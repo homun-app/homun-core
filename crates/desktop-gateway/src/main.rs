@@ -1713,7 +1713,7 @@ fn is_salient_exchange(user_message: &str) -> bool {
 fn is_auto_confirmable(memory_type: &str, sensitivity: MemoryDataSensitivity, confidence: f64) -> bool {
     // Decisions are factual records of choices made during work (low privacy risk),
     // so they auto-confirm like facts/preferences when confident + non-sensitive.
-    matches!(memory_type, "preference" | "fact" | "decision")
+    matches!(memory_type, "preference" | "fact" | "decision" | "goal")
         && sensitivity <= MemoryDataSensitivity::Internal
         && confidence >= 0.8
 }
@@ -2032,7 +2032,7 @@ fn persist_scope_memories(
         .unwrap_or_default()
         .into_iter()
         .filter(|m| !matches!(m.status, MemoryStatus::Deleted | MemoryStatus::Rejected))
-        .filter(|m| matches!(m.memory_type.as_str(), "fact" | "preference" | "decision"))
+        .filter(|m| matches!(m.memory_type.as_str(), "fact" | "preference" | "decision" | "goal"))
         .map(|m| (m.reference, m.text))
         .collect();
     // include the just-extracted refs even if not yet listable
@@ -2493,7 +2493,7 @@ async fn consolidate_scope(
                     .into_iter()
                     .filter(|m| {
                         matches!(m.status, MemoryStatus::Confirmed | MemoryStatus::Candidate)
-                            && matches!(m.memory_type.as_str(), "fact" | "preference" | "decision")
+                            && matches!(m.memory_type.as_str(), "fact" | "preference" | "decision" | "goal")
                     })
                     .map(|m| (m.reference, m.memory_type, m.text))
                     .collect()
@@ -2627,7 +2627,7 @@ aspetti della stessa cosa; (2) ELIMINA il RUMORE: informazioni transitorie, bana
 valore futuro, o rimaste ridondanti dopo la fusione. Tieni SOLO ciò che è davvero importante e \
 riutilizzabile. Nel dubbio MANTIENI (non eliminare). NON inventare: la frase fusa deve derivare solo \
 dalle memorie indicate. Rispondi SOLO con JSON: \
-{\"merges\":[{\"into\":\"frase consolidata\",\"memory_type\":\"fact|preference|decision\",\"importance\":0.0-1.0,\"from\":[indici]}],\
+{\"merges\":[{\"into\":\"frase consolidata\",\"memory_type\":\"fact|preference|decision|goal\",\"importance\":0.0-1.0,\"from\":[indici]}],\
 \"drops\":[{\"index\":N,\"reason\":\"perché è rumore/ininfluente\"}]}. \
 Ogni \"from\" deve avere ALMENO 2 indici (è una fusione). \"importance\": 1=cruciale, 0=trascurabile. \
 Se non c'è nulla da fare: {\"merges\":[],\"drops\":[]}.";
@@ -2959,7 +2959,7 @@ fn sweep_graph_orphans(state: &AppState, workspace: &MemoryWorkspaceId) {
         .unwrap_or_default()
         .into_iter()
         .filter(|m| !matches!(m.status, MemoryStatus::Deleted | MemoryStatus::Rejected))
-        .filter(|m| matches!(m.memory_type.as_str(), "fact" | "preference" | "decision"))
+        .filter(|m| matches!(m.memory_type.as_str(), "fact" | "preference" | "decision" | "goal"))
         .map(|m| (m.reference, m.text))
         .collect();
     // Re-link against ALL entities INCLUDING tombstoned ones, resurrecting any that a
@@ -3109,7 +3109,7 @@ MAI registrare come ricordo una richiesta di DIMENTICARE/eliminare qualcosa. Non
 di progetto fatti che riguardano un ALTRO progetto o strumento estraneo al lavoro corrente. \
 Rispondi SOLO con JSON valido, \
 niente altro:\n\
-{\"memories\":[{\"memory_type\":\"fact|preference|decision\",\"text\":\"frase breve in 3a persona \
+{\"memories\":[{\"memory_type\":\"fact|preference|decision|goal\",\"text\":\"frase breve in 3a persona \
 nella lingua dell'utente\",\"sensitivity\":\"internal|private|confidential|secret\",\"confidence\":0.0-1.0,\
 \"metadata\":{\"scope\":\"personal|project\",\"certainty\":\"committed|considered|intended\",\"decision\":{\"rationale\":\"il perché\",\
 \"alternatives\":[{\"option\":\"alternativa\",\"rejected_because\":\"motivo\"}]}}}],\
@@ -3122,7 +3122,13 @@ nella lingua dell'utente\",\"sensitivity\":\"internal|private|confidential|secre
 REGOLE: scope \"personal\" = vale ovunque (preferenze, persone, dati personali); scope \"project\" \
 = specifico del progetto/lavoro corrente (decisioni tecniche, file, scelte). Per memory_type \
 \"decision\" metadata.decision è OBBLIGATORIO (rationale, e alternatives se citate) e lo scope è di \
-norma \"project\". ENTITÀ = le cose citate, TIPIZZATE bene: person = persone; organization = aziende, \
+norma \"project\". memory_type \"goal\" = un OBIETTIVO o DIREZIONE del progetto. Se l'utente usa parole \
+come «obiettivo», «traguardo», «vogliamo che», «deve restare/diventare», «la meta è» riferite al \
+progetto nel suo insieme, emetti memory_type=\"goal\" (scope \"project\") e NON \"decision\". \
+Differenza netta: decision = una scelta TECNICA già fatta con un perché (es. «scelto JSON per la \
+persistenza perché human-readable»); goal = la DIREZIONE da tenere (es. «taskline deve restare \
+minimale, solo stdlib, zero dipendenze» → goal, NON decision). Nel dubbio tra goal e decision per un \
+ESPLICITO obiettivo dichiarato, scegli goal. ENTITÀ = le cose citate, TIPIZZATE bene: person = persone; organization = aziende, \
 servizi, enti (Trenitalia, Gmail, una banca); place = luoghi (città, paesi, indirizzi); event = \
 viaggi, acquisti, appuntamenti, scadenze (es. \"Viaggio a Barcellona a settembre\"); project = \
 progetti di lavoro; tool = software, file, librerie (SEMPRE metadata.scope \"project\" — mai \
@@ -3317,7 +3323,7 @@ aggiornamenti sostanziali rispetto a queste):\n{known_decisions}"
     let graph_relations = std::mem::take(&mut extraction.relations);
     extraction
         .memories
-        .retain(|m| matches!(m.memory_type.as_str(), "fact" | "preference" | "decision"));
+        .retain(|m| matches!(m.memory_type.as_str(), "fact" | "preference" | "decision" | "goal"));
     if extraction.memories.is_empty()
         && graph_entities.is_empty()
         && graph_relations.is_empty()
@@ -5171,6 +5177,7 @@ async fn relevant_memory_for_prompt(state: &AppState, prompt: &str) -> Option<St
                 query: query.to_string(),
                 statuses: vec![MemoryStatus::Confirmed, MemoryStatus::Candidate],
                 memory_types: vec![
+                    "goal".to_string(),
                     "decision".to_string(),
                     "fact".to_string(),
                     "preference".to_string(),
@@ -12159,7 +12166,7 @@ fn backfill_mentions(state: &AppState) {
             .unwrap_or_default()
             .into_iter()
             .filter(|m| !matches!(m.status, MemoryStatus::Deleted | MemoryStatus::Rejected))
-            .filter(|m| matches!(m.memory_type.as_str(), "fact" | "preference" | "decision"))
+            .filter(|m| matches!(m.memory_type.as_str(), "fact" | "preference" | "decision" | "goal"))
             .map(|m| (m.reference, m.text))
             .collect();
         if items.is_empty() {
@@ -22077,7 +22084,7 @@ fn facts_from_graph(
         .into_iter()
         .filter(|m| !matches!(m.status, MemoryStatus::Deleted | MemoryStatus::Rejected))
         .filter(|m| mem_refs.contains(&m.reference.to_string()))
-        .filter(|m| matches!(m.memory_type.as_str(), "fact" | "preference" | "decision"))
+        .filter(|m| matches!(m.memory_type.as_str(), "fact" | "preference" | "decision" | "goal"))
         .map(|m| {
             // Temporality is a PROPERTY of the fact (durable/transient/event), not its
             // epistemic certainty — read it from metadata when the distiller set it,
