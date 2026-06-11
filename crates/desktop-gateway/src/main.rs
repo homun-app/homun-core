@@ -4769,9 +4769,51 @@ fn guess_key_field(tool: &str) -> &'static str {
     }
 }
 
+/// Among a service's READ tools, pick the best "list new items" tool to poll for events:
+/// prefer FETCH/LIST/SEARCH + a collection noun (emails/events/messages/files), penalize
+/// single-item lookups (BY_ID) and detail getters. Falls back to the first tool.
+fn pick_poll_tool(tools: &[String]) -> String {
+    fn score(t: &str) -> i32 {
+        let u = t.to_ascii_uppercase();
+        let mut s = 0;
+        // FETCH returns the items themselves (aligns with the per-item key_field guess);
+        // LIST/SEARCH may return containers (threads) — slightly lower.
+        if u.contains("FETCH") {
+            s += 3;
+        } else if u.contains("LIST") || u.contains("SEARCH") {
+            s += 2;
+        }
+        if u.contains("EMAILS")
+            || u.contains("EVENTS")
+            || u.contains("MESSAGES")
+            || u.contains("FILES")
+            || u.contains("THREADS")
+        {
+            s += 2;
+        }
+        if u.contains("BY_ID")
+            || u.contains("BY_MESSAGE_ID")
+            || u.contains("BY_THREAD_ID")
+            || u.contains("ATTACHMENT")
+            || u.contains("CONTACTS")
+            || u.contains("PEOPLE")
+            || u.contains("PROFILE")
+        {
+            s -= 3;
+        }
+        s
+    }
+    tools
+        .iter()
+        .max_by_key(|t| score(t))
+        .cloned()
+        .unwrap_or_default()
+}
+
 /// GET /api/automations/event-sources — the manual event picker's options (mirrors the model
-/// selector: searchable + grouped). Channels (always) + READ tools of connected Composio/MCP
-/// services (an event polls a read/list tool). Returns suggested key_field per connector tool.
+/// selector: searchable + grouped). Channels + ONE entry per connected SERVICE (Gmail,
+/// Calendar, …): the user declares the service, the poller uses that service's "new items"
+/// read tool (auto-picked) and the agent decides the rest at run time.
 async fn automation_event_sources(State(state): State<AppState>) -> Json<serde_json::Value> {
     let st = state.clone();
     let (composio, mcp) = tokio::task::spawn_blocking(move || {
@@ -4779,24 +4821,20 @@ async fn automation_event_sources(State(state): State<AppState>) -> Json<serde_j
     })
     .await
     .unwrap_or_else(|_| (ComposioChatTools::default(), McpChatTools::default()));
-    let mut connectors = Vec::new();
+    // Group READ tools per service (Composio toolkit / MCP server), then collapse each
+    // service to ONE pickable entry whose `tool` is its best poll tool.
+    let mut services: std::collections::BTreeMap<String, Vec<String>> = Default::default();
     for schema in &composio.schemas {
         let Some(name) = schema.pointer("/function/name").and_then(|v| v.as_str()) else {
             continue;
         };
         if composio.writes.contains(name) {
-            continue; // events poll READS, not writes
+            continue;
         }
-        // Group by SERVICE (Gmail, Calendar, …); label is just the action (drop the
-        // redundant "· Toolkit" suffix since the group already names the service).
-        let full = humanize_composio_tool(name);
-        let label = full.split(" · ").next().unwrap_or(&full).to_string();
-        connectors.push(serde_json::json!({
-            "group": composio_toolkit_name(name),
-            "tool": name,
-            "label": label,
-            "key_field": guess_key_field(name),
-        }));
+        services
+            .entry(composio_toolkit_name(name))
+            .or_default()
+            .push(name.to_string());
     }
     for schema in &mcp.schemas {
         let Some(name) = schema.pointer("/function/name").and_then(|v| v.as_str()) else {
@@ -4805,23 +4843,29 @@ async fn automation_event_sources(State(state): State<AppState>) -> Json<serde_j
         if mcp.writes.contains(name) {
             continue;
         }
-        // mcp__<server>__<tool>: group by the server, label is the tool name.
         let rest = name.strip_prefix("mcp__").unwrap_or(name);
-        let (server, tool) = rest.split_once("__").unwrap_or((rest, rest));
-        let group = {
+        let server = rest.split_once("__").map(|(s, _)| s).unwrap_or(rest);
+        let label = {
             let mut chars = server.chars();
             chars
                 .next()
                 .map(|f| f.to_uppercase().collect::<String>() + chars.as_str())
-                .unwrap_or_else(|| "MCP".to_string())
+                .unwrap_or_else(|| server.to_string())
         };
-        connectors.push(serde_json::json!({
-            "group": group,
-            "tool": name,
-            "label": tool.replace('_', " "),
-            "key_field": guess_key_field(name),
-        }));
+        services.entry(label).or_default().push(name.to_string());
     }
+    let connectors: Vec<serde_json::Value> = services
+        .into_iter()
+        .map(|(service, tools)| {
+            let tool = pick_poll_tool(&tools);
+            serde_json::json!({
+                "group": "Servizi collegati",
+                "tool": tool,
+                "label": service,
+                "key_field": guess_key_field(&tool),
+            })
+        })
+        .collect();
     Json(serde_json::json!({
         "channels": [
             { "id": "whatsapp", "label": "WhatsApp" },
