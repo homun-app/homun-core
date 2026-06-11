@@ -4302,6 +4302,125 @@ fn cancel_automation_task(store: &TaskStore, task_id: &str) {
     );
 }
 
+fn create_automation_tool_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": "create_automation",
+            "description": "Crea un'AUTOMAZIONE di prima classe: una regola «quando → allora». Il trigger è a ORARIO (ricorrenza) oppure a EVENTO (un messaggio in arrivo su un canale). L'azione è un prompt che eseguirai tu con tutti gli strumenti. Usalo quando l'utente vuole qualcosa di ricorrente o reattivo: «ogni venerdì mandami il riassunto», «quando mi scrive Mario preparami una bozza». L'automazione appare nella sezione Automazioni dell'app.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": { "type": "string", "description": "Titolo breve dell'automazione" },
+                    "prompt": { "type": "string", "description": "Cosa fare quando scatta, in linguaggio naturale" },
+                    "trigger_type": { "type": "string", "enum": ["schedule", "event"], "description": "schedule = a orario; event = a un messaggio in arrivo su un canale" },
+                    "recurrence": { "type": "string", "description": "Solo schedule: daily@HH:MM | weekly@<lun..dom>@HH:MM | every Nh | every Nd" },
+                    "timezone": { "type": "string", "description": "Solo schedule: fuso IANA (default: fuso dell'utente)" },
+                    "event_channel": { "type": "string", "description": "Solo event: whatsapp | telegram (vuoto = qualsiasi canale)" },
+                    "event_from": { "type": "string", "description": "Solo event: nome o numero del mittente (vuoto = chiunque)" },
+                    "require_confirmation": { "type": "boolean", "description": "true (default) = chiede conferma prima di inviare/pubblicare; false = autonoma" }
+                },
+                "required": ["title", "prompt", "trigger_type"]
+            }
+        }
+    })
+}
+
+/// Create a first-class Automation from a chat tool call (source=chat). Builds the trigger,
+/// dedups against existing automations (same kind + high prompt overlap), materializes the
+/// driving task for schedules, and persists it so it shows in the Automazioni view.
+fn create_automation_from_chat(state: &AppState, args_raw: &str) -> String {
+    let args: serde_json::Value = serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
+    let s = |k: &str| args.get(k).and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    let opt = |k: &str| {
+        args.get(k)
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .map(String::from)
+    };
+    let title = s("title");
+    let prompt = s("prompt");
+    if title.is_empty() || prompt.is_empty() {
+        return "Per creare un'automazione servono almeno il titolo e cosa fare (prompt).".to_string();
+    }
+    let trigger = if s("trigger_type") == "event" {
+        AutomationTrigger::Event {
+            event: EventTrigger::ChannelMessage {
+                channel: opt("event_channel"),
+                from: opt("event_from"),
+            },
+        }
+    } else {
+        let recurrence = s("recurrence");
+        if recurrence.is_empty() {
+            return "Per un'automazione a orario serve la ricorrenza (es. \"daily@08:00\", \"weekly@fri@18:00\", \"every 6h\").".to_string();
+        }
+        let tz = opt("timezone").or_else(|| Some(effective_user_tz_name()));
+        AutomationTrigger::Schedule { recurrence, tz }
+    };
+    let approval = if args.get("require_confirmation").and_then(|v| v.as_bool()).unwrap_or(true) {
+        ApprovalPolicy::Confirm
+    } else {
+        ApprovalPolicy::Autonomous
+    };
+    let store = match lock_task_store(state) {
+        Ok(store) => store,
+        Err(_) => return "Store dei task non disponibile.".to_string(),
+    };
+    // Dedup: a near-identical existing automation (same trigger kind + >0.6 prompt overlap).
+    let new_kind = match &trigger {
+        AutomationTrigger::Schedule { .. } => "schedule",
+        AutomationTrigger::Event { .. } => "event",
+    };
+    let new_tokens: std::collections::BTreeSet<String> = cap_tokenize(&prompt).into_iter().collect();
+    if let Ok(existing) = store.list_automations(&gateway_user_id(), &gateway_workspace_id()) {
+        for a in &existing {
+            if a.trigger_kind() != new_kind {
+                continue;
+            }
+            let a_tokens: std::collections::BTreeSet<String> =
+                cap_tokenize(&a.prompt).into_iter().collect();
+            let inter = new_tokens.intersection(&a_tokens).count();
+            let uni = new_tokens.union(&a_tokens).count().max(1);
+            if inter as f64 / uni as f64 > 0.6 {
+                return format!(
+                    "Esiste già un'automazione simile: «{}». Non ne creo un duplicato (gestiscila dalla sezione Automazioni).",
+                    a.title
+                );
+            }
+        }
+    }
+    let now = OffsetDateTime::now_utc();
+    let mut automation = Automation {
+        id: format!("auto_{}", uuid::Uuid::new_v4().simple()),
+        user_id: gateway_user_id(),
+        workspace_id: gateway_workspace_id(),
+        title,
+        trigger,
+        prompt,
+        approval,
+        enabled: true,
+        source: AutomationSource::Chat,
+        task_id: None,
+        created_at: now,
+        updated_at: now,
+        last_fired_at: None,
+    };
+    match materialize_automation_task(&store, &automation) {
+        Ok(task_id) => automation.task_id = task_id,
+        Err(msg) => return format!("Ricorrenza non valida: {msg}"),
+    }
+    if store.upsert_automation(&automation).is_err() {
+        return "Non sono riuscito a salvare l'automazione.".to_string();
+    }
+    format!(
+        "✅ Automazione creata: «{}» — {}. La trovi nella sezione Automazioni.",
+        automation.title,
+        automation_trigger_summary(&automation.trigger)
+    )
+}
+
 /// Fire enabled Event automations matching an inbound channel message: each materializes a
 /// ONE-SHOT run (proactive_prompt) carrying the automation's prompt + the message as context.
 /// Independent of the auto-reply/draft policy — these are explicit user rules. Best-effort.
@@ -7386,6 +7505,10 @@ const CORE_TOOL_NAMES: &[&str] = &[
     "resolve_datetime",
     "use_skill",
     "update_plan",
+    // Creating automations is a common, high-value action — keep it directly reachable
+    // (not behind find_capability) so "ricordami ogni…" / "quando mi scrive X…" land reliably.
+    "create_automation",
+    "schedule_task",
     "query_code_graph",
     "query_git_history",
     "read_file",
@@ -7656,6 +7779,11 @@ estratto e/o immagini delle pagine) sotto la sezione \"[File allegati a questa \
 conversazione]\". Analizzali da lì direttamente. Se l'utente dice \"questo file/pdf/\
 allegato\" ma in quell'elenco NON c'è nulla, chiedi gentilmente di (ri)allegarlo: NON \
 usare list_directory, run_in_sandbox o link di download per cercarlo o decodificarlo.\n\
+AUTOMAZIONI: per richieste RICORRENTI o REATTIVE usa `create_automation` (crea una regola \
+visibile nella sezione Automazioni), non limitarti a rispondere. «ogni venerdì / ogni mattina \
+/ ogni lunedì …» → trigger_type=schedule con la ricorrenza. «quando mi scrive X / quando \
+arriva un messaggio da Y …» → trigger_type=event (NON è una richiesta di accesso al canale: è \
+una regola che scatta su quel messaggio).\n\
 STRUMENTI: hai un set di BASE ridotto. Per capacità che NON vedi tra i tuoi tool (navigare \
 il web, cercare su GitHub, leggere/elencare file e cartelle dell'utente, eseguire comandi in \
 sandbox, creare artefatti, pianificare task ricorrenti, …) chiama PRIMA `find_capability` \
@@ -8176,6 +8304,7 @@ RI-VERIFICA eseguendo. Una causa alla volta, niente tentativi alla cieca."
         base_tools.push(forget_memory_tool_schema());
         base_tools.push(update_plan_tool_schema());
         base_tools.push(schedule_task_tool_schema());
+        base_tools.push(create_automation_tool_schema());
         base_tools.push(list_scheduled_tasks_tool_schema());
         base_tools.push(cancel_scheduled_task_tool_schema());
         // Shell execution is a general capability (run scripts, process data, and
@@ -9969,6 +10098,15 @@ una data incerta.",
                                 .count();
                             format!("Piano aggiornato: {done}/{} step completati. Mostrato nel pannello Piano.", steps.len())
                         }
+                    } else if name == "create_automation" {
+                        let _ = emit_stream_event(
+                            &tx,
+                            GenerateStreamEvent::Delta {
+                                text: "‹‹ACT››⚡ Creo un'automazione‹‹/ACT››".to_string(),
+                            },
+                        )
+                        .await;
+                        create_automation_from_chat(&state_owned, args_raw)
                     } else if name == "find_capability" {
                         // Tool Search: discover DEFERRED native tools by intent and activate
                         // them (push into the live tool set) so the model calls them next
@@ -10072,10 +10210,20 @@ caricano con use_skill):\n{}",
                                 },
                             )
                             .await;
+                            // Route through the first-class Automation model so a chat-
+                            // scheduled task shows up in the Automazioni view (not a hidden run).
                             let st = state_owned.clone();
-                            let tz = timezone.clone();
+                            let title: String = goal.chars().take(48).collect();
+                            let auto_args = serde_json::json!({
+                                "title": title,
+                                "prompt": goal,
+                                "trigger_type": "schedule",
+                                "recurrence": every,
+                                "timezone": timezone,
+                            })
+                            .to_string();
                             tokio::task::spawn_blocking(move || {
-                                schedule_proactive_task(&st, &goal, &every, tz.as_deref())
+                                create_automation_from_chat(&st, &auto_args)
                             })
                             .await
                             .unwrap_or_else(|e| format!("Errore di pianificazione: {e}"))
