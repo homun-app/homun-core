@@ -292,6 +292,92 @@ function TimezoneRow() {
   );
 }
 
+/* --------------------------------------------------------- approval routing */
+
+function ApprovalRoutingRow() {
+  const [channel, setChannel] = useState<string>("in_app");
+  const [target, setTarget] = useState<string>("");
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+
+  useEffect(() => {
+    void coreBridge
+      .approvalRouting()
+      .then((r) => {
+        setChannel(r.channel || "in_app");
+        setTarget(r.target ?? "");
+      })
+      .catch(() => {});
+  }, []);
+
+  const save = async (nextChannel: string, nextTarget: string) => {
+    setBusy(true);
+    setNote(null);
+    try {
+      const r = await coreBridge.setApprovalRouting(
+        nextChannel,
+        nextChannel === "in_app" ? null : nextTarget.trim() || null,
+      );
+      setChannel(r.channel);
+      setTarget(r.target ?? "");
+      setNote("Salvato.");
+    } catch (error) {
+      setNote((error as Error).message || "Non salvato.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const needsTarget = channel !== "in_app";
+  return (
+    <div className="set-rows">
+      <div className="set-trow">
+        <div>
+          <div className="tt">Dove ricevere le conferme</div>
+          <div className="td">
+            Le richieste di autorizzazione (invii, pubblicazioni) arrivano qui — così puoi
+            approvarle anche da remoto. Solo il tuo numero può autorizzare.
+          </div>
+        </div>
+        <select
+          className="set-input set-row-input"
+          disabled={busy}
+          value={channel}
+          onChange={(e) => {
+            const c = e.target.value;
+            setChannel(c);
+            if (c === "in_app") void save(c, "");
+          }}
+        >
+          <option value="in_app">Solo in app</option>
+          <option value="telegram">Telegram</option>
+          <option value="whatsapp">WhatsApp</option>
+        </select>
+      </div>
+      {needsTarget && (
+        <div className="set-trow">
+          <div>
+            <div className="tt">Il tuo numero / chat su {channel === "telegram" ? "Telegram" : "WhatsApp"}</div>
+            <div className="td">Numero o chat id da cui autorizzerai (es. 39333…).</div>
+          </div>
+          <input
+            className="set-input set-row-input"
+            disabled={busy}
+            value={target}
+            placeholder="es. 393331234567"
+            onChange={(e) => setTarget(e.target.value)}
+            onBlur={() => void save(channel, target)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void save(channel, target);
+            }}
+          />
+        </div>
+      )}
+      {note && <p className="set-hint">{note}</p>}
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------------- account */
 
 function AccountPane({
@@ -1203,6 +1289,8 @@ function PrivacyPane() {
           fallback={true}
         />
       </div>
+      <div className="set-section-label">Approvazione remota</div>
+      <ApprovalRoutingRow />
       <p className="set-hint">
         <ShieldCheck size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />
         Il browser si ferma comunque prima di login, dati personali, pagamenti o acquisti.
