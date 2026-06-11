@@ -3117,64 +3117,85 @@ function GoalsPanel({
 
   return (
     <div className="goals-manager">
-      <div className="goals-head">🎯 Obiettivo del progetto</div>
-      <p className="muted goals-hint">
-        La stella polare: dove deve arrivare il progetto, come un modulo deve funzionare.
-        È iniettato a ogni turno per non perdere il focus — diverso dalle decisioni (cosa è già stato scelto).
-      </p>
+      <div className="goals-head">
+        <span className="goals-head-icon" aria-hidden="true">
+          <Target size={13} />
+        </span>
+        Obiettivo del progetto
+      </div>
+
       {data.goals.length > 0 ? (
-        <ul className="goals-list">
+        <div className="goals-cards">
           {data.goals.map((g) => (
-            <li key={g.reference}>{g.text}</li>
+            <div key={g.reference} className="goals-card">
+              <span className="goals-card-dot" aria-hidden="true" />
+              <span>{g.text}</span>
+            </div>
           ))}
-        </ul>
+        </div>
       ) : (
-        <p className="muted">Nessun obiettivo ancora — definiscine uno o fattelo proporre.</p>
+        <p className="goals-empty">Nessun obiettivo ancora — definiscine uno o fattelo proporre.</p>
       )}
-      <div className="goals-add">
-        <input
-          type="text"
-          placeholder="Scrivi un obiettivo (la direzione)…"
-          value={newGoal}
-          onChange={(e) => setNewGoal(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && add(newGoal)}
-          disabled={busy}
-        />
-        <button onClick={() => add(newGoal)} disabled={busy || !newGoal.trim()}>
-          Aggiungi
+
+      <textarea
+        className="goals-compose"
+        placeholder="Scrivi un obiettivo — la direzione…"
+        rows={2}
+        value={newGoal}
+        onChange={(e) => setNewGoal(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) add(newGoal);
+        }}
+        disabled={busy}
+      />
+      <div className="goals-actions">
+        <button
+          className="goals-btn-primary"
+          onClick={() => add(newGoal)}
+          disabled={busy || !newGoal.trim()}
+        >
+          Aggiungi obiettivo
+        </button>
+        <button className="goals-btn-ghost" onClick={suggest} disabled={suggesting || busy}>
+          <span className="goals-spark" aria-hidden="true">✨</span>
+          {suggesting ? "Sto proponendo…" : "Proponi"}
         </button>
       </div>
-      <button className="goals-suggest" onClick={suggest} disabled={suggesting || busy}>
-        ✨ {suggesting ? "Sto proponendo…" : "Proponi obiettivi dal progetto"}
-      </button>
+
       {drafts && (
-        <div className="goals-drafts">
+        <div className="goals-section">
           {drafts.length === 0 ? (
-            <p className="muted">Nessuna proposta — prova a scriverne uno tu.</p>
+            <p className="goals-empty">Nessuna proposta — prova a scriverne uno tu.</p>
           ) : (
             <>
-              <p className="muted">Proposte (modificabili) — aggiungi quelle giuste:</p>
-              {drafts.map((d, i) => (
-                <div key={i} className="goals-draft">
-                  <input
-                    type="text"
-                    value={d}
-                    onChange={(e) => {
-                      const next = [...drafts];
-                      next[i] = e.target.value;
-                      setDrafts(next);
-                    }}
-                    disabled={busy}
-                  />
-                  <button onClick={() => add(d)} disabled={busy || !d.trim()}>
-                    Aggiungi
-                  </button>
-                </div>
-              ))}
+              <div className="goals-section-label">Proposte dal progetto — modificabili</div>
+              <div className="goals-cards">
+                {drafts.map((d, i) => (
+                  <div key={i} className="goals-draft-card">
+                    <textarea
+                      className="goals-draft-text"
+                      rows={2}
+                      value={d}
+                      onChange={(e) => {
+                        const next = [...drafts];
+                        next[i] = e.target.value;
+                        setDrafts(next);
+                      }}
+                      disabled={busy}
+                    />
+                    <div className="goals-draft-foot">
+                      <button className="goals-chip" onClick={() => add(d)} disabled={busy || !d.trim()}>
+                        <i aria-hidden="true">+</i> Aggiungi
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </>
           )}
         </div>
       )}
+
       {data.decisions.length > 0 && (
         <details className="goals-promote">
           <summary>Oppure eleva una decisione direzionale a obiettivo ({data.decisions.length})</summary>
@@ -3195,7 +3216,7 @@ function GoalsPanel({
               </label>
             ))}
           </div>
-          <button onClick={promote} disabled={busy || sel.size === 0}>
+          <button className="goals-btn-ghost" onClick={promote} disabled={busy || sel.size === 0}>
             Eleva {sel.size > 0 ? `(${sel.size})` : ""} a obiettivo
           </button>
         </details>
