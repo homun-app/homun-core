@@ -3117,7 +3117,7 @@ fn summarize_tool_action(name: &str, args_raw: &str) -> Option<String> {
         "cancel_scheduled_task" => format!("annullato task {}", field("task_id")),
         // Pure reads / discovery → nothing to remember.
         "read_file" | "read_text_file" | "list_files" | "list_directory" | "recall_memory"
-        | "find_connected_tools" | "suggest_capabilities" => return None,
+        | "suggest_capabilities" => return None,
         _ => return None,
     };
     Some(line)
@@ -4136,11 +4136,12 @@ fn schedule_task_tool_schema() -> serde_json::Value {
         "type": "function",
         "function": {
             "name": "schedule_task",
-            "description": "Pianifica un task RICORRENTE che verrà eseguito in autonomia (proattività). \
-Usalo quando l'utente chiede di fare/controllare qualcosa periodicamente (es. \"ogni mattina \
-controlla le news su X\", \"ogni lunedì mandami il riepilogo\"). A ogni occorrenza eseguo il 'goal' \
-con strumenti READ-ONLY e ti consegno il risultato in un thread dedicato. NON usarlo per azioni \
-una-tantum immediate (quelle falle ora).",
+            "description": "Crea un'AUTOMAZIONE ricorrente a orario (una regola, visibile in \
+Automazioni). Usalo quando l'utente chiede di fare/controllare qualcosa periodicamente (es. \
+\"ogni mattina controlla le news su X\", \"ogni lunedì mandami il riepilogo\"). A ogni occorrenza \
+eseguo il 'goal' con tutti gli strumenti e ti CHIEDO CONFERMA prima di inviare/pubblicare. Per \
+trigger a EVENTO (non orari) usa create_automation. NON usarlo per azioni una-tantum immediate \
+(quelle falle ora).",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -7914,6 +7915,9 @@ chiede di salvare/esportare un file in una cartella."
 const CORE_TOOL_NAMES: &[&str] = &[
     "find_capability",
     "suggest_capabilities",
+    // GitHub search is common + the system prompt steers toward it over the browser, so it
+    // must be always-loaded (not behind find_capability) to actually be callable.
+    "github_search",
     "recall_memory",
     "resolve_datetime",
     "use_skill",
@@ -8119,7 +8123,9 @@ async fn stream_chat_via_openai(
     // user from OTHERS (e.g. the browser click block) don't apply. Lock taken and
     // released inside; never held across the generation.
     let (contact_ctx, channel_owner) = contact_turn_context(state, request.thread_id.as_deref());
-    if request.thread_id.as_deref().is_some_and(|t| t.starts_with("channel_")) {
+    if verbose_debug()
+        && request.thread_id.as_deref().is_some_and(|t| t.starts_with("channel_"))
+    {
         eprintln!(
             "channel-turn: thread={} owner={} contact={}",
             request.thread_id.as_deref().unwrap_or("-"),
@@ -17391,6 +17397,12 @@ collegarla (i percorsi tra parentesi). NON dichiarare di averle già collegate."
 }
 
 /// Executes a Composio tool for the current entity and returns its raw output.
+/// Opt-in verbose diagnostics (set `LFPA_DEBUG`). Off by default because these logs can echo
+/// tool arguments, channel context, or Composio error bodies that may include secrets/PII.
+fn verbose_debug() -> bool {
+    std::env::var("LFPA_DEBUG").is_ok()
+}
+
 fn send_message_tool_schema() -> serde_json::Value {
     serde_json::json!({
         "type": "function",
@@ -17467,12 +17479,14 @@ fn composio_execute_tool(
         return execute_send_message(state, arguments);
     }
     let transport = composio_transport_for(state)?;
-    // Diagnostic: surface exactly what we send so date/arg bugs are visible in the
-    // log (e.g. a calendar event that landed on the wrong day) instead of guessed.
-    eprintln!(
-        "composio/execute tool={tool} args={}",
-        arguments.to_string().chars().take(600).collect::<String>()
-    );
+    // Diagnostic (opt-in: LFPA_DEBUG): surface exactly what we send so date/arg bugs are
+    // visible in the log. Off by default — args can carry message bodies / PII.
+    if verbose_debug() {
+        eprintln!(
+            "composio/execute tool={tool} args={}",
+            arguments.to_string().chars().take(600).collect::<String>()
+        );
+    }
     transport
         .request(
             "POST",
@@ -19287,9 +19301,12 @@ impl ComposioTransport for GatewayComposioTransport {
             // actionable instead of an opaque "composio_status:400".
             let code = status.as_u16();
             let body_text = response.text().unwrap_or_default();
-            // Full body to the log — Composio's top-level "message" is often generic
-            // ("Validation error…"); the offending field lives in a nested array.
-            eprintln!("[composio] {method} {path} -> {code} body={body_text}");
+            // Full body to the log (opt-in: LFPA_DEBUG) — Composio's top-level "message" is
+            // often generic; the offending field lives in a nested array. Off by default
+            // because an error body can echo back submitted credentials.
+            if verbose_debug() {
+                eprintln!("[composio] {method} {path} -> {code} body={body_text}");
+            }
             let detail = serde_json::from_str::<serde_json::Value>(&body_text)
                 .ok()
                 .and_then(|value| {
@@ -26398,6 +26415,31 @@ data: [DONE]\n";
         // Master toggle off → draft even for allowlisted.
         settings.auto_reply = false;
         assert_eq!(inbound_action(&settings, "alice"), InboundAction::Draft);
+    }
+
+    #[test]
+    fn bm25_rank_orders_by_relevance() {
+        use super::{bm25_rank, CapabilityEntry};
+        let entry = |key: &str, text: &str| CapabilityEntry {
+            key: key.to_string(),
+            desc: text.to_string(),
+            text: text.to_string(),
+            schema: None,
+            is_skill: false,
+        };
+        let corpus = vec![
+            entry("gmail_send", "send an email message via gmail"),
+            entry("calendar_list", "list upcoming calendar events and schedule"),
+            entry("weather", "current weather forecast and temperature"),
+        ];
+        // Query terms select the matching doc as #1.
+        let top = bm25_rank(&corpus, "send email", 3);
+        assert_eq!(top[0].key, "gmail_send");
+        let top2 = bm25_rank(&corpus, "calendar event", 3);
+        assert_eq!(top2[0].key, "calendar_list");
+        // Empty query → a bounded sample (no panic, no ranking).
+        let sample = bm25_rank(&corpus, "   ", 2);
+        assert_eq!(sample.len(), 2);
     }
 
     #[test]
