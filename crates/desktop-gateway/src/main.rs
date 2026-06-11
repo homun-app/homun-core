@@ -2404,6 +2404,39 @@ fn project_brief_block(state: &AppState) -> Option<String> {
     ))
 }
 
+/// Recent work (push): the active project's last git commits — "what we last worked on",
+/// so a new conversation resumes the thread instead of starting cold. Distinct from the
+/// brief (goals/state): this is the activity timeline. Projects-with-git only; capped.
+fn recent_work_block(state: &AppState) -> Option<String> {
+    let _ = state; // kept for signature symmetry with the other briefing blocks
+    let ws = gateway_memory_workspace_id();
+    if ws.as_str() == PERSONAL_WORKSPACE || ws.as_str() == THREADS_WORKSPACE {
+        return None;
+    }
+    let folder = load_workspaces_file()
+        .workspaces
+        .into_iter()
+        .find(|w| w.id == ws.as_str())
+        .and_then(|w| w.folder)
+        .filter(|f| !f.trim().is_empty())?;
+    let root = std::path::Path::new(&folder);
+    let out = std::process::Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["log", "--pretty=format:%ad %s", "--date=short", "-n", "8"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())?;
+    if out.is_empty() {
+        return None;
+    }
+    let capped: String = out.lines().take(8).collect::<Vec<_>>().join("\n").chars().take(1200).collect();
+    Some(format!(
+        "LAVORO RECENTE (ultimi commit del progetto — riprendi il filo, non ripartire da zero):\n{capped}"
+    ))
+}
+
 /// One-shot JSON call to the memory role model (same path as the extractor).
 async fn call_memory_json(
     state: &AppState,
@@ -7475,6 +7508,12 @@ salvare/esportare un file in una cartella, chiama save_artifact(file, destinatio
         // Project BRIEF (always-on): goals + recent state, so "where this project is
         // going" is present every turn — not just when the prompt happens to match.
         let system = match project_brief_block(state) {
+            Some(block) => format!("{system}\n\n{block}"),
+            None => system,
+        };
+        // Recent work (always-on): the last commits, so a new conversation resumes the
+        // thread of what was just being done instead of starting cold.
+        let system = match recent_work_block(state) {
             Some(block) => format!("{system}\n\n{block}"),
             None => system,
         };
