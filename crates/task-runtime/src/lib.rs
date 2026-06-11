@@ -26,7 +26,8 @@ pub use resources::{ResourceGovernor, ResourceLimits};
 pub use scheduler::TaskScheduler;
 pub use store::TaskStore;
 pub use types::{
-    ResourceClass, ResourceRequirement, RetryPolicy, TaskId, TaskPriority, TaskRecord, TaskStatus,
-    UserId, WorkflowId, WorkspaceId,
+    ApprovalPolicy, Automation, AutomationSource, AutomationTrigger, EventTrigger, ResourceClass,
+    ResourceRequirement, RetryPolicy, TaskId, TaskPriority, TaskRecord, TaskStatus, UserId,
+    WorkflowId, WorkspaceId,
 };
 pub use ui::{TaskQueueSnapshot, TaskUiDetail, TaskUiItem, TaskUiReadModel};
