@@ -18593,12 +18593,31 @@ fn composio_auth_config_resolve(
         return Ok(id);
     }
     let auth_config = if managed {
-        serde_json::json!({ "type": "use_composio_managed_auth", "auth_scheme": scheme })
-    } else {
         serde_json::json!({
+            "name": format!("{toolkit_slug} (Homun)"),
+            "type": "use_composio_managed_auth",
+            "auth_scheme": scheme,
+        })
+    } else {
+        // Composio's create-auth-config validates a `name` and, for OAuth2, a redirect URI in
+        // the credentials. Both were missing → 400 "Validation error". Default the redirect URI
+        // to Composio's own callback when the user didn't supply one.
+        let mut creds = credentials.clone();
+        if scheme == "OAUTH2" {
+            if let Some(obj) = creds.as_object_mut() {
+                if !obj.contains_key("oauth_redirect_uri") {
+                    obj.insert(
+                        "oauth_redirect_uri".to_string(),
+                        serde_json::json!("https://backend.composio.dev/api/v3.1/toolkits/auth/callback"),
+                    );
+                }
+            }
+        }
+        serde_json::json!({
+            "name": format!("{toolkit_slug} (Homun)"),
             "type": "use_custom_auth",
             "auth_scheme": scheme,
-            "credentials": credentials,
+            "credentials": creds,
         })
     };
     let created = transport
