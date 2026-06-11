@@ -503,6 +503,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "/api/prefs/approval-routing",
             get(get_approval_routing).post(set_approval_routing),
         )
+        .route("/api/prefs/channel-identities", get(channel_identities))
         .route(
             "/api/runtime/provider",
             get(runtime_provider).post(set_runtime_provider),
@@ -11610,6 +11611,48 @@ async fn set_approval_routing(
         message,
     })?;
     Ok(Json(ApprovalRoutingView { channel, target }))
+}
+
+#[derive(Debug, Deserialize)]
+struct ChannelIdentitiesQuery {
+    channel: String,
+}
+
+/// GET /api/prefs/channel-identities?channel=telegram — recent chat ids seen on a channel
+/// (from the per-contact channel threads), so the approval-routing form can offer the user's
+/// OWN chat id as a quick-fill instead of the phone-number-vs-chat-id trap.
+async fn channel_identities(
+    State(state): State<AppState>,
+    axum::extract::Query(q): axum::extract::Query<ChannelIdentitiesQuery>,
+) -> Json<serde_json::Value> {
+    let ch = q.channel.trim().to_ascii_lowercase();
+    let prefix = format!("channel_{ch}_");
+    let channel_label = match ch.as_str() {
+        "telegram" => "Telegram",
+        "whatsapp" => "WhatsApp",
+        _ => "Canale",
+    };
+    let mut out = Vec::new();
+    if let Ok(store) = lock_store(&state) {
+        if let Ok(snap) = store.threads(&base_workspace_id()) {
+            for t in snap.threads {
+                if let Some(id) = t.thread_id.strip_prefix(&prefix) {
+                    // Prefer the curated contact's name; never expose a thread title
+                    // (which may be the text of a message) as the chip label.
+                    let name = store
+                        .contact_name_for_identity(&ch, id)
+                        .ok()
+                        .flatten()
+                        .unwrap_or_else(|| channel_label.to_string());
+                    out.push(serde_json::json!({ "id": id, "name": name }));
+                    if out.len() >= 8 {
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    Json(serde_json::json!({ "identities": out }))
 }
 
 pub(crate) fn weekday_it(w: jiff::civil::Weekday) -> &'static str {

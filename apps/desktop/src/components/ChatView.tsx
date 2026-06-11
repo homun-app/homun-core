@@ -5850,6 +5850,12 @@ function ComposioConfirmCard({
           </button>
         )}
       </div>
+      {!isMcp && (
+        <p className="cmp-confirm-note">
+          «Esegui sempre» disattiva la conferma ovunque per questo strumento — anche quella remota
+          su Telegram/WhatsApp.
+        </p>
+      )}
     </div>
   );
 }

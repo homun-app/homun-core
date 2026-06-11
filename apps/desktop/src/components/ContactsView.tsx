@@ -31,6 +31,20 @@ function initial(name: string): string {
   const t = name.trim();
   return t ? t[0]!.toUpperCase() : "?";
 }
+/// Compact channel-response-mode chip for the contact list (only the meaningful modes;
+/// "" inherit and "draft" show nothing). short = the chip glyph, title = the tooltip.
+function responseModeBadge(mode?: string): { short: string; title: string } | null {
+  switch (mode) {
+    case "automatic":
+      return { short: "⚡", title: "Risponde in automatico" };
+    case "approve":
+      return { short: "✋", title: "Prepara la risposta, la confermi prima dell'invio" };
+    case "silent":
+      return { short: "🔕", title: "Non risponde a questo contatto" };
+    default:
+      return null;
+  }
+}
 function normalizeName(name: string): string {
   return name.trim().toLowerCase();
 }
@@ -316,6 +330,14 @@ export function ContactsView() {
                             : ""}
                         </small>
                       </span>
+                      {responseModeBadge(c.response_mode) && (
+                        <span
+                          className={`contact-mode-badge mode-${c.response_mode}`}
+                          title={responseModeBadge(c.response_mode)!.title}
+                        >
+                          {responseModeBadge(c.response_mode)!.short}
+                        </span>
+                      )}
                       {c.memory_count > 0 && (
                         <span className="mdl-rail-badge">{c.memory_count}</span>
                       )}
