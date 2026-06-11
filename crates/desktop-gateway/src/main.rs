@@ -20208,7 +20208,13 @@ async fn project_graph_ensure(
     let st = state.clone();
     let ws = req.workspace.clone();
     let subpath = req.subpath.clone();
-    tokio::task::spawn_blocking(move || build_project_graph(&st, &ws, &folder, subpath.as_deref()));
+    tokio::task::spawn_blocking(move || {
+        // Ensure the project is under git (use an existing repo, else init with a
+        // protective .gitignore + baseline commit): versioning, history-back and the
+        // git change-signal then work uniformly. Then (re)build the code graph.
+        crate::sandbox::ensure_project_git(std::path::Path::new(&folder));
+        build_project_graph(&st, &ws, &folder, subpath.as_deref());
+    });
     Ok(Json(serde_json::json!({ "building": true })))
 }
 
