@@ -6926,6 +6926,39 @@ i titoli di sezione quando la risposta è lunga. Rispondi in italiano, chiaro e 
         now = now_block(),
         home = std::env::var("HOME").unwrap_or_else(|_| "~".to_string())
     );
+    // Code-map steering: if THIS project has an imported code graph, tell the
+    // orchestrator to query it FIRST for structure/dependency questions instead of
+    // grepping/reading files by default (the natural reflex). Conditional: only when a
+    // map exists for the active scope (else query_code_graph would just say "no map"
+    // and grep is the correct fallback). Cheap count on the already-scoped workspace.
+    let has_code_map = {
+        let st = state.clone();
+        tokio::task::spawn_blocking(move || {
+            lock_memory_facade(&st)
+                .ok()
+                .and_then(|f| {
+                    f.list_entities_for_ui(&gateway_memory_user_id(), &gateway_memory_workspace_id())
+                        .ok()
+                })
+                .map(|ents| ents.iter().any(|e| e.entity_type.starts_with("code_")))
+                .unwrap_or(false)
+        })
+        .await
+        .unwrap_or(false)
+    };
+    let system = if has_code_map {
+        format!(
+            "{system}\n\nMAPPA DEL CODICE: questo progetto ha una mappa del codice \
+indicizzata. Per domande su STRUTTURA o DIPENDENZE del codice — \"che metodi/funzioni \
+ha X\", \"chi chiama/usa Y\", \"cosa usa Z\", \"dove è definito/quali file usano W\" — \
+chiama PRIMA `query_code_graph` (è istantaneo e autorevole). Ricorri a \
+read_file/list_files/run_in_project SOLO se la mappa non basta (es. leggere il CORPO di \
+una funzione o un dettaglio non strutturale). NON grepare/elencare file per domande a \
+cui la mappa risponde già."
+        )
+    } else {
+        system
+    };
     // Connected-service (Composio) tools are reached via a DISCOVERY meta-tool
     // (`find_connected_tools`), not dumped into the prompt: the model searches by
     // intent, we return the few relevant tools and inject their schemas for the
