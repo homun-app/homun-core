@@ -481,6 +481,58 @@ impl SQLiteMemoryStore {
         Ok(())
     }
 
+    /// Find imported code entities whose NAME matches any of the given terms — for the
+    /// per-turn briefing's "these components already exist, don't recreate" section.
+    /// One indexed-ish SQL scan (no loading 48k entities into Rust); returns
+    /// (name, entity_type, source_file), capped. `terms` are matched case-insensitively
+    /// as substrings.
+    pub fn search_code_entities(
+        &self,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+        terms: &[String],
+        limit: usize,
+    ) -> Result<Vec<(String, String, String)>, String> {
+        if terms.is_empty() {
+            return Ok(Vec::new());
+        }
+        let clauses = terms
+            .iter()
+            .map(|_| "lower(name) like ?")
+            .collect::<Vec<_>>()
+            .join(" or ");
+        let sql = format!(
+            "select name, entity_type, \
+                coalesce(json_extract(metadata_json, '$.source_file'), '') \
+             from entities \
+             where user_id = ? and workspace_id = ? \
+               and json_extract(metadata_json, '$.source') = 'graphify' \
+               and ({clauses}) \
+             limit {limit}"
+        );
+        let mut params: Vec<String> = vec![user_id.as_str().to_string(), workspace_id.as_str().to_string()];
+        for term in terms {
+            params.push(format!("%{}%", term.to_lowercase()));
+        }
+        let mut statement = self.conn.prepare(&sql).map_err(|e| e.to_string())?;
+        let rows = statement
+            .query_map(rusqlite::params_from_iter(params.iter()), |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })
+            .map_err(|e| e.to_string())?;
+        let mut out = Vec::new();
+        for row in rows {
+            if let Ok(triple) = row {
+                out.push(triple);
+            }
+        }
+        Ok(out)
+    }
+
     /// Replace a scope's imported code graph in ONE transaction: clears the prior
     /// graphify data, then bulk-inserts the new entities + relations. Batching is
     /// essential at scale — a big repo is tens of thousands of nodes/edges, and per-row

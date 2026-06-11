@@ -1576,9 +1576,11 @@ fn sanitize_wiki_filename(reference: &str) -> String {
 }
 
 /// Character budget for the always-on memory profile injected into the chat
-/// prompt. Small on purpose: this is the stable "what I know about you", not the
-/// deep, query-relevant recall (that arrives with the on-demand `recall` tool).
-const CHAT_MEMORY_BUDGET_CHARS: usize = 1500;
+/// prompt. The always-on "what I know about you / this project" briefing — push, not
+/// the on-demand `recall` tool. Raised from 1500: on capable models the context window
+/// is large and a starved briefing was the main reason the assistant "didn't seem to
+/// know" the project. Still bounded so it never dominates the prompt.
+const CHAT_MEMORY_BUDGET_CHARS: usize = 4000;
 
 /// Reads confirmed memories for the PERSONAL scope and the active PROJECT scope,
 /// to inject as the always-on profile. Sensitivity is capped at `Private`
@@ -4956,6 +4958,48 @@ fn decisions_for_path(state: &AppState, path: &str) -> Option<String> {
 
 /// Retrieval-augmented context: memory RELEVANT to this turn's prompt (decisions,
 /// facts, preferences in the active project + personal scope), injected into the
+/// Anti-rewrite anchor (push): code-graph entities whose NAME matches the request's
+/// terms, injected so the model SEES "this already exists, extend it" before it
+/// re-implements something. This is the strongest no-regression signal we have, and the
+/// model can't be trusted to query for what it doesn't know exists — so it's pushed, not
+/// pulled. Cheap: one capped SQL LIKE over the active project's code entities.
+fn relevant_code_components_for_prompt(state: &AppState, prompt: &str) -> Option<String> {
+    // Distinctive terms from the request: length >= 4, deduped, capped. Lowercased.
+    let mut seen = std::collections::HashSet::new();
+    let terms: Vec<String> = prompt
+        .split(|c: char| !c.is_alphanumeric() && c != '_')
+        .filter(|t| t.chars().count() >= 4)
+        .map(|t| t.to_lowercase())
+        .filter(|t| seen.insert(t.clone()))
+        .take(12)
+        .collect();
+    if terms.is_empty() {
+        return None;
+    }
+    let facade = lock_memory_facade(state).ok()?;
+    let user = gateway_memory_user_id();
+    let ws = gateway_memory_workspace_id();
+    let hits = facade.search_code_entities(&user, &ws, &terms, 15).ok()?;
+    if hits.is_empty() {
+        return None;
+    }
+    let kind = |t: &str| match t {
+        "code_symbol" => "funzione/metodo",
+        "code_file" => "file",
+        "code_doc" => "documento",
+        _ => "elemento",
+    };
+    let mut block = String::from(
+        "COMPONENTI GIÀ ESISTENTI pertinenti alla richiesta (dalla mappa del codice — \
+NON ricrearli, ESTENDI/riusa quelli giusti; usa query_code_graph per i dettagli):",
+    );
+    for (name, etype, src) in hits.iter().take(15) {
+        let loc = if src.is_empty() { String::new() } else { format!(" — {src}") };
+        block.push_str(&format!("\n- {name} ({}){loc}", kind(etype)));
+    }
+    Some(block)
+}
+
 /// system prompt so the model answers "why did we…" from memory WITHOUT having to call
 /// recall_memory itself — and doesn't claim "I have nothing in memory" when it does.
 async fn relevant_memory_for_prompt(state: &AppState, prompt: &str) -> Option<String> {
@@ -7326,7 +7370,13 @@ salvare/esportare un file in una cartella, chiama save_artifact(file, destinatio
         };
         // RAG: inject memory relevant to THIS prompt (decisions/facts), so the model
         // answers from what was already decided instead of saying it has nothing.
-        match relevant_memory_for_prompt(state, &request.prompt).await {
+        let system = match relevant_memory_for_prompt(state, &request.prompt).await {
+            Some(block) => format!("{system}\n\n{block}"),
+            None => system,
+        };
+        // Anti-rewrite anchor: existing code components matching the request, so the
+        // model extends/reuses instead of re-implementing (no-regression by default).
+        match relevant_code_components_for_prompt(state, &request.prompt) {
             Some(block) => format!("{system}\n\n{block}"),
             None => system,
         }
