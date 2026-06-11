@@ -8,6 +8,7 @@ import {
   ShieldCheck,
   Sparkles,
   Trash2,
+  X,
 } from "lucide-react";
 import type {
   AutomationCreateInput,
@@ -42,19 +43,58 @@ export function AutomationsView({
   const [title, setTitle] = useState("");
   const [prompt, setPrompt] = useState("");
   const [triggerKind, setTriggerKind] = useState<"schedule" | "event">("schedule");
-  const [recurrence, setRecurrence] = useState("daily@09:00");
+  // Schedule builder: a mode + (days × times) or an interval.
+  const [scheduleMode, setScheduleMode] = useState<"daily" | "days" | "interval">("daily");
+  const [days, setDays] = useState<string[]>(["mon", "tue", "wed", "thu", "fri"]);
+  const [times, setTimes] = useState<string[]>(["09:00"]);
+  const [intervalN, setIntervalN] = useState(6);
+  const [intervalUnit, setIntervalUnit] = useState<"h" | "d">("h");
   const [eventChannel, setEventChannel] = useState("");
   const [eventFrom, setEventFrom] = useState("");
   const [autonomous, setAutonomous] = useState(false);
 
   const active = automations.filter((a) => a.enabled).length;
-  const canSave = title.trim().length > 0 && prompt.trim().length > 0;
+
+  const toggleDay = (d: string) =>
+    setDays((prev) =>
+      prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d],
+    );
+  const setTimeAt = (i: number, v: string) =>
+    setTimes((prev) => prev.map((t, idx) => (idx === i ? v : t)));
+  const addTime = () => setTimes((prev) => [...prev, "12:00"]);
+  const removeTime = (i: number) =>
+    setTimes((prev) => (prev.length > 1 ? prev.filter((_, idx) => idx !== i) : prev));
+
+  // Compose the recurrence string the runtime understands from the builder state.
+  const composeRecurrence = (): string => {
+    if (scheduleMode === "interval") {
+      return `every ${Math.max(1, intervalN)}${intervalUnit}`;
+    }
+    const order = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+    const t = times.join(",");
+    if (scheduleMode === "daily") return `dow@*@${t}`;
+    const sorted = order.filter((d) => days.includes(d)).join(",");
+    return `dow@${sorted}@${t}`;
+  };
+
+  const scheduleValid =
+    scheduleMode === "interval"
+      ? intervalN >= 1
+      : times.length > 0 && (scheduleMode === "daily" || days.length > 0);
+  const canSave =
+    title.trim().length > 0 &&
+    prompt.trim().length > 0 &&
+    (triggerKind === "event" || scheduleValid);
 
   const reset = () => {
     setTitle("");
     setPrompt("");
     setTriggerKind("schedule");
-    setRecurrence("daily@09:00");
+    setScheduleMode("daily");
+    setDays(["mon", "tue", "wed", "thu", "fri"]);
+    setTimes(["09:00"]);
+    setIntervalN(6);
+    setIntervalUnit("h");
     setEventChannel("");
     setEventFrom("");
     setAutonomous(false);
@@ -65,7 +105,7 @@ export function AutomationsView({
     if (!canSave) return;
     const trigger: AutomationTriggerJson =
       triggerKind === "schedule"
-        ? { type: "schedule", recurrence: recurrence.trim() }
+        ? { type: "schedule", recurrence: composeRecurrence() }
         : {
             type: "event",
             event: {
@@ -83,6 +123,16 @@ export function AutomationsView({
     });
     reset();
   };
+
+  const DAYS: Array<[string, string]> = [
+    ["mon", "Lun"],
+    ["tue", "Mar"],
+    ["wed", "Mer"],
+    ["thu", "Gio"],
+    ["fri", "Ven"],
+    ["sat", "Sab"],
+    ["sun", "Dom"],
+  ];
 
   return (
     <section className="automations-view" aria-labelledby="automations-title">
@@ -141,16 +191,86 @@ export function AutomationsView({
           </div>
 
           {triggerKind === "schedule" ? (
-            <div className="auto-field">
-              <label>Ricorrenza</label>
-              <input
-                value={recurrence}
-                onChange={(e) => setRecurrence(e.target.value)}
-                placeholder="daily@09:00"
-              />
-              <small className="auto-hint">
-                daily@HH:MM · weekly@&lt;lun..dom&gt;@HH:MM · every Nh / every Nd
-              </small>
+            <div className="auto-schedule">
+              <div className="auto-seg">
+                <button
+                  className={scheduleMode === "daily" ? "active" : ""}
+                  onClick={() => setScheduleMode("daily")}
+                >
+                  Ogni giorno
+                </button>
+                <button
+                  className={scheduleMode === "days" ? "active" : ""}
+                  onClick={() => setScheduleMode("days")}
+                >
+                  Giorni scelti
+                </button>
+                <button
+                  className={scheduleMode === "interval" ? "active" : ""}
+                  onClick={() => setScheduleMode("interval")}
+                >
+                  Intervallo
+                </button>
+              </div>
+
+              {scheduleMode === "interval" ? (
+                <div className="auto-interval">
+                  <span>Ogni</span>
+                  <input
+                    type="number"
+                    min={1}
+                    value={intervalN}
+                    onChange={(e) => setIntervalN(Math.max(1, Number(e.target.value) || 1))}
+                  />
+                  <select
+                    value={intervalUnit}
+                    onChange={(e) => setIntervalUnit(e.target.value as "h" | "d")}
+                  >
+                    <option value="h">ore</option>
+                    <option value="d">giorni</option>
+                  </select>
+                </div>
+              ) : (
+                <>
+                  {scheduleMode === "days" && (
+                    <div className="auto-days">
+                      {DAYS.map(([id, label]) => (
+                        <button
+                          key={id}
+                          className={`auto-day${days.includes(id) ? " on" : ""}`}
+                          onClick={() => toggleDay(id)}
+                          type="button"
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  <div className="auto-times">
+                    {times.map((t, i) => (
+                      <span className="auto-time" key={i}>
+                        <input
+                          type="time"
+                          value={t}
+                          onChange={(e) => setTimeAt(i, e.target.value)}
+                        />
+                        {times.length > 1 && (
+                          <button
+                            className="auto-time-x"
+                            aria-label="Rimuovi orario"
+                            onClick={() => removeTime(i)}
+                          >
+                            <X size={13} aria-hidden />
+                          </button>
+                        )}
+                      </span>
+                    ))}
+                    <button className="auto-time-add" onClick={addTime} type="button">
+                      <Plus size={13} aria-hidden /> orario
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           ) : (
             <div className="auto-row">
