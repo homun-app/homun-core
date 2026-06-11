@@ -8703,6 +8703,10 @@ RI-VERIFICA eseguendo. Una causa alla volta, niente tentativi alla cieca."
     // files, run sandbox, Composio writes) are withheld → Phase 2 routes them to
     // approval. App chat (tool_policy unset) keeps the full toolset.
     let read_only = request.tool_policy.as_deref() == Some("read_only");
+    // `autonomous` (set only by an Automation run whose rule is ApprovalPolicy::Autonomous):
+    // side-effecting tools EXECUTE directly instead of proposing a confirm card. This is the
+    // user's explicit per-automation opt-in; everything else still confirms.
+    let autonomous = request.tool_policy.as_deref() == Some("autonomous");
     // Browser toolset: the main agent ALWAYS drives the browser itself via the
     // granular micro-tools. The legacy coarse `browse_web` handoff is gone.
     // read_only (channels) still gets browser_act, but the dispatch blocks any
@@ -10980,8 +10984,9 @@ richiedono la tua conferma nell'app. Proponila e fermati."
                         // derived from the MCP readOnlyHint) need confirmation; reads run
                         // with a timeout so a hung server can't freeze the turn. A
                         // read_only channel + write was already rejected just above
-                        // (composio_writes now includes MCP writes).
-                        if composio_writes.contains(name) {
+                        // (composio_writes now includes MCP writes). `autonomous` runs skip
+                        // the card and execute (explicit per-automation opt-in).
+                        if composio_writes.contains(name) && !autonomous {
                             let args_val: serde_json::Value = serde_json::from_str(args_raw)
                                 .unwrap_or_else(|_| serde_json::json!({}));
                             let marker = serde_json::json!({ "tool": name, "arguments": args_val })
@@ -11028,9 +11033,11 @@ Dillo all'utente, NON dichiarare che è fatto.",
                         }
                     } else if !name.is_empty() {
                         // A connected-service (Composio) tool. Writes need explicit
-                        // confirmation unless the user marked this tool "always allow".
-                        let needs_confirm =
-                            composio_writes.contains(name) && !composio_tool_allowed(name);
+                        // confirmation unless the user marked this tool "always allow" OR the
+                        // run is an autonomous automation (explicit per-automation opt-in).
+                        let needs_confirm = composio_writes.contains(name)
+                            && !composio_tool_allowed(name)
+                            && !autonomous;
                         if needs_confirm {
                             // Do NOT execute. Emit a confirmation card carrying the exact
                             // action; the user runs it (once/always) via the card. The model
@@ -15752,10 +15759,19 @@ domande passate, non sollecitare risposte a domande precedenti. Conciso. NON com
         "title": title,
     }));
 
-    // Automation runs (input_json carries `automation_id`) may ACT: use the full toolset so
-    // side-effecting tools (send_message, connector writes) PROPOSE a confirm card instead of
-    // being refused. Check-in / curiosity runs (no automation_id) stay read_only ("no actions").
-    let policy = if task.input_json.get("automation_id").is_some() {
+    // Automation runs (input_json carries `automation_id`) may ACT. Three policies:
+    // - `autonomous`  → the rule is marked Autonomous: side-effecting tools execute directly.
+    // - `full`        → the rule needs confirmation: writes PROPOSE a confirm card.
+    // - `read_only`   → check-in / curiosity runs (no automation_id): "no actions".
+    let is_automation = task.input_json.get("automation_id").is_some();
+    let is_autonomous = task
+        .input_json
+        .get("approval")
+        .and_then(|v| v.as_str())
+        .is_some_and(|s| s.eq_ignore_ascii_case("autonomous"));
+    let policy = if is_automation && is_autonomous {
+        "autonomous"
+    } else if is_automation {
         "full"
     } else {
         "read_only"
