@@ -186,6 +186,8 @@ struct HealthResponse {
 struct TaskItemResponse {
     task_id: String,
     kind: String,
+    /// Human-readable label for the kind (e.g. "Automazione", "Browser: snapshot").
+    label: String,
     goal: String,
     status: String,
     priority: String,
@@ -23220,32 +23222,26 @@ fn task_queue_response(snapshot: TaskQueueSnapshot) -> Result<TaskQueueResponse,
         .collect::<Vec<_>>();
     resource_usage.sort_by(|left, right| left.resource_class.cmp(&right.resource_class));
 
+    // The queue lists USER-meaningful runs (automations, proactive prompts). Internal
+    // execution sub-tasks (capability.* / subagent.*) are filtered out — they belong to
+    // the Computer/activity view, not the queue. This is the fix for the "browser noise".
+    let user_facing = |items: Vec<TaskUiItem>| {
+        items
+            .into_iter()
+            .filter(|i| !is_internal_task_kind(&i.kind))
+            .map(task_item_response)
+            .collect::<Result<Vec<_>, _>>()
+    };
     Ok(TaskQueueResponse {
-        queued: snapshot
-            .queued
-            .into_iter()
-            .map(task_item_response)
-            .collect::<Result<Vec<_>, _>>()?,
-        active: snapshot
-            .active
-            .into_iter()
-            .map(task_item_response)
-            .collect::<Result<Vec<_>, _>>()?,
-        blocked: snapshot
-            .blocked
-            .into_iter()
-            .map(task_item_response)
-            .collect::<Result<Vec<_>, _>>()?,
+        queued: user_facing(snapshot.queued)?,
+        active: user_facing(snapshot.active)?,
+        blocked: user_facing(snapshot.blocked)?,
         waiting_approvals: snapshot
             .waiting_approvals
             .into_iter()
             .map(approval_item_response)
             .collect::<Result<Vec<_>, _>>()?,
-        recent_failures: snapshot
-            .recent_failures
-            .into_iter()
-            .map(task_item_response)
-            .collect::<Result<Vec<_>, _>>()?,
+        recent_failures: user_facing(snapshot.recent_failures)?,
         resource_usage,
     })
 }
@@ -23266,9 +23262,46 @@ fn task_detail_response(detail: TaskUiDetail) -> Result<TaskDetailResponse, Gate
     })
 }
 
+/// Execution sub-tasks the user shouldn't see in the queue — internal steps of a run
+/// (capability calls, subagent workflows). They surface in the Computer/activity view, not
+/// in the user-facing queue (which lists automations runs + proactive prompts).
+fn is_internal_task_kind(kind: &str) -> bool {
+    kind.starts_with("capability.") || kind.starts_with("subagent.")
+}
+
+/// Human label for a task kind shown in the queue.
+fn humanize_task_kind(kind: &str) -> String {
+    let cap = |s: &str| {
+        let mut chars = s.chars();
+        chars
+            .next()
+            .map(|f| f.to_uppercase().collect::<String>() + chars.as_str())
+            .unwrap_or_default()
+    };
+    match kind {
+        "proactive_prompt" => "Automazione".to_string(),
+        other if other.starts_with("capability.") => {
+            let rest = other.trim_start_matches("capability.");
+            let mut parts = rest.splitn(2, '.');
+            let provider = parts.next().unwrap_or(rest);
+            let tool = parts.next().unwrap_or("");
+            if tool.is_empty() {
+                cap(provider)
+            } else {
+                format!("{}: {}", cap(provider), tool.replace('_', " "))
+            }
+        }
+        other if other.starts_with("subagent.") => {
+            format!("Sub-agente: {}", other.trim_start_matches("subagent."))
+        }
+        other => cap(&other.replace('_', " ")),
+    }
+}
+
 fn task_item_response(item: TaskUiItem) -> Result<TaskItemResponse, GatewayError> {
     Ok(TaskItemResponse {
         task_id: item.task_id.as_str().to_string(),
+        label: humanize_task_kind(&item.kind),
         kind: item.kind,
         goal: item.goal,
         status: enum_label(&item.status)?,
