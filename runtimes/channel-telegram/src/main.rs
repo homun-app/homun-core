@@ -20,8 +20,13 @@ use axum::http::StatusCode;
 use axum::routing::post;
 use axum::{Json, Router};
 use frankenstein::client_reqwest::Bot;
-use frankenstein::methods::{GetUpdatesParams, SendChatActionParams, SendMessageParams};
-use frankenstein::types::{AllowedUpdate, ChatAction, ChatId, ChatType};
+use frankenstein::methods::{
+    AnswerCallbackQueryParams, GetUpdatesParams, SendChatActionParams, SendMessageParams,
+};
+use frankenstein::types::{
+    AllowedUpdate, ChatAction, ChatId, ChatType, InlineKeyboardButton, InlineKeyboardMarkup,
+    ReplyMarkup,
+};
 use frankenstein::updates::UpdateContent;
 use frankenstein::{AsyncTelegramApi, ParseMode};
 use serde::{Deserialize, Serialize};
@@ -84,6 +89,10 @@ struct SendRequest {
     /// Telegram chat id (numeric).
     recipient: String,
     text: String,
+    /// Optional inline keyboard: each entry is `[label, callback_data]`. When present the text
+    /// is sent as a single block with tappable buttons (used for remote-approval cards).
+    #[serde(default)]
+    buttons: Vec<[String; 2]>,
 }
 
 async fn send_handler(State(bot): State<Arc<Bot>>, Json(request): Json<SendRequest>) -> StatusCode {
@@ -91,6 +100,33 @@ async fn send_handler(State(bot): State<Arc<Bot>>, Json(request): Json<SendReque
         eprintln!("recipient non valido (atteso chat_id numerico): {}", request.recipient);
         return StatusCode::BAD_REQUEST;
     };
+
+    // Inline-keyboard message (approval card): a single block with tappable buttons.
+    if !request.buttons.is_empty() {
+        let row: Vec<InlineKeyboardButton> = request
+            .buttons
+            .iter()
+            .map(|b| {
+                InlineKeyboardButton::builder()
+                    .text(b[0].clone())
+                    .callback_data(b[1].clone())
+                    .build()
+            })
+            .collect();
+        let markup = InlineKeyboardMarkup::builder().inline_keyboard(vec![row]).build();
+        let params = SendMessageParams::builder()
+            .chat_id(ChatId::Integer(chat_id))
+            .text(&request.text)
+            .reply_markup(ReplyMarkup::InlineKeyboardMarkup(markup))
+            .build();
+        return match bot.send_message(&params).await {
+            Ok(_) => StatusCode::OK,
+            Err(error) => {
+                eprintln!("invio con bottoni fallito → chat {chat_id}: {error:?}");
+                StatusCode::BAD_GATEWAY
+            }
+        };
+    }
 
     // Split to Telegram's 4096-char limit; render markdown as HTML with a
     // plain-text fallback if the HTML is rejected (matches Homun).
@@ -237,6 +273,29 @@ async fn forward_inbound(
     false
 }
 
+/// Forward an inline-button tap (remote approval) to the gateway. `from` = the tapping user's
+/// id (== the private chat id), which the gateway checks against the configured self target.
+async fn forward_callback(
+    http: &reqwest::Client,
+    gateway_url: Option<&str>,
+    gateway_token: Option<&str>,
+    cb: &frankenstein::types::CallbackQuery,
+) {
+    let (Some(url), Some(token)) = (gateway_url, gateway_token) else {
+        return;
+    };
+    let payload = serde_json::json!({
+        "from": cb.from.id.to_string(),
+        "data": cb.data.clone().unwrap_or_default(),
+    });
+    let _ = http
+        .post(format!("{url}/api/channels/telegram/callback"))
+        .bearer_auth(token)
+        .json(&payload)
+        .send()
+        .await;
+}
+
 fn main() -> anyhow::Result<()> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -299,7 +358,10 @@ fn main() -> anyhow::Result<()> {
                 offset: Some(offset as i64),
                 limit: Some(100),
                 timeout: Some(60),
-                allowed_updates: Some(vec![AllowedUpdate::Message]),
+                allowed_updates: Some(vec![
+                    AllowedUpdate::Message,
+                    AllowedUpdate::CallbackQuery,
+                ]),
             };
             match bot.get_updates(&params).await {
                 Ok(response) => {
@@ -308,17 +370,38 @@ fn main() -> anyhow::Result<()> {
                         // Forward BEFORE confirming: only advance once the gateway
                         // has the message. On a transient delivery failure, stop
                         // the batch and re-fetch from the same offset next poll.
-                        if let UpdateContent::Message(message) = update.content {
-                            let delivered = forward_inbound(
-                                &http,
-                                gateway_url.as_deref(),
-                                gateway_token.as_deref(),
-                                *message,
-                            )
-                            .await;
-                            if !delivered {
-                                break;
+                        match update.content {
+                            UpdateContent::Message(message) => {
+                                let delivered = forward_inbound(
+                                    &http,
+                                    gateway_url.as_deref(),
+                                    gateway_token.as_deref(),
+                                    *message,
+                                )
+                                .await;
+                                if !delivered {
+                                    break;
+                                }
                             }
+                            // Inline-button tap (remote approval): dismiss the spinner, then
+                            // forward {from, data} to the gateway which verifies + executes.
+                            UpdateContent::CallbackQuery(cb) => {
+                                let _ = bot
+                                    .answer_callback_query(
+                                        &AnswerCallbackQueryParams::builder()
+                                            .callback_query_id(cb.id.clone())
+                                            .build(),
+                                    )
+                                    .await;
+                                forward_callback(
+                                    &http,
+                                    gateway_url.as_deref(),
+                                    gateway_token.as_deref(),
+                                    &cb,
+                                )
+                                .await;
+                            }
+                            _ => {}
                         }
                         offset = next;
                         persist_offset(offset);
