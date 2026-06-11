@@ -344,6 +344,7 @@ dependencies = [
  "anyhow",
  "axum",
  "env_logger",
+ "libc",
  "log",
  "qrcode",
  "reqwest",

@@ -362,6 +362,16 @@ struct ErrorBody {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // SECURITY (data at rest): make everything this process writes owner-only.
+    // The personal stores (memory.sqlite, desktop-gateway.sqlite, the WhatsApp
+    // session, …) are PLAINTEXT SQLite — 0644 would expose the user's memory,
+    // contacts and messages to any other local user. umask 0077 makes new files
+    // born 0600, including the SQLite WAL/SHM that SQLite creates at runtime.
+    #[cfg(unix)]
+    // SAFETY: libc::umask has no preconditions; called once before any file is created.
+    unsafe {
+        libc::umask(0o077 as libc::mode_t);
+    }
     let port = env::var("LOCAL_FIRST_DESKTOP_GATEWAY_PORT")
         .ok()
         .and_then(|value| value.parse::<u16>().ok())
@@ -391,6 +401,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         secret_store: Arc::new(open_gateway_secret_store()?),
         auth_token: resolve_gateway_auth_token()?.into(),
     };
+    // Fix any pre-existing 0644 data files (created before the umask above was set):
+    // the SQLite stores and the WhatsApp session are world-readable on old installs.
+    if let Ok(dir) = gateway_data_dir() {
+        harden_data_at_rest(&dir);
+    }
     init_active_workspace_from_disk();
     backfill_contacts(&state);
     backfill_mentions(&state);
@@ -26109,6 +26124,45 @@ fn resolve_gateway_auth_token() -> Result<String, std::io::Error> {
     );
     Ok(token)
 }
+
+/// Make every top-level file in the data directory owner-only (0600). The
+/// personal stores (memory.sqlite, desktop-gateway.sqlite, the WhatsApp session,
+/// task-runtime.sqlite, their WAL/SHM, plus any *.bak snapshots) are plaintext on
+/// disk; world-readable (0644) would let any other local user or a casual backup
+/// read the user's memory, contacts and messages. New files are already born 0600
+/// via the process umask — this repairs files written before that. Only top-level
+/// files are touched: subdirectories (skills/, artifacts/) may hold executables
+/// whose modes must not be clobbered. Best-effort: logs a count, never aborts.
+#[cfg(unix)]
+fn harden_data_at_rest(base: &std::path::Path) {
+    use std::os::unix::fs::PermissionsExt;
+    let Ok(entries) = fs::read_dir(base) else {
+        return;
+    };
+    let mut fixed = 0usize;
+    for entry in entries.flatten() {
+        if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+            continue;
+        }
+        let Ok(meta) = entry.metadata() else { continue };
+        // Already owner-only? leave it. Otherwise group/other have some access → tighten.
+        if meta.permissions().mode() & 0o077 == 0 {
+            continue;
+        }
+        if fs::set_permissions(&entry.path(), fs::Permissions::from_mode(0o600)).is_ok() {
+            fixed += 1;
+        }
+    }
+    if fixed > 0 {
+        eprintln!(
+            "[gateway] data-at-rest: tightened {fixed} file(s) to 0600 in {}",
+            base.display()
+        );
+    }
+}
+
+#[cfg(not(unix))]
+fn harden_data_at_rest(_base: &std::path::Path) {}
 
 /// Writes a file readable/writable only by the current user (0600 on Unix).
 #[cfg(unix)]
