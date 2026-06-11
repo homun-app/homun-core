@@ -15575,8 +15575,16 @@ domande passate, non sollecitare risposte a domande precedenti. Conciso. NON com
         "title": title,
     }));
 
+    // Automation runs (input_json carries `automation_id`) may ACT: use the full toolset so
+    // side-effecting tools (send_message, connector writes) PROPOSE a confirm card instead of
+    // being refused. Check-in / curiosity runs (no automation_id) stay read_only ("no actions").
+    let policy = if task.input_json.get("automation_id").is_some() {
+        "full"
+    } else {
+        "read_only"
+    };
     let answer = tokio::runtime::Handle::current()
-        .block_on(run_agent_turn(state, &thread_id, &goal, "read_only"))
+        .block_on(run_agent_turn(state, &thread_id, &goal, policy))
         .unwrap_or_else(|| "Nessuna risposta generata per il task pianificato.".to_string());
 
     if let Ok(store) = lock_store(state) {
