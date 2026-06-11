@@ -80,8 +80,10 @@ grouped (Gmail/Calendar/Spotify live).
 - ConnectorPoll real fire on a live connector returning items is verified only at the
   machinery level (poller loop + extraction + creation); the full Gmail→fire path is the user's
   to confirm.
-- Autonomous automations (`ApprovalPolicy::Autonomous`) still go through the confirm card in runs
-  — the confirm-skip is not implemented.
+- ~~Autonomous confirm-skip~~ **DONE**: `execute_proactive_prompt_task` maps the rule's
+  `ApprovalPolicy::Autonomous` to a `tool_policy = "autonomous"` that makes side-effecting tools
+  execute directly (no card) in that run; confirm-policy rules still propose the card; channels
+  stay read_only. Verified e2e (autonomous event automation sent on WhatsApp directly, no card).
 - The poll-tool auto-pick (`pick_poll_tool`) + `guess_key_field` are heuristics tuned for
   feed-like services (Gmail/Calendar); non-feed services (e.g. Spotify→SEARCH) have weak "event"
   semantics. Chat configuration (agent resolves tool/args/key) is the precise path.
