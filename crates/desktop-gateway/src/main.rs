@@ -7095,6 +7095,93 @@ chiede di salvare/esportare un file in una cartella."
 
 /// The discovery meta-tool: the model searches connected-service tools by intent
 /// instead of receiving all of them up front (progressive tool disclosure).
+/// Native tools that are ALWAYS loaded (the small core). Everything else is DEFERRED and
+/// discovered on demand via `find_capability` — the Tool Search pattern (Anthropic): keeping
+/// the upfront set small preserves selection accuracy + context as the tool count grows.
+/// Common across most turns: memory, dates, planning, skills, project code/files, discovery.
+const CORE_TOOL_NAMES: &[&str] = &[
+    "find_capability",
+    "find_connected_tools",
+    "suggest_capabilities",
+    "recall_memory",
+    "resolve_datetime",
+    "use_skill",
+    "update_plan",
+    "query_code_graph",
+    "query_git_history",
+    "read_file",
+    "write_file",
+    "edit_file",
+    "list_files",
+    "run_in_project",
+];
+
+fn find_capability_tool_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": "find_capability",
+            "description": "Scopri e ATTIVA gli strumenti NON presenti nel tuo set di base. Descrivi cosa vuoi FARE (es. \"navigare o leggere una pagina web\", \"cercare repository su GitHub\", \"elencare/leggere file e cartelle dell'utente\", \"eseguire comandi in un sandbox\", \"creare un documento/artefatto\", \"pianificare un task ricorrente\"). Ritorna gli strumenti adatti, GIÀ RICHIAMABILI dal turno successivo. Chiamalo PRIMA di rinunciare o di ripiegare sul browser: il browser stesso si attiva da qui ed è l'ultima risorsa.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "intent": {
+                        "type": "string",
+                        "description": "Cosa vuoi fare, in parole semplici (es. \"cercare su GitHub\", \"leggere un PDF dell'utente\", \"navigare un sito\")."
+                    }
+                },
+                "required": ["intent"]
+            }
+        }
+    })
+}
+
+/// Keyword search over the DEFERRED tool registry (name weighted over description), for
+/// `find_capability`. Returns up to `limit` best matches; an empty/no-match query yields a
+/// small sample so the model still sees what exists.
+fn search_deferred_tools(
+    registry: &[serde_json::Value],
+    intent: &str,
+    limit: usize,
+) -> Vec<serde_json::Value> {
+    let q = intent.to_lowercase();
+    let terms: Vec<String> = q
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|t| t.chars().count() >= 2)
+        .map(str::to_string)
+        .collect();
+    if terms.is_empty() {
+        return registry.iter().take(limit).cloned().collect();
+    }
+    let mut scored: Vec<(i32, serde_json::Value)> = registry
+        .iter()
+        .filter_map(|schema| {
+            let name = schema.pointer("/function/name").and_then(|v| v.as_str()).unwrap_or("");
+            let desc = schema
+                .pointer("/function/description")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let name_l = name.to_lowercase();
+            let desc_l = desc.to_lowercase();
+            let mut score = 0;
+            for t in &terms {
+                if name_l.contains(t) {
+                    score += 3;
+                } else if desc_l.contains(t) {
+                    score += 1;
+                }
+            }
+            if score > 0 {
+                Some((score, schema.clone()))
+            } else {
+                None
+            }
+        })
+        .collect();
+    scored.sort_by(|a, b| b.0.cmp(&a.0));
+    scored.into_iter().take(limit).map(|(_, s)| s).collect()
+}
+
 fn find_connected_tools_schema() -> serde_json::Value {
     serde_json::json!({
         "type": "function",
@@ -7288,6 +7375,12 @@ estratto e/o immagini delle pagine) sotto la sezione \"[File allegati a questa \
 conversazione]\". Analizzali da lì direttamente. Se l'utente dice \"questo file/pdf/\
 allegato\" ma in quell'elenco NON c'è nulla, chiedi gentilmente di (ri)allegarlo: NON \
 usare list_directory, run_in_sandbox o link di download per cercarlo o decodificarlo.\n\
+STRUMENTI: hai un set di BASE ridotto. Per capacità che NON vedi tra i tuoi tool (navigare \
+il web, cercare su GitHub, leggere/elencare file e cartelle dell'utente, eseguire comandi in \
+sandbox, creare artefatti, pianificare task ricorrenti, …) chiama PRIMA `find_capability` \
+descrivendo cosa vuoi fare: ti attiva lo strumento giusto, richiamabile subito dopo. Il \
+browser NON è di base e si attiva da `find_capability`: usalo come ULTIMA risorsa, solo se \
+nessuno strumento più diretto (es. `github_search` per GitHub) copre la richiesta.\n\
 SERVIZI ESTERNI (email, calendario, GitHub, …): chiama `find_connected_tools` per \
 scoprire lo strumento adatto e usalo; se non trova nulla di adatto, chiama \
 `suggest_capabilities` per proporre cosa collegare. Mai lasciare l'utente con una \
@@ -7837,6 +7930,20 @@ RI-VERIFICA eseguendo. Una causa alla volta, niente tentativi alla cieca."
     if !artifact_destinations.is_empty() && !read_only {
         base_tools.push(save_artifact_tool_schema(&artifact_destinations));
     }
+    // Tool Search (Anthropic pattern): split the full toolset into a SMALL always-loaded
+    // CORE + a DEFERRED registry the model discovers via `find_capability`. Keeps the
+    // upfront tool count low (selection accuracy + context budget) as tools grow, and makes
+    // the browser a discovered last-resort instead of the silent catch-all. `find_capability`
+    // pushes matches into the live `tool_schemas` (same mechanism as `find_connected_tools`).
+    let (mut base_tools, deferred_tools): (Vec<serde_json::Value>, Vec<serde_json::Value>) =
+        base_tools.into_iter().partition(|schema| {
+            schema
+                .pointer("/function/name")
+                .and_then(|v| v.as_str())
+                .map(|name| CORE_TOOL_NAMES.contains(&name))
+                .unwrap_or(false)
+        });
+    base_tools.push(find_capability_tool_schema());
     // Attachments (persistent): ingest NEW files off-runtime, PERSIST them on the
     // thread, then load the thread's FULL set so a file stays usable across turns
     // (no re-attach). A manifest lists the available files so the model uses their
@@ -9512,6 +9619,64 @@ una data incerta.",
                                 .filter(|s| s.get("status").and_then(|v| v.as_str()) == Some("done"))
                                 .count();
                             format!("Piano aggiornato: {done}/{} step completati. Mostrato nel pannello Piano.", steps.len())
+                        }
+                    } else if name == "find_capability" {
+                        // Tool Search: discover DEFERRED native tools by intent and activate
+                        // them (push into the live tool set) so the model calls them next
+                        // round — same mechanism as find_connected_tools, for built-in tools.
+                        let parsed = serde_json::from_str::<serde_json::Value>(args_raw).ok();
+                        let intent = parsed
+                            .as_ref()
+                            .and_then(|a| {
+                                a.get("intent")
+                                    .or_else(|| a.get("query"))
+                                    .and_then(|v| v.as_str())
+                                    .map(String::from)
+                            })
+                            .unwrap_or_default();
+                        let _ = emit_stream_event(
+                            &tx,
+                            GenerateStreamEvent::Delta {
+                                text: format!(
+                                    "‹‹ACT››🧭 Cerco una capacità: {}‹‹/ACT››",
+                                    if intent.is_empty() { "(intento)" } else { intent.as_str() }
+                                ),
+                            },
+                        )
+                        .await;
+                        let matches = search_deferred_tools(&deferred_tools, &intent, 5);
+                        if matches.is_empty() {
+                            "Nessuno strumento aggiuntivo corrisponde. Riformula con cosa vuoi \
+fare (es. \"navigare il web\", \"cercare su GitHub\", \"leggere file dell'utente\")."
+                                .to_string()
+                        } else {
+                            let mut lines = Vec::new();
+                            for schema in &matches {
+                                let tname = schema
+                                    .pointer("/function/name")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("")
+                                    .to_string();
+                                if tname.is_empty() {
+                                    continue;
+                                }
+                                if loaded_tools.insert(tname.clone()) {
+                                    tool_schemas.push(schema.clone());
+                                }
+                                let desc = schema
+                                    .pointer("/function/description")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("")
+                                    .chars()
+                                    .take(140)
+                                    .collect::<String>();
+                                lines.push(format!("- {tname}: {desc}"));
+                            }
+                            format!(
+                                "Strumenti attivati (ora RICHIAMABILI — chiama quello giusto con i \
+suoi argomenti):\n{}",
+                                lines.join("\n")
+                            )
                         }
                     } else if name == "find_connected_tools" {
                         // Discovery: search the catalog, inject the matching tool
