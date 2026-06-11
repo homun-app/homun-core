@@ -3267,6 +3267,40 @@ body.resizing-drawer {
   display: flex;
   justify-content: flex-end;
 }
+/* Inline goal-propose affordance card (under an assistant message). */
+.goal-propose-card {
+  margin-top: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 10px 12px;
+  display: grid;
+  gap: 8px;
+}
+.goal-propose-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.goal-propose-list {
+  display: grid;
+  gap: 6px;
+}
+.goal-propose-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text);
+}
+.goal-propose-item > button {
+  flex-shrink: 0;
+}
 .goals-promote summary {
   cursor: pointer;
   font-size: 12px;
