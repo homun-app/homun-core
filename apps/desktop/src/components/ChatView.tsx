@@ -212,6 +212,11 @@ export function ChatView({
   const [artifactsOpen, setArtifactsOpen] = useState(false);
   const [workbenchTab, setWorkbenchTab] = useState<WorkbenchTab>("files");
   const [artifactsInitial, setArtifactsInitial] = useState<string | null>(null);
+  // Is this thread a project? Reliable context signal (not keyword-detection) that gates
+  // the "Salva come obiettivo" message action + the Obiettivi tab. `goalSeed` pre-fills
+  // the Obiettivi compose when promoting a chat message to a goal.
+  const [threadIsProject, setThreadIsProject] = useState(false);
+  const [goalSeed, setGoalSeed] = useState<string | null>(null);
   const [followUps, setFollowUps] = useState<string[]>([]);
   const [followUpsFor, setFollowUpsFor] = useState<string | null>(null);
   const titledThreadsRef = useRef<Set<string>>(new Set());
@@ -968,6 +973,28 @@ export function ChatView({
     }
   }
 
+  // Resolve once per thread whether it's a project (gates "Salva come obiettivo").
+  useEffect(() => {
+    let cancelled = false;
+    void coreBridge.projectGoals(thread.threadId).then((d) => {
+      if (!cancelled) setThreadIsProject(Boolean(d?.is_project));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [thread.threadId]);
+
+  // Promote a chat message to a project objective: hand the text off to the Obiettivi
+  // panel's compose (open Workbench → Obiettivi tab, pre-filled) so the user trims and
+  // confirms with the polished UI — never auto-saving long prose verbatim.
+  function saveMessageAsGoal(text?: string | null) {
+    const seed = (text ?? "").trim();
+    if (!seed) return;
+    setGoalSeed(seed);
+    setArtifactsOpen(true);
+    setWorkbenchTab("goals");
+  }
+
   async function saveMessageToMemory(message: ChatMessage) {
     if (message.role !== "assistant" || message.savedMemoryRef) return;
     const optimisticMessages = threadMessages.map((item) =>
@@ -1571,6 +1598,7 @@ export function ChatView({
                   canCreateTask={assistantTextMessage}
                   canExpand={assistantTextMessage}
                   canSaveToMemory={assistantOperationalMessage}
+                  canSaveAsGoal={assistantOperationalMessage && threadIsProject}
                   feedback={displayMessage.feedback}
                   linkedAutomation={Boolean(displayMessage.linkedAutomationRef)}
                   linkedTask={Boolean(displayMessage.linkedTaskId)}
@@ -1614,6 +1642,7 @@ export function ChatView({
                     )
                   }
                   onSaveToMemory={() => void saveMessageToMemory(displayMessage)}
+                  onSaveAsGoal={() => saveMessageAsGoal(displayMessage.text)}
                 />
                 </>
               )}
@@ -1800,6 +1829,9 @@ export function ChatView({
         artifactsInitial={artifactsInitial}
         uploadedFiles={uploadedFiles}
         threadId={thread.threadId}
+        projectThread={threadIsProject}
+        goalSeed={goalSeed}
+        onGoalSeedConsumed={() => setGoalSeed(null)}
         operationalPlanMarkdown={conversationPlan ?? visibleComputerSession.operationalPlanMarkdown}
       />
 
@@ -2027,6 +2059,7 @@ function MessageActionBar({
   canReply,
   canEdit,
   canSaveToMemory,
+  canSaveAsGoal,
   contentKind,
   copied,
   feedback,
@@ -2048,6 +2081,7 @@ function MessageActionBar({
   onRegenerate,
   onReviseDiagram,
   onSaveToMemory,
+  onSaveAsGoal,
 }: {
   canContinue: boolean;
   canCreateAutomation: boolean;
@@ -2057,6 +2091,7 @@ function MessageActionBar({
   canReply: boolean;
   canEdit: boolean;
   canSaveToMemory: boolean;
+  canSaveAsGoal: boolean;
   contentKind: MessageContentKind;
   copied: boolean;
   feedback: ChatMessage["feedback"];
@@ -2078,6 +2113,7 @@ function MessageActionBar({
   onRegenerate: () => void;
   onReviseDiagram: () => void;
   onSaveToMemory: () => void;
+  onSaveAsGoal: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPlacement, setMenuPlacement] =
@@ -2087,6 +2123,7 @@ function MessageActionBar({
     canExpand ||
     canRegenerate ||
     canSaveToMemory ||
+    canSaveAsGoal ||
     canCreateTask ||
     canCreateAutomation ||
     contentKind === "code" ||
@@ -2210,6 +2247,12 @@ function MessageActionBar({
                 >
                   <BookMarked size={14} />
                   <span>{savedToMemory ? "Salvato in memoria" : "Salva in memoria"}</span>
+                </button>
+              )}
+              {canSaveAsGoal && (
+                <button type="button" role="menuitem" onClick={onSaveAsGoal}>
+                  <Target size={14} />
+                  <span>Salva come obiettivo</span>
                 </button>
               )}
               {canCreateTask && (
@@ -3071,15 +3114,26 @@ function graphStyleKey(node: { kind: string; entity_type?: string }): string {
 function GoalsPanel({
   data,
   threadId,
+  seed,
+  onSeedConsumed,
   onRefresh,
 }: {
   data: ProjectGoalsData;
   threadId: string;
+  seed?: string | null;
+  onSeedConsumed?: () => void;
   onRefresh: () => void;
 }) {
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [newGoal, setNewGoal] = useState("");
   const [busy, setBusy] = useState(false);
+  // Pre-fill the compose when a chat message was promoted to a goal (then clear the seed).
+  useEffect(() => {
+    if (seed && seed.trim()) {
+      setNewGoal(seed);
+      onSeedConsumed?.();
+    }
+  }, [seed, onSeedConsumed]);
   // Assistant-proposed objectives (north star), editable before saving.
   const [drafts, setDrafts] = useState<string[] | null>(null);
   const [suggesting, setSuggesting] = useState(false);
@@ -3716,6 +3770,9 @@ function Workbench({
   artifactsInitial,
   uploadedFiles,
   threadId,
+  projectThread,
+  goalSeed,
+  onGoalSeedConsumed,
   operationalPlanMarkdown,
 }: {
   open: boolean;
@@ -3726,6 +3783,9 @@ function Workbench({
   artifactsInitial?: string | null;
   uploadedFiles: ChatAttachment[];
   threadId: string;
+  projectThread: boolean;
+  goalSeed?: string | null;
+  onGoalSeedConsumed?: () => void;
   operationalPlanMarkdown?: string;
 }) {
   // Project-folder browser state (File tab): the thread's linked folder, navigable.
@@ -3832,7 +3892,7 @@ function Workbench({
         case "memoria":
           return true;
         case "goals":
-          return !!goalsData?.is_project;
+          return projectThread;
         case "activity":
           return (tasks ? tasks.active.length + tasks.queued.length + tasks.blocked.length : 0) > 0;
         case "plan":
@@ -3843,7 +3903,7 @@ function Workbench({
       const order: WorkbenchTab[] = ["files", "artifacts", "plan", "goals", "activity", "memoria"];
       onTab(order.find(populated) ?? "memoria");
     }
-  }, [open, tab, uploadedFiles.length, fsRoot, artifacts.length, tasks, operationalPlanMarkdown, goalsData, onTab]);
+  }, [open, tab, uploadedFiles.length, fsRoot, artifacts.length, tasks, operationalPlanMarkdown, projectThread, onTab]);
   // Load project goals (Obiettivi tab) when the panel opens — resolves scope from thread.
   useEffect(() => {
     if (!open) return;
@@ -3880,7 +3940,7 @@ function Workbench({
   const refreshGoals = () => {
     void coreBridge.projectGoals(threadId).then(setGoalsData);
   };
-  const goalsAvailable = !!goalsData?.is_project;
+  const goalsAvailable = projectThread;
   const planItems = parseOperationalPlanItems(operationalPlanMarkdown);
   const activeTasks = tasks
     ? [...tasks.active, ...tasks.queued, ...tasks.blocked]
@@ -4127,7 +4187,13 @@ function Workbench({
           ))}
         {tab === "memoria" && <MemoryGraphPanel threadId={threadId} />}
         {tab === "goals" && goalsData && (
-          <GoalsPanel data={goalsData} threadId={threadId} onRefresh={refreshGoals} />
+          <GoalsPanel
+            data={goalsData}
+            threadId={threadId}
+            seed={goalSeed}
+            onSeedConsumed={onGoalSeedConsumed}
+            onRefresh={refreshGoals}
+          />
         )}
         {tab === "activity" && (
           <div className="workbench-files">
