@@ -6645,6 +6645,16 @@ function Composer({
     return () => cancelAnimationFrame(id);
   }, [threadId]);
 
+  // When the assistant FINISHES responding (streaming true→false), return the cursor to
+  // the composer so the user can type the next message immediately — no extra click.
+  const wasStreaming = useRef(false);
+  useEffect(() => {
+    if (wasStreaming.current && !streaming) {
+      requestAnimationFrame(() => textareaRef.current?.focus());
+    }
+    wasStreaming.current = streaming;
+  }, [streaming]);
+
   useEffect(() => {
     let cancelled = false;
     void (async () => {
