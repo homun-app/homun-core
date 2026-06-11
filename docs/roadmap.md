@@ -472,13 +472,15 @@ stato dei 3 layer: i path discovery/esecuzione/approval sono cablati; i buchi so
 **completamento, gestione, onboarding**.
 
 Verso la prima release:
-1. **Composio OAuth end-to-end** — PARZIALE (verificato 2026-06-08). In
-   **Impostazioni → Connettori → Composio** il flusso è COMPLETO:
-   `ComposioToolkitBrowser.connect` apre il browser + poll `connected_accounts`
-   ogni 3s fino ad ACTIVE + refresh toolkit (SettingsView.tsx:1492-1527). Buco: le
-   **connect-card in chat** (`linkComposio`, ComposioReconnectCard) aprono l'URL e
-   si fermano ("autorizza e riprova"), senza poll né refresh, con `markConnected`
-   ottimistico → da allineare al poll di Settings.
+1. **Composio OAuth end-to-end** — FATTO (`9048459`, verificato codice 2026-06-12).
+   Sia Impostazioni sia le **connect-card in chat** usano ora lo stesso helper
+   condiviso `src/lib/composioConnect.ts`: apre il redirect OAuth, poi POLLA
+   `composioConnections()` ogni 3s fino a `status === "ACTIVE"` (deadline 150s
+   OAuth / 20s API-key). `markConnected()` (persistenza via `/api/connect/mark`,
+   item "Collegato" al reload) viene chiamato SOLO dopo il rilevamento reale —
+   niente più "autorizza e riprova" né `markConnected` ottimistico. Lo usano
+   `ConnectSuggestRow.linkComposio` (suggerimenti) e `ComposioReconnectCard`
+   (riconnessione su EXPIRED).
 2. **Errori azionabili + token.** PARZIALE (2026-06-08): il **401 del modello** ora ha
    messaggio azionabile (`:cloud` → `ollama signin`/chiave) + **fallback automatico**
    al binding orchestratore + preset **Ollama Cloud** (`9d63b88`/`84432aa`/`c8bd089`).
