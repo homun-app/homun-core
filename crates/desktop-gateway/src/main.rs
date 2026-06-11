@@ -90,7 +90,8 @@ use local_first_subagents::{
 };
 use local_first_task_runtime::{
     ApprovalGate, ApprovalPolicy, ApprovalRequest, Automation, AutomationSource, AutomationTrigger,
-    ExecutorResult, LeaseManager, ResourceClass, ResourceGovernor, ResourceLimits, TaskExecutor,
+    EventTrigger, ExecutorResult, LeaseManager, ResourceClass, ResourceGovernor, ResourceLimits,
+    TaskExecutor,
     TaskId, TaskQueueSnapshot, TaskRecord, TaskRuntimeError, TaskScheduler, TaskStatus, TaskStore,
     TaskUiDetail, TaskUiItem, TaskUiReadModel, UserId, WorkspaceId,
 };
@@ -4244,6 +4245,70 @@ fn cancel_automation_task(store: &TaskStore, task_id: &str) {
         TaskStatus::Cancelled,
         Some("automazione disattivata o eliminata"),
     );
+}
+
+/// Fire enabled Event automations matching an inbound channel message: each materializes a
+/// ONE-SHOT run (proactive_prompt) carrying the automation's prompt + the message as context.
+/// Independent of the auto-reply/draft policy — these are explicit user rules. Best-effort.
+fn fire_channel_event_automations(state: &AppState, channel: &str, message: &ChannelInbound) {
+    let store = match lock_task_store(state) {
+        Ok(store) => store,
+        Err(_) => return,
+    };
+    let automations = match store.list_enabled_event_automations(&gateway_user_id()) {
+        Ok(list) => list,
+        Err(_) => return,
+    };
+    let sender = message.sender.trim();
+    let sender_name = message.sender_name.trim();
+    let speaker = if sender_name.is_empty() { sender } else { sender_name };
+    let now = OffsetDateTime::now_utc();
+    for automation in automations {
+        // Only ChannelMessage triggers; clone the filters so the borrow ends here.
+        let (want_channel, want_from) = match &automation.trigger {
+            AutomationTrigger::Event {
+                event: EventTrigger::ChannelMessage { channel, from },
+            } => (channel.clone(), from.clone()),
+            _ => continue,
+        };
+        if let Some(want) = &want_channel {
+            if !want.eq_ignore_ascii_case(channel) {
+                continue;
+            }
+        }
+        if let Some(want) = &want_from {
+            let needle = want.to_lowercase();
+            let matches = sender_name.to_lowercase().contains(&needle)
+                || sender.to_lowercase().contains(&needle);
+            if !matches {
+                continue;
+            }
+        }
+        let task_id = format!("autorun_{}", uuid::Uuid::new_v4().simple());
+        let goal = format!(
+            "{}\n\n[Evento scatenante: messaggio {channel} da {speaker}]\nContenuto del messaggio: {}",
+            automation.prompt, message.content
+        );
+        let mut task = TaskRecord::new(
+            task_id,
+            gateway_user_id(),
+            gateway_workspace_id(),
+            "proactive_prompt",
+            goal,
+            serde_json::json!({
+                "automation_id": automation.id,
+                "approval": automation.approval,
+                "event": { "channel": channel, "from": speaker, "message_id": message.message_id },
+            }),
+        );
+        task.not_before = Some(now);
+        if store.insert_task(&task).is_ok() {
+            let mut fired = automation;
+            fired.last_fired_at = Some(now);
+            let _ = store.upsert_automation(&fired);
+            eprintln!("automation/{}: fired on {channel} message from {speaker}", fired.id);
+        }
+    }
 }
 
 /// GET /api/automations — list the user's automations (rules), newest first.
@@ -12440,6 +12505,9 @@ async fn handle_channel_inbound(
 
     // Best-effort: record the contact (person node) + the message (episodic).
     record_channel_message(state, channel, &message);
+    // Event-triggered automations: fire any user rule listening for this channel message
+    // (independent of the auto-reply/draft policy below — these are explicit rules).
+    fire_channel_event_automations(state, channel, &message);
     // Learn durable knowledge from the channel conversation into the general
     // memory (fire-and-forget), attributed to the CONTACT rather than the user.
     {
