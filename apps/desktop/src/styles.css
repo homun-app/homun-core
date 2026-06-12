@@ -1,35 +1,37 @@
 :root {
   color-scheme: light;
-  /* Warm light palette (Manus-like): off-white surfaces, warm grey lines. */
-  --bg: #fdfcfb;
-  --panel: #faf8f5;
+  /* ── Surface palette. Default = "Freddo" (cool grey, the Homun App redesign).
+     Swapped at runtime via [data-theme="…"] below (applyTheme() in lib/accent). */
+  --bg: #fcfcfd;
+  --panel: #f4f5f7;
   --surface: #ffffff;
-  --surface-muted: #f4f2ee;
-  --surface-hover: #efece7;
-  --line: #e8e4dd;
-  --line-strong: #d8d3ca;
-  --text: #1f1d1a;
-  --muted: #6f6a62;
-  --faint: #a8a39a;
-  /* Brand accent — warm orange from the homün wordmark (replaces iOS blue as the
-     primary/brand colour). --blue kept as alias so existing rules don't break. */
-  --brand: #dd6b20;
-  --brand-strong: #c25e16;
-  --brand-soft: #fbeede;
-  --blue: #dd6b20;
-  --blue-soft: #fbeede;
-  --green: #20a850;
-  --green-soft: #eaf8ef;
-  --amber: #c57900;
-  --amber-soft: #fff4df;
-  --red: #e5484d;
-  --red-soft: #ffeded;
-  --danger: #e5484d;
-  --shadow-soft: 0 18px 60px rgba(28, 22, 14, 0.08);
-  --shadow-menu: 0 16px 46px rgba(28, 22, 14, 0.14);
-  /* Radii — differentiated by role (was a flat 8px everywhere → looked rigid). */
+  --surface-muted: #f4f5f7;
+  --surface-hover: #edeef2;
+  --line: #ecedef;
+  --line-strong: #e0e2e7;
+  --text: #1b1c1f;
+  --muted: #565a63;
+  --faint: #9aa0ad;
+  /* ── Brand accent. Default = teal #157A6E. Driven at runtime from a single hex
+     via applyAccent() (strong/soft derived). --blue kept as alias so old rules work. */
+  --brand: #157a6e;
+  --brand-strong: #11655b;
+  --brand-soft: #e4efec;
+  --blue: #157a6e;
+  --blue-soft: #e4efec;
+  /* ── Semantic status (constant across surfaces + accents). */
+  --green: #25785a;
+  --green-soft: #e7f4ea;
+  --amber: #c9881e;
+  --amber-soft: #fbf1de;
+  --red: #b0432b;
+  --red-soft: #f7e9e4;
+  --danger: #c4452f;
+  --shadow-soft: 0 18px 60px rgba(20, 22, 30, 0.1);
+  --shadow-menu: 0 16px 46px rgba(20, 22, 30, 0.18);
+  /* Radii — differentiated by role. */
   --radius: 8px;
-  --radius-control: 8px;
+  --radius-control: 9px;
   --radius-card: 14px;
   --radius-lg: 18px;
   --radius-pill: 999px;
@@ -42,28 +44,79 @@
   --s6: 24px;
   --s7: 32px;
   --s8: 40px;
-  /* Type scale — one ladder instead of ad-hoc px (the core of a "designed" feel). */
+  /* Type scale. */
   --text-xs: 12px;
   --text-sm: 13px;
   --text-base: 14px;
   --text-md: 16px;
   --text-lg: 20px;
   --text-xl: 28px;
-  --text-hero: 40px;
-  /* Cursor 1:1: the OS UI font (SF Pro on macOS) instead of Inter; no serif anywhere
-     (serif headings now resolve to the same system stack). */
-  --font-serif: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --text-hero: 34px;
+  /* Fonts: Hanken Grotesk (UI) + JetBrains Mono (eyebrow/label/timestamp/kbd).
+     Self-hosted (@fontsource, imported in main.tsx) — no CDN, offline-safe.
+     --font-serif aliases the sans stack (the new design uses no serif). */
+  --font-sans: "Hanken Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-serif: var(--font-sans);
   --window-drag-height: 42px;
-  font-family:
-    -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, Roboto, "Helvetica Neue",
-    Arial, sans-serif;
+  font-family: var(--font-sans);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
 }
 
+/* ── Surface themes — neutrals only; the brand accent is independent (orthogonal
+   axes, mixable, exactly as the design's palette board suggests). Set on
+   <html data-theme="…"> by applyTheme(). "freddo" == :root defaults. */
+:root[data-theme="avorio"] {
+  --bg: #fbfaf7;
+  --panel: #f4f2ec;
+  --surface: #ffffff;
+  --surface-muted: #f4f2ec;
+  --surface-hover: #efece4;
+  --line: #e4e0d7;
+  --line-strong: #d8d3ca;
+  --text: #1e1d1a;
+  --muted: #56544c;
+  --faint: #9c9a90;
+}
+:root[data-theme="neutro"] {
+  --bg: #ffffff;
+  --panel: #f6f6f6;
+  --surface: #ffffff;
+  --surface-muted: #f6f6f6;
+  --surface-hover: #efeff0;
+  --line: #e6e6e8;
+  --line-strong: #dcdcdf;
+  --text: #18181b;
+  --muted: #52525b;
+  --faint: #a1a1aa;
+}
+:root[data-theme="sabbia"] {
+  --bg: #faf8f3;
+  --panel: #f2eee6;
+  --surface: #ffffff;
+  --surface-muted: #f2eee6;
+  --surface-hover: #ece6db;
+  --line: #e7e1d6;
+  --line-strong: #dbd3c4;
+  --text: #211d18;
+  --muted: #5a5349;
+  --faint: #a89e8d;
+}
+
 * {
   box-sizing: border-box;
+}
+
+/* ── Icon coherence (F2). Lucide ships every icon at stroke-width 2; the Homun
+   design uses a lighter ~1.7 outline. A CSS rule beats the inline presentation
+   attribute, so this normalizes the WHOLE icon set (all 14 importers) to the
+   design weight in one place — no per-component edits. Custom inline SVGs (thread
+   type glyphs, theme previews) carry no .lucide class, so they keep their own
+   stroke/fill. Round caps/joins are already lucide defaults. */
+svg.lucide {
+  stroke-width: 1.7;
 }
 
 /* Focus policy: show a ring only for keyboard navigation (focus-visible), never on
@@ -572,15 +625,21 @@ body.resizing-drawer {
 }
 
 .drawer-nav-item span,
-.drawer-link span {
+.drawer-link-title {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.drawer-nav-item.active,
+/* Nav rows (Cerca/Automazioni/Proattività) active = teal pill. */
+.drawer-nav-item.active {
+  background: var(--brand-soft);
+  color: var(--brand);
+  font-weight: 600;
+}
+/* Active thread = subtle surface tint (the nav owns the brand accent). */
 .drawer-link.active {
-  background: #e9e9eb;
+  background: var(--surface-hover);
 }
 
 .drawer-nav-item em {
@@ -665,15 +724,63 @@ body.resizing-drawer {
 .drawer-link {
   min-height: 32px;
   padding: 0 10px;
-  font-size: 14px;
+  font-size: var(--text-sm);
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: 15px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 8px;
+  gap: 9px;
 }
 
 .drawer-link.pinned svg {
   color: var(--muted);
+}
+
+/* Leading per-type glyph slot (empty for normal chats → titles stay aligned). */
+.drawer-link-icon {
+  width: 15px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+.drawer-link-icon svg {
+  width: 13px;
+  height: 13px;
+}
+
+/* "CHAT" mono eyebrow + inline new-chat (replaces the full-width button). */
+.drawer-chats-head {
+  display: flex;
+  align-items: center;
+  margin: 14px 0 4px;
+  padding: 0 6px 0 10px;
+}
+.drawer-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+.drawer-eyebrow-add {
+  margin-left: auto;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: none;
+  border-radius: var(--radius);
+  color: var(--brand);
+  cursor: pointer;
+}
+.drawer-eyebrow-add:hover {
+  background: var(--brand-soft);
+}
+.drawer-eyebrow-add:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 /* --- M9: Projects + Personale sections --- */
@@ -1722,8 +1829,9 @@ body.resizing-drawer {
   display: flex;
   gap: 12px;
   margin-top: 8px;
-  color: var(--muted);
-  font-size: 12px;
+  color: var(--faint);
+  font-family: var(--font-mono);
+  font-size: 11px;
 }
 
 .message-incomplete-note {
@@ -2774,9 +2882,10 @@ body.resizing-drawer {
   width: min(100%, 760px);
   margin: 8px auto 16px;
   border: 1px solid var(--line-strong);
-  border-radius: var(--radius-lg);
+  /* Design composer: rounded 16, flat (border only, no float shadow). */
+  border-radius: 16px;
   background: var(--surface);
-  box-shadow: var(--shadow-soft);
+  box-shadow: none;
   /* visible (not hidden) so the skill/model popovers can open ABOVE the
    * composer without being clipped; rounded corners come from border-radius. */
   overflow: visible;
@@ -3763,6 +3872,8 @@ body.resizing-drawer {
 }
 .rail-button {
   position: relative;
+  /* Rounded square (design) instead of a pill — overrides the shared icon-button radius. */
+  border-radius: 10px;
 }
 
 /* Sidebar: IDE-style context switcher + primary new-chat + channels group. */
@@ -3775,16 +3886,16 @@ body.resizing-drawer {
   gap: var(--s2);
   width: 100%;
   padding: 7px 10px;
-  border: 1px solid var(--line);
+  border: none;
   border-radius: var(--radius-control);
-  background: var(--surface);
+  background: transparent;
   color: var(--text);
   font-size: var(--text-sm);
   font-weight: 600;
   cursor: pointer;
 }
 .ctx-switcher:hover {
-  background: var(--surface-muted);
+  background: var(--surface-hover);
 }
 .ctx-switcher-name {
   flex: 1;
@@ -3792,6 +3903,21 @@ body.resizing-drawer {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+/* Scope marker chip for the personal workspace (teal gradient, like the design). */
+.ctx-switcher-chip {
+  width: 17px;
+  height: 17px;
+  flex: none;
+  border-radius: 5px;
+  background: linear-gradient(135deg, #bfe3d9, #9fcfc2);
+}
+/* Mono uppercase group label, matching the "CHAT" eyebrow. */
+.drawer-section-name {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 .ctx-menu-backdrop {
   position: fixed;
@@ -3925,32 +4051,6 @@ body.resizing-drawer {
 .ctx-menu-create:hover {
   background: var(--brand-soft);
 }
-.drawer-new-chat {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--s2);
-  margin: 16px 0 14px;
-  padding: 8px 12px;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-control);
-  background: var(--surface);
-  color: var(--text);
-  font-size: var(--text-base);
-  font-weight: 600;
-  cursor: pointer;
-}
-.drawer-new-chat:hover {
-  background: var(--surface-muted);
-}
-.drawer-new-chat:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
-.drawer-new-chat:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
 .drawer-section-count {
   margin-left: auto;
   font-size: var(--text-xs);
@@ -3990,6 +4090,80 @@ body.resizing-drawer {
 .appearance-swatch.active {
   border-color: var(--surface);
   box-shadow: 0 0 0 2px var(--text);
+}
+/* Surface-theme picker (Aspetto › Tema · superficie). */
+.appearance-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+.appearance-themes {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--s3);
+}
+.appearance-theme-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  padding: var(--s2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+.appearance-theme-card:hover {
+  border-color: var(--line-strong);
+}
+.appearance-theme-card.active {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 1px var(--brand) inset;
+}
+.appearance-theme-preview {
+  display: flex;
+  height: 48px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  overflow: hidden;
+}
+.appearance-theme-rail {
+  width: 16px;
+  flex: none;
+}
+.appearance-theme-bars {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 9px;
+}
+.appearance-theme-bars > span {
+  height: 4px;
+  border-radius: 3px;
+}
+.appearance-theme-bars > span:first-child {
+  width: 70%;
+}
+.appearance-theme-bars > span:last-child {
+  width: 45%;
+}
+.appearance-theme-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text);
+}
+.appearance-theme-check {
+  margin-left: auto;
+  color: var(--brand);
 }
 .appearance-custom {
   display: flex;
@@ -8484,9 +8658,6 @@ body.resizing-drawer {
 .contacts-modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
 
 /* Channel origin badge on a chat thread in the sidebar (M8). */
-.thread-channel-badge { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.3px; padding: 1px 5px; border-radius: 4px; background: var(--surface-muted); color: var(--muted); margin-left: 6px; flex-shrink: 0; }
-.thread-channel-badge.whatsapp { background: var(--green-soft); color: var(--green); }
-.thread-channel-badge.telegram { background: var(--blue-soft); color: var(--blue); }
 
 /* ── Automazioni (vista lista + editor Quando→Allora) ───────────────────── */
 .automations-view {

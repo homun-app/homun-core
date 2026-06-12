@@ -2,17 +2,17 @@
 // overriding these CSS variables at runtime re-tints the entire app. The strong/soft
 // variants are DERIVED from the chosen colour so a single hex drives a coherent set.
 
-export const DEFAULT_ACCENT = "#dd6b20"; // homün orange
+export const DEFAULT_ACCENT = "#157a6e"; // teal — Homun brand
 
 export const ACCENT_PRESETS: { name: string; hex: string }[] = [
-  { name: "Arancione", hex: "#dd6b20" },
-  { name: "Ambra", hex: "#d97706" },
-  { name: "Rosso", hex: "#e5484d" },
-  { name: "Rosa", hex: "#e93d82" },
+  { name: "Teal", hex: "#157a6e" },
+  { name: "Indaco", hex: "#4f66e0" },
+  { name: "Terracotta", hex: "#c2683c" },
+  { name: "Ambra", hex: "#c9881e" },
+  { name: "Verde", hex: "#25785a" },
+  { name: "Blu", hex: "#2a7fb8" },
   { name: "Viola", hex: "#7c5cff" },
-  { name: "Blu", hex: "#0a84ff" },
-  { name: "Ciano", hex: "#0891b2" },
-  { name: "Verde", hex: "#16a34a" },
+  { name: "Rosa", hex: "#e93d82" },
   { name: "Grafite", hex: "#52525b" },
 ];
 
@@ -86,4 +86,54 @@ export function saveAccent(hex: string): void {
 /** Apply the persisted accent at startup (before first paint, no flash). */
 export function initAccent(): void {
   applyAccent(loadAccent());
+}
+
+// ── Surface theme (neutral palette). Orthogonal to the accent: this only swaps the
+// background/line/text neutrals, while the accent (brand) stays as chosen — exactly the
+// two-axis model the design's palette board uses ("posso mixare … neutro + teal").
+// Sets data-theme on <html>; the [data-theme="…"] blocks in styles.css do the rest.
+export type ThemeName = "freddo" | "avorio" | "neutro" | "sabbia";
+
+export const DEFAULT_THEME: ThemeName = "freddo";
+
+export const THEME_PRESETS: { name: ThemeName; label: string; hint: string }[] = [
+  { name: "freddo", label: "Freddo", hint: "Grigio freddo" },
+  { name: "avorio", label: "Avorio", hint: "Caldo neutro" },
+  { name: "neutro", label: "Neutro", hint: "Grigi veri" },
+  { name: "sabbia", label: "Sabbia", hint: "Caldo sabbia" },
+];
+
+const THEME_KEY = "homun.theme";
+
+function isThemeName(value: string): value is ThemeName {
+  return value === "freddo" || value === "avorio" || value === "neutro" || value === "sabbia";
+}
+
+/** Set the surface theme by toggling <html data-theme>. */
+export function applyTheme(name: ThemeName): void {
+  document.documentElement.setAttribute("data-theme", name);
+}
+
+export function loadTheme(): ThemeName {
+  try {
+    const saved = localStorage.getItem(THEME_KEY);
+    if (saved && isThemeName(saved)) return saved;
+  } catch {
+    /* ignore */
+  }
+  return DEFAULT_THEME;
+}
+
+export function saveTheme(name: ThemeName): void {
+  try {
+    localStorage.setItem(THEME_KEY, name);
+  } catch {
+    /* ignore */
+  }
+  applyTheme(name);
+}
+
+/** Apply the persisted surface theme at startup (before first paint, no flash). */
+export function initTheme(): void {
+  applyTheme(loadTheme());
 }

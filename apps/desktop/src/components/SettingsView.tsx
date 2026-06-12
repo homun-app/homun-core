@@ -67,7 +67,25 @@ import {
   type SystemStatus,
 } from "../lib/coreBridge";
 import { useSetting } from "../lib/settingsStore";
-import { ACCENT_PRESETS, DEFAULT_ACCENT, loadAccent, saveAccent } from "../lib/accent";
+import {
+  ACCENT_PRESETS,
+  DEFAULT_ACCENT,
+  loadAccent,
+  loadTheme,
+  saveAccent,
+  saveTheme,
+  THEME_PRESETS,
+  type ThemeName,
+} from "../lib/accent";
+
+// Literal neutrals per surface theme — for the mini-previews in the Aspetto picker
+// (the live CSS vars only reflect the ACTIVE theme, so previews need the raw values).
+const THEME_SWATCH: Record<ThemeName, { bg: string; panel: string; line: string }> = {
+  freddo: { bg: "#fcfcfd", panel: "#f4f5f7", line: "#e0e2e7" },
+  avorio: { bg: "#fbfaf7", panel: "#f4f2ec", line: "#e4e0d7" },
+  neutro: { bg: "#ffffff", panel: "#f6f6f6", line: "#e6e6e8" },
+  sabbia: { bg: "#faf8f3", panel: "#f2eee6", line: "#e7e1d6" },
+};
 import { copyText } from "../lib/clipboard";
 import type {
   ConnectionItem,
@@ -532,16 +550,59 @@ function AccountPane({
 
 function AppearancePane() {
   const [accent, setAccent] = useState(loadAccent());
+  const [theme, setTheme] = useState<ThemeName>(loadTheme());
   const pick = (hex: string) => {
     setAccent(hex);
     saveAccent(hex); // applies to :root + persists immediately
   };
+  const pickTheme = (name: ThemeName) => {
+    setTheme(name);
+    saveTheme(name); // toggles <html data-theme> + persists immediately
+  };
   const norm = accent.toLowerCase();
   return (
     <div className="appearance-pane">
+      <div className="appearance-eyebrow">Tema · superficie</div>
       <p className="set-hint">
-        Scegli l'accento dell'interfaccia. Il default è l'arancione del brand, ma puoi renderlo
-        tuo — si applica subito a tutta l'app.
+        I toni di sfondo dell'interfaccia. L'accento resta quello scelto sotto — le due scelte si
+        combinano.
+      </p>
+      <div className="appearance-themes">
+        {THEME_PRESETS.map((t) => {
+          const sw = THEME_SWATCH[t.name];
+          const active = theme === t.name;
+          return (
+            <button
+              key={t.name}
+              type="button"
+              title={t.hint}
+              className={`appearance-theme-card ${active ? "active" : ""}`}
+              onClick={() => pickTheme(t.name)}
+            >
+              <span
+                className="appearance-theme-preview"
+                style={{ background: sw.bg, borderColor: sw.line }}
+              >
+                <span className="appearance-theme-rail" style={{ background: sw.panel }} />
+                <span className="appearance-theme-bars">
+                  <span style={{ background: sw.line }} />
+                  <span style={{ background: "var(--brand)" }} />
+                </span>
+              </span>
+              <span className="appearance-theme-label">
+                {t.label}
+                {active && <Check size={13} className="appearance-theme-check" />}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="appearance-eyebrow" style={{ marginTop: "var(--s5)" }}>
+        Accento
+      </div>
+      <p className="set-hint">
+        L'accento del brand è il teal. Puoi renderlo tuo — si applica subito a tutta l'app.
       </p>
       <div className="appearance-swatches">
         {ACCENT_PRESETS.map((preset) => (
