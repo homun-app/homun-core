@@ -1164,23 +1164,32 @@ fn parse_review_suggestion(
 
 const PROACTIVE_SUPERVISOR_SYSTEM: &str = "Sei il SUPERVISORE proattivo dell'utente per UNO scope di \
 lavoro (un progetto o lo spazio personale). Dal CONTESTO REALE qui sotto individua AL MASSIMO UNA \
-cosa concreta che valga la pena segnalare ORA — oppure NESSUNA. Sei un collega che affianca, non un \
-assistente che aspetta ordini.\n\
-Una segnalazione è VALIDA solo se: (1) è ANCORATA al contesto reale (memoria/decisioni/goal dello \
-scope o attività recente dei connettori) e citi la base in `rationale` — NON inventare nulla che non \
-sia nel contesto; (2) è CONCRETA e AZIONABILE (qualcosa che l'utente può fare/decidere), non \
-un'osservazione vaga; (3) è NUOVA, non assomiglia alle card GIÀ PRESENTI.\n\
-NON fare: consigli generici o motivazionali; domande-intervista («come posso aiutarti»); azioni \
-eseguite (se proponi un'azione va in `proposed_action` e sarà l'utente ad approvarla). Se non c'è \
-nulla di solido e non banale, rispondi {\"suggestion\": null}. MEGLIO ZERO CHE RUMORE.\n\
+cosa che valga la pena segnalare ORA — oppure NESSUNA. Sei un collega che affianca, non un assistente \
+che aspetta ordini.\n\
+Una card può essere DI DUE TIPI:\n\
+(A) un'AZIONE concreta da fare/decidere (kind es. scadenza, progetto-fermo, automazione, follow-up); \
+oppure\n\
+(B) una DOMANDA mirata per CONOSCERE meglio l'utente o il progetto, quando rispondere fa crescere ciò \
+che sai e ti rende più utile: kind \"curiosità\" se approfondisci una NOVITÀ del contesto (es. è \
+comparsa una persona/un progetto/una preferenza e te ne manca un dettaglio); kind \"onboarding\" \
+quando sai ANCORA POCO (memoria scarsa) e ti servono le basi (come lavora, di cosa si occupa, persone \
+e scadenze importanti, come preferisce le risposte). Le domande NON hanno `proposed_action`: l'utente \
+risponde aprendo la chat.\n\
+VALIDA solo se: (1) è ANCORATA — le azioni al contesto reale, le domande a un fatto recente (o, in \
+onboarding, a ciò che chiaramente NON sai ancora) — e citi la base in `rationale`; NON inventare; \
+(2) è SPECIFICA, mai vaga; (3) è NUOVA, non assomiglia alle card GIÀ PRESENTI.\n\
+NON fare: consigli generici o motivazionali; domande-intervista GENERICHE e pigre («come posso \
+aiutarti?», «parlami di te»); più cose insieme (UNA sola, la più utile); azioni eseguite (l'azione \
+va in `proposed_action`, la approva l'utente). Se non c'è nulla di solido e non banale, rispondi \
+{\"suggestion\": null}. MEGLIO ZERO CHE RUMORE.\n\
 IMPARA DAL FEEDBACK: se è presente una sezione FEEDBACK, privilegia lo STILE e i TEMI dei \
-suggerimenti che l'utente ha trovato UTILI ed EVITA ciò che assomiglia a quelli segnati NON UTILI \
-(non riproporre quel genere). Il feedback è il segnale più importante sul suo gusto.\n\
+suggerimenti che l'utente ha trovato UTILI ed EVITA ciò che assomiglia a quelli segnati NON UTILI. \
+Il feedback è il segnale più importante sul suo gusto.\n\
 Rispondi SOLO con JSON: {\"suggestion\": null} OPPURE {\"suggestion\": {\"kind\":\"tema breve in \
-kebab-case (es. scadenza, progetto-fermo, automazione, follow-up)\",\"title\":\"titolo brevissimo\",\
-\"body\":\"1-3 frasi: cosa hai notato e cosa proponi\",\"rationale\":\"da quale elemento del contesto \
-deriva\",\"dedup_key\":\"àncora STABILE di COSA parla (l'oggetto/progetto/scadenza), non il testo\",\
-\"proposed_action\":\"OPZIONALE: l'azione proposta, che l'utente approverà\"}}.";
+kebab-case\",\"title\":\"titolo brevissimo (per una domanda, È la domanda)\",\"body\":\"1-3 frasi: \
+cosa hai notato e cosa proponi/chiedi\",\"rationale\":\"da quale elemento del contesto deriva (o cosa \
+non sai ancora)\",\"dedup_key\":\"àncora STABILE di COSA parla (l'oggetto/persona/scadenza), non il \
+testo\",\"proposed_action\":\"OPZIONALE, solo per le AZIONI: cosa fare, che l'utente approverà\"}}.";
 
 /// Internal plugins (ADR 0011 §10-A). The id gates the plugin's UI (nav+panel,
 /// from the frontend registry) AND its engine (here) — detaching makes all three
@@ -1199,9 +1208,13 @@ async fn run_proactive_review(state: &AppState, scope: &str) -> Option<i64> {
     }
     let memory = gather_scope_memory(state, scope, 60);
     let activity = gather_recent_connector_activity(state, 20);
-    // Grounding precondition: with no real context there is nothing to anchor a
-    // suggestion to → skip (no speculation). Observable like the Homun check-in.
-    if memory.is_empty() && activity.is_empty() {
+    // Grounding precondition: a PROJECT with no real context has nothing to anchor a
+    // suggestion to → skip (no speculation). The PERSONAL scope is the exception:
+    // empty memory there is exactly day-1 ONBOARDING — the supervisor asks a basic
+    // getting-to-know-you question (kind "onboarding"), so onboarding is just
+    // proactivity at day 1 (no separate subsystem).
+    let is_personal = scope == PERSONAL_WORKSPACE;
+    if memory.is_empty() && activity.is_empty() && !is_personal {
         eprintln!("[proattività] review '{scope}': nessun contesto, salto");
         return None;
     }
