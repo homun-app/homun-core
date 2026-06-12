@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AutomationsView } from "./components/AutomationsView";
+import { ProattivitaView } from "./components/ProattivitaView";
 import { ChatView } from "./components/ChatView";
 import { ContainedComputerView } from "./components/ContainedComputerView";
 import { LearningView } from "./components/LearningView";
@@ -34,6 +35,7 @@ import {
   type CoreTaskDetail,
   type CoreTaskItem,
   type CoreTaskQueueSnapshot,
+  type ProactivitySuggestion,
 } from "./lib/coreBridge";
 import type {
   ApprovalItem,
@@ -420,6 +422,9 @@ function fallbackTaskDetail(task: TaskItem): TaskDetailItem {
 export default function App() {
   const [activeView, setActiveView] = useState<ViewId>("chat");
   const [previousView, setPreviousView] = useState<ViewId>("chat");
+  // Seed text for the chat composer, set when a proactivity card is engaged so the
+  // new chat opens pre-filled with the card's context (the nonce re-applies it).
+  const [chatSeed, setChatSeed] = useState<{ text: string; nonce: number } | null>(null);
   const [settingsSection, setSettingsSection] =
     useState<SettingsSectionId>("account");
   // Badge on the Homun nav entry: set when a proactive message arrives while you're
@@ -626,6 +631,38 @@ export default function App() {
       setSelectedTaskId(fallback.taskId);
       setActiveView("chat");
       console.warn("create_chat_thread unavailable", error);
+    }
+  }
+
+  // Engage a proactivity card (ADR 0011 §7): open a fresh chat in the card's scope,
+  // pre-seeded with its context. This is what dissolves the proactive-task workspace
+  // problem — the supervisor runs centrally and tags scope; the heavy chat
+  // materializes on demand in the right place. Personal cards map to the base
+  // ("local-workspace") which IS the memory "__personal__" scope; projects pass through.
+  async function handleOpenSuggestion(suggestion: ProactivitySuggestion) {
+    const workspaceId =
+      suggestion.scope === "__personal__" ? "local-workspace" : suggestion.scope;
+    const seedText = suggestion.proposed_action
+      ? suggestion.proposed_action
+      : `${suggestion.title}\n\n${suggestion.body}`;
+    try {
+      await coreBridge.selectWorkspace(workspaceId);
+      const created = mapCoreChatThread(await coreBridge.createChatThread(workspaceId));
+      const messages = await coreBridge.chatMessages(created.threadId);
+      setChatThreads((current) => [
+        created,
+        ...current.filter((thread) => thread.threadId !== created.threadId),
+      ]);
+      setThreadMessages((current) => ({
+        ...current,
+        [created.threadId]: messages.messages.map(mapCoreChatMessage),
+      }));
+      setActiveThreadId(created.threadId);
+      setSelectedTaskId(created.taskId);
+      setChatSeed({ text: seedText, nonce: Date.now() });
+      setActiveView("chat");
+    } catch (error) {
+      console.warn("open_suggestion unavailable", error);
     }
   }
 
@@ -1087,6 +1124,7 @@ export default function App() {
             onRejectApproval={handleRejectApproval}
             onRuntimeChanged={() => refreshRuntimeReadModels(activeThread.taskId)}
             onThreadChanged={() => refreshChatReadModels(activeThread.threadId)}
+            seed={chatSeed}
           />
         )}
         {activeView === "tasks" && (
@@ -1122,6 +1160,9 @@ export default function App() {
             onToggle={handleToggleAutomation}
             onDelete={handleDeleteAutomation}
           />
+        )}
+        {activeView === "proattivita" && (
+          <ProattivitaView onOpenChat={handleOpenSuggestion} />
         )}
         {activeView === "browser" && <ContainedComputerView />}
         {activeView === "brain" && (

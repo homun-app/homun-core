@@ -1587,6 +1587,67 @@ async function electronToolRuns(limit = 50): Promise<ConnectorToolRun[]> {
   }
 }
 
+// Proactive suggestion card (ADR 0011 §7) — the shared addon↔user surface.
+export interface ProactivitySuggestion {
+  id: number;
+  scope: string; // a workspace id, or "__personal__"
+  kind: string; // free-form, chosen by the supervisor (no rule catalog)
+  title: string;
+  body: string;
+  rationale: string;
+  proposed_action: string | null; // gated by approval, never auto-run
+  status: string; // pending | accepted | dismissed | snoozed
+  feedback: string | null; // liked | disliked
+  created_at: number;
+}
+
+export interface ProactivityScopeCount {
+  scope: string;
+  count: number;
+}
+
+async function electronSuggestions(
+  scope?: string,
+): Promise<{ suggestions: ProactivitySuggestion[]; counts: ProactivityScopeCount[] }> {
+  try {
+    const suffix = scope ? `?scope=${encodeURIComponent(scope)}` : "";
+    const payload = await gatewayGetJson<{
+      suggestions: ProactivitySuggestion[];
+      counts: ProactivityScopeCount[];
+    }>(`/api/suggestions${suffix}`);
+    return { suggestions: payload.suggestions ?? [], counts: payload.counts ?? [] };
+  } catch {
+    return { suggestions: [], counts: [] };
+  }
+}
+
+async function electronSuggestionAct(
+  id: number,
+  status: "accepted" | "dismissed" | "snoozed",
+  feedback?: "liked" | "disliked",
+  note?: string,
+): Promise<{ ok: boolean }> {
+  try {
+    return await gatewayPostJson<{ ok: boolean }>(
+      `/api/suggestions/${id}/act`,
+      { status, feedback, note },
+    );
+  } catch {
+    return { ok: false };
+  }
+}
+
+// Manually trigger the A2 supervisor review for a scope (twin of homun checkin-now).
+async function electronProactivityReviewNow(
+  scope: string,
+): Promise<{ emitted: boolean; id?: number; card?: ProactivitySuggestion | null }> {
+  try {
+    return await gatewayPostJson("/api/proactivity/review-now", { scope });
+  } catch {
+    return { emitted: false };
+  }
+}
+
 async function electronComposioDisconnect(id: string): Promise<void> {
   const response = await fetch(
     `${DESKTOP_GATEWAY_URL}/api/capabilities/composio/connections/${encodeURIComponent(id)}`,
@@ -1791,6 +1852,14 @@ export const coreBridge = {
     electronComposioLink(toolkitSlug, input),
   composioConnections: () => electronComposioConnections(),
   toolRuns: (limit?: number) => electronToolRuns(limit),
+  suggestions: (scope?: string) => electronSuggestions(scope),
+  suggestionAct: (
+    id: number,
+    status: "accepted" | "dismissed" | "snoozed",
+    feedback?: "liked" | "disliked",
+    note?: string,
+  ) => electronSuggestionAct(id, status, feedback, note),
+  proactivityReviewNow: (scope: string) => electronProactivityReviewNow(scope),
   composioDisconnect: (id: string) => electronComposioDisconnect(id),
   composioExecute: (
     tool: string,
