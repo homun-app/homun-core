@@ -25,8 +25,8 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { MouseEvent } from "react";
-import { navItems, settingsGroupLabels, settingsSections } from "../data/mockData";
-import type { ChatThread, SettingsSectionId, ViewId } from "../types";
+import { settingsGroupLabels, settingsSections } from "../data/mockData";
+import type { ChatThread, NavItem, SettingsSectionId, ViewId } from "../types";
 import { useSetting } from "../lib/settingsStore";
 import { coreBridge, type CoreChatThread, type WorkspaceRecord } from "../lib/coreBridge";
 
@@ -52,6 +52,7 @@ interface NavigationRailProps {
   activeView: ViewId;
   activeThreadId: string;
   homunUnread: boolean;
+  navItems: NavItem[];
   onNavigate: (view: ViewId) => void;
   onOpenHomun: () => void;
   onSearch: () => void;
@@ -62,6 +63,7 @@ export function NavigationRail({
   activeView,
   activeThreadId,
   homunUnread,
+  navItems,
   onNavigate,
   onOpenHomun,
   onSearch,
@@ -565,6 +567,7 @@ interface NavDrawerProps {
   activeThreadId: string;
   chatThreads: ChatThread[];
   homunUnread: boolean;
+  navItems: NavItem[];
   onArchiveChatThread: (threadId: string) => void;
   onCreateChatThread: () => void;
   onDeleteChatThread: (threadId: string) => void;
@@ -582,6 +585,7 @@ export function NavDrawer({
   activeThreadId,
   chatThreads,
   homunUnread,
+  navItems,
   onArchiveChatThread,
   onCreateChatThread,
   onDeleteChatThread,

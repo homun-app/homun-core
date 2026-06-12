@@ -9162,3 +9162,55 @@ body.resizing-drawer {
   cursor: pointer;
 }
 .proattiva-more:hover { color: var(--text); }
+
+/* ── Addon manager (Impostazioni → Addon, ADR 0011 §6/§10-A) ─────────────── */
+.addon-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 14px;
+}
+.addon-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  padding: 14px 16px;
+}
+.addon-row-main { min-width: 0; flex: 1; }
+.addon-row-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text);
+}
+.addon-badge {
+  font-size: 11px;
+  padding: 1px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-muted);
+  color: var(--muted);
+}
+.addon-badge.on { background: rgba(32, 168, 80, 0.12); color: var(--green); }
+.addon-row-desc {
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.5;
+  margin: 6px 0 8px;
+}
+.addon-caps { display: flex; flex-wrap: wrap; gap: 6px; }
+.addon-cap {
+  font-size: 11px;
+  font-family: var(--font-mono, monospace);
+  padding: 2px 7px;
+  border-radius: var(--radius-control);
+  background: var(--surface-muted);
+  color: var(--muted);
+}
+.addon-row-toggle { flex-shrink: 0; padding-top: 2px; }
+.addon-row-toggle.is-busy { opacity: 0.5; pointer-events: none; }

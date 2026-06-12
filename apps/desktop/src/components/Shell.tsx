@@ -5,7 +5,7 @@ import {
   NavigationRail,
   SettingsDrawer,
 } from "./Sidebar";
-import type { ChatThread, SettingsSectionId, ViewId } from "../types";
+import type { ChatThread, NavItem, SettingsSectionId, ViewId } from "../types";
 
 interface ShellProps {
   activeView: ViewId;
@@ -13,6 +13,8 @@ interface ShellProps {
   chatThreads: ChatThread[];
   drawerOpen: boolean;
   homunUnread: boolean;
+  // Composed at runtime in App: static core + enabled addon entries (ADR 0011 §10-A).
+  navItems: NavItem[];
   onArchiveChatThread: (threadId: string) => void;
   onBackFromSettings: () => void;
   onCreateChatThread: () => void;
@@ -35,6 +37,7 @@ export function Shell({
   children,
   drawerOpen,
   homunUnread,
+  navItems,
   onArchiveChatThread,
   onBackFromSettings,
   onCreateChatThread,
@@ -104,6 +107,7 @@ export function Shell({
           activeView={activeView}
           activeThreadId={activeThreadId}
           homunUnread={homunUnread}
+          navItems={navItems}
           onNavigate={onNavigate}
           onOpenHomun={onOpenHomun}
           onSearch={() => setSearchOpen(true)}
@@ -116,6 +120,7 @@ export function Shell({
           activeThreadId={activeThreadId}
           chatThreads={chatThreads}
           homunUnread={homunUnread}
+          navItems={navItems}
           onArchiveChatThread={onArchiveChatThread}
           onCreateChatThread={onCreateChatThread}
           onDeleteChatThread={onDeleteChatThread}

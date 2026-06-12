@@ -525,6 +525,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/suggestions", get(suggestions_list))
         .route("/api/suggestions/{id}/act", post(suggestion_act))
         .route("/api/proactivity/review-now", post(proactivity_review_now))
+        .route("/api/plugins", get(plugins_list))
+        .route("/api/plugins/{id}/toggle", post(plugin_toggle))
         .route(
             "/api/runtime/provider",
             get(runtime_provider).post(set_runtime_provider),
@@ -1176,11 +1178,21 @@ kebab-case (es. scadenza, progetto-fermo, automazione, follow-up)\",\"title\":\"
 deriva\",\"dedup_key\":\"àncora STABILE di COSA parla (l'oggetto/progetto/scadenza), non il testo\",\
 \"proposed_action\":\"OPZIONALE: l'azione proposta, che l'utente approverà\"}}.";
 
+/// Internal plugins (ADR 0011 §10-A). The id gates the plugin's UI (nav+panel,
+/// from the frontend registry) AND its engine (here) — detaching makes all three
+/// vanish. The proactivity dashboard is the FIRST addon.
+const KNOWN_PLUGINS: &[&str] = &["proattivita"];
+
 /// A2 ENGINE: run one read-only supervisor review for a scope. Assembles the real
 /// context, asks the model for AT MOST ONE grounded card, dedups against the
 /// durable key, inserts. Returns the inserted card id, or None (nothing worth
 /// surfacing / duplicate / no context / no provider). Read-only: never acts.
 async fn run_proactive_review(state: &AppState, scope: &str) -> Option<i64> {
+    // The engine is part of the addon: if proattivita is detached, it doesn't run.
+    if !lock_store(state).map(|s| s.plugin_enabled("proattivita")).unwrap_or(true) {
+        eprintln!("[proattività] addon disattivato, salto");
+        return None;
+    }
     let memory = gather_scope_memory(state, scope, 60);
     let activity = gather_recent_connector_activity(state, 20);
     // Grounding precondition: with no real context there is nothing to anchor a
@@ -12251,6 +12263,9 @@ async fn proactivity_review_now(
         let s = req.scope.trim();
         if s.is_empty() { PERSONAL_WORKSPACE.to_string() } else { s.to_string() }
     };
+    if !lock_store(&state).map(|s| s.plugin_enabled("proattivita")).unwrap_or(true) {
+        return Json(serde_json::json!({ "emitted": false, "disabled": true }));
+    }
     match run_proactive_review(&state, &scope).await {
         Some(id) => {
             let card = lock_store(&state)
@@ -12273,6 +12288,40 @@ async fn proactivity_review_now(
             Json(serde_json::json!({ "emitted": true, "id": id, "card": card }))
         }
         None => Json(serde_json::json!({ "emitted": false })),
+    }
+}
+
+/// GET /api/plugins — the addon registry's enabled-state (ADR 0011 §10-A). The
+/// frontend registry owns each plugin's manifest (name/icon/panel); the backend
+/// owns the enabled flag, which gates BOTH the UI and the engine.
+async fn plugins_list(State(state): State<AppState>) -> Json<serde_json::Value> {
+    let plugins: Vec<serde_json::Value> = KNOWN_PLUGINS
+        .iter()
+        .map(|id| {
+            let enabled = lock_store(&state).map(|s| s.plugin_enabled(id)).unwrap_or(true);
+            serde_json::json!({ "id": id, "enabled": enabled })
+        })
+        .collect();
+    Json(serde_json::json!({ "plugins": plugins }))
+}
+
+/// POST /api/plugins/{id}/toggle — flip a plugin on/off. Detaching it makes its
+/// nav entry, panel AND engine all vanish (the engine checks this same flag).
+async fn plugin_toggle(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Json<serde_json::Value> {
+    if !KNOWN_PLUGINS.contains(&id.as_str()) {
+        return Json(serde_json::json!({ "ok": false, "error": "unknown_plugin" }));
+    }
+    let next = lock_store(&state).ok().and_then(|s| {
+        let next = !s.plugin_enabled(&id);
+        s.set_plugin_enabled(&id, next).ok()?;
+        Some(next)
+    });
+    match next {
+        Some(enabled) => Json(serde_json::json!({ "id": id, "enabled": enabled })),
+        None => Json(serde_json::json!({ "ok": false })),
     }
 }
 

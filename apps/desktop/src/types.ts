@@ -23,6 +23,7 @@ export type SettingsSectionId =
   | "channels"
   | "connections"
   | "skills"
+  | "addon"
   | "computer";
 
 export type TaskStatus =
