@@ -78,8 +78,6 @@ import {
   type FsEntry,
   type FsFilePayload,
   type McpRegistryServer,
-  type HomunAutomation,
-  type HomunCuriosity,
   type MemoryGraph,
   type MemoryGraphEdge,
   type MemoryGraphNode,
@@ -1492,12 +1490,8 @@ export function ChatView({
           <div className="thread-message-list">
           {threadMessages.length === 0 && !promptSubmitting && (
             <ChatEmptyHero
-              threadId={thread.threadId}
               onPick={(text) => setComposerSeed({ text, nonce: Date.now() })}
             />
-          )}
-          {thread.threadId === "homun" && threadMessages.length > 0 && (
-            <HomunCuriosityQueue />
           )}
           {threadMessages.map((message) => {
             const isStreamingMessage = message.id === streamingAssistantId;
@@ -6360,27 +6354,14 @@ const EMPTY_HERO_CHIPS = [
   "Aiutami a scrivere ",
 ];
 
-// Homun is the control center (Apprendimento merged in): chips lean on what it knows + control.
-const HOMUN_HERO_CHIPS = [
-  "Cosa sai di me?",
-  "Cosa hai appreso ultimamente?",
-  "Ricorda che ",
-  "Cosa puoi fare per me?",
-];
-
 // Empty-chat hero (Manus-style): serif headline + quick-action chips that seed the composer.
-function ChatEmptyHero({ onPick, threadId }: { onPick: (text: string) => void; threadId: string }) {
-  const isHomun = threadId === "homun";
+function ChatEmptyHero({ onPick }: { onPick: (text: string) => void }) {
   return (
     <div className="chat-hero">
-      <h1 className="chat-hero-title">{isHomun ? "Ciao, sono Homun" : "Come posso aiutarti?"}</h1>
-      <p className="chat-hero-sub">
-        {isHomun
-          ? "Conosciamoci: raccontami di te, oppure chiedimi qualcosa."
-          : "Scrivi qui sotto, oppure parti da uno spunto."}
-      </p>
+      <h1 className="chat-hero-title">Come posso aiutarti?</h1>
+      <p className="chat-hero-sub">Scrivi qui sotto, oppure parti da uno spunto.</p>
       <div className="chat-hero-chips">
-        {(isHomun ? HOMUN_HERO_CHIPS : EMPTY_HERO_CHIPS).map((chip) => (
+        {EMPTY_HERO_CHIPS.map((chip) => (
           <button
             key={chip}
             type="button"
@@ -6391,206 +6372,6 @@ function ChatEmptyHero({ onPick, threadId }: { onPick: (text: string) => void; t
           </button>
         ))}
       </div>
-      {isHomun && <HomunProactiveToggle />}
-      {isHomun && <HomunCuriosityQueue />}
-      {isHomun && <HomunAutomationProposals />}
-    </div>
-  );
-}
-
-// Apprendista "agisci": automations Homun could run for you. Approve → becomes a
-// real recurring task (read-only, gated); reject → never proposed again.
-function HomunAutomationProposals() {
-  const [items, setItems] = useState<HomunAutomation[]>([]);
-  const [busy, setBusy] = useState(false);
-  const [note, setNote] = useState<string | null>(null);
-  const reload = () =>
-    coreBridge
-      .homunAutomations()
-      .then(setItems)
-      .catch(() => {});
-  useEffect(() => {
-    void reload();
-  }, []);
-  const mine = () => {
-    setBusy(true);
-    coreBridge
-      .mineHomunAutomations()
-      .then(() => reload())
-      .catch(() => {})
-      .finally(() => setBusy(false));
-  };
-  if (items.length === 0) {
-    return (
-      <button type="button" className="ghost-button homun-automations-cta" onClick={mine} disabled={busy}>
-        {busy ? "Cerco…" : "Cosa posso automatizzare per te?"}
-      </button>
-    );
-  }
-  return (
-    <div className="homun-curiosities homun-automations">
-      <div className="homun-curiosities-head">
-        <span>Posso occuparmene io</span>
-        <button type="button" className="ghost-button" disabled={busy} onClick={mine}>
-          {busy ? "Cerco…" : "Cerca altre"}
-        </button>
-      </div>
-      {note && <p className="set-hint" style={{ margin: "0 0 6px" }}>{note}</p>}
-      <ul>
-        {items.map((a) => (
-          <li key={a.reference} title={a.summary}>
-            <span className="homun-curiosity-text">
-              <strong>{a.title}</strong> · {a.trigger}
-            </span>
-            <button
-              type="button"
-              className="set-btn"
-              onClick={() => {
-                coreBridge
-                  .approveHomunAutomation(a.reference)
-                  .then(() => {
-                    setNote(`Attivata: ${a.title}.`);
-                    void reload();
-                  })
-                  .catch(() => {});
-              }}
-            >
-              Attiva
-            </button>
-            <button
-              type="button"
-              className="fact-forget"
-              title="No grazie"
-              aria-label="Rifiuta"
-              onClick={() => {
-                void coreBridge.rejectHomunAutomation(a.reference).then(() => reload());
-              }}
-            >
-              ×
-            </button>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
-// Apprendista: the pending curiosity backlog — what Homun plans to ask, one per
-// check-in. Visible and manageable: × discards (never asked, never re-mined).
-function HomunCuriosityQueue() {
-  const [items, setItems] = useState<HomunCuriosity[]>([]);
-  const [busy, setBusy] = useState(false);
-  const reload = () =>
-    coreBridge
-      .homunCuriosities()
-      .then(setItems)
-      .catch(() => {});
-  useEffect(() => {
-    void reload();
-  }, []);
-  if (items.length === 0) return null;
-  return (
-    <div className="homun-curiosities">
-      <div className="homun-curiosities-head">
-        <span>Cose che vorrei chiederti</span>
-        <button
-          type="button"
-          className="ghost-button"
-          disabled={busy}
-          onClick={() => {
-            setBusy(true);
-            coreBridge
-              .mineHomunCuriosities()
-              .then(() => reload())
-              .catch(() => {})
-              .finally(() => setBusy(false));
-          }}
-        >
-          {busy ? "Genero…" : "Genera altre"}
-        </button>
-      </div>
-      <ul>
-        {items.map((c) => (
-          <li key={c.id} title={c.rationale}>
-            <span className="homun-curiosity-text">{c.text}</span>
-            <button
-              type="button"
-              className="fact-forget"
-              title="Scarta: non chiederla"
-              aria-label="Scarta"
-              onClick={() => {
-                void coreBridge.dismissHomunCuriosity(c.id).then(() => reload());
-              }}
-            >
-              ×
-            </button>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
-// V2 Homun: enable/disable a daily proactive check-in delivered into this thread.
-function HomunProactiveToggle() {
-  const [enabled, setEnabled] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [nudging, setNudging] = useState(false);
-  const [nudgeNote, setNudgeNote] = useState<string | null>(null);
-  useEffect(() => {
-    coreBridge
-      .homunProactiveStatus()
-      .then((s) => setEnabled(s.enabled))
-      .catch(() => {});
-  }, []);
-  const toggle = () => {
-    setBusy(true);
-    coreBridge
-      .setHomunProactive(!enabled)
-      .then((s) => setEnabled(s.enabled))
-      .catch(() => {})
-      .finally(() => setBusy(false));
-  };
-  // On-demand check-in: bypasses the cadence gates and pulls one curiosity now.
-  // The delivered message arrives in the thread via the live `thread.updated` event.
-  const nudge = () => {
-    setNudging(true);
-    setNudgeNote(null);
-    coreBridge
-      .homunCheckinNow()
-      .then((r) =>
-        setNudgeNote(
-          r.delivered ? null : "Niente di nuovo da chiederti al momento.",
-        ),
-      )
-      .catch(() => setNudgeNote("Non riuscito, riprova."))
-      .finally(() => setNudging(false));
-  };
-  return (
-    <div className="homun-proactive-row">
-      <button
-        type="button"
-        className={`homun-proactive ${enabled ? "on" : ""}`}
-        disabled={busy}
-        onClick={toggle}
-      >
-        <Sparkles size={14} />
-        <span>
-          {enabled
-            ? "Proattivo attivo · ti scrivo ogni tanto"
-            : "Attiva i check-in proattivi"}
-        </span>
-      </button>
-      <button
-        type="button"
-        className="homun-nudge"
-        disabled={nudging}
-        title="Tira fuori una curiosità adesso"
-        onClick={nudge}
-      >
-        {nudging ? "…" : "Chiedimi qualcosa ora"}
-      </button>
-      {nudgeNote && <span className="homun-nudge-note">{nudgeNote}</span>}
     </div>
   );
 }
@@ -6632,8 +6413,6 @@ function Composer({
     if (seed && seed.text) setValue(seed.text);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seed?.nonce]);
-  // Homun is the personal control interface, not a project workspace: no skill picker.
-  const isHomun = threadId === "homun";
   const [linkedFolder, setLinkedFolder] = useState<string | null>(null);
   const [folderBusy, setFolderBusy] = useState(false);
   const [fileMenuOpen, setFileMenuOpen] = useState(false);
@@ -7183,8 +6962,6 @@ function Composer({
           >
             <Paperclip size={17} />
           </button>
-          {/* Homun is the interface to the SYSTEM, not to a project folder — no @-context there. */}
-          {!isHomun && (
           <div className="composer-pop-wrap">
             <button
               className={`icon-button${contextFiles.length > 0 || linkedFolder ? " active" : ""}`}
@@ -7286,8 +7063,7 @@ function Composer({
               </div>
             )}
           </div>
-          )}
-          {skills.length > 0 && !isHomun && (
+          {skills.length > 0 && (
             <div className="composer-pop-wrap">
               <button
                 className={`icon-button${forcedSkill ? " active" : ""}`}
@@ -7369,7 +7145,6 @@ function Composer({
               <Mic size={17} />
             )}
           </button>
-          {!isHomun && (
             <div className="composer-pop-wrap">
               <button
                 className="composer-model-button"
@@ -7418,7 +7193,6 @@ function Composer({
                 </div>
               )}
             </div>
-          )}
           {models.length > 0 && (
             <div className="composer-pop-wrap">
               <button

@@ -725,129 +725,6 @@ async function electronMemoryWiki(thread?: string, workspace?: string): Promise<
   return gatewayGetJson<MemoryWikiPage[]>(`/api/memory/wiki${scopeQuery(thread, workspace)}`);
 }
 
-async function electronHomunGreet(): Promise<void> {
-  await fetch(`${DESKTOP_GATEWAY_URL}/api/homun/greet`, {
-    method: "POST",
-    headers: gatewayHeaders(),
-  }).catch(() => undefined);
-}
-
-async function electronHomunProactiveStatus(): Promise<{ enabled: boolean }> {
-  const response = await fetch(`${DESKTOP_GATEWAY_URL}/api/homun/proactive`, {
-    headers: gatewayHeaders(),
-  });
-  if (!response.ok) return { enabled: false };
-  return response.json() as Promise<{ enabled: boolean }>;
-}
-
-async function electronSetHomunProactive(
-  enabled: boolean,
-  every?: string,
-): Promise<{ enabled: boolean }> {
-  const response = await fetch(`${DESKTOP_GATEWAY_URL}/api/homun/proactive`, {
-    method: "POST",
-    headers: { ...gatewayHeaders(), "Content-Type": "application/json" },
-    body: JSON.stringify({ enabled, every }),
-  });
-  if (!response.ok) {
-    throw new Error(`Desktop Gateway homun proactive HTTP ${response.status}`);
-  }
-  return response.json() as Promise<{ enabled: boolean }>;
-}
-
-export type HomunCuriosity = {
-  id: number;
-  text: string;
-  topic: string;
-  rationale: string;
-};
-
-async function electronHomunCuriosities(): Promise<HomunCuriosity[]> {
-  const response = await fetch(`${DESKTOP_GATEWAY_URL}/api/homun/curiosities`, {
-    headers: gatewayHeaders(),
-  });
-  if (!response.ok) return [];
-  const body = (await response.json()) as { curiosities: HomunCuriosity[] };
-  return body.curiosities ?? [];
-}
-
-async function electronMineHomunCuriosities(): Promise<number> {
-  const response = await fetch(`${DESKTOP_GATEWAY_URL}/api/homun/curiosities`, {
-    method: "POST",
-    headers: gatewayHeaders(),
-  });
-  if (!response.ok) return 0;
-  const body = (await response.json()) as { queued: number };
-  return body.queued ?? 0;
-}
-
-async function electronHomunCheckinNow(): Promise<{ delivered: boolean; summary: string }> {
-  try {
-    const response = await fetch(`${DESKTOP_GATEWAY_URL}/api/homun/checkin-now`, {
-      method: "POST",
-      headers: gatewayHeaders(),
-    });
-    if (!response.ok) return { delivered: false, summary: `HTTP ${response.status}` };
-    const body = (await response.json()) as { delivered?: boolean; summary?: string };
-    return { delivered: body.delivered ?? false, summary: body.summary ?? "" };
-  } catch {
-    return { delivered: false, summary: "errore" };
-  }
-}
-
-async function electronDismissHomunCuriosity(id: number): Promise<void> {
-  await fetch(`${DESKTOP_GATEWAY_URL}/api/homun/curiosities/dismiss`, {
-    method: "POST",
-    headers: { ...gatewayHeaders(), "Content-Type": "application/json" },
-    body: JSON.stringify({ id }),
-  }).catch(() => undefined);
-}
-
-export type HomunAutomation = {
-  reference: string;
-  title: string;
-  summary: string;
-  trigger: string;
-};
-
-async function electronHomunAutomations(): Promise<HomunAutomation[]> {
-  const response = await fetch(`${DESKTOP_GATEWAY_URL}/api/homun/automations`, {
-    headers: gatewayHeaders(),
-  });
-  if (!response.ok) return [];
-  const body = (await response.json()) as { automations: HomunAutomation[] };
-  return body.automations ?? [];
-}
-
-async function electronMineHomunAutomations(): Promise<number> {
-  const response = await fetch(`${DESKTOP_GATEWAY_URL}/api/homun/automations`, {
-    method: "POST",
-    headers: gatewayHeaders(),
-  });
-  if (!response.ok) return 0;
-  const body = (await response.json()) as { proposed: number };
-  return body.proposed ?? 0;
-}
-
-async function electronApproveHomunAutomation(reference: string): Promise<string> {
-  const response = await fetch(`${DESKTOP_GATEWAY_URL}/api/homun/automations/approve`, {
-    method: "POST",
-    headers: { ...gatewayHeaders(), "Content-Type": "application/json" },
-    body: JSON.stringify({ reference }),
-  });
-  if (!response.ok) throw new Error(`approve automation HTTP ${response.status}`);
-  const body = (await response.json()) as { scheduled?: string };
-  return body.scheduled ?? "";
-}
-
-async function electronRejectHomunAutomation(reference: string): Promise<void> {
-  await fetch(`${DESKTOP_GATEWAY_URL}/api/homun/automations/reject`, {
-    method: "POST",
-    headers: { ...gatewayHeaders(), "Content-Type": "application/json" },
-    body: JSON.stringify({ reference }),
-  }).catch(() => undefined);
-}
-
 // ── First-class automations (the trigger→action rules) ────────────────────────
 export type AutomationEventJson =
   | { kind: "channel_message"; channel?: string | null; from?: string | null }
@@ -1637,7 +1514,7 @@ async function electronSuggestionAct(
   }
 }
 
-// Manually trigger the A2 supervisor review for a scope (twin of homun checkin-now).
+// Manually trigger the A2 supervisor review for a scope.
 async function electronProactivityReviewNow(
   scope: string,
 ): Promise<{ emitted: boolean; id?: number; card?: ProactivitySuggestion | null }> {
@@ -1942,24 +1819,11 @@ export const coreBridge = {
     chatApi.createAutomationFromChatMessage(threadId, messageId),
   selectChatThread: (threadId: string) => chatApi.selectChatThread(threadId),
   createChatThread: (workspace?: string) => chatApi.createChatThread(workspace),
-  homunThread: () => chatApi.homunThread(),
-  homunGreet: () => electronHomunGreet(),
-  homunProactiveStatus: () => electronHomunProactiveStatus(),
-  setHomunProactive: (enabled: boolean, every?: string) =>
-    electronSetHomunProactive(enabled, every),
-  homunCuriosities: () => electronHomunCuriosities(),
-  mineHomunCuriosities: () => electronMineHomunCuriosities(),
-  homunCheckinNow: () => electronHomunCheckinNow(),
-  dismissHomunCuriosity: (id: number) => electronDismissHomunCuriosity(id),
-  homunAutomations: () => electronHomunAutomations(),
-  mineHomunAutomations: () => electronMineHomunAutomations(),
   automations: () => electronAutomations(),
   automationEventSources: () => electronAutomationEventSources(),
   createAutomation: (input: AutomationCreateInput) => electronCreateAutomation(input),
   toggleAutomation: (id: string) => electronToggleAutomation(id),
   deleteAutomation: (id: string) => electronDeleteAutomation(id),
-  approveHomunAutomation: (reference: string) => electronApproveHomunAutomation(reference),
-  rejectHomunAutomation: (reference: string) => electronRejectHomunAutomation(reference),
   setChatThreadPinned: (threadId: string, pinned: boolean) =>
     chatApi.setChatThreadPinned(threadId, pinned),
   archiveChatThread: (threadId: string) =>

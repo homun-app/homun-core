@@ -419,7 +419,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let st = state.clone();
         tokio::task::spawn_blocking(move || sweep_graph_on_startup(&st));
     }
-    seed_homun_asked_questions(&state);
     // Homun retired as a proactive surface: its curiosities/onboarding now flow as
     // proactivity cards. Cancel any check-in still scheduled from a previous version
     // so the old "sfilza di domande" push stops (the thread stays as inert data).
@@ -451,24 +450,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "/api/chat/threads/{thread_id}/unarchive",
             post(unarchive_chat_thread),
         )
-        .route("/api/chat/homun", get(homun_thread))
-        .route(
-            "/api/homun/proactive",
-            get(homun_proactive_status).post(homun_proactive_set),
-        )
-        .route("/api/homun/checkin-now", post(homun_checkin_now))
-        .route(
-            "/api/homun/curiosities",
-            get(homun_curiosities_list).post(homun_curiosities_mine),
-        )
-        .route("/api/homun/curiosities/dismiss", post(homun_curiosity_dismiss))
-        .route(
-            "/api/homun/automations",
-            get(homun_automations_list).post(homun_automations_mine),
-        )
-        .route("/api/homun/automations/approve", post(homun_automation_approve))
-        .route("/api/homun/automations/reject", post(homun_automation_reject))
-        .route("/api/homun/greet", post(homun_greet))
         .route("/api/chat/threads/{thread_id}", delete(delete_chat_thread))
         .route("/api/chat/threads/{thread_id}/messages", get(chat_messages))
         .route(
@@ -764,251 +745,6 @@ async fn create_chat_thread(
     ))
 }
 
-/// Find-or-create the dedicated proactive "Homun" thread (personal scope).
-async fn homun_thread(
-    State(state): State<AppState>,
-    Query(_query): Query<ChatThreadsQuery>,
-) -> Result<Json<ChatThread>, GatewayError> {
-    // Homun always lives in the base/personal workspace (not the active project), so it's
-    // reachable + listed in the personal scope regardless of where the user currently is.
-    Ok(Json(
-        lock_store(&state)?
-            .find_or_create_homun_thread(&base_workspace_id())
-            .map_err(GatewayError::store)?,
-    ))
-}
-
-// V2 Homun: a recurring proactive check-in delivered INTO the Homun thread (the persona
-// applies there). The goal doubles as the marker to find/cancel it.
-const HOMUN_CHECKIN_GOAL: &str = "Check-in proattivo e CURIOSO. Richiama la memoria personale \
-(recall_memory) e ragiona sulle IMPLICAZIONI dei fatti, non limitarti a riassumere: da un indizio \
-tira un filo e fai UNA domanda di approfondimento + UNA proposta concreta di aiuto. Esempio: da «ha \
-cercato traghetti per un viaggio in moto» → «che moto hai? vuoi che ti ricordi tagliando, \
-assicurazione e bollo?». GUARDA cosa hai GIÀ chiesto o detto in questa conversazione e NON \
-ripeterti: UNA sola cosa nuova per volta. In alternativa, uno spunto legato ai suoi interessi \
-(qualcosa da esplorare/leggere/provare) per stimolarlo. Conciso e caldo. Sono SOLO proposte/domande: non compiere azioni \
-esterne. Se non sai nulla di lui, fai una domanda per conoscerlo. NON inventare fatti o attività \
-non avvenute.";
-
-/// Apprendista mining: distil the personal memory profile into a queue of
-/// concrete, non-trivial curiosities/proposals — FOLLOW-UP FIRST (deepen the
-/// newest facts: kids → ages/birthdays/school; birthdays → suggest saving them
-/// in the address book) — and persist them as 'pending' rows. Dedup against the
-/// WHOLE queue (pending+delivered+dismissed: asked or discarded = never again)
-/// by lexical overlap OR token containment. Returns how many were queued.
-async fn mine_curiosities(state: &AppState) -> usize {
-    // Memory profile (clean, post-consolidation) — newest last so the model sees
-    // recency; cap to keep the prompt bounded.
-    let (personal, _) = gather_profile_memory(state);
-    if personal.is_empty() {
-        return 0;
-    }
-    let listing = personal
-        .iter()
-        .rev()
-        .take(60)
-        .rev()
-        .map(|t| format!("- {t}"))
-        .collect::<Vec<_>>()
-        .join("\n");
-    // Durable dedup horizon: everything ever queued, asked in the past included.
-    let known: Vec<std::collections::HashSet<String>> = {
-        let Ok(store) = lock_store(state) else { return 0 };
-        store
-            .all_curiosity_texts()
-            .unwrap_or_default()
-            .iter()
-            .map(|t| dedup_tokens(t))
-            .collect()
-    };
-    let system = "Sei l'APPRENDISTA curioso dell'utente. Dalle sue memorie (le ULTIME sono le più \
-recenti) prepara un piccolo backlog di curiosità: domande di approfondimento o proposte concrete. \
-REGOLE: (1) FOLLOW-UP FIRST — parti dalle informazioni più NUOVE e approfondiscile (es. «ha due \
-figli, Claudio e Gaia» → che età hanno? quando sono i compleanni — proponi di salvarli in rubrica —? \
-cosa fanno?); (2) poi deduci IMPLICAZIONI dai fatti stabili (moto → tagliando/assicurazione; \
-viaggio → preparativi); (3) MAI domande-intervista generiche («che lavoro fai», «hai una regola \
-fissa», «come posso aiutarti»); (4) ogni voce è UNA domanda o UNA proposta, breve, concreta, in \
-italiano; (5) NON inventare fatti. Rispondi SOLO con JSON: \
-{\"curiosities\":[{\"text\":\"la domanda/proposta\",\"topic\":\"tema breve\",\"rationale\":\"da quale \
-fatto deriva\"}]} — al massimo 6 voci, anche 0 se non c'è nulla di non banale.";
-    let Some(root) =
-        call_memory_json(state, system, &format!("MEMORIE DELL'UTENTE:\n{listing}")).await
-    else {
-        return 0;
-    };
-    let items = root
-        .get("curiosities")
-        .and_then(|v| v.as_array())
-        .cloned()
-        .unwrap_or_default();
-    if items.is_empty() {
-        return 0;
-    }
-    // Best-effort provenance: which memories the curiosity's rationale overlaps.
-    let memory_tokens: Vec<(String, std::collections::HashSet<String>)> = {
-        let Ok(facade) = lock_memory_facade(state) else { return 0 };
-        facade
-            .list_memories_for_ui(&gateway_memory_user_id(), &MemoryWorkspaceId::new(PERSONAL_WORKSPACE))
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|m| !matches!(m.status, MemoryStatus::Deleted | MemoryStatus::Rejected))
-            .map(|m| (m.reference.to_string(), dedup_tokens(&m.text)))
-            .collect()
-    };
-    let Ok(store) = lock_store(state) else { return 0 };
-    let mut queued = 0usize;
-    let mut seen_now: Vec<std::collections::HashSet<String>> = Vec::new();
-    for item in &items {
-        let text = item.get("text").and_then(|v| v.as_str()).unwrap_or("").trim();
-        if text.is_empty() {
-            continue;
-        }
-        let tokens = dedup_tokens(text);
-        let duplicate = known
-            .iter()
-            .chain(seen_now.iter())
-            .any(|k| jaccard(&tokens, k) >= DEDUP_JACCARD || (tokens.len() >= 3 && tokens.is_subset(k)));
-        if duplicate {
-            continue;
-        }
-        let topic = item.get("topic").and_then(|v| v.as_str()).unwrap_or("");
-        let rationale = item.get("rationale").and_then(|v| v.as_str()).unwrap_or("");
-        let basis = dedup_tokens(&format!("{text} {rationale}"));
-        let source_refs: Vec<&String> = memory_tokens
-            .iter()
-            .filter(|(_, mt)| jaccard(&basis, mt) >= 0.2)
-            .map(|(r, _)| r)
-            .take(4)
-            .collect();
-        let refs_json = serde_json::to_string(&source_refs).unwrap_or_else(|_| "[]".to_string());
-        if store.insert_curiosity(text, topic, rationale, &refs_json).is_ok() {
-            seen_now.push(tokens);
-            queued += 1;
-        }
-    }
-    queued
-}
-
-/// "Agisci" mining: from the personal memory, propose RECURRING automations the
-/// user can approve — read-only, grounded in real patterns. Each candidate carries
-/// a parseable `recurrence` + a read-only `goal` in `proposal_json`. Dedup against
-/// ALL existing candidates (approved/rejected never re-proposed). Returns count.
-async fn mine_automations(state: &AppState) -> usize {
-    let user = gateway_memory_user_id();
-    let workspace = MemoryWorkspaceId::new(PERSONAL_WORKSPACE);
-    let (personal, _) = gather_profile_memory(state);
-    if personal.is_empty() {
-        return 0;
-    }
-    let listing = personal
-        .iter()
-        .rev()
-        .take(60)
-        .rev()
-        .map(|t| format!("- {t}"))
-        .collect::<Vec<_>>()
-        .join("\n");
-    // Dedup horizon: every candidate ever proposed (approved/rejected included), keyed
-    // on title + the ACTION GOAL — the stable identity (a paraphrased title for the
-    // same recurring action is the same automation). Goals are more robust than titles.
-    let candidate_goal = |c: &local_first_memory::AutomationCandidateRecord| -> String {
-        c.proposal_json
-            .get("goal")
-            .and_then(|v| v.as_str())
-            .map(str::to_string)
-            .or_else(|| c.actions.first().cloned())
-            .unwrap_or_default()
-    };
-    let known: Vec<std::collections::HashSet<String>> = {
-        let Ok(facade) = lock_memory_facade(state) else { return 0 };
-        facade
-            .list_automation_candidates_for_ui(&user, &workspace)
-            .unwrap_or_default()
-            .iter()
-            .map(|c| dedup_tokens(&format!("{} {}", c.title, candidate_goal(c))))
-            .collect()
-    };
-    let system = "Sei l'APPRENDISTA D'AZIONE dell'utente. Dalle sue memorie proponi AUTOMAZIONI \
-ricorrenti UTILI, fondate su pattern REALI e ripetuti (es. cerca spesso treni Napoli-Roma → un \
-riepilogo settimanale; segue un tennista → aggiornamenti pre-torneo). REGOLE: (1) solo azioni \
-READ-ONLY (cercare, riassumere, ricordare) — MAI acquisti, login, invii, prenotazioni; (2) ogni \
-proposta deve avere una cadenza naturale; (3) niente proposte generiche o senza un pattern chiaro \
-in memoria; (4) breve, in italiano. Rispondi SOLO con JSON: {\"automations\":[{\"title\":\"nome \
-breve\",\"summary\":\"cosa farei e perché, in una frase\",\"trigger\":\"quando (umano, es. 'ogni \
-venerdì alle 9')\",\"recurrence\":\"daily@HH:MM | weekly@<mon..sun|lun..dom>@HH:MM | every Nd\",\
-\"goal\":\"l'istruzione READ-ONLY da eseguire a ogni occorrenza\"}]} — max 4, anche 0 se non c'è \
-un pattern solido.";
-    let Some(root) =
-        call_memory_json(state, system, &format!("MEMORIE DELL'UTENTE:\n{listing}")).await
-    else {
-        return 0;
-    };
-    let items = root
-        .get("automations")
-        .and_then(|v| v.as_array())
-        .cloned()
-        .unwrap_or_default();
-    if items.is_empty() {
-        return 0;
-    }
-    let tz = effective_user_tz_name();
-    let now = OffsetDateTime::now_utc();
-    let Ok(facade) = lock_memory_facade(state) else { return 0 };
-    let mut proposed = 0usize;
-    let mut seen_now: Vec<std::collections::HashSet<String>> = Vec::new();
-    for item in &items {
-        let title = item.get("title").and_then(|v| v.as_str()).unwrap_or("").trim();
-        let goal = item.get("goal").and_then(|v| v.as_str()).unwrap_or("").trim();
-        let recurrence = item.get("recurrence").and_then(|v| v.as_str()).unwrap_or("").trim();
-        if title.is_empty() || goal.is_empty() || recurrence.is_empty() {
-            continue;
-        }
-        // A proposal that can't be scheduled is useless — drop it here, never
-        // create a broken task later.
-        if local_first_task_runtime::next_occurrence(recurrence, Some(&tz), now).is_none() {
-            continue;
-        }
-        let summary = item.get("summary").and_then(|v| v.as_str()).unwrap_or("");
-        let trigger = item.get("trigger").and_then(|v| v.as_str()).unwrap_or(recurrence);
-        // Identity = title + goal (the action). A rejected automation's paraphrase
-        // must not slip back: lower threshold + containment, since automations are
-        // few and re-proposing a declined one breaks trust more than a near-miss.
-        let tokens = dedup_tokens(&format!("{title} {goal}"));
-        if known.iter().chain(seen_now.iter()).any(|k| {
-            jaccard(&tokens, k) >= 0.5 || (tokens.len() >= 3 && (tokens.is_subset(k) || k.is_subset(&tokens)))
-        }) {
-            continue;
-        }
-        let create = AutomationCandidateCreateRequest {
-            request: MemoryLifecycleRequest {
-                actor_id: "automation-miner".to_string(),
-                user_id: user.clone(),
-                workspace_id: workspace.clone(),
-                purpose: "propose_automation".to_string(),
-            },
-            routine_ref: None,
-            title: title.to_string(),
-            summary: summary.to_string(),
-            trigger: trigger.to_string(),
-            actions: vec![goal.to_string()],
-            risk_level: AutomationRiskLevel::Low,
-            autonomy_level: 2, // needs the user's explicit approval to activate
-            status: AutomationCandidateStatus::Candidate,
-            privacy_domain: PrivacyDomain::new("personal"),
-            sensitivity: MemoryDataSensitivity::Internal,
-            evidence_refs: Vec::new(),
-            proposal_json: serde_json::json!({
-                "recurrence": recurrence, "tz": tz, "goal": goal
-            }),
-        };
-        if facade.propose_automation(create).is_ok() {
-            seen_now.push(tokens);
-            proposed += 1;
-        }
-    }
-    proposed
-}
-
 // ── A2: motore supervisore proattivo (ADR 0011 §8) ─────────────────────────
 // Un turno LLM READ-ONLY per SCOPE: assembla il contesto REALE (memoria durevole
 // dello scope + attività recente dei connettori + card già pending) e — se c'è
@@ -1016,7 +752,7 @@ un pattern solido.";
 // `suggestions`. Adattivo (il modello decide cosa conta, NON un catalogo di
 // regole); grounded (niente speculazione, cita la base); no-repeat durevole
 // (dedup_key semantico); gated per agire (proposed_action è sempre soggetta ad
-// approvazione, mai eseguita qui). Stessa forma one-shot LLM→JSON dei mining sopra.
+// approvazione, mai eseguita qui). Forma one-shot LLM→JSON (estrattore, temp 0.0).
 
 /// Friendly label for a scope (a workspace id or PERSONAL_WORKSPACE), so the
 /// supervisor reasons over "Progetto Acme" rather than an opaque id.
@@ -1357,36 +1093,6 @@ async fn proactivity_auto_review_tick(state: &AppState) {
     let _ = run_proactive_review(state, &scope).await;
 }
 
-/// One-shot bootstrap: register the questions Homun ALREADY asked in the existing
-/// thread as 'delivered' queue rows, so the durable dedup blocks re-asking them
-/// (the empirical bug: "c'è una regola fissa…" was re-asked on every check-in).
-fn seed_homun_asked_questions(state: &AppState) {
-    let Ok(store) = lock_store(state) else { return };
-    if store.flag("homun_asked_seed_v1").ok().flatten().is_some() {
-        return;
-    }
-    if let Ok(snapshot) = store.messages("homun") {
-        let mut seeded = 0usize;
-        for message in snapshot
-            .messages
-            .iter()
-            .filter(|m| m.role == "assistant" && m.text.contains('?'))
-        {
-            if let Ok(id) =
-                store.insert_curiosity(&message.text, "storico", "già posta nel thread Homun", "[]")
-            {
-                // Inserted as pending — flip straight to delivered (it WAS asked).
-                let _ = store.mark_curiosity(id, "delivered");
-                seeded += 1;
-            }
-        }
-        if seeded > 0 {
-            eprintln!("homun-seed: registrate {seeded} domande già poste");
-        }
-    }
-    let _ = store.set_flag("homun_asked_seed_v1", "1");
-}
-
 /// A proactive task that DELIVERS into the Homun thread — matched by the
 /// `deliver_thread` marker, NOT the goal text. (The goal has changed across
 /// versions; matching the goal left old-goal check-ins uncancelled → duplicates
@@ -1408,18 +1114,6 @@ fn task_is_live(task: &TaskRecord) -> bool {
             | local_first_task_runtime::TaskStatus::WaitingTime
             | local_first_task_runtime::TaskStatus::Running
     )
-}
-
-fn homun_checkin_is_active(state: &AppState) -> bool {
-    let Ok(store) = lock_task_store(state) else {
-        return false;
-    };
-    let Ok(tasks) = store.list_tasks(&gateway_user_id(), &gateway_workspace_id()) else {
-        return false;
-    };
-    tasks
-        .iter()
-        .any(|task| task_delivers_to_homun(task) && task_is_live(task))
 }
 
 fn cancel_homun_checkins(state: &AppState) {
@@ -1520,325 +1214,6 @@ fn gc_stale_tasks(state: &AppState) {
 
     if cancelled > 0 {
         eprintln!("[gc] task obsoleti/duplicati cancellati: {cancelled}");
-    }
-}
-
-// Self-contained so it works even on the headless run_agent_turn path (no chat persona).
-const HOMUN_GREETING_GOAL: &str = "Sei HOMUN, l'assistente personale dell'utente, al PRIMO \
-incontro. Presentati in 1-2 frasi calde e brevi e di' che vuoi conoscerlo un po' per aiutarlo \
-meglio. Poi fai 1-2 domande d'apertura semplici per iniziare: come si chiama e se userà l'assistente \
-per LAVORO, per la VITA PRIVATA o per ENTRAMBI. Non fissarti su un tema: è solo l'inizio, lo \
-conoscerai a poco a poco. Tono naturale, niente elenchi, niente tecnicismi.";
-
-/// If the Homun thread is empty, have Homun speak first (background turn → delivered via
-/// the live event). Idempotent: a no-op once the thread has any message.
-async fn homun_greet(State(state): State<AppState>) -> Json<serde_json::Value> {
-    let is_empty = match lock_store(&state) {
-        Ok(store) => store
-            .find_or_create_homun_thread(&base_workspace_id())
-            .map(|thread| thread.message_count == 0)
-            .unwrap_or(false),
-        Err(_) => false,
-    };
-    if !is_empty {
-        return Json(serde_json::json!({ "greeted": false }));
-    }
-    let st = state.clone();
-    tokio::spawn(async move {
-        let thread_id = match lock_store(&st) {
-            Ok(store) => store
-                .find_or_create_homun_thread(&base_workspace_id())
-                .ok()
-                .map(|thread| thread.thread_id),
-            Err(_) => None,
-        };
-        let Some(thread_id) = thread_id else { return };
-        if let Some(answer) =
-            run_agent_turn(&st, &thread_id, HOMUN_GREETING_GOAL, "read_only").await
-        {
-            if let Ok(store) = lock_store(&st) {
-                let _ = store
-                    .append_assistant_message(&thread_id, &channel_chat_message("assistant", &answer));
-            }
-            publish_app_event(serde_json::json!({
-                "type": "thread.updated",
-                "thread_id": thread_id,
-                "workspace": base_workspace_id(),
-            }));
-        }
-    });
-    Json(serde_json::json!({ "greeted": true }))
-}
-
-#[derive(serde::Deserialize)]
-struct HomunProactiveRequest {
-    enabled: bool,
-    every: Option<String>,
-}
-
-async fn homun_proactive_status(State(state): State<AppState>) -> Json<serde_json::Value> {
-    Json(serde_json::json!({ "enabled": homun_checkin_is_active(&state) }))
-}
-
-/// The pending curiosity backlog (what Homun plans to ask, oldest first).
-async fn homun_curiosities_list(
-    State(state): State<AppState>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
-    let store = lock_store(&state)?;
-    let items: Vec<serde_json::Value> = store
-        .pending_curiosities()
-        .map_err(|e| GatewayError {
-            status: StatusCode::INTERNAL_SERVER_ERROR,
-            code: "curiosities_list",
-            message: e.to_string(),
-        })?
-        .into_iter()
-        .map(|(id, text, topic, rationale)| {
-            serde_json::json!({ "id": id, "text": text, "topic": topic, "rationale": rationale })
-        })
-        .collect();
-    Ok(Json(serde_json::json!({ "curiosities": items })))
-}
-
-/// Mine the memory for new curiosities NOW (manual refill / test).
-async fn homun_curiosities_mine(
-    State(state): State<AppState>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
-    let queued = mine_curiosities(&state).await;
-    Ok(Json(serde_json::json!({ "queued": queued })))
-}
-
-#[derive(Deserialize)]
-struct CuriosityDismissRequest {
-    id: i64,
-}
-
-/// Discard a queued curiosity: never delivered, never re-mined (durable dedup).
-async fn homun_curiosity_dismiss(
-    State(state): State<AppState>,
-    Json(req): Json<CuriosityDismissRequest>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
-    let store = lock_store(&state)?;
-    store.mark_curiosity(req.id, "dismissed").map_err(|e| GatewayError {
-        status: StatusCode::INTERNAL_SERVER_ERROR,
-        code: "curiosity_dismiss",
-        message: e.to_string(),
-    })?;
-    Ok(Json(serde_json::json!({ "ok": true })))
-}
-
-/// Pending automation proposals (what Homun could take off your hands).
-async fn homun_automations_list(
-    State(state): State<AppState>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
-    let user = gateway_memory_user_id();
-    let workspace = MemoryWorkspaceId::new(PERSONAL_WORKSPACE);
-    let facade = lock_memory_facade(&state)?;
-    let items: Vec<serde_json::Value> = facade
-        .list_automation_candidates_for_ui(&user, &workspace)
-        .map_err(|e| GatewayError {
-            status: StatusCode::INTERNAL_SERVER_ERROR,
-            code: "automations_list",
-            message: e,
-        })?
-        .into_iter()
-        .filter(|c| matches!(c.status, AutomationCandidateStatus::Candidate))
-        .map(|c| {
-            serde_json::json!({
-                "reference": c.reference.to_string(),
-                "title": c.title,
-                "summary": c.summary,
-                "trigger": c.trigger,
-            })
-        })
-        .collect();
-    Ok(Json(serde_json::json!({ "automations": items })))
-}
-
-/// Mine the memory for new automation proposals NOW (manual / test).
-async fn homun_automations_mine(
-    State(state): State<AppState>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
-    let proposed = mine_automations(&state).await;
-    Ok(Json(serde_json::json!({ "proposed": proposed })))
-}
-
-#[derive(Deserialize)]
-struct AutomationRefRequest {
-    reference: String,
-}
-
-/// Approve a proposal → it becomes a REAL recurring task (read-only, gated), then
-/// the candidate is marked Executed.
-async fn homun_automation_approve(
-    State(state): State<AppState>,
-    Json(req): Json<AutomationRefRequest>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
-    let reference = req.reference.parse::<MemoryRef>().map_err(|message| GatewayError {
-        status: StatusCode::BAD_REQUEST,
-        code: "automation_bad_ref",
-        message,
-    })?;
-    let user = gateway_memory_user_id();
-    let workspace = MemoryWorkspaceId::new(PERSONAL_WORKSPACE);
-    // Read the proposal (goal + recurrence) off the candidate.
-    let candidate = {
-        let facade = lock_memory_facade(&state)?;
-        facade
-            .list_automation_candidates_for_ui(&user, &workspace)
-            .map_err(|e| GatewayError {
-                status: StatusCode::INTERNAL_SERVER_ERROR,
-                code: "automations_list",
-                message: e,
-            })?
-            .into_iter()
-            .find(|c| c.reference == reference)
-            .ok_or_else(|| GatewayError {
-                status: StatusCode::NOT_FOUND,
-                code: "automation_not_found",
-                message: "proposta non trovata".to_string(),
-            })?
-    };
-    let goal = candidate
-        .proposal_json
-        .get("goal")
-        .and_then(|v| v.as_str())
-        .unwrap_or(candidate.actions.first().map(String::as_str).unwrap_or(""))
-        .to_string();
-    let recurrence = candidate
-        .proposal_json
-        .get("recurrence")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
-    let tz = candidate
-        .proposal_json
-        .get("tz")
-        .and_then(|v| v.as_str())
-        .map(str::to_string);
-    if goal.is_empty() || recurrence.is_empty() {
-        return Err(GatewayError {
-            status: StatusCode::BAD_REQUEST,
-            code: "automation_incomplete",
-            message: "proposta priva di goal o ricorrenza".to_string(),
-        });
-    }
-    // Reuse the exact machinery the Homun check-in uses: a recurring read-only
-    // proactive_prompt delivered into the "Pianificato" thread.
-    let scheduled = schedule_proactive_task(&state, &goal, &recurrence, tz.as_deref());
-    {
-        let facade = lock_memory_facade(&state)?;
-        let _ =
-            facade.update_automation_status(&reference, &user, &workspace, AutomationCandidateStatus::Executed);
-    }
-    Ok(Json(serde_json::json!({ "ok": true, "scheduled": scheduled })))
-}
-
-/// Decline a proposal → never re-proposed (dedup horizon includes Rejected).
-async fn homun_automation_reject(
-    State(state): State<AppState>,
-    Json(req): Json<AutomationRefRequest>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
-    let reference = req.reference.parse::<MemoryRef>().map_err(|message| GatewayError {
-        status: StatusCode::BAD_REQUEST,
-        code: "automation_bad_ref",
-        message,
-    })?;
-    let user = gateway_memory_user_id();
-    let workspace = MemoryWorkspaceId::new(PERSONAL_WORKSPACE);
-    let facade = lock_memory_facade(&state)?;
-    facade
-        .update_automation_status(&reference, &user, &workspace, AutomationCandidateStatus::Rejected)
-        .map_err(|e| GatewayError {
-            status: StatusCode::INTERNAL_SERVER_ERROR,
-            code: "automation_reject",
-            message: e.to_string(),
-        })?;
-    Ok(Json(serde_json::json!({ "ok": true })))
-}
-
-/// Enable/disable the recurring Homun proactive check-in (idempotent: always clears the
-/// previous one first).
-async fn homun_proactive_set(
-    State(state): State<AppState>,
-    Json(req): Json<HomunProactiveRequest>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
-    cancel_homun_checkins(&state);
-    if req.enabled {
-        // Frequent pulse; the executor's hour+random gate makes it ASK only now and then
-        // (human cadence), within waking hours — not a fixed morning batch.
-        let every = req
-            .every
-            .as_deref()
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .unwrap_or("every 3h");
-        let now = OffsetDateTime::now_utc();
-        // Validate the recurrence rule (rejects garbage), but the FIRST occurrence
-        // fires SOON (not 3h out) so enabling proactivity visibly works right away;
-        // the recurrence drives every subsequent check-in.
-        if local_first_task_runtime::next_occurrence(every, None, now).is_none() {
-            return Err(GatewayError {
-                status: StatusCode::BAD_REQUEST,
-                code: "schedule_invalid",
-                message: format!("Pianificazione '{every}' non valida."),
-            });
-        }
-        let id = format!("sched_homun_{}", uuid::Uuid::new_v4().simple());
-        let mut task = TaskRecord::new(
-            id,
-            gateway_user_id(),
-            gateway_workspace_id(),
-            "proactive_prompt",
-            HOMUN_CHECKIN_GOAL,
-            serde_json::json!({ "deliver_thread": "homun" }),
-        );
-        task.not_before = Some(now + Duration::minutes(2));
-        task.recurrence = Some(every.to_string());
-        if let Ok(store) = lock_task_store(&state) {
-            store.insert_task(&task).map_err(|error| GatewayError {
-                status: StatusCode::INTERNAL_SERVER_ERROR,
-                code: "homun_checkin_insert",
-                message: error.to_string(),
-            })?;
-        }
-    }
-    Ok(Json(serde_json::json!({ "enabled": req.enabled })))
-}
-
-/// POST /api/homun/checkin-now — run a Homun check-in IMMEDIATELY, bypassing the
-/// human-cadence gates (hour / random pause / idle) but keeping the curiosity queue +
-/// mining. Powers a "chiedimi qualcosa ora" button and is the deterministic way to
-/// verify the proactive delivery path end-to-end (no 3h wait).
-async fn homun_checkin_now(
-    State(state): State<AppState>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
-    let task = TaskRecord::new(
-        format!("homun_now_{}", uuid::Uuid::new_v4().simple()),
-        gateway_user_id(),
-        gateway_workspace_id(),
-        "proactive_prompt",
-        HOMUN_CHECKIN_GOAL,
-        serde_json::json!({ "deliver_thread": "homun", "force": true }),
-    );
-    let st = state.clone();
-    let outcome = tokio::task::spawn_blocking(move || execute_proactive_prompt_task(&st, &task))
-        .await
-        .map_err(|e| GatewayError {
-            status: StatusCode::INTERNAL_SERVER_ERROR,
-            code: "homun_checkin_now",
-            message: e.to_string(),
-        })?;
-    match outcome {
-        Ok(o) => {
-            let delivered = !o.summary.contains("saltato") && !o.chat_message.is_empty();
-            Ok(Json(serde_json::json!({
-                "ok": true,
-                "delivered": delivered,
-                "summary": o.summary,
-            })))
-        }
-        Err(e) => Ok(Json(serde_json::json!({ "ok": false, "error": e.message }))),
     }
 }
 
@@ -4673,6 +4048,11 @@ trigger a EVENTO (non orari) usa create_automation. NON usarlo per azioni una-ta
 /// Creates a recurring `proactive_prompt` task from chat. Inserts it under the
 /// gateway scope so the executor worker (`run_next_task_once`) picks it up; the
 /// first occurrence fires one interval from now, then `next_recurrence` re-enqueues.
+///
+/// Retained (no current caller) as the recurring-task creator the upcoming
+/// "automation proposals as cards" feature will reuse — the executor side
+/// (`execute_proactive_prompt_task`) is already wired and runs scheduled tasks.
+#[allow(dead_code)]
 fn schedule_proactive_task(state: &AppState, goal: &str, every: &str, tz: Option<&str>) -> String {
     let now = OffsetDateTime::now_utc();
     let Some(next) = local_first_task_runtime::next_occurrence(every, tz, now) else {
@@ -12367,7 +11747,7 @@ struct ProactiveReviewRequest {
 }
 
 /// POST /api/proactivity/review-now — run the A2 supervisor review IMMEDIATELY for
-/// a scope (the manual trigger, twin of /api/homun/checkin-now): assemble real
+/// a scope (the manual trigger): assemble real
 /// context, emit AT MOST ONE grounded card, dedup, insert. Returns the emitted
 /// card or `{emitted:false}`. Lets us verify the engine end-to-end on demand,
 /// before the idle/connector trigger is wired.
@@ -16668,7 +16048,7 @@ fn execute_proactive_prompt_task(
     state: &AppState,
     task: &TaskRecord,
 ) -> Result<TaskExecutionOutcome, LocalTaskExecutionError> {
-    let mut goal = task.goal.clone();
+    let goal = task.goal.clone();
     let root = task
         .task_id
         .as_str()
@@ -16681,25 +16061,12 @@ fn execute_proactive_prompt_task(
         format!("Pianificato · {trimmed}")
     };
 
-    // A proactive task can target a specific thread (e.g. the Homun home) via
-    // input_json.deliver_thread; otherwise it gets its own per-schedule "scheduled" thread.
-    let deliver_thread = task
-        .input_json
-        .get("deliver_thread")
-        .and_then(|v| v.as_str())
-        .filter(|s| !s.trim().is_empty());
+    // A proactive task gets its own per-schedule "scheduled" thread.
     let thread_id = match lock_store(state) {
-        Ok(store) => if deliver_thread == Some("homun") {
-            store
-                .find_or_create_homun_thread(&base_workspace_id())
-                .ok()
-                .map(|thread| thread.thread_id)
-        } else {
-            store
-                .find_or_create_channel_thread(&base_workspace_id(), "scheduled", &root, &title)
-                .ok()
-                .map(|thread| thread.thread_id)
-        },
+        Ok(store) => store
+            .find_or_create_channel_thread(&base_workspace_id(), "scheduled", &root, &title)
+            .ok()
+            .map(|thread| thread.thread_id),
         Err(_) => None,
     };
     let Some(thread_id) = thread_id else {
@@ -16707,101 +16074,6 @@ fn execute_proactive_prompt_task(
             message: "impossibile creare il thread pianificato".to_string(),
         });
     };
-
-    // Human cadence for Homun: it analyses often (frequent schedule) but only ASKS now
-    // and then, within waking hours (local timezone). Outside 9–22, on a "pause" roll,
-    // or while the user is ACTIVELY working (real-idle gate), skip silently — complete
-    // the occurrence (so the recurrence re-enqueues) with no message and no event.
-    // `force` (set by the "check-in ora" endpoint) bypasses the human-cadence gates
-    // (hour / random pause / idle) but KEEPS the curiosity queue + mining — so a manual
-    // nudge always tries to deliver, and we can verify the path end-to-end on demand.
-    let force = task
-        .input_json
-        .get("force")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
-    let mut homun_curiosity: Option<(i64, String)> = None;
-    if deliver_thread == Some("homun") {
-        let skip = |reason: &str| {
-            // OBSERVABILITY (#proattività): every skip is logged so it's visible WHY a
-            // check-in didn't arrive (the bug was invisible before).
-            eprintln!("[homun] check-in saltato: {reason}");
-            Ok(TaskExecutionOutcome {
-                completed: true,
-                blocked_reason: None,
-                pending_approval: None,
-                summary: format!("check-in Homun saltato ({reason})"),
-                checkpoint_payload: serde_json::json!({ "kind": "proactive_prompt", "skipped": true }),
-                checkpoint_redacted: serde_json::json!({ "kind": "proactive_prompt" }),
-                chat_message: String::new(),
-                surface: SurfaceKind::Logs,
-                event_kind: "proactive_prompt_skipped".to_string(),
-                event_title: "Check-in saltato".to_string(),
-                event_subtitle: "Pausa proattiva.".to_string(),
-                event_payload: serde_json::json!({}),
-                artifacts: vec![],
-            })
-        };
-        if !force {
-            let now = now_local(); // user timezone (Now & Dates layer)
-            let hour = now.hour(); // i8, 0..23
-            // Waking-hours only. (The old 45% random "pause" was removed: combined with
-            // the idle gate + 3h cadence it made delivery so rare it looked broken.)
-            if !(9..22).contains(&hour) {
-                return skip("fuori orario (9–22)");
-            }
-            // Real idle (H3): don't interrupt while the user is actively working —
-            // a check-in lands when they've been quiet for a while.
-            if let Some(secs) = seconds_since_user_activity() {
-                if secs < homun_idle_threshold_secs() {
-                    return skip("utente attivo");
-                }
-            }
-        }
-        // Apprendista (H2): the question comes from the durable curiosity queue —
-        // never from a free-form generator (that's what caused the repetitions).
-        let handle = tokio::runtime::Handle::current();
-        let pending = lock_store(state)
-            .ok()
-            .and_then(|s| s.pending_curiosity_count().ok())
-            .unwrap_or(0);
-        eprintln!("[homun] check-in: force={force}, coda pending={pending}");
-        if pending < 3 {
-            let queued = handle.block_on(mine_curiosities(state));
-            eprintln!(
-                "[homun] mining: +{queued} curiosità (pending stimato ora {})",
-                pending + queued as i64
-            );
-        }
-        // Forget-coherent dequeue: a curiosity touching FORGOTTEN content is
-        // dismissed on the spot, never asked.
-        let forgotten = lock_memory_facade(state)
-            .ok()
-            .map(|facade| forgotten_token_sets(&facade, &gateway_memory_user_id()))
-            .unwrap_or_default();
-        if let Ok(store) = lock_store(state) {
-            while let Ok(Some((id, text))) = store.next_pending_curiosity() {
-                if is_suppressed(&text, &forgotten) {
-                    let _ = store.mark_curiosity(id, "dismissed");
-                    continue;
-                }
-                homun_curiosity = Some((id, text));
-                break;
-            }
-        }
-        let Some((_, ref text)) = homun_curiosity else {
-            return skip("nessuna curiosità in coda");
-        };
-        eprintln!(
-            "[homun] consegno: {}",
-            text.chars().take(70).collect::<String>()
-        );
-        goal = format!(
-            "Proponi all'utente SOLO questa curiosità, in modo naturale, caldo e ancorato a ciò \
-che sai di lui: «{text}». UNA sola domanda o proposta: non aggiungerne altre, non ripetere \
-domande passate, non sollecitare risposte a domande precedenti. Conciso. NON compiere azioni."
-        );
-    }
 
     // Surface the (possibly new) thread immediately, like an inbound channel msg.
     publish_app_event(serde_json::json!({
@@ -16834,19 +16106,10 @@ domande passate, non sollecitare risposte a domande precedenti. Conciso. NON com
         .unwrap_or_else(|| "Nessuna risposta generata per il task pianificato.".to_string());
 
     if let Ok(store) = lock_store(state) {
-        // The goal is an INTERNAL instruction: in the Homun thread it must not
-        // appear as a user bubble (the conversation is Homun speaking first).
-        // Scheduled threads keep it — there it documents what the task was asked.
-        if deliver_thread != Some("homun") {
-            let _ =
-                store.append_assistant_message(&thread_id, &channel_chat_message("user", &goal));
-        }
+        // The goal documents what the scheduled task was asked — keep it as a user bubble.
+        let _ = store.append_assistant_message(&thread_id, &channel_chat_message("user", &goal));
         let _ =
             store.append_assistant_message(&thread_id, &channel_chat_message("assistant", &answer));
-        // The curiosity was asked: durable no-repeat (never re-delivered nor re-mined).
-        if let Some((id, _)) = homun_curiosity {
-            let _ = store.mark_curiosity(id, "delivered");
-        }
     }
     publish_app_event(serde_json::json!({
         "type": "thread.updated",
