@@ -49,6 +49,35 @@ pub struct ToolRunRow {
     pub summary: Option<String>,
 }
 
+/// A proactive suggestion card to insert (ADR 0011 §7). `scope` = a workspace id
+/// or "__personal__". `dedup_key` is the durable no-repeat key.
+#[derive(Debug, Clone, Default)]
+pub struct SuggestionInput {
+    pub scope: String,
+    pub kind: String,
+    pub title: String,
+    pub body: String,
+    pub rationale: String,
+    /// Optional structured action the card proposes (JSON), gated by approval.
+    pub proposed_action: Option<String>,
+    pub dedup_key: String,
+}
+
+/// A suggestion card as shown in the dashboard.
+#[derive(Debug, Clone)]
+pub struct SuggestionRow {
+    pub id: i64,
+    pub scope: String,
+    pub kind: String,
+    pub title: String,
+    pub body: String,
+    pub rationale: String,
+    pub proposed_action: Option<String>,
+    pub status: String,
+    pub feedback: Option<String>,
+    pub created_at: i64,
+}
+
 /// A curated contact (rubrica). Knowledge ABOUT them lives in the memory DB,
 /// linked by handle (`channel:identifier`); this row is just the address-book entry.
 #[derive(Debug, Clone)]
@@ -132,6 +161,22 @@ fn json_string_list(raw: &str) -> Vec<String> {
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .collect()
+}
+
+/// Row mapper for `suggestions` queries (column order must match the SELECTs).
+fn map_suggestion(row: &rusqlite::Row) -> rusqlite::Result<SuggestionRow> {
+    Ok(SuggestionRow {
+        id: row.get(0)?,
+        scope: row.get(1)?,
+        kind: row.get(2)?,
+        title: row.get(3)?,
+        body: row.get(4)?,
+        rationale: row.get(5)?,
+        proposed_action: row.get(6)?,
+        status: row.get(7)?,
+        feedback: row.get(8)?,
+        created_at: row.get(9)?,
+    })
 }
 
 impl ChatStore {
@@ -1328,6 +1373,34 @@ impl ChatStore {
 
             create index if not exists idx_tool_runs_ts on tool_runs(ts desc);
 
+            -- Proactive SUGGESTIONS (ADR 0011 §7): the shared card surface for the
+            -- proactive supervisor (and, later, addons). NOT a chat — discrete,
+            -- dismissible cards in a dashboard, scope-tagged (a workspace id, or
+            -- '__personal__'). `kind` is free text the model chooses (no rule
+            -- catalog). `dedup_key` powers the durable no-repeat (a dismissed card
+            -- must never reappear). `status`: pending|accepted|dismissed|snoozed.
+            -- `feedback`: liked|disliked (+note) → conditions future suggestions.
+            create table if not exists suggestions (
+                id integer primary key autoincrement,
+                scope text not null,
+                kind text not null default '',
+                title text not null,
+                body text not null default '',
+                rationale text not null default '',
+                proposed_action text,
+                status text not null default 'pending',
+                feedback text,
+                feedback_note text,
+                dedup_key text not null default '',
+                created_at integer not null,
+                updated_at integer not null
+            );
+
+            create index if not exists idx_suggestions_scope_status
+                on suggestions(scope, status);
+            create index if not exists idx_suggestions_dedup
+                on suggestions(scope, dedup_key);
+
             -- Contact book (curated rubrica). A contact is a person we communicate
             -- with — created from a channel identity (someone messaged us) or added
             -- by hand — NOT every person merely mentioned in chat. Knowledge ABOUT a
@@ -1618,6 +1691,107 @@ impl ChatStore {
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(rows)
+    }
+
+    // ── Proactive suggestions (ADR 0011 §7) ────────────────────────────────────
+
+    /// True if a suggestion with this dedup_key already exists in the scope, in
+    /// ANY status — so a dismissed card never reappears (durable no-repeat).
+    pub fn suggestion_dedup_exists(&self, scope: &str, dedup_key: &str) -> rusqlite::Result<bool> {
+        if dedup_key.trim().is_empty() {
+            return Ok(false);
+        }
+        let n: i64 = self.conn.query_row(
+            "select count(*) from suggestions where scope = ?1 and dedup_key = ?2",
+            params![scope, dedup_key],
+            |row| row.get(0),
+        )?;
+        Ok(n > 0)
+    }
+
+    /// Inserts a suggestion card (pending). Caller checks `suggestion_dedup_exists`
+    /// first. Returns the new id.
+    pub fn insert_suggestion(&self, s: &SuggestionInput) -> rusqlite::Result<i64> {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        self.conn.execute(
+            "insert into suggestions
+                (scope, kind, title, body, rationale, proposed_action, status, dedup_key, created_at, updated_at)
+             values (?1, ?2, ?3, ?4, ?5, ?6, 'pending', ?7, ?8, ?8)",
+            params![
+                s.scope,
+                s.kind,
+                s.title,
+                s.body,
+                s.rationale,
+                s.proposed_action,
+                s.dedup_key,
+                now,
+            ],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    /// Pending suggestions, newest first. `scope` None = all scopes; with a scope,
+    /// only that scope. (The dashboard shows pending; status filters come later.)
+    pub fn pending_suggestions(
+        &self,
+        scope: Option<&str>,
+        limit: usize,
+    ) -> rusqlite::Result<Vec<SuggestionRow>> {
+        let mut stmt;
+        let rows = if let Some(scope) = scope {
+            stmt = self.conn.prepare(
+                "select id, scope, kind, title, body, rationale, proposed_action, status, feedback, created_at
+                   from suggestions where status = 'pending' and scope = ?1
+                   order by id desc limit ?2",
+            )?;
+            stmt.query_map(params![scope, limit as i64], map_suggestion)?
+                .collect::<rusqlite::Result<Vec<_>>>()?
+        } else {
+            stmt = self.conn.prepare(
+                "select id, scope, kind, title, body, rationale, proposed_action, status, feedback, created_at
+                   from suggestions where status = 'pending'
+                   order by id desc limit ?1",
+            )?;
+            stmt.query_map(params![limit as i64], map_suggestion)?
+                .collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        Ok(rows)
+    }
+
+    /// Count of pending suggestions per scope (for the zen "+N" badge).
+    pub fn pending_suggestion_counts(&self) -> rusqlite::Result<Vec<(String, i64)>> {
+        let mut stmt = self.conn.prepare(
+            "select scope, count(*) from suggestions where status = 'pending' group by scope",
+        )?;
+        let rows = stmt
+            .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    /// Acts on a card: status (accepted|dismissed|snoozed) + optional feedback
+    /// (liked|disliked + note). Feedback conditions future suggestions (ADR 0011 §7).
+    pub fn set_suggestion_status(
+        &self,
+        id: i64,
+        status: &str,
+        feedback: Option<&str>,
+        feedback_note: Option<&str>,
+    ) -> rusqlite::Result<()> {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        self.conn.execute(
+            "update suggestions set status = ?2, feedback = ?3, feedback_note = ?4, updated_at = ?5
+             where id = ?1",
+            params![id, status, feedback, feedback_note, now],
+        )?;
+        Ok(())
     }
 
     /// Prunes channel dedup entries older than `max_age_secs` (best-effort
@@ -1964,6 +2138,39 @@ fn monotonic_suffix() -> u128 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn suggestions_dedup_list_and_act() {
+        let store = ChatStore::in_memory().unwrap();
+        let mk = |scope: &str, key: &str, title: &str| SuggestionInput {
+            scope: scope.to_string(),
+            kind: "info".to_string(),
+            title: title.to_string(),
+            dedup_key: key.to_string(),
+            ..Default::default()
+        };
+        // Insert two in a project scope + one personal.
+        let id1 = store.insert_suggestion(&mk("proj", "k1", "Primo")).unwrap();
+        store.insert_suggestion(&mk("proj", "k2", "Secondo")).unwrap();
+        store.insert_suggestion(&mk("__personal__", "p1", "Personale")).unwrap();
+
+        // Dedup is per (scope, key), any status.
+        assert!(store.suggestion_dedup_exists("proj", "k1").unwrap());
+        assert!(!store.suggestion_dedup_exists("proj", "kX").unwrap());
+
+        // Pending list scoped + counts.
+        assert_eq!(store.pending_suggestions(Some("proj"), 50).unwrap().len(), 2);
+        assert_eq!(store.pending_suggestions(None, 50).unwrap().len(), 3);
+        let counts = store.pending_suggestion_counts().unwrap();
+        assert_eq!(counts.iter().find(|(s, _)| s == "proj").map(|(_, n)| *n), Some(2));
+
+        // Dismiss one → drops out of pending but dedup still blocks it (durable no-repeat).
+        store
+            .set_suggestion_status(id1, "dismissed", Some("disliked"), None)
+            .unwrap();
+        assert_eq!(store.pending_suggestions(Some("proj"), 50).unwrap().len(), 1);
+        assert!(store.suggestion_dedup_exists("proj", "k1").unwrap());
+    }
 
     #[test]
     fn store_seeds_and_commits_chat_messages() {

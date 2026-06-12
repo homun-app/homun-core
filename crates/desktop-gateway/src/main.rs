@@ -522,6 +522,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .route("/api/prefs/channel-identities", get(channel_identities))
         .route("/api/tools/runs", get(tool_runs_list))
+        .route("/api/suggestions", get(suggestions_list))
+        .route("/api/suggestions/{id}/act", post(suggestion_act))
         .route(
             "/api/runtime/provider",
             get(runtime_provider).post(set_runtime_provider),
@@ -11918,6 +11920,87 @@ async fn tool_runs_list(
         })
         .collect();
     Json(serde_json::json!({ "runs": items }))
+}
+
+#[derive(Debug, Deserialize)]
+struct SuggestionsQuery {
+    scope: Option<String>,
+    limit: Option<usize>,
+}
+
+/// GET /api/suggestions?scope=&limit= — pending proactive cards + per-scope counts
+/// (ADR 0011 §7: the dashboard surface). Shows pending; status filters come later.
+async fn suggestions_list(
+    State(state): State<AppState>,
+    axum::extract::Query(q): axum::extract::Query<SuggestionsQuery>,
+) -> Json<serde_json::Value> {
+    let limit = q.limit.unwrap_or(50).clamp(1, 200);
+    let (rows, counts) = lock_store(&state)
+        .map(|s| {
+            (
+                s.pending_suggestions(q.scope.as_deref(), limit)
+                    .unwrap_or_default(),
+                s.pending_suggestion_counts().unwrap_or_default(),
+            )
+        })
+        .unwrap_or_default();
+    let items: Vec<serde_json::Value> = rows
+        .into_iter()
+        .map(|r| {
+            serde_json::json!({
+                "id": r.id,
+                "scope": r.scope,
+                "kind": r.kind,
+                "title": r.title,
+                "body": r.body,
+                "rationale": r.rationale,
+                "proposed_action": r.proposed_action,
+                "status": r.status,
+                "feedback": r.feedback,
+                "created_at": r.created_at,
+            })
+        })
+        .collect();
+    let counts: Vec<serde_json::Value> = counts
+        .into_iter()
+        .map(|(scope, count)| serde_json::json!({ "scope": scope, "count": count }))
+        .collect();
+    Json(serde_json::json!({ "suggestions": items, "counts": counts }))
+}
+
+#[derive(Debug, Deserialize)]
+struct SuggestionActRequest {
+    status: String,
+    #[serde(default)]
+    feedback: Option<String>,
+    #[serde(default)]
+    note: Option<String>,
+}
+
+/// POST /api/suggestions/{id}/act — accept|dismiss|snooze a card + optional feedback
+/// (liked|disliked). Dismissed cards never reappear (durable dedup); feedback
+/// conditions future suggestions.
+async fn suggestion_act(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    Json(req): Json<SuggestionActRequest>,
+) -> Json<serde_json::Value> {
+    let status = match req.status.as_str() {
+        "accepted" | "dismissed" | "snoozed" => req.status.as_str(),
+        _ => "dismissed",
+    };
+    let feedback = req
+        .feedback
+        .as_deref()
+        .filter(|f| matches!(*f, "liked" | "disliked"));
+    let ok = lock_store(&state)
+        .ok()
+        .and_then(|s| {
+            s.set_suggestion_status(id, status, feedback, req.note.as_deref())
+                .ok()
+        })
+        .is_some();
+    Json(serde_json::json!({ "ok": ok }))
 }
 
 pub(crate) fn weekday_it(w: jiff::civil::Weekday) -> &'static str {
