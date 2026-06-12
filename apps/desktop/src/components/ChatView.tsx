@@ -6222,17 +6222,34 @@ function ComputerDetailPanel({
 }) {
   const currentSurface = session.surfaces.find((surface) => surface.id === activeSurface);
   const paused = session.status === "paused";
+  // Fullscreen toggle (design): expand the panel to near-full-window for wide
+  // diffs/browser views, then shrink back. Local UI state — no persistence needed.
+  const [fullscreen, setFullscreen] = useState(false);
 
   return (
-    <aside className="computer-detail-panel" aria-label="Dettaglio computer locale">
+    <aside
+      className={`computer-detail-panel${fullscreen ? " fullscreen" : ""}`}
+      aria-label="Dettaglio computer locale"
+    >
       <header>
         <div>
           <strong>{session.title}</strong>
           <small>{session.subtitle}</small>
         </div>
-        <button className="icon-button" type="button" aria-label="Chiudi computer" onClick={onClose}>
-          <X size={18} />
-        </button>
+        <div className="computer-panel-header-actions">
+          <button
+            className="icon-button"
+            type="button"
+            aria-label={fullscreen ? "Riduci pannello" : "Espandi pannello"}
+            title={fullscreen ? "Riduci" : "Espandi"}
+            onClick={() => setFullscreen((value) => !value)}
+          >
+            {fullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+          </button>
+          <button className="icon-button" type="button" aria-label="Chiudi computer" onClick={onClose}>
+            <X size={18} />
+          </button>
+        </div>
       </header>
 
       <nav className="surface-tabs" aria-label="Superfici computer">
