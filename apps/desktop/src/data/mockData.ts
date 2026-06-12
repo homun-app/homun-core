@@ -8,6 +8,7 @@ import {
   GalleryVerticalEnd,
   Globe2,
   KeyRound,
+  Lightbulb,
   MessageSquare,
   Monitor,
   MonitorPlay,
@@ -35,6 +36,8 @@ import type {
 
 export const navItems: NavItem[] = [
   { id: "chat", label: "Nuovo compito", icon: MessageSquare },
+  // "Proattività": la dashboard di suggerimenti del supervisore (primo addon).
+  { id: "proattivita", label: "Proattività", icon: Lightbulb },
   // "Apprendimento" è confluito in Homun. "Memoria" è stata unificata nelle
   // Impostazioni → Memoria (un'unica superficie, fuori più pulito).
   // "Pianificato" (coda dei run) è confluito in Automazioni: la regola è la cosa

@@ -9004,3 +9004,161 @@ body.resizing-drawer {
   background: var(--surface-muted); border: 1px solid var(--line); border-radius: var(--radius-control);
   color: var(--text); word-break: break-all; cursor: pointer;
 }
+
+/* ── Proattività: dashboard di suggestion-card (ADR 0011 §7) ─────────────── */
+.proattiva-view {
+  padding: 28px 32px 48px;
+  max-width: 880px;
+  margin: 0 auto;
+  width: 100%;
+}
+.proattiva-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 4px 0 20px;
+}
+.proattiva-filters {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.proattiva-chip {
+  font: inherit;
+  font-size: 13px;
+  padding: 5px 12px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.proattiva-chip:hover { background: var(--surface-hover); }
+.proattiva-chip.is-active {
+  background: var(--text);
+  border-color: var(--text);
+  color: var(--surface);
+}
+.proattiva-refresh {
+  font: inherit;
+  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.proattiva-refresh:hover { background: var(--surface-hover); color: var(--text); }
+.proattiva-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  text-align: center;
+  font-size: 13.5px;
+  color: var(--muted);
+  padding: 40px 20px;
+}
+.proattiva-group { margin-bottom: 18px; }
+.proattiva-group-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 8px;
+  color: var(--muted);
+}
+.proattiva-group-name { font-size: 13px; font-weight: 500; color: var(--text); }
+.proattiva-group-count { font-size: 12px; color: var(--muted); }
+.proattiva-card {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  padding: 14px 16px;
+  margin-bottom: 6px;
+}
+.proattiva-card.is-busy { opacity: 0.55; }
+.proattiva-card-main { min-width: 0; flex: 1; }
+.proattiva-card-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+  flex-wrap: wrap;
+}
+.proattiva-kind {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-muted);
+  color: var(--muted);
+}
+.proattiva-card-title { font-size: 14px; font-weight: 500; color: var(--text); }
+.proattiva-card-body {
+  font-size: 13px;
+  color: var(--text);
+  margin: 0 0 8px;
+  line-height: 1.5;
+}
+.proattiva-card-why {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+.proattiva-card-why svg { flex-shrink: 0; margin-top: 2px; }
+.proattiva-card-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.proattiva-btn-row { display: flex; gap: 6px; }
+.proattiva-btn {
+  font: inherit;
+  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 6px 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.proattiva-btn:hover { background: var(--surface-hover); }
+.proattiva-btn:disabled { opacity: 0.5; cursor: default; }
+.proattiva-btn-primary {
+  border-color: var(--brand);
+  color: var(--brand);
+  font-weight: 500;
+}
+.proattiva-btn-primary:hover { background: rgba(221, 107, 32, 0.08); }
+.proattiva-btn-muted { color: var(--muted); }
+.proattiva-more {
+  font: inherit;
+  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 4px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.proattiva-more:hover { color: var(--text); }

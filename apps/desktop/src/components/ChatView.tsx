@@ -132,6 +132,9 @@ interface ChatViewProps {
   onRejectApproval: (approvalId: string) => void;
   onRuntimeChanged: () => void | Promise<void>;
   onThreadChanged: () => void | Promise<void>;
+  // Pre-fill the composer (e.g. engaging a proactivity card opens a chat seeded
+  // with the card's context). The nonce re-applies the same text.
+  seed?: { text: string; nonce: number } | null;
 }
 
 const surfaceIcons: Record<ComputerSurfaceKind, typeof Globe2> = {
@@ -172,6 +175,7 @@ export function ChatView({
   onRejectApproval,
   onRuntimeChanged,
   onThreadChanged,
+  seed,
 }: ChatViewProps) {
   const [computerSession, setComputerSession] = useState<ComputerSession>(() =>
     createLoadingComputerSession(computerSessionId),
@@ -716,6 +720,14 @@ export function ChatView({
   const [composerSeed, setComposerSeed] = useState<{ text: string; nonce: number } | null>(
     null,
   );
+
+  // External seed (e.g. a proactivity card engaged from the dashboard) → prefill
+  // the composer. Keyed by nonce so re-engaging the same card re-applies.
+  useEffect(() => {
+    if (seed && seed.text.trim()) {
+      setComposerSeed({ text: seed.text, nonce: seed.nonce });
+    }
+  }, [seed?.nonce]);
 
   function submitComposerPrompt(
     prompt: string,

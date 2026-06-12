@@ -7,6 +7,7 @@ export type ViewId =
   | "memory"
   | "connections"
   | "automations"
+  | "proattivita"
   | "browser"
   | "brain"
   | "settings";
