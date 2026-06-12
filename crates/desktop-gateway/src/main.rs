@@ -424,6 +424,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     spawn_thread_browser_session_reaper(state.clone());
     spawn_contained_computer_idle_reaper(state.clone());
     spawn_connector_event_poller(state.clone());
+    start_proactivity_auto_review(state.clone());
     reconnect_channels_on_startup();
     let chat_routes = Router::new()
         .route(
@@ -1255,6 +1256,88 @@ async fn run_proactive_review(state: &AppState, scope: &str) -> Option<i64> {
     let id = store.insert_suggestion(&input).ok()?;
     eprintln!("[proattività] review '{scope}': card #{id} '{}'", input.title);
     Some(id)
+}
+
+/// Interval between auto-review ticks — a cheap LOCAL cadence check; the review
+/// only RUNS when the idle/hours gates pass. Default 10 min. Env: LFPA_PROACTIVE_TICK_SECS.
+fn proactive_tick_secs() -> u64 {
+    std::env::var("LFPA_PROACTIVE_TICK_SECS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .filter(|&v| v >= 60)
+        .unwrap_or(600)
+}
+
+/// Min seconds before the SAME scope is auto-reviewed again — keeps the cadence
+/// gentle and the LLM calls few. Default 3h. Env: LFPA_PROACTIVE_COOLDOWN_SECS.
+fn proactive_cooldown_secs() -> i64 {
+    std::env::var("LFPA_PROACTIVE_COOLDOWN_SECS")
+        .ok()
+        .and_then(|v| v.trim().parse::<i64>().ok())
+        .filter(|&v| v > 0)
+        .unwrap_or(3 * 60 * 60)
+}
+
+/// AUTOMATIC TRIGGER (ADR 0011 §8): a background tick that fires the supervisor
+/// review on IDLE within waking hours — the same human-cadence gates as the Homun
+/// check-in, so it NEVER interrupts active work — NOT constant polling. Each tick
+/// reviews ONE scope (the least-recently auto-reviewed, past its cooldown), round-
+/// robining so projects you're NOT currently in still get surfaced ("X fermo da…")
+/// without a burst of LLM calls. Cards dedup as usual. Gated by the addon flag.
+fn start_proactivity_auto_review(state: AppState) {
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(proactive_tick_secs())).await;
+            proactivity_auto_review_tick(&state).await;
+        }
+    });
+}
+
+async fn proactivity_auto_review_tick(state: &AppState) {
+    // Addon detached → silent (UI and engine gated by the same flag).
+    if !lock_store(state).map(|s| s.plugin_enabled("proattivita")).unwrap_or(true) {
+        return;
+    }
+    // Waking hours only (user timezone) — no surfacing in the middle of the night.
+    if !(9..22).contains(&now_local().hour()) {
+        return;
+    }
+    // Real idle: only when the user has stepped away. Active → never interrupt.
+    if let Some(secs) = seconds_since_user_activity() {
+        if secs < homun_idle_threshold_secs() {
+            return;
+        }
+    }
+    // Candidate scopes: personal + every named project (the base id maps to personal).
+    let mut scopes = vec![PERSONAL_WORKSPACE.to_string()];
+    for ws in load_workspaces_file().workspaces {
+        if ws.id != base_workspace_id() && ws.id != PERSONAL_WORKSPACE {
+            scopes.push(ws.id);
+        }
+    }
+    let now = now_epoch_secs() as i64;
+    let cooldown = proactive_cooldown_secs();
+    let last_at = |scope: &str| -> i64 {
+        lock_store(state)
+            .ok()
+            .and_then(|s| s.flag(&format!("auto_review_at:{scope}")).ok().flatten())
+            .and_then(|v| v.parse::<i64>().ok())
+            .unwrap_or(0)
+    };
+    // Least-recently auto-reviewed scope that's past its cooldown (round-robin).
+    let Some(scope) = scopes
+        .into_iter()
+        .filter(|s| now - last_at(s) >= cooldown)
+        .min_by_key(|s| last_at(s))
+    else {
+        return;
+    };
+    // Stamp BEFORE running so a slow review can't be re-picked on the next tick.
+    if let Ok(store) = lock_store(state) {
+        let _ = store.set_flag(&format!("auto_review_at:{scope}"), &now.to_string());
+    }
+    eprintln!("[proattività] auto-review scope '{scope}' (idle + orario ok)");
+    let _ = run_proactive_review(state, &scope).await;
 }
 
 /// One-shot bootstrap: register the questions Homun ALREADY asked in the existing
