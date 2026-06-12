@@ -3761,78 +3761,6 @@ body.resizing-drawer {
   background: var(--brand-soft);
   color: var(--brand-strong);
 }
-.homun-proactive {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 18px;
-  padding: 8px 14px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-pill);
-  background: var(--surface);
-  color: var(--muted);
-  font-size: var(--text-sm);
-  cursor: pointer;
-}
-.homun-proactive:hover {
-  border-color: var(--brand);
-  color: var(--text);
-}
-.homun-proactive.on {
-  border-color: var(--brand);
-  background: var(--brand-soft);
-  color: var(--brand-strong);
-  font-weight: 600;
-}
-.homun-proactive:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
-.homun-proactive-row {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 18px;
-}
-.homun-proactive-row .homun-proactive {
-  margin-top: 0;
-}
-.homun-nudge {
-  padding: 8px 14px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-pill);
-  background: var(--surface);
-  color: var(--muted);
-  font-size: var(--text-sm);
-  cursor: pointer;
-}
-.homun-nudge:hover:not(:disabled) {
-  border-color: var(--brand);
-  color: var(--text);
-}
-.homun-nudge:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
-.homun-nudge-note {
-  font-size: var(--text-sm);
-  color: var(--muted);
-}
-
-/* Homun "ho qualcosa da dirti" badge on the nav entry. */
-.nav-unread-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--brand);
-  flex: none;
-}
-.nav-unread-dot.rail {
-  position: absolute;
-  top: 6px;
-  right: 6px;
-}
 .rail-button {
   position: relative;
 }
@@ -8544,21 +8472,9 @@ body.resizing-drawer {
 .fact-tag.durable { background: var(--surface-muted); color: var(--muted); }
 .fact-tag.event { background: var(--blue-soft); color: var(--blue); }
 .fact-tag.transient { background: #fdeede; color: #b06a00; }
-.contacts-facts li .fact-forget,
-.homun-curiosities li .fact-forget { flex-shrink: 0; opacity: 0; border: none; background: transparent; color: var(--muted); cursor: pointer; font-size: 15px; line-height: 1; padding: 0 2px; border-radius: 4px; transition: opacity 0.12s, color 0.12s; }
-.contacts-facts li:hover .fact-forget,
-.homun-curiosities li:hover .fact-forget { opacity: 1; }
-.contacts-facts li .fact-forget:hover,
-.homun-curiosities li .fact-forget:hover { color: var(--danger, #d23); background: var(--surface-muted); }
-
-/* Apprendista: the curiosity backlog shown in the Homun thread (hero + above messages). */
-.homun-curiosities { margin: 18px auto 12px; width: min(560px, 100%); text-align: left; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
-.homun-curiosities-head { display: flex; align-items: center; justify-content: space-between; font-size: 12px; font-weight: 600; color: var(--muted); margin-bottom: 6px; }
-.homun-curiosities ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
-.homun-curiosities li { display: flex; align-items: baseline; gap: 8px; font-size: 13px; color: var(--text); }
-.homun-curiosity-text { flex: 1; }
-.homun-automations-cta { margin-top: 14px; }
-.homun-automations li .set-btn { flex-shrink: 0; padding: 2px 10px; font-size: 12px; }
+.contacts-facts li .fact-forget { flex-shrink: 0; opacity: 0; border: none; background: transparent; color: var(--muted); cursor: pointer; font-size: 15px; line-height: 1; padding: 0 2px; border-radius: 4px; transition: opacity 0.12s, color 0.12s; }
+.contacts-facts li:hover .fact-forget { opacity: 1; }
+.contacts-facts li .fact-forget:hover { color: var(--danger, #d23); background: var(--surface-muted); }
 
 .set-btn.primary { background: var(--blue); color: #fff; border-color: var(--blue); }
 .contacts-modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.32); display: flex; align-items: center; justify-content: center; z-index: 50; }

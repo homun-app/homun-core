@@ -209,14 +209,23 @@ impl ChatStore {
             self.seed_workspace(workspace_id)?;
         }
         let active_thread_id = match self.setting(&active_thread_setting_key(workspace_id))? {
-            Some(thread_id) => thread_id,
-            None => self.first_thread_id(workspace_id)?.unwrap_or_default(),
+            // The retired "homun" thread is inert data, never a landing thread: redirect a
+            // stale pointer (or an unset one) to the first real thread and persist the
+            // correction so the app stops re-landing on Homun at every launch.
+            Some(thread_id) if thread_id != "homun" => thread_id,
+            _ => {
+                let first = self.first_thread_id(workspace_id)?.unwrap_or_default();
+                if !first.is_empty() {
+                    self.set_active_thread(workspace_id, &first)?;
+                }
+                first
+            }
         };
         let mut stmt = self.conn.prepare(
             "select thread_id, title, subtitle, status, pinned, computer_session_id, task_id,
                     updated_at, message_count, source
                from chat_threads
-              where workspace_id = ?1
+              where workspace_id = ?1 and thread_id <> 'homun'
               order by pinned desc, cast(updated_at as integer) desc, rowid desc",
         )?;
         let threads = stmt
@@ -278,38 +287,6 @@ impl ChatStore {
             updated_at: timestamp,
             message_count: 0,
             source: Some(source.to_string()),
-        };
-        self.insert_thread(&thread, workspace_id)?;
-        Ok(thread)
-    }
-
-    /// The dedicated proactive "Homun" thread — the assistant's home (personal scope).
-    /// Fixed id so the persona injection can detect it; pinned to stay at the top.
-    pub fn find_or_create_homun_thread(&self, workspace_id: &str) -> rusqlite::Result<ChatThread> {
-        let thread_id = "homun".to_string();
-        if let Some(thread) = self.thread(&thread_id)? {
-            // Ensure Homun lives in the requested (personal/base) workspace — migrate it
-            // if it was created elsewhere (e.g. under a project), otherwise it won't show
-            // in the personal thread list and navigation falls back to another thread.
-            self.conn.execute(
-                "update chat_threads set workspace_id = ?1 \
-                 where thread_id = 'homun' and workspace_id <> ?1",
-                params![workspace_id],
-            )?;
-            return Ok(thread);
-        }
-        let timestamp = current_timestamp_seconds();
-        let thread = ChatThread {
-            thread_id: thread_id.clone(),
-            title: "Homun".to_string(),
-            subtitle: "Il tuo assistente".to_string(),
-            status: "active".to_string(),
-            pinned: true,
-            computer_session_id: format!("computer_{thread_id}"),
-            task_id: format!("task_{thread_id}"),
-            updated_at: timestamp,
-            message_count: 0,
-            source: Some("homun".to_string()),
         };
         self.insert_thread(&thread, workspace_id)?;
         Ok(thread)
@@ -1219,75 +1196,6 @@ impl ChatStore {
     // contact's entity), so the cache + its accessors were removed. The `facts_json`
     // column stays in the schema, inert, to avoid a destructive migration.
 
-    // ------------------------------------------------------ curiosity backlog
-
-    /// Queue a mined curiosity (status 'pending').
-    pub fn insert_curiosity(
-        &self,
-        text: &str,
-        topic: &str,
-        rationale: &str,
-        source_refs_json: &str,
-    ) -> rusqlite::Result<i64> {
-        self.conn.execute(
-            "insert into curiosities(status, text, topic, rationale, source_refs, created_at)
-             values('pending', ?1, ?2, ?3, ?4, ?5)",
-            params![text, topic, rationale, source_refs_json, Self::now_secs()],
-        )?;
-        Ok(self.conn.last_insert_rowid())
-    }
-
-    /// Oldest pending curiosity (FIFO: earliest mined is asked first).
-    pub fn next_pending_curiosity(&self) -> rusqlite::Result<Option<(i64, String)>> {
-        self.conn
-            .query_row(
-                "select id, text from curiosities where status = 'pending'
-                 order by id asc limit 1",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .optional()
-    }
-
-    pub fn pending_curiosities(&self) -> rusqlite::Result<Vec<(i64, String, String, String)>> {
-        let mut stmt = self.conn.prepare(
-            "select id, text, topic, rationale from curiosities
-             where status = 'pending' order by id asc",
-        )?;
-        let rows = stmt.query_map([], |row| {
-            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
-        })?;
-        rows.collect()
-    }
-
-    pub fn pending_curiosity_count(&self) -> rusqlite::Result<i64> {
-        self.conn.query_row(
-            "select count(*) from curiosities where status = 'pending'",
-            [],
-            |row| row.get(0),
-        )
-    }
-
-    /// All texts ever queued (any status) — the durable dedup horizon for mining:
-    /// delivered AND dismissed must never be re-mined.
-    pub fn all_curiosity_texts(&self) -> rusqlite::Result<Vec<String>> {
-        let mut stmt = self.conn.prepare("select text from curiosities")?;
-        let rows = stmt.query_map([], |row| row.get(0))?;
-        rows.collect()
-    }
-
-    pub fn mark_curiosity(&self, id: i64, status: &str) -> rusqlite::Result<()> {
-        self.conn.execute(
-            "update curiosities set status = ?1,
-                    delivered_at = case when ?1 = 'delivered' then ?2 else delivered_at end
-             where id = ?3",
-            params![status, Self::now_secs(), id],
-        )?;
-        Ok(())
-    }
-
-    /// One-shot bootstrap flag helper reuse: see `flag`/`set_flag`.
-
     fn migrate(&self) -> rusqlite::Result<()> {
         self.conn.execute_batch(
             "
@@ -1498,20 +1406,6 @@ impl ChatStore {
                 unique(from_contact_id, to_contact_id, relationship_type)
             );
 
-            -- Homun's persistent curiosity backlog: questions/proposals mined from
-            -- memory, doled out ONE per check-in. The queue itself is the durable
-            -- no-repeat: delivered/dismissed rows are never re-asked nor re-mined.
-            create table if not exists curiosities (
-                id integer primary key autoincrement,
-                status text not null default 'pending',
-                text text not null,
-                topic text not null default '',
-                rationale text not null default '',
-                source_refs text not null default '[]',
-                created_at integer not null,
-                delivered_at integer
-            );
-            create index if not exists idx_curiosities_status on curiosities(status);
             ",
         )?;
 
@@ -2093,8 +1987,9 @@ impl ChatStore {
     fn first_thread_id(&self, workspace_id: &str) -> rusqlite::Result<Option<String>> {
         self.conn
             .query_row(
+                // The retired "homun" thread is inert data, never a landing thread.
                 "select thread_id from chat_threads
-                  where workspace_id = ?1
+                  where workspace_id = ?1 and thread_id <> 'homun'
                  order by pinned desc, cast(updated_at as integer) desc, rowid desc
                  limit 1",
                 params![workspace_id],
