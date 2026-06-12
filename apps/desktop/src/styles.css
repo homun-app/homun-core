@@ -1663,8 +1663,11 @@ body.resizing-drawer {
 }
 /* While streaming, the collapsed line echoes the current action in monospace so
  * the live command/skill reads clearly. */
+.msg-activity.live:not(.open) .msg-activity-toggle {
+  color: var(--brand);
+}
 .msg-activity.live:not(.open) .msg-activity-label {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 11.5px;
 }
 .msg-activity-dot {
@@ -1672,7 +1675,7 @@ body.resizing-drawer {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--faint);
+  background: var(--brand);
   animation: msg-activity-pulse 1.1s ease-in-out infinite;
 }
 @keyframes msg-activity-pulse {
@@ -1689,18 +1692,31 @@ body.resizing-drawer {
 }
 .msg-activity-steps {
   margin: 6px 0 0;
-  padding: 0 0 0 22px;
+  padding: 0 0 0 4px;
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 5px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  gap: 7px;
+  font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.5;
   color: var(--muted);
 }
+/* Per-step marker (design): each completed step gets a leading hollow dot. */
 .msg-activity-steps li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
   overflow-wrap: anywhere;
+}
+.msg-activity-steps li::before {
+  content: "";
+  flex: none;
+  width: 9px;
+  height: 9px;
+  margin-top: 4px;
+  border: 1.5px solid var(--line-strong);
+  border-radius: 50%;
 }
 
 .rich-inline-code {
