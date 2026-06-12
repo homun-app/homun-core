@@ -524,6 +524,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/tools/runs", get(tool_runs_list))
         .route("/api/suggestions", get(suggestions_list))
         .route("/api/suggestions/{id}/act", post(suggestion_act))
+        .route("/api/proactivity/review-now", post(proactivity_review_now))
         .route(
             "/api/runtime/provider",
             get(runtime_provider).post(set_runtime_provider),
@@ -999,6 +1000,233 @@ un pattern solido.";
         }
     }
     proposed
+}
+
+// ── A2: motore supervisore proattivo (ADR 0011 §8) ─────────────────────────
+// Un turno LLM READ-ONLY per SCOPE: assembla il contesto REALE (memoria durevole
+// dello scope + attività recente dei connettori + card già pending) e — se c'è
+// qualcosa che vale la pena — emette AL MASSIMO UNA card ancorata nello store
+// `suggestions`. Adattivo (il modello decide cosa conta, NON un catalogo di
+// regole); grounded (niente speculazione, cita la base); no-repeat durevole
+// (dedup_key semantico); gated per agire (proposed_action è sempre soggetta ad
+// approvazione, mai eseguita qui). Stessa forma one-shot LLM→JSON dei mining sopra.
+
+/// Friendly label for a scope (a workspace id or PERSONAL_WORKSPACE), so the
+/// supervisor reasons over "Progetto Acme" rather than an opaque id.
+fn scope_display_name(scope: &str) -> String {
+    match scope {
+        PERSONAL_WORKSPACE => "Personale".to_string(),
+        THREADS_WORKSPACE => "Conversazioni".to_string(),
+        other => load_workspaces_file()
+            .workspaces
+            .iter()
+            .find(|w| w.id == other)
+            .map(|w| w.name.clone())
+            .unwrap_or_else(|| other.to_string()),
+    }
+}
+
+/// Durable knowledge of a scope (facts/preferences/decisions/goals), capped to
+/// keep the prompt bounded. `scope` is a workspace id or PERSONAL_WORKSPACE —
+/// which is exactly the suggestion card's `scope`, so no translation is needed.
+fn gather_scope_memory(state: &AppState, scope: &str, cap: usize) -> Vec<String> {
+    let Ok(facade) = lock_memory_facade(state) else {
+        return Vec::new();
+    };
+    let user = gateway_memory_user_id();
+    let workspace = MemoryWorkspaceId::new(scope);
+    let mut items: Vec<String> = facade
+        .list_memories_for_ui(&user, &workspace)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|m| {
+            matches!(m.status, MemoryStatus::Confirmed | MemoryStatus::Candidate)
+                && matches!(m.memory_type.as_str(), "fact" | "preference" | "decision" | "goal")
+        })
+        .map(|m| {
+            let one = m.text.trim().replace('\n', " ");
+            format!("[{}] {one}", m.memory_type)
+        })
+        .collect();
+    if items.len() > cap {
+        items.drain(0..items.len() - cap);
+    }
+    items
+}
+
+/// Recent connector activity (Composio/MCP tool runs) — the "what's been
+/// happening" signal that lets the supervisor say "ho visto che hai fatto X".
+fn gather_recent_connector_activity(state: &AppState, cap: usize) -> Vec<String> {
+    let Ok(store) = lock_store(state) else {
+        return Vec::new();
+    };
+    store
+        .recent_tool_runs(cap.saturating_mul(4).max(cap))
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|r| matches!(r.kind.as_str(), "composio" | "mcp"))
+        .take(cap)
+        .map(|r| {
+            let status = if r.ok {
+                "ok".to_string()
+            } else {
+                format!("errore:{}", r.error_kind.as_deref().unwrap_or("?"))
+            };
+            match r.summary.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+                Some(s) => format!("- {} [{status}] {s}", r.tool),
+                None => format!("- {} [{status}]", r.tool),
+            }
+        })
+        .collect()
+}
+
+/// Normalize a model-proposed anchor into a stable, DURABLE dedup key
+/// `{kind}:{slug}`. Semantic (survives paraphrase), unlike a hash of the body:
+/// lowercased, runs of non-alphanumerics collapsed to a single '-', trimmed.
+/// Pure → unit-testable.
+fn sanitize_dedup_key(kind: &str, raw: &str) -> String {
+    let slug = |s: &str| -> String {
+        let mut out = String::new();
+        let mut prev_dash = false;
+        for ch in s.trim().to_lowercase().chars() {
+            if ch.is_alphanumeric() {
+                out.push(ch);
+                prev_dash = false;
+            } else if !out.is_empty() && !prev_dash {
+                out.push('-');
+                prev_dash = true;
+            }
+        }
+        out.trim_matches('-').to_string()
+    };
+    let k = slug(kind);
+    let a = slug(raw);
+    match (k.is_empty(), a.is_empty()) {
+        (true, true) => "suggerimento".to_string(),
+        (true, false) => a,
+        (false, true) => k,
+        (false, false) => format!("{k}:{a}"),
+    }
+}
+
+/// Parse the supervisor's JSON into a ready-to-insert card, or None when the
+/// model declined (`suggestion: null`) or omitted the required title/body. Pure
+/// → unit-testable. Shape: `{ "suggestion": null | { kind, title, body,
+/// rationale, dedup_key, proposed_action? } }`.
+fn parse_review_suggestion(
+    value: &serde_json::Value,
+    scope: &str,
+) -> Option<chat_store::SuggestionInput> {
+    let s = value.get("suggestion")?;
+    if s.is_null() {
+        return None;
+    }
+    let field = |k: &str| s.get(k).and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    let title = field("title");
+    let body = field("body");
+    // A card with no title or body is not actionable — treat as "declined".
+    if title.is_empty() || body.is_empty() {
+        return None;
+    }
+    let kind = {
+        let raw = field("kind");
+        if raw.is_empty() { "suggerimento".to_string() } else { raw }
+    };
+    let anchor = {
+        let dk = field("dedup_key");
+        if dk.is_empty() { title.clone() } else { dk }
+    };
+    let proposed_action = s
+        .get("proposed_action")
+        .filter(|v| !v.is_null())
+        .map(|v| match v.as_str() {
+            Some(t) => t.to_string(),
+            None => v.to_string(),
+        })
+        .filter(|t| !t.trim().is_empty());
+    // dedup_key uses the EFFECTIVE kind (after the fallback) so it stays consistent
+    // with the card's `kind` field and never collides an empty-kind card with a
+    // "suggerimento" one on the same anchor.
+    let dedup_key = sanitize_dedup_key(&kind, &anchor);
+    Some(chat_store::SuggestionInput {
+        scope: scope.to_string(),
+        kind,
+        title,
+        body,
+        rationale: field("rationale"),
+        proposed_action,
+        dedup_key,
+    })
+}
+
+const PROACTIVE_SUPERVISOR_SYSTEM: &str = "Sei il SUPERVISORE proattivo dell'utente per UNO scope di \
+lavoro (un progetto o lo spazio personale). Dal CONTESTO REALE qui sotto individua AL MASSIMO UNA \
+cosa concreta che valga la pena segnalare ORA — oppure NESSUNA. Sei un collega che affianca, non un \
+assistente che aspetta ordini.\n\
+Una segnalazione è VALIDA solo se: (1) è ANCORATA al contesto reale (memoria/decisioni/goal dello \
+scope o attività recente dei connettori) e citi la base in `rationale` — NON inventare nulla che non \
+sia nel contesto; (2) è CONCRETA e AZIONABILE (qualcosa che l'utente può fare/decidere), non \
+un'osservazione vaga; (3) è NUOVA, non assomiglia alle card GIÀ PRESENTI.\n\
+NON fare: consigli generici o motivazionali; domande-intervista («come posso aiutarti»); azioni \
+eseguite (se proponi un'azione va in `proposed_action` e sarà l'utente ad approvarla). Se non c'è \
+nulla di solido e non banale, rispondi {\"suggestion\": null}. MEGLIO ZERO CHE RUMORE.\n\
+Rispondi SOLO con JSON: {\"suggestion\": null} OPPURE {\"suggestion\": {\"kind\":\"tema breve in \
+kebab-case (es. scadenza, progetto-fermo, automazione, follow-up)\",\"title\":\"titolo brevissimo\",\
+\"body\":\"1-3 frasi: cosa hai notato e cosa proponi\",\"rationale\":\"da quale elemento del contesto \
+deriva\",\"dedup_key\":\"àncora STABILE di COSA parla (l'oggetto/progetto/scadenza), non il testo\",\
+\"proposed_action\":\"OPZIONALE: l'azione proposta, che l'utente approverà\"}}.";
+
+/// A2 ENGINE: run one read-only supervisor review for a scope. Assembles the real
+/// context, asks the model for AT MOST ONE grounded card, dedups against the
+/// durable key, inserts. Returns the inserted card id, or None (nothing worth
+/// surfacing / duplicate / no context / no provider). Read-only: never acts.
+async fn run_proactive_review(state: &AppState, scope: &str) -> Option<i64> {
+    let memory = gather_scope_memory(state, scope, 60);
+    let activity = gather_recent_connector_activity(state, 20);
+    // Grounding precondition: with no real context there is nothing to anchor a
+    // suggestion to → skip (no speculation). Observable like the Homun check-in.
+    if memory.is_empty() && activity.is_empty() {
+        eprintln!("[proattività] review '{scope}': nessun contesto, salto");
+        return None;
+    }
+    // What's already on the board for this scope — an extra no-repeat signal
+    // beyond the exact dedup_key, so the model avoids semantic repeats too.
+    let pending: Vec<String> = lock_store(state)
+        .ok()
+        .and_then(|s| s.pending_suggestions(Some(scope), 20).ok())
+        .unwrap_or_default()
+        .into_iter()
+        .map(|c| format!("- [{}] {}", c.kind, c.title))
+        .collect();
+
+    let mut brief = format!("SCOPE: {}\n\n", scope_display_name(scope));
+    if !memory.is_empty() {
+        brief.push_str("MEMORIA DELLO SCOPE (decisioni/goal/fatti/preferenze):\n");
+        brief.push_str(&memory.join("\n"));
+        brief.push_str("\n\n");
+    }
+    if !activity.is_empty() {
+        brief.push_str("ATTIVITÀ RECENTE DEI CONNETTORI:\n");
+        brief.push_str(&activity.join("\n"));
+        brief.push_str("\n\n");
+    }
+    if !pending.is_empty() {
+        brief.push_str("CARD GIÀ PRESENTI (NON ripeterle, nemmeno parafrasate):\n");
+        brief.push_str(&pending.join("\n"));
+        brief.push('\n');
+    }
+
+    let root = call_memory_json(state, PROACTIVE_SUPERVISOR_SYSTEM, &brief).await?;
+    let input = parse_review_suggestion(&root, scope)?;
+
+    let store = lock_store(state).ok()?;
+    if store.suggestion_dedup_exists(scope, &input.dedup_key).unwrap_or(false) {
+        eprintln!("[proattività] review '{scope}': duplicato '{}', salto", input.dedup_key);
+        return None;
+    }
+    let id = store.insert_suggestion(&input).ok()?;
+    eprintln!("[proattività] review '{scope}': card #{id} '{}'", input.title);
+    Some(id)
 }
 
 /// One-shot bootstrap: register the questions Homun ALREADY asked in the existing
@@ -12001,6 +12229,51 @@ async fn suggestion_act(
         })
         .is_some();
     Json(serde_json::json!({ "ok": ok }))
+}
+
+#[derive(Debug, Deserialize)]
+struct ProactiveReviewRequest {
+    /// A workspace id or "__personal__". Empty → personal scope.
+    #[serde(default)]
+    scope: String,
+}
+
+/// POST /api/proactivity/review-now — run the A2 supervisor review IMMEDIATELY for
+/// a scope (the manual trigger, twin of /api/homun/checkin-now): assemble real
+/// context, emit AT MOST ONE grounded card, dedup, insert. Returns the emitted
+/// card or `{emitted:false}`. Lets us verify the engine end-to-end on demand,
+/// before the idle/connector trigger is wired.
+async fn proactivity_review_now(
+    State(state): State<AppState>,
+    Json(req): Json<ProactiveReviewRequest>,
+) -> Json<serde_json::Value> {
+    let scope = {
+        let s = req.scope.trim();
+        if s.is_empty() { PERSONAL_WORKSPACE.to_string() } else { s.to_string() }
+    };
+    match run_proactive_review(&state, &scope).await {
+        Some(id) => {
+            let card = lock_store(&state)
+                .ok()
+                .and_then(|s| s.pending_suggestions(Some(&scope), 50).ok())
+                .and_then(|cards| cards.into_iter().find(|c| c.id == id))
+                .map(|r| {
+                    serde_json::json!({
+                        "id": r.id,
+                        "scope": r.scope,
+                        "kind": r.kind,
+                        "title": r.title,
+                        "body": r.body,
+                        "rationale": r.rationale,
+                        "proposed_action": r.proposed_action,
+                        "status": r.status,
+                        "created_at": r.created_at,
+                    })
+                });
+            Json(serde_json::json!({ "emitted": true, "id": id, "card": card }))
+        }
+        None => Json(serde_json::json!({ "emitted": false })),
+    }
 }
 
 pub(crate) fn weekday_it(w: jiff::civil::Weekday) -> &'static str {
@@ -27125,6 +27398,8 @@ mod tests {
         message_has_image_url,
         browser_snapshot_text,
         jail_in_root,
+        parse_review_suggestion,
+        sanitize_dedup_key,
     };
     use crate::browser_safety;
     use local_first_capabilities::{CapabilityCallResult, ProviderId as CapProviderId};
@@ -27137,6 +27412,63 @@ mod tests {
         TaskRecord, TaskStatus, TaskStore, TaskUiItem, UserId, WorkspaceId,
     };
     use std::collections::HashMap;
+
+    #[test]
+    fn proactive_dedup_key_is_semantic_and_stable() {
+        // kind + anchor → "{kind}:{slug}"; paraphrases of the SAME anchor collapse.
+        assert_eq!(sanitize_dedup_key("Scadenza", "Contratto Acme"), "scadenza:contratto-acme");
+        assert_eq!(
+            sanitize_dedup_key("scadenza", "il contratto  ACME!!!"),
+            "scadenza:il-contratto-acme"
+        );
+        // Missing kind/anchor degrade gracefully, never empty.
+        assert_eq!(sanitize_dedup_key("", "Idra"), "idra");
+        assert_eq!(sanitize_dedup_key("progetto-fermo", ""), "progetto-fermo");
+        assert_eq!(sanitize_dedup_key("", ""), "suggerimento");
+    }
+
+    #[test]
+    fn proactive_parse_declines_cleanly() {
+        // Explicit decline → None (the supervisor chose silence over noise).
+        let null = serde_json::json!({ "suggestion": null });
+        assert!(parse_review_suggestion(&null, "proj").is_none());
+        // Missing the wrapper key → None.
+        assert!(parse_review_suggestion(&serde_json::json!({}), "proj").is_none());
+        // Present but no title/body → not actionable → None.
+        let empty = serde_json::json!({ "suggestion": { "kind": "x", "title": "", "body": "" } });
+        assert!(parse_review_suggestion(&empty, "proj").is_none());
+    }
+
+    #[test]
+    fn proactive_parse_builds_card() {
+        let value = serde_json::json!({
+            "suggestion": {
+                "kind": "Progetto fermo",
+                "title": "Idra è fermo da un po'",
+                "body": "Nessuna attività recente sul progetto Idra.",
+                "rationale": "Ultima decisione registrata settimane fa.",
+                "dedup_key": "Idra",
+                "proposed_action": "Vuoi che controlli lo stato?"
+            }
+        });
+        let card = parse_review_suggestion(&value, "ws-idra").expect("card");
+        assert_eq!(card.scope, "ws-idra");
+        assert_eq!(card.kind, "Progetto fermo");
+        assert_eq!(card.dedup_key, "progetto-fermo:idra");
+        assert_eq!(card.proposed_action.as_deref(), Some("Vuoi che controlli lo stato?"));
+        // A non-string proposed_action is serialized, not dropped.
+        let obj_action = serde_json::json!({
+            "suggestion": {
+                "title": "X", "body": "Y", "dedup_key": "k",
+                "proposed_action": { "tool": "create_automation" }
+            }
+        });
+        let card2 = parse_review_suggestion(&obj_action, "p").expect("card2");
+        assert!(card2.proposed_action.unwrap().contains("create_automation"));
+        // dedup_key falls back to the title when omitted.
+        let no_key = serde_json::json!({ "suggestion": { "title": "Ciao Mondo", "body": "b" } });
+        assert_eq!(parse_review_suggestion(&no_key, "p").unwrap().dedup_key, "suggerimento:ciao-mondo");
+    }
 
     #[test]
     fn project_path_jail_blocks_escapes() {
