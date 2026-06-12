@@ -9,7 +9,6 @@ import {
   FolderOpen,
   FolderPlus,
   Info,
-  MessageSquare,
   PanelLeftClose,
   PanelLeftOpen,
   Pencil,
@@ -23,7 +22,7 @@ import {
   X,
 } from "lucide-react";
 import { useEffect, useState } from "react";
-import type { MouseEvent } from "react";
+import type { MouseEvent, ReactNode } from "react";
 import { settingsGroupLabels, settingsSections } from "../data/mockData";
 import type { ChatThread, NavItem, SettingsSectionId, ViewId } from "../types";
 import { useSetting } from "../lib/settingsStore";
@@ -180,18 +179,16 @@ function ProjectsNav({
   const filteredProjects = q
     ? projects.filter((p) => p.name.toLowerCase().includes(q))
     : projects;
-  // Personal-scope threads (channels live here too); split channels into their own group.
-  const isChannel = (t: ChatThread) =>
-    t.source === "whatsapp" || t.source === "telegram";
+  // Chats of the ACTIVE context. Channels (WhatsApp/Telegram) live in the personal
+  // scope and are mixed straight into the list — ordered by recency like every other
+  // thread (their leading type icon is what tells them apart). The "homun" thread is
+  // excluded (retired). Backend order is already `pinned desc, updated_at desc`.
   const personalSource = (inProject ? personalThreads : activeThreads).filter(
     (t) => t.status === "active",
   );
-  const channelThreads = personalSource.filter(isChannel);
-  // Chats of the ACTIVE context: project chats when in a project, else personal (no
-  // channels). The "homun" thread is excluded — it lives in the top-level nav.
   const contextChats = inProject
     ? activeThreads.filter((t) => t.status === "active" && t.threadId !== "homun")
-    : personalSource.filter((t) => !isChannel(t) && t.threadId !== "homun");
+    : personalSource.filter((t) => t.threadId !== "homun");
 
   // Context switches re-scope memory/capabilities/artifacts-folder → full reload.
   async function selectProject(id: string) {
@@ -299,7 +296,11 @@ function ProjectsNav({
           disabled={busy}
           onClick={() => setSwitcherOpen((v) => !v)}
         >
-          {inProject ? <FolderOpen size={14} /> : <User size={14} />}
+          {inProject ? (
+            <FolderOpen size={14} />
+          ) : (
+            <span className="ctx-switcher-chip" aria-hidden="true" />
+          )}
           <span className="ctx-switcher-name">
             {inProject ? (activeProjectName ?? "Progetto") : "Personale"}
           </span>
@@ -422,10 +423,19 @@ function ProjectsNav({
         )}
       </div>
 
-      <button className="drawer-new-chat" type="button" disabled={busy} onClick={onCreateChatThread}>
-        <Plus size={15} />
-        <span>Nuova chat</span>
-      </button>
+      <div className="drawer-chats-head">
+        <span className="drawer-eyebrow">Chat</span>
+        <button
+          className="drawer-eyebrow-add"
+          type="button"
+          disabled={busy}
+          onClick={onCreateChatThread}
+          aria-label="Nuova chat"
+          title="Nuova chat"
+        >
+          <Plus size={16} />
+        </button>
+      </div>
 
       <section className="drawer-section drawer-chats">
         {contextChats.length === 0 && <p className="drawer-empty">Nessuna chat ancora.</p>}
@@ -442,31 +452,6 @@ function ProjectsNav({
           />
         ))}
       </section>
-
-      {channelThreads.length > 0 && (
-        <section className="drawer-section">
-          <button
-            className="drawer-section-title"
-            type="button"
-            onClick={() => setShowChannels((v) => !v)}
-          >
-            {showChannels ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
-            <MessageSquare size={13} />
-            <span>Canali</span>
-            <span className="drawer-section-count">{channelThreads.length}</span>
-          </button>
-          {showChannels &&
-            channelThreads.map((thread) => (
-              <ThreadLink
-                key={thread.threadId}
-                active={!inProject && thread.threadId === activeThreadId && activeView === "chat"}
-                thread={thread}
-                onContextMenu={(e) => onThreadContextMenu(thread, e)}
-                onSelect={() => void openPersonalThread(thread.threadId)}
-              />
-            ))}
-        </section>
-      )}
 
       {error && (
         <p className="drawer-empty" style={{ color: "var(--danger)" }}>
@@ -936,6 +921,46 @@ export function ChatSearchModal({
   );
 }
 
+// Leading per-type glyph so chat / scheduled / channel are distinguishable at a
+// glance (the design's #1 sidebar fix). Normal chats get an empty slot so titles
+// stay aligned. Custom outline icons matching the design language.
+function threadTypeIcon(
+  source: string | null | undefined,
+): { node: ReactNode; label: string } | null {
+  if (source === "scheduled") {
+    return {
+      label: "Pianificato",
+      node: (
+        <svg viewBox="0 0 24 24" fill="none" stroke="var(--amber)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="8" />
+          <path d="M12 8 V12 L15 14" />
+        </svg>
+      ),
+    };
+  }
+  if (source === "whatsapp") {
+    return {
+      label: "WhatsApp",
+      node: (
+        <svg viewBox="0 0 24 24" fill="var(--green)">
+          <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.521.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.885-9.885 9.885m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z" />
+        </svg>
+      ),
+    };
+  }
+  if (source === "telegram") {
+    return {
+      label: "Telegram",
+      node: (
+        <svg viewBox="0 0 24 24" fill="#2a7fb8">
+          <path d="M21 5 L2.5 12 L8 13.5 L9 19 L12 15.5 L16.5 18.5 Z" />
+        </svg>
+      ),
+    };
+  }
+  return null;
+}
+
 function ThreadLink({
   active,
   onContextMenu,
@@ -947,6 +972,7 @@ function ThreadLink({
   onSelect: () => void;
   thread: ChatThread;
 }) {
+  const icon = threadTypeIcon(thread.source);
   return (
     <button
       className={`drawer-link ${active ? "active" : ""} ${thread.pinned ? "pinned" : ""}`}
@@ -954,16 +980,10 @@ function ThreadLink({
       onContextMenu={onContextMenu}
       onClick={onSelect}
     >
-      <span>{thread.title}</span>
-      {thread.source && thread.source !== "homun" && (
-        <span className={`thread-channel-badge ${thread.source}`}>
-          {thread.source === "whatsapp"
-            ? "WhatsApp"
-            : thread.source === "telegram"
-              ? "Telegram"
-              : thread.source}
-        </span>
-      )}
+      <span className="drawer-link-icon" title={icon?.label} aria-label={icon?.label}>
+        {icon?.node}
+      </span>
+      <span className="drawer-link-title">{thread.title}</span>
       {thread.pinned && <Pin size={12} aria-hidden="true" />}
     </button>
   );
