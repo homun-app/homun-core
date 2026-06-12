@@ -502,8 +502,12 @@ Verso la prima release:
    (scoperta unificata MCP+Skill+Composio); transport **streamable-HTTP** (server
    remoti del registry collegabili, `9d70e0c`). Restano: secret-store per i token,
    read-timeout nel transport, OAuth-remote (vedi follow-up).
-4. **Onboarding first-run.** Wizard connettori (Composio prima, poi MCP/skill) cosi'
-   il nuovo utente non parte da schermate vuote.
+4. **Onboarding first-run.** ~85% GIÀ FATTO (riveduto 2026-06-13): la **persona del
+   thread Homun** (main.rs:8456) è già un'intervista-onboarding guidata a 360°
+   (identità/uso/occupazione/interessi/preferenze/persone/cosa ricordare, "ho salvato
+   che…", "cosa sai di me"→recall, una-due domande per volta) e le risposte entrano in
+   memoria via M2. RESTA solo il mini **"primi passi" statico** (modello/chiave →
+   connettori) per il primissimo avvio senza modello — UX a sé.
 5. **Skill: gestione.** Install dal marketplace fluido, rilevamento update, override
    security consapevole (oggi blocco opaco).
 6. **Status connettori + audit.** FATTO (2026-06-12, `67e8cc1`/Fase 2). Lo **stato**
