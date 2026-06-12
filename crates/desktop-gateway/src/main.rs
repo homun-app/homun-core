@@ -420,6 +420,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tokio::task::spawn_blocking(move || sweep_graph_on_startup(&st));
     }
     seed_homun_asked_questions(&state);
+    // Homun retired as a proactive surface: its curiosities/onboarding now flow as
+    // proactivity cards. Cancel any check-in still scheduled from a previous version
+    // so the old "sfilza di domande" push stops (the thread stays as inert data).
+    cancel_homun_checkins(&state);
     start_task_executor_worker(state.clone());
     spawn_thread_browser_session_reaper(state.clone());
     spawn_contained_computer_idle_reaper(state.clone());

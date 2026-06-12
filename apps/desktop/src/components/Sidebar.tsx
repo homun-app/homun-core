@@ -18,7 +18,6 @@ import {
   Plus,
   Search,
   Settings,
-  Sparkles,
   Trash2,
   User,
   X,
@@ -50,22 +49,16 @@ function toChatThread(thread: CoreChatThread): ChatThread {
 
 interface NavigationRailProps {
   activeView: ViewId;
-  activeThreadId: string;
-  homunUnread: boolean;
   navItems: NavItem[];
   onNavigate: (view: ViewId) => void;
-  onOpenHomun: () => void;
   onSearch: () => void;
   onToggleDrawer: () => void;
 }
 
 export function NavigationRail({
   activeView,
-  activeThreadId,
-  homunUnread,
   navItems,
   onNavigate,
-  onOpenHomun,
   onSearch,
   onToggleDrawer,
 }: NavigationRailProps) {
@@ -81,16 +74,6 @@ export function NavigationRail({
       </button>
 
       <nav className="rail-nav">
-        <button
-          className={`rail-button ${activeView === "chat" && activeThreadId === "homun" ? "active" : ""}`}
-          type="button"
-          aria-label="Homun"
-          title="Homun"
-          onClick={onOpenHomun}
-        >
-          <Sparkles size={18} />
-          {homunUnread && <span className="nav-unread-dot rail" aria-hidden="true" />}
-        </button>
         <button
           className="rail-button"
           type="button"
@@ -566,13 +549,11 @@ interface NavDrawerProps {
   activeView: ViewId;
   activeThreadId: string;
   chatThreads: ChatThread[];
-  homunUnread: boolean;
   navItems: NavItem[];
   onArchiveChatThread: (threadId: string) => void;
   onCreateChatThread: () => void;
   onDeleteChatThread: (threadId: string) => void;
   onNavigate: (view: ViewId) => void;
-  onOpenHomun: () => void;
   onSearchChat: () => void;
   onSelectThread: (threadId: string) => void;
   onSetChatThreadPinned: (threadId: string, pinned: boolean) => void;
@@ -584,13 +565,11 @@ export function NavDrawer({
   activeView,
   activeThreadId,
   chatThreads,
-  homunUnread,
   navItems,
   onArchiveChatThread,
   onCreateChatThread,
   onDeleteChatThread,
   onNavigate,
-  onOpenHomun,
   onSearchChat,
   onSelectThread,
   onSetChatThreadPinned,
@@ -646,17 +625,6 @@ export function NavDrawer({
       </button>
 
       <nav className="drawer-nav">
-        <button
-          className={`drawer-nav-item ${
-            activeView === "chat" && activeThreadId === "homun" ? "active" : ""
-          }`}
-          type="button"
-          onClick={onOpenHomun}
-        >
-          <Sparkles size={17} />
-          <span>Homun</span>
-          {homunUnread && <span className="nav-unread-dot" aria-label="Nuovo da Homun" />}
-        </button>
         {navItems.map((item) => {
           const Icon = item.icon;
           const isSearch = item.id === "chat";

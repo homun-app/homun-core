@@ -12,7 +12,6 @@ interface ShellProps {
   activeThreadId: string;
   chatThreads: ChatThread[];
   drawerOpen: boolean;
-  homunUnread: boolean;
   // Composed at runtime in App: static core + enabled addon entries (ADR 0011 §10-A).
   navItems: NavItem[];
   onArchiveChatThread: (threadId: string) => void;
@@ -20,7 +19,6 @@ interface ShellProps {
   onCreateChatThread: () => void;
   onDeleteChatThread: (threadId: string) => void;
   onNavigate: (view: ViewId) => void;
-  onOpenHomun: () => void;
   onSelectThread: (threadId: string) => void;
   onSetChatThreadPinned: (threadId: string, pinned: boolean) => void;
   onSelectSettingsSection: (section: SettingsSectionId) => void;
@@ -36,14 +34,12 @@ export function Shell({
   chatThreads,
   children,
   drawerOpen,
-  homunUnread,
   navItems,
   onArchiveChatThread,
   onBackFromSettings,
   onCreateChatThread,
   onDeleteChatThread,
   onNavigate,
-  onOpenHomun,
   onSelectThread,
   onSetChatThreadPinned,
   onSelectSettingsSection,
@@ -105,11 +101,8 @@ export function Shell({
       {!drawerOpen && (
         <NavigationRail
           activeView={activeView}
-          activeThreadId={activeThreadId}
-          homunUnread={homunUnread}
           navItems={navItems}
           onNavigate={onNavigate}
-          onOpenHomun={onOpenHomun}
           onSearch={() => setSearchOpen(true)}
           onToggleDrawer={onToggleDrawer}
         />
@@ -119,13 +112,11 @@ export function Shell({
           activeView={activeView}
           activeThreadId={activeThreadId}
           chatThreads={chatThreads}
-          homunUnread={homunUnread}
           navItems={navItems}
           onArchiveChatThread={onArchiveChatThread}
           onCreateChatThread={onCreateChatThread}
           onDeleteChatThread={onDeleteChatThread}
           onNavigate={onNavigate}
-          onOpenHomun={onOpenHomun}
           onSearchChat={() => setSearchOpen(true)}
           onSelectThread={onSelectThread}
           onSetChatThreadPinned={onSetChatThreadPinned}

@@ -433,9 +433,6 @@ export default function App() {
   const [pluginStates, setPluginStates] = useState<PluginState[]>([]);
   const [settingsSection, setSettingsSection] =
     useState<SettingsSectionId>("account");
-  // Badge on the Homun nav entry: set when a proactive message arrives while you're
-  // elsewhere, cleared when you open Homun.
-  const [homunUnread, setHomunUnread] = useState(false);
   const [chatThreads, setChatThreads] = useState<ChatThread[]>([
     defaultChatThread,
   ]);
@@ -519,30 +516,6 @@ export default function App() {
   // Navigate to a thread that may live in ANOTHER workspace (e.g. a channel
   // thread in Personale): select_thread is workspace-aware and returns that
   // workspace's snapshot, so applying it switches context for us.
-  // Open the dedicated proactive "Homun" thread from the top-level nav (ensure it
-  // exists first; it lives in the personal scope with a fixed id).
-  async function handleOpenHomun() {
-    setHomunUnread(false);
-    try {
-      await coreBridge.homunThread();
-      // Proactive by default: enable the daily check-in the first time Homun is opened.
-      // After that, respect whatever the user chose (we only auto-enable once).
-      if (!localStorage.getItem("homun.proactive.initialized")) {
-        localStorage.setItem("homun.proactive.initialized", "1");
-        await coreBridge.setHomunProactive(true);
-      }
-      // Homun speaks first: if the thread is empty it greets + asks (no-op otherwise).
-      void coreBridge.homunGreet();
-      // Homun is personal: switch the active workspace to personal so "homun" belongs to
-      // the active thread list — otherwise project-scoped polls keep pulling us back to a
-      // project chat.
-      await coreBridge.selectWorkspace("local-workspace");
-    } catch {
-      /* non-fatal */
-    }
-    await navigateToThread("homun");
-  }
-
   async function navigateToThread(threadId: string) {
     try {
       const snapshot = await coreBridge.selectChatThread(threadId);
@@ -571,25 +544,9 @@ export default function App() {
   const appEventHandlerRef = useRef<(event: AppEvent) => void>(() => {});
   appEventHandlerRef.current = (event: AppEvent) => {
     if (!event.thread_id) return;
-    // Homun is the proactive assistant: a new message there flags a badge ("ho qualcosa
-    // da dirti") instead of yanking the user into the thread.
+    // The "homun" thread is retired as a proactive surface (its curiosities/onboarding
+    // now flow as proactivity cards) — ignore its events; it has no nav entry to update.
     if (event.thread_id === "homun") {
-      if (activeThreadId === "homun") {
-        // Reload ONLY Homun's messages — do NOT re-select via refreshChatReadModels:
-        // Homun lives in the personal scope, so if the active workspace is a project
-        // its thread list has no "homun" and we'd jump to the first project chat.
-        void coreBridge
-          .chatMessages("homun")
-          .then((messages) => {
-            setThreadMessages((current) => ({
-              ...current,
-              homun: messages.messages.map(mapCoreChatMessage),
-            }));
-          })
-          .catch(() => {});
-      } else {
-        setHomunUnread(true);
-      }
       return;
     }
     if (event.type === "thread.upserted") {
@@ -1068,11 +1025,6 @@ export default function App() {
 
     async function loadChatThreads() {
       try {
-        try {
-          await coreBridge.homunThread(); // ensure the proactive "Homun" home thread exists
-        } catch {
-          /* non-fatal: gateway may be starting up */
-        }
         const snapshot = await coreBridge.chatThreads();
         if (cancelled) return;
         const mapped = snapshot.threads.map(mapCoreChatThread);
@@ -1117,10 +1069,8 @@ export default function App() {
       onArchiveChatThread={handleArchiveChatThread}
       onBackFromSettings={() => setActiveView(previousView)}
       onDeleteChatThread={handleDeleteChatThread}
-      homunUnread={homunUnread}
       navItems={composedNavItems}
       onNavigate={handleNavigate}
-      onOpenHomun={handleOpenHomun}
       onSelectThread={handleSelectThread}
       onSetChatThreadPinned={handleSetChatThreadPinned}
       onToggleDrawer={() => setDrawerOpen((value) => !value)}
