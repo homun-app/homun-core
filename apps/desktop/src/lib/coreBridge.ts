@@ -781,6 +781,20 @@ async function electronMineHomunCuriosities(): Promise<number> {
   return body.queued ?? 0;
 }
 
+async function electronHomunCheckinNow(): Promise<{ delivered: boolean; summary: string }> {
+  try {
+    const response = await fetch(`${DESKTOP_GATEWAY_URL}/api/homun/checkin-now`, {
+      method: "POST",
+      headers: gatewayHeaders(),
+    });
+    if (!response.ok) return { delivered: false, summary: `HTTP ${response.status}` };
+    const body = (await response.json()) as { delivered?: boolean; summary?: string };
+    return { delivered: body.delivered ?? false, summary: body.summary ?? "" };
+  } catch {
+    return { delivered: false, summary: "errore" };
+  }
+}
+
 async function electronDismissHomunCuriosity(id: number): Promise<void> {
   await fetch(`${DESKTOP_GATEWAY_URL}/api/homun/curiosities/dismiss`, {
     method: "POST",
@@ -1836,6 +1850,7 @@ export const coreBridge = {
     electronSetHomunProactive(enabled, every),
   homunCuriosities: () => electronHomunCuriosities(),
   mineHomunCuriosities: () => electronMineHomunCuriosities(),
+  homunCheckinNow: () => electronHomunCheckinNow(),
   dismissHomunCuriosity: (id: number) => electronDismissHomunCuriosity(id),
   homunAutomations: () => electronHomunAutomations(),
   mineHomunAutomations: () => electronMineHomunAutomations(),

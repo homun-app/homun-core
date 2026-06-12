@@ -450,6 +450,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "/api/homun/proactive",
             get(homun_proactive_status).post(homun_proactive_set),
         )
+        .route("/api/homun/checkin-now", post(homun_checkin_now))
         .route(
             "/api/homun/curiosities",
             get(homun_curiosities_list).post(homun_curiosities_mine),
@@ -1329,13 +1330,16 @@ async fn homun_proactive_set(
             .filter(|s| !s.is_empty())
             .unwrap_or("every 3h");
         let now = OffsetDateTime::now_utc();
-        let Some(next) = local_first_task_runtime::next_occurrence(every, None, now) else {
+        // Validate the recurrence rule (rejects garbage), but the FIRST occurrence
+        // fires SOON (not 3h out) so enabling proactivity visibly works right away;
+        // the recurrence drives every subsequent check-in.
+        if local_first_task_runtime::next_occurrence(every, None, now).is_none() {
             return Err(GatewayError {
                 status: StatusCode::BAD_REQUEST,
                 code: "schedule_invalid",
                 message: format!("Pianificazione '{every}' non valida."),
             });
-        };
+        }
         let id = format!("sched_homun_{}", uuid::Uuid::new_v4().simple());
         let mut task = TaskRecord::new(
             id,
@@ -1345,7 +1349,7 @@ async fn homun_proactive_set(
             HOMUN_CHECKIN_GOAL,
             serde_json::json!({ "deliver_thread": "homun" }),
         );
-        task.not_before = Some(next);
+        task.not_before = Some(now + Duration::minutes(2));
         task.recurrence = Some(every.to_string());
         if let Ok(store) = lock_task_store(&state) {
             store.insert_task(&task).map_err(|error| GatewayError {
@@ -1356,6 +1360,42 @@ async fn homun_proactive_set(
         }
     }
     Ok(Json(serde_json::json!({ "enabled": req.enabled })))
+}
+
+/// POST /api/homun/checkin-now — run a Homun check-in IMMEDIATELY, bypassing the
+/// human-cadence gates (hour / random pause / idle) but keeping the curiosity queue +
+/// mining. Powers a "chiedimi qualcosa ora" button and is the deterministic way to
+/// verify the proactive delivery path end-to-end (no 3h wait).
+async fn homun_checkin_now(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let task = TaskRecord::new(
+        format!("homun_now_{}", uuid::Uuid::new_v4().simple()),
+        gateway_user_id(),
+        gateway_workspace_id(),
+        "proactive_prompt",
+        HOMUN_CHECKIN_GOAL,
+        serde_json::json!({ "deliver_thread": "homun", "force": true }),
+    );
+    let st = state.clone();
+    let outcome = tokio::task::spawn_blocking(move || execute_proactive_prompt_task(&st, &task))
+        .await
+        .map_err(|e| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "homun_checkin_now",
+            message: e.to_string(),
+        })?;
+    match outcome {
+        Ok(o) => {
+            let delivered = !o.summary.contains("saltato") && !o.chat_message.is_empty();
+            Ok(Json(serde_json::json!({
+                "ok": true,
+                "delivered": delivered,
+                "summary": o.summary,
+            })))
+        }
+        Err(e) => Ok(Json(serde_json::json!({ "ok": false, "error": e.message }))),
+    }
 }
 
 async fn select_chat_thread(
@@ -16065,9 +16105,20 @@ fn execute_proactive_prompt_task(
     // and then, within waking hours (local timezone). Outside 9–22, on a "pause" roll,
     // or while the user is ACTIVELY working (real-idle gate), skip silently — complete
     // the occurrence (so the recurrence re-enqueues) with no message and no event.
+    // `force` (set by the "check-in ora" endpoint) bypasses the human-cadence gates
+    // (hour / random pause / idle) but KEEPS the curiosity queue + mining — so a manual
+    // nudge always tries to deliver, and we can verify the path end-to-end on demand.
+    let force = task
+        .input_json
+        .get("force")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
     let mut homun_curiosity: Option<(i64, String)> = None;
     if deliver_thread == Some("homun") {
         let skip = |reason: &str| {
+            // OBSERVABILITY (#proattività): every skip is logged so it's visible WHY a
+            // check-in didn't arrive (the bug was invisible before).
+            eprintln!("[homun] check-in saltato: {reason}");
             Ok(TaskExecutionOutcome {
                 completed: true,
                 blocked_reason: None,
@@ -16084,17 +16135,20 @@ fn execute_proactive_prompt_task(
                 artifacts: vec![],
             })
         };
-        let now = now_local(); // user timezone (Now & Dates layer)
-        let hour = now.hour(); // i8, 0..23
-        let roll = now.subsec_nanosecond().rem_euclid(100);
-        if !(9..22).contains(&hour) || roll >= 45 {
-            return skip("orario o pausa");
-        }
-        // Real idle (H3): don't interrupt while the user is actively working —
-        // a check-in lands when they've been quiet for a while.
-        if let Some(secs) = seconds_since_user_activity() {
-            if secs < homun_idle_threshold_secs() {
-                return skip("utente attivo");
+        if !force {
+            let now = now_local(); // user timezone (Now & Dates layer)
+            let hour = now.hour(); // i8, 0..23
+            // Waking-hours only. (The old 45% random "pause" was removed: combined with
+            // the idle gate + 3h cadence it made delivery so rare it looked broken.)
+            if !(9..22).contains(&hour) {
+                return skip("fuori orario (9–22)");
+            }
+            // Real idle (H3): don't interrupt while the user is actively working —
+            // a check-in lands when they've been quiet for a while.
+            if let Some(secs) = seconds_since_user_activity() {
+                if secs < homun_idle_threshold_secs() {
+                    return skip("utente attivo");
+                }
             }
         }
         // Apprendista (H2): the question comes from the durable curiosity queue —
@@ -16104,11 +16158,13 @@ fn execute_proactive_prompt_task(
             .ok()
             .and_then(|s| s.pending_curiosity_count().ok())
             .unwrap_or(0);
+        eprintln!("[homun] check-in: force={force}, coda pending={pending}");
         if pending < 3 {
             let queued = handle.block_on(mine_curiosities(state));
-            if queued > 0 {
-                eprintln!("homun-mining: {queued} nuove curiosità in coda");
-            }
+            eprintln!(
+                "[homun] mining: +{queued} curiosità (pending stimato ora {})",
+                pending + queued as i64
+            );
         }
         // Forget-coherent dequeue: a curiosity touching FORGOTTEN content is
         // dismissed on the spot, never asked.
@@ -16129,6 +16185,10 @@ fn execute_proactive_prompt_task(
         let Some((_, ref text)) = homun_curiosity else {
             return skip("nessuna curiosità in coda");
         };
+        eprintln!(
+            "[homun] consegno: {}",
+            text.chars().take(70).collect::<String>()
+        );
         goal = format!(
             "Proponi all'utente SOLO questa curiosità, in modo naturale, caldo e ancorato a ciò \
 che sai di lui: «{text}». UNA sola domanda o proposta: non aggiungerne altre, non ripetere \

@@ -3788,6 +3788,37 @@ body.resizing-drawer {
   opacity: 0.6;
   cursor: default;
 }
+.homun-proactive-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 18px;
+}
+.homun-proactive-row .homun-proactive {
+  margin-top: 0;
+}
+.homun-nudge {
+  padding: 8px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  color: var(--muted);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+.homun-nudge:hover:not(:disabled) {
+  border-color: var(--brand);
+  color: var(--text);
+}
+.homun-nudge:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.homun-nudge-note {
+  font-size: var(--text-sm);
+  color: var(--muted);
+}
 
 /* Homun "ho qualcosa da dirti" badge on the nav entry. */
 .nav-unread-dot {
