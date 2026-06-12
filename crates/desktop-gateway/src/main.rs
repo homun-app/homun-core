@@ -1172,6 +1172,9 @@ un'osservazione vaga; (3) è NUOVA, non assomiglia alle card GIÀ PRESENTI.\n\
 NON fare: consigli generici o motivazionali; domande-intervista («come posso aiutarti»); azioni \
 eseguite (se proponi un'azione va in `proposed_action` e sarà l'utente ad approvarla). Se non c'è \
 nulla di solido e non banale, rispondi {\"suggestion\": null}. MEGLIO ZERO CHE RUMORE.\n\
+IMPARA DAL FEEDBACK: se è presente una sezione FEEDBACK, privilegia lo STILE e i TEMI dei \
+suggerimenti che l'utente ha trovato UTILI ed EVITA ciò che assomiglia a quelli segnati NON UTILI \
+(non riproporre quel genere). Il feedback è il segnale più importante sul suo gusto.\n\
 Rispondi SOLO con JSON: {\"suggestion\": null} OPPURE {\"suggestion\": {\"kind\":\"tema breve in \
 kebab-case (es. scadenza, progetto-fermo, automazione, follow-up)\",\"title\":\"titolo brevissimo\",\
 \"body\":\"1-3 frasi: cosa hai notato e cosa proponi\",\"rationale\":\"da quale elemento del contesto \
@@ -1225,7 +1228,20 @@ async fn run_proactive_review(state: &AppState, scope: &str) -> Option<i64> {
     if !pending.is_empty() {
         brief.push_str("CARD GIÀ PRESENTI (NON ripeterle, nemmeno parafrasate):\n");
         brief.push_str(&pending.join("\n"));
-        brief.push('\n');
+        brief.push_str("\n\n");
+    }
+    // A5: the adaptive loop — recent liked/disliked cards calibrate what to surface.
+    let feedback = lock_store(state)
+        .ok()
+        .and_then(|s| s.recent_feedback(scope, 12).ok())
+        .unwrap_or_default();
+    if !feedback.is_empty() {
+        brief.push_str("FEEDBACK DELL'UTENTE (impara da qui):\n");
+        for (verdict, kind, title) in &feedback {
+            let mark = if verdict == "liked" { "UTILE" } else { "NON UTILE" };
+            brief.push_str(&format!("- [{mark}] ({kind}) {title}\n"));
+        }
+        eprintln!("[proattività] review '{scope}': {} segnali di feedback in contesto", feedback.len());
     }
 
     let root = call_memory_json(state, PROACTIVE_SUPERVISOR_SYSTEM, &brief).await?;

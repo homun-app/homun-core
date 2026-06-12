@@ -1812,6 +1812,26 @@ impl ChatStore {
         Ok(())
     }
 
+    /// Recent feedback signals for a scope (ADR 0011 §7, the adaptive loop): cards
+    /// the user marked liked/disliked, newest first. The supervisor reads these to
+    /// calibrate future suggestions — privilege the style of the liked, avoid the
+    /// disliked. Returns (feedback, kind, title).
+    pub fn recent_feedback(
+        &self,
+        scope: &str,
+        limit: usize,
+    ) -> rusqlite::Result<Vec<(String, String, String)>> {
+        let mut stmt = self.conn.prepare(
+            "select feedback, kind, title from suggestions
+             where scope = ?1 and feedback is not null and feedback <> ''
+             order by updated_at desc limit ?2",
+        )?;
+        let rows = stmt.query_map(params![scope, limit as i64], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
+        })?;
+        rows.collect()
+    }
+
     /// Prunes channel dedup entries older than `max_age_secs` (best-effort
     /// housekeeping; the table only needs to remember the recent offline window
     /// plus a margin). Returns the number of rows removed.
@@ -2202,6 +2222,33 @@ mod tests {
         assert!(store.plugin_enabled("proattivita"));
         // Independent per id.
         assert!(store.plugin_enabled("invoicing"));
+    }
+
+    #[test]
+    fn recent_feedback_returns_acted_cards_scoped() {
+        let store = ChatStore::in_memory().unwrap();
+        let mk = |scope: &str, key: &str, title: &str| SuggestionInput {
+            scope: scope.to_string(),
+            kind: "follow-up".to_string(),
+            title: title.to_string(),
+            dedup_key: key.to_string(),
+            ..Default::default()
+        };
+        let liked = store.insert_suggestion(&mk("proj", "k1", "Utile")).unwrap();
+        let disliked = store.insert_suggestion(&mk("proj", "k2", "Rumore")).unwrap();
+        store.insert_suggestion(&mk("proj", "k3", "Intatta")).unwrap();
+        let personal = store.insert_suggestion(&mk("__personal__", "p1", "Altro scope")).unwrap();
+        store.set_suggestion_status(liked, "accepted", Some("liked"), None).unwrap();
+        store.set_suggestion_status(disliked, "dismissed", Some("disliked"), None).unwrap();
+        store.set_suggestion_status(personal, "dismissed", Some("disliked"), None).unwrap();
+
+        // Only acted cards of the scope, newest first; the untouched one is excluded.
+        let fb = store.recent_feedback("proj", 10).unwrap();
+        assert_eq!(fb.len(), 2);
+        assert!(fb.iter().any(|(f, _, t)| f == "liked" && t == "Utile"));
+        assert!(fb.iter().any(|(f, _, t)| f == "disliked" && t == "Rumore"));
+        // Scope isolation: the personal feedback doesn't leak into proj.
+        assert_eq!(store.recent_feedback("__personal__", 10).unwrap().len(), 1);
     }
 
     #[test]
