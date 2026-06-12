@@ -88,3 +88,83 @@ forked snowflakes.
 - NOT generating arbitrary per-customer applications/code.
 - NOT a flow-builder (n8n-style); customization is conversational, within the
   contract.
+
+## Addendum 2026-06-13: addon = panel + engine; proactivity is the FIRST addon; A→B path
+
+Design session refinements (decisioni utente):
+
+**6. An addon is SELF-CONTAINED: its own panel (UI) + its own engine (logic).**
+Detach the addon → its nav entry, panel AND engine all disappear together. This is
+the "extension" model (VS Code / Obsidian): a plugin contributes both views and
+behaviour; uninstalling removes everything. The core becomes a **host** with:
+- **UI extension point**: a nav slot + a panel region the plugin fills (panel
+  CONTENT belongs to the plugin).
+- **Capability API (engine extension point)**: the host-provided calls a plugin may
+  use — read context/connectors, **emit a suggestion card**, **propose an action**
+  (→ approval gate), schedule, read/write its own config+state — all inside the
+  security perimeter. No raw system access.
+- **Lifecycle**: install / enable / disable / detach → de-registers nav + panel +
+  engine atomically.
+
+**7. The shared user-facing surface is the SUGGESTION CARD (a dashboard), not chat.**
+A chat thread is the wrong container for proactivity: unanswered prompts pile up and
+read as debt (observed live — the Homun thread accumulated 20+ unanswered check-ins).
+Instead, addons (and the proactive supervisor) emit **cards into a dashboard**:
+- **Zen-but-expandable**: per project show the latest/most-relevant card + a count
+  ("+N altre"), expandable with filters (urgency, scope).
+- **No-repeat**: dedup against prior cards INCLUDING dismissed ones (generalize the
+  existing `curiosities` queue: pending|delivered|dismissed).
+- **Feedback → memory**: accept/dismiss is low-friction training signal; liked/
+  disliked is stored and CONDITIONS future suggestions (this is the precision/trust
+  mechanism — a clic, not a rule).
+- **Engage → chat in the correct workspace**: the card is the entry point; acting on
+  it lazily creates/opens a chat in that scope's workspace, seeded with the card
+  context. This DISSOLVES the proactive-task workspace-scoping problem: the engine
+  runs centrally, emits scope-tagged cards; the heavy chat materializes on demand in
+  the right place.
+
+**8. The proactivity supervisor is ADAPTIVE (LLM-driven), NOT a rule catalog.**
+No hardcoded observers (staleness/deadline/pattern were examples, not rules). The
+engine assembles context for a scope (project graph + memory/decisions + connected
+sources read via Composio/MCP — e.g. Trello/Mattermost) and an LLM **review turn**
+decides what's worth surfacing ("there are these things to do; I looked at the
+project, maybe the issue is this"). Guardrails (the user endorses guardrails, not
+rules): read-only/autonomous to observe+propose, **gated to act**; every card
+**grounded** in real context (no speculation); **no-repeat** durable. Triggered (idle
+/ new connector activity — Auto-G2 ConnectorPoll), not constant polling.
+
+**9. The PROACTIVE DASHBOARD is the FIRST addon** (not invoicing). It is OUR addon, so
+it both ships value AND proves/shapes the addon contract (panel + engine + capability
+API + lifecycle). **Invoicing becomes the SECOND addon**, reusing the same contract —
+confirming it generalizes (consistent with "extract the contract from a real addon").
+
+**10. Path A (now) → B (later).** The decision that sizes the work is internal vs
+external plugins:
+- **A — internal modules, now**: plugins are modules inside the app, each panel+engine,
+  behind a **registry** + enable/disable (detachable = gated). No sandbox, no dynamic
+  loading. Build proactivity as the first addon on this; design the manifest +
+  capability-API + UI-slot **in the shape of B** so conversion is mechanical, not a
+  rewrite. Ship the product on A.
+- **B — external/third-party, later** (the business model: free + PAID plugins):
+  dynamically-loaded, sandboxed (iframe panel + typed postMessage bridge), versioned
+  API, marketplace + licensing + payment.
+
+**B concrete analysis (grounded 2026-06-13 — "mesi" was imprecise).** Substrate already
+present: declarative engine (`process-skill`: Trigger/Step/Config → NO arbitrary code),
+zip install + ClawHub catalog (packaging/distribution), `CapabilityFacade` (the broker),
+sandboxed renderer + `<iframe>` precedent (UI sandbox). Decomposition (dev effort,
+assuming declarative engine): package format ~1–2d; declarative-engine loader ~2–3d;
+**iframe panel + typed bridge to capabilities (the real security boundary) ~1wk**;
+host↔plugin API versioning ~2–3d + ongoing; per-plugin permission/consent + signing
+~3–5d; marketplace (reuse skill catalog) ~3–5d; **licensing + payment ~1–2wk, partly
+external (Stripe/license server)**. Bottom line: the **technical core of B** (external,
+free, signed-by-us, declarative engine, sandboxed panel) is realistically **~1.5–2
+weeks** — not months, because the substrate exists and the engine is declarative. **Paid
+third-party** is **+2–4 weeks**, mostly PRODUCT/EXTERNAL (marketplace, licensing,
+payment, review/trust), not core engineering. Three levers that keep it small:
+(1) **declarative engine** (no code sandbox — already ADR 0011's choice); (2) start with
+**signed-by-us plugins only** (even paid) → defer the untrusted-code sandbox; (3) payment
+via **external integration**, not built in-house.
+
+Implication: do A now (contract shaped for B), launch; open B when selling plugins — and
+the gating work there is marketplace+payment+trust (product), not the loader.
