@@ -6523,6 +6523,8 @@ function HomunCuriosityQueue() {
 function HomunProactiveToggle() {
   const [enabled, setEnabled] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [nudging, setNudging] = useState(false);
+  const [nudgeNote, setNudgeNote] = useState<string | null>(null);
   useEffect(() => {
     coreBridge
       .homunProactiveStatus()
@@ -6537,20 +6539,47 @@ function HomunProactiveToggle() {
       .catch(() => {})
       .finally(() => setBusy(false));
   };
+  // On-demand check-in: bypasses the cadence gates and pulls one curiosity now.
+  // The delivered message arrives in the thread via the live `thread.updated` event.
+  const nudge = () => {
+    setNudging(true);
+    setNudgeNote(null);
+    coreBridge
+      .homunCheckinNow()
+      .then((r) =>
+        setNudgeNote(
+          r.delivered ? null : "Niente di nuovo da chiederti al momento.",
+        ),
+      )
+      .catch(() => setNudgeNote("Non riuscito, riprova."))
+      .finally(() => setNudging(false));
+  };
   return (
-    <button
-      type="button"
-      className={`homun-proactive ${enabled ? "on" : ""}`}
-      disabled={busy}
-      onClick={toggle}
-    >
-      <Sparkles size={14} />
-      <span>
-        {enabled
-          ? "Proattivo attivo · ti scrivo ogni tanto"
-          : "Attiva i check-in proattivi"}
-      </span>
-    </button>
+    <div className="homun-proactive-row">
+      <button
+        type="button"
+        className={`homun-proactive ${enabled ? "on" : ""}`}
+        disabled={busy}
+        onClick={toggle}
+      >
+        <Sparkles size={14} />
+        <span>
+          {enabled
+            ? "Proattivo attivo · ti scrivo ogni tanto"
+            : "Attiva i check-in proattivi"}
+        </span>
+      </button>
+      <button
+        type="button"
+        className="homun-nudge"
+        disabled={nudging}
+        title="Tira fuori una curiosità adesso"
+        onClick={nudge}
+      >
+        {nudging ? "…" : "Chiedimi qualcosa ora"}
+      </button>
+      {nudgeNote && <span className="homun-nudge-note">{nudgeNote}</span>}
+    </div>
   );
 }
 
