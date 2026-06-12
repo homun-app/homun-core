@@ -2735,6 +2735,22 @@ body.resizing-drawer {
   animation: panel-in 170ms ease both;
 }
 
+/* Fullscreen: expand the floating panel to near-full-window (design toggle). */
+.computer-detail-panel.fullscreen {
+  top: 12px;
+  right: 12px;
+  bottom: 12px;
+  left: 12px;
+  width: auto;
+}
+
+.computer-panel-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+}
+
 .computer-detail-panel > * {
   min-width: 0;
 }
