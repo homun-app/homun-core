@@ -224,6 +224,25 @@ impl TaskStore {
         self.insert_task(&task)
     }
 
+    /// Distinct (user, workspace) pairs that own tasks. Lets a maintenance sweep
+    /// (GC, dedup) reach tasks in EVERY workspace — `list_tasks` is per-workspace, so
+    /// cruft accumulated under old projects would otherwise be invisible to a sweep
+    /// scoped to the active workspace.
+    pub fn task_owner_scopes(&self) -> TaskRuntimeResult<Vec<(UserId, WorkspaceId)>> {
+        let mut statement = self
+            .connection
+            .prepare("SELECT DISTINCT user_id, workspace_id FROM tasks")?;
+        let rows = statement.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        let mut scopes = Vec::new();
+        for row in rows {
+            let (user, workspace) = row?;
+            scopes.push((UserId::new(user), WorkspaceId::new(workspace)));
+        }
+        Ok(scopes)
+    }
+
     pub fn list_tasks(
         &self,
         user_id: &UserId,

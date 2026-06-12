@@ -407,6 +407,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         harden_data_at_rest(&dir);
     }
     init_active_workspace_from_disk();
+    gc_stale_tasks(&state);
     backfill_contacts(&state);
     backfill_mentions(&state);
     unify_owner_identity(&state);
@@ -1028,6 +1029,29 @@ fn seed_homun_asked_questions(state: &AppState) {
     let _ = store.set_flag("homun_asked_seed_v1", "1");
 }
 
+/// A proactive task that DELIVERS into the Homun thread — matched by the
+/// `deliver_thread` marker, NOT the goal text. (The goal has changed across
+/// versions; matching the goal left old-goal check-ins uncancelled → duplicates
+/// kept firing. The delivery target is the stable identity.)
+fn task_delivers_to_homun(task: &TaskRecord) -> bool {
+    task.kind == "proactive_prompt"
+        && task
+            .input_json
+            .get("deliver_thread")
+            .and_then(|v| v.as_str())
+            == Some("homun")
+}
+
+fn task_is_live(task: &TaskRecord) -> bool {
+    matches!(
+        task.status,
+        local_first_task_runtime::TaskStatus::Queued
+            | local_first_task_runtime::TaskStatus::Pending
+            | local_first_task_runtime::TaskStatus::WaitingTime
+            | local_first_task_runtime::TaskStatus::Running
+    )
+}
+
 fn homun_checkin_is_active(state: &AppState) -> bool {
     let Ok(store) = lock_task_store(state) else {
         return false;
@@ -1035,17 +1059,9 @@ fn homun_checkin_is_active(state: &AppState) -> bool {
     let Ok(tasks) = store.list_tasks(&gateway_user_id(), &gateway_workspace_id()) else {
         return false;
     };
-    tasks.iter().any(|task| {
-        task.kind == "proactive_prompt"
-            && task.goal == HOMUN_CHECKIN_GOAL
-            && matches!(
-                task.status,
-                local_first_task_runtime::TaskStatus::Queued
-                    | local_first_task_runtime::TaskStatus::Pending
-                    | local_first_task_runtime::TaskStatus::WaitingTime
-                    | local_first_task_runtime::TaskStatus::Running
-            )
-    })
+    tasks
+        .iter()
+        .any(|task| task_delivers_to_homun(task) && task_is_live(task))
 }
 
 fn cancel_homun_checkins(state: &AppState) {
@@ -1058,16 +1074,7 @@ fn cancel_homun_checkins(state: &AppState) {
         return;
     };
     for task in tasks {
-        if task.kind == "proactive_prompt"
-            && task.goal == HOMUN_CHECKIN_GOAL
-            && matches!(
-                task.status,
-                local_first_task_runtime::TaskStatus::Queued
-                    | local_first_task_runtime::TaskStatus::Pending
-                    | local_first_task_runtime::TaskStatus::WaitingTime
-                    | local_first_task_runtime::TaskStatus::Running
-            )
-        {
+        if task_delivers_to_homun(&task) && task_is_live(&task) {
             let _ = store.update_task_status(
                 &task.task_id,
                 &user,
@@ -1076,6 +1083,85 @@ fn cancel_homun_checkins(state: &AppState) {
                 Some("check-in Homun disattivato"),
             );
         }
+    }
+}
+
+/// Startup garbage-collection of the task store. Two classes of cruft accumulate
+/// and never self-clean (no retention policy — gap #7):
+/// (1) execution tasks (the retired durable `browser_task` + granular `capability.*`)
+///     left stuck in non-terminal waiting/failed states forever — they'll never make
+///     progress (the durable browser engine was replaced by the inline loop);
+/// (2) DUPLICATE Homun check-ins — older versions used a different goal string, so
+///     `cancel_homun_checkins` (which used to match the goal) left them behind and they
+///     kept firing. Keep the most recent, cancel the rest.
+/// Conservative: only touches tasks older than 2 days for (1); status→Cancelled (history
+/// kept, not deleted). Idempotent; cheap; runs once at boot.
+fn gc_stale_tasks(state: &AppState) {
+    let Ok(store) = lock_task_store(state) else {
+        return;
+    };
+    // Sweep EVERY workspace, not just the active one: the cruft (retired durable
+    // browser tasks, duplicate check-ins) is spread across base + old project
+    // workspaces, invisible to a single-workspace scan.
+    let Ok(scopes) = store.task_owner_scopes() else {
+        return;
+    };
+    let cutoff = OffsetDateTime::now_utc() - Duration::days(2);
+    let mut cancelled = 0usize;
+    // All live Homun check-ins across all workspaces, for a GLOBAL dedup (only one
+    // should exist — they all deliver to the single base "homun" thread).
+    let mut homun_live: Vec<(UserId, WorkspaceId, TaskRecord)> = Vec::new();
+
+    for (user, workspace) in &scopes {
+        let Ok(tasks) = store.list_tasks(user, workspace) else {
+            continue;
+        };
+        for task in tasks {
+            // (1) Dead execution tasks: stuck waiting/failed, created long ago and
+            // never going to resolve (the durable browser engine was retired).
+            // Age by created_at (the scheduler bumps updated_at every poll).
+            let stuck = matches!(
+                task.status,
+                local_first_task_runtime::TaskStatus::WaitingExternalEvent
+                    | local_first_task_runtime::TaskStatus::WaitingResource
+                    | local_first_task_runtime::TaskStatus::Failed
+            );
+            let is_execution =
+                task.kind == "browser_task" || task.kind.starts_with("capability.");
+            if stuck && is_execution && task.created_at < cutoff {
+                let _ = store.update_task_status(
+                    &task.task_id,
+                    user,
+                    workspace,
+                    local_first_task_runtime::TaskStatus::Cancelled,
+                    Some("GC: task d'esecuzione obsoleto"),
+                );
+                cancelled += 1;
+                continue;
+            }
+            if task_delivers_to_homun(&task) && task_is_live(&task) {
+                homun_live.push((user.clone(), workspace.clone(), task));
+            }
+        }
+    }
+
+    // (2) Duplicate Homun check-ins (across ALL workspaces): keep the newest, cancel the rest.
+    homun_live.sort_by_key(|(_, _, task)| task.created_at);
+    if homun_live.len() > 1 {
+        for (user, workspace, task) in &homun_live[..homun_live.len() - 1] {
+            let _ = store.update_task_status(
+                &task.task_id,
+                user,
+                workspace,
+                local_first_task_runtime::TaskStatus::Cancelled,
+                Some("GC: check-in Homun duplicato"),
+            );
+            cancelled += 1;
+        }
+    }
+
+    if cancelled > 0 {
+        eprintln!("[gc] task obsoleti/duplicati cancellati: {cancelled}");
     }
 }
 
