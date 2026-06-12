@@ -29,6 +29,8 @@ import {
   X,
 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { pluginRegistry } from "../plugins/registry";
+import type { PluginState } from "../lib/coreBridge";
 import { ContactsView } from "./ContactsView";
 import { MemoryView } from "./MemoryView";
 import ReactMarkdown from "react-markdown";
@@ -75,6 +77,9 @@ import type {
 interface SettingsViewProps {
   connections: ConnectionItem[];
   section: SettingsSectionId;
+  // Called after an addon is toggled, so App can re-read enabled-state and
+  // mount/unmount its nav entry + panel (ADR 0011 §10-A).
+  onPluginsChanged?: () => void;
 }
 
 const SECTION_TITLES: Record<SettingsSectionId, string> = {
@@ -88,10 +93,11 @@ const SECTION_TITLES: Record<SettingsSectionId, string> = {
   channels: "Canali",
   connections: "Connettori",
   skills: "Skill",
+  addon: "Addon",
   computer: "Computer locale",
 };
 
-export function SettingsView({ section }: SettingsViewProps) {
+export function SettingsView({ section, onPluginsChanged }: SettingsViewProps) {
   const [model, setModel] = useState<ActiveModelInfo | null>(null);
   const [computer, setComputer] = useState<ContainedComputerLive | null>(null);
 
@@ -142,6 +148,7 @@ export function SettingsView({ section }: SettingsViewProps) {
         {section === "channels" && <ChannelsPane />}
         {section === "connections" && <ConnectorsPane />}
         {section === "skills" && <SkillsPane />}
+        {section === "addon" && <AddonPane onChanged={onPluginsChanged} />}
         {section === "computer" && <ComputerPane computer={computer} />}
       </div>
     </section>
@@ -4175,6 +4182,77 @@ function MemoryItemsList() {
           );
         })
       )}
+    </>
+  );
+}
+
+// Addon manager (ADR 0011 §6/§10-A): each registry plugin is self-contained
+// (panel + engine). Toggling persists the enabled flag in the backend, which
+// gates BOTH — detaching makes the nav entry, panel AND engine vanish together.
+function AddonPane({ onChanged }: { onChanged?: () => void }) {
+  const [states, setStates] = useState<PluginState[]>([]);
+  const [busy, setBusy] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void coreBridge.plugins().then((s) => {
+      if (!cancelled) setStates(s);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const isEnabled = (id: string) => states.find((s) => s.id === id)?.enabled !== false;
+
+  async function toggle(id: string) {
+    setBusy(id);
+    const next = await coreBridge.togglePlugin(id);
+    if (next) {
+      setStates((cur) => {
+        const rest = cur.filter((s) => s.id !== id);
+        return [...rest, next];
+      });
+      onChanged?.();
+    }
+    setBusy(null);
+  }
+
+  return (
+    <>
+      <p className="set-hint">
+        Gli addon estendono Homun con un pannello e un motore propri. Staccandone uno spariscono
+        sia la sua voce di navigazione sia il suo motore.
+      </p>
+      <div className="addon-list">
+        {pluginRegistry.map((p) => {
+          const on = isEnabled(p.id);
+          return (
+            <div key={p.id} className="addon-row">
+              <div className="addon-row-main">
+                <div className="addon-row-title">
+                  <p.navIcon size={16} aria-hidden="true" />
+                  <span>{p.name}</span>
+                  <span className={`addon-badge ${on ? "on" : "off"}`}>
+                    {on ? "Attivo" : "Disattivato"}
+                  </span>
+                </div>
+                <p className="addon-row-desc">{p.description}</p>
+                <div className="addon-caps">
+                  {p.capabilities.map((c) => (
+                    <span key={c} className="addon-cap">
+                      {c}
+                    </span>
+                  ))}
+                </div>
+              </div>
+              <div className={busy === p.id ? "addon-row-toggle is-busy" : "addon-row-toggle"}>
+                <Toggle on={on} onChange={() => void toggle(p.id)} />
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </>
   );
 }

@@ -1648,6 +1648,34 @@ async function electronProactivityReviewNow(
   }
 }
 
+// Plugin/addon registry enabled-state (ADR 0011 §10-A). The backend owns the flag
+// that gates both the UI (nav+panel) and the engine; detaching makes all vanish.
+export interface PluginState {
+  id: string;
+  enabled: boolean;
+}
+
+async function electronPlugins(): Promise<PluginState[]> {
+  try {
+    const payload = await gatewayGetJson<{ plugins: PluginState[] }>("/api/plugins");
+    return payload.plugins ?? [];
+  } catch {
+    return [];
+  }
+}
+
+async function electronTogglePlugin(id: string): Promise<PluginState | null> {
+  try {
+    const r = await gatewayPostJson<{ id?: string; enabled?: boolean }>(
+      `/api/plugins/${encodeURIComponent(id)}/toggle`,
+      {},
+    );
+    return typeof r.enabled === "boolean" ? { id, enabled: r.enabled } : null;
+  } catch {
+    return null;
+  }
+}
+
 async function electronComposioDisconnect(id: string): Promise<void> {
   const response = await fetch(
     `${DESKTOP_GATEWAY_URL}/api/capabilities/composio/connections/${encodeURIComponent(id)}`,
@@ -1860,6 +1888,8 @@ export const coreBridge = {
     note?: string,
   ) => electronSuggestionAct(id, status, feedback, note),
   proactivityReviewNow: (scope: string) => electronProactivityReviewNow(scope),
+  plugins: () => electronPlugins(),
+  togglePlugin: (id: string) => electronTogglePlugin(id),
   composioDisconnect: (id: string) => electronComposioDisconnect(id),
   composioExecute: (
     tool: string,

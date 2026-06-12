@@ -568,6 +568,24 @@ impl ChatStore {
         Ok(())
     }
 
+    // ── Plugin/addon enabled-state (ADR 0011 §6/§10-A) ──────────────────────────
+    // A plugin is enabled by default; disabling persists "0". The same flag gates
+    // the plugin's UI (nav+panel) AND its engine — detaching makes all three vanish.
+
+    /// True unless the plugin was explicitly disabled. Default-on so a freshly
+    /// shipped addon works without setup.
+    pub fn plugin_enabled(&self, id: &str) -> bool {
+        self.flag(&format!("plugin:{id}:enabled"))
+            .ok()
+            .flatten()
+            .map(|v| v != "0")
+            .unwrap_or(true)
+    }
+
+    pub fn set_plugin_enabled(&self, id: &str, enabled: bool) -> rusqlite::Result<()> {
+        self.set_flag(&format!("plugin:{id}:enabled"), if enabled { "1" } else { "0" })
+    }
+
     pub fn contact_id_by_identity(
         &self,
         channel: &str,
@@ -2170,6 +2188,20 @@ mod tests {
             .unwrap();
         assert_eq!(store.pending_suggestions(Some("proj"), 50).unwrap().len(), 1);
         assert!(store.suggestion_dedup_exists("proj", "k1").unwrap());
+    }
+
+    #[test]
+    fn plugin_enabled_defaults_on_and_toggles() {
+        let store = ChatStore::in_memory().unwrap();
+        // Default-on: a freshly shipped addon works without setup.
+        assert!(store.plugin_enabled("proattivita"));
+        // Disable persists "0" → off; re-enable → on.
+        store.set_plugin_enabled("proattivita", false).unwrap();
+        assert!(!store.plugin_enabled("proattivita"));
+        store.set_plugin_enabled("proattivita", true).unwrap();
+        assert!(store.plugin_enabled("proattivita"));
+        // Independent per id.
+        assert!(store.plugin_enabled("invoicing"));
     }
 
     #[test]

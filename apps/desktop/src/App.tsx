@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AutomationsView } from "./components/AutomationsView";
-import { ProattivitaView } from "./components/ProattivitaView";
 import { ChatView } from "./components/ChatView";
 import { ContainedComputerView } from "./components/ContainedComputerView";
 import { LearningView } from "./components/LearningView";
@@ -16,9 +15,11 @@ import {
   automationProposals,
   learningInsights,
   memorySummary,
+  navItems as staticNavItems,
   runtimeHealth,
   tasks,
 } from "./data/mockData";
+import { pluginRegistry, type PluginHost } from "./plugins/registry";
 import {
   coreBridge,
   subscribeAppEvents,
@@ -36,6 +37,7 @@ import {
   type CoreTaskItem,
   type CoreTaskQueueSnapshot,
   type ProactivitySuggestion,
+  type PluginState,
 } from "./lib/coreBridge";
 import type {
   ApprovalItem,
@@ -43,6 +45,7 @@ import type {
   ChatThread,
   ConnectionItem,
   MemorySummary,
+  NavItem,
   Priority,
   RuntimeHealth,
   SettingsSectionId,
@@ -425,6 +428,9 @@ export default function App() {
   // Seed text for the chat composer, set when a proactivity card is engaged so the
   // new chat opens pre-filled with the card's context (the nonce re-applies it).
   const [chatSeed, setChatSeed] = useState<{ text: string; nonce: number } | null>(null);
+  // Addon/plugin enabled-state (ADR 0011 §10-A): drives which registry plugins
+  // contribute a nav entry + panel. Default-on until the backend answers.
+  const [pluginStates, setPluginStates] = useState<PluginState[]>([]);
   const [settingsSection, setSettingsSection] =
     useState<SettingsSectionId>("account");
   // Badge on the Homun nav entry: set when a proactive message arrives while you're
@@ -665,6 +671,24 @@ export default function App() {
       console.warn("open_suggestion unavailable", error);
     }
   }
+
+  async function reloadPlugins() {
+    setPluginStates(await coreBridge.plugins());
+  }
+  useEffect(() => {
+    void reloadPlugins();
+  }, []);
+
+  // A registry plugin is shown unless the backend says it's disabled (default-on).
+  const enabledPlugins = pluginRegistry.filter(
+    (p) => pluginStates.find((s) => s.id === p.id)?.enabled !== false,
+  );
+  const composedNavItems: NavItem[] = [
+    ...staticNavItems,
+    ...enabledPlugins.map((p) => ({ id: p.id as ViewId, label: p.navLabel, icon: p.navIcon })),
+  ];
+  // The host capability surface handed to each plugin panel (ADR 0011 §6).
+  const pluginHost: PluginHost = { openChat: handleOpenSuggestion };
 
   async function applyThreadSnapshot(snapshot: CoreChatThreadSnapshot) {
     const mappedThreads = snapshot.threads.map(mapCoreChatThread);
@@ -1094,6 +1118,7 @@ export default function App() {
       onBackFromSettings={() => setActiveView(previousView)}
       onDeleteChatThread={handleDeleteChatThread}
       homunUnread={homunUnread}
+      navItems={composedNavItems}
       onNavigate={handleNavigate}
       onOpenHomun={handleOpenHomun}
       onSelectThread={handleSelectThread}
@@ -1151,6 +1176,7 @@ export default function App() {
           <SettingsView
             connections={connectionItems}
             section={settingsSection}
+            onPluginsChanged={reloadPlugins}
           />
         )}
         {activeView === "automations" && (
@@ -1161,8 +1187,9 @@ export default function App() {
             onDelete={handleDeleteAutomation}
           />
         )}
-        {activeView === "proattivita" && (
-          <ProattivitaView onOpenChat={handleOpenSuggestion} />
+        {enabledPlugins.map(
+          (plugin) =>
+            activeView === plugin.id && <plugin.Panel key={plugin.id} host={pluginHost} />,
         )}
         {activeView === "browser" && <ContainedComputerView />}
         {activeView === "brain" && (

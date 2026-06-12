@@ -1,4 +1,5 @@
 import {
+  Blocks,
   Bot,
   Brain,
   CalendarClock,
@@ -8,7 +9,6 @@ import {
   GalleryVerticalEnd,
   Globe2,
   KeyRound,
-  Lightbulb,
   MessageSquare,
   Monitor,
   MonitorPlay,
@@ -34,10 +34,11 @@ import type {
   TaskItem,
 } from "../types";
 
+// Static core nav. Plugin/addon entries (es. "Proattività") sono aggiunti a runtime
+// dal registro in App.tsx in base allo stato abilitato (ADR 0011 §10-A): staccare
+// l'addon ne fa sparire la voce di nav.
 export const navItems: NavItem[] = [
   { id: "chat", label: "Nuovo compito", icon: MessageSquare },
-  // "Proattività": la dashboard di suggerimenti del supervisore (primo addon).
-  { id: "proattivita", label: "Proattività", icon: Lightbulb },
   // "Apprendimento" è confluito in Homun. "Memoria" è stata unificata nelle
   // Impostazioni → Memoria (un'unica superficie, fuori più pulito).
   // "Pianificato" (coda dei run) è confluito in Automazioni: la regola è la cosa
@@ -409,6 +410,7 @@ export const settingsSections: Array<{
   { id: "channels", label: "Canali", icon: MessageSquare, group: "capabilities" },
   { id: "connections", label: "Connettori", icon: Plug, group: "capabilities" },
   { id: "skills", label: "Skill", icon: Sparkles, group: "capabilities" },
+  { id: "addon", label: "Addon", icon: Blocks, group: "capabilities" },
   { id: "computer", label: "Computer locale", icon: MonitorPlay, group: "capabilities" },
 ];
 
