@@ -1218,6 +1218,9 @@ body.resizing-drawer {
 }
 
 .active-task-layout {
+  /* Shared by the detail panel (its width) and the conversation inset below, so the
+     two never drift. Desktop-first; the responsive breakpoints handle narrow widths. */
+  --detail-panel-w: min(520px, calc(100% - 48px));
   height: 100%;
   min-height: 0;
   position: relative;
@@ -1225,6 +1228,13 @@ body.resizing-drawer {
   grid-template-rows: 58px minmax(0, 1fr) auto;
   overflow: hidden;
   padding: 0 clamp(18px, 5vw, 72px);
+}
+
+/* "Fake-docked" panel: the panel itself is a flush-right full-height column (see
+   .computer-detail-panel), and here the conversation reflows LEFT by the panel's
+   width so nothing is covered — the docked effect without a layout-grid rebuild. */
+.active-task-layout.panel-open {
+  padding-right: calc(var(--detail-panel-w) + 20px);
 }
 
 .task-topbar {
@@ -2720,15 +2730,18 @@ body.resizing-drawer {
 
 .computer-detail-panel {
   position: absolute;
-  top: 66px;
-  right: 24px;
-  bottom: 112px;
+  top: 0;
+  right: 0;
+  bottom: 0;
   z-index: 12;
-  width: min(520px, calc(100% - 48px));
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
+  width: var(--detail-panel-w, min(520px, calc(100% - 48px)));
+  /* Docked look: flush-right full-height column, flat (border-left only, no shadow
+     /radius) — feels part of the frame, not a popup. */
+  border: none;
+  border-left: 1px solid var(--line);
+  border-radius: 0;
   background: var(--surface);
-  box-shadow: var(--shadow-menu);
+  box-shadow: none;
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr) auto;
   overflow: hidden;

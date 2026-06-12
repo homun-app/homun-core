@@ -1439,7 +1439,10 @@ export function ChatView({
   const headerToolPolicy = thread.source ? "Solo lettura (canale)" : "Strumenti locali completi";
 
   return (
-    <section className="chat-view active-task-layout" aria-labelledby="chat-title">
+    <section
+      className={`chat-view active-task-layout${detailsOpen ? " panel-open" : ""}`}
+      aria-labelledby="chat-title"
+    >
       <header className="task-topbar">
         <div className="task-title-area">
           <button
