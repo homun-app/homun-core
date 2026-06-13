@@ -1324,6 +1324,67 @@ body.resizing-drawer {
   color: var(--text);
 }
 
+/* Panel view picker: the toggle opens this dropdown (mock interaction); each item
+   opens the docked panel at that view. */
+.panel-menu-wrap {
+  position: relative;
+  display: inline-flex;
+}
+/* Pinned to the top-right corner of the conversation, aligned with the title row.
+   z-index sits BELOW the docked panel (40) so the panel covers it when open and its
+   own header takes over — and ABOVE the thread content so it's clickable when closed. */
+.panel-menu-wrap--corner {
+  position: absolute;
+  top: 13px;
+  right: 16px;
+  z-index: 30;
+}
+.panel-menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+}
+.panel-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 60;
+  width: 228px;
+  padding: 6px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 18px 44px -16px rgba(22, 23, 28, 0.38);
+}
+.panel-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font-size: 13.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.panel-menu-item svg {
+  color: var(--muted);
+  flex: none;
+}
+.panel-menu-item:hover {
+  background: var(--surface-hover);
+}
+.panel-menu-item.active {
+  background: var(--brand-soft);
+  color: var(--brand);
+  font-weight: 600;
+}
+.panel-menu-item.active svg {
+  color: var(--brand);
+}
+
 .floating-menu {
   position: absolute;
   top: calc(100% + 8px);
@@ -3187,8 +3248,9 @@ body.resizing-drawer {
   display: flex;
   flex-direction: column;
   background: var(--surface);
+  /* Docked column (design): flat, border-left only — no float shadow. */
   border-left: 1px solid var(--line);
-  box-shadow: -16px 0 46px rgba(18, 22, 30, 0.12);
+  box-shadow: none;
 }
 .workbench.expanded {
   width: 100% !important;
@@ -3208,45 +3270,23 @@ body.resizing-drawer {
   background: var(--accent, #3b82f6);
   opacity: 0.35;
 }
-.workbench-tabs {
+/* Mock-style panel header: view title on the left, fullscreen + close on the right. */
+.workbench-header {
+  display: flex;
+  align-items: center;
+  padding: 14px 12px 10px 16px;
+}
+.workbench-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: -0.01em;
+}
+.workbench-header-actions {
+  margin-left: auto;
   display: flex;
   align-items: center;
   gap: 2px;
-  padding: 8px;
-  border-bottom: 1px solid var(--line);
-}
-.workbench-tab {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--muted);
-  font-size: 13px;
-}
-.workbench-tab:hover {
-  background: var(--surface-hover);
-  color: var(--text);
-}
-.workbench-tab.active {
-  background: var(--surface-hover);
-  color: var(--text);
-  font-weight: 600;
-}
-.workbench-tab-count {
-  min-width: 18px;
-  height: 18px;
-  padding: 0 5px;
-  border-radius: 9px;
-  display: inline-grid;
-  place-items: center;
-  font-size: 11px;
-  background: rgba(120, 130, 150, 0.16);
-  color: var(--text);
-}
-.workbench-tabs-spacer {
-  flex: 1;
 }
 .workbench-close {
   display: grid;
@@ -3282,13 +3322,17 @@ body.resizing-drawer {
 /* Goals manager (Workbench): define the project's objective. Mirrors the operational
    plan panel's visual language for consistency (same card, header, step rhythm). */
 .goals-manager {
-  margin-top: 16px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  padding: 12px 14px;
-  background: var(--surface);
+  /* Flush view inside the docked panel (mock language): the panel border + title
+     already frame it, so no inner card. Fill the panel, scroll when tall, and pin
+     content to the top so rows keep their natural height (no stretched textarea/buttons). */
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px 16px;
+  background: transparent;
   display: grid;
-  gap: 10px;
+  align-content: start;
+  gap: 12px;
 }
 .goals-head {
   display: flex;

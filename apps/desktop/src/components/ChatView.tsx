@@ -212,6 +212,7 @@ export function ChatView({
   // open/closed flag; `workbenchTab` is the active tab. Phase 1 ships the
   // "Artefatti" tab; File / Computer / Attività / Piano land in later phases.
   const [artifactsOpen, setArtifactsOpen] = useState(false);
+  const [panelMenuOpen, setPanelMenuOpen] = useState(false);
   const [workbenchTab, setWorkbenchTab] = useState<WorkbenchTab>("files");
   const [artifactsInitial, setArtifactsInitial] = useState<string | null>(null);
   // Is this thread a project? Reliable context signal (not keyword-detection) that gates
@@ -1470,23 +1471,66 @@ export function ChatView({
           )}
         </div>
 
-        <div className="task-top-actions">
-          {/* Header stripped to a single affordance: the Workbench toggle. Model
-              lives in the composer selector; share/⋯ removed as clutter. */}
-          <button
-            className={`workbench-toggle${artifactsOpen ? " active" : ""}`}
-            type="button"
-            title="Pannello (file, artefatti)"
-            aria-label="Apri pannello"
-            onClick={() => setArtifactsOpen((value) => !value)}
-          >
-            <PanelRight size={18} />
-            {conversationArtifacts.length > 0 && (
-              <span className="top-action-count">{conversationArtifacts.length}</span>
-            )}
-          </button>
-        </div>
       </header>
+
+      {/* Panel toggle pinned to the top-right CORNER of the conversation (mock): opens a
+          dropdown of panel views. When the panel opens it docks over this corner (z-index),
+          so the panel's own header (title + fullscreen + close) takes over — no duplicate. */}
+      <div className="panel-menu-wrap panel-menu-wrap--corner">
+        <button
+          className={`workbench-toggle${artifactsOpen ? " active" : ""}`}
+          type="button"
+          title={artifactsOpen ? "Chiudi pannello" : "Pannello"}
+          aria-label={artifactsOpen ? "Chiudi pannello" : "Apri pannello"}
+          aria-expanded={panelMenuOpen}
+          onClick={() => {
+            // Toggle: open → close the panel; closed → open the view dropdown.
+            if (artifactsOpen) {
+              setArtifactsOpen(false);
+              setPanelMenuOpen(false);
+            } else {
+              setPanelMenuOpen((value) => !value);
+            }
+          }}
+        >
+          <PanelRight size={18} />
+          {conversationArtifacts.length > 0 && (
+            <span className="top-action-count">{conversationArtifacts.length}</span>
+          )}
+        </button>
+        {panelMenuOpen && (
+          <>
+            <div
+              className="panel-menu-backdrop"
+              role="presentation"
+              onClick={() => setPanelMenuOpen(false)}
+            />
+            <div className="panel-menu" role="menu">
+              {PANEL_VIEWS.map((view) => {
+                const Icon = view.icon;
+                return (
+                  <button
+                    key={view.key}
+                    type="button"
+                    role="menuitem"
+                    className={`panel-menu-item${
+                      artifactsOpen && workbenchTab === view.key ? " active" : ""
+                    }`}
+                    onClick={() => {
+                      setWorkbenchTab(view.key);
+                      setArtifactsOpen(true);
+                      setPanelMenuOpen(false);
+                    }}
+                  >
+                    <Icon size={16} />
+                    <span>{view.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </>
+        )}
+      </div>
 
       <div className="thread-scroll" aria-label="Thread attivo" ref={conversationRef}>
         <div className="thread-content">
@@ -3083,6 +3127,26 @@ function InlineArtifactPreview({ artifact }: { artifact: ParsedArtifact }) {
  *  (Computer stays docked above the composer by design.) */
 type WorkbenchTab = "files" | "artifacts" | "memoria" | "goals" | "activity" | "plan";
 
+// Shared view metadata for the panel: the header dropdown (chat top-right) and the
+// in-panel title both read from here, so labels/icons never drift. Mock interaction:
+// toggle → dropdown menu → docked panel with that view + a clean title header.
+const PANEL_VIEWS: { key: WorkbenchTab; label: string; icon: typeof FileText }[] = [
+  { key: "files", label: "File", icon: FolderOpen },
+  { key: "artifacts", label: "Artefatti", icon: FileText },
+  { key: "memoria", label: "Memoria", icon: Share2 },
+  { key: "goals", label: "Obiettivi", icon: Target },
+  { key: "activity", label: "Attività", icon: Clock3 },
+  { key: "plan", label: "Piano", icon: ListTodo },
+];
+const PANEL_VIEW_LABEL: Record<WorkbenchTab, string> = {
+  files: "File",
+  artifacts: "Artefatti",
+  memoria: "Memoria",
+  goals: "Obiettivi",
+  activity: "Attività",
+  plan: "Piano",
+};
+
 /** The Workbench: one toggle → a docked right panel with tabs, consolidating the
  *  assistant's tools/outputs (Claude-Code / IDE inspector pattern). Replaces the
  *  scattered header affordances. */
@@ -3895,31 +3959,9 @@ function Workbench({
   useEffect(() => {
     if (open && fsCwd === null) void loadFs(null);
   }, [open, fsCwd, loadFs]);
-  // Show only POPULATED tabs; if the active one becomes hidden, jump to the first
-  // populated tab (memoria is the always-available baseline so the panel is never empty).
-  useEffect(() => {
-    if (!open) return;
-    const populated = (key: WorkbenchTab): boolean => {
-      switch (key) {
-        case "files":
-          return uploadedFiles.length > 0 || fsRoot != null;
-        case "artifacts":
-          return artifacts.length > 0;
-        case "memoria":
-          return true;
-        case "goals":
-          return projectThread;
-        case "activity":
-          return (tasks ? tasks.active.length + tasks.queued.length + tasks.blocked.length : 0) > 0;
-        case "plan":
-          return parseOperationalPlanItems(operationalPlanMarkdown).length > 0;
-      }
-    };
-    if (!populated(tab)) {
-      const order: WorkbenchTab[] = ["files", "artifacts", "plan", "goals", "activity", "memoria"];
-      onTab(order.find(populated) ?? "memoria");
-    }
-  }, [open, tab, uploadedFiles.length, fsRoot, artifacts.length, tasks, operationalPlanMarkdown, projectThread, onTab]);
+  // No auto-redirect: every panel-open path picks a view explicitly (dropdown pick,
+  // save-goal → "goals", open-artifact → "artifacts"), and every view has its own
+  // empty state — so an explicitly chosen empty view stays put instead of bouncing.
   // Load project goals (Obiettivi tab) when the panel opens — resolves scope from thread.
   useEffect(() => {
     if (!open) return;
@@ -3956,7 +3998,6 @@ function Workbench({
   const refreshGoals = () => {
     void coreBridge.projectGoals(threadId).then(setGoalsData);
   };
-  const goalsAvailable = projectThread;
   const planItems = parseOperationalPlanItems(operationalPlanMarkdown);
   const activeTasks = tasks
     ? [...tasks.active, ...tasks.queued, ...tasks.blocked]
@@ -3964,53 +4005,6 @@ function Workbench({
   const atRoot = !fsRoot || fsCwd === fsRoot;
   const cwdLabel = fsCwd ? fsCwd.replace(/\/+$/, "").split("/").pop() || fsCwd : "";
   const parentOf = (path: string) => path.replace(/\/+$/, "").split("/").slice(0, -1).join("/");
-  const tabs: { key: WorkbenchTab; label: string; icon: typeof FileText; badge?: number }[] = [
-    {
-      key: "files",
-      label: "File",
-      icon: FolderOpen,
-      badge: uploadedFiles.length || undefined,
-    },
-    {
-      key: "artifacts",
-      label: "Artefatti",
-      icon: FileText,
-      badge: artifacts.length || undefined,
-    },
-    {
-      key: "memoria",
-      label: "Memoria",
-      icon: Share2,
-    },
-    {
-      key: "goals",
-      label: "Obiettivi",
-      icon: Target,
-      badge: goalsData?.goals.length || undefined,
-    },
-    {
-      key: "activity",
-      label: "Attività",
-      icon: Clock3,
-      badge: activeTasks.length || undefined,
-    },
-    {
-      key: "plan",
-      label: "Piano",
-      icon: ListTodo,
-      badge: planItems.length || undefined,
-    },
-  ];
-  // Only show tabs that have content (memoria is the always-available baseline).
-  const tabPopulated: Record<WorkbenchTab, boolean> = {
-    files: uploadedFiles.length > 0 || fsRoot != null,
-    artifacts: artifacts.length > 0,
-    memoria: true,
-    goals: goalsAvailable,
-    activity: activeTasks.length > 0,
-    plan: planItems.length > 0,
-  };
-  const visibleTabs = tabs.filter((entry) => tabPopulated[entry.key]);
   return (
     <aside
       className={`workbench${expanded ? " expanded" : ""}`}
@@ -4025,43 +4019,28 @@ function Workbench({
           onMouseDown={startResize}
         />
       )}
-      <div className="workbench-tabs" role="tablist">
-        {visibleTabs.map((entry) => {
-          const Icon = entry.icon;
-          return (
-            <button
-              key={entry.key}
-              role="tab"
-              type="button"
-              aria-selected={tab === entry.key}
-              className={`workbench-tab${tab === entry.key ? " active" : ""}`}
-              onClick={() => onTab(entry.key)}
-            >
-              <Icon size={15} />
-              <span>{entry.label}</span>
-              {entry.badge ? <span className="workbench-tab-count">{entry.badge}</span> : null}
-            </button>
-          );
-        })}
-        <span className="workbench-tabs-spacer" />
-        <button
-          className="workbench-close"
-          type="button"
-          aria-label={expanded ? "Riduci pannello" : "Schermo intero"}
-          title={expanded ? "Riduci" : "Schermo intero"}
-          onClick={() => setExpanded((value) => !value)}
-        >
-          {expanded ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
-        </button>
-        <button
-          className="workbench-close"
-          type="button"
-          aria-label="Chiudi pannello"
-          title="Chiudi pannello"
-          onClick={onClose}
-        >
-          <X size={16} />
-        </button>
+      <div className="workbench-header">
+        <span className="workbench-title">{PANEL_VIEW_LABEL[tab]}</span>
+        <span className="workbench-header-actions">
+          <button
+            className="workbench-close"
+            type="button"
+            aria-label={expanded ? "Riduci pannello" : "Schermo intero"}
+            title={expanded ? "Riduci" : "Schermo intero"}
+            onClick={() => setExpanded((value) => !value)}
+          >
+            {expanded ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+          </button>
+          <button
+            className="workbench-close"
+            type="button"
+            aria-label="Chiudi pannello"
+            title="Chiudi pannello"
+            onClick={onClose}
+          >
+            <X size={16} />
+          </button>
+        </span>
       </div>
       <div className="workbench-body">
         {tab === "files" && openFile && (
