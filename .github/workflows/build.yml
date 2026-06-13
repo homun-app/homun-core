@@ -1,0 +1,129 @@
+name: Build installers
+
+# Builds native installers for macOS, Windows and Linux.
+# - Triggered on version tags (v*) -> builds + drafts a GitHub Release with the
+#   installers attached.
+# - Triggered manually (workflow_dispatch) -> builds + uploads artifacts only
+#   (no release), handy for verifying the pipeline without cutting a version.
+#
+# Each runner builds its OWN native gateway binary (cargo --release) and bundles
+# it into the app, so an installer is only valid for the OS/arch that produced it.
+#
+# Security note: no untrusted github.event.* input is interpolated into run:
+# steps. The only ${{ }} expressions inside commands are secrets and matrix
+# values, both trusted/controlled here -> no workflow-injection surface.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write # the release job needs this to create a GitHub Release
+
+jobs:
+  build:
+    name: Build (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    env:
+      # Resolves to the string 'true' only once the macOS signing cert secret is
+      # configured. Until then the mac build runs unsigned instead of failing.
+      HAS_APPLE_CERT: ${{ secrets.MAC_CSC_LINK != '' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14 # Apple Silicon -> arm64 gateway + arm64 app
+            platform: mac
+          - os: windows-latest # x64
+            platform: win
+          - os: ubuntu-22.04 # older glibc -> broader Linux compatibility
+            platform: linux
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+
+      - name: Linux build deps
+        if: matrix.platform == 'linux'
+        # Insurance for any transitive native-tls/openssl dep in the gateway tree.
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev
+
+      - name: Install npm deps
+        working-directory: apps/desktop
+        run: npm ci
+
+      - name: Prepare resources (vite build + gateway release binary)
+        working-directory: apps/desktop
+        run: npm run package:prepare
+
+      - name: Build installer (macOS · signed + notarized)
+        if: matrix.platform == 'mac' && env.HAS_APPLE_CERT == 'true'
+        working-directory: apps/desktop
+        run: npx electron-builder --mac --publish never -c.mac.notarize=true
+        env:
+          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+      - name: Build installer (macOS · unsigned — Apple cert not configured)
+        if: matrix.platform == 'mac' && env.HAS_APPLE_CERT != 'true'
+        working-directory: apps/desktop
+        run: npx electron-builder --mac --publish never -c.mac.identity=null
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+      - name: Build installer (Windows · unsigned)
+        if: matrix.platform == 'win'
+        working-directory: apps/desktop
+        run: npx electron-builder --win --publish never
+
+      - name: Build installer (Linux)
+        if: matrix.platform == 'linux'
+        working-directory: apps/desktop
+        run: npx electron-builder --linux --publish never
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: homun-${{ matrix.platform }}
+          path: |
+            apps/desktop/dist-installers/*.dmg
+            apps/desktop/dist-installers/*.zip
+            apps/desktop/dist-installers/*.exe
+            apps/desktop/dist-installers/*.AppImage
+            apps/desktop/dist-installers/*.deb
+          if-no-files-found: error
+
+  release:
+    name: Draft GitHub Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all installers
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create draft release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true # review the assets, then publish manually
+          generate_release_notes: true
+          files: artifacts/**/*
