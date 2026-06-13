@@ -15,7 +15,9 @@ function run(command, args, cwd) {
   const result = spawnSync(command, args, {
     cwd,
     stdio: "inherit",
-    shell: false,
+    // On Windows `npm`/`cargo` are `npm.cmd`/`cargo.exe`; without a shell
+    // spawnSync can't resolve them (PATHEXT) and fails with status: null.
+    shell: process.platform === "win32",
   });
   if (result.status !== 0) {
     throw new Error(`${command} ${args.join(" ")} failed with ${result.status}`);
