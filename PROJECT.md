@@ -1198,7 +1198,7 @@ Deliverable:
 ## Struttura Repository Proposta
 
 ```text
-local-first-personal-assistant/
+homun/
   apps/
     desktop/
       src/

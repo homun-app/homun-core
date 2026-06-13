@@ -38,7 +38,7 @@ fn data_dir() -> PathBuf {
     let base = std::env::var("HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|_| std::env::temp_dir())
-        .join(".local-first-personal-assistant");
+        .join(".homun");
     let _ = std::fs::create_dir_all(&base);
     base
 }

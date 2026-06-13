@@ -218,7 +218,7 @@ model-driven non sono verificabili headless. Commit: `9853162`, `4c53edc`,
    usa `webUtils.getPathForFile`.
    - **PREREQUISITO PDF**: serve la libreria nativa pdfium. Una volta sola, esegui
      `bash scripts/fetch-pdfium.sh` (scarica il prebuilt bblanchon in
-     `~/.local-first-personal-assistant/pdfium/`). Senza, immagini/testo funzionano
+     `~/.homun/pdfium/`). Senza, immagini/testo funzionano
      ma i PDF rispondono con un messaggio chiaro "motore PDF non disponibile".
    - **Persistenza nel thread** (`1d7e719`): l'allegato è ingerito UNA volta e
      salvato sul thread (tabella `thread_attachments`); a ogni turno il contenuto

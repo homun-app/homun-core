@@ -192,7 +192,7 @@ model), A1.6 (flag default ON).
 
 ### A1.1 VALIDATA end-to-end con modello frontier (qwen3-vl:235b)
 
-Chiave gestita in sicurezza: file 0600 `~/.local-first-personal-assistant/
+Chiave gestita in sicurezza: file 0600 `~/.homun/
 ollama-api-key`, letto via `LOCAL_FIRST_INFERENCE_API_KEY_FILE` (valore mai in
 chat/comandi). Endpoint `https://ollama.com/v1`.
 
@@ -461,7 +461,7 @@ milestone dedicato (de-hardcodare anche l'esecuzione, non solo il display).
 
 - S1 — Auth gateway obbligatoria di default. `resolve_gateway_auth_token()`
   (`desktop-gateway/src/main.rs`): env -> file persistito -> token generato
-  (due uuid v4) scritto 0600 in `~/.local-first-personal-assistant/
+  (due uuid v4) scritto 0600 in `~/.homun/
   desktop-gateway-token`. Mai piu' "auth off": rimosso il bypass in
   `require_gateway_token`, ora fail-closed se il token fosse vuoto. Aggiunta dep
   `uuid` v4 al gateway + helper `gateway_data_dir`/`write_private_file` (cfg unix
@@ -5284,7 +5284,7 @@ Brain.
   - tabella `chat_messages`;
   - tabella `settings` per `active_thread_id`.
 - Il DB usa `LOCAL_FIRST_DESKTOP_GATEWAY_DB` se presente, altrimenti
-  `~/.local-first-personal-assistant/desktop-gateway.sqlite`.
+  `~/.homun/desktop-gateway.sqlite`.
 - Nuovi endpoint chat persistenti:
   - `GET /api/chat/threads`;
   - `POST /api/chat/threads`;
@@ -5365,7 +5365,7 @@ e' lifecycle/packaging del gateway e poi collegamento Brain.
   - registra `llm-gemma4-mlx` dal `SidecarProcessCatalog`;
   - usa `.venv-mlx/bin/python runtimes/mlx-gemma4/server.py`;
   - mantiene il registry processi in
-    `~/.local-first-personal-assistant/process-registry.sqlite` o
+    `~/.homun/process-registry.sqlite` o
     `LOCAL_FIRST_PROCESS_REGISTRY_DB`;
   - se `/api/runtime/warmup` non trova Gemma in health, prova ad avviare il
     runtime prima di chiamare `/warmup`.
@@ -5572,7 +5572,7 @@ del processo Rust deve essere governato dalla shell desktop che l'utente avvia.
   - chiavi `sk-*` / `sk_proj_*`.
 - Il Desktop Gateway ora configura il supervisor con:
   - `LOCAL_FIRST_PROCESS_LOG_DIR`, se presente;
-  - fallback `~/.local-first-personal-assistant/logs/processes`;
+  - fallback `~/.homun/logs/processes`;
   - retention default 2.000 righe.
 - Il Desktop Gateway supporta `LOCAL_FIRST_GEMMA_PYTHON_VENV`:
   - in dev resta `.venv-mlx`;
@@ -6132,7 +6132,7 @@ una base piu' semplice da far crescere.
   - scope `always` persistito;
   - modalita browser `auto`, `visible`, `headless`.
 - Il Desktop Gateway apre `browser-url-policy.sqlite` sotto
-  `~/.local-first-personal-assistant`, configurabile con
+  `~/.homun`, configurabile con
   `LOCAL_FIRST_BROWSER_POLICY_DB`.
 - L'endpoint approve accetta ora opzioni opzionali:
   - `scope`;

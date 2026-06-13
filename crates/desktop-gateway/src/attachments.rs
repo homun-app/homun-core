@@ -210,7 +210,7 @@ fn render_pdf_pages(document: &PdfDocument) -> Result<Vec<String>, String> {
 }
 
 /// Binds the pdfium dynamic library at runtime. Resolution order:
-/// `LOCAL_FIRST_PDFIUM_LIB` (a dir or the lib file) → `~/.local-first-personal-assistant/pdfium`
+/// `LOCAL_FIRST_PDFIUM_LIB` (a dir or the lib file) → `~/.homun/pdfium`
 /// → the system library. Returns a clear error (not a panic) when unavailable, so a
 /// missing lib degrades to a "couldn't read the scan" note rather than crashing.
 fn bind_pdfium() -> Result<Pdfium, String> {
@@ -221,7 +221,7 @@ fn bind_pdfium() -> Result<Pdfium, String> {
     .map_err(|e| {
         format!(
             "motore PDF (pdfium) non disponibile: {e}. Scarica libpdfium e mettilo in \
-~/.local-first-personal-assistant/pdfium/ (o imposta LOCAL_FIRST_PDFIUM_LIB)."
+~/.homun/pdfium/ (o imposta LOCAL_FIRST_PDFIUM_LIB)."
         )
     })?;
     Ok(Pdfium::new(bindings))
@@ -239,7 +239,7 @@ fn pdfium_lib_dir() -> Option<std::path::PathBuf> {
     }
     let home = std::env::var("HOME").ok()?;
     let dir = std::path::PathBuf::from(home)
-        .join(".local-first-personal-assistant")
+        .join(".homun")
         .join("pdfium");
     if dir.is_dir() {
         return Some(dir);

@@ -911,7 +911,7 @@ export function ChatSearchModal({
               onClick={() => onSelectThread(thread.threadId)}
             >
               <span>{thread.title}</span>
-              <em>local-first-personal-assistant</em>
+              <em>homun</em>
               <kbd>⌘{index + 1}</kbd>
             </button>
           ))}

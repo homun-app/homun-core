@@ -1,5 +1,5 @@
 {
-  "name": "@local-first-personal-assistant/browser-automation",
+  "name": "homun-browser-automation",
   "version": "0.1.0",
   "private": true,
   "type": "module",

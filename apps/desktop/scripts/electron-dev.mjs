@@ -8,14 +8,14 @@ import { fileURLToPath } from "node:url";
 const devUrl = process.env.LOCAL_FIRST_DESKTOP_URL ?? "http://127.0.0.1:1420/";
 
 // Stable dev token: reuse the SAME 0600 file the gateway persists
-// (~/.local-first-personal-assistant/desktop-gateway-token) instead of minting
+// (~/.homun/desktop-gateway-token) instead of minting
 // a fresh random token each launch. This keeps the token constant across
 // gateway restarts, so long-lived children (e.g. the WhatsApp sidecar) keep a
 // valid WA_GATEWAY_TOKEN and don't need to be reconnected after every restart.
 function resolveGatewayToken() {
   const fromEnv = (process.env.LOCAL_FIRST_DESKTOP_GATEWAY_TOKEN ?? "").trim();
   if (fromEnv) return fromEnv;
-  const dir = join(homedir(), ".local-first-personal-assistant");
+  const dir = join(homedir(), ".homun");
   const tokenPath = join(dir, "desktop-gateway-token");
   try {
     const existing = readFileSync(tokenPath, "utf8").trim();

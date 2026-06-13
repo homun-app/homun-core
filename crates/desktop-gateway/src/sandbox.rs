@@ -28,7 +28,7 @@ pub fn artifacts_dir() -> PathBuf {
     std::env::var("HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|_| std::env::temp_dir())
-        .join(".local-first-personal-assistant")
+        .join(".homun")
         .join("artifacts")
 }
 

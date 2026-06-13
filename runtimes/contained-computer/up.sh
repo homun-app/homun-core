@@ -23,7 +23,7 @@ echo "==> (re)starting ${NAME}"
 docker rm -f "${NAME}" >/dev/null 2>&1 || true
 # Generated-file output dir: a real HOST folder bind-mounted at /home/agent/output
 # so skill artifacts (xlsx/pdf/…) persist on disk and are listed/downloadable.
-ARTIFACTS_DIR="${LFPA_ARTIFACTS_DIR:-$HOME/.local-first-personal-assistant/artifacts}"
+ARTIFACTS_DIR="${LFPA_ARTIFACTS_DIR:-$HOME/.homun/artifacts}"
 mkdir -p "${ARTIFACTS_DIR}"
 # Publish to loopback only. --shm-size avoids Chromium crashes on small /dev/shm.
 # Port 9100→9000: on-device Whisper STT server. Named volume persists the model

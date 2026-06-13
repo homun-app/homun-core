@@ -243,7 +243,7 @@ impl<T: McpTransport> McpCapabilityProvider<T> {
                 "protocolVersion": protocol_version,
                 "capabilities": {},
                 "clientInfo": {
-                    "name": "local-first-personal-assistant",
+                    "name": "homun",
                     "version": "0.1.0"
                 }
             })),

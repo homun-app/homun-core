@@ -35,7 +35,7 @@ impl McpHttpTransport {
     pub fn connect(config: McpHttpConfig) -> CapabilityResult<Self> {
         let client = reqwest::blocking::Client::builder()
             .timeout(std::time::Duration::from_secs(30))
-            .user_agent("local-first-personal-assistant")
+            .user_agent("homun")
             .build()
             .map_err(|e| CapabilityError::ProviderUnavailable(format!("mcp_http_client:{e}")))?;
         Ok(Self {

@@ -360,6 +360,32 @@ struct ErrorBody {
     message: String,
 }
 
+/// One-time data-dir migration after the project rename to "homun". Existing
+/// installs keep their data: if the legacy `~/.local-first-personal-assistant`
+/// still exists and the new `~/.homun` does not, move it across. Never deletes
+/// anything; on failure we proceed with a fresh `~/.homun`.
+fn migrate_legacy_data_dir() {
+    let Ok(home) = env::var("HOME") else {
+        return;
+    };
+    let home = PathBuf::from(home);
+    let legacy = home.join(".local-first-personal-assistant");
+    let current = home.join(".homun");
+    if legacy.exists() && !current.exists() {
+        match fs::rename(&legacy, &current) {
+            Ok(()) => eprintln!(
+                "[homun] migrated data dir {} -> {}",
+                legacy.display(),
+                current.display()
+            ),
+            Err(error) => eprintln!(
+                "[homun] WARN: data-dir migration failed ({error}); starting fresh at {}",
+                current.display()
+            ),
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // SECURITY (data at rest): make everything this process writes owner-only.
@@ -372,6 +398,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     unsafe {
         libc::umask(0o077 as libc::mode_t);
     }
+
+    // Move any pre-rename data dir to the new ~/.homun location before anything
+    // opens it (the SQLite stores are created immediately below).
+    migrate_legacy_data_dir();
+
     let port = env::var("LOCAL_FIRST_DESKTOP_GATEWAY_PORT")
         .ok()
         .and_then(|value| value.parse::<u16>().ok())
@@ -13022,11 +13053,11 @@ fn reconnect_channels_on_startup() {
     let gw_token = env::var("LOCAL_FIRST_DESKTOP_GATEWAY_TOKEN").ok();
 
     // WhatsApp: only if a session was previously paired (matches the sidecar's
-    // own session path under $HOME/.local-first-personal-assistant).
+    // own session path under $HOME/.homun).
     let wa_session = env::var("HOME")
         .map(PathBuf::from)
         .unwrap_or_default()
-        .join(".local-first-personal-assistant")
+        .join(".homun")
         .join("whatsapp-session.db");
     if !whatsapp_running() && wa_session.exists() {
         if let Some(bin) = whatsapp_bin() {
@@ -20851,7 +20882,7 @@ fn github_token() -> Option<String> {
 fn github_get(http: &reqwest::Client, url: &str) -> reqwest::RequestBuilder {
     let mut builder = http
         .get(url)
-        .header(reqwest::header::USER_AGENT, "local-first-personal-assistant");
+        .header(reqwest::header::USER_AGENT, "homun");
     if let Some(token) = github_token() {
         builder = builder.bearer_auth(token);
     }
@@ -26180,7 +26211,7 @@ fn gateway_database_path() -> Result<PathBuf, std::io::Error> {
     let base = env::var("HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|_| env::temp_dir())
-        .join(".local-first-personal-assistant");
+        .join(".homun");
     fs::create_dir_all(&base)?;
     Ok(base.join("desktop-gateway.sqlite"))
 }
@@ -26197,7 +26228,7 @@ fn gateway_task_database_path() -> Result<PathBuf, std::io::Error> {
     let base = env::var("HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|_| env::temp_dir())
-        .join(".local-first-personal-assistant");
+        .join(".homun");
     fs::create_dir_all(&base)?;
     Ok(base.join("task-runtime.sqlite"))
 }
@@ -26214,7 +26245,7 @@ fn gateway_local_computer_database_path() -> Result<PathBuf, std::io::Error> {
     let base = env::var("HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|_| env::temp_dir())
-        .join(".local-first-personal-assistant");
+        .join(".homun");
     fs::create_dir_all(&base)?;
     Ok(base.join("local-computer-session.sqlite"))
 }
@@ -26231,7 +26262,7 @@ fn gateway_browser_policy_database_path() -> Result<PathBuf, std::io::Error> {
     let base = env::var("HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|_| env::temp_dir())
-        .join(".local-first-personal-assistant");
+        .join(".homun");
     fs::create_dir_all(&base)?;
     Ok(base.join("browser-url-policy.sqlite"))
 }
@@ -26248,7 +26279,7 @@ fn gateway_memory_database_path() -> Result<PathBuf, std::io::Error> {
     let base = env::var("HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|_| env::temp_dir())
-        .join(".local-first-personal-assistant");
+        .join(".homun");
     fs::create_dir_all(&base)?;
     Ok(base.join("memory.sqlite"))
 }
@@ -26263,7 +26294,7 @@ fn gateway_memory_wiki_dir() -> Result<PathBuf, std::io::Error> {
     let base = env::var("HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|_| env::temp_dir())
-        .join(".local-first-personal-assistant")
+        .join(".homun")
         .join("memory-wiki");
     fs::create_dir_all(&base)?;
     Ok(base)
@@ -26281,7 +26312,7 @@ fn gateway_capability_database_path() -> Result<PathBuf, std::io::Error> {
     let base = env::var("HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|_| env::temp_dir())
-        .join(".local-first-personal-assistant");
+        .join(".homun");
     fs::create_dir_all(&base)?;
     Ok(base.join("capability-registry.sqlite"))
 }
@@ -26297,7 +26328,7 @@ fn gateway_data_dir() -> Result<PathBuf, std::io::Error> {
     let base = env::var("HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|_| env::temp_dir())
-        .join(".local-first-personal-assistant");
+        .join(".homun");
     fs::create_dir_all(&base)?;
     Ok(base)
 }
@@ -26532,7 +26563,7 @@ fn gateway_workspaces_path() -> Result<PathBuf, std::io::Error> {
     let base = env::var("HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|_| env::temp_dir())
-        .join(".local-first-personal-assistant");
+        .join(".homun");
     fs::create_dir_all(&base)?;
     Ok(base.join("workspaces.json"))
 }
@@ -26588,7 +26619,7 @@ fn gateway_secret_key_seed() -> Result<[u8; 32], std::io::Error> {
     let base = env::var("HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|_| env::temp_dir())
-        .join(".local-first-personal-assistant");
+        .join(".homun");
     fs::create_dir_all(&base)?;
     let path = base.join("secret-key");
     if let Ok(bytes) = fs::read(&path) {
@@ -26611,7 +26642,7 @@ fn open_gateway_secret_store()
     let base = env::var("HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|_| env::temp_dir())
-        .join(".local-first-personal-assistant");
+        .join(".homun");
     fs::create_dir_all(&base)?;
     EncryptedFileSecretStore::open(base.join("secrets.json"), DevelopmentSecretKeyProvider::new(seed))
         .map_err(|error| std::io::Error::other(error.to_string()))
