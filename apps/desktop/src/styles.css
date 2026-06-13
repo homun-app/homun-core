@@ -3227,6 +3227,73 @@ body.resizing-drawer {
   color: var(--text);
 }
 
+/* The ⊕ that opens the add menu (attach / folder / skill / improve) — round + bordered,
+   like the mock's leading button. */
+.composer-add-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  flex: none;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+}
+.composer-add-button:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+.composer-add-button.active {
+  border-color: var(--brand);
+  color: var(--brand);
+  background: var(--brand-soft);
+}
+.composer-add-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.composer-add-pop {
+  left: 0;
+  width: 224px;
+  padding: 6px;
+}
+.composer-add-pop button {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font-size: 13.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.composer-add-pop button svg {
+  color: var(--muted);
+  flex: none;
+}
+.composer-add-pop button:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+.composer-add-pop button.active,
+.composer-add-pop button.active svg {
+  color: var(--brand);
+}
+.composer-add-pop button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+/* Skill popover anchor with no trigger button: take no space (and no flex gap) when
+   the popover isn't open. */
+.composer-skill-anchor:empty {
+  display: none;
+}
+
 .composer-error {
   max-width: 240px;
   color: var(--danger);

@@ -36,6 +36,7 @@ import {
   MoreHorizontal,
   Paperclip,
   PanelRight,
+  Plus,
   Pause,
   Pencil,
   Play,
@@ -6432,6 +6433,7 @@ function Composer({
   }, [seed?.nonce]);
   const [linkedFolder, setLinkedFolder] = useState<string | null>(null);
   const [folderBusy, setFolderBusy] = useState(false);
+  const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [fileMenuOpen, setFileMenuOpen] = useState(false);
   const [fileQuery, setFileQuery] = useState("");
   const [fileResults, setFileResults] = useState<string[]>([]);
@@ -6969,35 +6971,88 @@ function Composer({
             type="file"
             onChange={handleAttachmentSelect}
           />
-          <button
-            className="icon-button"
-            disabled={disabled}
-            type="button"
-            aria-label="Aggiungi allegato"
-            title="Allega file"
-            onClick={() => fileInputRef.current?.click()}
-          >
-            <Paperclip size={17} />
-          </button>
+          {/* Mock: one ⊕ gathers every input action (attach / folder / skill / improve)
+              in a menu, keeping the bar clean. The folder + skill popovers it opens are
+              anchored to this same wrap. */}
           <div className="composer-pop-wrap">
             <button
-              className={`icon-button${contextFiles.length > 0 || linkedFolder ? " active" : ""}`}
+              className={`composer-add-button${
+                addMenuOpen || contextFiles.length > 0 || linkedFolder || forcedSkill
+                  ? " active"
+                  : ""
+              }`}
               type="button"
-              aria-label={linkedFolder ? "Menziona un file della cartella" : "Collega una cartella"}
-              aria-expanded={fileMenuOpen}
-              title={
-                linkedFolder
-                  ? `Menziona un file · ${folderName}`
-                  : "Collega una cartella alla conversazione"
-              }
+              disabled={disabled}
+              aria-label="Aggiungi"
+              aria-expanded={addMenuOpen}
+              title="Aggiungi: file, cartella, skill, migliora"
               onClick={() => {
-                setFileMenuOpen((open) => !open);
+                setAddMenuOpen((open) => !open);
+                setFileMenuOpen(false);
                 setSkillMenuOpen(false);
+                setModeMenuOpen(false);
                 setModelMenuOpen(false);
               }}
             >
-              <AtSign size={17} />
+              <Plus size={18} />
             </button>
+            {addMenuOpen && (
+              <div className="composer-pop composer-add-pop" role="menu">
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setAddMenuOpen(false);
+                    fileInputRef.current?.click();
+                  }}
+                >
+                  <Paperclip size={16} />
+                  <span>Allega file</span>
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className={contextFiles.length > 0 || linkedFolder ? "active" : ""}
+                  onClick={() => {
+                    setAddMenuOpen(false);
+                    setFileMenuOpen(true);
+                  }}
+                >
+                  <AtSign size={16} />
+                  <span>{linkedFolder ? "Menziona un file" : "Collega una cartella"}</span>
+                </button>
+                {skills.length > 0 && (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className={forcedSkill ? "active" : ""}
+                    onClick={() => {
+                      setAddMenuOpen(false);
+                      setSkillMenuOpen(true);
+                    }}
+                  >
+                    <Puzzle size={16} />
+                    <span>{forcedSkill ? `Skill · ${forcedSkill.name}` : "Usa una skill"}</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={improving || !value.trim()}
+                  onClick={() => {
+                    setAddMenuOpen(false);
+                    void handleImprovePrompt();
+                  }}
+                >
+                  {improving ? (
+                    <Loader2 size={16} className="composer-spin" />
+                  ) : (
+                    <WandSparkles size={16} />
+                  )}
+                  <span>Migliora il prompt</span>
+                </button>
+              </div>
+            )}
             {fileMenuOpen && !linkedFolder && (
               <div className="composer-pop composer-skill-pop" role="menu">
                 <div className="composer-pop-link">
@@ -7081,20 +7136,7 @@ function Composer({
             )}
           </div>
           {skills.length > 0 && (
-            <div className="composer-pop-wrap">
-              <button
-                className={`icon-button${forcedSkill ? " active" : ""}`}
-                type="button"
-                aria-label="Scegli una skill"
-                aria-expanded={skillMenuOpen}
-                title="Usa una skill"
-                onClick={() => {
-                  setSkillMenuOpen((open) => !open);
-                  setModelMenuOpen(false);
-                }}
-              >
-                <Puzzle size={17} />
-              </button>
+            <div className="composer-pop-wrap composer-skill-anchor">
               {skillMenuOpen && (
                 <div className="composer-pop composer-skill-pop" role="menu">
                   <div className="composer-pop-search">
@@ -7134,34 +7176,6 @@ function Composer({
               )}
             </div>
           )}
-          <button
-            className="icon-button"
-            type="button"
-            aria-label="Migliora il prompt"
-            title="Migliora il prompt"
-            disabled={disabled || improving || !value.trim()}
-            onClick={() => void handleImprovePrompt()}
-          >
-            {improving ? <Loader2 size={17} className="composer-spin" /> : <WandSparkles size={17} />}
-          </button>
-        </div>
-        <div className="composer-actions">
-          <button
-            className={`icon-button${recording ? " recording" : ""}`}
-            type="button"
-            aria-label={recording ? "Ferma dettatura" : "Dettatura vocale"}
-            title={recording ? "Ferma e trascrivi" : "Dettatura vocale (multilingua)"}
-            disabled={transcribing}
-            onClick={() => (recording ? stopDictation() : void startDictation())}
-          >
-            {transcribing ? (
-              <Loader2 size={17} className="composer-spin" />
-            ) : recording ? (
-              <span className="composer-stop-square" aria-hidden="true" />
-            ) : (
-              <Mic size={17} />
-            )}
-          </button>
             <div className="composer-pop-wrap">
               <button
                 className="composer-model-button"
@@ -7329,6 +7343,24 @@ function Composer({
               )}
             </div>
           )}
+        </div>
+        <div className="composer-actions">
+          <button
+            className={`icon-button${recording ? " recording" : ""}`}
+            type="button"
+            aria-label={recording ? "Ferma dettatura" : "Dettatura vocale"}
+            title={recording ? "Ferma e trascrivi" : "Dettatura vocale (multilingua)"}
+            disabled={transcribing}
+            onClick={() => (recording ? stopDictation() : void startDictation())}
+          >
+            {transcribing ? (
+              <Loader2 size={17} className="composer-spin" />
+            ) : recording ? (
+              <span className="composer-stop-square" aria-hidden="true" />
+            ) : (
+              <Mic size={17} />
+            )}
+          </button>
           {error && <span className="composer-error">{error}</span>}
           {composerAttachmentError && (
             <span className="composer-error">{composerAttachmentError}</span>
