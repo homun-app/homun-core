@@ -27134,6 +27134,29 @@ mod tests {
     }
 
     #[test]
+    fn auto_confirm_promotes_private_personal_facts_but_gates_pii() {
+        // The "la mia moto" fix (C'): the extractor tags ordinary personal facts and
+        // possessions as `private`, so the auto-confirm ceiling MUST be Private. An
+        // `Internal` cap froze EVERY personal fact at `candidate`, invisible to the
+        // always-on profile (which is confirmed-only).
+        assert!(is_auto_confirmable("fact", MemoryDataSensitivity::Private, 0.9));
+        assert!(is_auto_confirmable("preference", MemoryDataSensitivity::Private, 0.95));
+        assert!(is_auto_confirmable("decision", MemoryDataSensitivity::Private, 0.85));
+        assert!(is_auto_confirmable("goal", MemoryDataSensitivity::Private, 0.9));
+        // Less sensitive levels still auto-confirm.
+        assert!(is_auto_confirmable("fact", MemoryDataSensitivity::Internal, 0.9));
+        assert!(is_auto_confirmable("fact", MemoryDataSensitivity::Public, 0.9));
+        // Real PII (codice fiscale, health, addresses) stays a candidate to confirm.
+        assert!(!is_auto_confirmable("fact", MemoryDataSensitivity::Confidential, 0.99));
+        assert!(!is_auto_confirmable("fact", MemoryDataSensitivity::Secret, 0.99));
+        // Low confidence never auto-confirms.
+        assert!(!is_auto_confirmable("fact", MemoryDataSensitivity::Private, 0.5));
+        // Only durable knowledge types auto-confirm — not raw topics/entities.
+        assert!(!is_auto_confirmable("topic", MemoryDataSensitivity::Private, 0.95));
+        assert!(!is_auto_confirmable("entity", MemoryDataSensitivity::Private, 0.95));
+    }
+
+    #[test]
     fn summarize_tool_action_captures_mutations_skips_reads() {
         // Reads / discovery → nothing to remember.
         for read in ["read_file", "list_directory", "list_files", "recall_memory", "suggest_capabilities"] {
