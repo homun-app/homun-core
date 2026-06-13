@@ -5,7 +5,7 @@ Date: 2026-05-28
 ## Local Flow Map
 
 - Electron chat creates `browser_task` work in `crates/desktop-gateway/src/main.rs`.
-- `execute_browser_read_only_task` now routes to `execute_browser_loop_read_only_task` by default when `LOCAL_FIRST_BROWSER_LOOP_CONTROLLER` is enabled.
+- `execute_browser_read_only_task` now routes to `execute_browser_loop_read_only_task` by default when `HOMUN_BROWSER_LOOP_CONTROLLER` is enabled.
 - The gateway starts `runtimes/browser-automation` as a local stdio sidecar.
 - `BrowserLoopRunner` in `crates/browser-automation/src/browser_loop.rs` performs observe -> decide -> act -> observe.
 - `RuntimeBrowserLoopPlanner` in `crates/desktop-gateway/src/browser_loop_controller.rs` asks Gemma for one JSON decision at a time.

@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 const appRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const repoRoot = resolve(appRoot, "../..");
 const resourcesDir = resolve(
-  process.env.LOCAL_FIRST_DESKTOP_PACKAGE_RESOURCES ??
+  process.env.HOMUN_DESKTOP_PACKAGE_RESOURCES ??
     join(appRoot, ".package", "resources"),
 );
 const skipBuild = process.argv.includes("--skip-build");

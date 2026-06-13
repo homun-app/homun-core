@@ -19,7 +19,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 fn base_dir() -> PathBuf {
-    std::env::var("LFPA_DATA_DIR")
+    std::env::var("HOMUN_DATA_DIR")
         .map(PathBuf::from)
         .ok()
         .filter(|p| !p.as_os_str().is_empty())
@@ -27,7 +27,7 @@ fn base_dir() -> PathBuf {
             std::env::var("HOME")
                 .map(PathBuf::from)
                 .unwrap_or_else(|_| std::env::temp_dir())
-                .join(".local-first-personal-assistant")
+                .join(".homun")
         })
 }
 

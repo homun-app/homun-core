@@ -13,7 +13,7 @@ nativi:
 Ogni runner **ricompila il proprio gateway** (`cargo build --release`) e lo
 incapsula nell'app: un installer è valido solo per la coppia OS/arch che l'ha
 prodotto. Niente database, immagini Docker o dati nel pacchetto — l'app ricrea
-tutto al primo avvio in `~/.local-first-personal-assistant/`.
+tutto al primo avvio in `~/.homun/`.
 
 ¹ La firma+notarizzazione macOS si attiva **solo quando i secret sono
 configurati** (vedi sotto). Finché non lo sono, anche il build macOS gira ma

@@ -426,7 +426,7 @@ export const drawerTasks = [
 ];
 
 export const drawerProjects = [
-  "local-first-personal-assistant",
+  "homun",
   "Acme workspace",
   "Ricerca viaggi",
 ];

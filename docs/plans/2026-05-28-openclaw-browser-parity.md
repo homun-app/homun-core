@@ -56,12 +56,12 @@ Implemented:
   `depth`) derived from Playwright AI snapshots so the model sees actionable
   controls without keyword-based pruning.
 - The desktop gateway now routes browser tasks through the observe/act browser
-  loop by default when `LOCAL_FIRST_BROWSER_LOOP_CONTROLLER` is enabled; the
+  loop by default when `HOMUN_BROWSER_LOOP_CONTROLLER` is enabled; the
   old rigid read-only executor is fallback only.
 - Browser loop prompt switched to an OpenClaw-style contract and no longer
   relies on train-specific controller actions.
 - Browser loop planner now supports context ablation through
-  `LOCAL_FIRST_BROWSER_CONTEXT_PROFILE=full|compact|minimal`. The default
+  `HOMUN_BROWSER_CONTEXT_PROFILE=full|compact|minimal`. The default
   `compact` profile builds a budgeted action frame instead of passing a raw
   snapshot prefix, preserving relevant refs, goal matches and recent failure
   memory.
@@ -121,7 +121,7 @@ npm test -- --run
 cargo test -p local-first-browser-automation --test browser_loop -- --nocapture
 cargo test -p local-first-desktop-gateway browser_loop_controller -- --nocapture
 cargo test -p local-first-desktop-gateway train -- --nocapture
-LOCAL_FIRST_BROWSER_CONTEXT_PROFILE=compact cargo test -p local-first-desktop-gateway browser_loop_controller -- --nocapture
+HOMUN_BROWSER_CONTEXT_PROFILE=compact cargo test -p local-first-desktop-gateway browser_loop_controller -- --nocapture
 git diff --check
 ```
 

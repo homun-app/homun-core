@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://local-first-personal-assistant/contracts/subagents/subagent_task.schema.json",
+  "$id": "https://homun/contracts/subagents/subagent_task.schema.json",
   "title": "SubagentTask",
   "type": "object",
   "additionalProperties": false,

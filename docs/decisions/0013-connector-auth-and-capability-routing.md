@@ -73,9 +73,9 @@ with empty creds); **Spotify connected end-to-end (ACTIVE)** with the user's rea
   removed; the legacy link path now expresses itself through `composio_auth_config_resolve`
   (api_key→API_KEY/custom, else→OAUTH2/managed). One builder to maintain.
 - ~~Per-turn catalog rebuild~~ **DONE**: `composio_chat_tools_cached` caches the `/tools` fan-out
-  per `cap` with a short TTL (`LFPA_COMPOSIO_CACHE_SECS`, default 60s), invalidated on
+  per `cap` with a short TTL (`HOMUN_COMPOSIO_CACHE_SECS`, default 60s), invalidated on
   connect/link/disconnect. Measured: cold ~10s → cached ~0.4s on this setup (4 toolkits).
-- Verbose Composio diagnostics are now opt-in behind `LFPA_DEBUG` (error bodies can echo
+- Verbose Composio diagnostics are now opt-in behind `HOMUN_DEBUG` (error bodies can echo
   submitted credentials).
 
 ## Consequences

@@ -132,7 +132,7 @@ pub async fn refresh_cache(http: &reqwest::Client, path: &Path) -> Result<usize,
         }
         let resp = http
             .get(&url)
-            .header(reqwest::header::USER_AGENT, "local-first-personal-assistant")
+            .header(reqwest::header::USER_AGENT, "homun")
             .send()
             .await
             .map_err(|e| e.to_string())?;
@@ -221,7 +221,7 @@ pub async fn download_zip(http: &reqwest::Client, slug: &str) -> Result<Vec<u8>,
     let url = format!("{DOWNLOAD_BASE}?slug={}", urlencoding(slug));
     let resp = http
         .get(&url)
-        .header(reqwest::header::USER_AGENT, "local-first-personal-assistant")
+        .header(reqwest::header::USER_AGENT, "homun")
         .send()
         .await
         .map_err(|e| e.to_string())?;

@@ -15,7 +15,7 @@ set -euo pipefail
 
 SRC="${1:-/Users/fabio/Projects/superdev/evidence-first-methodology}"
 SKILLS_SRC="$SRC/skills"
-DEST="${LOCAL_FIRST_DATA_DIR:-$HOME/.local-first-personal-assistant}/skills"
+DEST="${HOMUN_DATA_DIR:-$HOME/.homun}/skills"
 
 # Methodology-development skills: kept in the source repo, NOT installed into Homun.
 EXCLUDE=(

@@ -45,7 +45,7 @@ invent new architecture.
 ### Phase 1 — local-first, no VM; fixes the complaint
 1. **Headless by default** — DONE (this commit). No focus-stealing window;
    self-heal `restartAssistantVisible` still recovers hard sites (window only as
-   last resort). `LOCAL_FIRST_BROWSER_HEADLESS=0` overrides.
+   last resort). `HOMUN_BROWSER_HEADLESS=0` overrides.
 2. **Per-iteration frame capture** — STAGED. Capture a screenshot artifact each
    loop iteration (best-effort, must not slow/destabilize the validated loop) so
    the EXISTING in-chat computer card updates live. Backend-only, but needs a
@@ -94,8 +94,8 @@ Chromium with CDP. `up.sh` validates CDP + noVNC reachability headlessly.
    `navigator.webdriver === false` (NOT flagged headless — the bot-detection win).
    Fixed a CDP-binding gotcha with a socat bridge (Chromium ignores
    `--remote-debugging-address`; binds loopback only).
-2. **Wire the gateway** — DONE & VALIDATED. `LOCAL_FIRST_CONTAINED_COMPUTER=1`
-   (or `LOCAL_FIRST_CONTAINED_COMPUTER_CDP=<url>`) makes every browser-sidecar
+2. **Wire the gateway** — DONE & VALIDATED. `HOMUN_CONTAINED_COMPUTER=1`
+   (or `HOMUN_CONTAINED_COMPUTER_CDP=<url>`) makes every browser-sidecar
    spawn carry `BROWSER_AUTOMATION_USER_CDP_ENDPOINT`; the sidecar then attaches
    via CDP by default (single switch). Shared `browser_sidecar_env` so no spawn
    path is missed. End-to-end probe drove the sidecar (start→open→snapshot)

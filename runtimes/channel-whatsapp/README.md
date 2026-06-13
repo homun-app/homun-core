@@ -23,9 +23,9 @@ scan it. The session is persisted, so subsequent runs reconnect automatically.
 
 ### Environment
 - `WA_SESSION_DB` — path to the SQLite session DB (default
-  `~/.local-first-personal-assistant/whatsapp-session.db`).
+  `~/.homun/whatsapp-session.db`).
 - `WA_STATUS_FILE` — where the connection status JSON is written (default
-  `~/.local-first-personal-assistant/channel-whatsapp-status.json`). The gateway
+  `~/.homun/channel-whatsapp-status.json`). The gateway
   reads this to show "connected / scan QR".
 - `RUST_LOG=info` — verbose logging.
 

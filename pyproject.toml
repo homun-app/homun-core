@@ -1,5 +1,5 @@
 [project]
-name = "local-first-personal-assistant"
+name = "homun"
 version = "0.1.0"
 description = "Local-first personal assistant with a persistent Gemma 4 MLX runtime."
 requires-python = ">=3.12,<3.13"

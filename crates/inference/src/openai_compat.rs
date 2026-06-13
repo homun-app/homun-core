@@ -85,7 +85,7 @@ impl InferenceProvider for OpenAiCompatProvider {
         }
         let body: Value = response.json().map_err(RuntimeClientError::Request)?;
         let parsed = parse_chat_completion(&body, request);
-        if !parsed.valid && std::env::var("LOCAL_FIRST_INFERENCE_DEBUG").is_ok() {
+        if !parsed.valid && std::env::var("HOMUN_INFERENCE_DEBUG").is_ok() {
             eprintln!(
                 "[inference-debug] invalid response ({:?}); raw_output:\n{}",
                 parsed.errors,

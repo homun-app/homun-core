@@ -46,7 +46,7 @@ gap di **fiducia/UX** che minano il Product Loop.
   snapshot untrusted = catena prompt-injection→esecuzione. Classificare come
   `NeedsApproval` o toglierlo dal set di default.
 - **S4 — API key cloud fuori dall'env.** ✅ FATTO (slice file-0600):
-  `resolve_inference_api_key()` preferisce `LOCAL_FIRST_INFERENCE_API_KEY_FILE`
+  `resolve_inference_api_key()` preferisce `HOMUN_INFERENCE_API_KEY_FILE`
   (0600, non ereditato dai processi figli, non in `ps`/`/proc/environ`); env
   resta come fallback con warning.
 

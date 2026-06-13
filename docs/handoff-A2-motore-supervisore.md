@@ -109,7 +109,7 @@ Decidile esplicitamente con l'utente prima di scolpire codice — plasmano il ma
 - **Test**: `cargo test -p local-first-desktop-gateway` (atteso verde: lib + main; A1 lasciava
   "114 passed; 1 ignored" su main).
 - **Restart dev** (per endpoint live): killare l'albero `scripts/electron-dev.mjs` + `npm run electron:dev`
-  (background). Token gateway: `~/.local-first-personal-assistant/desktop-gateway-token`.
+  (background). Token gateway: `~/.homun/desktop-gateway-token`.
 - **Stile**: additivo, riusa i pezzi esistenti (run_agent_turn, recall_memory, query_code_graph,
   dedup di A1). Commit incrementale + test, come A1.
 
@@ -127,7 +127,7 @@ Vedi memoria `sicurezza-canali-perimetro.md`. Invarianti:
 
 - [docs/decisions/0011-agnostic-core-addon-ecosystem.md](decisions/0011-agnostic-core-addon-ecosystem.md) — §6–10: addon=pannello+motore; card=superficie; supervisore adattivo; dashboard=primo addon; A→B + analisi B.
 - [docs/state-of-project-2026-06-13.md](state-of-project-2026-06-13.md) — visione d'insieme aggiornata.
-- Memoria (`~/.claude/projects/-Users-fabio-Projects-local-first-personal-assistant/memory/`):
+- Memoria (`~/.claude/projects/-Users-fabio-Projects-homun/memory/`):
   - `homun-apprendista.md` — proattività risolta + coda curiosità (il no-repeat di Homun) + follow-up scoping.
   - `sicurezza-canali-perimetro.md` — invarianti del perimetro.
   - `automations-model.md` — Automation vs TaskRecord; trigger→azione agentica.

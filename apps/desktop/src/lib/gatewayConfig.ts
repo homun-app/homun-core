@@ -25,13 +25,13 @@ function normalizeGatewayUrl(value: string) {
 }
 
 export const DESKTOP_GATEWAY_URL = normalizeGatewayUrl(
-  viteEnv?.VITE_LOCAL_FIRST_DESKTOP_GATEWAY_URL ??
+  viteEnv?.VITE_HOMUN_DESKTOP_GATEWAY_URL ??
     desktopConfig?.gatewayUrl ??
     "http://127.0.0.1:18765",
 );
 
 const gatewayToken =
-  viteEnv?.VITE_LOCAL_FIRST_DESKTOP_GATEWAY_TOKEN ??
+  viteEnv?.VITE_HOMUN_DESKTOP_GATEWAY_TOKEN ??
   desktopConfig?.gatewayToken;
 
 export function gatewayHeaders(extra: HeadersInit = {}): HeadersInit {

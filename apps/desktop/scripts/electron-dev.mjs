@@ -5,17 +5,17 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const devUrl = process.env.LOCAL_FIRST_DESKTOP_URL ?? "http://127.0.0.1:1420/";
+const devUrl = process.env.HOMUN_DESKTOP_URL ?? "http://127.0.0.1:1420/";
 
 // Stable dev token: reuse the SAME 0600 file the gateway persists
-// (~/.local-first-personal-assistant/desktop-gateway-token) instead of minting
+// (~/.homun/desktop-gateway-token) instead of minting
 // a fresh random token each launch. This keeps the token constant across
 // gateway restarts, so long-lived children (e.g. the WhatsApp sidecar) keep a
 // valid WA_GATEWAY_TOKEN and don't need to be reconnected after every restart.
 function resolveGatewayToken() {
-  const fromEnv = (process.env.LOCAL_FIRST_DESKTOP_GATEWAY_TOKEN ?? "").trim();
+  const fromEnv = (process.env.HOMUN_DESKTOP_GATEWAY_TOKEN ?? "").trim();
   if (fromEnv) return fromEnv;
-  const dir = join(homedir(), ".local-first-personal-assistant");
+  const dir = join(homedir(), ".homun");
   const tokenPath = join(dir, "desktop-gateway-token");
   try {
     const existing = readFileSync(tokenPath, "utf8").trim();
@@ -63,7 +63,7 @@ async function waitForDevServer(url, timeoutMs = 30_000) {
 }
 
 function stopGatewayOnPort() {
-  const port = process.env.LOCAL_FIRST_DESKTOP_GATEWAY_PORT ?? "18765";
+  const port = process.env.HOMUN_DESKTOP_GATEWAY_PORT ?? "18765";
   const result = spawnSync("lsof", ["-tiTCP:" + port, "-sTCP:LISTEN"], {
     encoding: "utf8",
   });
@@ -95,8 +95,8 @@ stopGatewayOnPort();
 run("npm", ["run", "dev"], {
   env: {
     ...process.env,
-    LOCAL_FIRST_DESKTOP_GATEWAY_TOKEN: gatewayToken,
-    VITE_LOCAL_FIRST_DESKTOP_GATEWAY_TOKEN: gatewayToken,
+    HOMUN_DESKTOP_GATEWAY_TOKEN: gatewayToken,
+    VITE_HOMUN_DESKTOP_GATEWAY_TOKEN: gatewayToken,
   },
 });
 await waitForDevServer(devUrl);
@@ -104,8 +104,8 @@ await waitForDevServer(devUrl);
 const electron = run("npx", ["electron", "electron/main.cjs"], {
   env: {
     ...process.env,
-    LOCAL_FIRST_DESKTOP_URL: devUrl,
-    LOCAL_FIRST_DESKTOP_GATEWAY_TOKEN: gatewayToken,
+    HOMUN_DESKTOP_URL: devUrl,
+    HOMUN_DESKTOP_GATEWAY_TOKEN: gatewayToken,
   },
 });
 

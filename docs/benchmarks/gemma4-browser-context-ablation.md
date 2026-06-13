@@ -16,7 +16,7 @@ without guessing. This benchmark distinguishes:
 The desktop gateway browser-loop planner reads:
 
 ```bash
-LOCAL_FIRST_BROWSER_CONTEXT_PROFILE=compact
+HOMUN_BROWSER_CONTEXT_PROFILE=compact
 ```
 
 Supported values:
@@ -111,7 +111,7 @@ Artifact:
 `output/gemma4-browser-context-smoke-20260528-193119/result.md`
 
 Live browser smoke used the same train task with
-`LOCAL_FIRST_BROWSER_LOOP_MAX_ITERATIONS=1` to compare context profiles without
+`HOMUN_BROWSER_LOOP_MAX_ITERATIONS=1` to compare context profiles without
 spending the run mostly on site retries.
 
 | Profile | Avg prompt chars | Valid planner JSON-ish | End status | Finding |

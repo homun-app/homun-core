@@ -4,7 +4,7 @@
 //! block (`name`, `description`, optional `license` / `allowed-tools` / `version`)
 //! followed by a Markdown body. This is the same shape Claude uses under
 //! `~/.claude/skills`; here skills live under
-//! `~/.local-first-personal-assistant/skills/<id>/`.
+//! `~/.homun/skills/<id>/`.
 //!
 //! This module is intentionally *management only*: it reads and describes skills
 //! so the UI can list, preview and enable/disable them. Executing a skill is a

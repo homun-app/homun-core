@@ -218,7 +218,7 @@ model-driven non sono verificabili headless. Commit: `9853162`, `4c53edc`,
    usa `webUtils.getPathForFile`.
    - **PREREQUISITO PDF**: serve la libreria nativa pdfium. Una volta sola, esegui
      `bash scripts/fetch-pdfium.sh` (scarica il prebuilt bblanchon in
-     `~/.local-first-personal-assistant/pdfium/`). Senza, immagini/testo funzionano
+     `~/.homun/pdfium/`). Senza, immagini/testo funzionano
      ma i PDF rispondono con un messaggio chiaro "motore PDF non disponibile".
    - **Persistenza nel thread** (`1d7e719`): l'allegato è ingerito UNA volta e
      salvato sul thread (tabella `thread_attachments`); a ogni turno il contenuto
@@ -322,7 +322,7 @@ col pulsante per fare la cosa. Pattern condiviso coi confirm-card Composio/MCP.
    timeout: chat con `"stream": false` + cap sul tempo TOTALE → un modello lento/
    ragionatore (es. nemotron-3-ultra su Ollama cloud) sforava (Zed non ha il problema
    perché STREAMA). Fix: `stream:true` + consumo SSE (`resp.bytes_stream`) con
-   **timeout di INATTIVITÀ** per-chunk (`LOCAL_FIRST_MODEL_IDLE_TIMEOUT_SECS`, default
+   **timeout di INATTIVITÀ** per-chunk (`HOMUN_MODEL_IDLE_TIMEOUT_SECS`, default
    180s) invece del cap totale; `reassemble_openai_stream` ricompone i delta
    (content + tool_call dai frammenti) nella forma non-streaming → resto del loop,
    sanificazione e marker INVARIATI; fallback al JSON pieno se il provider ignora
@@ -468,7 +468,7 @@ chat** + catalogo registry + connect/disconnect + transport HTTP; **filesystem n
 
 **DIREZIONE (decisione 2026-06-06):** prima una **release ufficiale come assistente
 personale solido** — skill, **Composio (1000+ connettori)**, MCP. Gli **addon
-(ADR 0011) restano fondazione PRONTA ma DORMIENTE** (gated off, `LOCAL_FIRST_ADDONS=1`):
+(ADR 0011) restano fondazione PRONTA ma DORMIENTE** (gated off, `HOMUN_ADDONS=1`):
 si studiano e attivano DOPO la prima release, senza stravolgere nulla. Mappa dello
 stato dei 3 layer: i path discovery/esecuzione/approval sono cablati; i buchi sono
 **completamento, gestione, onboarding**.

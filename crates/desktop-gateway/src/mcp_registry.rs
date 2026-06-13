@@ -363,7 +363,7 @@ pub async fn fetch_servers(
 ) -> Result<Vec<McpRegistryServer>, String> {
     let mut req = http
         .get(format!("{REGISTRY_BASE}/v0/servers"))
-        .header(reqwest::header::USER_AGENT, "local-first-personal-assistant")
+        .header(reqwest::header::USER_AGENT, "homun")
         .query(&[("limit", limit.clamp(1, 100).to_string())]);
     if let Some(q) = search.map(str::trim).filter(|s| !s.is_empty()) {
         req = req.query(&[("search", q)]);

@@ -210,7 +210,7 @@ fn render_pdf_pages(document: &PdfDocument) -> Result<Vec<String>, String> {
 }
 
 /// Binds the pdfium dynamic library at runtime. Resolution order:
-/// `LOCAL_FIRST_PDFIUM_LIB` (a dir or the lib file) → `~/.local-first-personal-assistant/pdfium`
+/// `HOMUN_PDFIUM_LIB` (a dir or the lib file) → `~/.homun/pdfium`
 /// → the system library. Returns a clear error (not a panic) when unavailable, so a
 /// missing lib degrades to a "couldn't read the scan" note rather than crashing.
 fn bind_pdfium() -> Result<Pdfium, String> {
@@ -221,14 +221,14 @@ fn bind_pdfium() -> Result<Pdfium, String> {
     .map_err(|e| {
         format!(
             "motore PDF (pdfium) non disponibile: {e}. Scarica libpdfium e mettilo in \
-~/.local-first-personal-assistant/pdfium/ (o imposta LOCAL_FIRST_PDFIUM_LIB)."
+~/.homun/pdfium/ (o imposta HOMUN_PDFIUM_LIB)."
         )
     })?;
     Ok(Pdfium::new(bindings))
 }
 
 fn pdfium_lib_dir() -> Option<std::path::PathBuf> {
-    if let Ok(raw) = std::env::var("LOCAL_FIRST_PDFIUM_LIB") {
+    if let Ok(raw) = std::env::var("HOMUN_PDFIUM_LIB") {
         let path = std::path::PathBuf::from(&raw);
         if path.is_dir() {
             return Some(path);
@@ -239,7 +239,7 @@ fn pdfium_lib_dir() -> Option<std::path::PathBuf> {
     }
     let home = std::env::var("HOME").ok()?;
     let dir = std::path::PathBuf::from(home)
-        .join(".local-first-personal-assistant")
+        .join(".homun")
         .join("pdfium");
     if dir.is_dir() {
         return Some(dir);
@@ -378,12 +378,12 @@ mod tests {
     }
 
     // Opt-in smoke against a REAL pdfium lib (resolved from the data dir) + a real
-    // PDF. Run with: LOCAL_FIRST_TEST_PDF=/path/to.pdf cargo test -p
+    // PDF. Run with: HOMUN_TEST_PDF=/path/to.pdf cargo test -p
     // local-first-desktop-gateway pdfium_ingestion_smoke -- --ignored --nocapture
     #[test]
-    #[ignore = "needs pdfium lib installed + LOCAL_FIRST_TEST_PDF set"]
+    #[ignore = "needs pdfium lib installed + HOMUN_TEST_PDF set"]
     fn pdfium_ingestion_smoke() {
-        let path = std::env::var("LOCAL_FIRST_TEST_PDF").expect("set LOCAL_FIRST_TEST_PDF");
+        let path = std::env::var("HOMUN_TEST_PDF").expect("set HOMUN_TEST_PDF");
         let att = AttachmentInput {
             local_path: path.clone(),
             display_name: "test.pdf".into(),
