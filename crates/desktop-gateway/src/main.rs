@@ -1603,15 +1603,54 @@ fn is_salient_exchange(user_message: &str) -> bool {
     !TRIVIAL.contains(&low.as_str())
 }
 
-/// Auto-confirm policy (M2): only durable, low-risk knowledge enters memory
-/// without asking. Preferences/facts, low sensitivity, high confidence. Anything
-/// sensitive (PII like a codice fiscale → secret) or uncertain stays a candidate
-/// for the user to confirm later.
+/// A SHORT user reply that AFFIRMS or CORRECTS what the assistant just proposed —
+/// "sì", "esatto", "confermo", or a correction like "no, è una V9". On its own such
+/// a reply is NOT salient (is_salient_exchange drops it as trivial), so a confirmed
+/// fact the assistant had only hypothesized ("la tua moto è una Moto Guzzi V7?" →
+/// "sì") would EVAPORATE and be re-asked forever. Paired with the prior assistant
+/// turn it IS durable knowledge, so learn_from_exchange keeps the turn and the
+/// extractor promotes the fact to committed.
+///
+/// HEURISTIC — deliberately permissive and easy to tune. It only gates whether the
+/// background extractor *sees* the turn; the extractor remains the final judge of
+/// whether a durable fact is actually present. So a false positive costs one cheap
+/// background call, while a false negative silently loses a confirmation — we bias
+/// toward catching. Matches on the LEADING token so "sì, esatto" and "no, è una V9"
+/// both qualify.
+fn is_confirmation_reply(user_message: &str) -> bool {
+    let low = user_message.trim().to_lowercase();
+    // Bare confirmations are short; a long reply stands on its own (and is already
+    // handled by is_salient_exchange).
+    if low.is_empty() || low.split_whitespace().count() > 8 {
+        return false;
+    }
+    let lead = low
+        .split(|c: char| c.is_whitespace() || matches!(c, ',' | '.' | '!' | ';' | ':'))
+        .find(|t| !t.is_empty())
+        .unwrap_or("");
+    // Affirmations + corrections. Keep this list focused: strong fact-confirming
+    // words, not weak acks like "ok"/"va bene" (those rarely confirm a fact and
+    // would just add noise).
+    const CONFIRM_LEAD: [&str; 17] = [
+        "sì", "si", "sí", "esatto", "esattamente", "giusto", "corretto", "confermo",
+        "confermato", "vero", "yes", "yep", "yup", "no", "non", "sbagliato", "macché",
+    ];
+    CONFIRM_LEAD.contains(&lead)
+}
+
+/// Auto-confirm policy (M2): only durable, high-confidence knowledge enters memory
+/// without asking. The ceiling is `Private` — NOT `Internal` — on purpose: the
+/// extractor tags ordinary personal facts (possessions, family, city) as `private`
+/// by its own rules, so an `Internal` cap froze EVERY personal fact at `candidate`,
+/// invisible to the always-on profile (which is confirmed-only). A personal
+/// assistant must know what you own / who's in your life without re-asking, so
+/// `private` auto-confirms. Only `Confidential`/`Secret` (real PII — codice fiscale,
+/// health docs, addresses) stays a candidate for the user to confirm explicitly.
 fn is_auto_confirmable(memory_type: &str, sensitivity: MemoryDataSensitivity, confidence: f64) -> bool {
     // Decisions are factual records of choices made during work (low privacy risk),
     // so they auto-confirm like facts/preferences when confident + non-sensitive.
     matches!(memory_type, "preference" | "fact" | "decision" | "goal")
-        && sensitivity <= MemoryDataSensitivity::Internal
+        && sensitivity <= MemoryDataSensitivity::Private
         && confidence >= 0.8
 }
 
@@ -3017,11 +3056,20 @@ async fn learn_from_exchange(
     // When Some(name), the message comes from a channel CONTACT (not the user):
     // facts are attributed to them, not to person:self.
     speaker: Option<&str>,
+    // The assistant's PREVIOUS turn — the question/assertion that a short reply like
+    // "sì" or "no, è una V9" would be answering. Lets a bare confirmation be grounded
+    // into the fact it confirms. None when there's no prior turn.
+    prev_assistant: Option<&str>,
 ) {
-    // Learn when the exchange is salient OR when the turn DID something concrete —
-    // so a terse prompt ("sistemalo", "aggiorna il preventivo") that triggers real
-    // actions still records the decision + its rationale.
-    if actions.trim().is_empty() && !is_salient_exchange(user_message) {
+    // A confirmation turn ("la tua moto è una Moto Guzzi V7?" → "sì") is not salient on
+    // its own, but it commits a durable fact — keep it (grounded by prev_assistant
+    // below) so the confirmation doesn't evaporate and get re-asked next time.
+    let is_confirmation =
+        prev_assistant.is_some_and(|p| !p.trim().is_empty()) && is_confirmation_reply(user_message);
+    // Learn when the exchange is salient OR a confirmation OR the turn DID something
+    // concrete — so a terse prompt ("sistemalo", "aggiorna il preventivo") that
+    // triggers real actions still records the decision + its rationale.
+    if actions.trim().is_empty() && !is_salient_exchange(user_message) && !is_confirmation {
         return;
     }
     let Some((base_url, model, api_key)) = extractor_openai_config() else {
@@ -3040,6 +3088,12 @@ se l'utente lo afferma come reale/confermato (\"ho prenotato\", \"parto\", \"il 
 valutazione è comunque utile, formulala con cautela (\"ha cercato/valutato …\"), confidence bassa, e \
 metti metadata.certainty: \"committed\" = confermato/accaduto, \"considered\" = solo cercato/valutato, \
 \"intended\" = intenzione dichiarata ma non confermata. \
+CONFERME/CORREZIONI: se sopra è presente un blocco \"ASSISTENTE (turno precedente…)\", l'utente sta \
+RISPONDENDO a ciò che l'assistente aveva ipotizzato o chiesto. Se lo CONFERMA (\"sì\", \"esatto\", \
+\"confermo\") o lo CORREGGE (\"no, è una V9\"), quel fatto diventa REALE: registralo come committed con \
+confidence alta (>=0.85), usando la versione CORRETTA se l'utente ha corretto. La conferma trasforma \
+un'ipotesi in fatto acquisito (es. assistente «la tua moto è una Moto Guzzi V7 Stone?» + utente «sì» \
+→ fact committed \"L'utente possiede una Moto Guzzi V7 Stone\"). \
 FEDELTÀ (niente allucinazioni): registra SOLO ciò che è esplicito nello scambio; NON dedurre né \
 abbellire ruoli, transazioni o relazioni non dichiarati — es. da «ho guardato un annuncio per un \
 accessorio della moto» NON dedurre «vende la sua moto» né «X è interessato a comprarla». Se un \
@@ -3056,10 +3110,10 @@ niente altro:\n\
 nella lingua dell'utente\",\"sensitivity\":\"internal|private|confidential|secret\",\"confidence\":0.0-1.0,\
 \"metadata\":{\"scope\":\"personal|project\",\"certainty\":\"committed|considered|intended\",\"decision\":{\"rationale\":\"il perché\",\
 \"alternatives\":[{\"option\":\"alternativa\",\"rejected_because\":\"motivo\"}]}}}],\
-\"entities\":[{\"entity_type\":\"person|organization|place|event|project|tool|topic\",\"name\":\"Nome\",\
+\"entities\":[{\"entity_type\":\"person|organization|place|event|project|tool|object|topic\",\"name\":\"Nome\",\
 \"canonical_key\":\"person:nome-normalizzato\",\"aliases\":[\"forma breve\"],\
 \"sensitivity\":\"internal|private\",\"privacy_domain\":\"personal\",\"metadata\":{\"scope\":\"personal|project\"}}],\
-\"relations\":[{\"source_ref\":\"person:fabio\",\"relation_type\":\"child_of|parent_of|partner_of|sibling_of|works_as|relates_to\",\
+\"relations\":[{\"source_ref\":\"person:fabio\",\"relation_type\":\"child_of|parent_of|partner_of|sibling_of|works_as|possiede|relates_to\",\
 \"target_ref\":\"person:sara\",\"sensitivity\":\"internal\",\"privacy_domain\":\"personal\"}],\
 \"episode\":\"riassunto in UNA frase di cosa si è discusso o deciso in questo scambio\"}\n\
 REGOLE: scope \"personal\" = vale ovunque (preferenze, persone, dati personali); scope \"project\" \
@@ -3075,12 +3129,20 @@ ESPLICITO obiettivo dichiarato, scegli goal. ENTITÀ = le cose citate, TIPIZZATE
 servizi, enti (Trenitalia, Gmail, una banca); place = luoghi (città, paesi, indirizzi); event = \
 viaggi, acquisti, appuntamenti, scadenze (es. \"Viaggio a Barcellona a settembre\"); project = \
 progetti di lavoro; tool = software, file, librerie (SEMPRE metadata.scope \"project\" — mai \
-entità personali); topic = interessi/argomenti ricorrenti (es. \"tennis\"). canonical_key STABILE \
+entità personali); object = un BENE che l'utente POSSIEDE (veicolo, dispositivo, casa, strumento \
+personale: es. \"Moto Guzzi V7 Stone 850 2021\") — metadata.scope \"personal\"; \
+topic = interessi/argomenti ricorrenti (es. \"tennis\"). canonical_key STABILE \
 \"tipo:nome-normalizzato\" (es. \"organization:trenitalia\", \"event:viaggio-barcellona-2026\"). \
 metadata.scope dell'entità: \"personal\" per persone/luoghi/eventi/organizzazioni della vita \
 dell'utente, \"project\" per file/librerie/strumenti del lavoro corrente. Per l'UTENTE stesso usa \
 SEMPRE canonical_key \"person:self\" (sia nelle entità sia nelle relazioni), es. per \"ho una figlia \
 Sara\": relation parent_of person:self → person:sara. \
+POSSESSI: quando l'utente dichiara o CONFERMA di possedere un bene (\"la mia moto\", \"possiedo una \
+Moto Guzzi V7\", \"la mia auto/casa\"), emetti TRE cose insieme: (a) un fact committed \"L'utente \
+possiede <bene>\"; (b) l'entità del bene (entity_type \"object\", scope \"personal\"); (c) la relazione \
+possiede person:self → object:<bene>. Es.: \"sì, è la mia Moto Guzzi V7 Stone 850 2021\" → entity \
+{object, \"Moto Guzzi V7 Stone 850 2021\", canonical_key \"object:moto-guzzi-v7-stone-850-2021\"} + \
+relation {possiede, person:self → object:moto-guzzi-v7-stone-850-2021} + fact committed. \
 RELAZIONI = usa gli STESSI canonical_key in source_ref/target_ref. Inserisci entità e relazioni \
 SOLO se esplicite, altrimenti lascia gli array vuoti. sensitivity: PII (codice \
 fiscale, indirizzo, salute, documenti) = \"secret\"; fatti personali (figli, partner, città) = \
@@ -3180,7 +3242,18 @@ aggiornamenti sostanziali rispetto a queste):\n{known_decisions}"
         Some(name) => {
             format!("MESSAGGIO da {name} (canale):\n{user_message}\n\nRISPOSTA: {assistant_message}")
         }
-        None => format!("UTENTE: {user_message}\n\nASSISTENTE: {assistant_message}"),
+        None => {
+            // On a confirmation turn, prepend the assistant's PREVIOUS question so a
+            // bare "sì"/"no, …" can be grounded into the fact it confirms or corrects.
+            let preface = match prev_assistant {
+                Some(p) if is_confirmation && !p.trim().is_empty() => format!(
+                    "ASSISTENTE (turno precedente — ciò a cui l'utente sta rispondendo): {}\n\n",
+                    p.trim()
+                ),
+                _ => String::new(),
+            };
+            format!("{preface}UTENTE: {user_message}\n\nASSISTENTE: {assistant_message}")
+        }
     };
     let user_content = if actions.trim().is_empty() {
         exchange
@@ -3352,7 +3425,9 @@ fn recall_memory_tool_schema() -> serde_json::Value {
             "description": "Cerca nella memoria a lungo termine dell'utente (fatti, preferenze, persone, \
 decisioni passate e il loro perché) ciò che è pertinente alla richiesta. Usalo quando ti serve un \
 dettaglio personale o di progetto che potresti aver appreso prima e che NON è già nel profilo del \
-prompt, PRIMA di dire che non lo sai.",
+prompt, PRIMA di dire che non lo sai — e ANCHE PRIMA di CHIEDERE all'utente un suo possesso, una \
+persona o un contesto che dà per già noto (es. «la mia moto», «il mio capo»): recupera ciò che sai \
+e chiedi solo i dettagli che restano mancanti.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -8510,6 +8585,15 @@ personale o di progetto che potresti aver già appreso (un nome, una preferenza,
 decisione passata e il suo perché), OPPURE se l'utente chiede cosa è stato discusso o deciso in \
 conversazioni PRECEDENTI, e l'informazione NON è già nel profilo qui sopra, chiama SEMPRE lo \
 strumento recall_memory PRIMA di dire che non lo sai o non lo ricordi. \
+RECALL-PRIMA-DI-CHIEDERE: quando l'utente fa riferimento a un suo POSSESSO, una PERSONA o un \
+CONTESTO che dà per già noto (tipicamente con un possessivo: «la mia moto», «il mio capo», «casa \
+mia», «mio fratello», «il mio gestionale»…) e per agire ti serve un dettaglio su di esso che NON è \
+già nel profilo qui sopra, NON chiederlo d'istinto all'utente: chiama PRIMA recall_memory e USA ciò \
+che trovi; poi chiedi SOLTANTO i dettagli che dopo il recall restano davvero mancanti. \
+Es.: «mi cerchi un tappo serbatoio per la mia moto» → recall_memory(«moto dell'utente, marca \
+modello anno») → se trovi «Moto Guzzi V7 Stone 850 2021» procedi con quello e chiedi l'anno solo se \
+non risulta in memoria. Riguarda fatti DUREVOLI plausibilmente già appresi, non informazioni \
+effimere o appena emerse nella conversazione. \
 DECISIONI: PRIMA di modificare codice/documenti di un progetto, chiama recall_memory per ricordare \
 perché le cose sono come sono (NON ri-scandagliare tutto da zero). DOPO una scelta non banale — in \
 QUALSIASI dominio: codice, un documento (es. un preventivo cliente), dati, configurazioni — chiama \
@@ -8857,6 +8941,14 @@ questo elenco, chiedi di allegarlo (non cercarlo nella sandbox o nelle cartelle)
     let thread_id = request.thread_id.clone();
     // Raw user message captured for post-turn memory extraction (M2).
     let memory_user_message = request.prompt.clone();
+    // The assistant's most recent prior turn (the question a short "sì" would answer),
+    // so the extractor can ground a confirmation into the fact it commits.
+    let memory_prev_assistant = request
+        .context
+        .iter()
+        .rev()
+        .find(|m| matches!(m.role, ChatContextRole::Assistant))
+        .map(|m| m.text.clone());
     tokio::spawn(async move {
         let mut accumulated = String::new();
         // Final answer text captured for post-turn memory extraction (M2).
@@ -11297,6 +11389,7 @@ Dimmi se vuoi che riprovi o riformuli."
             let learn_answer = memory_answer.clone();
             let learn_thread = thread_id.clone();
             let learn_actions = tool_trace.join("\n");
+            let learn_prev = memory_prev_assistant.clone();
             tokio::spawn(async move {
                 learn_from_exchange(
                     &learn_state,
@@ -11305,6 +11398,7 @@ Dimmi se vuoi che riprovi o riformuli."
                     &learn_actions,
                     learn_thread.as_deref(),
                     None,
+                    learn_prev.as_deref(),
                 )
                 .await;
             });
@@ -13550,7 +13644,7 @@ async fn handle_channel_inbound(
         let content = message.content.clone();
         tokio::spawn(async move {
             // thread_id=None: record_channel_message already stored the episode.
-            learn_from_exchange(&st, &content, "", "", None, Some(&speaker)).await;
+            learn_from_exchange(&st, &content, "", "", None, Some(&speaker), None).await;
         });
     }
     match action {
@@ -23357,6 +23451,7 @@ async fn memory_wiki_save(
             "L'utente ha corretto a mano la wiki Decisioni",
             None,
             None,
+            None,
         )
         .await;
     });
@@ -26780,6 +26875,7 @@ mod tests {
         format_memory_block,
         humanize_task_kind,
         is_auto_confirmable,
+        is_confirmation_reply,
         is_internal_task_kind,
         is_salient_exchange,
         normalize_for_dedup,
@@ -27019,6 +27115,25 @@ mod tests {
     }
 
     #[test]
+    fn confirmation_reply_catches_affirmations_and_corrections() {
+        // Affirmations a bare-salience check drops, but that DO confirm a fact.
+        assert!(is_confirmation_reply("sì"));
+        assert!(is_confirmation_reply("Sì, esatto"));
+        assert!(is_confirmation_reply("esatto."));
+        assert!(is_confirmation_reply("confermo"));
+        // Corrections revise the assistant's proposal → still a confirmation turn.
+        assert!(is_confirmation_reply("no, è una V9"));
+        assert!(is_confirmation_reply("No, del 2019"));
+        // Not confirmations: weak acks and substantive new messages stand on their own.
+        assert!(!is_confirmation_reply("ok"));
+        assert!(!is_confirmation_reply("grazie mille"));
+        assert!(!is_confirmation_reply(
+            "cercami un tappo serbatoio per la mia moto guzzi"
+        ));
+        assert!(!is_confirmation_reply(""));
+    }
+
+    #[test]
     fn summarize_tool_action_captures_mutations_skips_reads() {
         // Reads / discovery → nothing to remember.
         for read in ["read_file", "list_directory", "list_files", "recall_memory", "suggest_capabilities"] {
@@ -27128,11 +27243,17 @@ data: [DONE]\n";
     fn auto_confirm_only_low_risk() {
         assert!(is_auto_confirmable("preference", MemoryDataSensitivity::Internal, 0.9));
         assert!(is_auto_confirmable("fact", MemoryDataSensitivity::Public, 0.85));
-        // PII / sensitive never auto-confirms
+        // Ordinary personal facts (possessions, family, city) are tagged `private` by
+        // the extractor — they MUST auto-confirm, else they never reach the profile
+        // and the assistant keeps re-asking what it already knows.
+        assert!(is_auto_confirmable("fact", MemoryDataSensitivity::Private, 0.9));
+        // Real PII (codice fiscale, health docs, addresses) → confidential/secret →
+        // still waits for explicit user confirmation.
         assert!(!is_auto_confirmable("fact", MemoryDataSensitivity::Secret, 0.99));
-        assert!(!is_auto_confirmable("fact", MemoryDataSensitivity::Private, 0.99));
+        assert!(!is_auto_confirmable("fact", MemoryDataSensitivity::Confidential, 0.99));
         // low confidence stays candidate
         assert!(!is_auto_confirmable("preference", MemoryDataSensitivity::Internal, 0.5));
+        assert!(!is_auto_confirmable("fact", MemoryDataSensitivity::Private, 0.5));
         // decisions are factual records of work → auto-confirm when confident + low-risk
         assert!(is_auto_confirmable("decision", MemoryDataSensitivity::Internal, 0.9));
         // but a sensitive decision still waits for confirmation
