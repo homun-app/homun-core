@@ -6475,6 +6475,21 @@ function Composer({
   const [skillQuery, setSkillQuery] = useState("");
   const [improving, setImproving] = useState(false);
   const [improveError, setImproveError] = useState<string | null>(null);
+  // Click outside the toolbar closes any open composer menu (⊕ add / folder / skill /
+  // model). Clicks INSIDE .composer-toolbar are left to the buttons' own toggles.
+  useEffect(() => {
+    if (!addMenuOpen && !fileMenuOpen && !skillMenuOpen && !modelMenuOpen) return;
+    const onDown = (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target && target.closest(".composer-toolbar")) return;
+      setAddMenuOpen(false);
+      setFileMenuOpen(false);
+      setSkillMenuOpen(false);
+      setModelMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [addMenuOpen, fileMenuOpen, skillMenuOpen, modelMenuOpen]);
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const [dictationError, setDictationError] = useState<string | null>(null);
