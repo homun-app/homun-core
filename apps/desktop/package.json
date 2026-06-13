@@ -50,6 +50,8 @@
   "build": {
     "appId": "app.homun.desktop",
     "productName": "Homun",
+    "executableName": "homun",
+    "artifactName": "${productName}-${version}-${arch}.${ext}",
     "directories": {
       "output": "dist-installers",
       "buildResources": "build"
