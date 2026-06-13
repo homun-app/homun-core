@@ -5455,7 +5455,7 @@ body.resizing-drawer {
   left: 0;
 }
 .composer-model-pop {
-  right: 0;
+  left: 0;
   width: 300px;
 }
 /* Model picker (Cursor-like): search box + Auto + provider-grouped models. */
