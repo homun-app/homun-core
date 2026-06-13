@@ -1449,7 +1449,9 @@ export function ChatView({
 
   return (
     <section
-      className={`chat-view active-task-layout${detailsOpen ? " panel-open" : ""}`}
+      className={`chat-view active-task-layout${detailsOpen ? " panel-open" : ""}${
+        threadMessages.length === 0 ? " is-empty" : ""
+      }`}
       aria-labelledby="chat-title"
     >
       <header className="task-topbar">
