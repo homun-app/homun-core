@@ -2555,7 +2555,7 @@ body.resizing-drawer {
 
 .computer-toolbar-main svg {
   flex: 0 0 auto;
-  color: var(--green);
+  color: var(--muted);
 }
 
 .computer-toolbar-main strong,
@@ -2574,6 +2574,31 @@ body.resizing-drawer {
 .computer-toolbar-main span {
   color: var(--muted);
   font-size: 12px;
+}
+/* Live badge (mock): pulsing teal dot + "vista live" in mono. */
+.computer-toolbar-main .computer-live-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--brand);
+}
+.computer-live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--brand);
+  flex: none;
+  animation: msg-activity-pulse 1.2s ease-in-out infinite;
+}
+/* Source hint (mock): "noVNC · browser reale" in mono, muted. */
+.computer-card-source {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--muted);
+  white-space: nowrap;
 }
 
 .computer-toolbar-meta {

@@ -33,6 +33,7 @@ import {
   MessageCircle,
   Mic,
   Minimize2,
+  Monitor,
   MoreHorizontal,
   Paperclip,
   PanelRight,
@@ -6057,11 +6058,21 @@ function LocalComputerCard({
           type="button"
           onClick={onOpen}
         >
-          <Play size={14} />
-          <strong>{session.title}</strong>
-          <span>{surfaceLabel} {activityLabel}</span>
+          <Monitor size={15} />
+          <strong>Computer locale</strong>
+          <span className="computer-live-badge">
+            <span className="computer-live-dot" aria-hidden="true" />
+            {activityLabel === "in esecuzione" ? "vista live" : surfaceLabel}
+          </span>
         </button>
         <div className="computer-toolbar-meta">
+          <span className="computer-card-source">
+            {session.activeSurface === "browser"
+              ? "noVNC · browser reale"
+              : session.activeSurface === "shell"
+                ? "shell reale"
+                : "computer reale"}
+          </span>
           <span>
             {session.progressCurrent} / {session.progressTotal}
           </span>
