@@ -6475,7 +6475,6 @@ function Composer({
   // Interaction mode (composer pill, Cursor-style): agent | plan | ask | debug.
   // Debug is offered only when a project folder is linked (coding context).
   const [chatMode, setChatMode] = useState<ChatMode>("agent");
-  const [modeMenuOpen, setModeMenuOpen] = useState(false);
   const [modelQuery, setModelQuery] = useState("");
 
   // Refetches the model list + default (= orchestrator role) + per-provider groups.
@@ -7027,7 +7026,6 @@ function Composer({
                 setAddMenuOpen((open) => !open);
                 setFileMenuOpen(false);
                 setSkillMenuOpen(false);
-                setModeMenuOpen(false);
                 setModelMenuOpen(false);
               }}
             >
