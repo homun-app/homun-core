@@ -42,11 +42,9 @@ jobs:
         working-directory: apps/desktop
         run: npm ci
 
-      - name: Typecheck
-        working-directory: apps/desktop
-        run: npm run typecheck
-
-      - name: Build (vite)
+      # `build` is `tsc --noEmit && vite build`, so it already typechecks —
+      # no separate typecheck step needed (would run tsc twice).
+      - name: Build (typecheck + vite)
         working-directory: apps/desktop
         run: npm run build
 
