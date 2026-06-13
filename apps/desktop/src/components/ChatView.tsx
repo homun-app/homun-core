@@ -6998,6 +6998,30 @@ function Composer({
             </button>
             {addMenuOpen && (
               <div className="composer-pop composer-add-pop" role="menu">
+                <div className="composer-add-eyebrow">
+                  Aggiungi agenti, contesto, strumenti
+                </div>
+                {CHAT_MODES.filter((m) => !m.projectOnly || linkedFolder != null).map((m) => {
+                  const I = m.icon;
+                  const active = m.key === chatMode;
+                  return (
+                    <button
+                      key={m.key}
+                      type="button"
+                      role="menuitem"
+                      className={active ? "active" : ""}
+                      onClick={() => {
+                        setChatMode(m.key);
+                        setAddMenuOpen(false);
+                      }}
+                    >
+                      <I size={16} />
+                      <span>{m.label}</span>
+                      {active && <Check size={14} className="composer-add-check" />}
+                    </button>
+                  );
+                })}
+                <div className="composer-add-divider" />
                 <button
                   type="button"
                   role="menuitem"
@@ -7176,54 +7200,6 @@ function Composer({
               )}
             </div>
           )}
-            <div className="composer-pop-wrap">
-              <button
-                className="composer-model-button"
-                type="button"
-                aria-label="Scegli la modalità"
-                aria-expanded={modeMenuOpen}
-                onClick={() => {
-                  setModeMenuOpen((open) => !open);
-                  setModelMenuOpen(false);
-                  setSkillMenuOpen(false);
-                }}
-              >
-                {(() => {
-                  const M = CHAT_MODES.find((m) => m.key === chatMode) ?? CHAT_MODES[0];
-                  const I = M.icon;
-                  return <I size={14} />;
-                })()}
-                <span>{(CHAT_MODES.find((m) => m.key === chatMode) ?? CHAT_MODES[0]).label}</span>
-                <ChevronDown size={14} />
-              </button>
-              {modeMenuOpen && (
-                <div className="composer-pop composer-mode-pop" role="menu">
-                  {CHAT_MODES.filter((m) => !m.projectOnly || linkedFolder != null).map((m) => {
-                    const I = m.icon;
-                    const active = m.key === chatMode;
-                    return (
-                      <button
-                        key={m.key}
-                        type="button"
-                        role="menuitem"
-                        className={active ? "active" : ""}
-                        onClick={() => {
-                          setChatMode(m.key);
-                          setModeMenuOpen(false);
-                        }}
-                      >
-                        <I size={15} />
-                        <span className="composer-mode-text">
-                          <strong>{m.label}</strong>
-                          <small>{m.desc}</small>
-                        </span>
-                        {active && <Check size={14} />}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
           {models.length > 0 && (
             <div className="composer-pop-wrap">
               <button
@@ -7240,10 +7216,13 @@ function Composer({
                   setSkillMenuOpen(false);
                 }}
               >
+                <span className="composer-model-chip-dot" aria-hidden="true" />
                 <span>
                   {selectedModel
                     ? shortModelName(selectedModel.split("::").pop() ?? selectedModel)
-                    : "Auto"}
+                    : activeModel
+                      ? shortModelName(activeModel)
+                      : "Auto"}
                 </span>
                 <ChevronDown size={14} />
               </button>
@@ -7375,11 +7354,11 @@ function Composer({
             >
               <X size={17} />
             </button>
-          ) : (
-            <button className="send-button" disabled={disabled || !value.trim()} type="submit" aria-label="Invia">
+          ) : value.trim() ? (
+            <button className="send-button" disabled={disabled} type="submit" aria-label="Invia">
               <ArrowUp size={18} />
             </button>
-          )}
+          ) : null}
         </div>
       </div>
     </form>

@@ -3293,6 +3293,32 @@ body.resizing-drawer {
 .composer-skill-anchor:empty {
   display: none;
 }
+/* Model chip status dot (teal) — mock shows "● model · tier". */
+.composer-model-chip-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--brand);
+  flex: none;
+}
+/* ⊕ menu: mono eyebrow header, section divider, active-mode check. */
+.composer-add-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 8px 10px 6px;
+}
+.composer-add-divider {
+  height: 1px;
+  margin: 5px 6px;
+  background: var(--line);
+}
+.composer-add-pop button .composer-add-check {
+  margin-left: auto;
+  color: var(--brand);
+}
 
 .composer-error {
   max-width: 240px;
