@@ -1237,6 +1237,23 @@ body.resizing-drawer {
   padding-right: calc(var(--detail-panel-w) + 20px);
 }
 
+/* New-chat layout (mock): the prompt lives in the CENTER with the hero, not docked
+   at the bottom. A 4th 1fr row below the composer balances the 1fr above the hero,
+   so the [hero + composer] block sits vertically centered while the header stays
+   pinned at the top. Reverts to the docked composer as soon as a message exists. */
+.active-task-layout.is-empty {
+  grid-template-rows: 58px 1fr auto 1fr;
+}
+.active-task-layout.is-empty .thread-scroll {
+  overflow: visible;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+.active-task-layout.is-empty .chat-hero {
+  padding-top: 0;
+}
+
 .task-topbar {
   position: relative;
   justify-content: space-between;
