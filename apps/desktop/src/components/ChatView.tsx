@@ -234,7 +234,15 @@ export function ChatView({
     () => health.filter((item) => item.status !== "attention").slice(0, 2),
     [health],
   );
-  const threadMessages = optimisticMessages ?? messages;
+  // The backend seeds a placeholder "ready" greeting on every new thread (id ends
+  // "_ready"). The designed new-chat experience is the centered hero, so hide that
+  // greeting: a thread whose only message is the greeting then renders as empty →
+  // ChatEmptyHero shows; threads with real messages no longer carry a stray greeting
+  // on top. It's a contentless placeholder, so dropping it from context too is fine.
+  const threadMessages = useMemo(() => {
+    const base = optimisticMessages ?? messages;
+    return base.filter((m) => !(m.role === "assistant" && m.id.endsWith("_ready")));
+  }, [optimisticMessages, messages]);
   // All artifacts generated in this conversation (from persisted ‹‹ARTIFACT››
   // markers) — drives the Artifacts workspace panel.
   const conversationArtifacts = useMemo(() => {
@@ -6346,30 +6354,38 @@ function ComputerDetailPanel({
   );
 }
 
-const EMPTY_HERO_CHIPS = [
-  "Pianifica la mia settimana",
-  "Trova informazioni su ",
-  "Riassumi un documento",
-  "Aiutami a scrivere ",
+// Quick-action chips that seed the composer. `seed` is what gets typed (a trailing
+// space = "keep typing"); `label` is the shorter pill text; `icon` is teal-tinted.
+const EMPTY_HERO_CHIPS: { label: string; seed: string; icon: typeof Search }[] = [
+  { label: "Pianifica una nuova idea", seed: "Pianifica ", icon: Sparkles },
+  { label: "Cerca qualcosa per me", seed: "Cerca ", icon: Search },
+  { label: "Riassumi un documento", seed: "Riassumi un documento", icon: FileText },
+  { label: "Scrivi del codice", seed: "Aiutami a scrivere del codice per ", icon: FileCode },
 ];
 
-// Empty-chat hero (Manus-style): serif headline + quick-action chips that seed the composer.
+// Empty-chat hero (design): teal living-mark orb + "Cosa facciamo oggi?" + quick-action
+// chips that seed the composer.
 function ChatEmptyHero({ onPick }: { onPick: (text: string) => void }) {
   return (
     <div className="chat-hero">
-      <h1 className="chat-hero-title">Come posso aiutarti?</h1>
-      <p className="chat-hero-sub">Scrivi qui sotto, oppure parti da uno spunto.</p>
+      <span className="chat-hero-mark" aria-hidden="true" />
+      <h1 className="chat-hero-title">Cosa facciamo oggi?</h1>
+      <p className="chat-hero-sub">Sono pronto. Scrivimi pure: rispondo in locale.</p>
       <div className="chat-hero-chips">
-        {EMPTY_HERO_CHIPS.map((chip) => (
-          <button
-            key={chip}
-            type="button"
-            className="chat-hero-chip"
-            onClick={() => onPick(chip)}
-          >
-            {chip.trim()}
-          </button>
-        ))}
+        {EMPTY_HERO_CHIPS.map((chip) => {
+          const Icon = chip.icon;
+          return (
+            <button
+              key={chip.label}
+              type="button"
+              className="chat-hero-chip"
+              onClick={() => onPick(chip.seed)}
+            >
+              <Icon size={13} />
+              {chip.label}
+            </button>
+          );
+        })}
       </div>
     </div>
   );

@@ -3922,21 +3922,31 @@ body.resizing-drawer {
   flex-direction: column;
   align-items: center;
   text-align: center;
-  padding: 12vh 24px 0;
-  gap: 8px;
+  padding: 11vh 24px 0;
+}
+/* "Living mark" (design): a teal gradient orb — Homun's identity, brand-teal even if
+   the UI accent changes. */
+.chat-hero-mark {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 36% 30%, #8feDce, #57c9a6 42%, #1a8870 86%);
+  box-shadow: 0 8px 22px -8px rgba(21, 122, 110, 0.5);
+  margin-bottom: 18px;
 }
 .chat-hero-title {
-  font-family: var(--font-serif);
-  font-weight: 400;
-  font-size: var(--text-hero);
-  line-height: 1.1;
+  font-family: var(--font-sans);
+  font-weight: 700;
+  font-size: 26px;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
   color: var(--text);
-  margin: 0;
+  margin: 0 0 6px;
 }
 .chat-hero-sub {
-  font-size: var(--text-base);
+  font-size: 14.5px;
   color: var(--muted);
-  margin: 0 0 8px;
+  margin: 0 0 26px;
 }
 .chat-hero-chips {
   display: flex;
@@ -3946,13 +3956,20 @@ body.resizing-drawer {
   max-width: 520px;
 }
 .chat-hero-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
   border: 1px solid var(--line);
   background: var(--surface);
-  color: var(--text);
+  color: var(--muted-strong, var(--text));
   border-radius: var(--radius-pill);
   padding: 7px 14px;
   font-size: var(--text-sm);
   cursor: pointer;
+}
+.chat-hero-chip svg {
+  color: var(--brand);
+  flex: none;
 }
 .chat-hero-chip:hover {
   border-color: var(--brand);
