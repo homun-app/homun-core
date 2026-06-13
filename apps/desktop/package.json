@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "description": "Homun — local-first personal assistant",
   "author": "Homun <noreply@homun.app>",
+  "license": "SEE LICENSE IN LICENSE.md",
   "private": true,
   "type": "module",
   "main": "electron/main.cjs",
