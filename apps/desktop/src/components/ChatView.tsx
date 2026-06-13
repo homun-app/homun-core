@@ -1505,6 +1505,7 @@ export function ChatView({
           }}
         >
           <PanelRight size={18} />
+          {!artifactsOpen && <ChevronDown size={12} className="workbench-toggle-caret" />}
           {conversationArtifacts.length > 0 && (
             <span className="top-action-count">{conversationArtifacts.length}</span>
           )}

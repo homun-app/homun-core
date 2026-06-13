@@ -1279,7 +1279,7 @@ body.resizing-drawer {
   margin-left: -8px;
   color: var(--text);
   background: transparent;
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 600;
 }
 
@@ -1339,6 +1339,10 @@ body.resizing-drawer {
 }
 .workbench-toggle.active {
   color: var(--text);
+}
+/* Caret next to the panel icon (mock): signals the dropdown; lighter than the icon. */
+.workbench-toggle-caret {
+  opacity: 0.65;
 }
 
 /* Panel view picker: the toggle opens this dropdown (mock interaction); each item
