@@ -6,15 +6,15 @@ const os = require("node:os");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 
-const DEV_SERVER_URL = process.env.LOCAL_FIRST_DESKTOP_URL ?? "http://127.0.0.1:1420/";
-const GATEWAY_PORT = process.env.LOCAL_FIRST_DESKTOP_GATEWAY_PORT ?? "18765";
+const DEV_SERVER_URL = process.env.HOMUN_DESKTOP_URL ?? "http://127.0.0.1:1420/";
+const GATEWAY_PORT = process.env.HOMUN_DESKTOP_GATEWAY_PORT ?? "18765";
 const GATEWAY_URL =
-  process.env.LOCAL_FIRST_DESKTOP_GATEWAY_URL ?? `http://127.0.0.1:${GATEWAY_PORT}`;
+  process.env.HOMUN_DESKTOP_GATEWAY_URL ?? `http://127.0.0.1:${GATEWAY_PORT}`;
 const GATEWAY_TOKEN =
-  process.env.LOCAL_FIRST_DESKTOP_GATEWAY_TOKEN ?? randomBytes(32).toString("hex");
+  process.env.HOMUN_DESKTOP_GATEWAY_TOKEN ?? randomBytes(32).toString("hex");
 const REPO_ROOT = path.resolve(__dirname, "../../..");
 const RESOURCES_ROOT =
-  process.env.LOCAL_FIRST_DESKTOP_RESOURCES_DIR ??
+  process.env.HOMUN_DESKTOP_RESOURCES_DIR ??
   (app.isPackaged ? process.resourcesPath : REPO_ROOT);
 let gatewayProcess = null;
 let isQuitting = false;
@@ -32,12 +32,12 @@ function brandIconPath() {
   return candidates.find((candidate) => fs.existsSync(candidate)) ?? null;
 }
 
-process.env.LOCAL_FIRST_DESKTOP_GATEWAY_URL = GATEWAY_URL;
-process.env.LOCAL_FIRST_DESKTOP_GATEWAY_TOKEN = GATEWAY_TOKEN;
+process.env.HOMUN_DESKTOP_GATEWAY_URL = GATEWAY_URL;
+process.env.HOMUN_DESKTOP_GATEWAY_TOKEN = GATEWAY_TOKEN;
 
 // Product/display name (macOS menu bar, About panel, dock tooltip). Set early,
 // before the app is ready, so the menu reflects it. Technical identifiers
-// (crate/binary "local-first-desktop-gateway", LOCAL_FIRST_* env) are unchanged.
+// (crate/binary "local-first-desktop-gateway", HOMUN_* env) are unchanged.
 app.setName("Homun");
 
 // In dev the macOS menu bar shows the bundle name ("Electron") unless we install a
@@ -131,15 +131,15 @@ async function isGatewayUsable() {
 }
 
 function gatewayBinaryPath() {
-  if (process.env.LOCAL_FIRST_DESKTOP_GATEWAY_BIN) {
-    return process.env.LOCAL_FIRST_DESKTOP_GATEWAY_BIN;
+  if (process.env.HOMUN_DESKTOP_GATEWAY_BIN) {
+    return process.env.HOMUN_DESKTOP_GATEWAY_BIN;
   }
 
   const executable = process.platform === "win32"
     ? "local-first-desktop-gateway.exe"
     : "local-first-desktop-gateway";
   const packagedPath = path.join(RESOURCES_ROOT, "bin", executable);
-  if ((app.isPackaged || process.env.LOCAL_FIRST_DESKTOP_RESOURCES_DIR) && fs.existsSync(packagedPath)) {
+  if ((app.isPackaged || process.env.HOMUN_DESKTOP_RESOURCES_DIR) && fs.existsSync(packagedPath)) {
     return packagedPath;
   }
 
@@ -224,16 +224,16 @@ function resolveGatewayPath() {
 
 function spawnGateway() {
   const gatewayBin = gatewayBinaryPath();
-  const workspaceRoot = process.env.LOCAL_FIRST_WORKSPACE_ROOT ??
-    ((app.isPackaged || process.env.LOCAL_FIRST_DESKTOP_RESOURCES_DIR)
+  const workspaceRoot = process.env.HOMUN_WORKSPACE_ROOT ??
+    ((app.isPackaged || process.env.HOMUN_DESKTOP_RESOURCES_DIR)
       ? RESOURCES_ROOT
       : REPO_ROOT);
   const env = {
     ...process.env,
     PATH: resolveGatewayPath(),
-    LOCAL_FIRST_DESKTOP_GATEWAY_PORT: GATEWAY_PORT,
-    LOCAL_FIRST_DESKTOP_GATEWAY_TOKEN: GATEWAY_TOKEN,
-    LOCAL_FIRST_WORKSPACE_ROOT: workspaceRoot,
+    HOMUN_DESKTOP_GATEWAY_PORT: GATEWAY_PORT,
+    HOMUN_DESKTOP_GATEWAY_TOKEN: GATEWAY_TOKEN,
+    HOMUN_WORKSPACE_ROOT: workspaceRoot,
   };
 
   if (gatewayBin) {
@@ -268,7 +268,7 @@ async function ensureGateway() {
 }
 
 function rendererEntry() {
-  if (process.env.LOCAL_FIRST_DESKTOP_URL) {
+  if (process.env.HOMUN_DESKTOP_URL) {
     return { kind: "url", value: DEV_SERVER_URL };
   }
 
@@ -313,7 +313,7 @@ function createWindow() {
   const entry = rendererEntry();
   void window.loadURL(entry.value);
 
-  if (process.env.LOCAL_FIRST_ELECTRON_DEVTOOLS === "1") {
+  if (process.env.HOMUN_ELECTRON_DEVTOOLS === "1") {
     window.webContents.openDevTools({ mode: "detach" });
   }
 }

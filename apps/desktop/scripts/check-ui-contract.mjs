@@ -53,8 +53,8 @@ assertContains("electron/main.cjs", "contextIsolation: true", "Electron shell mu
 assertContains("electron/main.cjs", "nodeIntegration: false", "Electron shell must not expose Node to the renderer");
 assertContains("electron/main.cjs", "sandbox: true", "Electron shell must run the renderer sandboxed");
 assertContains("electron/main.cjs", "ensureGateway", "Electron shell must own desktop gateway lifecycle");
-assertContains("electron/main.cjs", "LOCAL_FIRST_DESKTOP_GATEWAY_TOKEN", "Electron shell must generate/pass the local gateway token");
-assertContains("electron/main.cjs", "LOCAL_FIRST_DESKTOP_RESOURCES_DIR", "Electron shell must support production-like local resource smoke tests");
+assertContains("electron/main.cjs", "HOMUN_DESKTOP_GATEWAY_TOKEN", "Electron shell must generate/pass the local gateway token");
+assertContains("electron/main.cjs", "HOMUN_DESKTOP_RESOURCES_DIR", "Electron shell must support production-like local resource smoke tests");
 assertContains("electron/main.cjs", "before-quit", "Electron shell must stop managed gateway process on app quit");
 assertContains("electron/preload.cjs", "contextBridge.exposeInMainWorld", "Electron preload must expose only minimal runtime config");
 assertContains("scripts/prepare-package.mjs", "local-first-desktop-gateway", "package preparation must copy the gateway binary");
@@ -82,7 +82,7 @@ assertContains("src/lib/coreBridge.ts", "openChatStreamWithGateway", "Electron b
 assertContains("src/lib/coreBridge.ts", "/api/chat/generate_stream", "Electron bridge must call the local gateway streaming endpoint");
 assertNotContains("src/lib/coreBridge.ts", "127.0.0.1:8765", "renderer must not call Gemma runtime directly");
 assertContains("src/lib/gatewayConfig.ts", "localFirstDesktop", "desktop renderer must receive packaged gateway config through Electron preload");
-assertContains("src/lib/gatewayConfig.ts", "VITE_LOCAL_FIRST_DESKTOP_GATEWAY_TOKEN", "desktop renderer may receive the local gateway token through Vite env in tests/dev");
+assertContains("src/lib/gatewayConfig.ts", "VITE_HOMUN_DESKTOP_GATEWAY_TOKEN", "desktop renderer may receive the local gateway token through Vite env in tests/dev");
 assertContains("src/lib/gatewayConfig.ts", "Authorization", "desktop gateway requests must send bearer authorization");
 assertContains("src/lib/coreBridge.ts", "/api/tasks/queue", "Electron task queue must load from the local gateway");
 assertContains("src/lib/coreBridge.ts", "/api/tasks/executor", "Electron task executor status must load from the local gateway");
@@ -166,7 +166,7 @@ assertRepoContains("crates/desktop-gateway/src/main.rs", "/api/chat/threads", "d
 assertRepoContains("crates/desktop-gateway/src/main.rs", "/messages/{message_id}/create_task", "desktop gateway must create durable tasks from chat messages");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "ensure_operational_task_for_thread", "desktop gateway must link operational prompts to task and local computer read models");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "LocalComputerSessionStore", "desktop gateway must persist computer sessions for operational tasks");
-assertRepoContains("crates/desktop-gateway/src/main.rs", "LOCAL_FIRST_BROWSER_HEADLESS", "desktop gateway must allow visible Playwright browser sessions");
+assertRepoContains("crates/desktop-gateway/src/main.rs", "HOMUN_BROWSER_HEADLESS", "desktop gateway must allow visible Playwright browser sessions");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "require_gateway_token", "desktop gateway must protect chat endpoints with a local token");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "AllowOrigin::list", "desktop gateway CORS must use an explicit origin allowlist");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "HeaderValue::from_static(\"null\")", "desktop gateway CORS must allow packaged file-origin renderer with bearer token");

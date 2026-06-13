@@ -33,7 +33,7 @@ Persisted in the `automations` table (`store.rs`, schema_version 2) with CRUD
   via `fire_channel_event_automations`, independent of the auto-reply/draft policy).
 - `EventTrigger::ConnectorPoll { tool, args, key_field, label }` — GENERIC events on ANY connected
   Composio/MCP capability (G2). A background poller (`spawn_connector_event_poller`,
-  `connector_poll_tick`, interval `LFPA_CONNECTOR_POLL_SECS` default 300) calls `tool(args)`,
+  `connector_poll_tick`, interval `HOMUN_CONNECTOR_POLL_SECS` default 300) calls `tool(args)`,
   `extract_poll_items` finds the result array by `key_field`, diffs against a watermark stored on
   `Automation.state`, and fires one run per NEW item. The FIRST poll only seeds the watermark
   (no fire on pre-existing items).

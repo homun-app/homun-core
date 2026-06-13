@@ -403,7 +403,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // opens it (the SQLite stores are created immediately below).
     migrate_legacy_data_dir();
 
-    let port = env::var("LOCAL_FIRST_DESKTOP_GATEWAY_PORT")
+    let port = env::var("HOMUN_DESKTOP_GATEWAY_PORT")
         .ok()
         .and_then(|value| value.parse::<u16>().ok())
         .unwrap_or(18_765);
@@ -1043,9 +1043,9 @@ async fn run_proactive_review(state: &AppState, scope: &str) -> Option<i64> {
 }
 
 /// Interval between auto-review ticks — a cheap LOCAL cadence check; the review
-/// only RUNS when the idle/hours gates pass. Default 10 min. Env: LFPA_PROACTIVE_TICK_SECS.
+/// only RUNS when the idle/hours gates pass. Default 10 min. Env: HOMUN_PROACTIVE_TICK_SECS.
 fn proactive_tick_secs() -> u64 {
-    std::env::var("LFPA_PROACTIVE_TICK_SECS")
+    std::env::var("HOMUN_PROACTIVE_TICK_SECS")
         .ok()
         .and_then(|v| v.trim().parse::<u64>().ok())
         .filter(|&v| v >= 60)
@@ -1053,9 +1053,9 @@ fn proactive_tick_secs() -> u64 {
 }
 
 /// Min seconds before the SAME scope is auto-reviewed again — keeps the cadence
-/// gentle and the LLM calls few. Default 3h. Env: LFPA_PROACTIVE_COOLDOWN_SECS.
+/// gentle and the LLM calls few. Default 3h. Env: HOMUN_PROACTIVE_COOLDOWN_SECS.
 fn proactive_cooldown_secs() -> i64 {
-    std::env::var("LFPA_PROACTIVE_COOLDOWN_SECS")
+    std::env::var("HOMUN_PROACTIVE_COOLDOWN_SECS")
         .ok()
         .and_then(|v| v.trim().parse::<i64>().ok())
         .filter(|&v| v > 0)
@@ -1771,10 +1771,10 @@ fn is_suppressed(text: &str, forgotten: &[std::collections::HashSet<String>]) ->
 // stored per memory; similarity is brute-force cosine (fine at local single-user scale).
 
 fn embed_model() -> String {
-    env::var("LOCAL_FIRST_EMBED_MODEL").unwrap_or_else(|_| "nomic-embed-text-v2-moe".to_string())
+    env::var("HOMUN_EMBED_MODEL").unwrap_or_else(|_| "nomic-embed-text-v2-moe".to_string())
 }
 fn embed_base() -> String {
-    env::var("LOCAL_FIRST_EMBED_BASE").unwrap_or_else(|_| "http://127.0.0.1:11434".to_string())
+    env::var("HOMUN_EMBED_BASE").unwrap_or_else(|_| "http://127.0.0.1:11434".to_string())
 }
 
 /// Embed one text via Ollama `/api/embed`. Best-effort: `None` on any failure (the
@@ -4491,7 +4491,7 @@ fn create_automation_from_chat(state: &AppState, args_raw: &str) -> String {
 
 /// How often the connector-event poller checks each ConnectorPoll automation (min 30s).
 fn connector_poll_interval() -> std::time::Duration {
-    let secs = std::env::var("LFPA_CONNECTOR_POLL_SECS")
+    let secs = std::env::var("HOMUN_CONNECTOR_POLL_SECS")
         .ok()
         .and_then(|v| v.trim().parse::<u64>().ok())
         .filter(|&v| v >= 30)
@@ -5217,9 +5217,9 @@ fn run_in_project_tool_schema() -> serde_json::Value {
 
 /// Addons (process-skills, ADR 0011) are a post-release direction. The foundation
 /// stays wired but the agent-facing tools are gated off by default, so the first
-/// release ships as a focused personal assistant. Enable with LOCAL_FIRST_ADDONS=1.
+/// release ships as a focused personal assistant. Enable with HOMUN_ADDONS=1.
 fn addons_enabled() -> bool {
-    std::env::var("LOCAL_FIRST_ADDONS")
+    std::env::var("HOMUN_ADDONS")
         .map(|value| matches!(value.trim(), "1" | "true" | "on" | "yes"))
         .unwrap_or(false)
 }
@@ -6640,7 +6640,7 @@ async fn transcribe_audio(
 }
 
 /// Chat streaming config when an OpenAI-compatible backend is selected
-/// (`LOCAL_FIRST_INFERENCE_BACKEND=openai` + base URL). Returns
+/// (`HOMUN_INFERENCE_BACKEND=openai` + base URL). Returns
 /// `(base_url, model, api_key)`, else `None` when no inference provider is configured.
 /// File holding the user-selected active inference model (overrides the env
 /// default). Plain text, not a secret. Lets Settings switch model at runtime.
@@ -6816,12 +6816,12 @@ fn load_provider_registry() -> ProviderRegistry {
 fn seed_registry_from_legacy() -> ProviderRegistry {
     let mut registry = ProviderRegistry::default();
     let base_url = persisted_inference_base_url()
-        .or_else(|| env::var("LOCAL_FIRST_INFERENCE_BASE_URL").ok())
+        .or_else(|| env::var("HOMUN_INFERENCE_BASE_URL").ok())
         .filter(|value| !value.is_empty());
     let Some(base_url) = base_url else {
         return registry;
     };
-    let backend = env::var("LOCAL_FIRST_INFERENCE_BACKEND")
+    let backend = env::var("HOMUN_INFERENCE_BACKEND")
         .unwrap_or_default()
         .to_ascii_lowercase();
     let (id, label, kind) = if backend == "anthropic" {
@@ -6847,7 +6847,7 @@ fn save_provider_registry(registry: &ProviderRegistry) -> Result<(), String> {
 /// the registry-aware [`active_inference_model`].
 fn active_inference_model_legacy() -> Option<String> {
     persisted_inference_model()
-        .or_else(|| env::var("LOCAL_FIRST_INFERENCE_MODEL").ok())
+        .or_else(|| env::var("HOMUN_INFERENCE_MODEL").ok())
         .filter(|value| !value.is_empty())
 }
 
@@ -6858,7 +6858,7 @@ fn effective_inference_base_url() -> Option<String> {
         return Some(provider.base_url.clone());
     }
     persisted_inference_base_url().or_else(|| {
-        env::var("LOCAL_FIRST_INFERENCE_BASE_URL")
+        env::var("HOMUN_INFERENCE_BASE_URL")
             .ok()
             .filter(|value| !value.is_empty())
     })
@@ -6885,12 +6885,12 @@ fn chat_openai_stream_config() -> Option<(String, String, Option<String>)> {
 /// big reasoning models on slow proxies (e.g. nemotron on Ollama cloud) routinely
 /// need far more than the old fixed 180s — and editors like Zed don't cap total time
 /// at all because they STREAM (the proper fix; see roadmap). Override with
-/// LOCAL_FIRST_MODEL_TIMEOUT_SECS.
+/// HOMUN_MODEL_TIMEOUT_SECS.
 fn model_request_timeout_secs() -> u64 {
     // High ceiling: with streaming the real governors are the first-token + idle
     // timeouts (below). A total cap that fires mid-stream is reported by reqwest as
     // "error decoding response body" (#2839), so keep it well above any real turn.
-    std::env::var("LOCAL_FIRST_MODEL_TIMEOUT_SECS")
+    std::env::var("HOMUN_MODEL_TIMEOUT_SECS")
         .ok()
         .and_then(|value| value.trim().parse::<u64>().ok())
         .filter(|value| *value > 0)
@@ -6900,9 +6900,9 @@ fn model_request_timeout_secs() -> u64 {
 /// Idle (inter-token) timeout for streamed completions (seconds). With streaming the
 /// governor is INACTIVITY, not total time: a generation that keeps emitting tokens
 /// never dies, only a genuine stall (no token for this long) does. Default 180s;
-/// override with LOCAL_FIRST_MODEL_IDLE_TIMEOUT_SECS.
+/// override with HOMUN_MODEL_IDLE_TIMEOUT_SECS.
 fn model_idle_timeout_secs() -> u64 {
-    std::env::var("LOCAL_FIRST_MODEL_IDLE_TIMEOUT_SECS")
+    std::env::var("HOMUN_MODEL_IDLE_TIMEOUT_SECS")
         .ok()
         .and_then(|value| value.trim().parse::<u64>().ok())
         .filter(|value| *value > 0)
@@ -7085,9 +7085,9 @@ async fn collect_openai_stream(
 
 /// Generous budget for the FIRST token (seconds): Ollama may cold-load a big model
 /// or the cloud may take a moment before the first byte. Inter-token gaps use the
-/// tighter idle. Override with LOCAL_FIRST_MODEL_FIRST_TOKEN_SECS.
+/// tighter idle. Override with HOMUN_MODEL_FIRST_TOKEN_SECS.
 fn model_first_token_timeout_secs() -> u64 {
-    std::env::var("LOCAL_FIRST_MODEL_FIRST_TOKEN_SECS")
+    std::env::var("HOMUN_MODEL_FIRST_TOKEN_SECS")
         .ok()
         .and_then(|value| value.trim().parse::<u64>().ok())
         .filter(|value| *value > 0)
@@ -7470,12 +7470,12 @@ fn extractor_openai_config() -> Option<(String, String, Option<String>)> {
 }
 
 /// Chat context-char budget for the capable backend, derived from the model's
-/// context window (`LOCAL_FIRST_INFERENCE_CONTEXT_WINDOW`, default 32k tokens).
+/// context window (`HOMUN_INFERENCE_CONTEXT_WINDOW`, default 32k tokens).
 /// ~3 chars/token leaves headroom for the system prompt and the model's reply;
 /// it is vastly larger than the earlier 3.6K small-model default so chat history is not
 /// clamped on a model that can read it.
 fn chat_context_budget_chars() -> usize {
-    let window = env::var("LOCAL_FIRST_INFERENCE_CONTEXT_WINDOW")
+    let window = env::var("HOMUN_INFERENCE_CONTEXT_WINDOW")
         .ok()
         .and_then(|value| value.parse::<usize>().ok())
         .filter(|tokens| *tokens > 0)
@@ -7492,7 +7492,7 @@ fn chat_context_budget_chars() -> usize {
 /// Soft round budget for a normal turn. NOT the primary control: the turn ends when
 /// the MODEL stops calling tools (natural termination) or the no-progress guard trips
 /// (it repeats the same calls). This is a generous backstop so a long agentic task
-/// (large refactor, multi-file scaffold) isn't truncated. Env: `LOCAL_FIRST_CHAT_MAX_ROUNDS`.
+/// (large refactor, multi-file scaffold) isn't truncated. Env: `HOMUN_CHAT_MAX_ROUNDS`.
 const MAX_TOOL_ROUNDS: usize = 40;
 
 /// Absolute hard ceiling on rounds in ONE turn — pure anti-runaway, far above any real
@@ -7501,7 +7501,7 @@ const HARD_ROUND_CEILING: usize = 100;
 
 /// Soft round budget for a normal (non-browser) turn (env-overridable).
 fn chat_max_rounds() -> usize {
-    env::var("LOCAL_FIRST_CHAT_MAX_ROUNDS")
+    env::var("HOMUN_CHAT_MAX_ROUNDS")
         .ok()
         .and_then(|raw| raw.trim().parse::<usize>().ok())
         .filter(|n| *n > 0)
@@ -7510,12 +7510,12 @@ fn chat_max_rounds() -> usize {
 /// Round budget once a browser tool is in play. Driving a browser one micro-action
 /// at a time (navigate → snapshot → act → re-snapshot …) needs many more
 /// model↔tool round-trips than a normal chat turn. Env-overridable via
-/// `LOCAL_FIRST_CHAT_BROWSER_MAX_ROUNDS`.
+/// `HOMUN_CHAT_BROWSER_MAX_ROUNDS`.
 const MAX_TOOL_ROUNDS_BROWSER: usize = 32;
 
 /// Round budget once a browser tool has been used this turn (env-overridable).
 fn chat_browser_max_rounds() -> usize {
-    env::var("LOCAL_FIRST_CHAT_BROWSER_MAX_ROUNDS")
+    env::var("HOMUN_CHAT_BROWSER_MAX_ROUNDS")
         .ok()
         .and_then(|raw| raw.trim().parse::<usize>().ok())
         .filter(|n| *n > 0)
@@ -7534,9 +7534,9 @@ const COMPOSIO_RESULT_CHARS: usize = 6000;
 const MCP_CATALOG_CAP: usize = 100;
 /// Timeout for a single MCP `tools/call` from chat. The stdio transport's
 /// `read_line` is blocking and uncapped, so without this a hung server would
-/// freeze the turn forever. Overridable via `LOCAL_FIRST_MCP_CALL_TIMEOUT_SECS`.
+/// freeze the turn forever. Overridable via `HOMUN_MCP_CALL_TIMEOUT_SECS`.
 fn mcp_call_timeout() -> std::time::Duration {
-    let secs = std::env::var("LOCAL_FIRST_MCP_CALL_TIMEOUT_SECS")
+    let secs = std::env::var("HOMUN_MCP_CALL_TIMEOUT_SECS")
         .ok()
         .and_then(|v| v.trim().parse::<u64>().ok())
         .filter(|&v| v > 0)
@@ -8767,7 +8767,7 @@ RI-VERIFICA eseguendo. Una causa alla volta, niente tentativi alla cieca."
         base_tools.push(read_text_file_tool_schema());
         base_tools.push(run_in_project_tool_schema());
         // Addons (process-skills, ADR 0011) stay DORMANT until the post-release
-        // addon phase: foundation wired but off by default (LOCAL_FIRST_ADDONS=1).
+        // addon phase: foundation wired but off by default (HOMUN_ADDONS=1).
         if addons_enabled() {
             base_tools.push(list_addons_tool_schema());
             base_tools.push(show_addon_tool_schema());
@@ -9424,7 +9424,7 @@ richiedono la tua conferma nell'app. Proponila e fermati."
                             | "browser_tabs"
                             | "browser_dialog"
                     ) {
-                        // Granular browser tools (LOCAL_FIRST_CHAT_BROWSER_GRANULAR):
+                        // Granular browser tools (HOMUN_CHAT_BROWSER_GRANULAR):
                         // the main agent drives the browser one micro-action at a
                         // time against a per-turn session.
                         let args: serde_json::Value =
@@ -11509,7 +11509,7 @@ fn save_user_prefs(prefs: &UserPrefs) -> Result<(), String> {
 }
 
 /// The IANA name we resolve "now" against everywhere (prompt injection AND the
-/// container, via `LFPA_TZ`). User preference wins; else the host's system zone;
+/// container, via `HOMUN_TZ`). User preference wins; else the host's system zone;
 /// else "UTC" as a last resort so the value is always concrete.
 fn effective_user_tz_name() -> String {
     if let Some(name) = load_user_prefs().timezone.filter(|s| !s.trim().is_empty()) {
@@ -12452,9 +12452,9 @@ fn cc_idle_for() -> std::time::Duration {
 
 /// How long the contained computer may sit idle before the reaper recycles it.
 /// Default 30 min — comfortably past the 5-min browser-session idle, so parked
-/// sessions are already reaped by then. Overridable via `LFPA_CC_IDLE_RECYCLE_SECS`.
+/// sessions are already reaped by then. Overridable via `HOMUN_CC_IDLE_RECYCLE_SECS`.
 fn cc_idle_recycle_after() -> std::time::Duration {
-    let secs = std::env::var("LFPA_CC_IDLE_RECYCLE_SECS")
+    let secs = std::env::var("HOMUN_CC_IDLE_RECYCLE_SECS")
         .ok()
         .and_then(|v| v.trim().parse::<u64>().ok())
         .filter(|&v| v >= 60)
@@ -12545,7 +12545,7 @@ fn seconds_since_user_activity() -> Option<i64> {
 
 /// How long the user must be quiet before a Homun check-in may interrupt.
 fn homun_idle_threshold_secs() -> i64 {
-    env::var("LOCAL_FIRST_HOMUN_IDLE_SECS")
+    env::var("HOMUN_IDLE_SECS")
         .ok()
         .and_then(|v| v.trim().parse::<i64>().ok())
         .filter(|v| *v > 0)
@@ -12962,7 +12962,7 @@ fn whatsapp_status_path() -> Option<PathBuf> {
 
 /// Locates the built sidecar binary (env override, else repo-relative).
 fn whatsapp_bin() -> Option<PathBuf> {
-    if let Ok(p) = env::var("LOCAL_FIRST_WHATSAPP_BIN") {
+    if let Ok(p) = env::var("HOMUN_WHATSAPP_BIN") {
         let path = PathBuf::from(p);
         if path.is_file() {
             return Some(path);
@@ -13049,8 +13049,8 @@ fn reconnect_channels_on_startup() {
         return; // kill-switch off: stay disconnected.
     }
     let gw_port =
-        env::var("LOCAL_FIRST_DESKTOP_GATEWAY_PORT").unwrap_or_else(|_| "18765".to_string());
-    let gw_token = env::var("LOCAL_FIRST_DESKTOP_GATEWAY_TOKEN").ok();
+        env::var("HOMUN_DESKTOP_GATEWAY_PORT").unwrap_or_else(|_| "18765".to_string());
+    let gw_token = env::var("HOMUN_DESKTOP_GATEWAY_TOKEN").ok();
 
     // WhatsApp: only if a session was previously paired (matches the sidecar's
     // own session path under $HOME/.homun).
@@ -13133,9 +13133,9 @@ async fn whatsapp_connect(
     }
     // Wire the sidecar↔gateway protocol (C2 outbound /send, C3 inbound forward).
     command.env("WA_HTTP_PORT", WHATSAPP_HTTP_PORT.to_string());
-    let gw_port = env::var("LOCAL_FIRST_DESKTOP_GATEWAY_PORT").unwrap_or_else(|_| "18765".to_string());
+    let gw_port = env::var("HOMUN_DESKTOP_GATEWAY_PORT").unwrap_or_else(|_| "18765".to_string());
     command.env("WA_GATEWAY_URL", format!("http://127.0.0.1:{gw_port}"));
-    if let Ok(token) = env::var("LOCAL_FIRST_DESKTOP_GATEWAY_TOKEN") {
+    if let Ok(token) = env::var("HOMUN_DESKTOP_GATEWAY_TOKEN") {
         command.env("WA_GATEWAY_TOKEN", token);
     }
     let child = command.spawn().map_err(|error| GatewayError {
@@ -13195,7 +13195,7 @@ fn telegram_token_path() -> Option<PathBuf> {
 }
 
 fn telegram_bin() -> Option<PathBuf> {
-    if let Ok(p) = env::var("LOCAL_FIRST_TELEGRAM_BIN") {
+    if let Ok(p) = env::var("HOMUN_TELEGRAM_BIN") {
         let path = PathBuf::from(p);
         if path.is_file() {
             return Some(path);
@@ -13303,9 +13303,9 @@ async fn telegram_connect(
     if let Some(path) = telegram_status_path() {
         command.env("TG_STATUS_FILE", path);
     }
-    let gw_port = env::var("LOCAL_FIRST_DESKTOP_GATEWAY_PORT").unwrap_or_else(|_| "18765".to_string());
+    let gw_port = env::var("HOMUN_DESKTOP_GATEWAY_PORT").unwrap_or_else(|_| "18765".to_string());
     command.env("TG_GATEWAY_URL", format!("http://127.0.0.1:{gw_port}"));
-    if let Ok(token) = env::var("LOCAL_FIRST_DESKTOP_GATEWAY_TOKEN") {
+    if let Ok(token) = env::var("HOMUN_DESKTOP_GATEWAY_TOKEN") {
         command.env("TG_GATEWAY_TOKEN", token);
     }
     let child = command.spawn().map_err(|error| GatewayError {
@@ -15580,7 +15580,7 @@ fn record_task_executor_batch(state: &AppState, batch: TaskRunBatchResponse) {
 }
 
 fn task_executor_worker_enabled() -> bool {
-    env::var("LOCAL_FIRST_TASK_EXECUTOR_WORKER")
+    env::var("HOMUN_TASK_EXECUTOR_WORKER")
         .map(|value| {
             let normalized = value.trim().to_lowercase();
             !matches!(normalized.as_str(), "0" | "false" | "off" | "disabled")
@@ -17092,7 +17092,7 @@ struct ConnectComposioResponse {
 fn composio_base_url(explicit: Option<String>) -> String {
     explicit
         .filter(|url| !url.trim().is_empty())
-        .or_else(|| env::var("LOCAL_FIRST_COMPOSIO_BASE_URL").ok().filter(|url| !url.is_empty()))
+        .or_else(|| env::var("HOMUN_COMPOSIO_BASE_URL").ok().filter(|url| !url.is_empty()))
         .unwrap_or_else(|| "https://backend.composio.dev/api/v3".to_string())
 }
 
@@ -17511,7 +17511,7 @@ fn composio_catalog_cache(
 }
 
 fn composio_catalog_ttl() -> std::time::Duration {
-    let secs = std::env::var("LFPA_COMPOSIO_CACHE_SECS")
+    let secs = std::env::var("HOMUN_COMPOSIO_CACHE_SECS")
         .ok()
         .and_then(|v| v.trim().parse::<u64>().ok())
         .unwrap_or(60);
@@ -17527,7 +17527,7 @@ fn composio_catalog_invalidate() {
 }
 
 /// Cached wrapper over `composio_chat_tools`: that call is an N-toolkit `/tools` HTTP fan-out
-/// rebuilt every chat turn. Cache per `cap` with a short TTL (LFPA_COMPOSIO_CACHE_SECS, default
+/// rebuilt every chat turn. Cache per `cap` with a short TTL (HOMUN_COMPOSIO_CACHE_SECS, default
 /// 60s); `composio_catalog_invalidate()` clears it on connect/link/disconnect for immediacy.
 fn composio_chat_tools_cached(state: &AppState, cap: usize) -> ComposioChatTools {
     let now = std::time::Instant::now();
@@ -17917,10 +17917,10 @@ collegarla (i percorsi tra parentesi). NON dichiarare di averle già collegate."
 }
 
 /// Executes a Composio tool for the current entity and returns its raw output.
-/// Opt-in verbose diagnostics (set `LFPA_DEBUG`). Off by default because these logs can echo
+/// Opt-in verbose diagnostics (set `HOMUN_DEBUG`). Off by default because these logs can echo
 /// tool arguments, channel context, or Composio error bodies that may include secrets/PII.
 fn verbose_debug() -> bool {
-    std::env::var("LFPA_DEBUG").is_ok()
+    std::env::var("HOMUN_DEBUG").is_ok()
 }
 
 /// A confirmation routed to a channel for REMOTE authorization (the user approves from their
@@ -18156,7 +18156,7 @@ fn composio_execute_tool(
         return execute_send_message(state, arguments);
     }
     let transport = composio_transport_for(state)?;
-    // Diagnostic (opt-in: LFPA_DEBUG): surface exactly what we send so date/arg bugs are
+    // Diagnostic (opt-in: HOMUN_DEBUG): surface exactly what we send so date/arg bugs are
     // visible in the log. Off by default — args can carry message bodies / PII.
     if verbose_debug() {
         eprintln!(
@@ -19892,7 +19892,7 @@ fn run_read_only_command(command: &str, args: &[&str]) -> Result<String, LocalTa
 }
 
 fn brain_materialize_enabled() -> bool {
-    match env::var("LOCAL_FIRST_BRAIN_MATERIALIZE") {
+    match env::var("HOMUN_BRAIN_MATERIALIZE") {
         // Explicit override always wins.
         Ok(value) => matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "on"),
         // A1.6: default ON. The only backends are capable cloud/router providers
@@ -20020,7 +20020,7 @@ impl ComposioTransport for GatewayComposioTransport {
             // actionable instead of an opaque "composio_status:400".
             let code = status.as_u16();
             let body_text = response.text().unwrap_or_default();
-            // Full body to the log (opt-in: LFPA_DEBUG) — Composio's top-level "message" is
+            // Full body to the log (opt-in: HOMUN_DEBUG) — Composio's top-level "message" is
             // often generic; the offending field lives in a nested array. Off by default
             // because an error body can echo back submitted credentials.
             if verbose_debug() {
@@ -20272,7 +20272,7 @@ fn resolve_inference_api_key() -> Option<String> {
 /// API key from the environment only (0600 key file preferred over the var).
 /// Used as the per-provider fallback for role routing.
 fn env_inference_api_key() -> Option<String> {
-    if let Ok(path) = env::var("LOCAL_FIRST_INFERENCE_API_KEY_FILE")
+    if let Ok(path) = env::var("HOMUN_INFERENCE_API_KEY_FILE")
         && !path.trim().is_empty()
     {
         match fs::read_to_string(path.trim()) {
@@ -20283,17 +20283,17 @@ fn env_inference_api_key() -> Option<String> {
                 }
             }
             Err(error) => {
-                eprintln!("[inference] could not read LOCAL_FIRST_INFERENCE_API_KEY_FILE: {error}");
+                eprintln!("[inference] could not read HOMUN_INFERENCE_API_KEY_FILE: {error}");
             }
         }
     }
-    let from_env = env::var("LOCAL_FIRST_INFERENCE_API_KEY")
+    let from_env = env::var("HOMUN_INFERENCE_API_KEY")
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())?;
     eprintln!(
-        "[inference] using API key from LOCAL_FIRST_INFERENCE_API_KEY (env); prefer \
-         LOCAL_FIRST_INFERENCE_API_KEY_FILE (0600) — env is inherited by child processes"
+        "[inference] using API key from HOMUN_INFERENCE_API_KEY (env); prefer \
+         HOMUN_INFERENCE_API_KEY_FILE (0600) — env is inherited by child processes"
     );
     Some(from_env)
 }
@@ -20345,7 +20345,7 @@ fn build_router_from(
 /// agent, and semantic-router paths). Resolves the provider's key + context.
 fn build_router_for_resolved(resolved: &ResolvedRole) -> ModelRouter {
     let api_key = provider_api_key(&resolved.provider_id).or_else(env_inference_api_key);
-    let context_window = env::var("LOCAL_FIRST_INFERENCE_CONTEXT_WINDOW")
+    let context_window = env::var("HOMUN_INFERENCE_CONTEXT_WINDOW")
         .ok()
         .and_then(|value| value.parse::<u32>().ok())
         .unwrap_or(if matches!(resolved.kind, ProviderKind::Anthropic) {
@@ -20373,9 +20373,9 @@ fn router_for_role(role: &str) -> ModelRouter {
 }
 
 /// Whether the semantic (LLM) model router is enabled. Default ON; set
-/// `LOCAL_FIRST_SEMANTIC_ROUTER=0` to force the cheap heuristic.
+/// `HOMUN_SEMANTIC_ROUTER=0` to force the cheap heuristic.
 fn semantic_router_enabled() -> bool {
-    env::var("LOCAL_FIRST_SEMANTIC_ROUTER")
+    env::var("HOMUN_SEMANTIC_ROUTER")
         .map(|value| value != "0" && !value.eq_ignore_ascii_case("false"))
         .unwrap_or(true)
 }
@@ -20868,7 +20868,7 @@ fn valid_github_repo(repo: &str) -> bool {
 /// Optional GitHub token, which raises the 60 req/hour anonymous limit. Read
 /// from env first, then a 0600 file under the data dir. Never logged.
 fn github_token() -> Option<String> {
-    if let Ok(token) = env::var("LOCAL_FIRST_GITHUB_TOKEN") {
+    if let Ok(token) = env::var("HOMUN_GITHUB_TOKEN") {
         let token = token.trim().to_string();
         if !token.is_empty() {
             return Some(token);
@@ -21300,10 +21300,10 @@ fn build_browser_inference_router() -> ModelRouter {
 
 /// Legacy env-only router, used when the registry has no providers yet.
 fn build_inference_router_from_env() -> ModelRouter {
-    let backend = env::var("LOCAL_FIRST_INFERENCE_BACKEND")
+    let backend = env::var("HOMUN_INFERENCE_BACKEND")
         .unwrap_or_default()
         .to_ascii_lowercase();
-    let context_window = env::var("LOCAL_FIRST_INFERENCE_CONTEXT_WINDOW")
+    let context_window = env::var("HOMUN_INFERENCE_CONTEXT_WINDOW")
         .ok()
         .and_then(|value| value.parse::<u32>().ok());
     if backend == "anthropic"
@@ -21320,7 +21320,7 @@ fn build_inference_router_from_env() -> ModelRouter {
     }
     let base_url =
         effective_inference_base_url().unwrap_or_else(|| "http://127.0.0.1:11434/v1".to_string());
-    let model = env::var("LOCAL_FIRST_BROWSER_PLANNER_MODEL")
+    let model = env::var("HOMUN_BROWSER_PLANNER_MODEL")
         .ok()
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(active_inference_model);
@@ -21441,16 +21441,16 @@ fn active_inference_model_info() -> ActiveModelResponse {
         }
     }
     resolve_active_model(&ActiveModelInputs {
-        backend: env::var("LOCAL_FIRST_INFERENCE_BACKEND")
+        backend: env::var("HOMUN_INFERENCE_BACKEND")
             .unwrap_or_default()
             .to_ascii_lowercase(),
         model: persisted_inference_model()
-            .or_else(|| env::var("LOCAL_FIRST_INFERENCE_MODEL").ok())
+            .or_else(|| env::var("HOMUN_INFERENCE_MODEL").ok())
             .filter(|value| !value.is_empty()),
-        cloud_flag: env::var("LOCAL_FIRST_INFERENCE_CLOUD")
+        cloud_flag: env::var("HOMUN_INFERENCE_CLOUD")
             .map(|value| value == "1" || value.to_ascii_lowercase() == "true")
             .unwrap_or(false),
-        context_window: env::var("LOCAL_FIRST_INFERENCE_CONTEXT_WINDOW")
+        context_window: env::var("HOMUN_INFERENCE_CONTEXT_WINDOW")
             .ok()
             .and_then(|value| value.parse::<u32>().ok()),
         has_api_key: resolve_inference_api_key().is_some(),
@@ -21526,12 +21526,12 @@ async fn runtime_models(State(state): State<AppState>) -> Json<RuntimeModelsResp
             }
         }
     }
-    let backend = env::var("LOCAL_FIRST_INFERENCE_BACKEND")
+    let backend = env::var("HOMUN_INFERENCE_BACKEND")
         .unwrap_or_default()
         .to_ascii_lowercase();
-    let active = persisted_inference_model().or_else(|| env::var("LOCAL_FIRST_INFERENCE_MODEL").ok());
+    let active = persisted_inference_model().or_else(|| env::var("HOMUN_INFERENCE_MODEL").ok());
     let mut available = Vec::new();
-    if let Ok(base) = env::var("LOCAL_FIRST_INFERENCE_BASE_URL") {
+    if let Ok(base) = env::var("HOMUN_INFERENCE_BASE_URL") {
         if !base.is_empty() {
             let url = format!("{}/models", base.trim_end_matches('/'));
             let mut request = state.http.get(&url).timeout(std::time::Duration::from_secs(4));
@@ -21608,7 +21608,7 @@ struct InferenceProviderResponse {
 async fn runtime_provider() -> Json<InferenceProviderResponse> {
     Json(InferenceProviderResponse {
         base_url: effective_inference_base_url(),
-        model: persisted_inference_model().or_else(|| env::var("LOCAL_FIRST_INFERENCE_MODEL").ok()),
+        model: persisted_inference_model().or_else(|| env::var("HOMUN_INFERENCE_MODEL").ok()),
         has_key: resolve_inference_api_key().is_some(),
     })
 }
@@ -25223,7 +25223,7 @@ fn surface_for_task(task: &TaskRecord) -> SurfaceKind {
 }
 
 fn browser_automation_dir() -> PathBuf {
-    if let Ok(path) = env::var("LOCAL_FIRST_BROWSER_AUTOMATION_DIR") {
+    if let Ok(path) = env::var("HOMUN_BROWSER_AUTOMATION_DIR") {
         return PathBuf::from(path);
     }
     FsPath::new(env!("CARGO_MANIFEST_DIR"))
@@ -25241,19 +25241,19 @@ fn browser_automation_dir() -> PathBuf {
 /// the sidecar's `restartAssistantVisible` self-heal still recovers the rare
 /// site that genuinely fails headless, so it's "invisible by default, a window
 /// only as a last resort" rather than "a window always". Override per install
-/// with `LOCAL_FIRST_BROWSER_HEADLESS=0`.
+/// with `HOMUN_BROWSER_HEADLESS=0`.
 fn default_browser_headless_value() -> &'static str {
     "1"
 }
 
 fn browser_headless_env_value() -> String {
-    env::var("LOCAL_FIRST_BROWSER_HEADLESS")
+    env::var("HOMUN_BROWSER_HEADLESS")
         .unwrap_or_else(|_| default_browser_headless_value().to_string())
 }
 
 /// Resolves the contained-computer CDP endpoint (ADR 0010) from config, pure for
-/// testability. An explicit `LOCAL_FIRST_CONTAINED_COMPUTER_CDP` wins; otherwise
-/// `LOCAL_FIRST_CONTAINED_COMPUTER=1|true` enables the default local endpoint.
+/// testability. An explicit `HOMUN_CONTAINED_COMPUTER_CDP` wins; otherwise
+/// `HOMUN_CONTAINED_COMPUTER=1|true` enables the default local endpoint.
 /// `None` means "use the on-host browser" (current default).
 fn resolve_contained_computer_cdp(
     explicit: Option<&str>,
@@ -25316,14 +25316,14 @@ fn contained_container_detected() -> bool {
 }
 
 /// Resolves the contained computer's CDP endpoint. An explicit env endpoint wins;
-/// then the `LOCAL_FIRST_CONTAINED_COMPUTER` enable flag; otherwise we auto-detect
+/// then the `HOMUN_CONTAINED_COMPUTER` enable flag; otherwise we auto-detect
 /// a running container — the app auto-starts it for skills, so the browser and the
 /// live view should use it whenever it is up. `None` means "use the on-host
 /// browser", the graceful fallback when Docker is unavailable.
 fn contained_computer_cdp_endpoint() -> Option<String> {
     if let Some(endpoint) = resolve_contained_computer_cdp(
-        env::var("LOCAL_FIRST_CONTAINED_COMPUTER_CDP").ok().as_deref(),
-        env::var("LOCAL_FIRST_CONTAINED_COMPUTER").ok().as_deref(),
+        env::var("HOMUN_CONTAINED_COMPUTER_CDP").ok().as_deref(),
+        env::var("HOMUN_CONTAINED_COMPUTER").ok().as_deref(),
     ) {
         return Some(endpoint);
     }
@@ -25371,7 +25371,7 @@ struct ContainedComputerLiveResponse {
 async fn contained_computer_live() -> Json<ContainedComputerLiveResponse> {
     let novnc_url = resolve_contained_computer_novnc(
         contained_computer_cdp_endpoint().is_some(),
-        env::var("LOCAL_FIRST_CONTAINED_COMPUTER_NOVNC").ok().as_deref(),
+        env::var("HOMUN_CONTAINED_COMPUTER_NOVNC").ok().as_deref(),
     );
     let activity_state = current_browser_activity();
     let terminal = current_sandbox_activity();
@@ -25644,8 +25644,8 @@ fn browser_sidecar_env_with_headless(headless: String) -> Vec<(String, String)> 
         // context regresses reliability (no cookies -> consent/geo walls ->
         // the worker wanders and burns iterations). The default warm shared
         // context is far more reliable. Isolation is opt-in per worker (set via
-        // LOCAL_FIRST_BROWSER_PARALLEL when fanning out) — see parallel path.
-        if env::var("LOCAL_FIRST_BROWSER_ISOLATED_CONTEXT").as_deref() == Ok("1") {
+        // HOMUN_BROWSER_PARALLEL when fanning out) — see parallel path.
+        if env::var("HOMUN_BROWSER_ISOLATED_CONTEXT").as_deref() == Ok("1") {
             env.push((
                 "BROWSER_AUTOMATION_ISOLATED_CONTEXT".to_string(),
                 "1".to_string(),
@@ -26200,7 +26200,7 @@ fn lock_task_executor_status(
 }
 
 fn gateway_database_path() -> Result<PathBuf, std::io::Error> {
-    if let Ok(path) = env::var("LOCAL_FIRST_DESKTOP_GATEWAY_DB") {
+    if let Ok(path) = env::var("HOMUN_DESKTOP_GATEWAY_DB") {
         let path = PathBuf::from(path);
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
@@ -26217,7 +26217,7 @@ fn gateway_database_path() -> Result<PathBuf, std::io::Error> {
 }
 
 fn gateway_task_database_path() -> Result<PathBuf, std::io::Error> {
-    if let Ok(path) = env::var("LOCAL_FIRST_TASK_RUNTIME_DB") {
+    if let Ok(path) = env::var("HOMUN_TASK_RUNTIME_DB") {
         let path = PathBuf::from(path);
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
@@ -26234,7 +26234,7 @@ fn gateway_task_database_path() -> Result<PathBuf, std::io::Error> {
 }
 
 fn gateway_local_computer_database_path() -> Result<PathBuf, std::io::Error> {
-    if let Ok(path) = env::var("LOCAL_FIRST_LOCAL_COMPUTER_DB") {
+    if let Ok(path) = env::var("HOMUN_LOCAL_COMPUTER_DB") {
         let path = PathBuf::from(path);
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
@@ -26251,7 +26251,7 @@ fn gateway_local_computer_database_path() -> Result<PathBuf, std::io::Error> {
 }
 
 fn gateway_browser_policy_database_path() -> Result<PathBuf, std::io::Error> {
-    if let Ok(path) = env::var("LOCAL_FIRST_BROWSER_POLICY_DB") {
+    if let Ok(path) = env::var("HOMUN_BROWSER_POLICY_DB") {
         let path = PathBuf::from(path);
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
@@ -26268,7 +26268,7 @@ fn gateway_browser_policy_database_path() -> Result<PathBuf, std::io::Error> {
 }
 
 fn gateway_memory_database_path() -> Result<PathBuf, std::io::Error> {
-    if let Ok(path) = env::var("LOCAL_FIRST_MEMORY_DB") {
+    if let Ok(path) = env::var("HOMUN_MEMORY_DB") {
         let path = PathBuf::from(path);
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
@@ -26286,7 +26286,7 @@ fn gateway_memory_database_path() -> Result<PathBuf, std::io::Error> {
 
 /// Directory for human-readable/editable memory wiki markdown pages.
 fn gateway_memory_wiki_dir() -> Result<PathBuf, std::io::Error> {
-    if let Ok(path) = env::var("LOCAL_FIRST_MEMORY_WIKI_DIR") {
+    if let Ok(path) = env::var("HOMUN_MEMORY_WIKI_DIR") {
         let path = PathBuf::from(path);
         fs::create_dir_all(&path)?;
         return Ok(path);
@@ -26301,7 +26301,7 @@ fn gateway_memory_wiki_dir() -> Result<PathBuf, std::io::Error> {
 }
 
 fn gateway_capability_database_path() -> Result<PathBuf, std::io::Error> {
-    if let Ok(path) = env::var("LOCAL_FIRST_CAPABILITY_REGISTRY_DB") {
+    if let Ok(path) = env::var("HOMUN_CAPABILITY_REGISTRY_DB") {
         let path = PathBuf::from(path);
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
@@ -26318,7 +26318,7 @@ fn gateway_capability_database_path() -> Result<PathBuf, std::io::Error> {
 }
 
 fn gateway_token() -> String {
-    env::var("LOCAL_FIRST_DESKTOP_GATEWAY_TOKEN")
+    env::var("HOMUN_DESKTOP_GATEWAY_TOKEN")
         .unwrap_or_default()
         .trim()
         .to_string()
@@ -26359,7 +26359,7 @@ fn resolve_gateway_auth_token() -> Result<String, std::io::Error> {
     );
     write_private_file(&token_path, token.as_bytes())?;
     eprintln!(
-        "[gateway] no LOCAL_FIRST_DESKTOP_GATEWAY_TOKEN set; generated a local token at {} (auth required)",
+        "[gateway] no HOMUN_DESKTOP_GATEWAY_TOKEN set; generated a local token at {} (auth required)",
         token_path.display()
     );
     Ok(token)
@@ -26425,7 +26425,7 @@ fn write_private_file(path: &std::path::Path, bytes: &[u8]) -> Result<(), std::i
 
 fn gateway_user_id() -> UserId {
     UserId::new(
-        env::var("LOCAL_FIRST_USER_ID")
+        env::var("HOMUN_USER_ID")
             .unwrap_or_else(|_| "local-user".to_string())
             .trim()
             .to_string(),
@@ -26445,7 +26445,7 @@ fn active_workspace_id() -> String {
             return id.clone();
         }
     }
-    env::var("LOCAL_FIRST_WORKSPACE_ID")
+    env::var("HOMUN_WORKSPACE_ID")
         .unwrap_or_else(|_| "local-workspace".to_string())
         .trim()
         .to_string()
@@ -26476,7 +26476,7 @@ fn gateway_workspace_id() -> WorkspaceId {
 /// channel conversations live — independent of whichever project is active, since
 /// a WhatsApp/Telegram chat is personal, not project-scoped.
 fn base_workspace_id() -> String {
-    env::var("LOCAL_FIRST_WORKSPACE_ID")
+    env::var("HOMUN_WORKSPACE_ID")
         .unwrap_or_else(|_| "local-workspace".to_string())
         .trim()
         .to_string()
@@ -26484,7 +26484,7 @@ fn base_workspace_id() -> String {
 
 fn gateway_memory_user_id() -> MemoryUserId {
     MemoryUserId::new(
-        env::var("LOCAL_FIRST_USER_ID")
+        env::var("HOMUN_USER_ID")
             .unwrap_or_else(|_| "local-user".to_string())
             .trim()
             .to_string(),
@@ -26512,7 +26512,7 @@ fn gateway_memory_workspace_id() -> MemoryWorkspaceId {
 
 fn gateway_capability_user_id() -> CapabilityUserId {
     CapabilityUserId::new(
-        env::var("LOCAL_FIRST_USER_ID")
+        env::var("HOMUN_USER_ID")
             .unwrap_or_else(|_| "local-user".to_string())
             .trim()
             .to_string(),
@@ -26571,7 +26571,7 @@ fn gateway_workspaces_path() -> Result<PathBuf, std::io::Error> {
 /// Loads the persisted workspaces, seeding a default ("project") from the
 /// env/default id on first run so there is always at least one.
 fn load_workspaces_file() -> WorkspacesFile {
-    let default_id = env::var("LOCAL_FIRST_WORKSPACE_ID")
+    let default_id = env::var("HOMUN_WORKSPACE_ID")
         .unwrap_or_else(|_| "local-workspace".to_string())
         .trim()
         .to_string();
@@ -26867,7 +26867,7 @@ fn cors_layer() -> CorsLayer {
         HeaderValue::from_static("http://localhost:1421"),
         HeaderValue::from_static("null"),
     ];
-    if let Ok(origin) = env::var("LOCAL_FIRST_DESKTOP_ALLOWED_ORIGIN") {
+    if let Ok(origin) = env::var("HOMUN_DESKTOP_ALLOWED_ORIGIN") {
         if let Ok(header) = HeaderValue::from_str(origin.trim()) {
             origins.push(header);
         }

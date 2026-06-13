@@ -3,7 +3,7 @@
 # the gateway data dir, where the desktop-gateway resolves it at runtime for PDF
 # attachment ingestion (text extraction + page rasterization → vision).
 #
-# Resolution at runtime: LOCAL_FIRST_PDFIUM_LIB → ~/.homun/pdfium → system.
+# Resolution at runtime: HOMUN_PDFIUM_LIB → ~/.homun/pdfium → system.
 # This script populates the second location. For packaging, the per-OS lib gets
 # bundled with the app instead.
 set -euo pipefail

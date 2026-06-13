@@ -7,7 +7,7 @@ Questo file e' la memoria operativa del lavoro svolto nel repository. Va aggiorn
 ### VALIDAZIONE LIVE A1.1–A1.3 (gateway acceso, HTTP reale) — PASSATA + 2 bug fixati
 
 Setup: gateway leggero (`--no-default-features`), worker auto OFF (validazione
-controllata via `POST /api/tasks/run_next`), `LOCAL_FIRST_BRAIN_MATERIALIZE=1`,
+controllata via `POST /api/tasks/run_next`), `HOMUN_BRAIN_MATERIALIZE=1`,
 router -> Ollama locale. Ollama CLOUD relay DOWN (tutti i `:cloud` -> "internal
 service error"; chiave appena ruotata o outage lato Ollama) -> validato con
 `gemma4:latest` LOCALE (modello debole ma sufficiente per il plumbing).
@@ -96,7 +96,7 @@ step act statici.
 
 VINCOLI PRATICI emersi:
 - Il timeout del loop planner di DEFAULT e' 20s (`browser_loop_planner_timeout_seconds`,
-  env `LOCAL_FIRST_BROWSER_PLANNER_TIMEOUT_SECONDS`): troppo poco per un modello
+  env `HOMUN_BROWSER_PLANNER_TIMEOUT_SECONDS`): troppo poco per un modello
   cloud capace (~90s/chiamata). Prima run -> TimedOut immediato. Con 180s sblocca.
   -> In produzione il timeout va alzato per backend cloud.
 - qwen3-vl:235b sulla snapshot profilo Full di trenitalia (DOM enorme) e'
@@ -184,7 +184,7 @@ Test: `member_tasks_resolve_to_owning_thread_without_shadowing_primary`,
 `aggregate_session_state_reflects_member_progress`. Gateway lib 23 + bin 57 verdi.
 
 DA VALIDARE LIVE (non bloccante): far girare un prompt con
-`LOCAL_FIRST_BRAIN_MATERIALIZE=1` + backend capace e osservare la UI Computer
+`HOMUN_BRAIN_MATERIALIZE=1` + backend capace e osservare la UI Computer
 mostrare 1 sessione che avanza 0..N con i risultati per-step in chat.
 RESIDUO A1: A1.3 (provider live / sidecar singolo), A1.4 (convergere il run loop
 su TaskRuntime), A1.5 (ritirare routing keyword/train + OperationalPlan->read
@@ -193,7 +193,7 @@ model), A1.6 (flag default ON).
 ### A1.1 VALIDATA end-to-end con modello frontier (qwen3-vl:235b)
 
 Chiave gestita in sicurezza: file 0600 `~/.homun/
-ollama-api-key`, letto via `LOCAL_FIRST_INFERENCE_API_KEY_FILE` (valore mai in
+ollama-api-key`, letto via `HOMUN_INFERENCE_API_KEY_FILE` (valore mai in
 chat/comandi). Endpoint `https://ollama.com/v1`.
 
 RISULTATO (smoke brain_materialize): qwen3-vl:235b produce un piano CORRETTO a 5
@@ -215,7 +215,7 @@ Catena di fix scoperti dal vivo (ognuno sbloccava il successivo):
    cloud) -> anche qwen sbagliava forma (emetteva un bare step con `action`).
    Aggiunto al prompt un blocco OUTPUT FORMAT esplicito + esempio
    {route, steps:[...]} -> ora la forma e' corretta su qualunque backend.
-- Debug gated `LOCAL_FIRST_INFERENCE_DEBUG=1` nel provider per stampare
+- Debug gated `HOMUN_INFERENCE_DEBUG=1` nel provider per stampare
   raw_output su risposta invalida (ha permesso di vedere il bare-step).
 - Test: orchestrator 7 brain + altri verdi (soglia prompt test 9k->10.5k per il
   preambolo fisso; aggiunto planner_timeout_seconds ai literal di test),
@@ -273,7 +273,7 @@ capace (conferma la strategia "modello capace via router").
   `CapabilityTaskPayload`, ed `execute_capability_browser_task` parsa esattamente
   `CapabilityTaskPayload` -> la catena Brain->materializza->worker->executor
   browser SI CONNETTE. subagent.* via l'executor gia' de-stubbato.
-- Wiring opt-in in `submit_operational_prompt` dietro `LOCAL_FIRST_BRAIN_
+- Wiring opt-in in `submit_operational_prompt` dietro `HOMUN_BRAIN_
   MATERIALIZE` (spawn_blocking per non bloccare il runtime): se materializza,
   ack chat "pianificato N passi, li eseguo" e i task girano via worker (visibili
   in coda task); altrimenti path keyword legacy (default invariato).
@@ -284,8 +284,8 @@ capace (conferma la strategia "modello capace via router").
 
 ### A4 — chat dal router (streaming OpenAI-compat)
 
-- L'handler `generate_stream` ora, se `LOCAL_FIRST_INFERENCE_BACKEND=openai` +
-  `LOCAL_FIRST_INFERENCE_BASE_URL` (Ollama local/cloud, OpenAI, OpenRouter),
+- L'handler `generate_stream` ora, se `HOMUN_INFERENCE_BACKEND=openai` +
+  `HOMUN_INFERENCE_BASE_URL` (Ollama local/cloud, OpenAI, OpenRouter),
   streama da `{base}/chat/completions` con `stream:true` e TRADUCE la SSE nel
   formato NDJSON `GenerateStreamEvent` del gateway (delta/done) — IDENTICO al
   path MLX, quindi la UI consuma entrambi allo stesso modo. Default invariato =
@@ -376,7 +376,7 @@ per il browser (si puo' usare un modello capace via router). Conseguenze:
   in-memory), chiama `plan_only`, adatta a OperationalPlan. Cablato al punto-piano
   in `execute_browser_loop_read_only_task` come opzione intermedia:
   input_json plan -> Brain (se flag) -> legacy. Gate
-  `LOCAL_FIRST_USE_BRAIN_PLANNER` (default OFF: opt-in, fallback su qualunque
+  `HOMUN_USE_BRAIN_PLANNER` (default OFF: opt-in, fallback su qualunque
   errore). Rimosso `#[allow(dead_code)]` da brain_adapter (ora usato).
 - Test: capabilities (CachedToolProvider 2), gateway 23+55, orchestrator brain 7
   verdi. Build light e default (mistral.rs) verdi. Solo warning preesistente.
@@ -476,7 +476,7 @@ milestone dedicato (de-hardcodare anche l'esecuzione, non solo il display).
 - S3 — `evaluate` (JS arbitrario) sempre bloccato nel loop (catena
   prompt-injection->esecuzione chiusa).
 - S4 (slice) — API key cloud da FILE 0600 preferito all'env
-  (`LOCAL_FIRST_INFERENCE_API_KEY_FILE`), `resolve_inference_api_key()`; env
+  (`HOMUN_INFERENCE_API_KEY_FILE`), `resolve_inference_api_key()`; env
   ancora supportato ma con warning (e' ereditato dai processi figli). NOTA: la
   piena integrazione `local-first-secrets` (secret_ref + store cifrato/keychain)
   resta un task dedicato (S4-full) — farla a meta' sarebbe security theater.
@@ -549,7 +549,7 @@ A/B inference path validato live (2026-05-28):
 - Harness aggiornato: `examples/trenitalia_live.rs` con
   `INFERENCE_BACKEND=ollama|mlx`, `OLLAMA_MODEL`, `OLLAMA_API_KEY`.
 - Reso configurabile il timeout planner via
-  `LOCAL_FIRST_BROWSER_PLANNER_TIMEOUT_SECONDS` (default 20s): un 8B a freddo
+  `HOMUN_BROWSER_PLANNER_TIMEOUT_SECONDS` (default 20s): un 8B a freddo
   con prefill ~2.7k token supera i 20s, backend diversi hanno latenze diverse.
 - `OpenAiCompatProvider` ora onora `request_timeout_seconds`.
 - Modelli Ollama disponibili: locali `gemma4:latest` (8B), `llama3.1:8b`;
@@ -610,7 +610,7 @@ FATTO (e) ModelRouter cablato nel gateway reale:
   `RuntimeClient` MLX) come `InferenceProvider`.
 - `build_browser_inference_router(gemma_url)` in main.rs: default = MLX locale
   (comportamento invariato); opt-in OpenAI-compat con
-  `LOCAL_FIRST_INFERENCE_BACKEND=openai` + `_BASE_URL`/`_MODEL`/`_API_KEY`/
+  `HOMUN_INFERENCE_BACKEND=openai` + `_BASE_URL`/`_MODEL`/`_API_KEY`/
   `_CONTEXT_WINDOW`/`_CLOUD`. Cloud gated dalla privacy policy del router.
 - `execute_browser_loop_read_only_task` ora costruisce il router e sceglie il
   profilo via `BrowserContextProfile::for_context_window(active_context_window)`,
@@ -639,10 +639,10 @@ cross-OS, allineato ad ADR 0007). MLX retrocede a fallback/opzione.
   `--no-default-features` per build leggera MLX-only. `local-mistralrs` inoltra
   alla feature del crate inference.
 - `build_browser_inference_router`: selezione backend via
-  `LOCAL_FIRST_INFERENCE_BACKEND` = openai | mistralrs | mlx. Default quando la
+  `HOMUN_INFERENCE_BACKEND` = openai | mistralrs | mlx. Default quando la
   feature e' compilata = mistralrs (`try_build_mistralrs_router`); su errore di
   load fa fallback a `build_mlx_router` con warning. Modello default
-  `Qwen/Qwen3-4B` (text; override `LOCAL_FIRST_INFERENCE_MODEL`),
+  `Qwen/Qwen3-4B` (text; override `HOMUN_INFERENCE_MODEL`),
   supports_vision=false (il provider fa solo generate_json testuale per ora).
 - `execute_browser_loop_read_only_task`: il router e' costruito UNA volta per
   task (Arc) e clonato per ogni target -> il modello mistral.rs si carica una
@@ -659,7 +659,7 @@ non si abilita la feature `metal` di mistralrs). Compile-verificato contro API
 
 Risposta a "abbiamo ancora MLX?": MLX non e' piu' il default forzato. mistral.rs
 e' il default cross-OS (quando compilato); MLX e' fallback su errore load e
-opzione esplicita (`--no-default-features` o `LOCAL_FIRST_INFERENCE_BACKEND=mlx`).
+opzione esplicita (`--no-default-features` o `HOMUN_INFERENCE_BACKEND=mlx`).
 
 Piano "ritiro MLX" (scelto: sequenza sicura). MLX NON e' un fallback rimovibile:
 alimenta la CHAT (`/api/chat/generate_stream` -> `{gemma}/generate_stream`),
@@ -705,9 +705,9 @@ FATTO (c) AnthropicProvider:
   `x-api-key`+`anthropic-version`), parsing isolato `parse_anthropic_message`
   (concatena i blocchi text, usage input/output_tokens -> TokenMetrics, riusa
   `json_response_from_text` con repair). 4 unit test.
-- Cablato nel gateway: `LOCAL_FIRST_INFERENCE_BACKEND=anthropic` +
-  `LOCAL_FIRST_INFERENCE_MODEL` (default `claude-sonnet-4-6`) +
-  `LOCAL_FIRST_INFERENCE_API_KEY`. Locality Cloud, policy allowing_cloud.
+- Cablato nel gateway: `HOMUN_INFERENCE_BACKEND=anthropic` +
+  `HOMUN_INFERENCE_MODEL` (default `claude-sonnet-4-6`) +
+  `HOMUN_INFERENCE_API_KEY`. Locality Cloud, policy allowing_cloud.
 
 FATTO (d) parte sicura - ritenzione snapshot nel profilo compact:
 - `is_interactive_snapshot_line` ora include `gridcell`, `cell`, `row`,
@@ -760,7 +760,7 @@ avvicinare MLX.
   quando l'OrchestratorBrain generera' un OperationalPlan con step browser,
   il piano dovra' arrivare da li' (vedi TODO step #3).
 - `last_prompt_*.txt`/`last_response_*.txt` ora dietro
-  `LOCAL_FIRST_BROWSER_LOOP_DEBUG=1`, non piu' I/O di debug nel path di prod.
+  `HOMUN_BROWSER_LOOP_DEBUG=1`, non piu' I/O di debug nel path di prod.
 
 Perche': il loop browser era reattivo puro (snapshot -> 1 azione) e il piano
 non arrivava mai al modello; un E4B su una pagina Trenitalia con decine di ref
@@ -799,14 +799,14 @@ TODO prossimi step (in ordine):
 Note infra test: example `crates/desktop-gateway/examples/trenitalia_live.rs`;
 `browser_loop_controller` ora `pub mod` nel lib del gateway per essere
 richiamabile da example/harness. Debug prompt/response dietro
-`LOCAL_FIRST_BROWSER_LOOP_DEBUG=1`. Runtime MLX: `make server` su :8765.
+`HOMUN_BROWSER_LOOP_DEBUG=1`. Runtime MLX: `make server` su :8765.
 
 ### Browser context firewall per Gemma 4
 
 - Sostituito il taglio grezzo dello snapshot nel planner browser con una
   action frame compatta: task, pagina, refs, controlli rilevanti, ultimo passo,
   fallimenti recenti e tool ammessi.
-- Aggiunto supporto runtime a `LOCAL_FIRST_BROWSER_CONTEXT_PROFILE` con profili
+- Aggiunto supporto runtime a `HOMUN_BROWSER_CONTEXT_PROFILE` con profili
   `full`, `compact` e `minimal` per misurare overload vs over-compression senza
   cambiare modello, quantizzazione o runner.
 - Il profilo default resta `compact`: seleziona linee con ref interattivi,
@@ -4909,12 +4909,12 @@ reazione al sintomo.
     2. WebView riceve/consegna gli eventi WebSocket solo a fine risposta.
 - Implementato:
   - endpoint locale `POST /api/chat/streams/:request_id/debug`;
-  - il gateway logga i checkpoint solo quando `LOCAL_FIRST_STREAM_DEBUG=1`;
+  - il gateway logga i checkpoint solo quando `HOMUN_STREAM_DEBUG=1`;
   - `chatApi` invia checkpoint `ws_open`, `client_received_delta`,
     `client_received_done`;
   - `ChatView` invia checkpoint `paint_first_delta`,
     `paint_frame_checkpoint`, `paint_done_before_commit`;
-  - riavviata Tauri con `LOCAL_FIRST_STREAM_DEBUG=1`.
+  - riavviata Tauri con `HOMUN_STREAM_DEBUG=1`.
 - Verifiche:
   - `npm run typecheck`;
   - `npm run test:ui-contract`;
@@ -5283,7 +5283,7 @@ Brain.
   - tabella `chat_threads`;
   - tabella `chat_messages`;
   - tabella `settings` per `active_thread_id`.
-- Il DB usa `LOCAL_FIRST_DESKTOP_GATEWAY_DB` se presente, altrimenti
+- Il DB usa `HOMUN_DESKTOP_GATEWAY_DB` se presente, altrimenti
   `~/.homun/desktop-gateway.sqlite`.
 - Nuovi endpoint chat persistenti:
   - `GET /api/chat/threads`;
@@ -5315,14 +5315,14 @@ Electron come client e preparando Brain, task e audit su una cronologia stabile.
 ### Fase 77 - Token locale e CORS ristretto per Desktop Gateway
 
 - Aggiunto token bearer locale opzionale al `crates/desktop-gateway`:
-  - env `LOCAL_FIRST_DESKTOP_GATEWAY_TOKEN`;
+  - env `HOMUN_DESKTOP_GATEWAY_TOKEN`;
   - tutti gli endpoint `/api/chat/*` richiedono
     `Authorization: Bearer <token>` quando il token e' configurato;
   - `/api/health` resta pubblico e indica `auth_required`.
 - `apps/desktop/scripts/electron-dev.mjs` genera un token random a ogni avvio
   se non viene fornito via env:
-  - passa `LOCAL_FIRST_DESKTOP_GATEWAY_TOKEN` al gateway;
-  - passa `VITE_LOCAL_FIRST_DESKTOP_GATEWAY_TOKEN` al renderer Vite.
+  - passa `HOMUN_DESKTOP_GATEWAY_TOKEN` al gateway;
+  - passa `VITE_HOMUN_DESKTOP_GATEWAY_TOKEN` al renderer Vite.
 - Aggiunto `apps/desktop/src/lib/gatewayConfig.ts`:
   - URL gateway unico;
   - header `Authorization` centralizzato per `chatApi` e `coreBridge`.
@@ -5336,7 +5336,7 @@ Electron come client e preparando Brain, task e audit su una cronologia stabile.
   - `http://localhost:1420`;
   - `http://127.0.0.1:1421`;
   - `http://localhost:1421`;
-  - override singolo via `LOCAL_FIRST_DESKTOP_ALLOWED_ORIGIN`.
+  - override singolo via `HOMUN_DESKTOP_ALLOWED_ORIGIN`.
 - Smoke HTTP con token verificato:
   - health pubblico con `auth_required: true`;
   - `/api/chat/threads` senza token -> `401`;
@@ -5366,7 +5366,7 @@ e' lifecycle/packaging del gateway e poi collegamento Brain.
   - usa `.venv-mlx/bin/python runtimes/mlx-gemma4/server.py`;
   - mantiene il registry processi in
     `~/.homun/process-registry.sqlite` o
-    `LOCAL_FIRST_PROCESS_REGISTRY_DB`;
+    `HOMUN_PROCESS_REGISTRY_DB`;
   - se `/api/runtime/warmup` non trova Gemma in health, prova ad avviare il
     runtime prima di chiamare `/warmup`.
 - `electron-dev.mjs` controlla se il gateway gia' in ascolto e' compatibile con
@@ -5517,13 +5517,13 @@ senza esporre prompt, payload o segreti.
 - Spostata la responsabilita' di avvio del Desktop Gateway dentro
   `apps/desktop/electron/main.cjs`.
 - Electron ora:
-  - genera o riceve `LOCAL_FIRST_DESKTOP_GATEWAY_TOKEN`;
+  - genera o riceve `HOMUN_DESKTOP_GATEWAY_TOKEN`;
   - espone al renderer solo `gatewayUrl` e `gatewayToken` tramite preload
     isolato (`contextBridge`);
   - avvia o riusa il gateway locale;
   - in dev usa `cargo run -p local-first-desktop-gateway`, quindi ricompila il
     gateway quando Rust cambia;
-  - in packaged usa `LOCAL_FIRST_DESKTOP_GATEWAY_BIN` o
+  - in packaged usa `HOMUN_DESKTOP_GATEWAY_BIN` o
     `resources/bin/local-first-desktop-gateway`;
   - termina il gateway gestito su `before-quit`.
 - Semplificato `scripts/electron-dev.mjs`:
@@ -5533,14 +5533,14 @@ senza esporre prompt, payload o segreti.
   - non gestisce piu' token/gateway in parallelo.
 - Aggiornato `gatewayConfig.ts`:
   - usa il preload Electron in app packaged;
-  - conserva fallback `VITE_LOCAL_FIRST_DESKTOP_GATEWAY_*` per test/dev;
+  - conserva fallback `VITE_HOMUN_DESKTOP_GATEWAY_*` per test/dev;
   - normalizza l'URL gateway.
 - Gateway CORS:
   - aggiunto origin `null` per consentire renderer `file://` packaged;
   - la protezione resta sul bearer token locale e su bind loopback.
 - Smoke production-like:
   - `npm run build`;
-  - avvio Electron senza `LOCAL_FIRST_DESKTOP_URL`, quindi da `dist/index.html`;
+  - avvio Electron senza `HOMUN_DESKTOP_URL`, quindi da `dist/index.html`;
   - porta gateway separata `18766`;
   - richiesta autorizzata a `/api/chat/threads` OK;
   - richiesta senza token a `/api/chat/threads` restituisce `401`;
@@ -5571,16 +5571,16 @@ del processo Rust deve essere governato dalla shell desktop che l'utente avvia.
   - `secret=`;
   - chiavi `sk-*` / `sk_proj_*`.
 - Il Desktop Gateway ora configura il supervisor con:
-  - `LOCAL_FIRST_PROCESS_LOG_DIR`, se presente;
+  - `HOMUN_PROCESS_LOG_DIR`, se presente;
   - fallback `~/.homun/logs/processes`;
   - retention default 2.000 righe.
-- Il Desktop Gateway supporta `LOCAL_FIRST_GEMMA_PYTHON_VENV`:
+- Il Desktop Gateway supporta `HOMUN_GEMMA_PYTHON_VENV`:
   - in dev resta `.venv-mlx`;
   - in packaged Electron puo' puntare alla venv bundlata.
 - Electron passa al gateway:
-  - `LOCAL_FIRST_PROCESS_LOG_DIR` sotto `app.getPath("userData")`;
-  - `LOCAL_FIRST_GEMMA_PYTHON_VENV` se trova `resources/.venv-mlx`;
-  - `LOCAL_FIRST_WORKSPACE_ROOT` diverso tra dev e packaged.
+  - `HOMUN_PROCESS_LOG_DIR` sotto `app.getPath("userData")`;
+  - `HOMUN_GEMMA_PYTHON_VENV` se trova `resources/.venv-mlx`;
+  - `HOMUN_WORKSPACE_ROOT` diverso tra dev e packaged.
 - Aggiunto test:
   - `local_supervisor_persists_redacted_logs_with_retention`.
 - Verifiche:
@@ -5613,7 +5613,7 @@ restart, senza chiedere all'utente di aprire terminali o cercare processi.
   - copia `runtimes/mlx-gemma4` in `resources/runtimes/mlx-gemma4`;
   - collega `.venv-mlx` come symlink per smoke locale;
   - supporta `--copy-venv` quando serve produrre una cartella autosufficiente.
-- Electron supporta ora `LOCAL_FIRST_DESKTOP_RESOURCES_DIR`:
+- Electron supporta ora `HOMUN_DESKTOP_RESOURCES_DIR`:
   - permette smoke locale senza Vite e senza app bundle;
   - usa `resources/bin/local-first-desktop-gateway`;
   - usa `resources/.venv-mlx` se presente.
@@ -5672,7 +5672,7 @@ che rispecchia il futuro bundle Electron.
 - `apps/desktop/scripts/electron-dev.mjs` genera ora un token condiviso fra
   Vite ed Electron:
   - Electron continua a ricevere il token via preload isolato;
-  - il browser dev diretto riceve `VITE_LOCAL_FIRST_DESKTOP_GATEWAY_TOKEN`;
+  - il browser dev diretto riceve `VITE_HOMUN_DESKTOP_GATEWAY_TOKEN`;
   - evita 401 ripetuti quando si apre `http://127.0.0.1:1420/` fuori dalla
     finestra Electron.
 - Verifiche:
@@ -6012,15 +6012,15 @@ checkpoint redatti.
   - `Regola fissa` visibile ma non ancora abilitata;
   - nota che le regole fisse richiederanno policy dedicate.
 - Il browser automation gestito dal gateway non forza piu' headless:
-  - default desktop `LOCAL_FIRST_BROWSER_HEADLESS` assente => browser visibile;
-  - smoke/test possono usare `LOCAL_FIRST_BROWSER_HEADLESS=1`.
+  - default desktop `HOMUN_BROWSER_HEADLESS` assente => browser visibile;
+  - smoke/test possono usare `HOMUN_BROWSER_HEADLESS=1`.
 - Verifiche:
   - `cargo fmt`;
   - `cargo test -p local-first-desktop-gateway`;
   - `npm run typecheck`;
   - `npm run test:ui-contract`;
   - `npm run build`;
-  - smoke gateway con `LOCAL_FIRST_BROWSER_HEADLESS=1`: task treno completato,
+  - smoke gateway con `HOMUN_BROWSER_HEADLESS=1`: task treno completato,
     timeline Computer con 16 eventi, artifact screenshot presente.
 
 Perche': per task operativi l'utente deve vedere che esiste una sessione
@@ -6133,7 +6133,7 @@ una base piu' semplice da far crescere.
   - modalita browser `auto`, `visible`, `headless`.
 - Il Desktop Gateway apre `browser-url-policy.sqlite` sotto
   `~/.homun`, configurabile con
-  `LOCAL_FIRST_BROWSER_POLICY_DB`.
+  `HOMUN_BROWSER_POLICY_DB`.
 - L'endpoint approve accetta ora opzioni opzionali:
   - `scope`;
   - `browser_visibility`.
@@ -6501,9 +6501,9 @@ questo runner al gateway/Brain per sostituire il blocco legacy dentro
     `wait`;
   - refs non presenti nello snapshot corrente vengono rifiutati.
 - Il gateway ora usa il nuovo percorso per task treno/browser quando
-  `LOCAL_FIRST_BROWSER_LOOP_CONTROLLER` non e' `0`/`false`.
+  `HOMUN_BROWSER_LOOP_CONTROLLER` non e' `0`/`false`.
 - Il percorso legacy resta disponibile disattivando:
-  `LOCAL_FIRST_BROWSER_LOOP_CONTROLLER=0`.
+  `HOMUN_BROWSER_LOOP_CONTROLLER=0`.
 - `execute_browser_loop_read_only_task`:
   - avvia sidecar browser;
   - usa `BrowserLoopRunner::from_client`;
@@ -6795,7 +6795,7 @@ osservabile il computer locale e continuare finche' resta entro i gate sicuri.
 ### Fase 112 - Port metodologico OpenClaw del browser loop
 
 - Stop ai tentativi sito-specifici come percorso primario: con
-  `LOCAL_FIRST_BROWSER_LOOP_CONTROLLER` attivo, `browser_task` passa sempre dal
+  `HOMUN_BROWSER_LOOP_CONTROLLER` attivo, `browser_task` passa sempre dal
   loop observe -> act -> observe; il vecchio executor read-only guidato da
   euristiche resta solo fallback.
 - Allineato il contratto azioni del sidecar a OpenClaw:

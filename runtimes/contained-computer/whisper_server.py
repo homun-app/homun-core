@@ -6,7 +6,7 @@ Design:
 - The model is loaded LAZILY on the first /transcribe call and then kept WARM,
   so dictation after the first use is fast (no per-call reload).
 - Multilingual: no fixed language — Whisper auto-detects (optional X-Language
-  header hints it). large-v3-turbo by default (swappable via LFPA_WHISPER_MODEL).
+  header hints it). large-v3-turbo by default (swappable via HOMUN_WHISPER_MODEL).
 - The model weights download once to ~/.cache (a persistent Docker volume), so
   they survive container restarts.
 """
@@ -15,8 +15,8 @@ import os
 import tempfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-MODEL_NAME = os.environ.get("LFPA_WHISPER_MODEL", "large-v3-turbo")
-PORT = int(os.environ.get("LFPA_WHISPER_PORT", "9000"))
+MODEL_NAME = os.environ.get("HOMUN_WHISPER_MODEL", "large-v3-turbo")
+PORT = int(os.environ.get("HOMUN_WHISPER_PORT", "9000"))
 
 _model = None
 

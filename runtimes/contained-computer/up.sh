@@ -23,16 +23,16 @@ echo "==> (re)starting ${NAME}"
 docker rm -f "${NAME}" >/dev/null 2>&1 || true
 # Generated-file output dir: a real HOST folder bind-mounted at /home/agent/output
 # so skill artifacts (xlsx/pdf/…) persist on disk and are listed/downloadable.
-ARTIFACTS_DIR="${LFPA_ARTIFACTS_DIR:-$HOME/.homun/artifacts}"
+ARTIFACTS_DIR="${HOMUN_ARTIFACTS_DIR:-$HOME/.homun/artifacts}"
 mkdir -p "${ARTIFACTS_DIR}"
 # Publish to loopback only. --shm-size avoids Chromium crashes on small /dev/shm.
 # Port 9100→9000: on-device Whisper STT server. Named volume persists the model
 # download (~/.cache) across the --rm container lifecycle.
-# TZ: the gateway passes the user's effective IANA zone (LFPA_TZ); default UTC.
+# TZ: the gateway passes the user's effective IANA zone (HOMUN_TZ); default UTC.
 # Combined with tzdata in the image, this anchors the container clock — and
 # Chromium's `new Date()` — to the user, so date-defaulting web forms don't pick
 # the wrong day near the UTC midnight boundary.
-TZ_NAME="${LFPA_TZ:-UTC}"
+TZ_NAME="${HOMUN_TZ:-UTC}"
 docker run -d --rm --name "${NAME}" \
   --shm-size=512m \
   --tmpfs /tmp:rw,exec,nosuid,nodev,size=512m,mode=1777 \

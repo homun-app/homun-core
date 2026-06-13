@@ -18,9 +18,9 @@ pub const CONTAINER: &str = "homun-cc";
 const CONTAINER_SKILLS_DIR: &str = "/home/agent/skills";
 
 /// Host directory holding generated artifacts (bind-mounted into the container
-/// at `/home/agent/output`). Overridable via `LFPA_ARTIFACTS_DIR`.
+/// at `/home/agent/output`). Overridable via `HOMUN_ARTIFACTS_DIR`.
 pub fn artifacts_dir() -> PathBuf {
-    if let Ok(dir) = std::env::var("LFPA_ARTIFACTS_DIR") {
+    if let Ok(dir) = std::env::var("HOMUN_ARTIFACTS_DIR") {
         if !dir.trim().is_empty() {
             return PathBuf::from(dir);
         }
@@ -38,9 +38,9 @@ pub fn container_output_dir(thread: &str) -> String {
 }
 
 /// Base URL of the on-device Whisper STT server (published from the contained
-/// computer). Overridable via `LFPA_WHISPER_URL` for tests/alternate setups.
+/// computer). Overridable via `HOMUN_WHISPER_URL` for tests/alternate setups.
 pub fn whisper_base_url() -> String {
-    std::env::var("LFPA_WHISPER_URL").unwrap_or_else(|_| "http://127.0.0.1:9100".to_string())
+    std::env::var("HOMUN_WHISPER_URL").unwrap_or_else(|_| "http://127.0.0.1:9100".to_string())
 }
 
 /// Absolute path of a skill's directory INSIDE the container. Used both to set
@@ -80,10 +80,10 @@ const DOCKER_CANDIDATES: &[&str] =
 const DOCKER_CANDIDATES: &[&str] = &[];
 
 /// Resolves the `docker` executable, preferring an ABSOLUTE path so invocations
-/// succeed regardless of the inherited PATH. Honors `LFPA_DOCKER_BIN`; falls back
+/// succeed regardless of the inherited PATH. Honors `HOMUN_DOCKER_BIN`; falls back
 /// to the bare name `"docker"` (PATH lookup) when no known location exists.
 fn docker_bin() -> String {
-    if let Ok(explicit) = std::env::var("LFPA_DOCKER_BIN") {
+    if let Ok(explicit) = std::env::var("HOMUN_DOCKER_BIN") {
         if !explicit.trim().is_empty() {
             return explicit;
         }
@@ -144,9 +144,9 @@ pub fn recycle_container() -> bool {
 
 /// How long to poll for the daemon after launching the engine. A cold start of
 /// Docker Desktop / Colima can take well over a minute, so default to ~150s.
-/// Overridable via `LFPA_DOCKER_START_TIMEOUT_SECS`.
+/// Overridable via `HOMUN_DOCKER_START_TIMEOUT_SECS`.
 fn docker_start_timeout_secs() -> u64 {
-    std::env::var("LFPA_DOCKER_START_TIMEOUT_SECS")
+    std::env::var("HOMUN_DOCKER_START_TIMEOUT_SECS")
         .ok()
         .and_then(|v| v.trim().parse::<u64>().ok())
         .filter(|&v| v > 0)
@@ -296,7 +296,7 @@ pub fn ensure_docker() -> Result<(), String> {
 
 /// Locates `up.sh` for the contained computer (env override, else repo-relative).
 fn up_script() -> Option<PathBuf> {
-    if let Ok(p) = std::env::var("LOCAL_FIRST_CONTAINED_COMPUTER_UP") {
+    if let Ok(p) = std::env::var("HOMUN_CONTAINED_COMPUTER_UP") {
         let path = PathBuf::from(p);
         if path.is_file() {
             return Some(path);
@@ -322,13 +322,13 @@ pub fn ensure_contained_computer() -> Result<(), String> {
         // bind-mounting the artifacts dir so generated files land on the host.
         let _ = Command::new("bash")
             .arg(&script)
-            .env("LFPA_ARTIFACTS_DIR", artifacts_dir())
+            .env("HOMUN_ARTIFACTS_DIR", artifacts_dir())
             // Layer D: the container defaults to UTC (debian-slim ships no
             // /etc/localtime). Pass the user's effective IANA zone so `date`,
             // Python AND Chromium's clock inside the container match the user —
             // otherwise date-defaulting web forms pick the wrong day near the
             // UTC midnight boundary.
-            .env("LFPA_TZ", crate::effective_user_tz_name())
+            .env("HOMUN_TZ", crate::effective_user_tz_name())
             .env("PATH", path_with_docker_dir())
             .output();
         for _ in 0..30 {

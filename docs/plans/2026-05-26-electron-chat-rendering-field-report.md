@@ -11,7 +11,7 @@ chat runtime/gateway architecture.
 ## Local Flow Map
 
 - Electron shell starts in `apps/desktop/electron/main.cjs`. It loads
-  `LOCAL_FIRST_DESKTOP_URL` or `http://127.0.0.1:1420/` into a `BrowserWindow`
+  `HOMUN_DESKTOP_URL` or `http://127.0.0.1:1420/` into a `BrowserWindow`
   sized 1360x900 with `contextIsolation: true`, `nodeIntegration: false`,
   `sandbox: true`, and `webSecurity: true`.
 - Vite/React entry is `apps/desktop/src/main.tsx`, with app-level chat state in
@@ -70,7 +70,7 @@ chat runtime/gateway architecture.
 | TypeScript/build | `npm run typecheck`, `npm run build` | Current Electron/React code compiles and bundles | Build warns about large chunks; build does not prove runtime smoothness | Track bundle chunk warning in performance follow-up |
 | Runtime health | `curl http://127.0.0.1:8765/health` | Local Gemma runtime was reachable, loaded, and local-first during this run | Does not measure per-token delivery or UI paint | Keep health as preflight for render benchmarks |
 | Browser/Chromium inspection | Playwright against `http://127.0.0.1:1420/` | Same React renderer loaded, no console errors, prompt completed visually, no long tasks in a small Markdown/code sample | It is Chromium/Vite, not an automated Electron `BrowserWindow` trace | Add Electron-specific Playwright/Spectron-equivalent harness or DevTools protocol capture |
-| Electron bootstrap | `LOCAL_FIRST_DESKTOP_URL=http://127.0.0.1:1420/ npx electron electron/main.cjs` | Electron process can launch the current shell against the active dev server without visible terminal errors | No automated screenshot/console/performance capture from Electron window | Add automated Electron launch/profile script |
+| Electron bootstrap | `HOMUN_DESKTOP_URL=http://127.0.0.1:1420/ npx electron electron/main.cjs` | Electron process can launch the current shell against the active dev server without visible terminal errors | No automated screenshot/console/performance capture from Electron window | Add automated Electron launch/profile script |
 | Existing latency probe | `python -m unittest tests/test_chat_latency_probe.py` | Probe parsing/tests pass | Unit test only; no fresh long runtime probe was run in this analysis | Run real `scripts/chat_latency_probe.py` for long prompts when diagnosing transport |
 | In-page performance probe | Playwright-injected `PerformanceObserver`, `requestAnimationFrame`, mutation samples | Small Markdown/code prompt produced 0 long tasks; RAF p50 about 13.3 ms, p95 about 14.2 ms, max about 27.7 ms; final response had 3 rows and 1 code block | One sample, not production build, not Electron process, not large scrollback | Convert this into a deterministic benchmark harness |
 
@@ -242,7 +242,7 @@ piece is measurement, not another rendering dependency.
 | Build | `cd apps/desktop && npm run build` | Production frontend bundles | pass, with large chunk warnings |
 | Runtime health | `curl http://127.0.0.1:8765/health` | Local Gemma runtime reachable and loaded | pass |
 | Browser runtime render | Playwright navigate to `http://127.0.0.1:1420/`, submit Markdown/code prompt, inspect console/performance samples | Same React renderer produces visible response; small sample had 0 long tasks and RAF p95 about 14.2 ms | pass with limitation: browser Chromium, not Electron window automation |
-| Electron shell bootstrap | `LOCAL_FIRST_DESKTOP_URL=http://127.0.0.1:1420/ npx electron electron/main.cjs` | Electron shell launches against active dev server | pass for bootstrap; no automated visual trace |
+| Electron shell bootstrap | `HOMUN_DESKTOP_URL=http://127.0.0.1:1420/ npx electron electron/main.cjs` | Electron shell launches against active dev server | pass for bootstrap; no automated visual trace |
 | Backend/native | `python -m unittest tests/test_chat_latency_probe.py` | Existing latency probe tests pass | pass |
 | Performance benchmark | Deterministic Electron chat-render harness | Large scrollback, final Markdown, Mermaid and memory behavior | missing |
 | Docs/memory | This report and `docs/work-memory.md` update | Current Electron rendering findings are durable | pending until update committed |

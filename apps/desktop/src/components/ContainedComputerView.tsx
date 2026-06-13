@@ -69,7 +69,7 @@ export function ContainedComputerView() {
             </small>
             <pre className="cc-cmd">
               cd runtimes/contained-computer &amp;&amp; ./up.sh{"\n"}
-              # avvia il gateway con LOCAL_FIRST_CONTAINED_COMPUTER=1
+              # avvia il gateway con HOMUN_CONTAINED_COMPUTER=1
             </pre>
             <small>
               Il browser reale girerà nel container e comparirà qui, senza mai
