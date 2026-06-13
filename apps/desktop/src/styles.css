@@ -1810,6 +1810,23 @@ body.resizing-drawer {
   border: 1.5px solid var(--line-strong);
   border-radius: 50%;
 }
+/* In corso (ultimo step di un turno live): pallino teal pieno e pulsante. */
+.msg-activity-steps li[data-status="doing"] {
+  color: var(--brand);
+}
+.msg-activity-steps li[data-status="doing"]::before {
+  border-color: var(--brand);
+  background: var(--brand);
+  animation: msg-activity-pulse 1.2s ease-in-out infinite;
+}
+/* Attenzione (marker-problema del backend: retry/fallback/stop/fix): ambra. */
+.msg-activity-steps li[data-status="warn"] {
+  color: var(--amber);
+}
+.msg-activity-steps li[data-status="warn"]::before {
+  border-color: var(--amber);
+  background: var(--amber);
+}
 
 .rich-inline-code {
   border: 1px solid var(--line);

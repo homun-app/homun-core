@@ -4690,11 +4690,21 @@ function MessageActivity({ text, live = false }: { text: string; live?: boolean 
       </button>
       {open && (
         <ol className="msg-activity-steps">
-          {steps.map((step, index) => (
-            <li key={`${index}-${step.slice(0, 24)}`}>
-              {step.replace(/^(?:\p{Extended_Pictographic}|️|‍|\s)+/u, "")}
-            </li>
-          ))}
+          {steps.map((step, index) => {
+            // Per-step status, inferred without backend lifecycle data: the gateway's
+            // problem markers (⏳ retry / ↩ fallback / ⏹ stop / 🔧 fix) → "warn"; in a
+            // LIVE turn the last announced step is the one in progress; the rest are done.
+            const status = /^(?:⏳|↩|⏹|🔧)/u.test(step)
+              ? "warn"
+              : live && index === steps.length - 1
+                ? "doing"
+                : "done";
+            return (
+              <li key={`${index}-${step.slice(0, 24)}`} data-status={status}>
+                {step.replace(/^(?:\p{Extended_Pictographic}|️|‍|\s)+/u, "")}
+              </li>
+            );
+          })}
         </ol>
       )}
     </div>
