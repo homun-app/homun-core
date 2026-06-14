@@ -430,6 +430,10 @@ export default function App() {
   const [pluginStates, setPluginStates] = useState<PluginState[]>([]);
   const [settingsSection, setSettingsSection] =
     useState<SettingsSectionId>("account");
+  // Active sub-item within a section that has an inline expandable submenu (e.g.
+  // Modello & Runtime → routing|decisions|providers). A single free-form string
+  // keeps this generic for future sections (Connettori, etc.).
+  const [settingsSub, setSettingsSub] = useState<string>("");
   const [chatThreads, setChatThreads] = useState<ChatThread[]>([
     defaultChatThread,
   ]);
@@ -1071,6 +1075,8 @@ export default function App() {
       onUnarchiveChatThread={handleUnarchiveChatThread}
       onSelectSettingsSection={setSettingsSection}
       settingsSection={settingsSection}
+      settingsSub={settingsSub}
+      onSelectSettingsSub={setSettingsSub}
     >
       <main
         className={`workspace ${isSettings ? "settings-workspace" : ""}`}
@@ -1119,6 +1125,7 @@ export default function App() {
           <SettingsView
             connections={connectionItems}
             section={settingsSection}
+            sub={settingsSub}
             onPluginsChanged={reloadPlugins}
           />
         )}

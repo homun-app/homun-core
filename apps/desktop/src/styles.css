@@ -8133,6 +8133,22 @@ body.resizing-drawer {
   gap: var(--s3);
   min-width: 0;
 }
+/* Full-width content for Modello & Runtime once its internal rail moved into the
+   Settings nav submenu (routing | decisions | providers). Same vertical rhythm
+   as the old .mdl-detail so role/decision rows and provider grids stack cleanly. */
+.mdl-pane {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+  min-width: 0;
+}
+/* The provider editor (ProviderDetailView) renders as a fragment of fields/rows;
+   inside the modal it needs the same flex-column gap the .mdl-detail used to give. */
+.set-modal {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+}
 .mdl-detail-head {
   display: flex;
   align-items: center;
