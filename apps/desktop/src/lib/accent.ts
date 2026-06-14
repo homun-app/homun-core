@@ -88,6 +88,44 @@ export function initAccent(): void {
   applyAccent(loadAccent());
 }
 
+// ── Saved custom accents ──────────────────────────────────────────────────────
+// The user's own colours, kept as pills next to the presets. Persisted as a JSON
+// list of normalized hex strings.
+const CUSTOM_KEY = "homun.accent.custom";
+
+export function normalizeHex(hex: string): string {
+  const h = (hex.startsWith("#") ? hex : `#${hex}`).toLowerCase();
+  // Expand #abc → #aabbcc so equality checks against presets are consistent.
+  if (/^#[0-9a-f]{3}$/.test(h)) {
+    return "#" + h.slice(1).split("").map((c) => c + c).join("");
+  }
+  return h;
+}
+
+export function loadCustomAccents(): string[] {
+  try {
+    const raw = localStorage.getItem(CUSTOM_KEY);
+    if (!raw) return [];
+    const arr: unknown = JSON.parse(raw);
+    if (Array.isArray(arr)) {
+      return arr
+        .filter((x): x is string => typeof x === "string" && isValidHex(x))
+        .map(normalizeHex);
+    }
+  } catch {
+    /* ignore */
+  }
+  return [];
+}
+
+export function saveCustomAccents(list: string[]): void {
+  try {
+    localStorage.setItem(CUSTOM_KEY, JSON.stringify(list));
+  } catch {
+    /* ignore */
+  }
+}
+
 // ── Surface theme (neutral palette). Orthogonal to the accent: this only swaps the
 // background/line/text neutrals, while the accent (brand) stays as chosen — exactly the
 // two-axis model the design's palette board uses ("posso mixare … neutro + teal").

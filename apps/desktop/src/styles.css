@@ -4408,7 +4408,7 @@ body.resizing-drawer {
   color: var(--muted);
 }
 .appearance-accent:hover { border-color: var(--faint); }
-.appearance-accent.active { color: var(--text); }
+.appearance-accent.active { color: var(--text); border-color: var(--brand); }
 .appearance-accent.active .appearance-accent-name { font-weight: 600; }
 .appearance-accent-chip {
   width: 18px;
@@ -4416,6 +4416,52 @@ body.resizing-drawer {
   border-radius: 6px;
   flex: none;
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.06) inset;
+}
+
+/* Custom accent = the same pill as a preset, wrapped so a hover × can remove it. */
+.appearance-accent-wrap { position: relative; display: inline-flex; }
+.appearance-accent-del {
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  color: var(--muted);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+.appearance-accent-wrap:hover .appearance-accent-del,
+.appearance-accent-del:focus-visible { display: inline-flex; }
+.appearance-accent-del:hover { color: var(--red); border-color: var(--red); }
+
+/* "Personalizzato" add pill: neutral "+" chip + a native colour input overlaid so
+   clicking the pill opens the OS picker; the chosen colour becomes a saved pill. */
+.appearance-accent-add { position: relative; }
+.appearance-accent-chip-add {
+  background: var(--panel);
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 0 1px var(--line) inset;
+}
+.appearance-accent-add-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  cursor: pointer;
 }
 .appearance-swatch {
   width: 34px;
