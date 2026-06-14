@@ -58,10 +58,10 @@
   --font-sans: "Hanken Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
   --font-serif: var(--font-sans);
-  /* Header aligned to the very top (like Linear/Cursor): no reserved drag band —
-     content starts at y=0 and the header rows themselves are the drag region.
-     0 also collapses every `calc(100vh - var)` to full height automatically. */
-  --window-drag-height: 0px;
+  /* Full-width title bar reserve (macOS hiddenInset). The top strip (.app-shell::before)
+     is one draggable band across the WHOLE window — not just over the traffic lights —
+     and content is pushed below it. Sidebars no longer reserve their own top padding. */
+  --window-drag-height: 36px;
   font-family: var(--font-sans);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -294,7 +294,8 @@ body.resizing-drawer {
      The empty top strip is the window-drag handle (buttons are no-drag). */
   grid-template-rows: minmax(0, 1fr) auto;
   gap: 14px;
-  padding: 40px 10px 12px;
+  /* Title bar reserve is global now; just a small top pad for the first icon. */
+  padding: 12px 10px 12px;
   -webkit-app-region: drag;
 }
 
@@ -418,11 +419,12 @@ body.resizing-drawer {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: 38px 12px 10px;
+  /* Title bar reserve is now global (--window-drag-height); keep just a small top pad. */
+  padding: 10px 12px 10px;
   overflow: hidden;
   position: relative;
-  /* The empty top strip (above the nav) is the window-drag handle; the buttons,
-     links and inputs inside are no-drag (the global rule below). */
+  /* Dragging empty drawer space still moves the window; buttons/links/inputs are
+     no-drag (the global rule below). */
   -webkit-app-region: drag;
 }
 
@@ -431,7 +433,9 @@ body.resizing-drawer {
   position: absolute;
   top: 8px;
   right: 16px;
-  z-index: 5;
+  /* Above the window-drag strip (.app-shell::before, z-index 80) so it stays clickable
+     inside the title-bar band. */
+  z-index: 85;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -7599,9 +7603,9 @@ body.resizing-drawer {
 /* Drawer / left nav */
 .settings-drawer.set-nav {
   width: 100%;
-  /* Extra top padding clears the macOS traffic lights (hiddenInset titlebar,
-     lights at y:16) so "Torna all'app" isn't tucked under them. */
-  padding: 36px var(--s3) var(--s4);
+  /* Title bar reserve is global now (--window-drag-height clears the traffic lights);
+     just a small top pad here. */
+  padding: var(--s3) var(--s3) var(--s4);
   display: flex;
   flex-direction: column;
   gap: 2px;
