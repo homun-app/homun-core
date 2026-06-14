@@ -798,6 +798,15 @@ const SETTINGS_SUBNAV: Partial<
       { id: "providers", label: "Provider" },
     ],
   },
+  connections: {
+    defaultSub: "composio",
+    items: [
+      { id: "composio", label: "Composio" },
+      { id: "fs", label: "filesystem" },
+      { id: "catalogo", label: "Catalogo MCP" },
+      { id: "attivita", label: "Attività" },
+    ],
+  },
 };
 
 interface SettingsDrawerProps {

@@ -1,5 +1,4 @@
 import {
-  Activity,
   AlertTriangle,
   Boxes,
   Check,
@@ -171,7 +170,15 @@ export function SettingsView({ section, sub, onPluginsChanged }: SettingsViewPro
         {section === "memory" && <MemoryView embedded />}
         {section === "contacts" && <ContactsView />}
         {section === "channels" && <ChannelsPane />}
-        {section === "connections" && <ConnectorsPane />}
+        {section === "connections" && (
+          <ConnectorsPane
+            sub={
+              sub === "fs" || sub === "catalogo" || sub === "attivita"
+                ? sub
+                : "composio"
+            }
+          />
+        )}
         {section === "skills" && <SkillsPane />}
         {section === "addon" && <AddonPane onChanged={onPluginsChanged} />}
         {section === "computer" && <ComputerPane computer={computer} />}
@@ -1448,10 +1455,14 @@ function PrivacyPane() {
 
 /* ---------------------------------------------------------------- connectors */
 
-function ConnectorsPane() {
+type ConnectorsSub = "composio" | "fs" | "catalogo" | "attivita";
+
+// Full-width connectors pane driven by the nav submenu (Composio / filesystem /
+// Catalogo MCP / Attività). The old internal master-detail rail (.mdl-rail) is
+// gone: each `sub` renders full-width. All data + coreBridge logic is unchanged —
+// only the layout that selects which detail to show.
+function ConnectorsPane({ sub = "composio" }: { sub?: ConnectorsSub }) {
   const [snap, setSnap] = useState<CoreCapabilitySnapshot | null>(null);
-  // Selected rail entry: "composio" | "add-mcp" | an MCP provider id.
-  const [selected, setSelected] = useState<string>("composio");
   const [note, setNote] = useState<string | null>(null);
 
   const refresh = async () => {
@@ -1465,13 +1476,19 @@ function ConnectorsPane() {
     void refresh();
   }, []);
 
+  // Notes are scoped to a sub-view; clear when switching so a stale message from
+  // (say) Composio doesn't linger under the MCP catalogue.
+  useEffect(() => {
+    setNote(null);
+  }, [sub]);
+
   const composioConn = snap?.connections.find((c) => c.provider_id === "composio") ?? null;
   // The backend ConnectionStatus serializes as snake_case ("active" | "expired" |
   // "failed" | "disabled"). A stored composio connection in "active" means the key
   // verified and toolkits are cached → treat it as connected.
   const composioConnected = composioConn?.status.toLowerCase() === "active";
 
-  // Group MCP tools by provider so each server shows as one rail entry + tool count.
+  // Group MCP tools by provider so each server shows as one entry + tool count.
   const mcpProviders = new Map<string, { name: string; tools: number }>();
   for (const tool of snap?.tools ?? []) {
     if (tool.provider_kind !== "mcp") continue;
@@ -1484,111 +1501,98 @@ function ConnectorsPane() {
   }
   const mcpList = [...mcpProviders.entries()];
 
-  const pick = (id: string) => {
-    setSelected(id);
-    setNote(null);
-  };
-
   return (
-    <div className="mdl-layout">
-      <aside className="mdl-rail" aria-label="Connettori">
-        <div className="mdl-rail-group">Cloud</div>
-        <button
-          type="button"
-          className={`mdl-rail-item ${selected === "composio" ? "active" : ""}`}
-          onClick={() => pick("composio")}
-        >
-          <span className="conn-avatar composio">Co</span>
-          <span className="mdl-rail-name">Composio</span>
-          {composioConnected && <span className="mdl-rail-dot" title="Connesso" />}
-        </button>
+    <div className="conn-pane">
+      {sub === "composio" && (
+        <ComposioDetail
+          connected={composioConnected}
+          onChanged={refresh}
+          onNote={setNote}
+        />
+      )}
 
-        <div className="mdl-rail-group">Server MCP</div>
-        {mcpList.map(([id, info]) => (
-          <button
-            key={id}
-            type="button"
-            className={`mdl-rail-item ${selected === id ? "active" : ""}`}
-            onClick={() => pick(id)}
-          >
-            <span className="conn-avatar">
-              <Server size={14} />
-            </span>
-            <span className="mdl-rail-name">{info.name}</span>
-            <em className="mdl-rail-badge">{info.tools}</em>
-          </button>
-        ))}
-        {mcpList.length === 0 && <p className="mdl-rail-empty">Nessun server</p>}
-        <button
-          type="button"
-          className={`mdl-rail-item add ${selected === "mcp-catalog" ? "active" : ""}`}
-          onClick={() => pick("mcp-catalog")}
-        >
-          <span className="conn-avatar add">
-            <Search size={14} />
-          </span>
-          <span className="mdl-rail-name">Catalogo MCP</span>
-        </button>
-        <button
-          type="button"
-          className={`mdl-rail-item add ${selected === "add-mcp" ? "active" : ""}`}
-          onClick={() => pick("add-mcp")}
-        >
-          <span className="conn-avatar add">
-            <Plus size={14} />
-          </span>
-          <span className="mdl-rail-name">Aggiungi manuale</span>
-        </button>
+      {sub === "fs" && (
+        <FilesystemServersDetail
+          mcpList={mcpList}
+          snap={snap}
+          onChanged={refresh}
+          onNote={setNote}
+        />
+      )}
 
-        <div className="mdl-rail-group">Diagnostica</div>
+      {sub === "catalogo" && (
+        <McpCatalogDetail
+          connectedIds={new Set(mcpList.map(([id]) => id))}
+          onChanged={refresh}
+          onNote={setNote}
+          onConnected={() => void refresh()}
+        />
+      )}
+
+      {sub === "attivita" && <ConnectorActivityDetail />}
+
+      {note && (
+        <p className="set-hint" style={{ marginTop: "var(--s4)" }}>
+          {note}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** The "filesystem" sub: local MCP servers and their tools, full-width. Each
+ *  connected MCP server renders as a header + tool list (reusing McpServerDetail);
+ *  a manual "Aggiungi server MCP" form is available below. */
+function FilesystemServersDetail({
+  mcpList,
+  snap,
+  onChanged,
+  onNote,
+}: {
+  mcpList: [string, { name: string; tools: number }][];
+  snap: CoreCapabilitySnapshot | null;
+  onChanged: () => Promise<void>;
+  onNote: (note: string | null) => void;
+}) {
+  const [adding, setAdding] = useState(false);
+  return (
+    <div className="conn-stack">
+      {mcpList.length === 0 && !adding && (
+        <p className="set-hint">Nessun server MCP locale collegato.</p>
+      )}
+
+      {mcpList.map(([id, info]) => (
+        <McpServerDetail
+          key={id}
+          providerId={id}
+          info={info}
+          snap={snap}
+          onChanged={onChanged}
+          onNote={onNote}
+          onDisconnected={() => void onChanged()}
+        />
+      ))}
+
+      {adding ? (
+        <McpAddDetail
+          onChanged={async () => {
+            await onChanged();
+            setAdding(false);
+          }}
+          onNote={onNote}
+          onConnected={() => void onChanged()}
+        />
+      ) : (
         <button
           type="button"
-          className={`mdl-rail-item ${selected === "activity" ? "active" : ""}`}
-          onClick={() => pick("activity")}
+          className="set-btn"
+          style={{ alignSelf: "flex-start" }}
+          onClick={() => setAdding(true)}
         >
-          <span className="conn-avatar">
-            <Activity size={14} />
-          </span>
-          <span className="mdl-rail-name">Attività</span>
+          <Plus size={14} />
+          <span style={{ marginLeft: 6 }}>Aggiungi server MCP manuale</span>
         </button>
-      </aside>
-
-      <section className="mdl-detail">
-        {selected === "composio" && (
-          <ComposioDetail
-            connected={composioConnected}
-            onChanged={refresh}
-            onNote={setNote}
-          />
-        )}
-        {selected === "mcp-catalog" && (
-          <McpCatalogDetail
-            connectedIds={new Set(mcpList.map(([id]) => id))}
-            onChanged={refresh}
-            onNote={setNote}
-            onConnected={pick}
-          />
-        )}
-        {selected === "add-mcp" && (
-          <McpAddDetail onChanged={refresh} onNote={setNote} onConnected={pick} />
-        )}
-        {mcpProviders.has(selected) && (
-          <McpServerDetail
-            providerId={selected}
-            info={mcpProviders.get(selected)!}
-            snap={snap}
-            onChanged={refresh}
-            onNote={setNote}
-            onDisconnected={() => pick("composio")}
-          />
-        )}
-        {selected === "activity" && <ConnectorActivityDetail />}
-        {note && (
-          <p className="set-hint" style={{ marginTop: "var(--s4)" }}>
-            {note}
-          </p>
-        )}
-      </section>
+      )}
     </div>
   );
 }
@@ -1681,7 +1685,12 @@ function ComposioConnectionsList() {
   useEffect(() => {
     load();
   }, []);
-  if (!conns || conns.length === 0) return null;
+  if (!conns || conns.length === 0)
+    return (
+      <p className="set-hint">
+        Nessun account collegato. Collega un toolkit dalla scheda Toolkit.
+      </p>
+    );
   const label = (s: string) =>
     s === "ACTIVE" ? "attiva" : s === "EXPIRED" ? "scaduta" : s.toLowerCase();
   return (
@@ -1733,6 +1742,9 @@ function ComposioDetail({
   // expired / revoked). We then fall back to the key form so the user can fix it.
   const [kitsError, setKitsError] = useState<string | null>(null);
   const [editingKey, setEditingKey] = useState(false);
+  // Segmented control (Toolkit / Account collegati / Consentiti) — shown once a
+  // live connection exists, replacing the previous stacked layout.
+  const [tab, setTab] = useState<"toolkit" | "account" | "consentiti">("toolkit");
 
   const loadToolkits = async () => {
     setLoadingKits(true);
@@ -1850,14 +1862,46 @@ function ComposioDetail({
         </div>
       ) : (
         <>
-          <ComposioConnectionsList />
-          <AllowedToolsSection />
-          <ComposioToolkitBrowser
-            toolkits={toolkits}
-            loading={loadingKits}
-            onNote={onNote}
-            onConnectedCount={setConnectedCount}
-          />
+          <div className="set-seg conn-seg" role="tablist">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === "toolkit"}
+              className={`set-seg-item ${tab === "toolkit" ? "active" : ""}`}
+              onClick={() => setTab("toolkit")}
+            >
+              Toolkit
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === "account"}
+              className={`set-seg-item ${tab === "account" ? "active" : ""}`}
+              onClick={() => setTab("account")}
+            >
+              Account collegati
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === "consentiti"}
+              className={`set-seg-item ${tab === "consentiti" ? "active" : ""}`}
+              onClick={() => setTab("consentiti")}
+            >
+              Consentiti
+            </button>
+          </div>
+
+          {tab === "toolkit" && (
+            <ComposioToolkitBrowser
+              toolkits={toolkits}
+              loading={loadingKits}
+              onNote={onNote}
+              onConnectedCount={setConnectedCount}
+            />
+          )}
+          {tab === "account" && <ComposioConnectionsList />}
+          {tab === "consentiti" && <AllowedToolsSection />}
         </>
       )}
     </>
@@ -1880,7 +1924,12 @@ function AllowedToolsSection() {
     })();
   }, []);
 
-  if (tools.length === 0) return null;
+  if (tools.length === 0)
+    return (
+      <p className="set-hint">
+        Nessuno strumento sempre consentito. Quando approvi un'azione "sempre", comparirà qui.
+      </p>
+    );
 
   const revoke = async (slug: string) => {
     setBusy(slug);
