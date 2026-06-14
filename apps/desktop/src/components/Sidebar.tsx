@@ -10,6 +10,7 @@ import {
   FolderPlus,
   Info,
   PanelLeftClose,
+  PanelLeftOpen,
   Pencil,
   Pin,
   PinOff,
@@ -63,6 +64,17 @@ export function NavigationRail({
   return (
     <aside className="navigation-rail" aria-label="Navigazione rapida">
       <nav className="rail-nav">
+        {/* Expand toggle lives INSIDE the rail (a no-drag child of the drag rail, so it
+            reliably carves the drag region) instead of floating over the content. */}
+        <button
+          className="rail-button"
+          type="button"
+          aria-label="Espandi barra laterale"
+          title="Espandi barra laterale"
+          onClick={onToggleDrawer}
+        >
+          <PanelLeftOpen size={18} />
+        </button>
         <button
           className="rail-button"
           type="button"

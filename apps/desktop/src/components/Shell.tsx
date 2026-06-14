@@ -1,5 +1,4 @@
 import { useRef, useState, type CSSProperties, type PointerEvent, type ReactNode } from "react";
-import { PanelLeftOpen } from "lucide-react";
 import {
   ChatSearchModal,
   NavDrawer,
@@ -107,26 +106,15 @@ export function Shell({
         .join(" ")}
     >
       {!drawerOpen && !isSettings && (
-        <>
-          {/* When collapsed the rail stays narrow (icons only); the expand control lives
-              on the CONTENT side, just past the lights — so the column doesn't widen. */}
-          <button
-            className="sidebar-expand"
-            type="button"
-            aria-label="Espandi barra laterale"
-            title="Espandi barra laterale"
-            onClick={onToggleDrawer}
-          >
-            <PanelLeftOpen size={18} />
-          </button>
-          <NavigationRail
-            activeView={activeView}
-            navItems={navItems}
-            onNavigate={onNavigate}
-            onSearch={() => setSearchOpen(true)}
-            onToggleDrawer={onToggleDrawer}
-          />
-        </>
+        // Collapsed: the icon rail. Its top button is the expand toggle (a no-drag
+        // child of the drag rail), so no control floats over the content drag strip.
+        <NavigationRail
+          activeView={activeView}
+          navItems={navItems}
+          onNavigate={onNavigate}
+          onSearch={() => setSearchOpen(true)}
+          onToggleDrawer={onToggleDrawer}
+        />
       )}
       {drawerOpen && !isSettings && (
         <NavDrawer
