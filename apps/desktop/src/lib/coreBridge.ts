@@ -1819,6 +1819,8 @@ export const coreBridge = {
     chatApi.createAutomationFromChatMessage(threadId, messageId),
   selectChatThread: (threadId: string) => chatApi.selectChatThread(threadId),
   createChatThread: (workspace?: string) => chatApi.createChatThread(workspace),
+  seedAssistantMessage: (threadId: string, text: string) =>
+    chatApi.seedAssistantMessage(threadId, text),
   automations: () => electronAutomations(),
   automationEventSources: () => electronAutomationEventSources(),
   createAutomation: (input: AutomationCreateInput) => electronCreateAutomation(input),

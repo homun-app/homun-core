@@ -522,6 +522,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/chat/suggestions", post(chat_suggestions))
         .route("/api/chat/threads/{thread_id}/autotitle", post(autotitle_chat_thread))
         .route(
+            "/api/chat/threads/{thread_id}/assistant_message",
+            post(seed_assistant_message),
+        )
+        .route(
             "/api/chat/threads/{thread_id}/folder",
             get(get_thread_folder).post(set_thread_folder),
         )
@@ -6552,6 +6556,37 @@ async fn autotitle_chat_thread(
             .rename_thread(&thread_id, &title)
             .map_err(GatewayError::store)?,
     ))
+}
+
+#[derive(Debug, Deserialize)]
+struct SeedAssistantRequest {
+    text: String,
+}
+
+/// Append a literal assistant message to a thread. Used to open a proactivity-card
+/// chat with Homun's question already posted (so the conversation starts with the
+/// assistant asking, instead of seeding the composer with the user's draft).
+async fn seed_assistant_message(
+    State(state): State<AppState>,
+    Path(thread_id): Path<String>,
+    Json(request): Json<SeedAssistantRequest>,
+) -> Result<Json<ChatMessagesSnapshot>, GatewayError> {
+    let text = request.text.trim();
+    if text.is_empty() {
+        return Err(GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "empty_message",
+            message: "Messaggio vuoto.".to_string(),
+        });
+    }
+    let snapshot = lock_store(&state)?
+        .append_assistant_message(&thread_id, &channel_chat_message("assistant", text))
+        .map_err(GatewayError::store)?;
+    publish_app_event(serde_json::json!({
+        "type": "thread.updated",
+        "thread_id": thread_id,
+    }));
+    Ok(Json(snapshot))
 }
 
 #[derive(Debug, Deserialize)]
