@@ -4140,11 +4140,9 @@ body.resizing-drawer {
 /* "Living mark" (design): a teal gradient orb — Homun's identity, brand-teal even if
    the UI accent changes. */
 .chat-hero-mark {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  background: radial-gradient(circle at 36% 30%, #8feDce, #57c9a6 42%, #1a8870 86%);
-  box-shadow: 0 8px 22px -8px rgba(21, 122, 110, 0.5);
+  /* The Homun brandmark (U + dot), drawn inline so it themes via --text / --brand. */
+  width: 52px;
+  height: 52px;
   margin-bottom: 18px;
 }
 .chat-hero-title {

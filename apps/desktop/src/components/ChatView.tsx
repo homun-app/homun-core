@@ -6388,12 +6388,23 @@ const EMPTY_HERO_CHIPS: { label: string; seed: string; icon: typeof Search }[] =
   { label: "Scrivi del codice", seed: "Aiutami a scrivere del codice per ", icon: FileCode },
 ];
 
-// Empty-chat hero (design): teal living-mark orb + "Cosa facciamo oggi?" + quick-action
-// chips that seed the composer.
+// Empty-chat hero (design): the Homun mark (the "U" + dot brandmark) + "Cosa facciamo
+// oggi?" + quick-action chips that seed the composer. The mark uses the theme vars
+// (U = --text, dot = --brand) so it adapts to light/dark.
 function ChatEmptyHero({ onPick }: { onPick: (text: string) => void }) {
   return (
     <div className="chat-hero">
-      <span className="chat-hero-mark" aria-hidden="true" />
+      <svg className="chat-hero-mark" viewBox="646 -2 280 280" aria-hidden="true">
+        <circle cx="786" cy="60" r="34" fill="var(--brand)" />
+        <path
+          d="M721 117V187C721 220.333 742.667 237 786 237C829.333 237 851 220.333 851 187V117"
+          fill="none"
+          stroke="var(--text)"
+          strokeWidth="28"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
       <h1 className="chat-hero-title">Cosa facciamo oggi?</h1>
       <p className="chat-hero-sub">Sono pronto. Scrivimi pure: rispondo in locale.</p>
       <div className="chat-hero-chips">
