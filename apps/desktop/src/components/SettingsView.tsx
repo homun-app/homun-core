@@ -570,6 +570,10 @@ function AppearancePane() {
   const [theme, setTheme] = useState<ThemeName>(loadTheme());
   // The user's own accents, shown as pills alongside the presets (persisted).
   const [customs, setCustoms] = useState<string[]>(loadCustomAccents);
+  // A colour being picked but NOT yet saved. The native OS picker fires change events
+  // continuously while you move the selector, so we stage the choice here and only the
+  // explicit "Aggiungi" commits it — otherwise every colour passed over would be added.
+  const [draft, setDraft] = useState<string | null>(null);
   const isPreset = (hex: string) =>
     ACCENT_PRESETS.some((p) => p.hex.toLowerCase() === hex.toLowerCase());
   // Migrate a pre-existing custom accent (saved before this feature) into a pill.
@@ -698,23 +702,44 @@ function AppearancePane() {
             </span>
           );
         })}
-        {/* Add a custom colour — opens the native picker; the result becomes a pill. */}
+        {/* Pick a colour into a draft (the native OS panel updates it live) WITHOUT
+            saving — only the explicit "Aggiungi" commits it as a pill, so dragging
+            through colours no longer spams the list. */}
         <label
           className="appearance-accent appearance-accent-add"
-          title="Aggiungi un colore personalizzato"
+          title="Scegli un colore personalizzato"
         >
-          <span className="appearance-accent-chip appearance-accent-chip-add">
-            <Plus size={13} />
+          <span
+            className="appearance-accent-chip appearance-accent-chip-add"
+            style={draft ? { background: draft, boxShadow: "0 0 0 1px rgba(0,0,0,0.06) inset" } : undefined}
+          >
+            {!draft && <Plus size={13} />}
           </span>
-          <span className="appearance-accent-name">Personalizzato</span>
+          <span className="appearance-accent-name">
+            {draft ? draft.toUpperCase() : "Personalizzato"}
+          </span>
           <input
             type="color"
             className="appearance-accent-add-input"
             aria-label="Scegli un colore personalizzato"
-            value={isPreset(norm) || !customs.includes(norm) ? DEFAULT_ACCENT : norm}
-            onChange={(e) => addCustom(e.target.value)}
+            value={draft ?? (isPreset(norm) || !customs.includes(norm) ? DEFAULT_ACCENT : norm)}
+            onChange={(e) => setDraft(normalizeHex(e.target.value))}
           />
         </label>
+        {draft && (
+          <button
+            type="button"
+            className="appearance-accent-confirm"
+            title={`Aggiungi ${draft.toUpperCase()}`}
+            onClick={() => {
+              addCustom(draft);
+              setDraft(null);
+            }}
+          >
+            <Check size={14} />
+            <span>Aggiungi</span>
+          </button>
+        )}
       </div>
       <div className="appearance-preview">
         <button type="button" className="appearance-preview-btn">
