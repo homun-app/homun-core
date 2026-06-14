@@ -2,7 +2,7 @@ import {
   AlertTriangle,
   Boxes,
   Check,
-  ChevronDown,
+  ChevronLeft,
   ChevronRight,
   Code2,
   Copy,
@@ -2834,11 +2834,12 @@ function McpCatalogCard({
 
 /* -------------------------------------------------------------------- skills */
 
-/** Sentinel rail selection for the GitHub marketplace view. */
-const MARKET = "__market__";
-
 function SkillsPane() {
   const [resp, setResp] = useState<SkillsResponse | null>(null);
+  const [tab, setTab] = useState<"attive" | "catalogo">("attive");
+  // Which group is open inside "Skill attive" ("" = the two group cards).
+  const [group, setGroup] = useState<"" | "personali" | "homuncoder">("");
+  // The skill whose detail modal is open (null = no modal).
   const [selected, setSelected] = useState<string | null>(null);
   const [detail, setDetail] = useState<SkillDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -2847,17 +2848,16 @@ function SkillsPane() {
   useEffect(() => {
     void (async () => {
       try {
-        const r = await coreBridge.skills();
-        setResp(r);
-        setSelected((cur) => cur ?? r.skills[0]?.id ?? null);
+        setResp(await coreBridge.skills());
       } catch (e) {
         setError(`Impossibile leggere le skill: ${(e as Error).message}`);
       }
     })();
   }, []);
 
+  // Load the detail for whichever skill modal is open.
   useEffect(() => {
-    if (!selected || selected === MARKET) {
+    if (!selected) {
       setDetail(null);
       return;
     }
@@ -2889,11 +2889,10 @@ function SkillsPane() {
     }
   };
 
-  const [personalOpen, setPersonalOpen] = useState(true);
-  const [homuncoderOpen, setHomuncoderOpen] = useState(false);
   const skills = resp?.skills ?? [];
-  // Group the methodology skills under "HomunCoder" in the rail.
+  // Methodology skills are grouped under "HomunCoder"; everything else is personal.
   const homuncoderSkills = skills.filter((s) => s.source === "homuncoder");
+  const personalSkills = skills.filter((s) => s.source !== "homuncoder");
   // Enable/disable the WHOLE HomunCoder group at once. Each call returns the full updated
   // skills state; the last one reflects every change.
   const toggleGroup = async (enabled: boolean) => {
@@ -2911,98 +2910,121 @@ function SkillsPane() {
       setBusy(false);
     }
   };
-  const personalSkills = skills.filter((s) => s.source !== "homuncoder");
-  const renderRailItem = (s: (typeof skills)[number]) => (
-    <button
-      key={s.id}
-      type="button"
-      className={`mdl-rail-item ${selected === s.id ? "active" : ""}`}
-      onClick={() => setSelected(s.id)}
-    >
-      <span className="mdl-rail-name">{s.name}</span>
-      <span
-        className={`skl-state ${s.enabled ? "on" : "off"}`}
-        title={s.enabled ? "Attiva" : "Disattivata"}
-      />
-    </button>
+
+  const hcAllOn = homuncoderSkills.length > 0 && homuncoderSkills.every((s) => s.enabled);
+  const groupSkills = group === "homuncoder" ? homuncoderSkills : personalSkills;
+  const renderSkillCard = (s: (typeof skills)[number]) => (
+    <div key={s.id} className="skl-card">
+      <button type="button" className="skl-card-body" onClick={() => setSelected(s.id)}>
+        <span className="skl-card-name">{s.name}</span>
+        <span className="skl-card-meta">origine: {s.source}</span>
+      </button>
+      <Toggle on={s.enabled} onChange={(v) => void toggle(s.id, v)} />
+    </div>
   );
-  const onMarket = selected === MARKET;
 
   return (
-    <div className="mdl-layout">
-      <aside className="mdl-rail" aria-label="Skill">
+    <>
+      <div className="set-seg skl-seg">
         <button
           type="button"
-          className="mdl-rail-group toggle"
-          onClick={() => setPersonalOpen((v) => !v)}
+          className={`set-seg-item ${tab === "attive" ? "active" : ""}`}
+          onClick={() => setTab("attive")}
         >
-          {personalOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-          <span>Skill personali</span>
-          <span className="mdl-rail-group-count">{personalSkills.length}</span>
+          Skill attive
         </button>
-        {personalOpen && personalSkills.map(renderRailItem)}
-        {skills.length === 0 && <p className="mdl-rail-empty">Nessuna skill</p>}
-        {homuncoderSkills.length > 0 && (
-          <>
-            <div className="mdl-rail-group-row">
-              <button
-                type="button"
-                className="mdl-rail-group toggle"
-                onClick={() => setHomuncoderOpen((v) => !v)}
-              >
-                {homuncoderOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-                <span>HomunCoder</span>
-                <span className="mdl-rail-group-count">{homuncoderSkills.length}</span>
-              </button>
-              <button
-                type="button"
-                className={`skl-group-switch ${homuncoderSkills.every((s) => s.enabled) ? "on" : "off"}`}
-                disabled={busy}
-                title={
-                  homuncoderSkills.every((s) => s.enabled)
-                    ? "Disabilita tutto il gruppo"
-                    : "Abilita tutto il gruppo"
-                }
-                aria-label="Abilita/disabilita gruppo HomunCoder"
-                onClick={() => void toggleGroup(!homuncoderSkills.every((s) => s.enabled))}
-              >
-                <span className="skl-group-switch-knob" />
-              </button>
-            </div>
-            {homuncoderOpen && homuncoderSkills.map(renderRailItem)}
-          </>
-        )}
         <button
           type="button"
-          className={`mdl-rail-item add ${onMarket ? "active" : ""}`}
-          onClick={() => setSelected(MARKET)}
+          className={`set-seg-item ${tab === "catalogo" ? "active" : ""}`}
+          onClick={() => setTab("catalogo")}
         >
-          <span className="conn-avatar add">
-            <Download size={13} />
-          </span>
-          <span className="mdl-rail-name">Catalogo skill</span>
+          Catalogo
         </button>
-      </aside>
+      </div>
 
-      <section className="mdl-detail">
-        {onMarket ? (
-          <MarketplaceView
-            installedIds={skills.map((s) => s.id)}
-            onInstalled={(r, id) => {
-              setResp(r);
-              setSelected(id);
-            }}
-          />
-        ) : skills.length === 0 ? (
-          <SkillsEmpty dir={resp?.dir} onBrowse={() => setSelected(MARKET)} />
-        ) : detail ? (
-          <SkillDetailView detail={detail} busy={busy} onToggle={toggle} />
+      {tab === "attive" &&
+        (skills.length === 0 ? (
+          <SkillsEmpty dir={resp?.dir} onBrowse={() => setTab("catalogo")} />
+        ) : group === "" ? (
+          <div className="set-cards-grid cols-2">
+            <button type="button" className="skl-group-card" onClick={() => setGroup("personali")}>
+              <div className="skl-group-head">
+                <span className="skl-group-icon brand">
+                  <Sparkles size={17} />
+                </span>
+                <span className="skl-group-name">Skill personali</span>
+                <ChevronRight size={16} className="skl-group-chev" />
+              </div>
+              <div className="skl-group-meta">
+                {personalSkills.length} skill · tue, attive sempre
+              </div>
+            </button>
+            {homuncoderSkills.length > 0 && (
+              <button
+                type="button"
+                className="skl-group-card"
+                onClick={() => setGroup("homuncoder")}
+              >
+                <div className="skl-group-head">
+                  <span className="skl-group-icon">
+                    <Boxes size={17} />
+                  </span>
+                  <span className="skl-group-name">HomunCoder</span>
+                  <ChevronRight size={16} className="skl-group-chev" />
+                </div>
+                <div className="skl-group-meta">
+                  {homuncoderSkills.length} skill · pacchetto coding
+                </div>
+              </button>
+            )}
+          </div>
         ) : (
-          <p className="set-hint">Carico…</p>
-        )}
-        {error && <p className="set-hint">{error}</p>}
-      </section>
-    </div>
+          <>
+            <button type="button" className="skl-back" onClick={() => setGroup("")}>
+              <ChevronLeft size={15} />
+              {group === "homuncoder" ? "HomunCoder" : "Skill personali"}
+            </button>
+            {group === "homuncoder" && (
+              <div className="skl-group-switch-row">
+                <span>Abilita tutto il gruppo</span>
+                <Toggle on={hcAllOn} onChange={(v) => void toggleGroup(v)} />
+              </div>
+            )}
+            <div className="set-cards-grid cols-2">{groupSkills.map(renderSkillCard)}</div>
+          </>
+        ))}
+
+      {tab === "catalogo" && (
+        <MarketplaceView installedIds={skills.map((s) => s.id)} onInstalled={(r) => setResp(r)} />
+      )}
+
+      {selected && (
+        <div
+          className="set-modal-overlay"
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setSelected(null)}
+        >
+          <div className="set-modal-scrim" />
+          <div className="set-modal wide skl-modal" onClick={(e) => e.stopPropagation()}>
+            {detail ? (
+              <SkillDetailView
+                detail={detail}
+                busy={busy}
+                onToggle={toggle}
+                onClose={() => setSelected(null)}
+              />
+            ) : (
+              <div className="set-modal-body">
+                <p className="set-hint">Carico…</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {error && <p className="set-hint">{error}</p>}
+    </>
   );
 }
 
@@ -3299,93 +3321,98 @@ function SkillDetailView({
   detail,
   busy,
   onToggle,
+  onClose,
 }: {
   detail: SkillDetail;
   busy: boolean;
   onToggle: (id: string, enabled: boolean) => Promise<void>;
+  onClose: () => void;
 }) {
   const [raw, setRaw] = useState(false);
   return (
     <>
-      <div className="mdl-detail-head">
-        <div className="conn-detail-title">
-          <span className="conn-avatar lg">
-            <Sparkles size={18} />
-          </span>
-          <div className="conn-detail-titletext">
-            <h3 className="mdl-detail-title">{detail.name}</h3>
-            <p className="mdl-detail-sub">
-              {detail.id}
-              {detail.version ? ` · v${detail.version}` : ""}
-            </p>
+      <div className="set-modal-head">
+        <span className="skl-modal-icon">
+          <Sparkles size={18} />
+        </span>
+        <div>
+          <div className="mt">{detail.name}</div>
+          <div className="ms mono">
+            {detail.id}
+            {detail.version ? ` · v${detail.version}` : ""}
           </div>
-          <label className="skl-toggle" title="Attiva o disattiva la skill">
-            <input
-              type="checkbox"
-              checked={detail.enabled}
-              disabled={busy}
-              onChange={(e) => void onToggle(detail.id, e.target.checked)}
-            />
-            <span>{detail.enabled ? "Attiva" : "Disattivata"}</span>
-          </label>
         </div>
+        <label className="skl-modal-active" title="Attiva o disattiva la skill">
+          <Toggle
+            on={detail.enabled}
+            onChange={(v) => {
+              if (!busy) void onToggle(detail.id, v);
+            }}
+          />
+          <span>{detail.enabled ? "Attiva" : "Disattivata"}</span>
+        </label>
+        <button className="set-modal-close" type="button" aria-label="Chiudi" onClick={onClose}>
+          <X size={17} />
+        </button>
       </div>
 
-      <div className="skl-pills">
-        <span className="set-tag">origine: {detail.source}</span>
-        {detail.license && <span className="set-tag">licenza: {detail.license}</span>}
-        {(detail.allowed_tools ?? []).map((t) => (
-          <span key={t} className="set-tag brand">
-            {t}
-          </span>
-        ))}
-      </div>
-
-      {detail.description && <p className="skl-desc">{detail.description}</p>}
-
-      {detail.security && <SkillSecuritySection report={detail.security} />}
-
-      <div className="skl-md-head">
-        <span className="mdl-detail-section-label">SKILL.md</span>
-        <div className="skl-md-toggle">
-          <button
-            type="button"
-            className={`mdl-icon-btn ${!raw ? "active" : ""}`}
-            onClick={() => setRaw(false)}
-            title="Anteprima"
-            aria-label="Anteprima"
-          >
-            <Eye size={15} />
-          </button>
-          <button
-            type="button"
-            className={`mdl-icon-btn ${raw ? "active" : ""}`}
-            onClick={() => setRaw(true)}
-            title="Sorgente"
-            aria-label="Sorgente"
-          >
-            <Code2 size={15} />
-          </button>
+      <div className="set-modal-body">
+        <div className="skl-pills">
+          <span className="set-tag">origine: {detail.source}</span>
+          {detail.license && <span className="set-tag">licenza: {detail.license}</span>}
+          {(detail.allowed_tools ?? []).map((t) => (
+            <span key={t} className="set-tag brand">
+              {t}
+            </span>
+          ))}
         </div>
-      </div>
-      {raw ? (
-        <pre className="skl-raw">{detail.body}</pre>
-      ) : (
-        <div className="skl-prose">
-          <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>
-            {detail.body}
-          </ReactMarkdown>
-        </div>
-      )}
 
-      {detail.files.length > 0 && (
-        <>
-          <div className="mdl-detail-section-label">File</div>
-          <div className="skl-tree">
-            <SkillTree nodes={detail.files} depth={0} />
+        {detail.description && <p className="skl-desc">{detail.description}</p>}
+
+        {detail.security && <SkillSecuritySection report={detail.security} />}
+
+        <div className="skl-md-head">
+          <span className="set-modal-label">SKILL.md</span>
+          <div className="skl-md-toggle">
+            <button
+              type="button"
+              className={`mdl-icon-btn ${!raw ? "active" : ""}`}
+              onClick={() => setRaw(false)}
+              title="Anteprima"
+              aria-label="Anteprima"
+            >
+              <Eye size={15} />
+            </button>
+            <button
+              type="button"
+              className={`mdl-icon-btn ${raw ? "active" : ""}`}
+              onClick={() => setRaw(true)}
+              title="Sorgente"
+              aria-label="Sorgente"
+            >
+              <Code2 size={15} />
+            </button>
           </div>
-        </>
-      )}
+        </div>
+        {raw ? (
+          <pre className="skl-raw">{detail.body}</pre>
+        ) : (
+          <div className="skl-prose">
+            <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>
+              {detail.body}
+            </ReactMarkdown>
+          </div>
+        )}
+
+        {detail.files.length > 0 && (
+          <>
+            <div className="set-modal-label skl-files-label">File</div>
+            <div className="skl-tree">
+              <SkillTree nodes={detail.files} depth={0} />
+            </div>
+          </>
+        )}
+      </div>
     </>
   );
 }
