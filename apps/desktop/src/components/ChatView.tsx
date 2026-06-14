@@ -132,6 +132,9 @@ interface ChatViewProps {
   onRejectApproval: (approvalId: string) => void;
   onRuntimeChanged: () => void | Promise<void>;
   onThreadChanged: () => void | Promise<void>;
+  // Fires when this thread starts/stops generating, so the parent can mark the
+  // thread busy in the sidebar in real time (before the 2.5s taskQueue poll).
+  onStreamingChange?: (busy: boolean) => void;
   // Pre-fill the composer (e.g. engaging a proactivity card opens a chat seeded
   // with the card's context). The nonce re-applies the same text.
   seed?: { text: string; nonce: number } | null;
@@ -175,6 +178,7 @@ export function ChatView({
   onRejectApproval,
   onRuntimeChanged,
   onThreadChanged,
+  onStreamingChange,
   seed,
 }: ChatViewProps) {
   const [computerSession, setComputerSession] = useState<ComputerSession>(() =>
@@ -232,6 +236,32 @@ export function ChatView({
   const streamingFrameRef = useRef<number | null>(null);
   const cancelStreamingRequestRef = useRef<(() => void) | null>(null);
   const cancelledStreamIdsRef = useRef<Set<string>>(new Set());
+  // Tracks whether THIS ChatView instance is still mounted. The chat stream
+  // (submitChat) keeps running in the background after the user navigates to
+  // another thread (the gateway persists the answer; the client still commits
+  // it). This guard prevents a detached instance from touching dead state — the
+  // final commit lands via the same closure, but UI updates are skipped.
+  const isMountedRef = useRef(true);
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+  // Notifies the parent of streaming start/stop. A ref holds the latest callback
+  // so the unmount cleanup ([]) fires only on REAL unmount — not on every render,
+  // which would immediately undo a `notifyStreaming(true)` and flicker the dot off.
+  const onStreamingChangeRef = useRef(onStreamingChange);
+  onStreamingChangeRef.current = onStreamingChange;
+  const notifyStreaming = useCallback((busy: boolean) => {
+    if (!isMountedRef.current && busy) return;
+    onStreamingChangeRef.current?.(busy);
+  }, []);
+  useEffect(() => {
+    return () => {
+      notifyStreaming(false);
+    };
+  }, [notifyStreaming]);
   const activeHealth = useMemo(
     () => health.filter((item) => item.status !== "attention").slice(0, 2),
     [health],
@@ -503,6 +533,7 @@ export function ChatView({
       setOptimisticMessages([...promptMessages, streamingMessage]);
       resetStreamingState("");
       setStreamingAssistantId(streamingMessage.id);
+      notifyStreaming(true);
       streamingUserPinnedRef.current = conversationBottomDistance() < 220;
       window.setTimeout(() => scrollConversationToBottomIfPinned("auto"), 0);
       cancelStreamingRequestRef.current = cancelStreamingRequest;
@@ -550,6 +581,13 @@ export function ChatView({
         mode,
       );
       if (cancelledStreamIdsRef.current.has(requestId)) {
+        return;
+      }
+      // The user may have navigated to another thread while we awaited. The
+      // gateway already persisted the answer (submitChatPromptStream commits
+      // server-side), so we only need to stop touching THIS instance's UI — the
+      // parent's polling will surface the finalized messages on thread A.
+      if (!isMountedRef.current) {
         return;
       }
       streamedText = result.assistant_message.text || streamedText;
@@ -624,6 +662,7 @@ export function ChatView({
         );
         setPromptSubmitting(false);
       }
+      notifyStreaming(false);
       if (cancelStreamingRequestRef.current === cancelStreamingRequest) {
         cancelStreamingRequestRef.current = null;
       }
@@ -671,6 +710,7 @@ export function ChatView({
     setOptimisticMessages([...promptMessages, streamingMessage]);
     resetStreamingState("");
     setStreamingAssistantId(streamingMessage.id);
+    notifyStreaming(true);
     streamingUserPinnedRef.current = true;
     setStreamStatus({
       requestId,
@@ -711,6 +751,7 @@ export function ChatView({
       resetStreamingState("");
       setStreamStatus((current) => (current?.requestId === requestId ? null : current));
       setPromptSubmitting(false);
+      notifyStreaming(false);
       clearResumeMarker(thread.threadId);
     }
   }
@@ -862,6 +903,7 @@ export function ChatView({
 
     setPromptSubmitting(true);
     setStreamingAssistantId(message.id);
+    notifyStreaming(true);
     resetStreamingState("");
     streamingUserPinnedRef.current = conversationBottomDistance() < 220;
     window.setTimeout(() => scrollConversationToBottomIfPinned("auto"), 0);
@@ -915,6 +957,7 @@ export function ChatView({
       resetStreamingState("");
       setPromptSubmitting(false);
       setStreamStatus((current) => (current?.requestId === requestId ? null : current));
+      notifyStreaming(false);
       if (cancelStreamingRequestRef.current === cancelStreamingRequest) {
         cancelStreamingRequestRef.current = null;
       }
@@ -1148,6 +1191,7 @@ export function ChatView({
     };
 
     setStreamingAssistantId(message.id);
+    notifyStreaming(true);
     resetStreamingState(message.text);
     streamingUserPinnedRef.current = conversationBottomDistance() < 220;
     window.setTimeout(() => scrollConversationToBottomIfPinned("auto"), 0);
@@ -1207,6 +1251,7 @@ export function ChatView({
       setStreamStatus((current) =>
         current?.requestId === requestId ? null : current,
       );
+      notifyStreaming(false);
       if (cancelStreamingRequestRef.current === cancelStreamingRequest) {
         cancelStreamingRequestRef.current = null;
       }

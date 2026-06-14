@@ -352,6 +352,18 @@ pub struct ProviderRegistry {
     /// best model by capability".
     #[serde(default)]
     pub roles: std::collections::BTreeMap<String, RoleBinding>,
+    /// User override for the LLM concurrency limit (ResourceGovernor LlmInference).
+    /// `None` = infer from locality (loopback 1, cloud 4); `Some(n)` = force n.
+    /// The provider's kind/base_url still drives the inferred fallback when None.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub llm_concurrency_override: Option<u32>,
+}
+
+impl ProviderRegistry {
+    /// Whether the user has forced the LLM concurrency limit (vs. locality inference).
+    pub fn llm_concurrency_override(&self) -> Option<u32> {
+        self.llm_concurrency_override.filter(|&n| n >= 1)
+    }
 }
 
 /// A per-role model binding. Both fields present = manual; otherwise "auto"

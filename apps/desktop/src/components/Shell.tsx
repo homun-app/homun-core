@@ -10,6 +10,7 @@ import type { ChatThread, NavItem, SettingsSectionId, ViewId } from "../types";
 interface ShellProps {
   activeView: ViewId;
   activeThreadId: string;
+  busyThreadIds: Set<string>;
   chatThreads: ChatThread[];
   drawerOpen: boolean;
   // Composed at runtime in App: static core + enabled addon entries (ADR 0011 §10-A).
@@ -34,6 +35,7 @@ interface ShellProps {
 export function Shell({
   activeView,
   activeThreadId,
+  busyThreadIds,
   chatThreads,
   children,
   drawerOpen,
@@ -120,6 +122,7 @@ export function Shell({
         <NavDrawer
           activeView={activeView}
           activeThreadId={activeThreadId}
+          busyThreadIds={busyThreadIds}
           chatThreads={chatThreads}
           navItems={navItems}
           onArchiveChatThread={onArchiveChatThread}

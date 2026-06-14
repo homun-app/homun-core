@@ -458,6 +458,10 @@ export default function App() {
     useState<TaskDetailItem | null>(null);
   const [taskDetailLoading, setTaskDetailLoading] = useState(false);
   const [approvalBusyId, setApprovalBusyId] = useState<string | null>(null);
+  // The thread currently generating a chat answer (real-time signal from ChatView,
+  // sub-polling cadence). Used to mark the thread busy in the sidebar immediately,
+  // before the 2.5s taskQueue polling catches up.
+  const [streamingThreadId, setStreamingThreadId] = useState<string | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState("task_prompt_session");
   const [drawerOpen, setDrawerOpen] = useState(() => window.innerWidth > 860);
   const activeThread = useMemo(
@@ -467,6 +471,20 @@ export default function App() {
       defaultChatThread,
     [activeThreadId, chatThreads],
   );
+  // Threads "busy": a real-time streaming signal (from ChatView, sub-poll) UNION
+  // the taskQueue snapshot (running/queued tasks linked to a thread). The union
+  // covers both the chat-stream case and the durable-background-task case.
+  const busyThreadIds = useMemo(() => {
+    const ids = new Set<string>();
+    if (streamingThreadId) ids.add(streamingThreadId);
+    for (const thread of chatThreads) {
+      const task = taskItems.find((item) => item.id === thread.taskId);
+      if (task && (task.status === "running" || task.status === "queued")) {
+        ids.add(thread.threadId);
+      }
+    }
+    return ids;
+  }, [streamingThreadId, chatThreads, taskItems]);
   const selectedTask = useMemo(
     () =>
       taskItems.find((task) => task.id === selectedTaskId) ?? {
@@ -1061,6 +1079,7 @@ export default function App() {
     <Shell
       activeView={activeView}
       activeThreadId={activeThread.threadId}
+      busyThreadIds={busyThreadIds}
       chatThreads={chatThreads}
       drawerOpen={drawerOpen}
       onCreateChatThread={handleCreateChatThread}
@@ -1084,6 +1103,7 @@ export default function App() {
       >
         {activeView === "chat" && (
           <ChatView
+            key={activeThread.threadId}
             approvals={approvalItems}
             approvalBusyId={approvalBusyId}
             computerSessionId={activeThread.computerSessionId}
@@ -1099,6 +1119,9 @@ export default function App() {
             onRejectApproval={handleRejectApproval}
             onRuntimeChanged={() => refreshRuntimeReadModels(activeThread.taskId)}
             onThreadChanged={() => refreshChatReadModels(activeThread.threadId)}
+            onStreamingChange={(busy) =>
+              setStreamingThreadId(busy ? activeThread.threadId : null)
+            }
           />
         )}
         {activeView === "tasks" && (

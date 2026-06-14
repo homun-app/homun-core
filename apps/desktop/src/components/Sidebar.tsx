@@ -125,6 +125,7 @@ interface ProjectsNavProps {
   activeView: ViewId;
   activeThreadId: string;
   activeThreads: ChatThread[];
+  busyThreadIds: Set<string>;
   onSelectThread: (threadId: string) => void;
   onCreateChatThread: () => void;
   onThreadContextMenu: (thread: ChatThread, event: MouseEvent<HTMLButtonElement>) => void;
@@ -134,6 +135,7 @@ function ProjectsNav({
   activeView,
   activeThreadId,
   activeThreads,
+  busyThreadIds,
   onSelectThread,
   onCreateChatThread,
   onThreadContextMenu,
@@ -445,6 +447,7 @@ function ProjectsNav({
           <ThreadLink
             key={thread.threadId}
             active={thread.threadId === activeThreadId && activeView === "chat"}
+            busy={busyThreadIds.has(thread.threadId)}
             thread={thread}
             onContextMenu={(e) => onThreadContextMenu(thread, e)}
             onSelect={() => {
@@ -535,6 +538,7 @@ function ProjectsNav({
 interface NavDrawerProps {
   activeView: ViewId;
   activeThreadId: string;
+  busyThreadIds: Set<string>;
   chatThreads: ChatThread[];
   navItems: NavItem[];
   onArchiveChatThread: (threadId: string) => void;
@@ -551,6 +555,7 @@ interface NavDrawerProps {
 export function NavDrawer({
   activeView,
   activeThreadId,
+  busyThreadIds,
   chatThreads,
   navItems,
   onArchiveChatThread,
@@ -637,6 +642,7 @@ export function NavDrawer({
           activeView={activeView}
           activeThreadId={activeThreadId}
           activeThreads={activeThreads}
+          busyThreadIds={busyThreadIds}
           onSelectThread={onSelectThread}
           onCreateChatThread={onCreateChatThread}
           onThreadContextMenu={(thread, event) => {
@@ -659,6 +665,7 @@ export function NavDrawer({
               archivedThreads.map((thread) => (
                 <ThreadLink
                   active={thread.threadId === activeThreadId && activeView === "chat"}
+                  busy={busyThreadIds.has(thread.threadId)}
                   key={thread.threadId}
                   thread={thread}
                   onContextMenu={(event) => {
@@ -1046,11 +1053,13 @@ function threadTypeIcon(
 
 function ThreadLink({
   active,
+  busy,
   onContextMenu,
   onSelect,
   thread,
 }: {
   active: boolean;
+  busy?: boolean;
   onContextMenu: (event: MouseEvent<HTMLButtonElement>) => void;
   onSelect: () => void;
   thread: ChatThread;
@@ -1060,13 +1069,17 @@ function ThreadLink({
     <button
       className={`drawer-link ${active ? "active" : ""} ${thread.pinned ? "pinned" : ""}`}
       type="button"
+      aria-busy={busy || undefined}
       onContextMenu={onContextMenu}
       onClick={onSelect}
     >
       <span className="drawer-link-icon" title={icon?.label} aria-label={icon?.label}>
         {icon?.node}
       </span>
-      <span className="drawer-link-title">{thread.title}</span>
+      <span className="drawer-link-title">
+        {busy && <span className="thread-busy-dot" aria-hidden="true" />}
+        {thread.title}
+      </span>
       {thread.pinned && <Pin size={12} aria-hidden="true" />}
     </button>
   );

@@ -1126,6 +1126,29 @@ async function electronGenerateProviderProfiles(id: string): Promise<ProvidersRe
   );
 }
 
+// ── LLM concurrency (ResourceGovernor LlmInference limit) ─────────────────
+
+/** Effective LLM concurrency: the user override (if any) or the locality-inferred
+ *  default (loopback 1, cloud 4). `inferred_local` lets the UI warn that a high
+ *  override can saturate local VRAM. */
+export interface LlmConcurrencyView {
+  override: number | null;
+  effective: number;
+  inferred_local: boolean;
+}
+
+async function electronLlmConcurrency(): Promise<LlmConcurrencyView> {
+  return gatewayGetJson<LlmConcurrencyView>("/api/runtime/llm-concurrency");
+}
+
+async function electronSetLlmConcurrency(
+  override: number | null,
+): Promise<LlmConcurrencyView> {
+  return gatewayPostJson<LlmConcurrencyView>("/api/runtime/llm-concurrency", {
+    override,
+  });
+}
+
 // ── Role → model bindings (per-task model) ────────────────────────────────
 
 export interface RoleView {
@@ -1728,6 +1751,9 @@ export const coreBridge = {
   refreshProviderModels: (id: string) => electronRefreshProviderModels(id),
   setModelProfile: (input: SetModelProfileInput) => electronSetModelProfile(input),
   generateProviderProfiles: (id: string) => electronGenerateProviderProfiles(id),
+  llmConcurrency: () => electronLlmConcurrency(),
+  setLlmConcurrency: (override: number | null) =>
+    electronSetLlmConcurrency(override),
   routingDecisions: () => electronRoutingDecisions(),
   roles: () => electronRoles(),
   setRole: (input: { role: string; provider_id?: string; model?: string }) =>

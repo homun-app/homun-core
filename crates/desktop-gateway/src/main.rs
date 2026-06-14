@@ -113,6 +113,13 @@ use tower_http::cors::{AllowOrigin, CorsLayer};
 const TASK_EXECUTOR_WORKER_ID: &str = "desktop-gateway-background-worker";
 const TASK_EXECUTOR_MANUAL_WORKER_ID: &str = "desktop-gateway-manual-run";
 const TASK_EXECUTOR_POLL_INTERVAL_MS: u64 = 1_000;
+/// How many independent background workers pull from the task queue. Each worker
+/// owns its own lease id, so two workers never grab the same task; the
+/// ResourceGovernor does the real gating (a task whose resource is exhausted
+/// returns `WaitingResource` and is re-tried next tick). Default 3: enough for
+/// genuine parallelism across resource classes (e.g. a `network_io` task next to
+/// an `llm_inference` one) without hammering SQLite. Env: `HOMUN_TASK_WORKER_COUNT`.
+const TASK_EXECUTOR_DEFAULT_WORKER_COUNT: usize = 3;
 
 #[derive(Clone)]
 struct AppState {
@@ -156,9 +163,14 @@ struct TaskExecutorStatus {
 
 impl TaskExecutorStatus {
     fn new(enabled: bool) -> Self {
+        let count = if enabled { task_executor_worker_count() } else { 0 };
         Self {
             enabled,
-            worker_id: TASK_EXECUTOR_WORKER_ID.to_string(),
+            worker_id: if count > 1 {
+                format!("{TASK_EXECUTOR_WORKER_ID}-0..{count}")
+            } else {
+                TASK_EXECUTOR_WORKER_ID.to_string()
+            },
             poll_interval_ms: TASK_EXECUTOR_POLL_INTERVAL_MS,
             status: if enabled { "starting" } else { "disabled" }.to_string(),
             last_tick_at: None,
@@ -569,6 +581,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/chat/threads/{thread_id}/file", get(read_thread_file))
         .route("/api/runtime/model", get(runtime_model).post(set_runtime_model))
         .route("/api/runtime/models", get(runtime_models))
+        .route(
+            "/api/runtime/llm-concurrency",
+            get(get_llm_concurrency).post(set_llm_concurrency),
+        )
         .route(
             "/api/prefs/timezone",
             get(get_user_timezone).post(set_user_timezone),
@@ -7027,6 +7043,99 @@ fn chat_openai_stream_config() -> Option<(String, String, Option<String>)> {
     }
     let base_url = effective_inference_base_url()?;
     Some((base_url, active_inference_model(), resolve_inference_api_key()))
+}
+
+/// Whether the active orchestrator provider runs locally (loopback base_url).
+/// Mirrors the locality derivation in `build_router_from` (main.rs ~20438).
+fn orchestrator_is_local() -> bool {
+    let registry = load_provider_registry();
+    if let Some(resolved) = registry.resolve_role("orchestrator") {
+        return resolved
+            .base_url
+            .contains("127.0.0.1")
+            || resolved.base_url.contains("localhost");
+    }
+    // Fall back to the active provider, then legacy config.
+    registry
+        .active()
+        .map(|p| p.base_url.contains("127.0.0.1") || p.base_url.contains("localhost"))
+        .or_else(|| {
+            effective_inference_base_url()
+                .map(|url| url.contains("127.0.0.1") || url.contains("localhost"))
+        })
+        .unwrap_or(false)
+}
+
+/// The effective LLM concurrency limit for the ResourceGovernor, resolved fresh
+/// each scheduler tick. Order: user override (>=1) wins; otherwise infer from the
+/// active provider's locality — loopback (Ollama/MLX-via-OpenAI-compat) = 1 (VRAM
+/// / shared GPU is the real constraint), cloud (OpenAI/Anthropic/OpenRouter) = 4.
+/// Env override `HOMUN_LLM_CONCURRENCY` is honored for ops/testing.
+fn active_llm_concurrency() -> u32 {
+    if let Ok(raw) = std::env::var("HOMUN_LLM_CONCURRENCY") {
+        if let Ok(value) = raw.trim().parse::<u32>() {
+            if value >= 1 {
+                return value;
+            }
+        }
+    }
+    let registry = load_provider_registry();
+    if let Some(forced) = registry.llm_concurrency_override() {
+        return forced;
+    }
+    if orchestrator_is_local() {
+        1
+    } else {
+        4
+    }
+}
+
+/// The data the `/api/runtime/llm-concurrency` GET handler returns — so the UI
+/// can show the effective value, whether the user forced it, and the inferred
+/// locality hint (to warn "local provider: high concurrency can saturate RAM").
+#[derive(Debug, Clone, Serialize)]
+struct LlmConcurrencyView {
+    r#override: Option<u32>,
+    effective: u32,
+    inferred_local: bool,
+}
+
+fn llm_concurrency_view() -> LlmConcurrencyView {
+    let registry = load_provider_registry();
+    let r#override = registry.llm_concurrency_override();
+    let inferred_local = orchestrator_is_local();
+    let effective = match r#override {
+        Some(n) => n,
+        None if inferred_local => 1,
+        None => 4,
+    };
+    LlmConcurrencyView {
+        r#override,
+        effective,
+        inferred_local,
+    }
+}
+
+/// Request body for `POST /api/runtime/llm-concurrency`.
+/// `override: null` clears the user override (back to locality inference).
+#[derive(Debug, Deserialize)]
+struct SetLlmConcurrencyRequest {
+    r#override: Option<u32>,
+}
+
+async fn get_llm_concurrency() -> Json<LlmConcurrencyView> {
+    Json(llm_concurrency_view())
+}
+
+async fn set_llm_concurrency(
+    Json(request): Json<SetLlmConcurrencyRequest>,
+) -> Result<Json<LlmConcurrencyView>, GatewayError> {
+    // Clamp to a sane range; reject 0 (would stall the LLM resource entirely).
+    let value = request.r#override.filter(|&n| n >= 1 && n <= 16);
+    let mut registry = load_provider_registry();
+    registry.llm_concurrency_override = value;
+    save_provider_registry(&registry).map_err(provider_registry_persist_error)?;
+    Ok(Json(llm_concurrency_view()))
 }
 
 /// A fallback model for when the chosen one returns 401 (auth) — used when the
@@ -15440,7 +15549,13 @@ fn run_next_task_once(
     let user = gateway_user_id();
     let workspace = gateway_workspace_id();
     let now = OffsetDateTime::now_utc();
-    let governor = ResourceGovernor::new(ResourceLimits::conservative_defaults());
+    // Dynamic LLM concurrency: the limit follows the active provider's locality
+    // (loopback 1, cloud 4) or the user's override — resolved fresh each tick so a
+    // Settings change applies with no restart. See `active_llm_concurrency`.
+    let governor = ResourceGovernor::new(
+        ResourceLimits::conservative_defaults()
+            .with_limit(ResourceClass::LlmInference, active_llm_concurrency()),
+    );
     let lease_manager = LeaseManager::new(Duration::minutes(5));
     let task = {
         let store = lock_task_store(state)?;
@@ -15643,47 +15758,63 @@ fn start_task_executor_worker(state: AppState) {
     if !task_executor_worker_enabled() {
         return;
     }
-    tokio::spawn(async move {
-        let mut interval =
-            tokio::time::interval(StdDuration::from_millis(TASK_EXECUTOR_POLL_INTERVAL_MS));
-        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-        loop {
-            interval.tick().await;
-            update_task_executor_status(&state, |status| {
-                status.status = "polling".to_string();
-                status.last_tick_at = Some(OffsetDateTime::now_utc().to_string());
-                status.last_message = "Controllo coda task locale.".to_string();
-            });
+    let count = task_executor_worker_count();
+    eprintln!(
+        "task executor: starting {count} background worker{} (poll {}ms, ResourceGovernor gates concurrency)",
+        if count == 1 { "" } else { "s" },
+        TASK_EXECUTOR_POLL_INTERVAL_MS
+    );
+    for index in 0..count {
+        let worker_state = state.clone();
+        let worker_id = task_executor_worker_id(index);
+        // Stagger the first tick across workers so they don't all hit SQLite at
+        // once on startup; the interval stays shared afterwards.
+        let stagger = StdDuration::from_millis(TASK_EXECUTOR_POLL_INTERVAL_MS / count.max(1) as u64 * index as u64);
+        tokio::spawn(async move {
+            // Initial offset before the steady-state interval begins.
+            tokio::time::sleep(stagger).await;
+            let mut interval =
+                tokio::time::interval(StdDuration::from_millis(TASK_EXECUTOR_POLL_INTERVAL_MS));
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                interval.tick().await;
+                update_task_executor_status(&worker_state, |status| {
+                    status.status = "polling".to_string();
+                    status.last_tick_at = Some(OffsetDateTime::now_utc().to_string());
+                    status.last_message = "Controllo coda task locale.".to_string();
+                });
 
-            let state_for_worker = state.clone();
-            let result = tokio::task::spawn_blocking(move || {
-                run_next_task_once(&state_for_worker, TASK_EXECUTOR_WORKER_ID)
-            })
-            .await;
+                let state_for_worker = worker_state.clone();
+                let id_for_run = worker_id.clone();
+                let result = tokio::task::spawn_blocking(move || {
+                    run_next_task_once(&state_for_worker, &id_for_run)
+                })
+                .await;
 
-            match result {
-                Ok(Ok(batch)) => record_task_executor_batch(&state, batch),
-                Ok(Err(error)) => {
-                    let message = error.message.clone();
-                    update_task_executor_status(&state, |status| {
-                        status.status = "failed".to_string();
-                        status.failure_count += 1;
-                        status.last_message = message.clone();
-                    });
-                    eprintln!("task executor worker error: {message}");
-                }
-                Err(error) => {
-                    let message = error.to_string();
-                    update_task_executor_status(&state, |status| {
-                        status.status = "failed".to_string();
-                        status.failure_count += 1;
-                        status.last_message = message.clone();
-                    });
-                    eprintln!("task executor worker join error: {message}");
+                match result {
+                    Ok(Ok(batch)) => record_task_executor_batch(&worker_state, batch),
+                    Ok(Err(error)) => {
+                        let message = error.message.clone();
+                        update_task_executor_status(&worker_state, |status| {
+                            status.status = "failed".to_string();
+                            status.failure_count += 1;
+                            status.last_message = message.clone();
+                        });
+                        eprintln!("task executor worker {worker_id} error: {message}");
+                    }
+                    Err(error) => {
+                        let message = error.to_string();
+                        update_task_executor_status(&worker_state, |status| {
+                            status.status = "failed".to_string();
+                            status.failure_count += 1;
+                            status.last_message = message.clone();
+                        });
+                        eprintln!("task executor worker {worker_id} join error: {message}");
+                    }
                 }
             }
-        }
-    });
+        });
+    }
 }
 
 fn record_task_executor_batch(state: &AppState, batch: TaskRunBatchResponse) {
@@ -15713,6 +15844,24 @@ fn task_executor_worker_enabled() -> bool {
             !matches!(normalized.as_str(), "0" | "false" | "off" | "disabled")
         })
         .unwrap_or(true)
+}
+
+/// Number of independent background workers. Each worker is a self-contained
+/// polling loop with its own lease id; the ResourceGovernor is the actual
+/// concurrency gate, so raising this only adds parallelism for tasks whose
+/// resources are NOT contended (e.g. network_io + filesystem_io together).
+fn task_executor_worker_count() -> usize {
+    std::env::var("HOMUN_TASK_WORKER_COUNT")
+        .ok()
+        .and_then(|value| value.trim().parse::<usize>().ok())
+        .filter(|&count| (1..=16).contains(&count))
+        .unwrap_or(TASK_EXECUTOR_DEFAULT_WORKER_COUNT)
+}
+
+/// Worker id for index `n`. Stable per index so leases survive across ticks and
+/// `recover_stale_leases` can still identify ownership after a crash.
+fn task_executor_worker_id(index: usize) -> String {
+    format!("{TASK_EXECUTOR_WORKER_ID}-{index}")
 }
 
 fn update_task_executor_status(state: &AppState, update: impl FnOnce(&mut TaskExecutorStatus)) {
@@ -27028,6 +27177,7 @@ impl IntoResponse for GatewayError {
 mod tests {
     use super::{
         adapt_skill_body,
+        active_llm_concurrency,
         extract_source_urls,
         fonti_section,
         format_memory_block,
@@ -27036,6 +27186,7 @@ mod tests {
         is_confirmation_reply,
         is_internal_task_kind,
         is_salient_exchange,
+        llm_concurrency_view,
         normalize_for_dedup,
         strip_json_fences,
         inbound_action,
@@ -27043,6 +27194,9 @@ mod tests {
         InboundAction,
         MemoryDataSensitivity,
         skill_id_from_command,
+        TASK_EXECUTOR_DEFAULT_WORKER_COUNT,
+        task_executor_worker_count,
+        task_executor_worker_id,
         browser_method_for_capability_tool,
         browser_targets_for_goal,
         browser_url_for_goal,
@@ -28428,5 +28582,82 @@ data: [DONE]\n";
         let value = serde_json::json!({ "snapshot": "- page", "url": "https://x" });
         assert_eq!(browser_snapshot_text(&value), "- page");
         assert_eq!(browser_snapshot_text(&serde_json::json!({})), "");
+    }
+
+    #[test]
+    fn active_llm_concurrency_honors_env_override() {
+        // The env override is the deterministic path (registry state is shared
+        // across tests and depends on the on-disk file). Restore it after.
+        // SAFETY: env mutation is `unsafe` under edition 2024; these tests run
+        // single-threaded within the gateway test binary so there is no data race
+        // with concurrent readers of the process environment.
+        let restore = std::env::var("HOMUN_LLM_CONCURRENCY").ok();
+        unsafe {
+            std::env::set_var("HOMUN_LLM_CONCURRENCY", "7");
+        }
+        assert_eq!(active_llm_concurrency(), 7);
+        unsafe {
+            std::env::set_var("HOMUN_LLM_CONCURRENCY", "1");
+        }
+        assert_eq!(active_llm_concurrency(), 1);
+        // 0 must be ignored (would stall the LLM resource) — fall back to the
+        // registry/locality path, which is >= 1 by construction.
+        unsafe {
+            std::env::set_var("HOMUN_LLM_CONCURRENCY", "0");
+        }
+        assert!(active_llm_concurrency() >= 1);
+        unsafe {
+            match &restore {
+                Some(value) => std::env::set_var("HOMUN_LLM_CONCURRENCY", value),
+                None => std::env::remove_var("HOMUN_LLM_CONCURRENCY"),
+            }
+        }
+    }
+
+    #[test]
+    fn llm_concurrency_view_reports_effective_and_locality() {
+        // The view is self-consistent regardless of registry state: `effective`
+        // equals the override when set, otherwise 1 (local) or 4 (cloud) from the
+        // inferred locality, and `effective` is always >= 1.
+        let view = llm_concurrency_view();
+        assert!(view.effective >= 1);
+        if let Some(forced) = view.r#override {
+            assert_eq!(view.effective, forced);
+        } else {
+            assert_eq!(view.effective, if view.inferred_local { 1 } else { 4 });
+        }
+    }
+
+    #[test]
+    fn task_executor_worker_count_clamps_and_defaults() {
+        // SAFETY: single-threaded test binary; no concurrent env readers.
+        let restore = std::env::var("HOMUN_TASK_WORKER_COUNT").ok();
+        unsafe {
+            std::env::set_var("HOMUN_TASK_WORKER_COUNT", "5");
+        }
+        assert_eq!(task_executor_worker_count(), 5);
+        unsafe {
+            std::env::set_var("HOMUN_TASK_WORKER_COUNT", "0");
+        }
+        assert_eq!(task_executor_worker_count(), TASK_EXECUTOR_DEFAULT_WORKER_COUNT);
+        unsafe {
+            std::env::set_var("HOMUN_TASK_WORKER_COUNT", "99");
+        }
+        assert_eq!(task_executor_worker_count(), TASK_EXECUTOR_DEFAULT_WORKER_COUNT);
+        unsafe {
+            std::env::remove_var("HOMUN_TASK_WORKER_COUNT");
+        }
+        assert_eq!(task_executor_worker_count(), TASK_EXECUTOR_DEFAULT_WORKER_COUNT);
+        unsafe {
+            if let Some(value) = &restore {
+                std::env::set_var("HOMUN_TASK_WORKER_COUNT", value);
+            }
+        }
+    }
+
+    #[test]
+    fn task_executor_worker_id_is_stable_per_index() {
+        assert_eq!(task_executor_worker_id(0), "desktop-gateway-background-worker-0");
+        assert_eq!(task_executor_worker_id(2), "desktop-gateway-background-worker-2");
     }
 }

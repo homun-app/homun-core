@@ -47,6 +47,7 @@ import {
   type CoreCapabilitySnapshot,
   type CoreChannelSettings,
   type CoreTelegramStatus,
+  type LlmConcurrencyView,
   type ProviderModelView,
   type ProviderView,
   type McpRegistryServer,
@@ -810,6 +811,100 @@ const PROVIDER_PRESETS: Array<{
   { id: "custom", label: "Personalizzato", baseUrl: "", kind: "openai_compat" },
 ];
 
+/// LLM concurrency control: how many inference requests the ResourceGovernor lets
+/// run in parallel. Auto follows locality (loopback 1, cloud 4); the user can force
+/// a value — useful for Ollama on a big GPU, or to cap cloud spend.
+function ConcurrencyBlock() {
+  const [view, setView] = useState<LlmConcurrencyView | null>(null);
+  const [draft, setDraft] = useState<number>(4);
+  const [manual, setManual] = useState<boolean>(false);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const current = await coreBridge.llmConcurrency();
+        setView(current);
+        setManual(current.override !== null);
+        setDraft(current.override ?? current.effective);
+      } catch {
+        /* provider runtime unavailable — block stays empty */
+      }
+    })();
+  }, []);
+
+  const apply = async () => {
+    setBusy(true);
+    try {
+      const next = await coreBridge.setLlmConcurrency(manual ? draft : null);
+      setView(next);
+      setDraft(next.override ?? next.effective);
+    } catch {
+      /* leave as-is */
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!view) return null;
+  const dirty = manual !== (view.override !== null) || (manual && draft !== view.effective && draft !== (view.override ?? -1));
+
+  return (
+    <>
+      <div className="set-section-label" style={{ marginTop: "var(--s4)" }}>
+        Concorrenza
+      </div>
+      <div className="mdl-row">
+        <div className="mdl-row-main">
+          <div className="mdl-row-top">
+            <strong>Richieste LLM in parallelo</strong>
+            <span className="set-badge green">Effettivo: {view.effective}</span>
+          </div>
+          <p className="mdl-detail-sub">
+            Quante inferenze il runtime lascia girare contemporaneamente. Automatico in base al
+            provider (locale 1, cloud 4).
+            {view.inferred_local
+              ? " Provider locale rilevato: una concorrenza alta può saturare la memoria."
+              : ""}
+          </p>
+        </div>
+        <div className="mdl-row-side" style={{ display: "flex", gap: "var(--s2)", alignItems: "center" }}>
+          <label className="set-check" style={{ whiteSpace: "nowrap" }}>
+            <input
+              type="checkbox"
+              checked={!manual}
+              onChange={(e) => setManual(!e.target.checked)}
+            />
+            Automatico
+          </label>
+          {!manual && (
+            <span className="set-hint">({view.inferred_local ? "1, locale" : "4, cloud"})</span>
+          )}
+          {manual && (
+            <input
+              className="set-input"
+              type="number"
+              min={1}
+              max={16}
+              value={draft}
+              style={{ width: "5rem" }}
+              onChange={(e) => setDraft(Math.max(1, Math.min(16, Number(e.target.value) || 1)))}
+            />
+          )}
+          <button
+            type="button"
+            className="set-btn"
+            disabled={busy || !dirty}
+            onClick={apply}
+          >
+            {busy ? "Salvo…" : "Salva"}
+          </button>
+        </div>
+      </div>
+    </>
+  );
+}
+
 function RuntimePane({
   model,
   sub = "routing",
@@ -979,6 +1074,7 @@ function RuntimePane({
               );
             })
           )}
+          <ConcurrencyBlock />
         </>
       )}
 
