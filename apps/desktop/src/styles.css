@@ -8415,64 +8415,36 @@ body.resizing-drawer {
    skill cards with toggles + detail-as-modal) ==================================== */
 .skl-seg { margin-bottom: 18px; }
 
-/* The two group cards under "Skill attive". */
-.skl-group-card {
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  padding: 16px;
-  background: var(--surface);
-  cursor: pointer;
-  text-align: left;
-  font: inherit;
+/* "Skill attive" shows each group inline (no drill-in): an eyebrow header with
+   count (+ a group switch for HomunCoder), then the cards. */
+.skl-groups { display: flex; flex-direction: column; gap: 22px; }
+.skl-group-block { display: flex; flex-direction: column; gap: 10px; }
+.skl-group-label {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.skl-group-card:hover { border-color: var(--brand); }
-.skl-group-head { display: flex; align-items: center; gap: 10px; }
-.skl-group-icon {
-  width: 34px;
-  height: 34px;
-  border-radius: 9px;
-  background: var(--panel);
-  color: var(--muted);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex: none;
-}
-.skl-group-icon.brand { background: var(--brand-soft); color: var(--brand); }
-.skl-group-name { font-size: 14.5px; font-weight: 700; color: var(--text); }
-.skl-group-chev { margin-left: auto; color: var(--faint); flex: none; }
-.skl-group-meta { font-size: 12px; color: var(--faint); }
-
-/* Back link inside a group + "enable whole group" row. */
-.skl-back {
-  display: inline-flex;
   align-items: center;
   gap: 7px;
-  border: 0;
-  background: none;
-  font: inherit;
-  font-size: 13px;
+  margin: 0;
+}
+.skl-group-label > svg { color: var(--faint); flex: none; }
+.skl-group-count {
+  background: var(--panel);
+  border-radius: 5px;
+  padding: 0 6px;
   color: var(--muted);
-  cursor: pointer;
-  padding: 0;
-  margin-bottom: 14px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 1.6;
 }
-.skl-back:hover { color: var(--text); }
-.skl-group-switch-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  padding: 11px 15px;
-  margin-bottom: 12px;
-  font-size: 13px;
-  color: var(--text);
+/* The eyebrow is uppercased; keep this descriptor lowercase + un-tracked. */
+.skl-group-label-meta {
+  text-transform: none;
+  letter-spacing: 0;
+  font-family: var(--font-sans);
+  font-size: 11.5px;
+  color: var(--faint);
 }
+.skl-group-label-switch { margin-left: auto; display: inline-flex; }
+.skl-group-empty { margin: 0; }
 
 /* Per-skill card: name + origin on the left, toggle on the right. */
 .skl-card {
