@@ -8713,6 +8713,9 @@ body.resizing-drawer {
   display: flex;
   flex-direction: column;
   gap: var(--s4);
+  /* Never overflow the viewport — scroll if the content is tall. */
+  max-height: 88vh;
+  overflow: auto;
 }
 .cmp-modal-head { display: flex; align-items: flex-start; gap: var(--s3); }
 .cmp-modal-head .mdl-icon-btn { margin-left: auto; }
