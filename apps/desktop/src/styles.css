@@ -8142,6 +8142,9 @@ body.resizing-drawer {
   flex-direction: column;
   gap: var(--s3);
 }
+/* Inside a modal the header's right-aligned actions (e.g. "Rimuovi") must clear the
+   absolute close × at top:16/right:16 — reserve room so they don't overlap. */
+.set-modal > .mdl-detail-head { padding-right: 38px; }
 .mdl-detail-head {
   display: flex;
   align-items: center;
@@ -8199,7 +8202,11 @@ body.resizing-drawer {
   flex-direction: column;
   border: 1px solid var(--line);
   border-radius: 12px;
-  overflow: hidden;
+  /* Scroll the model list INSIDE the modal (min-height:0 lets it shrink within the
+     flex-column modal) so the header (+ close ×) and footer stay put and all models
+     are reachable — instead of the list being squeezed/clipped. */
+  overflow-y: auto;
+  min-height: 0;
 }
 .mdl-model-row {
   display: flex;
