@@ -1,9 +1,8 @@
 import {
-  Activity,
   AlertTriangle,
   Boxes,
   Check,
-  ChevronDown,
+  ChevronLeft,
   ChevronRight,
   Code2,
   Copy,
@@ -14,7 +13,6 @@ import {
   EyeOff,
   FileText,
   Folder,
-  ListChecks,
   MonitorPlay,
   Play,
   Plus,
@@ -71,8 +69,11 @@ import {
   ACCENT_PRESETS,
   DEFAULT_ACCENT,
   loadAccent,
+  loadCustomAccents,
   loadTheme,
+  normalizeHex,
   saveAccent,
+  saveCustomAccents,
   saveTheme,
   THEME_PRESETS,
   type ThemeName,
@@ -95,6 +96,9 @@ import type {
 interface SettingsViewProps {
   connections: ConnectionItem[];
   section: SettingsSectionId;
+  // Active sub-item for sections with an inline expandable submenu (e.g.
+  // runtime → routing|decisions|providers). Free-form string, defaulted per pane.
+  sub?: string;
   // Called after an addon is toggled, so App can re-read enabled-state and
   // mount/unmount its nav entry + panel (ADR 0011 §10-A).
   onPluginsChanged?: () => void;
@@ -115,7 +119,7 @@ const SECTION_TITLES: Record<SettingsSectionId, string> = {
   computer: "Computer locale",
 };
 
-export function SettingsView({ section, onPluginsChanged }: SettingsViewProps) {
+export function SettingsView({ section, sub, onPluginsChanged }: SettingsViewProps) {
   const [model, setModel] = useState<ActiveModelInfo | null>(null);
   const [computer, setComputer] = useState<ContainedComputerLive | null>(null);
 
@@ -159,12 +163,25 @@ export function SettingsView({ section, onPluginsChanged }: SettingsViewProps) {
         {section === "account" && <AccountPane computer={computer} />}
         {section === "general" && <GeneralPane />}
         {section === "appearance" && <AppearancePane />}
-        {section === "runtime" && <RuntimePane model={model} />}
+        {section === "runtime" && (
+          <RuntimePane
+            model={model}
+            sub={sub === "decisions" || sub === "providers" ? sub : "routing"}
+          />
+        )}
         {section === "privacy" && <PrivacyPane />}
         {section === "memory" && <MemoryView embedded />}
         {section === "contacts" && <ContactsView />}
         {section === "channels" && <ChannelsPane />}
-        {section === "connections" && <ConnectorsPane />}
+        {section === "connections" && (
+          <ConnectorsPane
+            sub={
+              sub === "fs" || sub === "catalogo" || sub === "attivita"
+                ? sub
+                : "composio"
+            }
+          />
+        )}
         {section === "skills" && <SkillsPane />}
         {section === "addon" && <AddonPane onChanged={onPluginsChanged} />}
         {section === "computer" && <ComputerPane computer={computer} />}
@@ -551,9 +568,44 @@ function AccountPane({
 function AppearancePane() {
   const [accent, setAccent] = useState(loadAccent());
   const [theme, setTheme] = useState<ThemeName>(loadTheme());
+  // The user's own accents, shown as pills alongside the presets (persisted).
+  const [customs, setCustoms] = useState<string[]>(loadCustomAccents);
+  // A colour being picked but NOT yet saved. The native OS picker fires change events
+  // continuously while you move the selector, so we stage the choice here and only the
+  // explicit "Aggiungi" commits it — otherwise every colour passed over would be added.
+  const [draft, setDraft] = useState<string | null>(null);
+  const isPreset = (hex: string) =>
+    ACCENT_PRESETS.some((p) => p.hex.toLowerCase() === hex.toLowerCase());
+  // Migrate a pre-existing custom accent (saved before this feature) into a pill.
+  useEffect(() => {
+    const cur = normalizeHex(accent);
+    if (!isPreset(cur) && !customs.some((c) => c === cur)) {
+      const next = [...customs, cur];
+      setCustoms(next);
+      saveCustomAccents(next);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const pick = (hex: string) => {
-    setAccent(hex);
-    saveAccent(hex); // applies to :root + persists immediately
+    const h = normalizeHex(hex);
+    setAccent(h);
+    saveAccent(h); // applies to :root + persists immediately
+  };
+  const addCustom = (hex: string) => {
+    const h = normalizeHex(hex);
+    if (!isPreset(h) && !customs.some((c) => c === h)) {
+      const next = [...customs, h];
+      setCustoms(next);
+      saveCustomAccents(next);
+    }
+    pick(h);
+  };
+  const removeCustom = (hex: string) => {
+    const h = normalizeHex(hex);
+    const next = customs.filter((c) => c !== h);
+    setCustoms(next);
+    saveCustomAccents(next);
+    if (normalizeHex(accent) === h) pick(DEFAULT_ACCENT);
   };
   const pickTheme = (name: ThemeName) => {
     setTheme(name);
@@ -604,30 +656,90 @@ function AppearancePane() {
       <p className="set-hint">
         L'accento del brand è il teal. Puoi renderlo tuo — si applica subito a tutta l'app.
       </p>
-      <div className="appearance-swatches">
-        {ACCENT_PRESETS.map((preset) => (
-          <button
-            key={preset.hex}
-            type="button"
-            title={preset.name}
-            aria-label={preset.name}
-            className={`appearance-swatch ${norm === preset.hex.toLowerCase() ? "active" : ""}`}
-            style={{ background: preset.hex }}
-            onClick={() => pick(preset.hex)}
+      <div className="appearance-accents">
+        {ACCENT_PRESETS.map((preset) => {
+          const active = norm === preset.hex.toLowerCase();
+          return (
+            <button
+              key={preset.hex}
+              type="button"
+              title={preset.name}
+              aria-label={preset.name}
+              className={`appearance-accent ${active ? "active" : ""}`}
+              onClick={() => pick(preset.hex)}
+            >
+              <span className="appearance-accent-chip" style={{ background: preset.hex }} />
+              <span className="appearance-accent-name">{preset.name}</span>
+              {active && <Check size={14} style={{ color: preset.hex }} />}
+            </button>
+          );
+        })}
+        {/* Saved custom accents — same pill as the presets, each removable on hover. */}
+        {customs.map((hex) => {
+          const active = norm === hex;
+          return (
+            <span key={hex} className="appearance-accent-wrap">
+              <button
+                type="button"
+                title={hex.toUpperCase()}
+                aria-label={`Accento ${hex.toUpperCase()}`}
+                className={`appearance-accent ${active ? "active" : ""}`}
+                onClick={() => pick(hex)}
+              >
+                <span className="appearance-accent-chip" style={{ background: hex }} />
+                <span className="appearance-accent-name">{hex.toUpperCase()}</span>
+                {active && <Check size={14} style={{ color: hex }} />}
+              </button>
+              <button
+                type="button"
+                className="appearance-accent-del"
+                aria-label={`Rimuovi colore ${hex.toUpperCase()}`}
+                title="Rimuovi"
+                onClick={() => removeCustom(hex)}
+              >
+                <X size={11} />
+              </button>
+            </span>
+          );
+        })}
+        {/* Pick a colour into a draft (the native OS panel updates it live) WITHOUT
+            saving — only the explicit "Aggiungi" commits it as a pill, so dragging
+            through colours no longer spams the list. */}
+        <label
+          className="appearance-accent appearance-accent-add"
+          title="Scegli un colore personalizzato"
+        >
+          <span
+            className="appearance-accent-chip appearance-accent-chip-add"
+            style={draft ? { background: draft, boxShadow: "0 0 0 1px rgba(0,0,0,0.06) inset" } : undefined}
           >
-            {norm === preset.hex.toLowerCase() && <Check size={15} color="#fff" />}
-          </button>
-        ))}
-      </div>
-      <div className="appearance-custom">
-        <label className="appearance-color">
-          <input type="color" value={accent} onChange={(e) => pick(e.target.value)} />
-          <span>Personalizzato</span>
+            {!draft && <Plus size={13} />}
+          </span>
+          <span className="appearance-accent-name">
+            {draft ? draft.toUpperCase() : "Personalizzato"}
+          </span>
+          <input
+            type="color"
+            className="appearance-accent-add-input"
+            aria-label="Scegli un colore personalizzato"
+            value={draft ?? (isPreset(norm) || !customs.includes(norm) ? DEFAULT_ACCENT : norm)}
+            onChange={(e) => setDraft(normalizeHex(e.target.value))}
+          />
         </label>
-        <code className="appearance-hex">{accent.toUpperCase()}</code>
-        <button type="button" className="ghost-button" onClick={() => pick(DEFAULT_ACCENT)}>
-          Ripristina
-        </button>
+        {draft && (
+          <button
+            type="button"
+            className="appearance-accent-confirm"
+            title={`Aggiungi ${draft.toUpperCase()}`}
+            onClick={() => {
+              addCustom(draft);
+              setDraft(null);
+            }}
+          >
+            <Check size={14} />
+            <span>Aggiungi</span>
+          </button>
+        )}
       </div>
       <div className="appearance-preview">
         <button type="button" className="appearance-preview-btn">
@@ -698,15 +810,21 @@ const PROVIDER_PRESETS: Array<{
   { id: "custom", label: "Personalizzato", baseUrl: "", kind: "openai_compat" },
 ];
 
-function RuntimePane({ model }: { model: ActiveModelInfo | null }) {
+function RuntimePane({
+  model,
+  sub = "routing",
+}: {
+  model: ActiveModelInfo | null;
+  sub?: "routing" | "decisions" | "providers";
+}) {
   const [providers, setProviders] = useState<ProviderView[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [roles, setRoles] = useState<RoleView[]>([]);
   const [decisions, setDecisions] = useState<RoutingDecision[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
-  // Selected left-rail entry: "roles" | "decisions" | "add" | a provider id.
-  const [selected, setSelected] = useState<string>("roles");
+  // Provider modal: a provider id (edit existing) or "add" (new), null = closed.
+  const [modal, setModal] = useState<string | null>(null);
   // Add-provider form.
   const [presetId, setPresetId] = useState("ollama");
   const [label, setLabel] = useState("");
@@ -733,14 +851,7 @@ function RuntimePane({ model }: { model: ActiveModelInfo | null }) {
   useEffect(() => {
     void (async () => {
       try {
-        const snapshot = await coreBridge.providers();
-        apply(snapshot);
-        if (snapshot.providers.length > 0) {
-          const initialId = snapshot.active_provider_id ?? snapshot.providers[0].id;
-          setSelected(initialId);
-          const initial = snapshot.providers.find((p) => p.id === initialId);
-          if (initial) setEditBaseUrl(initial.base_url);
-        }
+        apply(await coreBridge.providers());
       } catch {
         /* leave empty */
       }
@@ -787,16 +898,28 @@ function RuntimePane({ model }: { model: ActiveModelInfo | null }) {
     }
   };
 
-  const selectProvider = (provider: ProviderView) => {
-    setSelected(provider.id);
+  const openProvider = (provider: ProviderView) => {
     setEditBaseUrl(provider.base_url);
     setEditKey("");
     setShowKey(false);
     setNote(null);
+    setModal(provider.id);
+  };
+
+  const openAddProvider = () => {
+    setEditKey("");
+    setShowKey(false);
+    setNote(null);
+    setModal("add");
+  };
+
+  const closeModal = () => {
+    setModal(null);
+    setNote(null);
   };
 
   const preset = PROVIDER_PRESETS.find((p) => p.id === presetId) ?? PROVIDER_PRESETS[0];
-  const selectedProvider = providers.find((p) => p.id === selected);
+  const modalProvider = modal && modal !== "add" ? providers.find((p) => p.id === modal) : undefined;
 
   // Options for a model picker: "Auto" + per-provider optgroups (used by roles).
   const modelOptions = (
@@ -816,277 +939,285 @@ function RuntimePane({ model }: { model: ActiveModelInfo | null }) {
   );
 
   return (
-    <div className="mdl-layout">
-      <aside className="mdl-rail" aria-label="Sezioni modelli">
-        <div className="mdl-rail-group">Routing</div>
-        <button
-          className={`mdl-rail-item ${selected === "roles" ? "active" : ""}`}
-          type="button"
-          onClick={() => setSelected("roles")}
-        >
-          <ListChecks size={16} />
-          <span className="mdl-rail-name">Modello per compito</span>
-        </button>
-        <button
-          className={`mdl-rail-item ${selected === "decisions" ? "active" : ""}`}
-          type="button"
-          onClick={() => setSelected("decisions")}
-        >
-          <Sparkles size={16} />
-          <span className="mdl-rail-name">Decisioni di routing</span>
-          {decisions.length > 0 && <em className="mdl-rail-badge">{decisions.length}</em>}
-        </button>
-
-        <div className="mdl-rail-group">Provider</div>
-        {providers.map((provider) => (
-          <button
-            key={provider.id}
-            className={`mdl-rail-item ${selected === provider.id ? "active" : ""}`}
-            type="button"
-            onClick={() => selectProvider(provider)}
-          >
-            <span className="mdl-rail-avatar">{provider.label.slice(0, 1).toUpperCase()}</span>
-            <span className="mdl-rail-name">{provider.label}</span>
-            {provider.id === activeId && <span className="mdl-rail-dot" title="Attivo" />}
-          </button>
-        ))}
-        {providers.length === 0 && <p className="mdl-rail-empty">Nessun provider</p>}
-        <button
-          className={`mdl-rail-item add ${selected === "add" ? "active" : ""}`}
-          type="button"
-          onClick={() => setSelected("add")}
-        >
-          <Plus size={16} />
-          <span className="mdl-rail-name">Aggiungi provider</span>
-        </button>
-      </aside>
-
-      <section className="mdl-detail">
-        {/* ── Roles ───────────────────────────────────────────────── */}
-        {selected === "roles" && (
-          <>
-            <div className="mdl-detail-head">
-              <h3>Modello per compito</h3>
-              <p className="mdl-detail-sub">
-                Il router sceglie automaticamente il modello migliore tra quelli idonei; puoi
-                forzarne uno.
-              </p>
-            </div>
-            {roles.length === 0 ? (
-              <p className="set-hint">Aggiungi un provider e aggiorna i suoi modelli.</p>
-            ) : (
-              roles.map((role) => {
-                const value = role.auto ? "auto" : `${role.binding_provider_id}::${role.binding_model}`;
-                return (
-                  <div className="mdl-row" key={role.key}>
-                    <div className="mdl-row-main">
-                      <div className="mdl-row-top">
-                        <strong>{role.label}</strong>
-                        <span className={`set-badge ${role.auto ? "muted" : "green"}`}>
-                          {role.auto ? "Auto" : "Manuale"}
-                        </span>
-                      </div>
-                      <p className="mdl-detail-sub">{role.description}</p>
-                    </div>
-                    <select
-                      className="set-input mdl-row-select"
-                      value={value}
-                      disabled={busy === `role:${role.key}`}
-                      onChange={(event) => changeRole(role.key, event.target.value)}
-                    >
-                      <option value="auto">
-                        Auto{role.resolved_model ? ` — ${role.resolved_model}` : ""}
-                      </option>
-                      {modelOptions}
-                    </select>
-                  </div>
-                );
-              })
-            )}
-          </>
-        )}
-
-        {/* ── Decisions ───────────────────────────────────────────── */}
-        {selected === "decisions" && (
-          <>
-            <div className="mdl-detail-head">
-              <h3>Decisioni di routing</h3>
-              <p className="mdl-detail-sub">
-                Perché il router ha scelto un modello per ogni task (ultime {decisions.length}).
-              </p>
-            </div>
-            {decisions.length === 0 ? (
-              <p className="set-hint">Nessuna decisione ancora. Esegui un task per popolarle.</p>
-            ) : (
-              decisions.map((d, i) => (
-                <div className="mdl-row" key={i}>
+    <div className="mdl-pane">
+      {/* ── routing → roles → model table ─────────────────────────── */}
+      {sub === "routing" && (
+        <>
+          <div className="set-section-label">Modello per compito</div>
+          <p className="mdl-detail-sub" style={{ paddingLeft: "var(--s3)" }}>
+            Il router sceglie automaticamente il modello migliore tra quelli idonei; puoi
+            forzarne uno.
+          </p>
+          {roles.length === 0 ? (
+            <p className="set-hint">Aggiungi un provider e aggiorna i suoi modelli.</p>
+          ) : (
+            roles.map((role) => {
+              const value = role.auto ? "auto" : `${role.binding_provider_id}::${role.binding_model}`;
+              return (
+                <div className="mdl-row" key={role.key}>
                   <div className="mdl-row-main">
                     <div className="mdl-row-top">
-                      <strong>{d.chosen_model}</strong>
-                      <span className={`set-badge ${d.stage === "semantic" ? "green" : "muted"}`}>
-                        {d.stage === "semantic"
-                          ? "semantico"
-                          : d.stage === "single_candidate"
-                            ? "unico"
-                            : d.stage === "heuristic_disabled"
-                              ? "euristico"
-                              : "fallback"}
+                      <strong>{role.label}</strong>
+                      <span className={`set-badge ${role.auto ? "muted" : "green"}`}>
+                        {role.auto ? "Auto" : "Manuale"}
                       </span>
-                      <span className="mdl-row-meta">{d.role} · {d.candidates.length} candidati</span>
                     </div>
-                    <p className="mdl-detail-sub">«{d.goal}»</p>
+                    <p className="mdl-detail-sub">{role.description}</p>
                   </div>
+                  <select
+                    className="set-input mdl-row-select"
+                    value={value}
+                    disabled={busy === `role:${role.key}`}
+                    onChange={(event) => changeRole(role.key, event.target.value)}
+                  >
+                    <option value="auto">
+                      Auto{role.resolved_model ? ` — ${role.resolved_model}` : ""}
+                    </option>
+                    {modelOptions}
+                  </select>
                 </div>
-              ))
-            )}
-          </>
-        )}
+              );
+            })
+          )}
+        </>
+      )}
 
-        {/* ── Add provider ────────────────────────────────────────── */}
-        {selected === "add" && (
-          <>
-            <div className="mdl-detail-head">
-              <h3>Aggiungi provider</h3>
-              <p className="mdl-detail-sub">
-                Qualsiasi endpoint OpenAI-compatibile, Anthropic o Ollama locale. La chiave è cifrata
-                nel secret store, mai mostrata.
-              </p>
-            </div>
-            <div className="mdl-field">
-              <label>Tipo</label>
-              <select
-                className="set-input"
-                value={presetId}
-                onChange={(event) => {
-                  const next = PROVIDER_PRESETS.find((p) => p.id === event.target.value);
-                  setPresetId(event.target.value);
-                  if (next && next.id !== "custom") {
-                    setBaseUrl(next.baseUrl);
-                    if (!label) setLabel(next.label);
-                  }
-                }}
-              >
-                {PROVIDER_PRESETS.map((p) => (
-                  <option key={p.id} value={p.id}>{p.label}</option>
-                ))}
-              </select>
-            </div>
-            <div className="mdl-field">
-              <label>Nome</label>
-              <input className="set-input" placeholder={preset.label} value={label} onChange={(e) => setLabel(e.target.value)} />
-            </div>
-            <div className="mdl-field">
-              <label>Endpoint (base URL)</label>
-              <input className="set-input" placeholder="https://api.openai.com/v1" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} />
-            </div>
-            <div className="mdl-field">
-              <label>API key (opzionale per endpoint locali)</label>
-              <input className="set-input" type="password" placeholder="sk-…" value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
-            </div>
-            <button
-              className="set-btn primary"
-              type="button"
-              style={{ alignSelf: "flex-start" }}
-              disabled={busy === "add" || !baseUrl.trim()}
-              onClick={() =>
-                run(
-                  "add",
-                  async () => {
-                    const result = await coreBridge.upsertProvider({
-                      label: (label || preset.label).trim(),
-                      kind: preset.kind,
-                      base_url: baseUrl.trim(),
-                      ...(apiKey.trim() ? { api_key: apiKey.trim() } : {}),
-                    });
-                    setApiKey("");
-                    const added = result.providers.find((p) => p.base_url === baseUrl.trim().replace(/\/$/, ""));
-                    if (added) {
-                      setSelected(added.id);
-                      try {
-                        return await coreBridge.refreshProviderModels(added.id);
-                      } catch {
-                        return result;
-                      }
-                    }
-                    return result;
-                  },
-                  "Provider aggiunto.",
-                )
-              }
-            >
-              {busy === "add" ? "Salvataggio…" : "Aggiungi provider"}
+      {/* ── decisions → routing decisions ─────────────────────────── */}
+      {sub === "decisions" && (
+        <>
+          <div className="set-section-label">Decisioni di routing</div>
+          <p className="mdl-detail-sub" style={{ paddingLeft: "var(--s3)" }}>
+            Quando arriva un compito, Homun stima complessità, lunghezza del contesto e
+            necessità di tool, poi sceglie il modello col miglior rapporto qualità/latenza.
+            Qui vedi perché il router ha scelto un modello per ogni task (ultime{" "}
+            {decisions.length}).
+          </p>
+          {decisions.length === 0 ? (
+            <p className="set-hint">Nessuna decisione ancora. Esegui un task per popolarle.</p>
+          ) : (
+            decisions.map((d, i) => (
+              <div className="mdl-row" key={i}>
+                <div className="mdl-row-main">
+                  <div className="mdl-row-top">
+                    <strong>{d.chosen_model}</strong>
+                    <span className={`set-badge ${d.stage === "semantic" ? "green" : "muted"}`}>
+                      {d.stage === "semantic"
+                        ? "semantico"
+                        : d.stage === "single_candidate"
+                          ? "unico"
+                          : d.stage === "heuristic_disabled"
+                            ? "euristico"
+                            : "fallback"}
+                    </span>
+                    <span className="mdl-row-meta">{d.role} · {d.candidates.length} candidati</span>
+                  </div>
+                  <p className="mdl-detail-sub">«{d.goal}»</p>
+                </div>
+              </div>
+            ))
+          )}
+        </>
+      )}
+
+      {/* ── providers → card grid (+ modal) ───────────────────────── */}
+      {sub === "providers" && (
+        <>
+          <div className="set-section-label">
+            Provider attivi <span style={{ textTransform: "none", letterSpacing: 0 }}>({providers.length})</span>
+          </div>
+          <div className="set-cards-grid cols-4">
+            {providers.map((provider) => {
+              const isActive = provider.id === activeId;
+              return (
+                <button
+                  key={provider.id}
+                  className={`set-prov ${isActive ? "active" : ""}`}
+                  type="button"
+                  onClick={() => openProvider(provider)}
+                >
+                  <div className="set-prov-top">
+                    <span className="set-prov-mark">{provider.label.slice(0, 1).toUpperCase()}</span>
+                    <span className="set-prov-name">{provider.label}</span>
+                    <span className={`set-prov-dot ${isActive ? "on" : ""}`} title={isActive ? "Attivo" : undefined} />
+                  </div>
+                  <div className="set-prov-meta">
+                    {provider.models.length > 0
+                      ? `${provider.models.length} modelli`
+                      : "nessun modello"}
+                    {" · "}
+                    {provider.kind}
+                  </div>
+                </button>
+              );
+            })}
+            <button className="set-add-card" type="button" onClick={openAddProvider}>
+              <Plus size={14} />
+              Aggiungi provider
             </button>
-          </>
-        )}
+          </div>
 
-        {/* ── Provider detail ─────────────────────────────────────── */}
-        {selectedProvider && (
-          <ProviderDetailView
-            key={selectedProvider.id}
-            provider={selectedProvider}
-            isActive={selectedProvider.id === activeId}
-            busy={busy}
-            editBaseUrl={editBaseUrl}
-            setEditBaseUrl={setEditBaseUrl}
-            editKey={editKey}
-            setEditKey={setEditKey}
-            showKey={showKey}
-            setShowKey={setShowKey}
-            contextWindow={model?.context_window ?? null}
-            onActivate={() => run(selectedProvider.id, () => coreBridge.activateProvider(selectedProvider.id))}
-            onRemove={() => {
-              const id = selectedProvider.id;
-              setSelected("roles");
-              void run(id, () => coreBridge.removeProvider(id));
-            }}
-            onRefreshModels={() =>
-              run(selectedProvider.id, () => coreBridge.refreshProviderModels(selectedProvider.id), "Catalogo aggiornato.")
-            }
-            onGenerateProfiles={() =>
-              run(selectedProvider.id, () => coreBridge.generateProviderProfiles(selectedProvider.id), "Profili generati.")
-            }
-            onSaveConnection={() =>
-              run(
-                selectedProvider.id,
-                () =>
-                  coreBridge.upsertProvider({
-                    id: selectedProvider.id,
-                    label: selectedProvider.label,
-                    kind: selectedProvider.kind,
-                    base_url: (editBaseUrl || selectedProvider.base_url).trim(),
-                    ...(editKey.trim() ? { api_key: editKey.trim() } : {}),
-                  }),
-                "Provider salvato.",
-              )
-            }
-            onSetModel={(modelId) =>
-              run(selectedProvider.id, () =>
-                coreBridge.upsertProvider({
-                  id: selectedProvider.id,
-                  label: selectedProvider.label,
-                  kind: selectedProvider.kind,
-                  base_url: selectedProvider.base_url,
-                  active_model: modelId,
-                }),
-              )
-            }
-            onSaveModel={(modelId, patch) =>
-              run(
-                selectedProvider.id,
-                () =>
-                  coreBridge.setModelProfile({
-                    provider_id: selectedProvider.id,
-                    model: modelId,
-                    ...patch,
-                  }),
-                "Modello aggiornato.",
-              )
-            }
-          />
-        )}
+          {modal && (
+            <div className="set-modal-overlay" role="dialog" aria-modal="true">
+              <div className="set-modal-scrim" onClick={closeModal} />
+              <div className="set-modal">
+                <button className="set-modal-close" type="button" aria-label="Chiudi" onClick={closeModal}>
+                  <X size={16} />
+                </button>
 
-        {note && <p className="set-hint" style={{ marginTop: "var(--s3)" }}>{note}</p>}
-      </section>
+                {/* Add a new provider. */}
+                {modal === "add" && (
+                  <>
+                    <div className="mdl-detail-head">
+                      <h3>Aggiungi provider</h3>
+                    </div>
+                    <p className="mdl-detail-sub">
+                      Qualsiasi endpoint OpenAI-compatibile, Anthropic o Ollama locale. La chiave è
+                      cifrata nel secret store, mai mostrata.
+                    </p>
+                    <div className="mdl-field">
+                      <label>Tipo</label>
+                      <select
+                        className="set-input"
+                        value={presetId}
+                        onChange={(event) => {
+                          const next = PROVIDER_PRESETS.find((p) => p.id === event.target.value);
+                          setPresetId(event.target.value);
+                          if (next && next.id !== "custom") {
+                            setBaseUrl(next.baseUrl);
+                            if (!label) setLabel(next.label);
+                          }
+                        }}
+                      >
+                        {PROVIDER_PRESETS.map((p) => (
+                          <option key={p.id} value={p.id}>{p.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="mdl-field">
+                      <label>Nome</label>
+                      <input className="set-input" placeholder={preset.label} value={label} onChange={(e) => setLabel(e.target.value)} />
+                    </div>
+                    <div className="mdl-field">
+                      <label>Endpoint (base URL)</label>
+                      <input className="set-input" placeholder="https://api.openai.com/v1" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} />
+                    </div>
+                    <div className="mdl-field">
+                      <label>API key (opzionale per endpoint locali)</label>
+                      <input className="set-input" type="password" placeholder="sk-…" value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
+                    </div>
+                    <button
+                      className="set-btn primary"
+                      type="button"
+                      style={{ alignSelf: "flex-start" }}
+                      disabled={busy === "add" || !baseUrl.trim()}
+                      onClick={() =>
+                        run(
+                          "add",
+                          async () => {
+                            const result = await coreBridge.upsertProvider({
+                              label: (label || preset.label).trim(),
+                              kind: preset.kind,
+                              base_url: baseUrl.trim(),
+                              ...(apiKey.trim() ? { api_key: apiKey.trim() } : {}),
+                            });
+                            setApiKey("");
+                            const added = result.providers.find((p) => p.base_url === baseUrl.trim().replace(/\/$/, ""));
+                            if (added) {
+                              setEditBaseUrl(added.base_url);
+                              setModal(added.id);
+                              try {
+                                return await coreBridge.refreshProviderModels(added.id);
+                              } catch {
+                                return result;
+                              }
+                            }
+                            return result;
+                          },
+                          "Provider aggiunto.",
+                        )
+                      }
+                    >
+                      {busy === "add" ? "Salvataggio…" : "Aggiungi provider"}
+                    </button>
+                  </>
+                )}
+
+                {/* Edit an existing provider (connection, active model, models list). */}
+                {modalProvider && (
+                  <ProviderDetailView
+                    key={modalProvider.id}
+                    provider={modalProvider}
+                    isActive={modalProvider.id === activeId}
+                    busy={busy}
+                    editBaseUrl={editBaseUrl}
+                    setEditBaseUrl={setEditBaseUrl}
+                    editKey={editKey}
+                    setEditKey={setEditKey}
+                    showKey={showKey}
+                    setShowKey={setShowKey}
+                    contextWindow={model?.context_window ?? null}
+                    onActivate={() => run(modalProvider.id, () => coreBridge.activateProvider(modalProvider.id))}
+                    onRemove={() => {
+                      const id = modalProvider.id;
+                      setModal(null);
+                      void run(id, () => coreBridge.removeProvider(id));
+                    }}
+                    onRefreshModels={() =>
+                      run(modalProvider.id, () => coreBridge.refreshProviderModels(modalProvider.id), "Catalogo aggiornato.")
+                    }
+                    onGenerateProfiles={() =>
+                      run(modalProvider.id, () => coreBridge.generateProviderProfiles(modalProvider.id), "Profili generati.")
+                    }
+                    onSaveConnection={() =>
+                      run(
+                        modalProvider.id,
+                        () =>
+                          coreBridge.upsertProvider({
+                            id: modalProvider.id,
+                            label: modalProvider.label,
+                            kind: modalProvider.kind,
+                            base_url: (editBaseUrl || modalProvider.base_url).trim(),
+                            ...(editKey.trim() ? { api_key: editKey.trim() } : {}),
+                          }),
+                        "Provider salvato.",
+                      )
+                    }
+                    onSetModel={(modelId) =>
+                      run(modalProvider.id, () =>
+                        coreBridge.upsertProvider({
+                          id: modalProvider.id,
+                          label: modalProvider.label,
+                          kind: modalProvider.kind,
+                          base_url: modalProvider.base_url,
+                          active_model: modelId,
+                        }),
+                      )
+                    }
+                    onSaveModel={(modelId, patch) =>
+                      run(
+                        modalProvider.id,
+                        () =>
+                          coreBridge.setModelProfile({
+                            provider_id: modalProvider.id,
+                            model: modelId,
+                            ...patch,
+                          }),
+                        "Modello aggiornato.",
+                      )
+                    }
+                  />
+                )}
+
+                {note && <p className="set-hint" style={{ marginTop: "var(--s3)" }}>{note}</p>}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+      {note && sub !== "providers" && (
+        <p className="set-hint" style={{ marginTop: "var(--s3)" }}>{note}</p>
+      )}
     </div>
   );
 }
@@ -1418,10 +1549,14 @@ function PrivacyPane() {
 
 /* ---------------------------------------------------------------- connectors */
 
-function ConnectorsPane() {
+type ConnectorsSub = "composio" | "fs" | "catalogo" | "attivita";
+
+// Full-width connectors pane driven by the nav submenu (Composio / filesystem /
+// Catalogo MCP / Attività). The old internal master-detail rail (.mdl-rail) is
+// gone: each `sub` renders full-width. All data + coreBridge logic is unchanged —
+// only the layout that selects which detail to show.
+function ConnectorsPane({ sub = "composio" }: { sub?: ConnectorsSub }) {
   const [snap, setSnap] = useState<CoreCapabilitySnapshot | null>(null);
-  // Selected rail entry: "composio" | "add-mcp" | an MCP provider id.
-  const [selected, setSelected] = useState<string>("composio");
   const [note, setNote] = useState<string | null>(null);
 
   const refresh = async () => {
@@ -1435,13 +1570,19 @@ function ConnectorsPane() {
     void refresh();
   }, []);
 
+  // Notes are scoped to a sub-view; clear when switching so a stale message from
+  // (say) Composio doesn't linger under the MCP catalogue.
+  useEffect(() => {
+    setNote(null);
+  }, [sub]);
+
   const composioConn = snap?.connections.find((c) => c.provider_id === "composio") ?? null;
   // The backend ConnectionStatus serializes as snake_case ("active" | "expired" |
   // "failed" | "disabled"). A stored composio connection in "active" means the key
   // verified and toolkits are cached → treat it as connected.
   const composioConnected = composioConn?.status.toLowerCase() === "active";
 
-  // Group MCP tools by provider so each server shows as one rail entry + tool count.
+  // Group MCP tools by provider so each server shows as one entry + tool count.
   const mcpProviders = new Map<string, { name: string; tools: number }>();
   for (const tool of snap?.tools ?? []) {
     if (tool.provider_kind !== "mcp") continue;
@@ -1454,111 +1595,98 @@ function ConnectorsPane() {
   }
   const mcpList = [...mcpProviders.entries()];
 
-  const pick = (id: string) => {
-    setSelected(id);
-    setNote(null);
-  };
-
   return (
-    <div className="mdl-layout">
-      <aside className="mdl-rail" aria-label="Connettori">
-        <div className="mdl-rail-group">Cloud</div>
-        <button
-          type="button"
-          className={`mdl-rail-item ${selected === "composio" ? "active" : ""}`}
-          onClick={() => pick("composio")}
-        >
-          <span className="conn-avatar composio">Co</span>
-          <span className="mdl-rail-name">Composio</span>
-          {composioConnected && <span className="mdl-rail-dot" title="Connesso" />}
-        </button>
+    <div className="conn-pane">
+      {sub === "composio" && (
+        <ComposioDetail
+          connected={composioConnected}
+          onChanged={refresh}
+          onNote={setNote}
+        />
+      )}
 
-        <div className="mdl-rail-group">Server MCP</div>
-        {mcpList.map(([id, info]) => (
-          <button
-            key={id}
-            type="button"
-            className={`mdl-rail-item ${selected === id ? "active" : ""}`}
-            onClick={() => pick(id)}
-          >
-            <span className="conn-avatar">
-              <Server size={14} />
-            </span>
-            <span className="mdl-rail-name">{info.name}</span>
-            <em className="mdl-rail-badge">{info.tools}</em>
-          </button>
-        ))}
-        {mcpList.length === 0 && <p className="mdl-rail-empty">Nessun server</p>}
-        <button
-          type="button"
-          className={`mdl-rail-item add ${selected === "mcp-catalog" ? "active" : ""}`}
-          onClick={() => pick("mcp-catalog")}
-        >
-          <span className="conn-avatar add">
-            <Search size={14} />
-          </span>
-          <span className="mdl-rail-name">Catalogo MCP</span>
-        </button>
-        <button
-          type="button"
-          className={`mdl-rail-item add ${selected === "add-mcp" ? "active" : ""}`}
-          onClick={() => pick("add-mcp")}
-        >
-          <span className="conn-avatar add">
-            <Plus size={14} />
-          </span>
-          <span className="mdl-rail-name">Aggiungi manuale</span>
-        </button>
+      {sub === "fs" && (
+        <FilesystemServersDetail
+          mcpList={mcpList}
+          snap={snap}
+          onChanged={refresh}
+          onNote={setNote}
+        />
+      )}
 
-        <div className="mdl-rail-group">Diagnostica</div>
+      {sub === "catalogo" && (
+        <McpCatalogDetail
+          connectedIds={new Set(mcpList.map(([id]) => id))}
+          onChanged={refresh}
+          onNote={setNote}
+          onConnected={() => void refresh()}
+        />
+      )}
+
+      {sub === "attivita" && <ConnectorActivityDetail />}
+
+      {note && (
+        <p className="set-hint" style={{ marginTop: "var(--s4)" }}>
+          {note}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** The "filesystem" sub: local MCP servers and their tools, full-width. Each
+ *  connected MCP server renders as a header + tool list (reusing McpServerDetail);
+ *  a manual "Aggiungi server MCP" form is available below. */
+function FilesystemServersDetail({
+  mcpList,
+  snap,
+  onChanged,
+  onNote,
+}: {
+  mcpList: [string, { name: string; tools: number }][];
+  snap: CoreCapabilitySnapshot | null;
+  onChanged: () => Promise<void>;
+  onNote: (note: string | null) => void;
+}) {
+  const [adding, setAdding] = useState(false);
+  return (
+    <div className="conn-stack">
+      {mcpList.length === 0 && !adding && (
+        <p className="set-hint">Nessun server MCP locale collegato.</p>
+      )}
+
+      {mcpList.map(([id, info]) => (
+        <McpServerDetail
+          key={id}
+          providerId={id}
+          info={info}
+          snap={snap}
+          onChanged={onChanged}
+          onNote={onNote}
+          onDisconnected={() => void onChanged()}
+        />
+      ))}
+
+      {adding ? (
+        <McpAddDetail
+          onChanged={async () => {
+            await onChanged();
+            setAdding(false);
+          }}
+          onNote={onNote}
+          onConnected={() => void onChanged()}
+        />
+      ) : (
         <button
           type="button"
-          className={`mdl-rail-item ${selected === "activity" ? "active" : ""}`}
-          onClick={() => pick("activity")}
+          className="set-btn"
+          style={{ alignSelf: "flex-start" }}
+          onClick={() => setAdding(true)}
         >
-          <span className="conn-avatar">
-            <Activity size={14} />
-          </span>
-          <span className="mdl-rail-name">Attività</span>
+          <Plus size={14} />
+          <span style={{ marginLeft: 6 }}>Aggiungi server MCP manuale</span>
         </button>
-      </aside>
-
-      <section className="mdl-detail">
-        {selected === "composio" && (
-          <ComposioDetail
-            connected={composioConnected}
-            onChanged={refresh}
-            onNote={setNote}
-          />
-        )}
-        {selected === "mcp-catalog" && (
-          <McpCatalogDetail
-            connectedIds={new Set(mcpList.map(([id]) => id))}
-            onChanged={refresh}
-            onNote={setNote}
-            onConnected={pick}
-          />
-        )}
-        {selected === "add-mcp" && (
-          <McpAddDetail onChanged={refresh} onNote={setNote} onConnected={pick} />
-        )}
-        {mcpProviders.has(selected) && (
-          <McpServerDetail
-            providerId={selected}
-            info={mcpProviders.get(selected)!}
-            snap={snap}
-            onChanged={refresh}
-            onNote={setNote}
-            onDisconnected={() => pick("composio")}
-          />
-        )}
-        {selected === "activity" && <ConnectorActivityDetail />}
-        {note && (
-          <p className="set-hint" style={{ marginTop: "var(--s4)" }}>
-            {note}
-          </p>
-        )}
-      </section>
+      )}
     </div>
   );
 }
@@ -1651,7 +1779,12 @@ function ComposioConnectionsList() {
   useEffect(() => {
     load();
   }, []);
-  if (!conns || conns.length === 0) return null;
+  if (!conns || conns.length === 0)
+    return (
+      <p className="set-hint">
+        Nessun account collegato. Collega un toolkit dalla scheda Toolkit.
+      </p>
+    );
   const label = (s: string) =>
     s === "ACTIVE" ? "attiva" : s === "EXPIRED" ? "scaduta" : s.toLowerCase();
   return (
@@ -1703,6 +1836,9 @@ function ComposioDetail({
   // expired / revoked). We then fall back to the key form so the user can fix it.
   const [kitsError, setKitsError] = useState<string | null>(null);
   const [editingKey, setEditingKey] = useState(false);
+  // Segmented control (Toolkit / Account collegati / Consentiti) — shown once a
+  // live connection exists, replacing the previous stacked layout.
+  const [tab, setTab] = useState<"toolkit" | "account" | "consentiti">("toolkit");
 
   const loadToolkits = async () => {
     setLoadingKits(true);
@@ -1820,14 +1956,46 @@ function ComposioDetail({
         </div>
       ) : (
         <>
-          <ComposioConnectionsList />
-          <AllowedToolsSection />
-          <ComposioToolkitBrowser
-            toolkits={toolkits}
-            loading={loadingKits}
-            onNote={onNote}
-            onConnectedCount={setConnectedCount}
-          />
+          <div className="set-seg conn-seg" role="tablist">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === "toolkit"}
+              className={`set-seg-item ${tab === "toolkit" ? "active" : ""}`}
+              onClick={() => setTab("toolkit")}
+            >
+              Toolkit
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === "account"}
+              className={`set-seg-item ${tab === "account" ? "active" : ""}`}
+              onClick={() => setTab("account")}
+            >
+              Account collegati
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === "consentiti"}
+              className={`set-seg-item ${tab === "consentiti" ? "active" : ""}`}
+              onClick={() => setTab("consentiti")}
+            >
+              Consentiti
+            </button>
+          </div>
+
+          {tab === "toolkit" && (
+            <ComposioToolkitBrowser
+              toolkits={toolkits}
+              loading={loadingKits}
+              onNote={onNote}
+              onConnectedCount={setConnectedCount}
+            />
+          )}
+          {tab === "account" && <ComposioConnectionsList />}
+          {tab === "consentiti" && <AllowedToolsSection />}
         </>
       )}
     </>
@@ -1850,7 +2018,12 @@ function AllowedToolsSection() {
     })();
   }, []);
 
-  if (tools.length === 0) return null;
+  if (tools.length === 0)
+    return (
+      <p className="set-hint">
+        Nessuno strumento sempre consentito. Quando approvi un'azione "sempre", comparirà qui.
+      </p>
+    );
 
   const revoke = async (slug: string) => {
     setBusy(slug);
@@ -2755,11 +2928,12 @@ function McpCatalogCard({
 
 /* -------------------------------------------------------------------- skills */
 
-/** Sentinel rail selection for the GitHub marketplace view. */
-const MARKET = "__market__";
-
 function SkillsPane() {
   const [resp, setResp] = useState<SkillsResponse | null>(null);
+  const [tab, setTab] = useState<"attive" | "catalogo">("attive");
+  // Which group is open inside "Skill attive" ("" = the two group cards).
+  const [group, setGroup] = useState<"" | "personali" | "homuncoder">("");
+  // The skill whose detail modal is open (null = no modal).
   const [selected, setSelected] = useState<string | null>(null);
   const [detail, setDetail] = useState<SkillDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -2768,17 +2942,16 @@ function SkillsPane() {
   useEffect(() => {
     void (async () => {
       try {
-        const r = await coreBridge.skills();
-        setResp(r);
-        setSelected((cur) => cur ?? r.skills[0]?.id ?? null);
+        setResp(await coreBridge.skills());
       } catch (e) {
         setError(`Impossibile leggere le skill: ${(e as Error).message}`);
       }
     })();
   }, []);
 
+  // Load the detail for whichever skill modal is open.
   useEffect(() => {
-    if (!selected || selected === MARKET) {
+    if (!selected) {
       setDetail(null);
       return;
     }
@@ -2810,11 +2983,10 @@ function SkillsPane() {
     }
   };
 
-  const [personalOpen, setPersonalOpen] = useState(true);
-  const [homuncoderOpen, setHomuncoderOpen] = useState(false);
   const skills = resp?.skills ?? [];
-  // Group the methodology skills under "HomunCoder" in the rail.
+  // Methodology skills are grouped under "HomunCoder"; everything else is personal.
   const homuncoderSkills = skills.filter((s) => s.source === "homuncoder");
+  const personalSkills = skills.filter((s) => s.source !== "homuncoder");
   // Enable/disable the WHOLE HomunCoder group at once. Each call returns the full updated
   // skills state; the last one reflects every change.
   const toggleGroup = async (enabled: boolean) => {
@@ -2832,98 +3004,121 @@ function SkillsPane() {
       setBusy(false);
     }
   };
-  const personalSkills = skills.filter((s) => s.source !== "homuncoder");
-  const renderRailItem = (s: (typeof skills)[number]) => (
-    <button
-      key={s.id}
-      type="button"
-      className={`mdl-rail-item ${selected === s.id ? "active" : ""}`}
-      onClick={() => setSelected(s.id)}
-    >
-      <span className="mdl-rail-name">{s.name}</span>
-      <span
-        className={`skl-state ${s.enabled ? "on" : "off"}`}
-        title={s.enabled ? "Attiva" : "Disattivata"}
-      />
-    </button>
+
+  const hcAllOn = homuncoderSkills.length > 0 && homuncoderSkills.every((s) => s.enabled);
+  const groupSkills = group === "homuncoder" ? homuncoderSkills : personalSkills;
+  const renderSkillCard = (s: (typeof skills)[number]) => (
+    <div key={s.id} className="skl-card">
+      <button type="button" className="skl-card-body" onClick={() => setSelected(s.id)}>
+        <span className="skl-card-name">{s.name}</span>
+        <span className="skl-card-meta">origine: {s.source}</span>
+      </button>
+      <Toggle on={s.enabled} onChange={(v) => void toggle(s.id, v)} />
+    </div>
   );
-  const onMarket = selected === MARKET;
 
   return (
-    <div className="mdl-layout">
-      <aside className="mdl-rail" aria-label="Skill">
+    <>
+      <div className="set-seg skl-seg">
         <button
           type="button"
-          className="mdl-rail-group toggle"
-          onClick={() => setPersonalOpen((v) => !v)}
+          className={`set-seg-item ${tab === "attive" ? "active" : ""}`}
+          onClick={() => setTab("attive")}
         >
-          {personalOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-          <span>Skill personali</span>
-          <span className="mdl-rail-group-count">{personalSkills.length}</span>
+          Skill attive
         </button>
-        {personalOpen && personalSkills.map(renderRailItem)}
-        {skills.length === 0 && <p className="mdl-rail-empty">Nessuna skill</p>}
-        {homuncoderSkills.length > 0 && (
-          <>
-            <div className="mdl-rail-group-row">
-              <button
-                type="button"
-                className="mdl-rail-group toggle"
-                onClick={() => setHomuncoderOpen((v) => !v)}
-              >
-                {homuncoderOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-                <span>HomunCoder</span>
-                <span className="mdl-rail-group-count">{homuncoderSkills.length}</span>
-              </button>
-              <button
-                type="button"
-                className={`skl-group-switch ${homuncoderSkills.every((s) => s.enabled) ? "on" : "off"}`}
-                disabled={busy}
-                title={
-                  homuncoderSkills.every((s) => s.enabled)
-                    ? "Disabilita tutto il gruppo"
-                    : "Abilita tutto il gruppo"
-                }
-                aria-label="Abilita/disabilita gruppo HomunCoder"
-                onClick={() => void toggleGroup(!homuncoderSkills.every((s) => s.enabled))}
-              >
-                <span className="skl-group-switch-knob" />
-              </button>
-            </div>
-            {homuncoderOpen && homuncoderSkills.map(renderRailItem)}
-          </>
-        )}
         <button
           type="button"
-          className={`mdl-rail-item add ${onMarket ? "active" : ""}`}
-          onClick={() => setSelected(MARKET)}
+          className={`set-seg-item ${tab === "catalogo" ? "active" : ""}`}
+          onClick={() => setTab("catalogo")}
         >
-          <span className="conn-avatar add">
-            <Download size={13} />
-          </span>
-          <span className="mdl-rail-name">Catalogo skill</span>
+          Catalogo
         </button>
-      </aside>
+      </div>
 
-      <section className="mdl-detail">
-        {onMarket ? (
-          <MarketplaceView
-            installedIds={skills.map((s) => s.id)}
-            onInstalled={(r, id) => {
-              setResp(r);
-              setSelected(id);
-            }}
-          />
-        ) : skills.length === 0 ? (
-          <SkillsEmpty dir={resp?.dir} onBrowse={() => setSelected(MARKET)} />
-        ) : detail ? (
-          <SkillDetailView detail={detail} busy={busy} onToggle={toggle} />
+      {tab === "attive" &&
+        (skills.length === 0 ? (
+          <SkillsEmpty dir={resp?.dir} onBrowse={() => setTab("catalogo")} />
+        ) : group === "" ? (
+          <div className="set-cards-grid cols-2">
+            <button type="button" className="skl-group-card" onClick={() => setGroup("personali")}>
+              <div className="skl-group-head">
+                <span className="skl-group-icon brand">
+                  <Sparkles size={17} />
+                </span>
+                <span className="skl-group-name">Skill personali</span>
+                <ChevronRight size={16} className="skl-group-chev" />
+              </div>
+              <div className="skl-group-meta">
+                {personalSkills.length} skill · tue, attive sempre
+              </div>
+            </button>
+            {homuncoderSkills.length > 0 && (
+              <button
+                type="button"
+                className="skl-group-card"
+                onClick={() => setGroup("homuncoder")}
+              >
+                <div className="skl-group-head">
+                  <span className="skl-group-icon">
+                    <Boxes size={17} />
+                  </span>
+                  <span className="skl-group-name">HomunCoder</span>
+                  <ChevronRight size={16} className="skl-group-chev" />
+                </div>
+                <div className="skl-group-meta">
+                  {homuncoderSkills.length} skill · pacchetto coding
+                </div>
+              </button>
+            )}
+          </div>
         ) : (
-          <p className="set-hint">Carico…</p>
-        )}
-        {error && <p className="set-hint">{error}</p>}
-      </section>
-    </div>
+          <>
+            <button type="button" className="skl-back" onClick={() => setGroup("")}>
+              <ChevronLeft size={15} />
+              {group === "homuncoder" ? "HomunCoder" : "Skill personali"}
+            </button>
+            {group === "homuncoder" && (
+              <div className="skl-group-switch-row">
+                <span>Abilita tutto il gruppo</span>
+                <Toggle on={hcAllOn} onChange={(v) => void toggleGroup(v)} />
+              </div>
+            )}
+            <div className="set-cards-grid cols-2">{groupSkills.map(renderSkillCard)}</div>
+          </>
+        ))}
+
+      {tab === "catalogo" && (
+        <MarketplaceView installedIds={skills.map((s) => s.id)} onInstalled={(r) => setResp(r)} />
+      )}
+
+      {selected && (
+        <div
+          className="set-modal-overlay"
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setSelected(null)}
+        >
+          <div className="set-modal-scrim" />
+          <div className="set-modal wide skl-modal" onClick={(e) => e.stopPropagation()}>
+            {detail ? (
+              <SkillDetailView
+                detail={detail}
+                busy={busy}
+                onToggle={toggle}
+                onClose={() => setSelected(null)}
+              />
+            ) : (
+              <div className="set-modal-body">
+                <p className="set-hint">Carico…</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {error && <p className="set-hint">{error}</p>}
+    </>
   );
 }
 
@@ -3007,9 +3202,9 @@ function MarketplaceView({
             <Download size={18} />
           </span>
           <div className="conn-detail-titletext">
-            <h3 className="mdl-detail-title">Catalogo skill (OpenClaw)</h3>
+            <h3 className="mdl-detail-title">Catalogo skill</h3>
             <p className="mdl-detail-sub">
-              {data ? `${data.total} skill nel registro.` : "Sfoglia e installa dal registro OpenClaw."}{" "}
+              {data ? `${data.total} skill nel registro.` : "Sfoglia e installa dal registro."}{" "}
               Sono codice: installa solo ciò di cui ti fidi.
             </p>
           </div>
@@ -3074,7 +3269,7 @@ function MarketplaceView({
                   <div className="conn-kit-meta market">{skill.description || skill.slug}</div>
                 </div>
                 {already ? (
-                  <span className="mdl-tag skl-installed">installata</span>
+                  <span className="set-badge dot green">installata</span>
                 ) : (
                   <button
                     className="mdl-icon-btn"
@@ -3220,93 +3415,98 @@ function SkillDetailView({
   detail,
   busy,
   onToggle,
+  onClose,
 }: {
   detail: SkillDetail;
   busy: boolean;
   onToggle: (id: string, enabled: boolean) => Promise<void>;
+  onClose: () => void;
 }) {
   const [raw, setRaw] = useState(false);
   return (
     <>
-      <div className="mdl-detail-head">
-        <div className="conn-detail-title">
-          <span className="conn-avatar lg">
-            <Sparkles size={18} />
-          </span>
-          <div className="conn-detail-titletext">
-            <h3 className="mdl-detail-title">{detail.name}</h3>
-            <p className="mdl-detail-sub">
-              {detail.id}
-              {detail.version ? ` · v${detail.version}` : ""}
-            </p>
+      <div className="set-modal-head">
+        <span className="skl-modal-icon">
+          <Sparkles size={18} />
+        </span>
+        <div>
+          <div className="mt">{detail.name}</div>
+          <div className="ms mono">
+            {detail.id}
+            {detail.version ? ` · v${detail.version}` : ""}
           </div>
-          <label className="skl-toggle" title="Attiva o disattiva la skill">
-            <input
-              type="checkbox"
-              checked={detail.enabled}
-              disabled={busy}
-              onChange={(e) => void onToggle(detail.id, e.target.checked)}
-            />
-            <span>{detail.enabled ? "Attiva" : "Disattivata"}</span>
-          </label>
         </div>
+        <label className="skl-modal-active" title="Attiva o disattiva la skill">
+          <Toggle
+            on={detail.enabled}
+            onChange={(v) => {
+              if (!busy) void onToggle(detail.id, v);
+            }}
+          />
+          <span>{detail.enabled ? "Attiva" : "Disattivata"}</span>
+        </label>
+        <button className="set-modal-close" type="button" aria-label="Chiudi" onClick={onClose}>
+          <X size={17} />
+        </button>
       </div>
 
-      <div className="skl-pills">
-        <span className="mdl-tag">origine: {detail.source}</span>
-        {detail.license && <span className="mdl-tag">licenza: {detail.license}</span>}
-        {(detail.allowed_tools ?? []).map((t) => (
-          <span key={t} className="mdl-tag tier">
-            {t}
-          </span>
-        ))}
-      </div>
-
-      {detail.description && <p className="skl-desc">{detail.description}</p>}
-
-      {detail.security && <SkillSecuritySection report={detail.security} />}
-
-      <div className="skl-md-head">
-        <span className="mdl-detail-section-label">SKILL.md</span>
-        <div className="skl-md-toggle">
-          <button
-            type="button"
-            className={`mdl-icon-btn ${!raw ? "active" : ""}`}
-            onClick={() => setRaw(false)}
-            title="Anteprima"
-            aria-label="Anteprima"
-          >
-            <Eye size={15} />
-          </button>
-          <button
-            type="button"
-            className={`mdl-icon-btn ${raw ? "active" : ""}`}
-            onClick={() => setRaw(true)}
-            title="Sorgente"
-            aria-label="Sorgente"
-          >
-            <Code2 size={15} />
-          </button>
+      <div className="set-modal-body">
+        <div className="skl-pills">
+          <span className="set-tag">origine: {detail.source}</span>
+          {detail.license && <span className="set-tag">licenza: {detail.license}</span>}
+          {(detail.allowed_tools ?? []).map((t) => (
+            <span key={t} className="set-tag brand">
+              {t}
+            </span>
+          ))}
         </div>
-      </div>
-      {raw ? (
-        <pre className="skl-raw">{detail.body}</pre>
-      ) : (
-        <div className="skl-prose">
-          <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>
-            {detail.body}
-          </ReactMarkdown>
-        </div>
-      )}
 
-      {detail.files.length > 0 && (
-        <>
-          <div className="mdl-detail-section-label">File</div>
-          <div className="skl-tree">
-            <SkillTree nodes={detail.files} depth={0} />
+        {detail.description && <p className="skl-desc">{detail.description}</p>}
+
+        {detail.security && <SkillSecuritySection report={detail.security} />}
+
+        <div className="skl-md-head">
+          <span className="set-modal-label">SKILL.md</span>
+          <div className="skl-md-toggle">
+            <button
+              type="button"
+              className={`mdl-icon-btn ${!raw ? "active" : ""}`}
+              onClick={() => setRaw(false)}
+              title="Anteprima"
+              aria-label="Anteprima"
+            >
+              <Eye size={15} />
+            </button>
+            <button
+              type="button"
+              className={`mdl-icon-btn ${raw ? "active" : ""}`}
+              onClick={() => setRaw(true)}
+              title="Sorgente"
+              aria-label="Sorgente"
+            >
+              <Code2 size={15} />
+            </button>
           </div>
-        </>
-      )}
+        </div>
+        {raw ? (
+          <pre className="skl-raw">{detail.body}</pre>
+        ) : (
+          <div className="skl-prose">
+            <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>
+              {detail.body}
+            </ReactMarkdown>
+          </div>
+        )}
+
+        {detail.files.length > 0 && (
+          <>
+            <div className="set-modal-label skl-files-label">File</div>
+            <div className="skl-tree">
+              <SkillTree nodes={detail.files} depth={0} />
+            </div>
+          </>
+        )}
+      </div>
     </>
   );
 }
@@ -3403,27 +3603,41 @@ function ComputerPane({ computer }: { computer: ContainedComputerLive | null }) 
           : "In esecuzione · container spento";
   const dockerOk = Boolean(docker?.running && docker.container_up);
 
+  const liveUrl = enabled ? computer?.novnc_url : null;
+
   return (
     <>
-      <div className="set-card">
-        <div className="set-card-top">
-          <span className="set-card-name">Computer contenuto</span>
-          <span className={`set-badge ${enabled ? "green" : "muted"}`}>
-            {enabled ? "Disponibile" : "Spento"}
-          </span>
+      {/* Status card — title + subtitle left, live-state badge right (design 530). */}
+      <div className="set-card set-computer-status">
+        <div>
+          <div className="set-card-name">Stato</div>
+          <div className="set-computer-status-sub">
+            Browser reale contenuto · vista live noVNC
+          </div>
         </div>
-        <div className="set-card-divider" />
-        <p className="set-meter-sub">
-          Un browser reale e contenuto (passa i controlli anti-bot) in un computer virtuale non
-          invasivo, visibile live nella chat.
-        </p>
-        {enabled && computer?.novnc_url && (
-          <div className="set-meter" style={{ marginTop: 8 }}>
-            <span className="k">Vista live</span>
-            <a className="set-btn" href={computer.novnc_url} target="_blank" rel="noreferrer">
+        <span className={`set-badge dot ${enabled ? "green" : "muted"}`}>
+          {enabled ? "Attivo" : "Spento"}
+        </span>
+      </div>
+
+      {/* Live view container — real noVNC iframe, striped placeholder otherwise (design 531). */}
+      <div className="set-computer-live">
+        {liveUrl ? (
+          <>
+            <iframe className="set-computer-live-frame" src={liveUrl} title="Vista live · noVNC" />
+            <a
+              className="set-btn set-computer-live-open"
+              href={liveUrl}
+              target="_blank"
+              rel="noreferrer"
+            >
               <ExternalLink size={14} />
               <span style={{ marginLeft: 6 }}>Apri noVNC</span>
             </a>
+          </>
+        ) : (
+          <div className="set-computer-live-empty">
+            <span className="set-computer-live-empty-label">vista live · noVNC</span>
           </div>
         )}
       </div>
@@ -3695,8 +3909,15 @@ function normalizeContact(raw: string): string {
 }
 
 /** Telegram (Bot API) connect/status section. Auth is a @BotFather token —
- *  no phone pairing — persisted server-side so reconnect needs no re-entry. */
-function TelegramSection() {
+ *  no phone pairing — persisted server-side so reconnect needs no re-entry.
+ *  Renders the "Stato" block of the channel modal (label + status card) and
+ *  reports its connection state up so the parent grid card + modal header can
+ *  show the badge. */
+function TelegramSection({
+  onStatusChange,
+}: {
+  onStatusChange?: (status: CoreTelegramStatus | null) => void;
+}) {
   const [status, setStatus] = useState<CoreTelegramStatus | null>(null);
   const [token, setToken] = useState("");
   const [busy, setBusy] = useState(false);
@@ -3704,7 +3925,9 @@ function TelegramSection() {
 
   const refresh = async () => {
     try {
-      setStatus(await coreBridge.telegramStatus());
+      const next = await coreBridge.telegramStatus();
+      setStatus(next);
+      onStatusChange?.(next);
     } catch {
       /* keep previous */
     }
@@ -3740,64 +3963,62 @@ function TelegramSection() {
 
   return (
     <>
-      <div className="set-section-label">Telegram</div>
-      <div className="set-card">
-        {status?.connected ? (
-          <div className="set-row">
-            <div>
-              <div className="rk">Stato</div>
-              <div className="rv">
-                ✅ Connesso{status.bot_username ? ` — @${status.bot_username}` : ""}
-              </div>
-            </div>
+      <div className="set-modal-label">Stato</div>
+      {status?.connected ? (
+        <div className="set-card chan-status-card">
+          <div className="chan-status-on">
+            <span className="chan-status-check" aria-hidden>
+              <Check size={11} strokeWidth={2.6} />
+            </span>
+            Connesso{status.bot_username ? ` — @${status.bot_username}` : ""}
+          </div>
+          <button
+            className="set-btn danger"
+            type="button"
+            disabled={busy}
+            onClick={() => void disconnect()}
+          >
+            Disconnetti
+          </button>
+        </div>
+      ) : (
+        <div className="set-card chan-connect-card">
+          <p className="set-hint" style={{ marginTop: 0 }}>
+            Crea un bot con <strong>@BotFather</strong> e incolla qui il token. Se l'hai già
+            inserito, premi <strong>Connetti</strong> (il token resta salvato).
+          </p>
+          <div className="chan-connect-field">
+            <input
+              type="password"
+              placeholder="token bot (123456:ABC…) — vuoto se già salvato"
+              value={token}
+              onChange={(e) => setToken(e.target.value)}
+              style={{ flex: 1 }}
+            />
             <button
-              className="set-btn danger"
+              className="set-btn primary"
               type="button"
               disabled={busy}
-              onClick={() => void disconnect()}
+              onClick={() => void connect()}
             >
-              Disconnetti
+              Connetti
             </button>
           </div>
-        ) : (
-          <div>
-            <p className="set-hint" style={{ marginTop: 0 }}>
-              Crea un bot con <strong>@BotFather</strong> e incolla qui il token. Se l'hai già
-              inserito, premi <strong>Connetti</strong> (il token resta salvato).
+          {status?.running && !status.connected && (
+            <p className="set-hint">Bridge avviato, verifica del token in corso…</p>
+          )}
+          {status?.error && (
+            <p className="set-hint" style={{ color: "var(--danger)" }}>
+              {status.error}
             </p>
-            <div style={{ display: "flex", gap: 8 }}>
-              <input
-                type="password"
-                placeholder="token bot (123456:ABC…) — vuoto se già salvato"
-                value={token}
-                onChange={(e) => setToken(e.target.value)}
-                style={{ flex: 1 }}
-              />
-              <button
-                className="set-btn"
-                type="button"
-                disabled={busy}
-                onClick={() => void connect()}
-              >
-                Connetti
-              </button>
-            </div>
-            {status?.running && !status.connected && (
-              <p className="set-hint">Bridge avviato, verifica del token in corso…</p>
-            )}
-            {status?.error && (
-              <p className="set-hint" style={{ color: "var(--danger)" }}>
-                {status.error}
-              </p>
-            )}
-            {error && (
-              <p className="set-hint" style={{ color: "var(--danger)" }}>
-                {error}
-              </p>
-            )}
-          </div>
-        )}
-      </div>
+          )}
+          {error && (
+            <p className="set-hint" style={{ color: "var(--danger)" }}>
+              {error}
+            </p>
+          )}
+        </div>
+      )}
     </>
   );
 }
@@ -3812,6 +4033,11 @@ function ChannelsPane() {
   const [newContact, setNewContact] = useState("");
   const [savingSettings, setSavingSettings] = useState(false);
   const [settingsError, setSettingsError] = useState<string | null>(null);
+
+  // Which channel modal is open (presentational); null = grid only.
+  const [openChannel, setOpenChannel] = useState<"whatsapp" | "telegram" | null>(null);
+  // Mirrored from TelegramSection so the grid card + modal header show the badge.
+  const [telegramConnected, setTelegramConnected] = useState(false);
 
   const refresh = async () => {
     try {
@@ -3887,87 +4113,34 @@ function ChannelsPane() {
     }
   };
 
-  return (
+  const whatsappConnected = !!status?.connected;
+
+  // WhatsApp / Telegram brand marks (inline to match the design's rounded chip).
+  const whatsappMark = (
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+      <path d="M12 3 A9 9 0 0 0 4 16 L3 21 L8.2 20 A9 9 0 1 0 12 3 Z M12 5 A7 7 0 1 1 7.4 17.7 L6 18 L6.3 16.6 A7 7 0 0 1 12 5 Z" />
+    </svg>
+  );
+  const telegramMark = (
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+      <path d="M21 5 L2.5 12 L8 13.5 L9 19 L12 15.5 L16.5 18.5 Z" />
+    </svg>
+  );
+
+  // Shared global settings rendered inside whichever channel modal is open:
+  // Auto-risposta (the two kill-switch toggles) + Allowlist. Both apply to all
+  // channels, matching the design copy ("vale per tutti i canali").
+  const sharedSettings = (
     <>
-      <div className="set-section-label" style={{ marginTop: 0 }}>
-        WhatsApp
-      </div>
-      <div className="set-card">
-        {status?.connected ? (
-          <div className="set-row">
-            <div>
-              <div className="rk">Stato</div>
-              <div className="rv">✅ Connesso</div>
-            </div>
-            <button className="set-btn danger" type="button" disabled={busy} onClick={() => void disconnect()}>
-              Disconnetti
-            </button>
-          </div>
-        ) : status?.pair_code ? (
+      <div className="set-modal-label">Auto-risposta</div>
+      <div className="set-card rows chan-settings-rows">
+        <div className="set-trow">
           <div>
-            <p className="set-hint" style={{ marginTop: 0 }}>
-              Sul telefono: WhatsApp ▸ Dispositivi collegati ▸ Collega un dispositivo ▸{" "}
-              <strong>Collega con numero di telefono</strong>, poi inserisci:
-            </p>
-            <div className="set-card-name" style={{ fontSize: 28, letterSpacing: 3 }}>
-              {status.pair_code}
-            </div>
-            <button
-              className="set-btn"
-              type="button"
-              disabled={busy}
-              onClick={() => void disconnect()}
-              style={{ marginTop: 12 }}
-            >
-              Annulla
-            </button>
-          </div>
-        ) : (
-          <div>
-            <p className="set-hint" style={{ marginTop: 0 }}>
-              Se hai già collegato il dispositivo, premi <strong>Connetti</strong> (riusa la
-              sessione salvata). Per il primo collegamento, inserisci il numero in formato
-              internazionale senza «+» (es. 39333…).
-            </p>
-            <div style={{ display: "flex", gap: 8 }}>
-              <input
-                placeholder="numero di telefono (solo primo collegamento)"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                style={{ flex: 1 }}
-              />
-              <button
-                className="set-btn"
-                type="button"
-                disabled={busy}
-                onClick={() => void connect()}
-              >
-                Connetti
-              </button>
-            </div>
-            {status?.running && (
-              <p className="set-hint">Bridge avviato, in attesa di connessione/codice…</p>
-            )}
-            {error && (
-              <p className="set-hint" style={{ color: "var(--danger)" }}>
-                {error}
-              </p>
-            )}
-          </div>
-        )}
-      </div>
-
-      <TelegramSection />
-
-      <div className="set-section-label">Auto-risposta</div>
-      <div className="set-card">
-        <div className="set-row">
-          <div>
-            <div className="rk">Canale attivo</div>
-            <div className="rv">
+            <div className="tt">Canale attivo</div>
+            <div className="td">
               {settings?.enabled
-                ? "I messaggi in arrivo vengono elaborati"
-                : "Interruttore generale: tutti i messaggi in arrivo sono ignorati"}
+                ? "I messaggi in arrivo vengono elaborati."
+                : "Interruttore generale: tutti i messaggi in arrivo sono ignorati."}
             </div>
           </div>
           <Toggle
@@ -3977,10 +4150,10 @@ function ChannelsPane() {
             }}
           />
         </div>
-        <div className="set-row">
+        <div className="set-trow">
           <div>
-            <div className="rk">Auto-risposta (solo testo)</div>
-            <div className="rv">
+            <div className="tt">Auto-risposta (solo testo)</div>
+            <div className="td">
               Risponde da sola ai contatti in allowlist; le altre azioni restano dietro conferma.
             </div>
           </div>
@@ -3991,69 +4164,219 @@ function ChannelsPane() {
             }}
           />
         </div>
-        {settings && !settings.enabled && (
-          <p className="set-hint" style={{ marginBottom: 0 }}>
-            Il canale è spento: l'auto-risposta non scatta finché non riattivi «Canale attivo».
-          </p>
-        )}
       </div>
-
-      <div className="set-section-label">Allowlist</div>
-      <div className="set-card">
-        <p className="set-hint" style={{ marginTop: 0 }}>
-          Solo questi contatti possono ricevere una risposta automatica (vale per tutti i canali).
-          WhatsApp: numero internazionale senza «+» (es. 39333…) o JID completo (es. 1234@lid).
-          Telegram: id utente numerico (es. 123456789).
+      {settings && !settings.enabled && (
+        <p className="set-hint">
+          Il canale è spento: l'auto-risposta non scatta finché non riattivi «Canale attivo».
         </p>
-        {settings && settings.allowlist.length > 0 ? (
-          <div>
-            {settings.allowlist.map((contact) => (
-              <div key={contact} className="set-row">
-                <span style={{ fontFamily: "monospace" }}>{contact}</span>
-                <button
-                  className="set-btn danger"
-                  type="button"
-                  disabled={savingSettings}
-                  onClick={() => removeContact(contact)}
-                >
-                  Rimuovi
-                </button>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <p className="set-hint">Nessun contatto in allowlist.</p>
-        )}
-        <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-          <input
-            placeholder="numero o JID"
-            value={newContact}
-            onChange={(e) => setNewContact(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") addContact();
-            }}
-            style={{ flex: 1 }}
-          />
-          <button
-            className="set-btn"
-            type="button"
-            disabled={savingSettings || !newContact.trim()}
-            onClick={addContact}
-          >
-            Aggiungi
-          </button>
-        </div>
-        {settingsError && (
-          <p className="set-hint" style={{ color: "var(--danger)" }}>
-            {settingsError}
-          </p>
-        )}
-      </div>
+      )}
 
+      <div className="set-modal-label">Allowlist</div>
+      <p className="set-hint" style={{ marginTop: 0 }}>
+        Solo questi contatti possono ricevere una risposta automatica (vale per tutti i canali).
+        WhatsApp: numero internazionale senza «+» (es. 39333…) o JID completo (es. 1234@lid).
+        Telegram: id utente numerico (es. 123456789).
+      </p>
+      {settings && settings.allowlist.length > 0 ? (
+        <div className="set-card rows chan-allow-rows">
+          {settings.allowlist.map((contact) => (
+            <div key={contact} className="set-row chan-allow-row">
+              <span className="set-mono-faint chan-allow-id">{contact}</span>
+              <button
+                className="set-btn danger"
+                type="button"
+                disabled={savingSettings}
+                onClick={() => removeContact(contact)}
+              >
+                Rimuovi
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="set-hint">Nessun contatto in allowlist.</p>
+      )}
+      <div className="chan-allow-add">
+        <input
+          placeholder="numero o id…"
+          className="chan-allow-input"
+          value={newContact}
+          onChange={(e) => setNewContact(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") addContact();
+          }}
+        />
+        <button
+          className="set-btn primary"
+          type="button"
+          disabled={savingSettings || !newContact.trim()}
+          onClick={addContact}
+        >
+          Aggiungi
+        </button>
+      </div>
+      {settingsError && (
+        <p className="set-hint" style={{ color: "var(--danger)" }}>
+          {settingsError}
+        </p>
+      )}
       <p className="set-hint">
         I messaggi in arrivo sono trattati come dati non fidati: l'auto-risposta (solo testo) vale
         unicamente per i contatti in allowlist e le azioni restano dietro conferma.
       </p>
+    </>
+  );
+
+  return (
+    <>
+      <div className="set-cards-grid cols-3">
+        <button type="button" className="set-channel" onClick={() => setOpenChannel("whatsapp")}>
+          <div className="set-channel-top">
+            <span className="set-channel-icon whatsapp">{whatsappMark}</span>
+            <span className="set-channel-name">WhatsApp</span>
+          </div>
+          {whatsappConnected ? (
+            <span className="set-badge dot green">Connesso</span>
+          ) : (
+            <span className="set-badge muted">Non connesso</span>
+          )}
+        </button>
+
+        <button type="button" className="set-channel" onClick={() => setOpenChannel("telegram")}>
+          <div className="set-channel-top">
+            <span className="set-channel-icon telegram">{telegramMark}</span>
+            <span className="set-channel-name">Telegram</span>
+          </div>
+          {telegramConnected ? (
+            <span className="set-badge dot green">Connesso</span>
+          ) : (
+            <span className="set-badge muted">Non connesso</span>
+          )}
+        </button>
+
+        <div className="set-add-card" aria-hidden>
+          <Plus size={14} strokeWidth={1.9} />
+          Aggiungi canale
+        </div>
+      </div>
+
+      {/* Keep the Telegram hooks mounted whenever its modal is open. */}
+      {openChannel === "telegram" && (
+        <div className="set-modal-overlay" role="dialog" aria-modal="true">
+          <div className="set-modal-scrim" onClick={() => setOpenChannel(null)} />
+          <div className="set-modal chan-modal">
+            <div className="set-modal-head">
+              <span className="set-channel-icon telegram">{telegramMark}</span>
+              <span className="mt">Telegram</span>
+              {telegramConnected && <span className="set-badge dot green">Connesso</span>}
+              <button
+                className="set-modal-close"
+                type="button"
+                aria-label="Chiudi"
+                onClick={() => setOpenChannel(null)}
+              >
+                <X size={17} />
+              </button>
+            </div>
+            <div className="set-modal-body">
+              <TelegramSection onStatusChange={(s) => setTelegramConnected(!!s?.connected)} />
+              {sharedSettings}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {openChannel === "whatsapp" && (
+        <div className="set-modal-overlay" role="dialog" aria-modal="true">
+          <div className="set-modal-scrim" onClick={() => setOpenChannel(null)} />
+          <div className="set-modal chan-modal">
+            <div className="set-modal-head">
+              <span className="set-channel-icon whatsapp">{whatsappMark}</span>
+              <span className="mt">WhatsApp</span>
+              {whatsappConnected && <span className="set-badge dot green">Connesso</span>}
+              <button
+                className="set-modal-close"
+                type="button"
+                aria-label="Chiudi"
+                onClick={() => setOpenChannel(null)}
+              >
+                <X size={17} />
+              </button>
+            </div>
+            <div className="set-modal-body">
+              <div className="set-modal-label">Stato</div>
+              {whatsappConnected ? (
+                <div className="set-card chan-status-card">
+                  <div className="chan-status-on">
+                    <span className="chan-status-check" aria-hidden>
+                      <Check size={11} strokeWidth={2.6} />
+                    </span>
+                    Connesso
+                  </div>
+                  <button
+                    className="set-btn danger"
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void disconnect()}
+                  >
+                    Disconnetti
+                  </button>
+                </div>
+              ) : status?.pair_code ? (
+                <div className="set-card chan-connect-card">
+                  <p className="set-hint" style={{ marginTop: 0 }}>
+                    Sul telefono: WhatsApp ▸ Dispositivi collegati ▸ Collega un dispositivo ▸{" "}
+                    <strong>Collega con numero di telefono</strong>, poi inserisci:
+                  </p>
+                  <div className="chan-pair-code">{status.pair_code}</div>
+                  <button
+                    className="set-btn"
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void disconnect()}
+                    style={{ alignSelf: "flex-start" }}
+                  >
+                    Annulla
+                  </button>
+                </div>
+              ) : (
+                <div className="set-card chan-connect-card">
+                  <p className="set-hint" style={{ marginTop: 0 }}>
+                    Se hai già collegato il dispositivo, premi <strong>Connetti</strong> (riusa la
+                    sessione salvata). Per il primo collegamento, inserisci il numero in formato
+                    internazionale senza «+» (es. 39333…).
+                  </p>
+                  <div className="chan-connect-field">
+                    <input
+                      placeholder="numero di telefono (solo primo collegamento)"
+                      value={phone}
+                      onChange={(e) => setPhone(e.target.value)}
+                      style={{ flex: 1 }}
+                    />
+                    <button
+                      className="set-btn primary"
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void connect()}
+                    >
+                      Connetti
+                    </button>
+                  </div>
+                  {status?.running && (
+                    <p className="set-hint">Bridge avviato, in attesa di connessione/codice…</p>
+                  )}
+                  {error && (
+                    <p className="set-hint" style={{ color: "var(--danger)" }}>
+                      {error}
+                    </p>
+                  )}
+                </div>
+              )}
+              {sharedSettings}
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

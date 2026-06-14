@@ -1,5 +1,4 @@
 import { useRef, useState, type CSSProperties, type PointerEvent, type ReactNode } from "react";
-import { PanelLeftOpen } from "lucide-react";
 import {
   ChatSearchModal,
   NavDrawer,
@@ -23,9 +22,12 @@ interface ShellProps {
   onSelectThread: (threadId: string) => void;
   onSetChatThreadPinned: (threadId: string, pinned: boolean) => void;
   onSelectSettingsSection: (section: SettingsSectionId) => void;
+  // Sub-item within a section that has an inline expandable submenu (generic string).
+  onSelectSettingsSub: (sub: string) => void;
   onToggleDrawer: () => void;
   onUnarchiveChatThread: (threadId: string) => void;
   settingsSection: SettingsSectionId;
+  settingsSub: string;
   children: ReactNode;
 }
 
@@ -44,9 +46,11 @@ export function Shell({
   onSelectThread,
   onSetChatThreadPinned,
   onSelectSettingsSection,
+  onSelectSettingsSub,
   onToggleDrawer,
   onUnarchiveChatThread,
   settingsSection,
+  settingsSub,
 }: ShellProps) {
   const isSettings = activeView === "settings";
   const [searchOpen, setSearchOpen] = useState(false);
@@ -93,33 +97,24 @@ export function Shell({
       style={{ "--drawer-width": `${drawerWidth}px` } as CSSProperties}
       className={[
         "app-shell",
-        drawerOpen ? "drawer-open" : "drawer-closed",
+        // Settings is always shown with its full sidebar open — it can't collapse to
+        // the icon rail — so force the open grid column when in settings.
+        drawerOpen || isSettings ? "drawer-open" : "drawer-closed",
         isSettings ? "settings-mode" : "",
       ]
         .filter(Boolean)
         .join(" ")}
     >
-      {!drawerOpen && (
-        <>
-          {/* When collapsed the rail stays narrow (icons only); the expand control lives
-              on the CONTENT side, just past the lights — so the column doesn't widen. */}
-          <button
-            className="sidebar-expand"
-            type="button"
-            aria-label="Espandi barra laterale"
-            title="Espandi barra laterale"
-            onClick={onToggleDrawer}
-          >
-            <PanelLeftOpen size={18} />
-          </button>
-          <NavigationRail
-            activeView={activeView}
-            navItems={navItems}
-            onNavigate={onNavigate}
-            onSearch={() => setSearchOpen(true)}
-            onToggleDrawer={onToggleDrawer}
-          />
-        </>
+      {!drawerOpen && !isSettings && (
+        // Collapsed: the icon rail. Its top button is the expand toggle (a no-drag
+        // child of the drag rail), so no control floats over the content drag strip.
+        <NavigationRail
+          activeView={activeView}
+          navItems={navItems}
+          onNavigate={onNavigate}
+          onSearch={() => setSearchOpen(true)}
+          onToggleDrawer={onToggleDrawer}
+        />
       )}
       {drawerOpen && !isSettings && (
         <NavDrawer
@@ -138,14 +133,16 @@ export function Shell({
           onUnarchiveChatThread={onUnarchiveChatThread}
         />
       )}
-      {drawerOpen && isSettings && (
+      {isSettings && (
         <SettingsDrawer
           activeSection={settingsSection}
+          activeSub={settingsSub}
           onBack={onBackFromSettings}
           onSelect={onSelectSettingsSection}
+          onSelectSub={onSelectSettingsSub}
         />
       )}
-      {drawerOpen && (
+      {(drawerOpen || isSettings) && (
         <div
           className="drawer-resizer"
           role="separator"

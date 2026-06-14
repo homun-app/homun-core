@@ -10,6 +10,7 @@ import {
   FolderPlus,
   Info,
   PanelLeftClose,
+  PanelLeftOpen,
   Pencil,
   Pin,
   PinOff,
@@ -63,6 +64,17 @@ export function NavigationRail({
   return (
     <aside className="navigation-rail" aria-label="Navigazione rapida">
       <nav className="rail-nav">
+        {/* Expand toggle lives INSIDE the rail (a no-drag child of the drag rail, so it
+            reliably carves the drag region) instead of floating over the content. */}
+        <button
+          className="rail-button"
+          type="button"
+          aria-label="Espandi barra laterale"
+          title="Espandi barra laterale"
+          onClick={onToggleDrawer}
+        >
+          <PanelLeftOpen size={18} />
+        </button>
         <button
           className="rail-button"
           type="button"
@@ -784,16 +796,45 @@ export function NavDrawer({
   );
 }
 
+// Inline expandable submenus, keyed by section id. When a section with an entry
+// here is active, its sub-items render as `.set-subnav-item`s under the nav item.
+// `defaultSub` is selected when the section is opened from a plain nav click.
+const SETTINGS_SUBNAV: Partial<
+  Record<SettingsSectionId, { defaultSub: string; items: Array<{ id: string; label: string }> }>
+> = {
+  runtime: {
+    defaultSub: "routing",
+    items: [
+      { id: "routing", label: "Modello per compito" },
+      { id: "decisions", label: "Decisioni di routing" },
+      { id: "providers", label: "Provider" },
+    ],
+  },
+  connections: {
+    defaultSub: "composio",
+    items: [
+      { id: "composio", label: "Composio" },
+      { id: "fs", label: "filesystem" },
+      { id: "catalogo", label: "Catalogo MCP" },
+      { id: "attivita", label: "Attività" },
+    ],
+  },
+};
+
 interface SettingsDrawerProps {
   activeSection: SettingsSectionId;
+  activeSub: string;
   onBack: () => void;
   onSelect: (section: SettingsSectionId) => void;
+  onSelectSub: (sub: string) => void;
 }
 
 export function SettingsDrawer({
   activeSection,
+  activeSub,
   onBack,
   onSelect,
+  onSelectSub,
 }: SettingsDrawerProps) {
   const [displayName] = useSetting("displayName", "Fabio Cantone");
   const [workspaceName] = useSetting("workspaceName", "Personale");
@@ -821,16 +862,44 @@ export function SettingsDrawer({
               .filter((item) => item.group === group)
               .map((item) => {
                 const Icon = item.icon;
+                const submenu = SETTINGS_SUBNAV[item.id];
+                const isActive = activeSection === item.id;
                 return (
-                  <button
-                    className={`set-nav-item ${activeSection === item.id ? "active" : ""}`}
-                    key={item.id}
-                    type="button"
-                    onClick={() => onSelect(item.id)}
-                  >
-                    <Icon size={16} />
-                    <span>{item.label}</span>
-                  </button>
+                  <div key={item.id}>
+                    <button
+                      className={`set-nav-item ${isActive ? "active" : ""}`}
+                      type="button"
+                      onClick={() => {
+                        onSelect(item.id);
+                        // Entering a section with a submenu lands on its default
+                        // sub-item (preserves the current sub if already inside).
+                        if (submenu) {
+                          onSelectSub(
+                            isActive && activeSub ? activeSub : submenu.defaultSub,
+                          );
+                        }
+                      }}
+                    >
+                      <Icon size={16} />
+                      <span>{item.label}</span>
+                    </button>
+                    {submenu && isActive &&
+                      submenu.items.map((sub) => (
+                        <button
+                          className={`set-subnav-item ${
+                            (activeSub || submenu.defaultSub) === sub.id ? "active" : ""
+                          }`}
+                          key={sub.id}
+                          type="button"
+                          onClick={() => {
+                            onSelect(item.id);
+                            onSelectSub(sub.id);
+                          }}
+                        >
+                          <span>{sub.label}</span>
+                        </button>
+                      ))}
+                  </div>
                 );
               })}
           </div>
@@ -842,6 +911,30 @@ export function SettingsDrawer({
         <Info size={16} />
         <span>Informazioni</span>
       </button>
+
+      {/* Persistent footer — mirrors the main drawer's [bell + gear], but in Settings
+          the gear becomes a back-to-app arrow (you're already in Settings). */}
+      <footer className="drawer-footer">
+        <div className="drawer-persistent-actions" aria-label="Azioni persistenti">
+          <button
+            className="drawer-footer-action"
+            type="button"
+            aria-label="Notifiche"
+            title="Notifiche"
+          >
+            <Bell size={16} />
+          </button>
+          <button
+            className="drawer-footer-action"
+            type="button"
+            aria-label="Torna all'app"
+            title="Torna all'app"
+            onClick={onBack}
+          >
+            <ArrowLeft size={16} />
+          </button>
+        </div>
+      </footer>
     </aside>
   );
 }
