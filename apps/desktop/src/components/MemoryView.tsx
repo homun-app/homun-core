@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Brain, Check, Search, Trash2, X } from "lucide-react";
+import { Brain, Check, ChevronDown, Download, Search, Sparkles, Trash2, X } from "lucide-react";
 
 import {
   coreBridge,
@@ -161,28 +161,34 @@ export function MemoryView({ embedded = false }: { embedded?: boolean } = {}) {
           </div>
         )}
         <div className="memview-filters">
-          <select
-            value={workspaceFilter}
-            onChange={(e) => {
-              setWorkspaceFilter(e.target.value);
-              setSelectedMonth(null);
-            }}
-          >
-            <option value="all">Tutti i progetti</option>
-            {workspaces.map((w) => (
-              <option key={w.id} value={w.id}>
-                {w.label}
-              </option>
-            ))}
-          </select>
-          <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
-            <option value="all">Tutti i tipi</option>
-            {Object.entries(TYPE_LABELS).map(([k, v]) => (
-              <option key={k} value={k}>
-                {v}
-              </option>
-            ))}
-          </select>
+          <label className="set-select memview-select">
+            <select
+              value={workspaceFilter}
+              onChange={(e) => {
+                setWorkspaceFilter(e.target.value);
+                setSelectedMonth(null);
+              }}
+            >
+              <option value="all">Tutti i progetti</option>
+              {workspaces.map((w) => (
+                <option key={w.id} value={w.id}>
+                  {w.label}
+                </option>
+              ))}
+            </select>
+            <ChevronDown size={12} className="chev" />
+          </label>
+          <label className="set-select memview-select">
+            <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
+              <option value="all">Tutti i tipi</option>
+              {Object.entries(TYPE_LABELS).map(([k, v]) => (
+                <option key={k} value={k}>
+                  {v}
+                </option>
+              ))}
+            </select>
+            <ChevronDown size={12} className="chev" />
+          </label>
           <label className="memview-search">
             <Search size={14} />
             <input
@@ -193,7 +199,7 @@ export function MemoryView({ embedded = false }: { embedded?: boolean } = {}) {
           </label>
           <button
             type="button"
-            className="memview-consolidate"
+            className="set-btn memview-consolidate"
             disabled={consolidating}
             title={
               workspaceFilter === "all"
@@ -213,39 +219,44 @@ export function MemoryView({ embedded = false }: { embedded?: boolean } = {}) {
                 .finally(() => setConsolidating(false));
             }}
           >
-            {consolidating ? "Consolido…" : "✨ Consolida"}
+            <Sparkles size={13} />
+            {consolidating ? "Consolido…" : "Consolida"}
           </button>
           {report && <span className="memview-report">{report}</span>}
           <button
             type="button"
-            className="memview-consolidate"
+            className="set-btn"
             disabled={exporting}
             title="Scarica memorie, entità e relazioni in un file JSON"
             onClick={exportMemory}
           >
-            {exporting ? "Esporto…" : "⬇ Esporta"}
+            <Download size={13} />
+            {exporting ? "Esporto…" : "Esporta"}
           </button>
         </div>
       </header>
 
       {dashboard && (
-        <div className="memview-stats">
+        <div className="set-stats memview-stats">
           <span>
             <strong>{dashboard.total_memories}</strong> memorie
           </span>
+          <span className="sep">·</span>
           <span>
             <strong>{dashboard.total_entities}</strong> entità
           </span>
+          <span className="sep">·</span>
           <span>
             <strong>{dashboard.total_relations}</strong> relazioni
           </span>
+          <span className="sep">·</span>
           <span>
             <strong>{dashboard.total_wiki_pages}</strong> pagine wiki
           </span>
         </div>
       )}
 
-      <div className="memview-tabs" role="tablist">
+      <div className="set-seg memview-tabs" role="tablist">
         {(
           [
             ["info", "Info"],
@@ -258,7 +269,7 @@ export function MemoryView({ embedded = false }: { embedded?: boolean } = {}) {
             type="button"
             role="tab"
             aria-selected={memTab === key}
-            className={`memview-tab ${memTab === key ? "active" : ""}`}
+            className={`set-seg-item ${memTab === key ? "active" : ""}`}
             onClick={() => setMemTab(key)}
           >
             {label}
@@ -268,93 +279,96 @@ export function MemoryView({ embedded = false }: { embedded?: boolean } = {}) {
 
       {memTab === "info" && (
         <div className="memview-info">
-      <div className="memview-timeline" role="group" aria-label="Timeline">
-        {timeline.length === 0 ? (
-          <span className="memview-empty">Nessuna informazione</span>
-        ) : (
-          timeline.map((t) => {
-            const [y, mo] = t.month.split("-");
-            const label = `${MONTHS[parseInt(mo, 10) - 1] ?? mo} ${y.slice(2)}`;
-            return (
-              <button
-                key={t.month}
-                type="button"
-                className={`memview-bar ${selectedMonth === t.month ? "active" : ""}`}
-                onClick={() => setSelectedMonth(selectedMonth === t.month ? null : t.month)}
-                title={`${t.count} info · ${t.month}`}
-              >
-                <span className="memview-bar-count">{t.count}</span>
-                <span
-                  className="memview-bar-fill"
-                  style={{ height: `${Math.max(6, (t.count / maxCount) * 100)}%` }}
-                />
-                <span className="memview-bar-label">{label}</span>
-              </button>
-            );
-          })
-        )}
-      </div>
-        <div className="memview-list">
+          <div className="memview-timeline" role="group" aria-label="Timeline">
+            {timeline.length === 0 ? (
+              <span className="memview-empty">Nessuna informazione</span>
+            ) : (
+              timeline.map((t) => {
+                const [y, mo] = t.month.split("-");
+                const label = `${MONTHS[parseInt(mo, 10) - 1] ?? mo} ${y.slice(2)}`;
+                return (
+                  <button
+                    key={t.month}
+                    type="button"
+                    className={`memview-bar ${selectedMonth === t.month ? "active" : ""}`}
+                    onClick={() => setSelectedMonth(selectedMonth === t.month ? null : t.month)}
+                    title={`${t.count} info · ${t.month}`}
+                  >
+                    <span className="memview-bar-count">{t.count}</span>
+                    <span
+                      className="memview-bar-fill"
+                      style={{ height: `${Math.max(6, (t.count / maxCount) * 100)}%` }}
+                    />
+                    <span className="memview-bar-label">{label}</span>
+                  </button>
+                );
+              })
+            )}
+          </div>
           <div className="memview-list-head">
             {visible.length} info{selectedMonth ? ` · ${selectedMonth}` : ""}
           </div>
-          {visible.map((it) => (
-            <div className="memview-item" key={it.reference}>
-              <span className="memview-dot" style={{ background: TYPE_COLORS[it.memory_type] ?? "#94a3b8" }} />
-              <div className="memview-item-body">
-                <div className="memview-item-text">
-                  {it.text}
-                  {it.certainty === "considered" && (
-                    <span className="memview-chip considered">valutato</span>
-                  )}
-                  {it.certainty === "intended" && (
-                    <span className="memview-chip intended">intenzione</span>
-                  )}
+          <div className="set-line-list memview-list">
+            {visible.map((it) => (
+              <div className="set-line-item memview-item" key={it.reference}>
+                <span
+                  className="set-dot memview-dot"
+                  style={{ background: TYPE_COLORS[it.memory_type] ?? "#94a3b8" }}
+                />
+                <div className="memview-item-body">
+                  <div className="memview-item-text">
+                    {it.text}
+                    {it.certainty === "considered" && (
+                      <span className="set-tag amber memview-chip">valutato</span>
+                    )}
+                    {it.certainty === "intended" && (
+                      <span className="set-tag brand memview-chip">intenzione</span>
+                    )}
+                  </div>
+                  <div className="memview-item-meta">
+                    {TYPE_LABELS[it.memory_type] ?? it.memory_type} · {it.workspace_label} ·{" "}
+                    {dayLabel(it.created_at)}
+                  </div>
                 </div>
-                <div className="memview-item-meta">
-                  {TYPE_LABELS[it.memory_type] ?? it.memory_type} · {it.workspace_label} ·{" "}
-                  {dayLabel(it.created_at)}
+                <div className="memview-actions">
+                  {it.status === "candidate" && (
+                    <>
+                      <button
+                        type="button"
+                        className="memview-confirm"
+                        title="Conferma (da usare)"
+                        disabled={busy}
+                        onClick={() => decide(it.reference, "confirm")}
+                      >
+                        <Check size={15} />
+                      </button>
+                      <button
+                        type="button"
+                        className="memview-reject"
+                        title="Rifiuta"
+                        disabled={busy}
+                        onClick={() => decide(it.reference, "reject")}
+                      >
+                        <X size={15} />
+                      </button>
+                    </>
+                  )}
+                  <button
+                    type="button"
+                    className="memview-del"
+                    title="Elimina dalla memoria"
+                    disabled={busy}
+                    onClick={() => decide(it.reference, "delete")}
+                  >
+                    <Trash2 size={15} />
+                  </button>
                 </div>
               </div>
-              <div className="memview-actions">
-                {it.status === "candidate" && (
-                  <>
-                    <button
-                      type="button"
-                      className="memview-confirm"
-                      title="Conferma (da usare)"
-                      disabled={busy}
-                      onClick={() => decide(it.reference, "confirm")}
-                    >
-                      <Check size={14} />
-                    </button>
-                    <button
-                      type="button"
-                      className="memview-reject"
-                      title="Rifiuta"
-                      disabled={busy}
-                      onClick={() => decide(it.reference, "reject")}
-                    >
-                      <X size={14} />
-                    </button>
-                  </>
-                )}
-                <button
-                  type="button"
-                  className="memview-del"
-                  title="Elimina dalla memoria"
-                  disabled={busy}
-                  onClick={() => decide(it.reference, "delete")}
-                >
-                  <Trash2 size={14} />
-                </button>
-              </div>
-            </div>
-          ))}
-          {visible.length === 0 && (
-            <p className="memview-empty">Nessuna informazione per i filtri scelti.</p>
-          )}
-        </div>
+            ))}
+            {visible.length === 0 && (
+              <p className="memview-empty">Nessuna informazione per i filtri scelti.</p>
+            )}
+          </div>
         </div>
       )}
 
