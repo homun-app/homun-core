@@ -8411,6 +8411,131 @@ body.resizing-drawer {
 }
 .skl-installed { color: var(--green); background: var(--green-soft); white-space: nowrap; align-self: center; }
 
+/* ===== Skill redesign (design handoff: seg Catalogo/Attive + group cards +
+   skill cards with toggles + detail-as-modal) ==================================== */
+.skl-seg { margin-bottom: 18px; }
+
+/* The two group cards under "Skill attive". */
+.skl-group-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 16px;
+  background: var(--surface);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.skl-group-card:hover { border-color: var(--brand); }
+.skl-group-head { display: flex; align-items: center; gap: 10px; }
+.skl-group-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  background: var(--panel);
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+.skl-group-icon.brand { background: var(--brand-soft); color: var(--brand); }
+.skl-group-name { font-size: 14.5px; font-weight: 700; color: var(--text); }
+.skl-group-chev { margin-left: auto; color: var(--faint); flex: none; }
+.skl-group-meta { font-size: 12px; color: var(--faint); }
+
+/* Back link inside a group + "enable whole group" row. */
+.skl-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 0;
+  margin-bottom: 14px;
+}
+.skl-back:hover { color: var(--text); }
+.skl-group-switch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 11px 15px;
+  margin-bottom: 12px;
+  font-size: 13px;
+  color: var(--text);
+}
+
+/* Per-skill card: name + origin on the left, toggle on the right. */
+.skl-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 13px 15px;
+  background: var(--surface);
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+.skl-card-body {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.skl-card-name {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.skl-card-meta { font-size: 11.5px; color: var(--faint); }
+
+/* Skill detail modal chrome (reuses the shared .set-modal.wide surface). */
+.skl-modal-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+.skl-modal .set-modal-head .ms.mono { font-family: var(--font-mono); }
+.skl-modal-active {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  font-size: 13px;
+  color: var(--muted);
+  cursor: pointer;
+}
+.skl-modal-active + .set-modal-close { margin-left: 0; }
+.skl-modal .skl-pills { margin-bottom: 12px; }
+.skl-modal .skl-desc { margin-bottom: 14px; }
+.skl-modal .skl-files-label { margin-top: 16px; }
+/* ===== /Skill redesign =========================================================== */
+
 /* Composio — always-allowed tools management */
 .cmp-allowed { display: flex; flex-direction: column; gap: var(--s2); margin-bottom: var(--s3); }
 .cmp-allowed-list { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
