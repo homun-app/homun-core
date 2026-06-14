@@ -1,0 +1,118 @@
+{
+  "common": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "close": "Close",
+    "delete": "Delete",
+    "remove": "Remove",
+    "edit": "Edit",
+    "add": "Add",
+    "retry": "Retry",
+    "search": "Search",
+    "loading": "Loading…",
+    "confirm": "Confirm",
+    "back": "Back",
+    "done": "Done",
+    "yes": "Yes",
+    "no": "No",
+    "new": "New",
+    "rename": "Rename",
+    "create": "Create",
+    "settings": "Settings"
+  },
+  "nav": {
+    "chat": "Chat",
+    "tasks": "Tasks",
+    "memory": "Memory",
+    "connections": "Connections",
+    "automations": "Automations",
+    "browser": "Computer",
+    "brain": "Brain Audit",
+    "learning": "Learning",
+    "contacts": "Contacts"
+  },
+  "chat": {
+    "newTask": "New task",
+    "emptyHero": "How can I help you?",
+    "composerPlaceholder": "Write a message…",
+    "action": {
+      "explainCode": "Explain code",
+      "improveCode": "Improve code"
+    },
+    "localSessionReady": "Local session ready",
+    "sending": "Sending…",
+    "generating": "Generating…",
+    "stop": "Stop",
+    "interrupted": "Interrupted.",
+    "thinking": "The assistant is thinking",
+    "writing": "The assistant is writing"
+  },
+  "task": {
+    "blocked": {
+      "recovered": "Recovered after restart: local resources released, task re-queued.",
+      "resource": "Waiting for local resources to become available.",
+      "approval": "Waiting for your confirmation."
+    },
+    "status": {
+      "queued": "Queued",
+      "running": "Running",
+      "waitingUserApproval": "Awaiting approval",
+      "waitingResource": "Waiting for resources",
+      "completed": "Completed",
+      "failed": "Failed"
+    },
+    "queue": "Queue",
+    "approvals": "Approvals"
+  },
+  "approval": {
+    "browserAction": "Browser action pending",
+    "confirmPlan": "Confirm operational plan",
+    "confirmPlanReason": "The plan contains a step that needs confirmation before proceeding. This does not authorize purchases, logins, sends or automatic payments.",
+    "click": "The browser wants to click on a page element. Confirm only if you want to proceed.",
+    "close": "The browser wants to close a page or window. Confirm only if it is no longer needed.",
+    "type": "The browser wants to send text as a submit. Confirm only if the content is correct.",
+    "default": "The browser requires confirmation before proceeding."
+  },
+  "settings": {
+    "account": "Account",
+    "appearance": "Appearance",
+    "general": "General",
+    "runtime": "Model & Runtime",
+    "privacy": "Privacy",
+    "connectors": "Connectors",
+    "language": "Language",
+    "timezone": "Timezone",
+    "concurrency": "Concurrency",
+    "concurrencyLabel": "Parallel LLM requests",
+    "concurrencyDesc": "How many inferences the runtime lets run at once. Automatic based on the provider (local 1, cloud 4).",
+    "concurrencyLocalWarn": "Local provider detected: high concurrency can saturate memory.",
+    "automatic": "Automatic",
+    "manual": "Manual"
+  },
+  "error": {
+    "model": {
+      "timeout": "The model took too long to respond. Try again shortly.",
+      "generic": "The model responded with an error ({{code}}). Try again shortly; if it persists, check the provider in Settings.",
+      "interrupted": "Answer interrupted."
+    },
+    "store": {
+      "chatStore": "Local store unavailable.",
+      "taskStore": "Task store unavailable.",
+      "localComputer": "Local computer store unavailable."
+    },
+    "browser": {
+      "unavailable": "Browser automation is not available right now.",
+      "actionBlocked": "This action is not available from the channel.",
+      "snapshotFailed": "Could not read the page snapshot.",
+      "screenshotFailed": "Could not capture the screenshot."
+    },
+    "sandbox": {
+      "failed": "Execution failed."
+    },
+    "common": {
+      "saveFailed": "Save failed.",
+      "operationFailed": "Operation failed: {{message}}",
+      "noProvider": "No provider configured."
+    }
+  }
+}

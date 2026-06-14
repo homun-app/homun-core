@@ -1,0 +1,118 @@
+{
+  "common": {
+    "save": "Salva",
+    "cancel": "Annulla",
+    "close": "Chiudi",
+    "delete": "Elimina",
+    "remove": "Rimuovi",
+    "edit": "Modifica",
+    "add": "Aggiungi",
+    "retry": "Riprova",
+    "search": "Cerca",
+    "loading": "Caricamento…",
+    "confirm": "Conferma",
+    "back": "Indietro",
+    "done": "Fatto",
+    "yes": "Sì",
+    "no": "No",
+    "new": "Nuovo",
+    "rename": "Rinomina",
+    "create": "Crea",
+    "settings": "Impostazioni"
+  },
+  "nav": {
+    "chat": "Chat",
+    "tasks": "Attività",
+    "memory": "Memoria",
+    "connections": "Connessioni",
+    "automations": "Automazioni",
+    "browser": "Computer",
+    "brain": "Brain Audit",
+    "learning": "Apprendimento",
+    "contacts": "Contatti"
+  },
+  "chat": {
+    "newTask": "Nuovo compito",
+    "emptyHero": "Come posso aiutarti?",
+    "composerPlaceholder": "Scrivi un messaggio…",
+    "action": {
+      "explainCode": "Spiega codice",
+      "improveCode": "Migliora codice"
+    },
+    "localSessionReady": "Sessione locale pronta",
+    "sending": "Invio…",
+    "generating": "Generazione…",
+    "stop": "Stop",
+    "interrupted": "Risposta interrotta.",
+    "thinking": "L'assistente sta pensando",
+    "writing": "L'assistente sta scrivendo"
+  },
+  "task": {
+    "blocked": {
+      "recovered": "Recuperato dopo riavvio: risorse locali rilasciate, task rimesso in coda.",
+      "resource": "In attesa di risorse locali disponibili.",
+      "approval": "In attesa di conferma utente."
+    },
+    "status": {
+      "queued": "In coda",
+      "running": "In esecuzione",
+      "waitingUserApproval": "In attesa di approvazione",
+      "waitingResource": "In attesa di risorse",
+      "completed": "Completato",
+      "failed": "Fallito"
+    },
+    "queue": "Coda",
+    "approvals": "Approvazioni"
+  },
+  "approval": {
+    "browserAction": "Azione browser in attesa",
+    "confirmPlan": "Conferma piano operativo",
+    "confirmPlanReason": "Il piano contiene uno step che richiede conferma prima di procedere. Non autorizza acquisti, login, invii o pagamenti automatici.",
+    "click": "Il browser vuole fare click su un elemento della pagina. Conferma solo se vuoi proseguire.",
+    "close": "Il browser vuole chiudere una pagina o una finestra. Conferma solo se non serve più.",
+    "type": "Il browser vuole inviare testo come submit. Conferma solo se il contenuto è corretto.",
+    "default": "Il browser richiede una conferma prima di procedere."
+  },
+  "settings": {
+    "account": "Account",
+    "appearance": "Aspetto",
+    "general": "Generale",
+    "runtime": "Modello & Runtime",
+    "privacy": "Privacy",
+    "connectors": "Connettori",
+    "language": "Lingua",
+    "timezone": "Fuso orario",
+    "concurrency": "Concorrenza",
+    "concurrencyLabel": "Richieste LLM in parallelo",
+    "concurrencyDesc": "Quante inferenze il runtime lascia girare contemporaneamente. Automatico in base al provider (locale 1, cloud 4).",
+    "concurrencyLocalWarn": "Provider locale rilevato: una concorrenza alta può saturare la memoria.",
+    "automatic": "Automatico",
+    "manual": "Manuale"
+  },
+  "error": {
+    "model": {
+      "timeout": "Il modello ha impiegato troppo tempo per rispondere. Riprova tra poco.",
+      "generic": "Il modello ha risposto con un errore ({{code}}). Riprova tra poco; se persiste, controlla il provider in Impostazioni.",
+      "interrupted": "Risposta interrotta."
+    },
+    "store": {
+      "chatStore": "Store locale non disponibile.",
+      "taskStore": "Store dei task non disponibile.",
+      "localComputer": "Store del computer locale non disponibile."
+    },
+    "browser": {
+      "unavailable": "L'automazione del browser non è disponibile in questo momento.",
+      "actionBlocked": "Questa azione non è disponibile dal canale.",
+      "snapshotFailed": "Impossibile leggere lo snapshot della pagina.",
+      "screenshotFailed": "Impossibile catturare lo screenshot."
+    },
+    "sandbox": {
+      "failed": "Esecuzione non riuscita."
+    },
+    "common": {
+      "saveFailed": "Salvataggio non riuscito.",
+      "operationFailed": "Operazione non riuscita: {{message}}",
+      "noProvider": "Nessun provider configurato."
+    }
+  }
+}

@@ -13,6 +13,10 @@ pub struct OrchestratorRequest {
     pub conversation_summary: Option<String>,
     pub attachments: Vec<serde_json::Value>,
     pub budgets: OrchestratorBudgets,
+    /// ISO-639-1 language code (e.g. "en", "it"). Injected into the subagent
+    /// prompt so it replies in the user's chosen language. Defaults to "en".
+    #[serde(default)]
+    pub language: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

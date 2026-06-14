@@ -20531,6 +20531,7 @@ fn brain_materialize_tasks(
         conversation_summary: None,
         attachments: Vec::new(),
         budgets,
+        language: effective_user_language(),
     };
     // Browser INTERACTION is no longer materialized as a durable `browser_task`:
     // the main chat agent drives the browser inline (granular tools). The Brain

@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import i18n from "./i18n";
+import { useTranslation } from "react-i18next";
 import { AutomationsView } from "./components/AutomationsView";
 import { ChatView } from "./components/ChatView";
 import { ContainedComputerView } from "./components/ContainedComputerView";
@@ -192,7 +194,9 @@ function mapCoreTask(task: CoreTaskItem): TaskItem {
     resource: "task_runtime",
     risk: "low",
     updated: "ora",
-    blockedReason: humanizeTaskBlockedReason(task.blocked_reason),
+    blockedReason: humanizeTaskBlockedReasonKey(task.blocked_reason)
+      ? i18n.t(humanizeTaskBlockedReasonKey(task.blocked_reason)!)
+      : task.blocked_reason ?? undefined,
   };
 }
 
@@ -208,14 +212,14 @@ function mapCoreApproval(approval: CoreApprovalItem): ApprovalItem {
   return {
     id: approval.approval_id,
     title: isBrowserAction
-      ? "Azione browser in attesa"
+      ? i18n.t("approval.browserAction")
       : isPromptPlanAction
-        ? "Conferma piano operativo"
+        ? i18n.t("approval.confirmPlan")
         : approval.action,
     reason: isBrowserAction
-      ? humanizeBrowserApprovalReason(approval.explanation)
+      ? i18n.t(humanizeBrowserApprovalReasonKey(approval.explanation))
       : isPromptPlanAction
-        ? "Il piano contiene uno step che richiede conferma prima di procedere. Non autorizza acquisti, login, invii o pagamenti automatici."
+        ? i18n.t("approval.confirmPlanReason")
         : approval.explanation,
     action: approval.action,
     boundary: approval.data_boundary,
@@ -252,33 +256,27 @@ function filterBrowserVisibility(value?: string): "auto" | "visible" | "headless
   return "auto";
 }
 
-function humanizeBrowserApprovalReason(reason: string): string {
+function humanizeBrowserApprovalReasonKey(reason: string): string {
   const match = reason.match(/before execution: ([a-z_]+)/i);
-  const action = match?.[1] ?? "azione";
-  if (action === "click") {
-    return "Il browser vuole fare click su un elemento della pagina. Conferma solo se vuoi proseguire.";
+  const action = match?.[1] ?? "default";
+  if (action === "click" || action === "close" || action === "type") {
+    return `approval.${action}`;
   }
-  if (action === "close") {
-    return "Il browser vuole chiudere una pagina o una finestra. Conferma solo se non serve piu'.";
-  }
-  if (action === "type") {
-    return "Il browser vuole inviare testo come submit. Conferma solo se il contenuto e' corretto.";
-  }
-  return "Il browser richiede una conferma prima di procedere.";
+  return "approval.default";
 }
 
-function humanizeTaskBlockedReason(reason: string | null): string | undefined {
-  if (!reason) return undefined;
+function humanizeTaskBlockedReasonKey(reason: string | null): string | null {
+  if (!reason) return null;
   if (reason === "recovered after desktop restart") {
-    return "Recuperato dopo riavvio: risorse locali rilasciate, task rimesso in coda.";
+    return "task.blocked.recovered";
   }
   if (reason.startsWith("resource ")) {
-    return "In attesa di risorse locali disponibili.";
+    return "task.blocked.resource";
   }
   if (reason.startsWith("approval required:")) {
-    return "In attesa di conferma utente.";
+    return "task.blocked.approval";
   }
-  return reason;
+  return null;
 }
 
 function summarizeSafeValue(value: unknown): string {
@@ -333,7 +331,9 @@ function mapCoreTaskDetail(detail: CoreTaskDetail): TaskDetailItem {
     goal: detail.goal,
     status: mapCoreTaskStatus(detail.status),
     priority: mapCoreTaskPriority(detail.priority),
-    blockedReason: humanizeTaskBlockedReason(detail.blocked_reason),
+    blockedReason: humanizeTaskBlockedReasonKey(detail.blocked_reason)
+      ? i18n.t(humanizeTaskBlockedReasonKey(detail.blocked_reason)!)
+      : detail.blocked_reason ?? undefined,
     checkpointSummary: summarizeSafeValue(detail.latest_checkpoint),
     metadataSummary: summarizeSafeValue(detail.runtime_metadata),
     exposesRawInput: detail.exposes_raw_input,

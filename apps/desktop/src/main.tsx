@@ -9,6 +9,7 @@ import "@fontsource/jetbrains-mono/400.css";
 import "@fontsource/jetbrains-mono/500.css";
 import App from "./App";
 import { initAccent, initTheme } from "./lib/accent";
+import "./i18n";
 import "./styles.css";
 
 initTheme();
