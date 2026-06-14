@@ -23,9 +23,12 @@ interface ShellProps {
   onSelectThread: (threadId: string) => void;
   onSetChatThreadPinned: (threadId: string, pinned: boolean) => void;
   onSelectSettingsSection: (section: SettingsSectionId) => void;
+  // Sub-item within a section that has an inline expandable submenu (generic string).
+  onSelectSettingsSub: (sub: string) => void;
   onToggleDrawer: () => void;
   onUnarchiveChatThread: (threadId: string) => void;
   settingsSection: SettingsSectionId;
+  settingsSub: string;
   children: ReactNode;
 }
 
@@ -44,9 +47,11 @@ export function Shell({
   onSelectThread,
   onSetChatThreadPinned,
   onSelectSettingsSection,
+  onSelectSettingsSub,
   onToggleDrawer,
   onUnarchiveChatThread,
   settingsSection,
+  settingsSub,
 }: ShellProps) {
   const isSettings = activeView === "settings";
   const [searchOpen, setSearchOpen] = useState(false);
@@ -141,8 +146,10 @@ export function Shell({
       {drawerOpen && isSettings && (
         <SettingsDrawer
           activeSection={settingsSection}
+          activeSub={settingsSub}
           onBack={onBackFromSettings}
           onSelect={onSelectSettingsSection}
+          onSelectSub={onSelectSettingsSub}
         />
       )}
       {drawerOpen && (

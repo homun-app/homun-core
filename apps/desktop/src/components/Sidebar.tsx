@@ -784,16 +784,36 @@ export function NavDrawer({
   );
 }
 
+// Inline expandable submenus, keyed by section id. When a section with an entry
+// here is active, its sub-items render as `.set-subnav-item`s under the nav item.
+// `defaultSub` is selected when the section is opened from a plain nav click.
+const SETTINGS_SUBNAV: Partial<
+  Record<SettingsSectionId, { defaultSub: string; items: Array<{ id: string; label: string }> }>
+> = {
+  runtime: {
+    defaultSub: "routing",
+    items: [
+      { id: "routing", label: "Modello per compito" },
+      { id: "decisions", label: "Decisioni di routing" },
+      { id: "providers", label: "Provider" },
+    ],
+  },
+};
+
 interface SettingsDrawerProps {
   activeSection: SettingsSectionId;
+  activeSub: string;
   onBack: () => void;
   onSelect: (section: SettingsSectionId) => void;
+  onSelectSub: (sub: string) => void;
 }
 
 export function SettingsDrawer({
   activeSection,
+  activeSub,
   onBack,
   onSelect,
+  onSelectSub,
 }: SettingsDrawerProps) {
   const [displayName] = useSetting("displayName", "Fabio Cantone");
   const [workspaceName] = useSetting("workspaceName", "Personale");
@@ -821,16 +841,44 @@ export function SettingsDrawer({
               .filter((item) => item.group === group)
               .map((item) => {
                 const Icon = item.icon;
+                const submenu = SETTINGS_SUBNAV[item.id];
+                const isActive = activeSection === item.id;
                 return (
-                  <button
-                    className={`set-nav-item ${activeSection === item.id ? "active" : ""}`}
-                    key={item.id}
-                    type="button"
-                    onClick={() => onSelect(item.id)}
-                  >
-                    <Icon size={16} />
-                    <span>{item.label}</span>
-                  </button>
+                  <div key={item.id}>
+                    <button
+                      className={`set-nav-item ${isActive ? "active" : ""}`}
+                      type="button"
+                      onClick={() => {
+                        onSelect(item.id);
+                        // Entering a section with a submenu lands on its default
+                        // sub-item (preserves the current sub if already inside).
+                        if (submenu) {
+                          onSelectSub(
+                            isActive && activeSub ? activeSub : submenu.defaultSub,
+                          );
+                        }
+                      }}
+                    >
+                      <Icon size={16} />
+                      <span>{item.label}</span>
+                    </button>
+                    {submenu && isActive &&
+                      submenu.items.map((sub) => (
+                        <button
+                          className={`set-subnav-item ${
+                            (activeSub || submenu.defaultSub) === sub.id ? "active" : ""
+                          }`}
+                          key={sub.id}
+                          type="button"
+                          onClick={() => {
+                            onSelect(item.id);
+                            onSelectSub(sub.id);
+                          }}
+                        >
+                          <span>{sub.label}</span>
+                        </button>
+                      ))}
+                  </div>
                 );
               })}
           </div>

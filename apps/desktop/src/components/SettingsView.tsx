@@ -14,7 +14,6 @@ import {
   EyeOff,
   FileText,
   Folder,
-  ListChecks,
   MonitorPlay,
   Play,
   Plus,
@@ -95,6 +94,9 @@ import type {
 interface SettingsViewProps {
   connections: ConnectionItem[];
   section: SettingsSectionId;
+  // Active sub-item for sections with an inline expandable submenu (e.g.
+  // runtime → routing|decisions|providers). Free-form string, defaulted per pane.
+  sub?: string;
   // Called after an addon is toggled, so App can re-read enabled-state and
   // mount/unmount its nav entry + panel (ADR 0011 §10-A).
   onPluginsChanged?: () => void;
@@ -115,7 +117,7 @@ const SECTION_TITLES: Record<SettingsSectionId, string> = {
   computer: "Computer locale",
 };
 
-export function SettingsView({ section, onPluginsChanged }: SettingsViewProps) {
+export function SettingsView({ section, sub, onPluginsChanged }: SettingsViewProps) {
   const [model, setModel] = useState<ActiveModelInfo | null>(null);
   const [computer, setComputer] = useState<ContainedComputerLive | null>(null);
 
@@ -159,7 +161,12 @@ export function SettingsView({ section, onPluginsChanged }: SettingsViewProps) {
         {section === "account" && <AccountPane computer={computer} />}
         {section === "general" && <GeneralPane />}
         {section === "appearance" && <AppearancePane />}
-        {section === "runtime" && <RuntimePane model={model} />}
+        {section === "runtime" && (
+          <RuntimePane
+            model={model}
+            sub={sub === "decisions" || sub === "providers" ? sub : "routing"}
+          />
+        )}
         {section === "privacy" && <PrivacyPane />}
         {section === "memory" && <MemoryView embedded />}
         {section === "contacts" && <ContactsView />}
@@ -702,15 +709,21 @@ const PROVIDER_PRESETS: Array<{
   { id: "custom", label: "Personalizzato", baseUrl: "", kind: "openai_compat" },
 ];
 
-function RuntimePane({ model }: { model: ActiveModelInfo | null }) {
+function RuntimePane({
+  model,
+  sub = "routing",
+}: {
+  model: ActiveModelInfo | null;
+  sub?: "routing" | "decisions" | "providers";
+}) {
   const [providers, setProviders] = useState<ProviderView[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [roles, setRoles] = useState<RoleView[]>([]);
   const [decisions, setDecisions] = useState<RoutingDecision[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
-  // Selected left-rail entry: "roles" | "decisions" | "add" | a provider id.
-  const [selected, setSelected] = useState<string>("roles");
+  // Provider modal: a provider id (edit existing) or "add" (new), null = closed.
+  const [modal, setModal] = useState<string | null>(null);
   // Add-provider form.
   const [presetId, setPresetId] = useState("ollama");
   const [label, setLabel] = useState("");
@@ -737,14 +750,7 @@ function RuntimePane({ model }: { model: ActiveModelInfo | null }) {
   useEffect(() => {
     void (async () => {
       try {
-        const snapshot = await coreBridge.providers();
-        apply(snapshot);
-        if (snapshot.providers.length > 0) {
-          const initialId = snapshot.active_provider_id ?? snapshot.providers[0].id;
-          setSelected(initialId);
-          const initial = snapshot.providers.find((p) => p.id === initialId);
-          if (initial) setEditBaseUrl(initial.base_url);
-        }
+        apply(await coreBridge.providers());
       } catch {
         /* leave empty */
       }
@@ -791,16 +797,28 @@ function RuntimePane({ model }: { model: ActiveModelInfo | null }) {
     }
   };
 
-  const selectProvider = (provider: ProviderView) => {
-    setSelected(provider.id);
+  const openProvider = (provider: ProviderView) => {
     setEditBaseUrl(provider.base_url);
     setEditKey("");
     setShowKey(false);
     setNote(null);
+    setModal(provider.id);
+  };
+
+  const openAddProvider = () => {
+    setEditKey("");
+    setShowKey(false);
+    setNote(null);
+    setModal("add");
+  };
+
+  const closeModal = () => {
+    setModal(null);
+    setNote(null);
   };
 
   const preset = PROVIDER_PRESETS.find((p) => p.id === presetId) ?? PROVIDER_PRESETS[0];
-  const selectedProvider = providers.find((p) => p.id === selected);
+  const modalProvider = modal && modal !== "add" ? providers.find((p) => p.id === modal) : undefined;
 
   // Options for a model picker: "Auto" + per-provider optgroups (used by roles).
   const modelOptions = (
@@ -820,277 +838,285 @@ function RuntimePane({ model }: { model: ActiveModelInfo | null }) {
   );
 
   return (
-    <div className="mdl-layout">
-      <aside className="mdl-rail" aria-label="Sezioni modelli">
-        <div className="mdl-rail-group">Routing</div>
-        <button
-          className={`mdl-rail-item ${selected === "roles" ? "active" : ""}`}
-          type="button"
-          onClick={() => setSelected("roles")}
-        >
-          <ListChecks size={16} />
-          <span className="mdl-rail-name">Modello per compito</span>
-        </button>
-        <button
-          className={`mdl-rail-item ${selected === "decisions" ? "active" : ""}`}
-          type="button"
-          onClick={() => setSelected("decisions")}
-        >
-          <Sparkles size={16} />
-          <span className="mdl-rail-name">Decisioni di routing</span>
-          {decisions.length > 0 && <em className="mdl-rail-badge">{decisions.length}</em>}
-        </button>
-
-        <div className="mdl-rail-group">Provider</div>
-        {providers.map((provider) => (
-          <button
-            key={provider.id}
-            className={`mdl-rail-item ${selected === provider.id ? "active" : ""}`}
-            type="button"
-            onClick={() => selectProvider(provider)}
-          >
-            <span className="mdl-rail-avatar">{provider.label.slice(0, 1).toUpperCase()}</span>
-            <span className="mdl-rail-name">{provider.label}</span>
-            {provider.id === activeId && <span className="mdl-rail-dot" title="Attivo" />}
-          </button>
-        ))}
-        {providers.length === 0 && <p className="mdl-rail-empty">Nessun provider</p>}
-        <button
-          className={`mdl-rail-item add ${selected === "add" ? "active" : ""}`}
-          type="button"
-          onClick={() => setSelected("add")}
-        >
-          <Plus size={16} />
-          <span className="mdl-rail-name">Aggiungi provider</span>
-        </button>
-      </aside>
-
-      <section className="mdl-detail">
-        {/* ── Roles ───────────────────────────────────────────────── */}
-        {selected === "roles" && (
-          <>
-            <div className="mdl-detail-head">
-              <h3>Modello per compito</h3>
-              <p className="mdl-detail-sub">
-                Il router sceglie automaticamente il modello migliore tra quelli idonei; puoi
-                forzarne uno.
-              </p>
-            </div>
-            {roles.length === 0 ? (
-              <p className="set-hint">Aggiungi un provider e aggiorna i suoi modelli.</p>
-            ) : (
-              roles.map((role) => {
-                const value = role.auto ? "auto" : `${role.binding_provider_id}::${role.binding_model}`;
-                return (
-                  <div className="mdl-row" key={role.key}>
-                    <div className="mdl-row-main">
-                      <div className="mdl-row-top">
-                        <strong>{role.label}</strong>
-                        <span className={`set-badge ${role.auto ? "muted" : "green"}`}>
-                          {role.auto ? "Auto" : "Manuale"}
-                        </span>
-                      </div>
-                      <p className="mdl-detail-sub">{role.description}</p>
-                    </div>
-                    <select
-                      className="set-input mdl-row-select"
-                      value={value}
-                      disabled={busy === `role:${role.key}`}
-                      onChange={(event) => changeRole(role.key, event.target.value)}
-                    >
-                      <option value="auto">
-                        Auto{role.resolved_model ? ` — ${role.resolved_model}` : ""}
-                      </option>
-                      {modelOptions}
-                    </select>
-                  </div>
-                );
-              })
-            )}
-          </>
-        )}
-
-        {/* ── Decisions ───────────────────────────────────────────── */}
-        {selected === "decisions" && (
-          <>
-            <div className="mdl-detail-head">
-              <h3>Decisioni di routing</h3>
-              <p className="mdl-detail-sub">
-                Perché il router ha scelto un modello per ogni task (ultime {decisions.length}).
-              </p>
-            </div>
-            {decisions.length === 0 ? (
-              <p className="set-hint">Nessuna decisione ancora. Esegui un task per popolarle.</p>
-            ) : (
-              decisions.map((d, i) => (
-                <div className="mdl-row" key={i}>
+    <div className="mdl-pane">
+      {/* ── routing → roles → model table ─────────────────────────── */}
+      {sub === "routing" && (
+        <>
+          <div className="set-section-label">Modello per compito</div>
+          <p className="mdl-detail-sub" style={{ paddingLeft: "var(--s3)" }}>
+            Il router sceglie automaticamente il modello migliore tra quelli idonei; puoi
+            forzarne uno.
+          </p>
+          {roles.length === 0 ? (
+            <p className="set-hint">Aggiungi un provider e aggiorna i suoi modelli.</p>
+          ) : (
+            roles.map((role) => {
+              const value = role.auto ? "auto" : `${role.binding_provider_id}::${role.binding_model}`;
+              return (
+                <div className="mdl-row" key={role.key}>
                   <div className="mdl-row-main">
                     <div className="mdl-row-top">
-                      <strong>{d.chosen_model}</strong>
-                      <span className={`set-badge ${d.stage === "semantic" ? "green" : "muted"}`}>
-                        {d.stage === "semantic"
-                          ? "semantico"
-                          : d.stage === "single_candidate"
-                            ? "unico"
-                            : d.stage === "heuristic_disabled"
-                              ? "euristico"
-                              : "fallback"}
+                      <strong>{role.label}</strong>
+                      <span className={`set-badge ${role.auto ? "muted" : "green"}`}>
+                        {role.auto ? "Auto" : "Manuale"}
                       </span>
-                      <span className="mdl-row-meta">{d.role} · {d.candidates.length} candidati</span>
                     </div>
-                    <p className="mdl-detail-sub">«{d.goal}»</p>
+                    <p className="mdl-detail-sub">{role.description}</p>
                   </div>
+                  <select
+                    className="set-input mdl-row-select"
+                    value={value}
+                    disabled={busy === `role:${role.key}`}
+                    onChange={(event) => changeRole(role.key, event.target.value)}
+                  >
+                    <option value="auto">
+                      Auto{role.resolved_model ? ` — ${role.resolved_model}` : ""}
+                    </option>
+                    {modelOptions}
+                  </select>
                 </div>
-              ))
-            )}
-          </>
-        )}
+              );
+            })
+          )}
+        </>
+      )}
 
-        {/* ── Add provider ────────────────────────────────────────── */}
-        {selected === "add" && (
-          <>
-            <div className="mdl-detail-head">
-              <h3>Aggiungi provider</h3>
-              <p className="mdl-detail-sub">
-                Qualsiasi endpoint OpenAI-compatibile, Anthropic o Ollama locale. La chiave è cifrata
-                nel secret store, mai mostrata.
-              </p>
-            </div>
-            <div className="mdl-field">
-              <label>Tipo</label>
-              <select
-                className="set-input"
-                value={presetId}
-                onChange={(event) => {
-                  const next = PROVIDER_PRESETS.find((p) => p.id === event.target.value);
-                  setPresetId(event.target.value);
-                  if (next && next.id !== "custom") {
-                    setBaseUrl(next.baseUrl);
-                    if (!label) setLabel(next.label);
-                  }
-                }}
-              >
-                {PROVIDER_PRESETS.map((p) => (
-                  <option key={p.id} value={p.id}>{p.label}</option>
-                ))}
-              </select>
-            </div>
-            <div className="mdl-field">
-              <label>Nome</label>
-              <input className="set-input" placeholder={preset.label} value={label} onChange={(e) => setLabel(e.target.value)} />
-            </div>
-            <div className="mdl-field">
-              <label>Endpoint (base URL)</label>
-              <input className="set-input" placeholder="https://api.openai.com/v1" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} />
-            </div>
-            <div className="mdl-field">
-              <label>API key (opzionale per endpoint locali)</label>
-              <input className="set-input" type="password" placeholder="sk-…" value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
-            </div>
-            <button
-              className="set-btn primary"
-              type="button"
-              style={{ alignSelf: "flex-start" }}
-              disabled={busy === "add" || !baseUrl.trim()}
-              onClick={() =>
-                run(
-                  "add",
-                  async () => {
-                    const result = await coreBridge.upsertProvider({
-                      label: (label || preset.label).trim(),
-                      kind: preset.kind,
-                      base_url: baseUrl.trim(),
-                      ...(apiKey.trim() ? { api_key: apiKey.trim() } : {}),
-                    });
-                    setApiKey("");
-                    const added = result.providers.find((p) => p.base_url === baseUrl.trim().replace(/\/$/, ""));
-                    if (added) {
-                      setSelected(added.id);
-                      try {
-                        return await coreBridge.refreshProviderModels(added.id);
-                      } catch {
-                        return result;
-                      }
-                    }
-                    return result;
-                  },
-                  "Provider aggiunto.",
-                )
-              }
-            >
-              {busy === "add" ? "Salvataggio…" : "Aggiungi provider"}
+      {/* ── decisions → routing decisions ─────────────────────────── */}
+      {sub === "decisions" && (
+        <>
+          <div className="set-section-label">Decisioni di routing</div>
+          <p className="mdl-detail-sub" style={{ paddingLeft: "var(--s3)" }}>
+            Quando arriva un compito, Homun stima complessità, lunghezza del contesto e
+            necessità di tool, poi sceglie il modello col miglior rapporto qualità/latenza.
+            Qui vedi perché il router ha scelto un modello per ogni task (ultime{" "}
+            {decisions.length}).
+          </p>
+          {decisions.length === 0 ? (
+            <p className="set-hint">Nessuna decisione ancora. Esegui un task per popolarle.</p>
+          ) : (
+            decisions.map((d, i) => (
+              <div className="mdl-row" key={i}>
+                <div className="mdl-row-main">
+                  <div className="mdl-row-top">
+                    <strong>{d.chosen_model}</strong>
+                    <span className={`set-badge ${d.stage === "semantic" ? "green" : "muted"}`}>
+                      {d.stage === "semantic"
+                        ? "semantico"
+                        : d.stage === "single_candidate"
+                          ? "unico"
+                          : d.stage === "heuristic_disabled"
+                            ? "euristico"
+                            : "fallback"}
+                    </span>
+                    <span className="mdl-row-meta">{d.role} · {d.candidates.length} candidati</span>
+                  </div>
+                  <p className="mdl-detail-sub">«{d.goal}»</p>
+                </div>
+              </div>
+            ))
+          )}
+        </>
+      )}
+
+      {/* ── providers → card grid (+ modal) ───────────────────────── */}
+      {sub === "providers" && (
+        <>
+          <div className="set-section-label">
+            Provider attivi <span style={{ textTransform: "none", letterSpacing: 0 }}>({providers.length})</span>
+          </div>
+          <div className="set-cards-grid cols-4">
+            {providers.map((provider) => {
+              const isActive = provider.id === activeId;
+              return (
+                <button
+                  key={provider.id}
+                  className={`set-prov ${isActive ? "active" : ""}`}
+                  type="button"
+                  onClick={() => openProvider(provider)}
+                >
+                  <div className="set-prov-top">
+                    <span className="set-prov-mark">{provider.label.slice(0, 1).toUpperCase()}</span>
+                    <span className="set-prov-name">{provider.label}</span>
+                    <span className={`set-prov-dot ${isActive ? "on" : ""}`} title={isActive ? "Attivo" : undefined} />
+                  </div>
+                  <div className="set-prov-meta">
+                    {provider.models.length > 0
+                      ? `${provider.models.length} modelli`
+                      : "nessun modello"}
+                    {" · "}
+                    {provider.kind}
+                  </div>
+                </button>
+              );
+            })}
+            <button className="set-add-card" type="button" onClick={openAddProvider}>
+              <Plus size={14} />
+              Aggiungi provider
             </button>
-          </>
-        )}
+          </div>
 
-        {/* ── Provider detail ─────────────────────────────────────── */}
-        {selectedProvider && (
-          <ProviderDetailView
-            key={selectedProvider.id}
-            provider={selectedProvider}
-            isActive={selectedProvider.id === activeId}
-            busy={busy}
-            editBaseUrl={editBaseUrl}
-            setEditBaseUrl={setEditBaseUrl}
-            editKey={editKey}
-            setEditKey={setEditKey}
-            showKey={showKey}
-            setShowKey={setShowKey}
-            contextWindow={model?.context_window ?? null}
-            onActivate={() => run(selectedProvider.id, () => coreBridge.activateProvider(selectedProvider.id))}
-            onRemove={() => {
-              const id = selectedProvider.id;
-              setSelected("roles");
-              void run(id, () => coreBridge.removeProvider(id));
-            }}
-            onRefreshModels={() =>
-              run(selectedProvider.id, () => coreBridge.refreshProviderModels(selectedProvider.id), "Catalogo aggiornato.")
-            }
-            onGenerateProfiles={() =>
-              run(selectedProvider.id, () => coreBridge.generateProviderProfiles(selectedProvider.id), "Profili generati.")
-            }
-            onSaveConnection={() =>
-              run(
-                selectedProvider.id,
-                () =>
-                  coreBridge.upsertProvider({
-                    id: selectedProvider.id,
-                    label: selectedProvider.label,
-                    kind: selectedProvider.kind,
-                    base_url: (editBaseUrl || selectedProvider.base_url).trim(),
-                    ...(editKey.trim() ? { api_key: editKey.trim() } : {}),
-                  }),
-                "Provider salvato.",
-              )
-            }
-            onSetModel={(modelId) =>
-              run(selectedProvider.id, () =>
-                coreBridge.upsertProvider({
-                  id: selectedProvider.id,
-                  label: selectedProvider.label,
-                  kind: selectedProvider.kind,
-                  base_url: selectedProvider.base_url,
-                  active_model: modelId,
-                }),
-              )
-            }
-            onSaveModel={(modelId, patch) =>
-              run(
-                selectedProvider.id,
-                () =>
-                  coreBridge.setModelProfile({
-                    provider_id: selectedProvider.id,
-                    model: modelId,
-                    ...patch,
-                  }),
-                "Modello aggiornato.",
-              )
-            }
-          />
-        )}
+          {modal && (
+            <div className="set-modal-overlay" role="dialog" aria-modal="true">
+              <div className="set-modal-scrim" onClick={closeModal} />
+              <div className="set-modal">
+                <button className="set-modal-close" type="button" aria-label="Chiudi" onClick={closeModal}>
+                  <X size={16} />
+                </button>
 
-        {note && <p className="set-hint" style={{ marginTop: "var(--s3)" }}>{note}</p>}
-      </section>
+                {/* Add a new provider. */}
+                {modal === "add" && (
+                  <>
+                    <div className="mdl-detail-head">
+                      <h3>Aggiungi provider</h3>
+                    </div>
+                    <p className="mdl-detail-sub">
+                      Qualsiasi endpoint OpenAI-compatibile, Anthropic o Ollama locale. La chiave è
+                      cifrata nel secret store, mai mostrata.
+                    </p>
+                    <div className="mdl-field">
+                      <label>Tipo</label>
+                      <select
+                        className="set-input"
+                        value={presetId}
+                        onChange={(event) => {
+                          const next = PROVIDER_PRESETS.find((p) => p.id === event.target.value);
+                          setPresetId(event.target.value);
+                          if (next && next.id !== "custom") {
+                            setBaseUrl(next.baseUrl);
+                            if (!label) setLabel(next.label);
+                          }
+                        }}
+                      >
+                        {PROVIDER_PRESETS.map((p) => (
+                          <option key={p.id} value={p.id}>{p.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="mdl-field">
+                      <label>Nome</label>
+                      <input className="set-input" placeholder={preset.label} value={label} onChange={(e) => setLabel(e.target.value)} />
+                    </div>
+                    <div className="mdl-field">
+                      <label>Endpoint (base URL)</label>
+                      <input className="set-input" placeholder="https://api.openai.com/v1" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} />
+                    </div>
+                    <div className="mdl-field">
+                      <label>API key (opzionale per endpoint locali)</label>
+                      <input className="set-input" type="password" placeholder="sk-…" value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
+                    </div>
+                    <button
+                      className="set-btn primary"
+                      type="button"
+                      style={{ alignSelf: "flex-start" }}
+                      disabled={busy === "add" || !baseUrl.trim()}
+                      onClick={() =>
+                        run(
+                          "add",
+                          async () => {
+                            const result = await coreBridge.upsertProvider({
+                              label: (label || preset.label).trim(),
+                              kind: preset.kind,
+                              base_url: baseUrl.trim(),
+                              ...(apiKey.trim() ? { api_key: apiKey.trim() } : {}),
+                            });
+                            setApiKey("");
+                            const added = result.providers.find((p) => p.base_url === baseUrl.trim().replace(/\/$/, ""));
+                            if (added) {
+                              setEditBaseUrl(added.base_url);
+                              setModal(added.id);
+                              try {
+                                return await coreBridge.refreshProviderModels(added.id);
+                              } catch {
+                                return result;
+                              }
+                            }
+                            return result;
+                          },
+                          "Provider aggiunto.",
+                        )
+                      }
+                    >
+                      {busy === "add" ? "Salvataggio…" : "Aggiungi provider"}
+                    </button>
+                  </>
+                )}
+
+                {/* Edit an existing provider (connection, active model, models list). */}
+                {modalProvider && (
+                  <ProviderDetailView
+                    key={modalProvider.id}
+                    provider={modalProvider}
+                    isActive={modalProvider.id === activeId}
+                    busy={busy}
+                    editBaseUrl={editBaseUrl}
+                    setEditBaseUrl={setEditBaseUrl}
+                    editKey={editKey}
+                    setEditKey={setEditKey}
+                    showKey={showKey}
+                    setShowKey={setShowKey}
+                    contextWindow={model?.context_window ?? null}
+                    onActivate={() => run(modalProvider.id, () => coreBridge.activateProvider(modalProvider.id))}
+                    onRemove={() => {
+                      const id = modalProvider.id;
+                      setModal(null);
+                      void run(id, () => coreBridge.removeProvider(id));
+                    }}
+                    onRefreshModels={() =>
+                      run(modalProvider.id, () => coreBridge.refreshProviderModels(modalProvider.id), "Catalogo aggiornato.")
+                    }
+                    onGenerateProfiles={() =>
+                      run(modalProvider.id, () => coreBridge.generateProviderProfiles(modalProvider.id), "Profili generati.")
+                    }
+                    onSaveConnection={() =>
+                      run(
+                        modalProvider.id,
+                        () =>
+                          coreBridge.upsertProvider({
+                            id: modalProvider.id,
+                            label: modalProvider.label,
+                            kind: modalProvider.kind,
+                            base_url: (editBaseUrl || modalProvider.base_url).trim(),
+                            ...(editKey.trim() ? { api_key: editKey.trim() } : {}),
+                          }),
+                        "Provider salvato.",
+                      )
+                    }
+                    onSetModel={(modelId) =>
+                      run(modalProvider.id, () =>
+                        coreBridge.upsertProvider({
+                          id: modalProvider.id,
+                          label: modalProvider.label,
+                          kind: modalProvider.kind,
+                          base_url: modalProvider.base_url,
+                          active_model: modelId,
+                        }),
+                      )
+                    }
+                    onSaveModel={(modelId, patch) =>
+                      run(
+                        modalProvider.id,
+                        () =>
+                          coreBridge.setModelProfile({
+                            provider_id: modalProvider.id,
+                            model: modelId,
+                            ...patch,
+                          }),
+                        "Modello aggiornato.",
+                      )
+                    }
+                  />
+                )}
+
+                {note && <p className="set-hint" style={{ marginTop: "var(--s3)" }}>{note}</p>}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+      {note && sub !== "providers" && (
+        <p className="set-hint" style={{ marginTop: "var(--s3)" }}>{note}</p>
+      )}
     </div>
   );
 }
