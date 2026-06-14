@@ -4379,6 +4379,35 @@ body.resizing-drawer {
   flex-wrap: wrap;
   gap: var(--s3);
 }
+/* Accent as labeled pills (design): colour chip + name + check. */
+.appearance-accents {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.appearance-accent {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  padding: 7px 12px 7px 9px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  color: var(--muted);
+}
+.appearance-accent:hover { border-color: var(--faint); }
+.appearance-accent.active { color: var(--text); }
+.appearance-accent.active .appearance-accent-name { font-weight: 600; }
+.appearance-accent-chip {
+  width: 18px;
+  height: 18px;
+  border-radius: 6px;
+  flex: none;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.06) inset;
+}
 .appearance-swatch {
   width: 34px;
   height: 34px;

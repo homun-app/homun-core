@@ -604,20 +604,24 @@ function AppearancePane() {
       <p className="set-hint">
         L'accento del brand è il teal. Puoi renderlo tuo — si applica subito a tutta l'app.
       </p>
-      <div className="appearance-swatches">
-        {ACCENT_PRESETS.map((preset) => (
-          <button
-            key={preset.hex}
-            type="button"
-            title={preset.name}
-            aria-label={preset.name}
-            className={`appearance-swatch ${norm === preset.hex.toLowerCase() ? "active" : ""}`}
-            style={{ background: preset.hex }}
-            onClick={() => pick(preset.hex)}
-          >
-            {norm === preset.hex.toLowerCase() && <Check size={15} color="#fff" />}
-          </button>
-        ))}
+      <div className="appearance-accents">
+        {ACCENT_PRESETS.map((preset) => {
+          const active = norm === preset.hex.toLowerCase();
+          return (
+            <button
+              key={preset.hex}
+              type="button"
+              title={preset.name}
+              aria-label={preset.name}
+              className={`appearance-accent ${active ? "active" : ""}`}
+              onClick={() => pick(preset.hex)}
+            >
+              <span className="appearance-accent-chip" style={{ background: preset.hex }} />
+              <span className="appearance-accent-name">{preset.name}</span>
+              {active && <Check size={14} style={{ color: preset.hex }} />}
+            </button>
+          );
+        })}
       </div>
       <div className="appearance-custom">
         <label className="appearance-color">
