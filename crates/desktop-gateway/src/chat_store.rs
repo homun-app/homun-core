@@ -60,6 +60,9 @@ pub struct SuggestionInput {
     pub rationale: String,
     /// Optional structured action the card proposes (JSON), gated by approval.
     pub proposed_action: Option<String>,
+    /// Optional quick-reply options (JSON array of strings) for a QUESTION card —
+    /// when engaged, they become clickable answers in the opened chat.
+    pub choices: Option<String>,
     pub dedup_key: String,
 }
 
@@ -73,6 +76,8 @@ pub struct SuggestionRow {
     pub body: String,
     pub rationale: String,
     pub proposed_action: Option<String>,
+    /// Quick-reply options (JSON array of strings) for a question card, or None.
+    pub choices: Option<String>,
     pub status: String,
     pub feedback: Option<String>,
     pub created_at: i64,
@@ -173,9 +178,10 @@ fn map_suggestion(row: &rusqlite::Row) -> rusqlite::Result<SuggestionRow> {
         body: row.get(4)?,
         rationale: row.get(5)?,
         proposed_action: row.get(6)?,
-        status: row.get(7)?,
-        feedback: row.get(8)?,
-        created_at: row.get(9)?,
+        choices: row.get(7)?,
+        status: row.get(8)?,
+        feedback: row.get(9)?,
+        created_at: row.get(10)?,
     })
 }
 
@@ -1314,6 +1320,7 @@ impl ChatStore {
                 body text not null default '',
                 rationale text not null default '',
                 proposed_action text,
+                choices text,
                 status text not null default 'pending',
                 feedback text,
                 feedback_note text,
@@ -1459,6 +1466,14 @@ impl ChatStore {
         if !self.column_exists("contacts", "birthday")? {
             self.conn
                 .execute("alter table contacts add column birthday text", [])?;
+        }
+        // Proactivity Fix 2: question cards can carry quick-reply options (JSON array)
+        // rendered as clickable answers when the card is engaged. Additive, guarded ALTER
+        // (on existing DBs the column lands physically last; harmless — every read names
+        // columns explicitly in the SELECT, so map_suggestion's index 7 stays correct).
+        if !self.column_exists("suggestions", "choices")? {
+            self.conn
+                .execute("alter table suggestions add column choices text", [])?;
         }
         Ok(())
     }
@@ -1621,6 +1636,25 @@ impl ChatStore {
         Ok(n > 0)
     }
 
+    /// (dedup_key, title) of recent cards in this scope, ANY status, newest first.
+    /// Feeds the FUZZY anti-re-propose check (Fix 3): the exact dedup_key misses
+    /// paraphrases — the supervisor's anchor varies across runs ("tappo" vs "tappo
+    /// moto") — so a card already accepted or dismissed must not come back reworded.
+    pub fn recent_suggestion_anchors(
+        &self,
+        scope: &str,
+        limit: usize,
+    ) -> rusqlite::Result<Vec<(String, String)>> {
+        let mut stmt = self.conn.prepare(
+            "select dedup_key, title from suggestions where scope = ?1
+               order by id desc limit ?2",
+        )?;
+        let rows = stmt.query_map(params![scope, limit as i64], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        rows.collect()
+    }
+
     /// Inserts a suggestion card (pending). Caller checks `suggestion_dedup_exists`
     /// first. Returns the new id.
     pub fn insert_suggestion(&self, s: &SuggestionInput) -> rusqlite::Result<i64> {
@@ -1630,8 +1664,8 @@ impl ChatStore {
             .unwrap_or(0);
         self.conn.execute(
             "insert into suggestions
-                (scope, kind, title, body, rationale, proposed_action, status, dedup_key, created_at, updated_at)
-             values (?1, ?2, ?3, ?4, ?5, ?6, 'pending', ?7, ?8, ?8)",
+                (scope, kind, title, body, rationale, proposed_action, choices, status, dedup_key, created_at, updated_at)
+             values (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'pending', ?8, ?9, ?9)",
             params![
                 s.scope,
                 s.kind,
@@ -1639,6 +1673,7 @@ impl ChatStore {
                 s.body,
                 s.rationale,
                 s.proposed_action,
+                s.choices,
                 s.dedup_key,
                 now,
             ],
@@ -1656,7 +1691,7 @@ impl ChatStore {
         let mut stmt;
         let rows = if let Some(scope) = scope {
             stmt = self.conn.prepare(
-                "select id, scope, kind, title, body, rationale, proposed_action, status, feedback, created_at
+                "select id, scope, kind, title, body, rationale, proposed_action, choices, status, feedback, created_at
                    from suggestions where status = 'pending' and scope = ?1
                    order by id desc limit ?2",
             )?;
@@ -1664,7 +1699,7 @@ impl ChatStore {
                 .collect::<rusqlite::Result<Vec<_>>>()?
         } else {
             stmt = self.conn.prepare(
-                "select id, scope, kind, title, body, rationale, proposed_action, status, feedback, created_at
+                "select id, scope, kind, title, body, rationale, proposed_action, choices, status, feedback, created_at
                    from suggestions where status = 'pending'
                    order by id desc limit ?1",
             )?;

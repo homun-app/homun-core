@@ -606,10 +606,23 @@ export default function App() {
     // so the conversation starts with the assistant asking (not a composer draft /
     // generic empty-state). The follow-up is grounded by the auto-injected memory.
     const question = (suggestion.body ?? "").trim() || suggestion.title;
+    // Fix 2: a question card may carry quick-reply options. We append a CHOICES marker
+    // to the seeded message — AssistantMessageBody renders it as clickable answers for
+    // persisted messages, and a click sends the pick as the user's reply. The marker's
+    // `question` is left empty so the prose above isn't duplicated inside the card.
+    const options = (suggestion.choices ?? []).filter((o) => o.trim().length > 0);
+    const seedText =
+      options.length > 0
+        ? `${question}\n\n‹‹CHOICES››${JSON.stringify({
+            question: "",
+            multi: false,
+            options,
+          })}‹‹/CHOICES››`
+        : question;
     try {
       await coreBridge.selectWorkspace(workspaceId);
       const created = mapCoreChatThread(await coreBridge.createChatThread(workspaceId));
-      const seeded = await coreBridge.seedAssistantMessage(created.threadId, question);
+      const seeded = await coreBridge.seedAssistantMessage(created.threadId, seedText);
       setChatThreads((current) => [
         created,
         ...current.filter((thread) => thread.threadId !== created.threadId),

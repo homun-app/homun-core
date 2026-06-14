@@ -1473,6 +1473,7 @@ export interface ProactivitySuggestion {
   body: string;
   rationale: string;
   proposed_action: string | null; // gated by approval, never auto-run
+  choices: string[] | null; // quick-reply options for a question card (Fix 2)
   status: string; // pending | accepted | dismissed | snoozed
   feedback: string | null; // liked | disliked
   created_at: number;
