@@ -296,9 +296,10 @@ body.resizing-drawer {
      The empty top strip is the window-drag handle (buttons are no-drag). */
   grid-template-rows: minmax(0, 1fr) auto;
   gap: 14px;
-  /* Top padding drops the first icon below the traffic lights; the empty top strip is
-     the window-drag handle (buttons are no-drag). */
-  padding: 40px 10px 12px;
+  /* Top padding drops the first icon CLEARLY below the traffic lights (lights end ~y30;
+     leave a comfortable gap, not tucked under them); the empty top strip is the
+     window-drag handle (buttons are no-drag). */
+  padding: 52px 10px 12px;
   -webkit-app-region: drag;
 }
 
@@ -422,9 +423,10 @@ body.resizing-drawer {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  /* Top padding clears the macOS traffic lights; the empty strip above the nav is the
-     window-drag handle (buttons/links/inputs are no-drag via the global rule). */
-  padding: 38px 12px 10px;
+  /* Top padding clears the macOS traffic lights with a comfortable gap (lights end
+     ~y30) so the first row isn't tucked against them; the empty strip above the nav is
+     the window-drag handle (buttons/links/inputs are no-drag via the global rule). */
+  padding: 52px 12px 10px;
   overflow: hidden;
   position: relative;
   -webkit-app-region: drag;
@@ -7608,9 +7610,10 @@ body.resizing-drawer {
 /* Drawer / left nav */
 .settings-drawer.set-nav {
   width: 100%;
-  /* Top padding clears the macOS traffic lights so "Torna all'app" isn't under them;
-     the empty strip above is part of the window-drag handle. */
-  padding: 38px var(--s3) var(--s4);
+  /* Top padding clears the macOS traffic lights with a comfortable gap so "Torna
+     all'app" isn't tucked against them (same inset as rail/nav-drawer); the empty
+     strip above is part of the window-drag handle. */
+  padding: 52px var(--s3) var(--s4);
   display: flex;
   flex-direction: column;
   gap: 2px;
