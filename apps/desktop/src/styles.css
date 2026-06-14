@@ -9031,6 +9031,193 @@ body.resizing-drawer {
 .contacts-modal p { margin: 0 0 12px; font-size: 13.5px; color: var(--text); line-height: 1.5; }
 .contacts-modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
 
+/* ── Contatti redesign (design handoff: full-width toolbar + 2-up card grid +
+      wide detail sheet). Builds on the shared .set-* design-system classes; only
+      contact-specific layout lives here. ─────────────────────────────────────── */
+
+/* Toolbar search: turn the shared .set-search box into an icon + borderless input
+   row (the design's pill with the magnifier). */
+.contacts-search {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex: 1;
+  max-width: 380px;
+  margin-bottom: 0;
+  padding: 8px 12px;
+  border-color: var(--line-strong);
+  color: var(--faint);
+}
+.contacts-search:focus-within { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-soft); }
+.contacts-search > svg { flex: none; }
+.contacts-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: none;
+  outline: none;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text);
+}
+.contacts-search input::placeholder { color: var(--faint); }
+
+/* Type filter sits on the shared .set-select wrapper; keep it intrinsic-width. */
+.contacts-toolbar .contacts-type-select { flex: none; width: auto; }
+.contacts-toolbar .contacts-type-select select { flex: none; }
+
+/* Eyebrow count above the grid — neutralize .set-section-label's first-child top
+   spacing so it hugs the toolbar/banner above it. */
+.contacts-count { margin-top: 4px; }
+
+/* Card grid + A–Z sections (full-width, the list IS the page). */
+.contacts-grid-wrap { display: flex; gap: 4px; min-height: 0; }
+.contacts-grid-scroll { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 14px; }
+.contacts-letter-group { display: flex; flex-direction: column; gap: 8px; }
+
+/* Active (currently-open) card gets a brand ring without moving anything. */
+.set-contact.active { border-color: var(--brand); box-shadow: 0 0 0 1px var(--brand) inset; }
+.set-contact.drag-over { outline: 2px dashed var(--brand); outline-offset: -2px; }
+
+/* ── Detail sheet (the big .set-modal.wide) ─────────────────────────────────── */
+.contacts-sheet { display: flex; flex-direction: column; }
+.contacts-sheet-head { flex: none; }
+.contacts-sheet-body { flex: 1; }
+.contacts-sheet-delete { margin-left: auto; }
+.contacts-sheet-head .set-modal-close { margin-left: 0; }
+
+/* Big avatar in the sheet header (reuses .set-contact-avatar, scaled up). */
+.set-contact-avatar.lg {
+  width: 38px;
+  height: 38px;
+  border-radius: 11px;
+  font-size: 15px;
+  font-weight: 700;
+}
+.set-contact-avatar.lg.is-me {
+  background: var(--brand-soft);
+  border-color: var(--brand-soft);
+  color: var(--brand-strong);
+}
+
+/* Two-up field grid inside the sheet (anagrafica, persona, perimetro). */
+.contacts-sheet-body .contacts-fields { margin-top: 0; gap: 16px 18px; }
+.contacts-field { display: flex; flex-direction: column; gap: 0; }
+.contacts-field .set-modal-label { margin-bottom: 6px; }
+.contacts-field-wide { grid-column: 1 / -1; }
+
+/* Section rhythm: a hairline rule + bold title between blocks, per the design. */
+.contacts-sheet-body .contacts-section { margin-top: 0; gap: 0; }
+.contacts-sheet-body .contacts-section + .contacts-section { margin-top: 22px; }
+.contacts-section-rule { padding-top: 18px; border-top: 1px solid var(--line); }
+.contacts-section-title { font-size: 14px; font-weight: 700; color: var(--text); margin-bottom: 14px; }
+.contacts-section-note { font-weight: 400; color: var(--faint); font-size: 12.5px; }
+.contacts-section-rule .contacts-section-head { margin-bottom: 12px; }
+.contacts-section-rule .contacts-section-head .contacts-section-title { margin-bottom: 0; }
+.contacts-section .set-modal-label { margin-bottom: 8px; }
+
+/* Channel chips: mono pill with a leading status dot (.set-tag + .set-dot). */
+.contacts-channels { gap: 8px; }
+.contacts-channel-tag { font-family: var(--font-mono); font-size: 11.5px; }
+
+/* Perimeter checkboxes: custom square box that fills brand when checked. */
+.contacts-checks { display: flex; flex-wrap: wrap; gap: 12px 28px; }
+.contacts-check { position: relative; cursor: pointer; user-select: none; }
+.contacts-check input[type="checkbox"] {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.contacts-check-box {
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  color: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.contacts-check input:checked + .contacts-check-box {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: #fff;
+}
+.contacts-check input:focus-visible + .contacts-check-box { box-shadow: 0 0 0 3px var(--brand-soft); }
+
+/* Relationships add-row + the standalone select used in it / the merge row. */
+.contacts-relation-select { min-width: 0; flex: 1; }
+.contacts-rel-empty { padding-left: 0; }
+
+/* "Cosa so" fact rows on the shared .set-line-list / .set-line-item. */
+.contacts-fact { align-items: center; gap: 11px; font-size: 13px; }
+.contacts-fact-tag {
+  flex: none;
+  text-transform: uppercase;
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  padding: 2px 6px;
+}
+.contacts-fact-text { flex: 1; color: var(--text); }
+.contacts-fact-date { flex: none; white-space: nowrap; }
+.contacts-fact-forget {
+  flex: none;
+  opacity: 0;
+  border: 0;
+  background: none;
+  color: var(--faint);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  padding: 2px;
+  border-radius: 5px;
+  transition: opacity 0.12s, color 0.12s, background 0.12s;
+}
+.contacts-fact:hover .contacts-fact-forget { opacity: 1; }
+.contacts-fact-forget:hover { color: var(--danger); background: var(--surface-muted); }
+
+/* Merge row (select + button) + its hint. */
+.contacts-merge-row { display: flex; gap: 10px; align-items: center; }
+.contacts-merge-select { flex: 1; min-width: 0; }
+.contacts-merge-hint { padding-left: 0; margin-bottom: 0; }
+
+/* Merge confirm dialog (small .set-modal). */
+.contacts-merge-modal { width: 440px; }
+.contacts-merge-title { margin: 0 0 8px; font-size: 16px; font-weight: 700; }
+.contacts-merge-text { margin: 0 0 14px; font-size: 13.5px; color: var(--text); line-height: 1.55; }
+.contacts-merge-modal .contacts-modal-actions { margin-top: 4px; }
+
+/* Profiles modal: 4-col row of inputs + delete. */
+.contacts-profiles-modal { width: 720px; max-width: 100%; }
+.contacts-profiles-modal .contacts-profile-row:first-of-type { margin-top: 0; }
+.contacts-profile-del { padding: 8px 10px; }
+.contacts-profiles-modal .contacts-modal-actions { margin-top: 16px; justify-content: space-between; }
+
+/* The shared .set-select wraps a native <select>; flatten the control so the
+   wrapper provides the border/background and our chevron sits at the end. */
+.set-select select {
+  appearance: none;
+  -webkit-appearance: none;
+  border: 0;
+  background: none;
+  outline: none;
+  font: inherit;
+  font-size: 13px;
+  color: inherit;
+  flex: 1;
+  min-width: 0;
+  cursor: pointer;
+  padding: 0;
+}
+.set-select { width: 100%; justify-content: space-between; }
+.set-select:focus-within { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-soft); }
+.set-select .chev { pointer-events: none; }
+.set-select select:disabled { cursor: default; opacity: 0.6; }
+
 /* Channel origin badge on a chat thread in the sidebar (M8). */
 
 /* ── Automazioni (vista lista + editor Quando→Allora) ───────────────────── */
