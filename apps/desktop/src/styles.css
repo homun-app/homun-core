@@ -58,7 +58,10 @@
   --font-sans: "Hanken Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
   --font-serif: var(--font-sans);
-  --window-drag-height: 42px;
+  /* Header aligned to the very top (like Linear/Cursor): no reserved drag band —
+     content starts at y=0 and the header rows themselves are the drag region.
+     0 also collapses every `calc(100vh - var)` to full height automatically. */
+  --window-drag-height: 0px;
   font-family: var(--font-sans);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -190,6 +193,8 @@ small {
   min-height: 0;
   position: relative;
   display: grid;
+  /* Narrow collapsed rail (icons only). The expand toggle lives on the CONTENT side
+     (.sidebar-expand), so the rail stays slim instead of widening to host it. */
   grid-template-columns: 64px minmax(0, 1fr);
   padding-top: var(--window-drag-height);
   background: var(--bg);
@@ -225,6 +230,19 @@ small {
 .app-shell [role="button"] {
   -webkit-app-region: no-drag;
 }
+
+/* Containers we mark `drag` (rail, drawer, header) make their non-button content
+   draggable too — exempt the scrollable lists and clickable rows so a click/scroll
+   there never moves the window. */
+.drawer-scroll,
+.drawer-chats,
+.drawer-link,
+.drawer-nav-item,
+.rail-nav,
+.task-title-area {
+  -webkit-app-region: no-drag;
+}
+
 
 .app-shell.drawer-open {
   grid-template-columns: var(--drawer-width, 292px) minmax(0, 1fr);
@@ -267,12 +285,17 @@ body.resizing-drawer {
 .navigation-rail {
   height: calc(100vh - var(--window-drag-height));
   min-height: 0;
-  border-right: 1px solid var(--line);
-  background: #f7f7f8;
+  /* Collapsed rail shares the content background and drops its right border, so it
+     blends with the chat — the traffic lights (which spill a few px past the slim
+     64px column) sit on one uniform surface instead of straddling a visible seam. */
+  background: var(--bg);
   display: grid;
-  grid-template-rows: 44px minmax(0, 1fr) auto;
+  /* Nav + bottom actions; top padding drops the first icon below the traffic lights.
+     The empty top strip is the window-drag handle (buttons are no-drag). */
+  grid-template-rows: minmax(0, 1fr) auto;
   gap: 14px;
-  padding: 12px 10px;
+  padding: 40px 10px 12px;
+  -webkit-app-region: drag;
 }
 
 .window-controls {
@@ -327,11 +350,29 @@ body.resizing-drawer {
   color: var(--text);
 }
 
-.rail-logo {
-  width: 44px;
-  height: 44px;
-  margin-inline: auto;
+/* Expand toggle shown when the sidebar is collapsed: lives on the CONTENT side, just
+   past the narrow rail and the traffic lights, on the lights' row. Keeps the collapsed
+   column slim. */
+.sidebar-expand {
+  position: absolute;
+  top: 8px;
+  left: 76px;
+  z-index: 85;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: none;
   background: transparent;
+  color: var(--muted);
+  border-radius: var(--radius-control);
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+.sidebar-expand:hover {
+  background: var(--surface-hover);
+  color: var(--text);
 }
 
 .rail-nav,
@@ -380,13 +421,16 @@ body.resizing-drawer {
   padding: 38px 12px 10px;
   overflow: hidden;
   position: relative;
+  /* The empty top strip (above the nav) is the window-drag handle; the buttons,
+     links and inputs inside are no-drag (the global rule below). */
+  -webkit-app-region: drag;
 }
 
 /* Collapse control: top-right, on the window-buttons line (out of the nav flow). */
 .drawer-collapse {
   position: absolute;
-  top: 7px;
-  right: 10px;
+  top: 8px;
+  right: 16px;
   z-index: 5;
   display: inline-flex;
   align-items: center;
@@ -1262,6 +1306,8 @@ body.resizing-drawer {
   /* Align the title row with the centered message column (same 760 column). */
   width: min(100%, 760px);
   margin: 0 auto;
+  /* The header row is a window-drag handle; the title button + actions are no-drag. */
+  -webkit-app-region: drag;
 }
 
 .task-title-area,
