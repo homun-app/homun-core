@@ -4373,7 +4373,6 @@ body.resizing-drawer {
   display: flex;
   flex-direction: column;
   gap: var(--s4);
-  max-width: 520px;
 }
 .appearance-swatches {
   display: flex;
@@ -4409,7 +4408,7 @@ body.resizing-drawer {
 }
 .appearance-themes {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: var(--s3);
 }
 .appearance-theme-card {
