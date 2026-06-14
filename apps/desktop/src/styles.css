@@ -7840,7 +7840,7 @@ body.resizing-drawer {
 /* Row group (identity, key/value with action) */
 .set-rows {
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: var(--radius-card);
   background: var(--surface);
   overflow: hidden;
 }
@@ -7906,7 +7906,7 @@ body.resizing-drawer {
   cursor: pointer;
   transition: background 0.15s ease;
 }
-.set-toggle.on { background: var(--green); }
+.set-toggle.on { background: var(--brand); }
 .set-toggle::after {
   content: "";
   position: absolute;
