@@ -4463,6 +4463,22 @@ body.resizing-drawer {
   opacity: 0;
   cursor: pointer;
 }
+/* "Aggiungi" confirm — appears only while a colour is staged in the picker. */
+.appearance-accent-confirm {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--brand);
+  border-radius: var(--radius-control);
+  background: var(--brand-soft);
+  color: var(--brand-strong);
+  padding: 7px 12px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.appearance-accent-confirm:hover { background: var(--brand); color: #fff; }
 .appearance-swatch {
   width: 34px;
   height: 34px;
