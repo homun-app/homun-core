@@ -17,6 +17,7 @@ import { coreBridge } from "../lib/coreBridge";
 import type {
   AutomationCreateInput,
   AutomationTriggerJson,
+  CoreTaskItem,
   EventSources,
   ManagedAutomation,
 } from "../lib/coreBridge";
@@ -74,6 +75,26 @@ export function AutomationsView({
       void coreBridge.automationEventSources().then(setEventSources);
     }
   }, [composing, eventSources.channels.length, eventSources.connectors.length]);
+
+  // Live queue of scheduled runs (proactive_prompt): includes chat-created
+  // reminders ("ricordami…") that have no Automazione rule behind them and would
+  // otherwise be invisible/undeletable. Listed here so there's one place to cancel any.
+  const [scheduled, setScheduled] = useState<CoreTaskItem[]>([]);
+  const reloadScheduled = () => {
+    void coreBridge.taskQueue().then((q) => {
+      setScheduled(
+        [...(q.queued ?? []), ...(q.active ?? [])].filter(
+          (t) => t.kind === "proactive_prompt",
+        ),
+      );
+    });
+  };
+  useEffect(() => {
+    reloadScheduled();
+  }, []);
+  const cancelScheduled = (taskId: string) => {
+    void coreBridge.cancelTask(taskId).then(() => reloadScheduled());
+  };
 
   const active = automations.filter((a) => a.enabled).length;
 
@@ -561,6 +582,41 @@ export function AutomationsView({
           </article>
         ))}
       </div>
+
+      {scheduled.length > 0 && (
+        <div className="auto-list" aria-label="Task pianificati">
+          <div className="auto-section-label" style={{ marginTop: 4 }}>
+            Task pianificati ({scheduled.length})
+          </div>
+          <p className="auto-empty" style={{ marginTop: 0 }}>
+            Esecuzioni in coda, inclusi i promemoria creati da chat. Cancellane uno
+            qui se non lo vuoi più.
+          </p>
+          {scheduled.map((t) => (
+            <article className="auto-card" key={t.task_id}>
+              <div className="auto-card-main">
+                <div className="auto-card-head">
+                  <span className="auto-trigger-chip">
+                    <Clock3 size={13} aria-hidden />
+                    {t.status === "active" ? "in corso" : "in coda"}
+                  </span>
+                </div>
+                <p className="auto-card-prompt">{t.goal}</p>
+              </div>
+              <div className="auto-card-actions">
+                <button
+                  className="auto-icon danger"
+                  title="Elimina"
+                  aria-label="Elimina task pianificato"
+                  onClick={() => cancelScheduled(t.task_id)}
+                >
+                  <Trash2 size={15} aria-hidden />
+                </button>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
     </section>
   );
 }
