@@ -425,9 +425,6 @@ function fallbackTaskDetail(task: TaskItem): TaskDetailItem {
 export default function App() {
   const [activeView, setActiveView] = useState<ViewId>("chat");
   const [previousView, setPreviousView] = useState<ViewId>("chat");
-  // Seed text for the chat composer, set when a proactivity card is engaged so the
-  // new chat opens pre-filled with the card's context (the nonce re-applies it).
-  const [chatSeed, setChatSeed] = useState<{ text: string; nonce: number } | null>(null);
   // Addon/plugin enabled-state (ADR 0011 §10-A): drives which registry plugins
   // contribute a nav entry + panel. Default-on until the backend answers.
   const [pluginStates, setPluginStates] = useState<PluginState[]>([]);
@@ -605,24 +602,24 @@ export default function App() {
   async function handleOpenSuggestion(suggestion: ProactivitySuggestion) {
     const workspaceId =
       suggestion.scope === "__personal__" ? "local-workspace" : suggestion.scope;
-    const seedText = suggestion.proposed_action
-      ? suggestion.proposed_action
-      : `${suggestion.title}\n\n${suggestion.body}`;
+    // Open the chat with Homun's question already posted as an assistant message,
+    // so the conversation starts with the assistant asking (not a composer draft /
+    // generic empty-state). The follow-up is grounded by the auto-injected memory.
+    const question = (suggestion.body ?? "").trim() || suggestion.title;
     try {
       await coreBridge.selectWorkspace(workspaceId);
       const created = mapCoreChatThread(await coreBridge.createChatThread(workspaceId));
-      const messages = await coreBridge.chatMessages(created.threadId);
+      const seeded = await coreBridge.seedAssistantMessage(created.threadId, question);
       setChatThreads((current) => [
         created,
         ...current.filter((thread) => thread.threadId !== created.threadId),
       ]);
       setThreadMessages((current) => ({
         ...current,
-        [created.threadId]: messages.messages.map(mapCoreChatMessage),
+        [created.threadId]: seeded.messages.map(mapCoreChatMessage),
       }));
       setActiveThreadId(created.threadId);
       setSelectedTaskId(created.taskId);
-      setChatSeed({ text: seedText, nonce: Date.now() });
       setActiveView("chat");
     } catch (error) {
       console.warn("open_suggestion unavailable", error);
@@ -1083,7 +1080,6 @@ export default function App() {
             onRejectApproval={handleRejectApproval}
             onRuntimeChanged={() => refreshRuntimeReadModels(activeThread.taskId)}
             onThreadChanged={() => refreshChatReadModels(activeThread.threadId)}
-            seed={chatSeed}
           />
         )}
         {activeView === "tasks" && (
