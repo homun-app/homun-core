@@ -3108,9 +3108,9 @@ function MarketplaceView({
             <Download size={18} />
           </span>
           <div className="conn-detail-titletext">
-            <h3 className="mdl-detail-title">Catalogo skill (OpenClaw)</h3>
+            <h3 className="mdl-detail-title">Catalogo skill</h3>
             <p className="mdl-detail-sub">
-              {data ? `${data.total} skill nel registro.` : "Sfoglia e installa dal registro OpenClaw."}{" "}
+              {data ? `${data.total} skill nel registro.` : "Sfoglia e installa dal registro."}{" "}
               Sono codice: installa solo ciò di cui ti fidi.
             </p>
           </div>

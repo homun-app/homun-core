@@ -8069,6 +8069,9 @@ body.resizing-drawer {
   align-items: center;
   flex-wrap: wrap;
   gap: var(--s3);
+  /* Air between the section head (title + subtitle) and the content below it
+     — search box, chips, grids, etc. */
+  margin-bottom: var(--s4);
 }
 .mdl-detail-head h3 { font-size: 18px; font-weight: 680; margin: 0; }
 .mdl-detail-actions { display: flex; align-items: center; gap: var(--s2); margin-left: auto; }
@@ -8251,9 +8254,12 @@ body.resizing-drawer {
   color: var(--muted);
 }
 .conn-search:focus-within { border-color: var(--blue); box-shadow: 0 0 0 3px var(--blue-soft); }
+/* Breathing room below the search before the filter chips / results that follow
+   it (applies wherever .conn-search is used: catalogo skill, Composio toolkit). */
+.conn-search { margin-bottom: var(--s5); }
 .conn-search-input { flex: 1; border: 0; background: transparent; font: inherit; font-size: 13.5px; color: var(--text); outline: none; }
 
-.conn-kit-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s2); }
+.conn-kit-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s3); }
 .conn-kit {
   display: flex;
   align-items: center;
@@ -8550,7 +8556,7 @@ body.resizing-drawer {
 .cmp-allowed-row .mdl-icon-btn { padding: 6px 8px; }
 
 /* Composio integrations — category chips + logo-card grid + connect modal */
-.cmp-cats { display: flex; flex-wrap: wrap; gap: 6px; }
+.cmp-cats { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: var(--s5); }
 .cmp-cat {
   border: 1px solid var(--line);
   background: var(--surface);
