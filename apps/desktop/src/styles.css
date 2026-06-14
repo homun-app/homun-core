@@ -7750,24 +7750,29 @@ body.resizing-drawer {
   margin: 0 auto;
 }
 .set-title {
-  font-size: 18px;
-  font-weight: 600;
+  font-size: 21px;
+  font-weight: 700;
   letter-spacing: -0.01em;
   margin-bottom: var(--s5);
   /* Cursor: title/label indented ~12px so they nearly line up with the card CONTENT
      (16px padding); the card border itself pokes out to the left. */
   padding-left: var(--s3);
 }
-.set-section-label {
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0;
-  text-transform: none;
-  color: var(--muted);
-  margin: var(--s6) 0 var(--s2);
+/* Eyebrow label (design): JetBrains Mono, uppercase, faint — the single typographic
+   motif that unifies every Settings section. */
+.set-section-label,
+.appearance-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--faint);
+  margin: var(--s6) 0 var(--s3);
   padding-left: var(--s3);
 }
-.set-section-label:first-of-type { margin-top: 0; }
+.set-section-label:first-of-type,
+.appearance-eyebrow:first-of-type { margin-top: 0; }
 
 /* Profile header */
 .set-profile {
