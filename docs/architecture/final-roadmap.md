@@ -145,7 +145,7 @@ Deliverable:
   - thread e messaggi via HTTP;
   - `POST /messages/stream` con NDJSON/SSE;
   - cancel per `request_id`;
-  - metriche Gemma preservate;
+  - metriche del modello attivo preservate;
   - nessun raw payload in read model UI.
 - composer avanzato:
   - send;
@@ -721,7 +721,7 @@ Test minimi:
 - upgrade schema;
 - cancellazione dati;
 - task recovery;
-- runtime Gemma health;
+- inferenza/provider health (Ollama/OpenAI-compat/Anthropic);
 - browser sidecar health;
 - workflow e2e: prompt -> piano -> task -> tool -> Local Computer -> output.
 
