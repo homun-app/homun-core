@@ -368,14 +368,14 @@ mod tests {
         assert!(
             response
                 .runtime_prompt
-                .contains("Utente: dimmi una barzelletta")
+                .contains("User: dimmi una barzelletta")
         );
         assert!(
             response
                 .runtime_prompt
-                .contains("Assistente: Perche' gli scienziati")
+                .contains("Assistant: Perche' gli scienziati")
         );
-        assert!(response.runtime_prompt.contains("Utente: dimmene un'altra"));
+        assert!(response.runtime_prompt.contains("User: dimmene un'altra"));
     }
 
     #[test]
@@ -451,7 +451,7 @@ mod tests {
 
         assert!(response.compression.compressed);
         assert!(response.runtime_prompt.contains("Earlier context"));
-        assert!(response.runtime_prompt.contains("Utente: continua"));
+        assert!(response.runtime_prompt.contains("User: continua"));
         assert!(response.compression.output_chars <= 500);
     }
 

@@ -589,6 +589,25 @@ async function electronSetTimezone(timezone: string | null): Promise<TimezoneInf
   return gatewayPostJson<TimezoneInfo>("/api/prefs/timezone", { timezone });
 }
 
+export interface LanguageInfo {
+  /** User's explicit ISO-639-1 choice, or null when following the default ("en"). */
+  selected: string | null;
+  /** The code actually in effect (choice or default "en"). */
+  effective: string;
+  /** Human-readable name for the effective language. */
+  effective_name: string;
+  /** All supported languages as [code, native name] pairs for the picker. */
+  supported: Array<[string, string]>;
+}
+
+async function electronLanguage(): Promise<LanguageInfo> {
+  return gatewayGetJson<LanguageInfo>("/api/prefs/language");
+}
+
+async function electronSetLanguage(language: string | null): Promise<LanguageInfo> {
+  return gatewayPostJson<LanguageInfo>("/api/prefs/language", { language });
+}
+
 export interface ApprovalRouting {
   /** "in_app" | "telegram" | "whatsapp". */
   channel: string;
@@ -1737,6 +1756,8 @@ export const coreBridge = {
   setRuntimeModel: (model: string) => electronSetRuntimeModel(model),
   timezone: () => electronTimezone(),
   setTimezone: (timezone: string | null) => electronSetTimezone(timezone),
+  language: () => electronLanguage(),
+  setLanguage: (language: string | null) => electronSetLanguage(language),
   approvalRouting: () => electronApprovalRouting(),
   setApprovalRouting: (channel: string, target: string | null) =>
     electronSetApprovalRouting(channel, target),

@@ -27,6 +27,7 @@ import {
   X,
 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { pluginRegistry } from "../plugins/registry";
 import type { PluginState } from "../lib/coreBridge";
 import { ContactsView } from "./ContactsView";
@@ -47,6 +48,7 @@ import {
   type CoreCapabilitySnapshot,
   type CoreChannelSettings,
   type CoreTelegramStatus,
+  type LanguageInfo,
   type LlmConcurrencyView,
   type ProviderModelView,
   type ProviderView,
@@ -339,6 +341,70 @@ function TimezoneRow() {
   );
 }
 
+/* ------------------------------------------------------------ language row */
+
+function LanguageRow() {
+  const { t, i18n: i18nInstance } = useTranslation();
+  const [info, setInfo] = useState<LanguageInfo | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    void coreBridge
+      .language()
+      .then(setInfo)
+      .catch(() => setInfo(null));
+  }, []);
+
+  const change = async (value: string) => {
+    setBusy(true);
+    try {
+      const next = await coreBridge.setLanguage(value === "" ? null : value);
+      setInfo(next);
+      // Switch BOTH the UI i18n AND the persisted localStorage key so the
+      // choice survives reloads and applies on next launch.
+      i18nInstance.changeLanguage(next.effective);
+      try {
+        window.localStorage.setItem("lfpa.settings.language", next.effective);
+      } catch {
+        /* localStorage unavailable */
+      }
+      void t; // keep t referenced for reactivity on language change
+    } catch {
+      /* keep prior */
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="set-trow">
+      <div>
+        <div className="tt">{t("settings.language")}</div>
+        <div className="td">
+          {info
+            ? `${t("common.done")}: ${info.effective_name} (${info.effective})`
+            : t("common.loading")}
+        </div>
+      </div>
+      <select
+        className="set-input set-row-input"
+        disabled={busy}
+        value={info?.selected ?? ""}
+        onChange={(event) => void change(event.target.value)}
+      >
+        <option value="">
+          {t("settings.automatic")} ({info ? `${info.effective} default` : "en"})
+        </option>
+        {info?.supported.map(([code, name]) => (
+          <option key={code} value={code}>
+            {name}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
 /* --------------------------------------------------------- approval routing */
 
 function ApprovalRoutingRow() {
@@ -547,6 +613,14 @@ function AccountPane({
       <p className="set-hint">
         Il fuso decide come l'assistente interpreta "oggi", "domani" e gli orari — e viene
         applicato anche al browser contenuto, così le ricerche con date prendono il giorno giusto.
+      </p>
+
+      <div className="set-section-label">Lingua</div>
+      <div className="set-rows">
+        <LanguageRow />
+      </div>
+      <p className="set-hint">
+        La lingua in cui l'assistente risponde e parla. L'interfaccia segue la stessa scelta.
       </p>
 
       <p className="set-hint">Tutto resta sul tuo dispositivo: memoria, task e audit non lasciano il computer.</p>
