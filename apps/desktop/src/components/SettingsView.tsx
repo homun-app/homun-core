@@ -2,6 +2,8 @@ import {
   AlertTriangle,
   Boxes,
   Check,
+  ChevronLeft,
+  ChevronRight,
   Code2,
   Copy,
   Cpu,
@@ -2835,6 +2837,8 @@ function McpCatalogCard({
 function SkillsPane() {
   const [resp, setResp] = useState<SkillsResponse | null>(null);
   const [tab, setTab] = useState<"attive" | "catalogo">("attive");
+  // Which group is open inside "Skill attive" ("" = the two group cards).
+  const [group, setGroup] = useState<"" | "personali" | "homuncoder">("");
   // The skill whose detail modal is open (null = no modal).
   const [selected, setSelected] = useState<string | null>(null);
   const [detail, setDetail] = useState<SkillDetail | null>(null);
@@ -2908,6 +2912,7 @@ function SkillsPane() {
   };
 
   const hcAllOn = homuncoderSkills.length > 0 && homuncoderSkills.every((s) => s.enabled);
+  const groupSkills = group === "homuncoder" ? homuncoderSkills : personalSkills;
   const renderSkillCard = (s: (typeof skills)[number]) => (
     <div key={s.id} className="skl-card">
       <button type="button" className="skl-card-body" onClick={() => setSelected(s.id)}>
@@ -2940,38 +2945,53 @@ function SkillsPane() {
       {tab === "attive" &&
         (skills.length === 0 ? (
           <SkillsEmpty dir={resp?.dir} onBrowse={() => setTab("catalogo")} />
-        ) : (
-          <div className="skl-groups">
-            {/* Personal skills — always shown inline, no drill-in. */}
-            <section className="skl-group-block">
-              <div className="set-section-label skl-group-label">
-                <Sparkles size={12} />
-                <span>Skill personali</span>
-                <span className="skl-group-count">{personalSkills.length}</span>
+        ) : group === "" ? (
+          <div className="set-cards-grid cols-2">
+            <button type="button" className="skl-group-card" onClick={() => setGroup("personali")}>
+              <div className="skl-group-head">
+                <span className="skl-group-icon brand">
+                  <Sparkles size={17} />
+                </span>
+                <span className="skl-group-name">Skill personali</span>
+                <ChevronRight size={16} className="skl-group-chev" />
               </div>
-              {personalSkills.length > 0 ? (
-                <div className="set-cards-grid cols-2">{personalSkills.map(renderSkillCard)}</div>
-              ) : (
-                <p className="set-hint skl-group-empty">Nessuna skill personale.</p>
-              )}
-            </section>
-
-            {/* HomunCoder coding pack — shown inline with a group-level switch. */}
+              <div className="skl-group-meta">
+                {personalSkills.length} skill · tue, attive sempre
+              </div>
+            </button>
             {homuncoderSkills.length > 0 && (
-              <section className="skl-group-block">
-                <div className="set-section-label skl-group-label">
-                  <Boxes size={12} />
-                  <span>HomunCoder</span>
-                  <span className="skl-group-count">{homuncoderSkills.length}</span>
-                  <span className="skl-group-label-meta">pacchetto coding</span>
-                  <span className="skl-group-label-switch" title="Abilita/disabilita tutto il gruppo">
-                    <Toggle on={hcAllOn} onChange={(v) => void toggleGroup(v)} />
+              <button
+                type="button"
+                className="skl-group-card"
+                onClick={() => setGroup("homuncoder")}
+              >
+                <div className="skl-group-head">
+                  <span className="skl-group-icon">
+                    <Boxes size={17} />
                   </span>
+                  <span className="skl-group-name">HomunCoder</span>
+                  <ChevronRight size={16} className="skl-group-chev" />
                 </div>
-                <div className="set-cards-grid cols-2">{homuncoderSkills.map(renderSkillCard)}</div>
-              </section>
+                <div className="skl-group-meta">
+                  {homuncoderSkills.length} skill · pacchetto coding
+                </div>
+              </button>
             )}
           </div>
+        ) : (
+          <>
+            <button type="button" className="skl-back" onClick={() => setGroup("")}>
+              <ChevronLeft size={15} />
+              {group === "homuncoder" ? "HomunCoder" : "Skill personali"}
+            </button>
+            {group === "homuncoder" && (
+              <div className="skl-group-switch-row">
+                <span>Abilita tutto il gruppo</span>
+                <Toggle on={hcAllOn} onChange={(v) => void toggleGroup(v)} />
+              </div>
+            )}
+            <div className="set-cards-grid cols-2">{groupSkills.map(renderSkillCard)}</div>
+          </>
         ))}
 
       {tab === "catalogo" && (
