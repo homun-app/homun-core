@@ -899,6 +899,30 @@ export function SettingsDrawer({
         <Info size={16} />
         <span>Informazioni</span>
       </button>
+
+      {/* Persistent footer — mirrors the main drawer's [bell + gear], but in Settings
+          the gear becomes a back-to-app arrow (you're already in Settings). */}
+      <footer className="drawer-footer">
+        <div className="drawer-persistent-actions" aria-label="Azioni persistenti">
+          <button
+            className="drawer-footer-action"
+            type="button"
+            aria-label="Notifiche"
+            title="Notifiche"
+          >
+            <Bell size={16} />
+          </button>
+          <button
+            className="drawer-footer-action"
+            type="button"
+            aria-label="Torna all'app"
+            title="Torna all'app"
+            onClick={onBack}
+          >
+            <ArrowLeft size={16} />
+          </button>
+        </div>
+      </footer>
     </aside>
   );
 }

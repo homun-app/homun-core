@@ -98,13 +98,15 @@ export function Shell({
       style={{ "--drawer-width": `${drawerWidth}px` } as CSSProperties}
       className={[
         "app-shell",
-        drawerOpen ? "drawer-open" : "drawer-closed",
+        // Settings is always shown with its full sidebar open — it can't collapse to
+        // the icon rail — so force the open grid column when in settings.
+        drawerOpen || isSettings ? "drawer-open" : "drawer-closed",
         isSettings ? "settings-mode" : "",
       ]
         .filter(Boolean)
         .join(" ")}
     >
-      {!drawerOpen && (
+      {!drawerOpen && !isSettings && (
         <>
           {/* When collapsed the rail stays narrow (icons only); the expand control lives
               on the CONTENT side, just past the lights — so the column doesn't widen. */}
@@ -143,7 +145,7 @@ export function Shell({
           onUnarchiveChatThread={onUnarchiveChatThread}
         />
       )}
-      {drawerOpen && isSettings && (
+      {isSettings && (
         <SettingsDrawer
           activeSection={settingsSection}
           activeSub={settingsSub}
@@ -152,7 +154,7 @@ export function Shell({
           onSelectSub={onSelectSettingsSub}
         />
       )}
-      {drawerOpen && (
+      {(drawerOpen || isSettings) && (
         <div
           className="drawer-resizer"
           role="separator"
