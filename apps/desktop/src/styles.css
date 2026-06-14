@@ -9613,3 +9613,445 @@ body.resizing-drawer {
 }
 .addon-row-toggle { flex-shrink: 0; padding-top: 2px; }
 .addon-row-toggle.is-busy { opacity: 0.5; pointer-events: none; }
+
+
+/* ===== Settings redesign — shared design-system (handoff) ===== */
+/* ============================================================================
+   Settings design system — shared .set-* primitives (handoff-aligned).
+   Tokens only: --surface/--panel/--line/--line-strong/--text/--muted/--faint,
+   --brand/--brand-strong/--brand-soft, --green(-soft)/--amber(-soft)/--red(-soft),
+   --radius-card/--radius-control/--radius-pill, --font-sans/--font-mono, --s1..--s8.
+   Builds on the existing .set-card/.set-row/.set-trow/.set-toggle/.set-badge so
+   every pane shares one rhythm. New classes added below for the design's
+   segmented pill-tabs, modals, sub-nav, provider/contact/channel grids, status
+   badges and mono tag chips.
+   ============================================================================ */
+
+/* ── Card: unify on --radius-card; divider-row variant ───────────────────── */
+/* Align the existing summary card to the design's 14px radius. Existing padding
+   (var(--s4)) is kept for content cards; the .rows modifier turns the card into a
+   divider-split list with NO own padding (rows carry the ~15px inset padding). */
+.set-card { border-radius: var(--radius-card); }
+.set-card.rows { padding: 0; overflow: hidden; }
+.set-card.rows > .set-row,
+.set-card.rows > .set-trow { padding: 15px var(--s5); }
+/* Inset divider between rows (line indented to the row padding, not full-bleed). */
+.set-card.rows > .set-row + .set-row::before,
+.set-card.rows > .set-trow + .set-trow::before,
+.set-card.rows > .set-row + .set-trow::before,
+.set-card.rows > .set-trow + .set-row::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: var(--s5);
+  right: var(--s5);
+  border-top: 1px solid var(--line);
+}
+.set-card.rows > .set-row + .set-row,
+.set-card.rows > .set-trow + .set-trow,
+.set-card.rows > .set-row + .set-trow,
+.set-card.rows > .set-trow + .set-row { position: relative; }
+
+/* Right-hand control column of a row (label left, control right). */
+.set-row-control {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  flex-shrink: 0;
+  font-size: 13px;
+  color: var(--text);
+}
+
+/* ── Toggle: 40x23 track, teal (brand) when on ──────────────────────────── */
+/* The existing .set-toggle is 38x22 / green-on. The design wants 40x23 and a
+   teal accent. .set-toggle.brand opts into brand color without disturbing any
+   pane that still relies on the green default. */
+.set-toggle { width: 40px; height: 23px; }
+.set-toggle::after { width: 19px; height: 19px; }
+.set-toggle.on::after { left: 19px; }
+.set-toggle.brand.on { background: var(--brand); }
+
+/* ── Segmented pill-tabs (Info/Grafo/Wiki · Toolkit/Account/Consentiti) ──── */
+/* Distinct from the boxed .set-connectors-tabs: free pills, active = brand-soft. */
+.set-seg { display: inline-flex; gap: 6px; }
+.set-seg-item {
+  border: 0;
+  background: transparent;
+  border-radius: var(--radius-control);
+  padding: 6px 13px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--muted);
+  cursor: pointer;
+}
+.set-seg-item:hover { background: var(--surface-hover); color: var(--text); }
+.set-seg-item.active {
+  background: var(--brand-soft);
+  color: var(--brand-strong);
+  font-weight: 600;
+}
+
+/* ── Modal (provider / contact / channel) ───────────────────────────────── */
+.set-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 28px;
+}
+.set-modal-overlay > .set-modal-scrim {
+  position: absolute;
+  inset: 0;
+  background: rgba(20, 22, 28, 0.42);
+}
+.set-modal {
+  position: relative;
+  width: 560px;
+  max-width: 100%;
+  max-height: 88vh;
+  overflow: auto;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-card);
+  box-shadow: 0 30px 70px -20px rgba(0, 0, 0, 0.45);
+  padding: 22px 24px;
+}
+.set-modal.wide { width: 920px; padding: 0; }
+.set-modal-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  color: var(--faint);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+}
+.set-modal-close:hover { background: var(--surface-hover); color: var(--text); }
+/* Sticky header for wide (no-padding) modals. */
+.set-modal-head {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 24px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+.set-modal-head .mt { font-size: 16px; font-weight: 700; }
+.set-modal-head .ms { font-size: 12px; color: var(--faint); margin-top: 1px; }
+.set-modal-head .set-modal-close { position: static; margin-left: auto; }
+.set-modal-body { padding: 22px 24px; }
+.set-modal-label { font-size: 12px; color: var(--faint); margin-bottom: 6px; }
+
+/* ── Sub-nav (indented nav submenu item) ────────────────────────────────── */
+.set-subnav-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px var(--s3) 6px 34px;
+  border: 0;
+  background: transparent;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--muted);
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+  line-height: 1.2;
+}
+.set-subnav-item::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: none;
+}
+.set-subnav-item:hover { background: var(--surface-hover); color: var(--text); }
+.set-subnav-item.active {
+  background: var(--brand-soft);
+  color: var(--brand-strong);
+  font-weight: 600;
+}
+
+/* ── Provider / contact / channel grid cards ────────────────────────────── */
+.set-cards-grid { display: grid; gap: 10px; }
+.set-cards-grid.cols-2 { grid-template-columns: repeat(2, 1fr); }
+.set-cards-grid.cols-3 { grid-template-columns: repeat(3, 1fr); }
+.set-cards-grid.cols-4 { grid-template-columns: repeat(4, 1fr); }
+.set-cards-grid.cols-5 { grid-template-columns: repeat(5, 1fr); }
+
+/* Provider card (Modello & Runtime → Provider). */
+.set-prov {
+  border: 1px solid var(--line-strong);
+  border-radius: 11px;
+  background: var(--surface);
+  padding: 12px 13px;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+}
+.set-prov.active { border-width: 2px; border-color: var(--brand); padding: 11px 12px; }
+.set-prov-top { display: flex; align-items: center; gap: 9px; margin-bottom: 8px; }
+.set-prov-mark {
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  background: var(--surface-muted);
+  border: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--muted);
+  flex: none;
+}
+.set-prov.active .set-prov-mark { background: var(--brand-soft); border-color: var(--brand-soft); color: var(--brand-strong); }
+.set-prov-name { font-size: 13.5px; font-weight: 600; }
+.set-prov-dot { margin-left: auto; width: 7px; height: 7px; border-radius: 50%; background: var(--line-strong); flex: none; }
+.set-prov-dot.on { background: var(--green); }
+.set-prov-meta { font-size: 11.5px; color: var(--faint); }
+
+/* Dashed "add" tile shared by provider / channel grids. */
+.set-add-card {
+  border: 1px dashed var(--brand-soft);
+  border-radius: 11px;
+  background: var(--bg);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  color: var(--brand);
+  font: inherit;
+  font-weight: 600;
+  font-size: 13px;
+  padding: 16px 12px;
+}
+.set-add-card:hover { border-color: var(--brand); }
+
+/* Contact card (Contatti grid). */
+.set-contact {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 11px 12px;
+  border-radius: 11px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  width: 100%;
+}
+.set-contact.is-me { border-color: var(--brand-soft); background: var(--brand-soft); }
+.set-contact-avatar {
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  background: var(--surface-muted);
+  border: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  flex: none;
+}
+.set-contact.is-me .set-contact-avatar { background: var(--surface); border-color: var(--brand-soft); color: var(--brand-strong); }
+.set-contact-body { flex: 1; min-width: 0; }
+.set-contact-name { font-size: 13.5px; font-weight: 600; }
+.set-contact.is-me .set-contact-name { color: var(--brand-strong); }
+.set-contact-sub { font-size: 11.5px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.set-contact.is-me .set-contact-sub { color: var(--brand-strong); }
+.set-contact-count {
+  font-size: 11px;
+  color: var(--muted);
+  background: var(--surface-muted);
+  border-radius: 6px;
+  padding: 1px 7px;
+  flex: none;
+}
+.set-contact.is-me .set-contact-count { color: var(--brand-strong); background: var(--surface); border: 1px solid var(--brand-soft); }
+
+/* Channel card (Canali grid). */
+.set-channel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 15px 16px;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  width: 100%;
+}
+.set-channel-top { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.set-channel-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  background: var(--surface-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  flex: none;
+}
+.set-channel-name { font-size: 14px; font-weight: 600; }
+
+/* Generic tile for capability toolkits (Composio toolkit grid). */
+.set-tile {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  border-radius: 12px;
+  padding: 16px 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  text-align: center;
+  font: inherit;
+}
+.set-tile.connected { border-color: var(--brand-soft); background: var(--brand-soft); }
+.set-tile-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+.set-tile-name { font-size: 12.5px; font-weight: 600; }
+.set-tile-state { font-size: 10.5px; color: var(--green); font-weight: 600; }
+
+/* ── List item (tool / allowed-action / catalog / fact rows) ────────────── */
+.set-item {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 11px 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.set-item-title { font-size: 13.5px; font-weight: 600; }
+.set-item-title.mono { font-family: var(--font-mono); font-size: 12.5px; }
+.set-item-desc { font-size: 11.5px; color: var(--faint); }
+.set-item-spacer { margin-left: auto; }
+.set-item-icon { color: var(--green); flex: none; }
+/* Borderless variant used in flush lists (Memoria info, catalog rows) split by inset dividers. */
+.set-line-list { display: flex; flex-direction: column; }
+.set-line-item {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 11px 4px;
+  font-size: 13px;
+  border-top: 1px solid var(--line);
+}
+.set-line-item:first-child { border-top: 0; }
+
+/* ── Status badges ──────────────────────────────────────────────────────── */
+/* Builds on .set-badge (.green/.muted/.red). Add a leading status dot and a
+   brand variant so "Connesso/Attivo" pills and routing dots share one look. */
+.set-badge.dot::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: none;
+}
+.set-badge.brand { color: var(--brand-strong); background: var(--brand-soft); }
+.set-badge.amber { color: var(--amber); background: var(--amber-soft); }
+/* Small square status dot used standalone (provider/channel/contact lists). */
+.set-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--line-strong); flex: none; }
+.set-dot.green { background: var(--green); }
+.set-dot.amber { background: var(--amber); }
+.set-dot.red { background: var(--red); }
+.set-dot.brand { background: var(--brand); }
+
+/* ── Mono tag chips ─────────────────────────────────────────────────────── */
+/* Inline JetBrains-Mono chips: tool slugs, capability tags, code snippets. */
+.set-tag {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--muted);
+  background: var(--surface-muted);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 1px 6px;
+}
+.set-tag.brand { color: var(--brand-strong); background: var(--brand-soft); border-color: var(--brand-soft); }
+.set-tag.amber { color: var(--amber); background: var(--amber-soft); border-color: var(--amber-soft); }
+/* Mono pill (provenance/capability slug, larger). */
+.set-mono-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--muted);
+  background: var(--surface-muted);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  padding: 5px 10px;
+}
+/* Faint mono provenance/slug text (right-aligned in allowed-action rows). */
+.set-mono-faint { font-family: var(--font-mono); font-size: 11px; color: var(--faint); }
+
+/* ── Filter / category chips (Composio toolkit categories) ──────────────── */
+.set-fchip {
+  font-size: 12px;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  padding: 4px 12px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+}
+.set-fchip.active { color: var(--brand-strong); background: var(--brand-soft); border-color: var(--brand-soft); }
+
+/* ── Stat strip (Memoria counts) ────────────────────────────────────────── */
+.set-stats { display: flex; gap: 8px; font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+.set-stats strong { color: var(--text); font-weight: 600; }
+.set-stats .sep { color: var(--line-strong); }
+
+/* ── Select-like control (read-only dropdown trigger used across panes) ──── */
+.set-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  padding: 8px 11px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+}
+.set-select .chev { color: var(--faint); flex: none; }
+.set-select.mono { font-family: var(--font-mono); font-size: 11.5px; color: var(--muted); }
