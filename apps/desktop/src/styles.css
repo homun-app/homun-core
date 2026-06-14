@@ -10117,3 +10117,114 @@ body.resizing-drawer {
 }
 .set-select .chev { color: var(--faint); flex: none; }
 .set-select.mono { font-family: var(--font-mono); font-size: 11.5px; color: var(--muted); }
+
+/* ── Channels (grid card + per-channel modal) ───────────────────────────── */
+/* The .set-channel card is a <button>; ensure block flow (icon row over badge). */
+.set-channel { display: block; }
+/* Per-brand icon washes on top of the shared .set-channel-icon chip. */
+.set-channel-icon.whatsapp { background: var(--green-soft); color: var(--green); }
+.set-channel-icon.telegram { background: var(--brand-soft); color: var(--brand-strong); }
+
+/* Channel modal body sizing (shared .set-modal handles surface/shadow/radius). */
+.chan-modal { width: 600px; max-width: 100%; max-height: 88vh; overflow: auto; }
+
+/* "Stato" status / connect cards inside the modal. */
+.chan-status-card,
+.chan-connect-card { display: flex; flex-direction: column; gap: var(--s3); }
+.chan-status-card {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s4);
+}
+.chan-status-on {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+.chan-status-check {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--green);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+
+/* WhatsApp pairing code — large mono so it's easy to type on the phone. */
+.chan-pair-code {
+  font-family: var(--font-mono);
+  font-size: 28px;
+  letter-spacing: 3px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* Connect input row (token / phone) inside the status card. */
+.chan-connect-field { display: flex; gap: var(--s2); }
+
+/* Allowlist: mono id rows + add-row (mono input + Aggiungi). */
+.chan-allow-id { font-size: 13px; }
+.chan-allow-add { display: flex; gap: var(--s3); margin-top: var(--s3); }
+.chan-allow-input {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+/* ── Computer locale (status card + noVNC live view) ────────────────────── */
+/* Status card laid out label-left / badge-right on top of the shared .set-card. */
+.set-computer-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s4);
+  margin-bottom: var(--s4);
+}
+.set-computer-status-sub {
+  font-size: 12.5px;
+  color: var(--faint);
+  margin-top: 2px;
+}
+/* Live noVNC view container — bordered rounded frame; real iframe fills it,
+   striped placeholder when no live session is available (design 531). */
+.set-computer-live {
+  position: relative;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  overflow: hidden;
+}
+.set-computer-live-frame {
+  display: block;
+  width: 100%;
+  height: 360px;
+  border: 0;
+  background: var(--surface-muted);
+}
+.set-computer-live-open {
+  position: absolute;
+  top: var(--s2);
+  right: var(--s2);
+}
+.set-computer-live-empty {
+  height: 200px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: repeating-linear-gradient(
+    135deg,
+    var(--surface-muted) 0 10px,
+    var(--surface) 10px 20px
+  );
+}
+.set-computer-live-empty-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--faint);
+}
