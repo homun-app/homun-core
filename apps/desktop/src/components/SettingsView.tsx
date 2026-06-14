@@ -3153,7 +3153,7 @@ function MarketplaceView({
                   <div className="conn-kit-meta market">{skill.description || skill.slug}</div>
                 </div>
                 {already ? (
-                  <span className="mdl-tag skl-installed">installata</span>
+                  <span className="set-badge dot green">installata</span>
                 ) : (
                   <button
                     className="mdl-icon-btn"
@@ -3332,10 +3332,10 @@ function SkillDetailView({
       </div>
 
       <div className="skl-pills">
-        <span className="mdl-tag">origine: {detail.source}</span>
-        {detail.license && <span className="mdl-tag">licenza: {detail.license}</span>}
+        <span className="set-tag">origine: {detail.source}</span>
+        {detail.license && <span className="set-tag">licenza: {detail.license}</span>}
         {(detail.allowed_tools ?? []).map((t) => (
-          <span key={t} className="mdl-tag tier">
+          <span key={t} className="set-tag brand">
             {t}
           </span>
         ))}
@@ -3482,27 +3482,41 @@ function ComputerPane({ computer }: { computer: ContainedComputerLive | null }) 
           : "In esecuzione · container spento";
   const dockerOk = Boolean(docker?.running && docker.container_up);
 
+  const liveUrl = enabled ? computer?.novnc_url : null;
+
   return (
     <>
-      <div className="set-card">
-        <div className="set-card-top">
-          <span className="set-card-name">Computer contenuto</span>
-          <span className={`set-badge ${enabled ? "green" : "muted"}`}>
-            {enabled ? "Disponibile" : "Spento"}
-          </span>
+      {/* Status card — title + subtitle left, live-state badge right (design 530). */}
+      <div className="set-card set-computer-status">
+        <div>
+          <div className="set-card-name">Stato</div>
+          <div className="set-computer-status-sub">
+            Browser reale contenuto · vista live noVNC
+          </div>
         </div>
-        <div className="set-card-divider" />
-        <p className="set-meter-sub">
-          Un browser reale e contenuto (passa i controlli anti-bot) in un computer virtuale non
-          invasivo, visibile live nella chat.
-        </p>
-        {enabled && computer?.novnc_url && (
-          <div className="set-meter" style={{ marginTop: 8 }}>
-            <span className="k">Vista live</span>
-            <a className="set-btn" href={computer.novnc_url} target="_blank" rel="noreferrer">
+        <span className={`set-badge dot ${enabled ? "green" : "muted"}`}>
+          {enabled ? "Attivo" : "Spento"}
+        </span>
+      </div>
+
+      {/* Live view container — real noVNC iframe, striped placeholder otherwise (design 531). */}
+      <div className="set-computer-live">
+        {liveUrl ? (
+          <>
+            <iframe className="set-computer-live-frame" src={liveUrl} title="Vista live · noVNC" />
+            <a
+              className="set-btn set-computer-live-open"
+              href={liveUrl}
+              target="_blank"
+              rel="noreferrer"
+            >
               <ExternalLink size={14} />
               <span style={{ marginLeft: 6 }}>Apri noVNC</span>
             </a>
+          </>
+        ) : (
+          <div className="set-computer-live-empty">
+            <span className="set-computer-live-empty-label">vista live · noVNC</span>
           </div>
         )}
       </div>
@@ -3774,8 +3788,15 @@ function normalizeContact(raw: string): string {
 }
 
 /** Telegram (Bot API) connect/status section. Auth is a @BotFather token —
- *  no phone pairing — persisted server-side so reconnect needs no re-entry. */
-function TelegramSection() {
+ *  no phone pairing — persisted server-side so reconnect needs no re-entry.
+ *  Renders the "Stato" block of the channel modal (label + status card) and
+ *  reports its connection state up so the parent grid card + modal header can
+ *  show the badge. */
+function TelegramSection({
+  onStatusChange,
+}: {
+  onStatusChange?: (status: CoreTelegramStatus | null) => void;
+}) {
   const [status, setStatus] = useState<CoreTelegramStatus | null>(null);
   const [token, setToken] = useState("");
   const [busy, setBusy] = useState(false);
@@ -3783,7 +3804,9 @@ function TelegramSection() {
 
   const refresh = async () => {
     try {
-      setStatus(await coreBridge.telegramStatus());
+      const next = await coreBridge.telegramStatus();
+      setStatus(next);
+      onStatusChange?.(next);
     } catch {
       /* keep previous */
     }
@@ -3819,64 +3842,62 @@ function TelegramSection() {
 
   return (
     <>
-      <div className="set-section-label">Telegram</div>
-      <div className="set-card">
-        {status?.connected ? (
-          <div className="set-row">
-            <div>
-              <div className="rk">Stato</div>
-              <div className="rv">
-                ✅ Connesso{status.bot_username ? ` — @${status.bot_username}` : ""}
-              </div>
-            </div>
+      <div className="set-modal-label">Stato</div>
+      {status?.connected ? (
+        <div className="set-card chan-status-card">
+          <div className="chan-status-on">
+            <span className="chan-status-check" aria-hidden>
+              <Check size={11} strokeWidth={2.6} />
+            </span>
+            Connesso{status.bot_username ? ` — @${status.bot_username}` : ""}
+          </div>
+          <button
+            className="set-btn danger"
+            type="button"
+            disabled={busy}
+            onClick={() => void disconnect()}
+          >
+            Disconnetti
+          </button>
+        </div>
+      ) : (
+        <div className="set-card chan-connect-card">
+          <p className="set-hint" style={{ marginTop: 0 }}>
+            Crea un bot con <strong>@BotFather</strong> e incolla qui il token. Se l'hai già
+            inserito, premi <strong>Connetti</strong> (il token resta salvato).
+          </p>
+          <div className="chan-connect-field">
+            <input
+              type="password"
+              placeholder="token bot (123456:ABC…) — vuoto se già salvato"
+              value={token}
+              onChange={(e) => setToken(e.target.value)}
+              style={{ flex: 1 }}
+            />
             <button
-              className="set-btn danger"
+              className="set-btn primary"
               type="button"
               disabled={busy}
-              onClick={() => void disconnect()}
+              onClick={() => void connect()}
             >
-              Disconnetti
+              Connetti
             </button>
           </div>
-        ) : (
-          <div>
-            <p className="set-hint" style={{ marginTop: 0 }}>
-              Crea un bot con <strong>@BotFather</strong> e incolla qui il token. Se l'hai già
-              inserito, premi <strong>Connetti</strong> (il token resta salvato).
+          {status?.running && !status.connected && (
+            <p className="set-hint">Bridge avviato, verifica del token in corso…</p>
+          )}
+          {status?.error && (
+            <p className="set-hint" style={{ color: "var(--danger)" }}>
+              {status.error}
             </p>
-            <div style={{ display: "flex", gap: 8 }}>
-              <input
-                type="password"
-                placeholder="token bot (123456:ABC…) — vuoto se già salvato"
-                value={token}
-                onChange={(e) => setToken(e.target.value)}
-                style={{ flex: 1 }}
-              />
-              <button
-                className="set-btn"
-                type="button"
-                disabled={busy}
-                onClick={() => void connect()}
-              >
-                Connetti
-              </button>
-            </div>
-            {status?.running && !status.connected && (
-              <p className="set-hint">Bridge avviato, verifica del token in corso…</p>
-            )}
-            {status?.error && (
-              <p className="set-hint" style={{ color: "var(--danger)" }}>
-                {status.error}
-              </p>
-            )}
-            {error && (
-              <p className="set-hint" style={{ color: "var(--danger)" }}>
-                {error}
-              </p>
-            )}
-          </div>
-        )}
-      </div>
+          )}
+          {error && (
+            <p className="set-hint" style={{ color: "var(--danger)" }}>
+              {error}
+            </p>
+          )}
+        </div>
+      )}
     </>
   );
 }
@@ -3891,6 +3912,11 @@ function ChannelsPane() {
   const [newContact, setNewContact] = useState("");
   const [savingSettings, setSavingSettings] = useState(false);
   const [settingsError, setSettingsError] = useState<string | null>(null);
+
+  // Which channel modal is open (presentational); null = grid only.
+  const [openChannel, setOpenChannel] = useState<"whatsapp" | "telegram" | null>(null);
+  // Mirrored from TelegramSection so the grid card + modal header show the badge.
+  const [telegramConnected, setTelegramConnected] = useState(false);
 
   const refresh = async () => {
     try {
@@ -3966,87 +3992,34 @@ function ChannelsPane() {
     }
   };
 
-  return (
+  const whatsappConnected = !!status?.connected;
+
+  // WhatsApp / Telegram brand marks (inline to match the design's rounded chip).
+  const whatsappMark = (
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+      <path d="M12 3 A9 9 0 0 0 4 16 L3 21 L8.2 20 A9 9 0 1 0 12 3 Z M12 5 A7 7 0 1 1 7.4 17.7 L6 18 L6.3 16.6 A7 7 0 0 1 12 5 Z" />
+    </svg>
+  );
+  const telegramMark = (
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+      <path d="M21 5 L2.5 12 L8 13.5 L9 19 L12 15.5 L16.5 18.5 Z" />
+    </svg>
+  );
+
+  // Shared global settings rendered inside whichever channel modal is open:
+  // Auto-risposta (the two kill-switch toggles) + Allowlist. Both apply to all
+  // channels, matching the design copy ("vale per tutti i canali").
+  const sharedSettings = (
     <>
-      <div className="set-section-label" style={{ marginTop: 0 }}>
-        WhatsApp
-      </div>
-      <div className="set-card">
-        {status?.connected ? (
-          <div className="set-row">
-            <div>
-              <div className="rk">Stato</div>
-              <div className="rv">✅ Connesso</div>
-            </div>
-            <button className="set-btn danger" type="button" disabled={busy} onClick={() => void disconnect()}>
-              Disconnetti
-            </button>
-          </div>
-        ) : status?.pair_code ? (
+      <div className="set-modal-label">Auto-risposta</div>
+      <div className="set-card rows chan-settings-rows">
+        <div className="set-trow">
           <div>
-            <p className="set-hint" style={{ marginTop: 0 }}>
-              Sul telefono: WhatsApp ▸ Dispositivi collegati ▸ Collega un dispositivo ▸{" "}
-              <strong>Collega con numero di telefono</strong>, poi inserisci:
-            </p>
-            <div className="set-card-name" style={{ fontSize: 28, letterSpacing: 3 }}>
-              {status.pair_code}
-            </div>
-            <button
-              className="set-btn"
-              type="button"
-              disabled={busy}
-              onClick={() => void disconnect()}
-              style={{ marginTop: 12 }}
-            >
-              Annulla
-            </button>
-          </div>
-        ) : (
-          <div>
-            <p className="set-hint" style={{ marginTop: 0 }}>
-              Se hai già collegato il dispositivo, premi <strong>Connetti</strong> (riusa la
-              sessione salvata). Per il primo collegamento, inserisci il numero in formato
-              internazionale senza «+» (es. 39333…).
-            </p>
-            <div style={{ display: "flex", gap: 8 }}>
-              <input
-                placeholder="numero di telefono (solo primo collegamento)"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                style={{ flex: 1 }}
-              />
-              <button
-                className="set-btn"
-                type="button"
-                disabled={busy}
-                onClick={() => void connect()}
-              >
-                Connetti
-              </button>
-            </div>
-            {status?.running && (
-              <p className="set-hint">Bridge avviato, in attesa di connessione/codice…</p>
-            )}
-            {error && (
-              <p className="set-hint" style={{ color: "var(--danger)" }}>
-                {error}
-              </p>
-            )}
-          </div>
-        )}
-      </div>
-
-      <TelegramSection />
-
-      <div className="set-section-label">Auto-risposta</div>
-      <div className="set-card">
-        <div className="set-row">
-          <div>
-            <div className="rk">Canale attivo</div>
-            <div className="rv">
+            <div className="tt">Canale attivo</div>
+            <div className="td">
               {settings?.enabled
-                ? "I messaggi in arrivo vengono elaborati"
-                : "Interruttore generale: tutti i messaggi in arrivo sono ignorati"}
+                ? "I messaggi in arrivo vengono elaborati."
+                : "Interruttore generale: tutti i messaggi in arrivo sono ignorati."}
             </div>
           </div>
           <Toggle
@@ -4056,10 +4029,10 @@ function ChannelsPane() {
             }}
           />
         </div>
-        <div className="set-row">
+        <div className="set-trow">
           <div>
-            <div className="rk">Auto-risposta (solo testo)</div>
-            <div className="rv">
+            <div className="tt">Auto-risposta (solo testo)</div>
+            <div className="td">
               Risponde da sola ai contatti in allowlist; le altre azioni restano dietro conferma.
             </div>
           </div>
@@ -4070,69 +4043,219 @@ function ChannelsPane() {
             }}
           />
         </div>
-        {settings && !settings.enabled && (
-          <p className="set-hint" style={{ marginBottom: 0 }}>
-            Il canale è spento: l'auto-risposta non scatta finché non riattivi «Canale attivo».
-          </p>
-        )}
       </div>
-
-      <div className="set-section-label">Allowlist</div>
-      <div className="set-card">
-        <p className="set-hint" style={{ marginTop: 0 }}>
-          Solo questi contatti possono ricevere una risposta automatica (vale per tutti i canali).
-          WhatsApp: numero internazionale senza «+» (es. 39333…) o JID completo (es. 1234@lid).
-          Telegram: id utente numerico (es. 123456789).
+      {settings && !settings.enabled && (
+        <p className="set-hint">
+          Il canale è spento: l'auto-risposta non scatta finché non riattivi «Canale attivo».
         </p>
-        {settings && settings.allowlist.length > 0 ? (
-          <div>
-            {settings.allowlist.map((contact) => (
-              <div key={contact} className="set-row">
-                <span style={{ fontFamily: "monospace" }}>{contact}</span>
-                <button
-                  className="set-btn danger"
-                  type="button"
-                  disabled={savingSettings}
-                  onClick={() => removeContact(contact)}
-                >
-                  Rimuovi
-                </button>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <p className="set-hint">Nessun contatto in allowlist.</p>
-        )}
-        <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-          <input
-            placeholder="numero o JID"
-            value={newContact}
-            onChange={(e) => setNewContact(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") addContact();
-            }}
-            style={{ flex: 1 }}
-          />
-          <button
-            className="set-btn"
-            type="button"
-            disabled={savingSettings || !newContact.trim()}
-            onClick={addContact}
-          >
-            Aggiungi
-          </button>
-        </div>
-        {settingsError && (
-          <p className="set-hint" style={{ color: "var(--danger)" }}>
-            {settingsError}
-          </p>
-        )}
-      </div>
+      )}
 
+      <div className="set-modal-label">Allowlist</div>
+      <p className="set-hint" style={{ marginTop: 0 }}>
+        Solo questi contatti possono ricevere una risposta automatica (vale per tutti i canali).
+        WhatsApp: numero internazionale senza «+» (es. 39333…) o JID completo (es. 1234@lid).
+        Telegram: id utente numerico (es. 123456789).
+      </p>
+      {settings && settings.allowlist.length > 0 ? (
+        <div className="set-card rows chan-allow-rows">
+          {settings.allowlist.map((contact) => (
+            <div key={contact} className="set-row chan-allow-row">
+              <span className="set-mono-faint chan-allow-id">{contact}</span>
+              <button
+                className="set-btn danger"
+                type="button"
+                disabled={savingSettings}
+                onClick={() => removeContact(contact)}
+              >
+                Rimuovi
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="set-hint">Nessun contatto in allowlist.</p>
+      )}
+      <div className="chan-allow-add">
+        <input
+          placeholder="numero o id…"
+          className="chan-allow-input"
+          value={newContact}
+          onChange={(e) => setNewContact(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") addContact();
+          }}
+        />
+        <button
+          className="set-btn primary"
+          type="button"
+          disabled={savingSettings || !newContact.trim()}
+          onClick={addContact}
+        >
+          Aggiungi
+        </button>
+      </div>
+      {settingsError && (
+        <p className="set-hint" style={{ color: "var(--danger)" }}>
+          {settingsError}
+        </p>
+      )}
       <p className="set-hint">
         I messaggi in arrivo sono trattati come dati non fidati: l'auto-risposta (solo testo) vale
         unicamente per i contatti in allowlist e le azioni restano dietro conferma.
       </p>
+    </>
+  );
+
+  return (
+    <>
+      <div className="set-cards-grid cols-3">
+        <button type="button" className="set-channel" onClick={() => setOpenChannel("whatsapp")}>
+          <div className="set-channel-top">
+            <span className="set-channel-icon whatsapp">{whatsappMark}</span>
+            <span className="set-channel-name">WhatsApp</span>
+          </div>
+          {whatsappConnected ? (
+            <span className="set-badge dot green">Connesso</span>
+          ) : (
+            <span className="set-badge muted">Non connesso</span>
+          )}
+        </button>
+
+        <button type="button" className="set-channel" onClick={() => setOpenChannel("telegram")}>
+          <div className="set-channel-top">
+            <span className="set-channel-icon telegram">{telegramMark}</span>
+            <span className="set-channel-name">Telegram</span>
+          </div>
+          {telegramConnected ? (
+            <span className="set-badge dot green">Connesso</span>
+          ) : (
+            <span className="set-badge muted">Non connesso</span>
+          )}
+        </button>
+
+        <div className="set-add-card" aria-hidden>
+          <Plus size={14} strokeWidth={1.9} />
+          Aggiungi canale
+        </div>
+      </div>
+
+      {/* Keep the Telegram hooks mounted whenever its modal is open. */}
+      {openChannel === "telegram" && (
+        <div className="set-modal-overlay" role="dialog" aria-modal="true">
+          <div className="set-modal-scrim" onClick={() => setOpenChannel(null)} />
+          <div className="set-modal chan-modal">
+            <div className="set-modal-head">
+              <span className="set-channel-icon telegram">{telegramMark}</span>
+              <span className="mt">Telegram</span>
+              {telegramConnected && <span className="set-badge dot green">Connesso</span>}
+              <button
+                className="set-modal-close"
+                type="button"
+                aria-label="Chiudi"
+                onClick={() => setOpenChannel(null)}
+              >
+                <X size={17} />
+              </button>
+            </div>
+            <div className="set-modal-body">
+              <TelegramSection onStatusChange={(s) => setTelegramConnected(!!s?.connected)} />
+              {sharedSettings}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {openChannel === "whatsapp" && (
+        <div className="set-modal-overlay" role="dialog" aria-modal="true">
+          <div className="set-modal-scrim" onClick={() => setOpenChannel(null)} />
+          <div className="set-modal chan-modal">
+            <div className="set-modal-head">
+              <span className="set-channel-icon whatsapp">{whatsappMark}</span>
+              <span className="mt">WhatsApp</span>
+              {whatsappConnected && <span className="set-badge dot green">Connesso</span>}
+              <button
+                className="set-modal-close"
+                type="button"
+                aria-label="Chiudi"
+                onClick={() => setOpenChannel(null)}
+              >
+                <X size={17} />
+              </button>
+            </div>
+            <div className="set-modal-body">
+              <div className="set-modal-label">Stato</div>
+              {whatsappConnected ? (
+                <div className="set-card chan-status-card">
+                  <div className="chan-status-on">
+                    <span className="chan-status-check" aria-hidden>
+                      <Check size={11} strokeWidth={2.6} />
+                    </span>
+                    Connesso
+                  </div>
+                  <button
+                    className="set-btn danger"
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void disconnect()}
+                  >
+                    Disconnetti
+                  </button>
+                </div>
+              ) : status?.pair_code ? (
+                <div className="set-card chan-connect-card">
+                  <p className="set-hint" style={{ marginTop: 0 }}>
+                    Sul telefono: WhatsApp ▸ Dispositivi collegati ▸ Collega un dispositivo ▸{" "}
+                    <strong>Collega con numero di telefono</strong>, poi inserisci:
+                  </p>
+                  <div className="chan-pair-code">{status.pair_code}</div>
+                  <button
+                    className="set-btn"
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void disconnect()}
+                    style={{ alignSelf: "flex-start" }}
+                  >
+                    Annulla
+                  </button>
+                </div>
+              ) : (
+                <div className="set-card chan-connect-card">
+                  <p className="set-hint" style={{ marginTop: 0 }}>
+                    Se hai già collegato il dispositivo, premi <strong>Connetti</strong> (riusa la
+                    sessione salvata). Per il primo collegamento, inserisci il numero in formato
+                    internazionale senza «+» (es. 39333…).
+                  </p>
+                  <div className="chan-connect-field">
+                    <input
+                      placeholder="numero di telefono (solo primo collegamento)"
+                      value={phone}
+                      onChange={(e) => setPhone(e.target.value)}
+                      style={{ flex: 1 }}
+                    />
+                    <button
+                      className="set-btn primary"
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void connect()}
+                    >
+                      Connetti
+                    </button>
+                  </div>
+                  {status?.running && (
+                    <p className="set-hint">Bridge avviato, in attesa di connessione/codice…</p>
+                  )}
+                  {error && (
+                    <p className="set-hint" style={{ color: "var(--danger)" }}>
+                      {error}
+                    </p>
+                  )}
+                </div>
+              )}
+              {sharedSettings}
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
