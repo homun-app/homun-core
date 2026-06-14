@@ -8447,8 +8447,11 @@ body.resizing-drawer {
 .skl-group-meta { font-size: 12px; color: var(--faint); }
 
 /* Back link inside a group + "enable whole group" row. */
+/* Breadcrumb / back-link: its own block-level line (width: fit-content so only
+   the label is clickable), sitting below the segmented tabs. */
 .skl-back {
-  display: inline-flex;
+  display: flex;
+  width: fit-content;
   align-items: center;
   gap: 7px;
   border: 0;
@@ -8458,7 +8461,7 @@ body.resizing-drawer {
   color: var(--muted);
   cursor: pointer;
   padding: 0;
-  margin-bottom: 14px;
+  margin: 2px 0 14px;
 }
 .skl-back:hover { color: var(--text); }
 .skl-group-switch-row {
@@ -9962,7 +9965,10 @@ body.resizing-drawer {
 
 /* ── Segmented pill-tabs (Info/Grafo/Wiki · Toolkit/Account/Consentiti) ──── */
 /* Distinct from the boxed .set-connectors-tabs: free pills, active = brand-soft. */
-.set-seg { display: inline-flex; gap: 6px; }
+/* Block-level row (was inline-flex) so a breadcrumb/back-link placed after a
+   segmented control always lands on its own line below the tabs. Items still
+   hug the left (no grow), so the look is unchanged. */
+.set-seg { display: flex; flex-wrap: wrap; gap: 6px; }
 .set-seg-item {
   border: 0;
   background: transparent;
