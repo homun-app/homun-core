@@ -1307,16 +1307,22 @@ body.resizing-drawer {
   justify-content: space-between;
   gap: 16px;
   border-bottom: 1px solid transparent;
-  /* Full-width header row so the ENTIRE top margin is a drag handle (not just the
-     centered 760 column — the gap between the sidebar and the title used to be bare,
-     non-draggable background). Break out of the layout's side padding with negative
-     inline margins, then re-pad so the title + actions still line up with the 760
-     message column. */
+  /* Align the title row with the centered message column (same 760 column). */
+  width: min(100%, 760px);
+  margin: 0 auto;
+  /* The header row is a window-drag handle; the title button + actions are no-drag. */
+  -webkit-app-region: drag;
+}
+
+/* When the sidebar is OPEN, stretch the header full-width so the gap between the
+   sidebar and the title is also a drag handle — breaking out of the layout's side
+   padding, then re-padding to keep the title/actions on the 760 column. Scoped to
+   drawer-open because when COLLAPSED the .sidebar-expand toggle lives in the top-left
+   content corner; a drag region there would swallow its clicks. */
+.app-shell.drawer-open .task-topbar {
   width: auto;
   margin-inline: calc(-1 * clamp(18px, 5vw, 72px));
   padding-inline: calc(clamp(18px, 5vw, 72px) + max(0px, (100% - 760px) / 2));
-  /* The header row is a window-drag handle; the title button + actions are no-drag. */
-  -webkit-app-region: drag;
 }
 
 .task-title-area,
