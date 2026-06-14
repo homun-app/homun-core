@@ -58,10 +58,12 @@
   --font-sans: "Hanken Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
   --font-serif: var(--font-sans);
-  /* Full-width title bar reserve (macOS hiddenInset). The top strip (.app-shell::before)
-     is one draggable band across the WHOLE window — not just over the traffic lights —
-     and content is pushed below it. Sidebars no longer reserve their own top padding. */
-  --window-drag-height: 36px;
+  /* Header aligned to the very top (Linear/Cursor): NO reserved drag band — content
+     starts at y=0 and the header rows themselves (sidebar top, .task-topbar, settings
+     header strip) are the drag region. 0 collapses every `calc(100vh - var)` to full
+     height. Full-width top drag is achieved by marking those header rows app-region:drag,
+     not by pushing content down. */
+  --window-drag-height: 0px;
   font-family: var(--font-sans);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -294,8 +296,9 @@ body.resizing-drawer {
      The empty top strip is the window-drag handle (buttons are no-drag). */
   grid-template-rows: minmax(0, 1fr) auto;
   gap: 14px;
-  /* Title bar reserve is global now; just a small top pad for the first icon. */
-  padding: 12px 10px 12px;
+  /* Top padding drops the first icon below the traffic lights; the empty top strip is
+     the window-drag handle (buttons are no-drag). */
+  padding: 40px 10px 12px;
   -webkit-app-region: drag;
 }
 
@@ -419,12 +422,11 @@ body.resizing-drawer {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  /* Title bar reserve is now global (--window-drag-height); keep just a small top pad. */
-  padding: 10px 12px 10px;
+  /* Top padding clears the macOS traffic lights; the empty strip above the nav is the
+     window-drag handle (buttons/links/inputs are no-drag via the global rule). */
+  padding: 38px 12px 10px;
   overflow: hidden;
   position: relative;
-  /* Dragging empty drawer space still moves the window; buttons/links/inputs are
-     no-drag (the global rule below). */
   -webkit-app-region: drag;
 }
 
@@ -433,9 +435,7 @@ body.resizing-drawer {
   position: absolute;
   top: 8px;
   right: 16px;
-  /* Above the window-drag strip (.app-shell::before, z-index 80) so it stays clickable
-     inside the title-bar band. */
-  z-index: 85;
+  z-index: 5;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -7603,12 +7603,13 @@ body.resizing-drawer {
 /* Drawer / left nav */
 .settings-drawer.set-nav {
   width: 100%;
-  /* Title bar reserve is global now (--window-drag-height clears the traffic lights);
-     just a small top pad here. */
-  padding: var(--s3) var(--s3) var(--s4);
+  /* Top padding clears the macOS traffic lights so "Torna all'app" isn't under them;
+     the empty strip above is part of the window-drag handle. */
+  padding: 38px var(--s3) var(--s4);
   display: flex;
   flex-direction: column;
   gap: 2px;
+  -webkit-app-region: drag;
 }
 .set-nav-profile {
   display: flex;
@@ -7706,6 +7707,9 @@ body.resizing-drawer {
   /* Cursor: title/label indented ~12px so they nearly line up with the card CONTENT
      (16px padding); the card border itself pokes out to the left. */
   padding-left: var(--s3);
+  /* Content-side window-drag handle (the settings header row), mirroring .task-topbar
+     in chat — so the whole top margin drags, not just the sidebar near the lights. */
+  -webkit-app-region: drag;
 }
 /* Eyebrow label (design): JetBrains Mono, uppercase, faint — the single typographic
    motif that unifies every Settings section. */
