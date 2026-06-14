@@ -922,6 +922,23 @@ fn parse_review_suggestion(
             None => v.to_string(),
         })
         .filter(|t| !t.trim().is_empty());
+    // Quick-reply options for a QUESTION card (Fix 2): keep only non-empty strings,
+    // cap at 5, and store as a JSON array string. None when absent/empty/malformed —
+    // the card then opens as a plain question (no buttons).
+    let choices = s
+        .get("choices")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|o| o.as_str())
+                .map(str::trim)
+                .filter(|o| !o.is_empty())
+                .take(5)
+                .map(str::to_string)
+                .collect::<Vec<String>>()
+        })
+        .filter(|opts| !opts.is_empty())
+        .and_then(|opts| serde_json::to_string(&opts).ok());
     // dedup_key uses the EFFECTIVE kind (after the fallback) so it stays consistent
     // with the card's `kind` field and never collides an empty-kind card with a
     // "suggerimento" one on the same anchor.
@@ -933,8 +950,21 @@ fn parse_review_suggestion(
         body,
         rationale: field("rationale"),
         proposed_action,
+        choices,
         dedup_key,
     })
+}
+
+/// Decode a card's stored `choices` (a JSON array string) into a JSON value the
+/// frontend consumes as `string[] | null`. Tolerant: missing/malformed → null, so a
+/// card without quick-replies opens as a plain question.
+fn suggestion_choices_json(stored: &Option<String>) -> serde_json::Value {
+    stored
+        .as_deref()
+        .and_then(|s| serde_json::from_str::<Vec<String>>(s).ok())
+        .filter(|v| !v.is_empty())
+        .map(|v| serde_json::json!(v))
+        .unwrap_or(serde_json::Value::Null)
 }
 
 const PROACTIVE_SUPERVISOR_SYSTEM: &str = "Sei il SUPERVISORE proattivo dell'utente per UNO scope di \
@@ -950,6 +980,9 @@ comparsa una persona/un progetto/una preferenza e te ne manca un dettaglio); kin
 quando sai ANCORA POCO (memoria scarsa) e ti servono le basi (come lavora, di cosa si occupa, persone \
 e scadenze importanti, come preferisce le risposte). Le domande NON hanno `proposed_action`: l'utente \
 risponde aprendo la chat.\n\
+Per una DOMANDA (B) la cui risposta è naturalmente una scelta tra POCHE opzioni (es. sì/no, una \
+preferenza tra alternative), aggiungi `choices`: 2-4 opzioni BREVISSIME che diventano pulsanti di \
+risposta rapida. Ometti `choices` per domande aperte (a risposta libera) e per le AZIONI.\n\
 VALIDA solo se: (1) è ANCORATA — le azioni al contesto reale, le domande a un fatto recente (o, in \
 onboarding, a ciò che chiaramente NON sai ancora) — e citi la base in `rationale`; NON inventare; \
 (2) è SPECIFICA, mai vaga; (3) è NUOVA, non assomiglia alle card GIÀ PRESENTI.\n\
@@ -964,7 +997,8 @@ Rispondi SOLO con JSON: {\"suggestion\": null} OPPURE {\"suggestion\": {\"kind\"
 kebab-case\",\"title\":\"titolo brevissimo (per una domanda, È la domanda)\",\"body\":\"1-3 frasi: \
 cosa hai notato e cosa proponi/chiedi\",\"rationale\":\"da quale elemento del contesto deriva (o cosa \
 non sai ancora)\",\"dedup_key\":\"àncora STABILE di COSA parla (l'oggetto/persona/scadenza), non il \
-testo\",\"proposed_action\":\"OPZIONALE, solo per le AZIONI: cosa fare, che l'utente approverà\"}}.";
+testo\",\"proposed_action\":\"OPZIONALE, solo per le AZIONI: cosa fare, che l'utente approverà\",\
+\"choices\":[\"OPZIONALE, solo per DOMANDE a scelta chiusa: 2-4 opzioni brevi\"]}}.";
 
 /// Internal plugins (ADR 0011 §10-A). The id gates the plugin's UI (nav+panel,
 /// from the frontend registry) AND its engine (here) — detaching makes all three
@@ -1039,6 +1073,18 @@ async fn run_proactive_review(state: &AppState, scope: &str) -> Option<i64> {
     let store = lock_store(state).ok()?;
     if store.suggestion_dedup_exists(scope, &input.dedup_key).unwrap_or(false) {
         eprintln!("[proattività] review '{scope}': duplicato '{}', salto", input.dedup_key);
+        return None;
+    }
+    // Fix 3 (anti re-propose): the exact key only catches identical anchors. The
+    // supervisor rewords the same thing across runs, so also reject SEMANTIC dups of
+    // any card already surfaced (pending/accepted/dismissed) — that's how "ho già
+    // fatto" cards stop coming back paraphrased.
+    let anchors = store.recent_suggestion_anchors(scope, 150).unwrap_or_default();
+    if is_semantic_duplicate(&input.dedup_key, &input.title, &anchors) {
+        eprintln!(
+            "[proattività] review '{scope}': near-duplicato di una card già emessa ('{}'), salto",
+            input.title
+        );
         return None;
     }
     let id = store.insert_suggestion(&input).ok()?;
@@ -1732,6 +1778,42 @@ fn jaccard(a: &std::collections::HashSet<String>, b: &std::collections::HashSet<
 /// Slightly higher than 0.5 to compensate for not removing function words (kept
 /// language-agnostic — no stopword list).
 const DEDUP_JACCARD: f32 = 0.55;
+
+/// True if two anchors are near-duplicates: Jaccard over the threshold, OR the
+/// smaller token set is fully contained in the larger (length-asymmetric paraphrase,
+/// e.g. "tappo" ⊂ "tappo moto"). Containment requires ≥2 shared tokens so a single
+/// common word (a shared `kind` prefix like "curiosità") never collapses distinct
+/// cards. Empty sets never match.
+fn anchors_are_similar(
+    a: &std::collections::HashSet<String>,
+    b: &std::collections::HashSet<String>,
+) -> bool {
+    if a.is_empty() || b.is_empty() {
+        return false;
+    }
+    if jaccard(a, b) >= DEDUP_JACCARD {
+        return true;
+    }
+    let shared = a.intersection(b).count();
+    shared >= 2 && shared == a.len().min(b.len())
+}
+
+/// Fix 3 (anti re-propose): true if the freshly-emitted card is a SEMANTIC near-dup
+/// of one already surfaced (in ANY status). The exact `dedup_key` check misses
+/// paraphrases — the supervisor's anchor drifts between runs — so we compare token
+/// sets on BOTH the dedup_key and the human title. Pure → unit-testable.
+fn is_semantic_duplicate(
+    new_key: &str,
+    new_title: &str,
+    existing: &[(String, String)],
+) -> bool {
+    let nk = dedup_tokens(new_key);
+    let nt = dedup_tokens(new_title);
+    existing.iter().any(|(key, title)| {
+        anchors_are_similar(&nk, &dedup_tokens(key))
+            || anchors_are_similar(&nt, &dedup_tokens(title))
+    })
+}
 
 /// "Soppressione permanente" del forget: the texts of DELETED/REJECTED memories in
 /// the always-on scopes ARE the suppression list — no extra table needed. Anything
@@ -11823,6 +11905,7 @@ async fn suggestions_list(
                 "body": r.body,
                 "rationale": r.rationale,
                 "proposed_action": r.proposed_action,
+                "choices": suggestion_choices_json(&r.choices),
                 "status": r.status,
                 "feedback": r.feedback,
                 "created_at": r.created_at,
@@ -11909,6 +11992,7 @@ async fn proactivity_review_now(
                         "body": r.body,
                         "rationale": r.rationale,
                         "proposed_action": r.proposed_action,
+                        "choices": suggestion_choices_json(&r.choices),
                         "status": r.status,
                         "created_at": r.created_at,
                     })
@@ -26962,6 +27046,8 @@ mod tests {
         jail_in_root,
         parse_review_suggestion,
         sanitize_dedup_key,
+        is_semantic_duplicate,
+        suggestion_choices_json,
     };
     use crate::browser_safety;
     use local_first_capabilities::{CapabilityCallResult, ProviderId as CapProviderId};
@@ -27030,6 +27116,50 @@ mod tests {
         // dedup_key falls back to the title when omitted.
         let no_key = serde_json::json!({ "suggestion": { "title": "Ciao Mondo", "body": "b" } });
         assert_eq!(parse_review_suggestion(&no_key, "p").unwrap().dedup_key, "suggerimento:ciao-mondo");
+    }
+
+    #[test]
+    fn proactive_parse_extracts_choices() {
+        // A closed question carries quick-reply options → stored as a JSON array string,
+        // and round-trips back to a JSON array for the frontend.
+        let q = serde_json::json!({
+            "suggestion": {
+                "kind": "curiosità", "title": "Lavoro o privato?", "body": "Come usi Homun?",
+                "dedup_key": "uso", "choices": ["Lavoro", "Privato", "  ", "Entrambi"]
+            }
+        });
+        let card = parse_review_suggestion(&q, "p").expect("card");
+        assert_eq!(card.choices.as_deref(), Some(r#"["Lavoro","Privato","Entrambi"]"#));
+        assert_eq!(
+            suggestion_choices_json(&card.choices),
+            serde_json::json!(["Lavoro", "Privato", "Entrambi"])
+        );
+        // No choices / empty / non-array → None → null on the wire.
+        let plain = serde_json::json!({ "suggestion": { "title": "T", "body": "B" } });
+        assert!(parse_review_suggestion(&plain, "p").unwrap().choices.is_none());
+        let empty = serde_json::json!({
+            "suggestion": { "title": "T", "body": "B", "choices": ["", "  "] }
+        });
+        assert!(parse_review_suggestion(&empty, "p").unwrap().choices.is_none());
+        assert_eq!(suggestion_choices_json(&None), serde_json::Value::Null);
+    }
+
+    #[test]
+    fn proactive_fuzzy_dedup_blocks_paraphrases() {
+        // The exact key misses paraphrases; the fuzzy check must catch them while NOT
+        // collapsing genuinely distinct cards (even when they share a `kind` prefix).
+        let existing = vec![
+            ("curiosità:tappo-moto".to_string(), "Che tappo cerchi per la moto?".to_string()),
+            ("scadenza:contratto-acme".to_string(), "Contratto Acme in scadenza".to_string()),
+        ];
+        // Reworded anchor for the SAME thing → duplicate.
+        assert!(is_semantic_duplicate("curiosità:tappo-della-moto", "Quale tappo per la moto?", &existing));
+        // A different curiosità (shares only the kind token) → NOT a duplicate.
+        assert!(!is_semantic_duplicate("curiosità:vacanze-estive", "Dove vai in vacanza?", &existing));
+        // Distinct topic entirely → NOT a duplicate.
+        assert!(!is_semantic_duplicate("progetto-fermo:idra", "Idra è fermo", &existing));
+        // Empty board → nothing matches.
+        assert!(!is_semantic_duplicate("curiosità:tappo-moto", "x", &[]));
     }
 
     #[test]
