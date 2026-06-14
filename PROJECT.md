@@ -1,6 +1,25 @@
-# Local-First Personal Assistant
+# Homun
 
-Documento fondativo del progetto per costruire un personal assistant locale, proattivo e installabile su macOS, Windows e Linux. Il nome e il branding sono provvisori; questo file serve a fissare architettura, componenti, decisioni tecniche, riferimenti e roadmap.
+Documento fondativo del progetto. Homun e' un personal assistant locale e proattivo, installabile su macOS, Windows e Linux. Questo file serve a fissare architettura, componenti, decisioni tecniche, riferimenti e roadmap.
+
+## Stato attuale (sintesi)
+
+Le capability seguenti sono implementate e in uso (dettaglio vivo in `docs/roadmap.md`):
+
+- Chat operativa completa: Markdown, codice con syntax highlighting, diagrammi, allegati/vision, edit messaggio + branch.
+- Computer locale contenuto: browser reale in container Docker con vista noVNC.
+- Durable Task Runtime + Local Computer Session con timeline/activity card.
+- Memoria ibrida: SQLite + grafo (entita'/relazioni/decisioni) + wiki Markdown generata + contatti curati + "forget" per argomento/entita'.
+- Canali: WhatsApp e Telegram (inbound -> memoria/bozza, auto-reply con allowlist + approval).
+- Automazioni: modello Quando -> Allora (trigger orario/evento -> azione agentica), ADR 0012.
+- Connettori + capability routing: nativi + MCP + provider managed (Composio) opt-in, con capability router via `find_capability` / Tool Search (ADR 0013).
+- Skill: scanner skill locali + catalogo OpenClaw installabile + sandbox.
+- Addon ecosystem (ADR 0011) con toggle abilita/disabilita.
+- Proattivita': motore supervisore + card suggerimento.
+- Artifacts: workspace file + create/edit/versioning.
+- Graphify: grafo del progetto/codebase su host.
+- Inferenza: routing provider (Ollama locale, OpenAI-compatible, Anthropic) con registry modelli e routing ruolo -> modello (ADR 0007), local-first con delega cloud opzionale.
+- Settings ridisegnati: tema/superficie + accento personalizzabile, canali, modello & runtime, connettori, skill, memoria, contatti, computer, addon.
 
 ## Visione
 
@@ -26,13 +45,13 @@ Prima di aggiungere nuove superfici o rendere visibili altri moduli interni,
 il prodotto deve rispettare il loop base:
 
 ```text
-utente scrive -> Gemma risponde -> utente capisce la risposta
+utente scrive -> l'assistente (modello attivo) risponde -> utente capisce la risposta
 ```
 
 Task runtime, browser, approval, memoria, subagenti e computer locale restano
 capacita' fondamentali, ma non devono comparire come comportamento base della
 chat. La prossima priorita' e' rendere usabili i cinque flussi descritti in
-`docs/PRODUCT_LOOP.md`, partendo da una chat Gemma semplice, stabile e senza
+`docs/PRODUCT_LOOP.md`, partendo da una chat semplice, stabile e senza
 interruzioni.
 
 La chat experience non e' polish finale. E' una fondazione: Markdown, codice,
@@ -47,7 +66,7 @@ operative complesse.
 - OpenHuman (`tinyhumansai/openhuman`) e' uno spunto di riferimento per capire come altri hanno affrontato assistant personali, agenti, memoria, tool e UX operativa.
 - Non e' un progetto da copiare o forkare.
 - Lo usiamo per leggere soluzioni concrete, confrontare tradeoff e decidere consapevolmente cosa adattare al nostro progetto.
-- Le nostre decisioni restano autonome: local-first per default, Electron desktop shell, Rust Core/gateway locale, runtime Python/MLX con Gemma 4, subagenti auditabili e permessi deny-by-default.
+- Le nostre decisioni restano autonome: local-first per default, Electron desktop shell, Rust Core/gateway locale, inferenza via routing provider (Ollama locale + OpenAI-compatible + Anthropic), local-first con delega cloud opzionale (ADR 0007), subagenti auditabili e permessi deny-by-default.
 - Ogni idea presa da OpenHuman deve passare da una decisione esplicita: cosa risolve, come viene adattata, quali parti non importiamo.
 
 ### Stack applicazione
@@ -55,8 +74,7 @@ operative complesse.
 - Desktop shell: Electron.
 - UI: React + TypeScript.
 - Core locale: Rust.
-- Runtime inference Mac: Python + MLX + mlx-vlm.
-- Modello Mac default: `mlx-community/gemma-4-e4b-it-4bit`.
+- Inferenza: `crates/inference` con routing provider (Ollama locale, OpenAI-compatible, Anthropic), registry modelli e routing ruolo -> modello (ADR 0007). Local-first: i modelli locali via Ollama restano l'opzione predefinita, i provider cloud sono opt-in.
 - Memoria primaria: SQLite + grafo + wiki Markdown.
 - Graph/document memory: Graphify / GraphifyLabs.
 - Human-readable memory: Obsidian Wiki / LLM Wiki.
@@ -70,36 +88,16 @@ operative complesse.
 - Chat UI complex rendering: assistant-ui e' riferimento architetturale per thread, composer, attachments, message actions, suggestions, tool activity e external-store runtime. Non adottiamo automaticamente la CLI shadcn/Tailwind; adattiamo i pattern alla nostra UI Electron custom e al Rust gateway locale come owner dello stato.
 - Desktop Chat Gateway: la chat non deve dipendere da bridge nativi per stream lunghi. Il trasporto chat passa a un gateway HTTP Rust locale su `127.0.0.1`, con token locale, CORS stretto, stream NDJSON/SSE o WebSocket e UI via `fetch`/browser APIs. Il gateway diventa il boundary per thread, messaggi, streaming, cancel, metriche, artifact e read model redatti.
 
-### Test Gemma 4 locale
+### Inferenza e routing provider
 
-Test eseguito su MacBook Air M4, 24 GB RAM, Apple Metal.
+L'inferenza non e' piu' un singolo runtime locale: e' un livello di routing provider in `crates/inference` (ADR 0007).
 
-Risultato suite locale: 7/7 passati.
-
-Capacita' testate:
-
-- italiano conversazionale.
-- JSON rigido.
-- routine inference con contratto severo.
-- memory extraction.
-- tool calling Gemma 4.
-- patch codice.
-- vision/OCR da immagine sintetica.
-
-Metriche indicative:
-
-- load da cache: circa 2.2 secondi.
-- generazione: circa 28-32 token/s.
-- memoria text: circa 5.3-5.8 GB.
-- modello: `mlx-community/gemma-4-e4b-it-4bit`.
-
-File esistenti:
-
-- `/Users/fabio/Documents/Codex/2026-05-22/voglio-creare-un-applicazione-tipo-codex/tests/gemma4_eval.py`
-- `/Users/fabio/Documents/Codex/2026-05-22/voglio-creare-un-applicazione-tipo-codex/reports/gemma4_eval.jsonl`
-- `/Users/fabio/Documents/Codex/2026-05-22/voglio-creare-un-applicazione-tipo-codex/reports/gemma4_vision_fixture.png`
-
-Conclusione: Gemma 4 locale e' utilizzabile come componente operativo se viene guidato con contratti rigidi e validazione, non come chatbot libero.
+- Provider neutrali: Ollama (locale), OpenAI-compatible, Anthropic.
+- Registry modelli con metadati per modello: supporto tools, vision, reasoning, context window e tier.
+- Routing ruolo -> modello (es. orchestrator/browser/memory) automatico, con override esplicito; override per-messaggio disponibile in chat.
+- Lo streaming chat passa dal `desktop-gateway`, che instrada al provider/modello configurato.
+- Local-first per default: i modelli locali via Ollama restano l'opzione predefinita, i provider cloud sono opt-in.
+- I contratti e la validazione JSON restano richiesti per gli output operativi (piano, memoria, rischio): il modello produce output strutturato che il core valida prima di agire.
 
 ## Architettura Generale
 
@@ -155,10 +153,11 @@ Electron React UI
       -> VisionAgent
       -> RiskAgent
       -> ReviewAgent
-    -> Local LLM Runtime
-      -> Python sidecar
-      -> MLX / mlx-vlm
-      -> Gemma 4
+    -> Inference Provider Router (crates/inference)
+      -> Ollama (local)
+      -> OpenAI-compatible
+      -> Anthropic
+      -> Model Registry + Role Routing
     -> Browser Automation Runtime
       -> implementation surface of Local Computer Session
 ```
@@ -185,7 +184,7 @@ Tecnologie:
 - TypeScript.
 - Rust HTTP Gateway locale per chat, streaming, artifact, processi, task,
   memoria, capability e read model ad alto volume.
-- Python/MLX locale per Gemma.
+- inferenza via provider (Ollama/OpenAI-compat/Anthropic) attraverso il gateway.
 
 La UI non deve essere una landing page. La prima schermata deve essere il prodotto operativo.
 
@@ -198,14 +197,14 @@ Implementato:
 - Viste shallow navigabili: Memoria, Connessioni, Automazioni, Browser e Brain Audit.
 - View-model mock separati dai componenti, allineati a task queue, run Brain, health runtime, memoria e provider/connection read model.
 - Inspector e task detail mostrano dati redatti, senza raw prompt, raw payload, raw tool args o raw output.
-- Electron bridge V1 in `apps/desktop/src/lib/coreBridge.ts`: shell desktop Chromium, chat via Desktop HTTP Gateway Rust locale, prompt builder Rust, streaming/cancel gateway e runtime health/warmup/shutdown senza chiamate dirette renderer -> Gemma.
+- Electron bridge V1 in `apps/desktop/src/lib/coreBridge.ts`: shell desktop Chromium, chat via Desktop HTTP Gateway Rust locale, prompt builder Rust, streaming/cancel gateway senza chiamate dirette renderer -> provider di inferenza.
 - Wrapper TypeScript `apps/desktop/src/lib/coreBridge.ts` separato dai componenti, cosi' i fallback UI possono essere sostituiti da endpoint HTTP locali senza riscrivere le schermate.
 - Il bridge espone solo read model UI-safe: task detail usa checkpoint redatti, capability snapshot omette `secret_ref`, memory dashboard passa da `MemoryUiReadModel` e process health non espone env o log raw.
 - Command `local_computer_session_snapshot` collegato al read model reale `crates/local-computer-session`, con sessione seeded redatta per preparare la sostituzione dei mock della activity card.
 - La Chat ora carica la Local Computer activity card da `coreBridge.localComputerSession(...)` tramite mapper dedicato `localComputerViewModel.ts`; il mock non viene piu' passato da `App`.
 - Command `local_computer_run_smoke_test` collegato alla card: esegue un health check reale del sidecar browser via stdio, un comando shell read-only `date`, registra eventi/artifact redatti e aggiorna lo snapshot UI.
-- Composer collegato al runtime Gemma locale via Desktop HTTP Gateway Rust: il prompt non passa da API cloud e non viene salvato come raw payload operativo. Il gateway autonomo in `crates/desktop-gateway` costruisce il prompt con `local-first-context-compression`, proxy stream/cancel verso Gemma, espone runtime health/warmup/shutdown, usa `ProcessManager` per avviare Gemma via `.venv-mlx` quando non e' gia' in ascolto, persiste thread/messaggi in SQLite locale e protegge gli endpoint chat/runtime con token bearer locale + CORS allowlist.
-- Le richieste operative seguono un percorso operational-first: la UI prova prima il gateway task locale; se il prompt richiede azioni, crea task, approval e Computer locale senza passare dalla risposta Gemma generica. La risposta finale deve arrivare dall'executor con dati raccolti, fonti, limiti e prossimo passo proattivo.
+- Composer collegato al desktop-gateway Rust, che instrada lo streaming chat al provider/modello configurato (Ollama/OpenAI-compat/Anthropic): il prompt non viene salvato come raw payload operativo. Il gateway autonomo in `crates/desktop-gateway` costruisce il prompt con `local-first-context-compression`, gestisce streaming/cancel verso il provider attivo, persiste thread/messaggi in SQLite locale e protegge gli endpoint chat con token bearer locale + CORS allowlist.
+- Le richieste operative seguono un percorso operational-first: la UI prova prima il gateway task locale; se il prompt richiede azioni, crea task, approval e Computer locale senza passare dalla risposta generica del modello attivo. La risposta finale deve arrivare dall'executor con dati raccolti, fonti, limiti e prossimo passo proattivo.
 - Per il primo caso browser reale, i task treno devono aprire i siti, compilare i form riconoscibili, avviare solo ricerche risultati sicure, raccogliere le opzioni e chiedere quale prenotare. Login, dati sensibili, scelta finale, acquisto e pagamento restano sempre dietro approval esplicita.
 
 Decisione architetturale aggiornata:
@@ -234,7 +233,7 @@ Direzione UX aggiornata dopo analisi Manus live:
 
 Responsabilita':
 
-- avviare e monitorare sidecar Python/MLX.
+- avviare e monitorare i sidecar locali (browser, MCP, runtime di inferenza locale opzionali).
 - gestire database SQLite.
 - osservare eventi locali.
 - applicare policy di sicurezza.
@@ -253,7 +252,7 @@ Implementato:
 - `FakeProcessSupervisor` per test deterministici.
 - `LocalProcessSupervisor` con spawn reale, idempotent start, stop/kill, snapshot exit e capture stdout/stderr in log ring bounded.
 - health check `process_alive` e `http_get` tramite probe iniettabile.
-- `SidecarProcessCatalog` per generare spec concrete di Gemma/MLX, browser automation e MCP stdio server.
+- `SidecarProcessCatalog` per generare spec concrete di sidecar locali (browser automation, MCP stdio server e runtime di inferenza locale opzionali).
 - registry helper per registrare i sidecar default nel `ProcessRegistryStore`.
 - crate `crates/secrets` per secret storage locale, audit-safe e multiutente/workspace.
 - contratti `SecretRef`, `SecretMaterial`, `SecretMetadata`, `SecretStatus` e trait `SecretStore`.
@@ -500,7 +499,7 @@ UX:
 
 ### 5. Subagent Manager
 
-Il Subagent Manager e' il coordinatore operativo dell'assistant. Non e' un modello e non e' un endpoint chat. Vive nel Rust Core e usa il runtime LLM locale come motore di inferenza dietro contratti rigidi.
+Il Subagent Manager e' il coordinatore operativo dell'assistant. Non e' un modello e non e' un endpoint chat. Vive nel Rust Core e usa il runtime di inferenza (provider) come motore di inferenza dietro contratti rigidi.
 
 Responsabilita':
 
@@ -553,7 +552,7 @@ Envelope minimo di un task subagente:
 
 Regole:
 
-- Il runtime Python/MLX non decide autonomia, permessi o routing tra subagenti.
+- Il runtime di inferenza (provider) non decide autonomia, permessi o routing tra subagenti.
 - I subagenti non eseguono azioni irreversibili; producono piani, bozze, tool call o valutazioni.
 - Ogni output operativo passa da validazione e, per azioni reali, da `RiskAgent` o `ReviewAgent`.
 - I task paralleli devono essere ricostruibili e auditabili separatamente.
@@ -574,47 +573,29 @@ Event batch
   -> approval center / automation proposal
 ```
 
-### 6. Local LLM Runtime
+### 6. Inferenza (Provider Routing)
 
-Runtime Mac iniziale:
+L'inferenza vive in `crates/inference` come livello di routing provider (ADR 0007), non come singolo runtime locale.
 
-- Python.
-- uv-managed environment.
-- MLX.
-- mlx-vlm.
-- Gemma 4 E4B 4-bit.
+Provider supportati (kind):
 
-Deve essere un server locale persistente, non un CLI lanciato a ogni prompt.
+- `ollama` (locale, predefinito local-first).
+- `openai_compat` (qualsiasi endpoint OpenAI-compatible).
+- `anthropic`.
 
-Endpoint minimi:
+Caratteristiche:
 
-```text
-GET  /health
-POST /generate
-POST /generate_json
-POST /tool_call
-POST /analyze_image
-POST /benchmark
-POST /shutdown
-```
+- registry provider + cataloghi modelli con metadati per modello: supporto tools, vision, reasoning, context window e tier.
+- routing ruolo -> modello (es. orchestrator/browser/memory) automatico, con override esplicito e override per-messaggio in chat.
+- streaming chat instradato dal `desktop-gateway` verso il provider/modello configurato.
+- chat/stream, tool calling e vision passano dal provider attivo secondo le capability del modello.
+- timeout, cancel request, schema validation e repair attempt per JSON invalido restano richiesti per gli output operativi.
 
-Requisiti:
+Il livello di inferenza espone primitive per i subagenti, non un'interfaccia di autonomia:
 
-- caricare modello una sola volta.
-- streaming token.
-- metriche token/s.
-- memoria peak.
-- timeout.
-- cancel request.
-- schema validation.
-- repair attempt per JSON invalido.
-
-Il runtime espone primitive per i subagenti, non un'interfaccia di autonomia:
-
-- `generate_json`: inferenza vincolata a contratto.
-- `tool_call`: produzione di chiamate tool parseabili, non esecuzione tool.
-- `analyze_image`: analisi locale di immagini/screenshot.
-- `benchmark`: verifica regressioni dei contratti locali.
+- generazione vincolata a contratto (output JSON validato).
+- produzione di chiamate tool parseabili, non esecuzione tool.
+- analisi di immagini/screenshot quando il modello attivo supporta vision.
 
 ### 7. Contratti LLM
 
@@ -957,26 +938,23 @@ critical: pagamento, deploy, modifiche irreversibili
 
 ### Fase 0 - Esperimenti validati
 
-Stato: in corso, base gia' presente.
+Stato: superata. La direzione single-runtime locale e' stata sostituita dal routing provider (ADR 0007).
 
-- Gemma 4 E4B 4-bit su MLX.
-- test JSON, routine, tool call, vision.
-- benchmark locale.
-- probe Candle/Rust.
+- test JSON, routine, tool call, vision validati come contratti.
+- inferenza ora via routing provider (Ollama locale + OpenAI-compatible + Anthropic).
 
-### Fase 1 - Local LLM Runtime
+### Fase 1 - Inferenza via routing provider
+
+Stato: operativa (ADR 0007). Sostituisce la vecchia Fase 1 "Local LLM Runtime" (server Python/MLX persistente).
 
 Deliverable:
 
-- server Python/MLX persistente.
-- API HTTP locale.
-- model load una volta sola.
-- schema validation.
-- error response stabile.
-- health operativo con readiness, configurazione locale e stato concorrenza.
-- busy/deadline handling.
-- validazione path immagini locali.
-- benchmark endpoint.
+- `crates/inference` con provider neutrali (Ollama locale, OpenAI-compatible, Anthropic).
+- registry provider + cataloghi modelli con metadati (tools/vision/reasoning/context window/tier).
+- routing ruolo -> modello automatico, con override esplicito e override per-messaggio in chat.
+- streaming chat instradato dal `desktop-gateway`.
+- schema validation e repair per gli output operativi.
+- local-first per default: i modelli locali via Ollama restano l'opzione predefinita, i provider cloud sono opt-in.
 
 ### Fase 1.5 - Subagent Orchestration
 
@@ -1204,24 +1182,27 @@ homun/
       src/
       electron/
   crates/
-    desktop-gateway/
-    core/
-    memory/
-    task-runtime/
-    local-computer-session/
-    process-manager/
-    secrets/
-    connectors/
-    capabilities/
     browser-automation/
-    automation/
-    permissions/
+    capabilities/
+    context-compression/
+    desktop-gateway/
+    inference/
+    local-computer-session/
+    memory/
+    orchestrator/
+    process-manager/
+    process-skill/
+    secrets/
+    skill-runtime/
     subagents/
+    task-runtime/
   runtimes/
-    mlx-gemma4/
-      server.py
-      contracts/
-      tests/
+    browser-automation/
+    channel-telegram/
+    channel-whatsapp/
+    contained-computer/
+    graphify/
+    mlx-gemma4/   # legacy, non e' il path vivo
   packages/
     shared-contracts/
     ui/
@@ -1275,7 +1256,7 @@ crates/browser-automation/
 crates/task-runtime/
 ```
 
-Runtime Python/MLX, memoria, subagenti, Durable Task Runtime, Capability Layer, Browser Automation, Process Manager, Secrets/Keychain, Skill/Plugin Registry, Skill Runtime Sandbox, process adapter trusted, WASM adapter non trusted, Assistant Orchestrator Brain e Local Computer Session hanno una base operativa testata. La UI Electron esiste con direzione rail/drawer, chat attiva, activity card e progressive disclosure; lo streaming Gemma locale e' fluido in Chromium. Il vecchio core desktop Tauri e' stato rimosso per pulizia: le sue responsabilita' stanno rientrando nel gateway Rust autonomo e nei crate riusabili. Il gateway ora possiede prompt building, streaming/cancel, runtime health/warmup/shutdown, autostart Gemma via `ProcessManager`, thread e messaggi persistenti. Restano da collegare read model reali per task, memoria, processi, capability e Local Computer al gateway, aggiungere packaging e diagnostica del runtime Python/MLX, collegare l'esecuzione effettiva degli step browser/shell ai worker runtime, promuovere il planner prompt-level nell'OrchestratorBrain completo per subagenti/tool complessi, e lasciare l'auto-apprendimento per ultimo quando gli eventi PC reali saranno disponibili.
+Inferenza (routing provider Ollama/OpenAI-compat/Anthropic), memoria, subagenti, Durable Task Runtime, Capability Layer, Browser Automation, Process Manager, Secrets/Keychain, Skill/Plugin Registry, Skill Runtime Sandbox, process adapter trusted, WASM adapter non trusted, Assistant Orchestrator Brain e Local Computer Session hanno una base operativa testata. La UI Electron esiste con direzione rail/drawer, chat attiva, activity card e progressive disclosure; lo streaming chat e' fluido in Chromium. Il vecchio core desktop Tauri e' stato rimosso per pulizia: le sue responsabilita' stanno rientrando nel gateway Rust autonomo e nei crate riusabili. Il gateway ora possiede prompt building, streaming/cancel verso il provider/modello configurato, thread e messaggi persistenti. Restano da collegare read model reali per task, memoria, processi, capability e Local Computer al gateway, aggiungere packaging e diagnostica, collegare l'esecuzione effettiva degli step browser/shell ai worker runtime, promuovere il planner prompt-level nell'OrchestratorBrain completo per subagenti/tool complessi, e lasciare l'auto-apprendimento per ultimo quando gli eventi PC reali saranno disponibili.
 
 Nota UI/core: la sessione chat default deve restare neutra (`computer_active_prompt`) e non contenere dati demo di task specifici. Contesto come ricerche treni, prenotazioni o form deve entrare solo quando un prompt/task reale lo genera.
 

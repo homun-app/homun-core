@@ -9,7 +9,7 @@ l'utente, non dalla quantita' di infrastruttura disponibile.
 Il loop base deve funzionare sempre:
 
 ```text
-utente scrive -> Gemma risponde -> utente capisce la risposta
+utente scrive -> l'assistente (modello attivo) risponde -> utente capisce la risposta
 ```
 
 Task runtime, browser, approval, memoria, subagenti e computer locale sono
@@ -41,11 +41,11 @@ Esempio: `chi sei?`, `spiegami cos'e' un mutuo`, `scrivi una mail breve`.
 
 UX attesa:
 
-- Mostra solo la risposta di Gemma.
+- Mostra solo la risposta dell'assistente (modello attivo).
 - Nessun computer locale visibile.
 - Nessun piano.
 - Nessuna approval.
-- Eventuale stato massimo: `Gemma sta rispondendo`.
+- Eventuale stato massimo: `L'assistente sta rispondendo`.
 
 ### 2. Calcolo o risposta breve
 
@@ -117,7 +117,7 @@ chiaro, piu' veloce o piu' affidabile senza peggiorare gli altri.
 La prossima fase del progetto deve quindi essere:
 
 ```text
-Chat Gemma semplice e stabile prima, orchestrazione visibile dopo.
+Chat semplice e stabile prima, orchestrazione visibile dopo.
 ```
 
 ## Chat Experience Foundation

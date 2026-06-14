@@ -108,8 +108,8 @@ Responsabilita':
 - esporre API locali per thread, messaggi, streaming chat, cancel, feedback e
   azioni messaggio;
 - streammare risposte via browser networking, non via IPC desktop;
-- tenere il Gemma Python/MLX runtime dietro al Rust Core, non esposto come API
-  prodotto;
+- tenere il livello di inferenza (routing provider, `crates/inference`, ADR 0007)
+  dietro al Rust Core, non esposto come API prodotto;
 - preservare metriche runtime: `prompt_tokens`, `generation_tokens`,
   `prompt_tps`, `generation_tps`, `peak_memory_gb`, `elapsed_seconds`;
 - applicare token locale, CORS stretto, bind loopback e read model redatti;
@@ -133,10 +133,10 @@ Stato attuale:
 - `crates/desktop-gateway` e' il processo Rust autonomo per la chat;
 - `apps/desktop/src/lib/chatApi.ts` usa il gateway per thread, messaggi, pin,
   archivio, delete e commit delle risposte, con cache locale solo come fallback;
-- `apps/desktop/src/lib/coreBridge.ts` usa il gateway per stream/cancel e per
-  runtime health/warmup/shutdown; il renderer non chiama piu' Gemma direttamente;
+- `apps/desktop/src/lib/coreBridge.ts` usa il gateway per stream/cancel; il
+  renderer non instrada direttamente verso il provider di inferenza;
 - prossimo step: estendere il gateway a task, memoria, capability, Local
-  Computer e packaging/log diagnostici del runtime Python/MLX.
+  Computer e packaging/log diagnostici dei runtime locali.
 
 ### Chat Thread
 
@@ -386,7 +386,7 @@ Responsabilita':
 Stato attuale:
 
 - Process Manager implementato;
-- Gemma 4 MLX runtime locale creato;
+- inferenza via routing provider (Ollama locale + OpenAI-compatible + Anthropic, ADR 0007); MLX/Gemma resta come fallback locale piccolo (legacy);
 - browser sidecar registrato;
 - UI runtime health parziale.
 
