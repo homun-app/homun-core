@@ -272,14 +272,14 @@ fn render_runtime_prompt(prompt: &str, compressed_context: &str) -> String {
     };
 
     [
-        "Sei un assistente personale locale. Rispondi nella lingua dell'utente, in modo diretto.",
-        "Il contesto recente e' stato redatto e compresso dal Desktop Gateway Rust locale con budget stile JuicePrompt.",
-        "Mantieni la prima risposta compatta: 1-4 paragrafi brevi o un blocco codice essenziale.",
-        "Se includi codice, usa sempre blocchi markdown fenced con linguaggio.",
-        "Usa il contesto recente per risolvere riferimenti come 'un'altra', 'continua', 'quello di prima' o 'spiegamelo meglio'.",
+        "You are a local personal assistant. Reply in the user's language, directly and to the point.",
+        "The recent context has been redacted and compressed by the local Rust Desktop Gateway with a JuicePrompt-style budget.",
+        "Keep your first answer compact: 1-4 short paragraphs or an essential code block.",
+        "If you include code, always use fenced markdown blocks with a language.",
+        "Use the recent context to resolve references like 'the other one', 'continue', 'the one from before' or 'explain it better'.",
         "",
         &context_block,
-        &format!("Utente: {prompt}"),
+        &format!("User: {prompt}"),
     ]
     .join("\n")
 }
@@ -291,9 +291,9 @@ fn normalize_context_text(text: &str, max_message_chars: usize) -> String {
 
 fn role_label(role: &ChatContextRole) -> &'static str {
     match role {
-        ChatContextRole::User => "Utente",
-        ChatContextRole::Assistant => "Assistente",
-        ChatContextRole::System => "Sistema",
+        ChatContextRole::User => "User",
+        ChatContextRole::Assistant => "Assistant",
+        ChatContextRole::System => "System",
     }
 }
 
