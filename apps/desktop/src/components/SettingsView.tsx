@@ -69,8 +69,11 @@ import {
   ACCENT_PRESETS,
   DEFAULT_ACCENT,
   loadAccent,
+  loadCustomAccents,
   loadTheme,
+  normalizeHex,
   saveAccent,
+  saveCustomAccents,
   saveTheme,
   THEME_PRESETS,
   type ThemeName,
@@ -565,9 +568,40 @@ function AccountPane({
 function AppearancePane() {
   const [accent, setAccent] = useState(loadAccent());
   const [theme, setTheme] = useState<ThemeName>(loadTheme());
+  // The user's own accents, shown as pills alongside the presets (persisted).
+  const [customs, setCustoms] = useState<string[]>(loadCustomAccents);
+  const isPreset = (hex: string) =>
+    ACCENT_PRESETS.some((p) => p.hex.toLowerCase() === hex.toLowerCase());
+  // Migrate a pre-existing custom accent (saved before this feature) into a pill.
+  useEffect(() => {
+    const cur = normalizeHex(accent);
+    if (!isPreset(cur) && !customs.some((c) => c === cur)) {
+      const next = [...customs, cur];
+      setCustoms(next);
+      saveCustomAccents(next);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const pick = (hex: string) => {
-    setAccent(hex);
-    saveAccent(hex); // applies to :root + persists immediately
+    const h = normalizeHex(hex);
+    setAccent(h);
+    saveAccent(h); // applies to :root + persists immediately
+  };
+  const addCustom = (hex: string) => {
+    const h = normalizeHex(hex);
+    if (!isPreset(h) && !customs.some((c) => c === h)) {
+      const next = [...customs, h];
+      setCustoms(next);
+      saveCustomAccents(next);
+    }
+    pick(h);
+  };
+  const removeCustom = (hex: string) => {
+    const h = normalizeHex(hex);
+    const next = customs.filter((c) => c !== h);
+    setCustoms(next);
+    saveCustomAccents(next);
+    if (normalizeHex(accent) === h) pick(DEFAULT_ACCENT);
   };
   const pickTheme = (name: ThemeName) => {
     setTheme(name);
@@ -636,16 +670,51 @@ function AppearancePane() {
             </button>
           );
         })}
-      </div>
-      <div className="appearance-custom">
-        <label className="appearance-color">
-          <input type="color" value={accent} onChange={(e) => pick(e.target.value)} />
-          <span>Personalizzato</span>
+        {/* Saved custom accents — same pill as the presets, each removable on hover. */}
+        {customs.map((hex) => {
+          const active = norm === hex;
+          return (
+            <span key={hex} className="appearance-accent-wrap">
+              <button
+                type="button"
+                title={hex.toUpperCase()}
+                aria-label={`Accento ${hex.toUpperCase()}`}
+                className={`appearance-accent ${active ? "active" : ""}`}
+                onClick={() => pick(hex)}
+              >
+                <span className="appearance-accent-chip" style={{ background: hex }} />
+                <span className="appearance-accent-name">{hex.toUpperCase()}</span>
+                {active && <Check size={14} style={{ color: hex }} />}
+              </button>
+              <button
+                type="button"
+                className="appearance-accent-del"
+                aria-label={`Rimuovi colore ${hex.toUpperCase()}`}
+                title="Rimuovi"
+                onClick={() => removeCustom(hex)}
+              >
+                <X size={11} />
+              </button>
+            </span>
+          );
+        })}
+        {/* Add a custom colour — opens the native picker; the result becomes a pill. */}
+        <label
+          className="appearance-accent appearance-accent-add"
+          title="Aggiungi un colore personalizzato"
+        >
+          <span className="appearance-accent-chip appearance-accent-chip-add">
+            <Plus size={13} />
+          </span>
+          <span className="appearance-accent-name">Personalizzato</span>
+          <input
+            type="color"
+            className="appearance-accent-add-input"
+            aria-label="Scegli un colore personalizzato"
+            value={isPreset(norm) || !customs.includes(norm) ? DEFAULT_ACCENT : norm}
+            onChange={(e) => addCustom(e.target.value)}
+          />
         </label>
-        <code className="appearance-hex">{accent.toUpperCase()}</code>
-        <button type="button" className="ghost-button" onClick={() => pick(DEFAULT_ACCENT)}>
-          Ripristina
-        </button>
       </div>
       <div className="appearance-preview">
         <button type="button" className="appearance-preview-btn">
