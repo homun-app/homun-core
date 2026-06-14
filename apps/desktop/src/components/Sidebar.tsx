@@ -10,7 +10,6 @@ import {
   FolderPlus,
   Info,
   PanelLeftClose,
-  PanelLeftOpen,
   Pencil,
   Pin,
   PinOff,
@@ -63,15 +62,6 @@ export function NavigationRail({
 }: NavigationRailProps) {
   return (
     <aside className="navigation-rail" aria-label="Navigazione rapida">
-      <button
-        className="rail-logo"
-        type="button"
-        aria-label="Apri menu"
-        onClick={onToggleDrawer}
-      >
-        <PanelLeftOpen size={18} />
-      </button>
-
       <nav className="rail-nav">
         <button
           className="rail-button"
