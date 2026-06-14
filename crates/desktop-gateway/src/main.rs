@@ -360,10 +360,35 @@ struct ErrorBody {
     message: String,
 }
 
+/// What to do with the legacy data dir at startup. Pure decision → unit-testable.
+#[derive(Debug, PartialEq, Eq)]
+enum LegacyDirAction {
+    /// No legacy dir (fresh install or already migrated) → nothing to do.
+    Noop,
+    /// Legacy exists, `~/.homun` does not → rename it across.
+    Migrate,
+    /// BOTH exist → can't rename; warn loudly instead of silently using `~/.homun`.
+    WarnCollision,
+}
+
+fn legacy_dir_action(legacy_exists: bool, current_exists: bool) -> LegacyDirAction {
+    match (legacy_exists, current_exists) {
+        (false, _) => LegacyDirAction::Noop,
+        (true, false) => LegacyDirAction::Migrate,
+        (true, true) => LegacyDirAction::WarnCollision,
+    }
+}
+
 /// One-time data-dir migration after the project rename to "homun". Existing
 /// installs keep their data: if the legacy `~/.local-first-personal-assistant`
-/// still exists and the new `~/.homun` does not, move it across. Never deletes
-/// anything; on failure we proceed with a fresh `~/.homun`.
+/// still exists and the new `~/.homun` does not, move it across. Never deletes or
+/// overwrites anything; on failure we proceed with a fresh `~/.homun`.
+///
+/// If BOTH dirs exist the rename can't run — and on at least one machine a
+/// pre-existing `~/.homun` (an unrelated older project) silently shadowed the real
+/// data left in the legacy dir, making the app look "empty". We don't guess which
+/// dataset wins (overwriting user data is never acceptable), but we make the split
+/// LOUD so it can't pass unnoticed again.
 fn migrate_legacy_data_dir() {
     let Ok(home) = env::var("HOME") else {
         return;
@@ -371,8 +396,9 @@ fn migrate_legacy_data_dir() {
     let home = PathBuf::from(home);
     let legacy = home.join(".local-first-personal-assistant");
     let current = home.join(".homun");
-    if legacy.exists() && !current.exists() {
-        match fs::rename(&legacy, &current) {
+    match legacy_dir_action(legacy.exists(), current.exists()) {
+        LegacyDirAction::Noop => {}
+        LegacyDirAction::Migrate => match fs::rename(&legacy, &current) {
             Ok(()) => eprintln!(
                 "[homun] migrated data dir {} -> {}",
                 legacy.display(),
@@ -382,7 +408,17 @@ fn migrate_legacy_data_dir() {
                 "[homun] WARN: data-dir migration failed ({error}); starting fresh at {}",
                 current.display()
             ),
-        }
+        },
+        LegacyDirAction::WarnCollision => eprintln!(
+            "[homun] WARN: due cartelle dati coesistono — uso {} ma {} esiste ancora \
+             (possibili dati più recenti lì). Se l'app sembra VUOTA: ferma il gateway, \
+             metti da parte {} e rinomina {} in {}.",
+            current.display(),
+            legacy.display(),
+            current.display(),
+            legacy.display(),
+            current.display(),
+        ),
     }
 }
 
@@ -27048,6 +27084,8 @@ mod tests {
         sanitize_dedup_key,
         is_semantic_duplicate,
         suggestion_choices_json,
+        legacy_dir_action,
+        LegacyDirAction,
     };
     use crate::browser_safety;
     use local_first_capabilities::{CapabilityCallResult, ProviderId as CapProviderId};
@@ -27160,6 +27198,18 @@ mod tests {
         assert!(!is_semantic_duplicate("progetto-fermo:idra", "Idra è fermo", &existing));
         // Empty board → nothing matches.
         assert!(!is_semantic_duplicate("curiosità:tappo-moto", "x", &[]));
+    }
+
+    #[test]
+    fn legacy_data_dir_decision() {
+        // No legacy dir → nothing to do (fresh install or already migrated).
+        assert_eq!(legacy_dir_action(false, false), LegacyDirAction::Noop);
+        assert_eq!(legacy_dir_action(false, true), LegacyDirAction::Noop);
+        // Legacy present, ~/.homun absent → clean rename.
+        assert_eq!(legacy_dir_action(true, false), LegacyDirAction::Migrate);
+        // BOTH present → can't rename; must warn (the collision that stranded data
+        // behind a pre-existing ~/.homun), never silently use the empty one.
+        assert_eq!(legacy_dir_action(true, true), LegacyDirAction::WarnCollision);
     }
 
     #[test]
