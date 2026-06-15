@@ -3,13 +3,27 @@
     "resizeSidebarAria": "Resize the sidebar"
   },
   "months": {
-    "jan": "Jan", "feb": "Feb", "mar": "Mar", "apr": "Apr",
-    "may": "May", "jun": "Jun", "jul": "Jul", "aug": "Aug",
-    "sep": "Sep", "oct": "Oct", "nov": "Nov", "dec": "Dec"
+    "jan": "Jan",
+    "feb": "Feb",
+    "mar": "Mar",
+    "apr": "Apr",
+    "may": "May",
+    "jun": "Jun",
+    "jul": "Jul",
+    "aug": "Aug",
+    "sep": "Sep",
+    "oct": "Oct",
+    "nov": "Nov",
+    "dec": "Dec"
   },
   "days": {
-    "mon": "Mon", "tue": "Tue", "wed": "Wed", "thu": "Thu",
-    "fri": "Fri", "sat": "Sat", "sun": "Sun"
+    "mon": "Mon",
+    "tue": "Tue",
+    "wed": "Wed",
+    "thu": "Thu",
+    "fri": "Fri",
+    "sat": "Sat",
+    "sun": "Sun"
   },
   "mdEditor": {
     "bold": "Bold",
@@ -385,7 +399,16 @@
     "concurrencyDesc": "How many inferences the runtime lets run at once. Automatic based on the provider (local 1, cloud 4).",
     "concurrencyLocalWarn": "Local provider detected: high concurrency can saturate memory.",
     "automatic": "Automatic",
-    "manual": "Manual"
+    "manual": "Manual",
+    "inAppOnly": "In-app only",
+    "yourName": "Your name",
+    "addProvider": "Add provider",
+    "type": "Type",
+    "endpoint": "Endpoint (base URL)",
+    "channels": "Channels",
+    "skills": "Skills",
+    "addon": "Addons",
+    "computer": "Local computer"
   },
   "error": {
     "model": {

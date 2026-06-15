@@ -108,21 +108,22 @@ interface SettingsViewProps {
 }
 
 const SECTION_TITLES: Record<SettingsSectionId, string> = {
-  account: "Account",
-  general: "Generale",
-  appearance: "Aspetto",
-  runtime: "Modello & Runtime",
-  privacy: "Privacy & Autonomia",
-  memory: "Memoria",
-  contacts: "Contatti",
-  channels: "Canali",
-  connections: "Connettori",
-  skills: "Skill",
-  addon: "Addon",
-  computer: "Computer locale",
+  account: "settings.account",
+  general: "settings.general",
+  appearance: "settings.appearance",
+  runtime: "settings.runtime",
+  privacy: "settings.privacy",
+  memory: "nav.memory",
+  contacts: "nav.contacts",
+  channels: "settings.channels",
+  connections: "settings.connectors",
+  skills: "settings.skills",
+  addon: "settings.addon",
+  computer: "settings.computer",
 };
 
 export function SettingsView({ section, sub, onPluginsChanged }: SettingsViewProps) {
+  const { t } = useTranslation();
   const [model, setModel] = useState<ActiveModelInfo | null>(null);
   const [computer, setComputer] = useState<ContainedComputerLive | null>(null);
 
@@ -161,7 +162,7 @@ export function SettingsView({ section, sub, onPluginsChanged }: SettingsViewPro
     >
       <div className="set-pane">
         <h2 id="settings-title" className="set-title">
-          {SECTION_TITLES[section]}
+          {t(SECTION_TITLES[section])}
         </h2>
         {section === "account" && <AccountPane computer={computer} />}
         {section === "general" && <GeneralPane />}

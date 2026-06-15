@@ -3,13 +3,27 @@
     "resizeSidebarAria": "Ridimensiona la barra laterale"
   },
   "months": {
-    "jan": "gen", "feb": "feb", "mar": "mar", "apr": "apr",
-    "may": "mag", "jun": "giu", "jul": "lug", "aug": "ago",
-    "sep": "set", "oct": "ott", "nov": "nov", "dec": "dic"
+    "jan": "gen",
+    "feb": "feb",
+    "mar": "mar",
+    "apr": "apr",
+    "may": "mag",
+    "jun": "giu",
+    "jul": "lug",
+    "aug": "ago",
+    "sep": "set",
+    "oct": "ott",
+    "nov": "nov",
+    "dec": "dic"
   },
   "days": {
-    "mon": "Lun", "tue": "Mar", "wed": "Mer", "thu": "Gio",
-    "fri": "Ven", "sat": "Sab", "sun": "Dom"
+    "mon": "Lun",
+    "tue": "Mar",
+    "wed": "Mer",
+    "thu": "Gio",
+    "fri": "Ven",
+    "sat": "Sab",
+    "sun": "Dom"
   },
   "mdEditor": {
     "bold": "Grassetto",
@@ -385,7 +399,16 @@
     "concurrencyDesc": "Quante inferenze il runtime lascia girare contemporaneamente. Automatico in base al provider (locale 1, cloud 4).",
     "concurrencyLocalWarn": "Provider locale rilevato: una concorrenza alta può saturare la memoria.",
     "automatic": "Automatico",
-    "manual": "Manuale"
+    "manual": "Manuale",
+    "inAppOnly": "Solo in app",
+    "yourName": "Il tuo nome",
+    "addProvider": "Aggiungi provider",
+    "type": "Tipo",
+    "endpoint": "Endpoint (base URL)",
+    "channels": "Canali",
+    "skills": "Skill",
+    "addon": "Addon",
+    "computer": "Computer locale"
   },
   "error": {
     "model": {
