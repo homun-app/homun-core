@@ -2228,6 +2228,7 @@ function MessageActionBar({
   onSaveToMemory: () => void;
   onSaveAsGoal: () => void;
 }) {
+  const { t } = useTranslation();
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPlacement, setMenuPlacement] =
     useState<MessageActionMenuPlacement>("below");
@@ -2549,6 +2550,7 @@ function OperationalPlanPreview({
   collapsed: boolean;
   markdown?: string;
 }) {
+  const { t } = useTranslation();
   const items = useMemo(() => parseOperationalPlanItems(markdown), [markdown]);
   if (!markdown || items.length === 0) {
     return null;
@@ -2649,6 +2651,7 @@ function InlineTimeline({
   onToggle: () => void;
   session: ComputerSession;
 }) {
+  const { t } = useTranslation();
   if (session.timeline.length === 0) {
     return null;
   }
@@ -4318,6 +4321,7 @@ function ArtifactsPanel({
    *  (fixed position, own close/expand) — the Workbench owns those. */
   embedded?: boolean;
 }) {
+  const { t } = useTranslation();
   const [selectedName, setSelectedName] = useState<string | null>(
     initialName ?? artifacts[0]?.name ?? null,
   );
