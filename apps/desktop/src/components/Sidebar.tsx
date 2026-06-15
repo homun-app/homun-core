@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { MouseEvent, ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { settingsGroupLabels, settingsSections } from "../data/mockData";
 import type { ChatThread, NavItem, SettingsSectionId, ViewId } from "../types";
 import { useSetting } from "../lib/settingsStore";
@@ -61,16 +62,17 @@ export function NavigationRail({
   onSearch,
   onToggleDrawer,
 }: NavigationRailProps) {
+  const { t } = useTranslation();
   return (
-    <aside className="navigation-rail" aria-label="Navigazione rapida">
+    <aside className="navigation-rail" aria-label={t("sidebar.railAriaLabel")}>
       <nav className="rail-nav">
         {/* Expand toggle lives INSIDE the rail (a no-drag child of the drag rail, so it
             reliably carves the drag region) instead of floating over the content. */}
         <button
           className="rail-button"
           type="button"
-          aria-label="Espandi barra laterale"
-          title="Espandi barra laterale"
+          aria-label={t("sidebar.expandSidebar")}
+          title={t("sidebar.expandSidebar")}
           onClick={onToggleDrawer}
         >
           <PanelLeftOpen size={18} />
@@ -78,7 +80,7 @@ export function NavigationRail({
         <button
           className="rail-button"
           type="button"
-          aria-label="Cerca"
+          aria-label={t("sidebar.search")}
           onClick={onSearch}
         >
           <Search size={18} />
@@ -101,13 +103,13 @@ export function NavigationRail({
       </nav>
 
       <div className="rail-bottom">
-        <button className="rail-button" type="button" aria-label="Notifiche">
+        <button className="rail-button" type="button" aria-label={t("sidebar.notifications")}>
           <Bell size={18} />
         </button>
         <button
           className={`rail-button ${activeView === "settings" ? "active" : ""}`}
           type="button"
-          aria-label="Impostazioni"
+          aria-label={t("sidebar.settings")}
           onClick={() => onNavigate("settings")}
         >
           <Settings size={18} />
@@ -140,6 +142,7 @@ function ProjectsNav({
   onCreateChatThread,
   onThreadContextMenu,
 }: ProjectsNavProps) {
+  const { t } = useTranslation();
   const [workspaces, setWorkspaces] = useState<WorkspaceRecord[]>([]);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState(PERSONAL_WORKSPACE_ID);
   const [personalThreads, setPersonalThreads] = useState<ChatThread[]>([]);
@@ -306,7 +309,7 @@ function ProjectsNav({
             <span className="ctx-switcher-chip" aria-hidden="true" />
           )}
           <span className="ctx-switcher-name">
-            {inProject ? (activeProjectName ?? "Progetto") : "Personale"}
+            {inProject ? (activeProjectName ?? t("sidebar.project")) : t("sidebar.personal")}
           </span>
           <ChevronDown size={14} />
         </button>
@@ -320,7 +323,7 @@ function ProjectsNav({
             <div className="ctx-menu" role="menu">
               <input
                 className="ctx-menu-search"
-                placeholder="Cerca progetto…"
+                placeholder={t("sidebar.searchProject")}
                 value={query}
                 autoFocus
                 onChange={(e) => setQuery(e.target.value)}
@@ -334,11 +337,11 @@ function ProjectsNav({
                 }}
               >
                 <User size={14} />
-                <span>Personale</span>
+                <span>{t("sidebar.personal")}</span>
                 {!inProject && <Check size={14} />}
               </button>
-              <div className="ctx-menu-label">Progetti</div>
-              {filteredProjects.length === 0 && <p className="ctx-menu-empty">Nessun progetto</p>}
+              <div className="ctx-menu-label">{t("sidebar.projects")}</div>
+              {filteredProjects.length === 0 && <p className="ctx-menu-empty">{t("sidebar.noProjects")}</p>}
               {filteredProjects.map((project) =>
                 editingId === project.id ? (
                   <div key={project.id} className="ctx-menu-edit">
@@ -356,7 +359,7 @@ function ProjectsNav({
                         className="link-button"
                         type="button"
                         disabled={busy}
-                        title={project.folder ?? "Nessuna cartella"}
+                        title={project.folder ?? t("sidebar.noFolder")}
                         onClick={() => void linkProjectFolder(project.id)}
                       >
                         Cartella
@@ -420,7 +423,7 @@ function ProjectsNav({
                 }}
               >
                 <FolderPlus size={14} />
-                <span>Nuovo progetto</span>
+                <span>{t("sidebar.newProject")}</span>
               </button>
             </div>
           </>
@@ -428,21 +431,21 @@ function ProjectsNav({
       </div>
 
       <div className="drawer-chats-head">
-        <span className="drawer-eyebrow">Chat</span>
+        <span className="drawer-eyebrow">{t("sidebar.chat")}</span>
         <button
           className="drawer-eyebrow-add"
           type="button"
           disabled={busy}
           onClick={onCreateChatThread}
-          aria-label="Nuova chat"
-          title="Nuova chat"
+          aria-label={t("sidebar.newChat")}
+          title={t("sidebar.newChat")}
         >
           <Plus size={16} />
         </button>
       </div>
 
       <section className="drawer-section drawer-chats">
-        {contextChats.length === 0 && <p className="drawer-empty">Nessuna chat ancora.</p>}
+        {contextChats.length === 0 && <p className="drawer-empty">{t("sidebar.noChatsYet")}</p>}
         {contextChats.map((thread) => (
           <ThreadLink
             key={thread.threadId}
@@ -475,15 +478,15 @@ function ProjectsNav({
           <div
             className="confirm-modal"
             role="dialog"
-            aria-label="Nuovo progetto"
+            aria-label={t("sidebar.newProject")}
             onClick={(e) => e.stopPropagation()}
           >
             <header>
-              <strong>Nuovo progetto</strong>
+              <strong>{t("sidebar.newProject")}</strong>
               <button
                 className="icon-button"
                 type="button"
-                aria-label="Chiudi"
+                aria-label={t("sidebar.close")}
                 onClick={() => setCreating(false)}
               >
                 <X size={17} />
@@ -496,7 +499,7 @@ function ProjectsNav({
             <input
               className="set-input drawer-modal-input"
               autoFocus
-              placeholder="Nome progetto"
+              placeholder={t("sidebar.projectNamePlaceholder")}
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
             />
@@ -504,11 +507,11 @@ function ProjectsNav({
               className="workspace-switcher-folder-pick"
               type="button"
               disabled={busy}
-              title={newFolder ?? "Cartella del progetto"}
+              title={newFolder ?? t("sidebar.projectFolderTitle")}
               onClick={() => void pickNewFolder()}
             >
               <FolderPlus size={13} />
-              <span>{newFolder ? newFolder.split("/").pop() : "Scegli cartella…"}</span>
+              <span>{newFolder ? newFolder.split("/").pop() : t("sidebar.pickFolder")}</span>
             </button>
             <footer>
               <button
@@ -568,6 +571,7 @@ export function NavDrawer({
   onToggleDrawer,
   onUnarchiveChatThread,
 }: NavDrawerProps) {
+  const { t } = useTranslation();
   const [collapsedSections, setCollapsedSections] = useState({
     archived: false,
   });
@@ -606,11 +610,11 @@ export function NavDrawer({
   const activeThreads = chatThreads.filter((thread) => thread.status === "active");
   const archivedThreads = chatThreads.filter((thread) => thread.status === "archived");
   return (
-    <aside className="nav-drawer" aria-label="Menu principale">
+    <aside className="nav-drawer" aria-label={t("sidebar.mainMenu")}>
       <button
         className="drawer-collapse"
         type="button"
-        aria-label="Comprimi barra laterale"
+        aria-label={t("sidebar.collapseSidebar")}
         onClick={onToggleDrawer}
       >
         <PanelLeftClose size={18} />
@@ -630,7 +634,7 @@ export function NavDrawer({
               onClick={() => (isSearch ? onSearchChat() : onNavigate(item.id))}
             >
               {isSearch ? <Search size={17} /> : <Icon size={17} />}
-              <span>{isSearch ? "Cerca" : item.label}</span>
+              <span>{isSearch ? t("sidebar.search") : item.label}</span>
               {item.badge && <em>{item.badge}</em>}
             </button>
           );
@@ -658,7 +662,7 @@ export function NavDrawer({
               type="button"
               onClick={() => toggleSection("archived")}
             >
-              <span>Archiviati</span>
+              <span>{t("sidebar.archived")}</span>
               {collapsedSections.archived ? <ChevronRight size={15} /> : <ChevronDown size={15} />}
             </button>
             {!collapsedSections.archived &&
@@ -685,13 +689,13 @@ export function NavDrawer({
 
       {deleteCandidate && (
         <div className="confirm-modal-backdrop" role="presentation">
-          <div className="confirm-modal" role="dialog" aria-label="Conferma eliminazione">
+          <div className="confirm-modal" role="dialog" aria-label={t("sidebar.deleteChatTitle")}>
             <header>
-              <strong>Eliminare questa chat?</strong>
+              <strong>{t("sidebar.deleteChatTitle")}</strong>
               <button
                 className="icon-button"
                 type="button"
-                aria-label="Chiudi conferma"
+                aria-label={t("sidebar.closeConfirm")}
                 onClick={() => setDeleteCandidate(null)}
               >
                 <X size={17} />
@@ -753,7 +757,7 @@ export function NavDrawer({
                 }
               >
                 <Archive size={15} />
-                <span>Archivia</span>
+                <span>{t("sidebar.archive")}</span>
               </button>
             </>
           )}
@@ -768,7 +772,7 @@ export function NavDrawer({
               }
             >
               <ArchiveRestore size={15} />
-              <span>Rimuovi dall'archivio</span>
+              <span>{t("sidebar.removeFromArchive")}</span>
             </button>
           )}
           <button
@@ -778,21 +782,21 @@ export function NavDrawer({
             onClick={() => runThreadAction(() => setDeleteCandidate(threadMenu.thread))}
           >
             <Trash2 size={15} />
-            <span>Elimina</span>
+            <span>{t("common.delete")}</span>
           </button>
         </div>
       )}
 
       <footer className="drawer-footer">
-        <div className="drawer-persistent-actions" aria-label="Azioni persistenti">
-          <button className="drawer-footer-action" type="button" aria-label="Notifiche" title="Notifiche">
+        <div className="drawer-persistent-actions" aria-label={t("sidebar.persistentActions")}>
+          <button className="drawer-footer-action" type="button" aria-label="Notifiche" title={t("sidebar.notifications")}>
             <Bell size={16} />
           </button>
           <button
             className="drawer-footer-action drawer-settings-action"
             type="button"
             aria-label="Impostazioni"
-            title="Impostazioni"
+            title={t("sidebar.settings")}
             onClick={() => onNavigate("settings")}
           >
             <Settings size={16} />
@@ -843,6 +847,7 @@ export function SettingsDrawer({
   onSelect,
   onSelectSub,
 }: SettingsDrawerProps) {
+  const { t } = useTranslation();
   const [displayName] = useSetting("displayName", "Fabio Cantone");
   const [workspaceName] = useSetting("workspaceName", "Personale");
   const groups: Array<"account" | "capabilities"> = ["account", "capabilities"];
@@ -850,13 +855,13 @@ export function SettingsDrawer({
     <aside className="nav-drawer settings-drawer set-nav" aria-label="Impostazioni">
       <button className="set-nav-back" type="button" onClick={onBack}>
         <ArrowLeft size={15} />
-        <span>Torna all'app</span>
+        <span>{t("sidebar.backToApp")}</span>
       </button>
 
       <div className="set-nav-profile">
         <span className="set-nav-avatar" aria-hidden />
         <span className="set-nav-id">
-          <span className="n">{displayName || "Account"}</span>
+          <span className="n">{displayName || t("sidebar.account")}</span>
           <span className="w">{workspaceName || "Personale"}</span>
         </span>
       </div>
@@ -916,7 +921,7 @@ export function SettingsDrawer({
       <span className="set-nav-spacer" />
       <button className="set-nav-item" type="button" onClick={onBack}>
         <Info size={16} />
-        <span>Informazioni</span>
+        <span>{t("common.information")}</span>
       </button>
 
       {/* Persistent footer — mirrors the main drawer's [bell + gear], but in Settings
@@ -934,7 +939,7 @@ export function SettingsDrawer({
           <button
             className="drawer-footer-action"
             type="button"
-            aria-label="Torna all'app"
+            aria-label={t("sidebar.backToApp")}
             title="Torna all'app"
             onClick={onBack}
           >
@@ -957,6 +962,7 @@ export function ChatSearchModal({
   onClose,
   onSelectThread,
 }: ChatSearchModalProps) {
+  const { t } = useTranslation();
   const [searchQuery, setSearchQuery] = useState("");
   const normalizedQuery = searchQuery.trim().toLowerCase();
   const searchResults = chatThreads
@@ -970,13 +976,13 @@ export function ChatSearchModal({
 
   return (
     <div className="search-modal-backdrop" role="presentation">
-      <div className="chat-search-modal" role="dialog" aria-label="Cerca chat">
+      <div className="chat-search-modal" role="dialog" aria-label={t("sidebar.searchChat")}>
         <header>
-          <strong>Cerca chat</strong>
+          <strong>{t("sidebar.searchChat")}</strong>
           <button
             className="icon-button"
             type="button"
-            aria-label="Chiudi ricerca"
+            aria-label={t("sidebar.closeSearch")}
             onClick={onClose}
           >
             <X size={17} />
@@ -986,13 +992,13 @@ export function ChatSearchModal({
           <Search size={16} />
           <input
             autoFocus
-            placeholder="Cerca nelle chat"
+            placeholder={t("sidebar.searchInChats")}
             value={searchQuery}
             onChange={(event) => setSearchQuery(event.target.value)}
           />
         </label>
         <div className="chat-search-results">
-          <small>{normalizedQuery ? "Risultati" : "Chat recenti"}</small>
+          <small>{normalizedQuery ? t("sidebar.results") : t("sidebar.recentChats")}</small>
           {searchResults.map((thread, index) => (
             <button
               className="chat-search-row"
@@ -1016,10 +1022,11 @@ export function ChatSearchModal({
 // stay aligned. Custom outline icons matching the design language.
 function threadTypeIcon(
   source: string | null | undefined,
+  t: (key: string) => string,
 ): { node: ReactNode; label: string } | null {
   if (source === "scheduled") {
     return {
-      label: "Pianificato",
+      label: t("sidebar.scheduled"),
       node: (
         <svg viewBox="0 0 24 24" fill="none" stroke="var(--amber)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
           <circle cx="12" cy="12" r="8" />
@@ -1064,7 +1071,8 @@ function ThreadLink({
   onSelect: () => void;
   thread: ChatThread;
 }) {
-  const icon = threadTypeIcon(thread.source);
+  const { t } = useTranslation();
+  const icon = threadTypeIcon(thread.source, t);
   return (
     <button
       className={`drawer-link ${active ? "active" : ""} ${thread.pinned ? "pinned" : ""}`}
