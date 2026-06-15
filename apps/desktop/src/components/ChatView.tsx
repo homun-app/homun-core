@@ -1522,7 +1522,7 @@ export function ChatView({
               </div>
               <div className="model-menu-row">
                 <HardDrive size={15} />
-                <span className="model-menu-name">Strumenti</span>
+                <span className="model-menu-name">{t("chat.tools")}</span>
                 <span>{headerToolPolicy}</span>
               </div>
               <p className="model-menu-hint">Cambia il modello per questa chat dal selettore nel composer ↓</p>
@@ -1692,7 +1692,7 @@ export function ChatView({
                 {autoContinueMessageId === displayMessage.id && (
                   <div className="auto-continue-status" role="status" aria-live="polite">
                     <Sparkles size={14} />
-                    <span>Sto completando automaticamente questa risposta.</span>
+                    <span>t("chat.autoCompleting")</span>
                   </div>
                 )}
                 <MessageActionBar
@@ -1765,7 +1765,7 @@ export function ChatView({
                   <div className="branch-picker" aria-label="Varianti risposta">
                     <button
                       type="button"
-                      aria-label="Variante precedente"
+                      aria-label={t("chat.prevVariant")}
                       disabled={variants[displayMessage.id].index === 0}
                       onClick={() => switchVariant(displayMessage.id, -1)}
                     >
@@ -1777,7 +1777,7 @@ export function ChatView({
                     </span>
                     <button
                       type="button"
-                      aria-label="Variante successiva"
+                      aria-label={t("chat.nextVariant")}
                       disabled={
                         variants[displayMessage.id].index ===
                         variants[displayMessage.id].texts.length - 1
@@ -1922,8 +1922,8 @@ export function ChatView({
         <button
           className="chat-jump-bottom"
           type="button"
-          aria-label="Vai all'ultimo messaggio"
-          title="Vai in fondo"
+          aria-label={t("chat.jumpToLast")}
+          title={t("chat.jumpToBottom")}
           onClick={() => {
             shouldStickToBottomRef.current = true;
             scrollConversationToBottom("smooth");
@@ -2280,13 +2280,13 @@ function MessageActionBar({
       {canReply && (
         <button type="button" onClick={onReply} aria-label="Rispondi al messaggio" title="Rispondi">
           <Reply size={14} />
-          <span>Rispondi</span>
+          <span>{t("chat.action.reply")}</span>
         </button>
       )}
       <button
         type="button"
         onClick={onCopy}
-        aria-label="Copia messaggio"
+        aria-label={t("chat.copyMessage")}
         title={copied ? "Copiato" : "Copia"}
       >
         {copied ? <Check size={14} /> : <Copy size={14} />}
@@ -2297,10 +2297,10 @@ function MessageActionBar({
           className="primary-continue-action"
           type="button"
           onClick={onContinue}
-          aria-label="Continua risposta"
+          aria-label={t("chat.action.continueResponse")}
         >
           <Play size={14} />
-          <span>Continua</span>
+          <span>{t("chat.action.continue")}</span>
         </button>
       )}
       {showMoreMenu && (
@@ -2309,7 +2309,7 @@ function MessageActionBar({
             ref={menuButtonRef}
             type="button"
             aria-expanded={menuOpen}
-            aria-label="Altre azioni messaggio"
+            aria-label={t("chat.moreActions")}
             onClick={toggleMoreMenu}
           >
             <MoreHorizontal size={14} />
@@ -2319,7 +2319,7 @@ function MessageActionBar({
               {canExpand && (
                 <button type="button" role="menuitem" onClick={onExpand}>
                   <Play size={14} />
-                  <span>Approfondisci</span>
+                  <span>{t("chat.action.expand")}</span>
                 </button>
               )}
               {contentKind === "code" && (
@@ -2338,18 +2338,18 @@ function MessageActionBar({
                 <>
                   <button type="button" role="menuitem" onClick={onExplainDiagram}>
                     <FileText size={14} />
-                    <span>Spiega diagramma</span>
+                    <span>{t("chat.action.explainDiagram")}</span>
                   </button>
                   <button type="button" role="menuitem" onClick={onReviseDiagram}>
                     <WandSparkles size={14} />
-                    <span>Modifica diagramma</span>
+                    <span>{t("chat.action.editDiagram")}</span>
                   </button>
                 </>
               )}
               {canRegenerate && (
                 <button type="button" role="menuitem" onClick={onRegenerate}>
                   <RotateCcw size={14} />
-                  <span>Rigenera</span>
+                  <span>{t("chat.action.regenerate")}</span>
                 </button>
               )}
               {canSaveToMemory && (
@@ -2366,7 +2366,7 @@ function MessageActionBar({
               {canSaveAsGoal && (
                 <button type="button" role="menuitem" onClick={onSaveAsGoal}>
                   <Target size={14} />
-                  <span>Salva come obiettivo</span>
+                  <span>{t("chat.action.saveAsGoal")}</span>
                 </button>
               )}
               {canCreateTask && (
@@ -2396,7 +2396,7 @@ function MessageActionBar({
                   className={feedback === "useful" ? "active" : ""}
                   type="button"
                   onClick={() => onFeedback("useful")}
-                  aria-label="Segna risposta utile"
+                  aria-label={t("chat.markHelpful")}
                 >
                   <ThumbsUp size={14} />
                 </button>
@@ -2404,7 +2404,7 @@ function MessageActionBar({
                   className={feedback === "not_useful" ? "active" : ""}
                   type="button"
                   onClick={() => onFeedback("not_useful")}
-                  aria-label="Segna risposta non utile"
+                  aria-label={t("chat.markNotHelpful")}
                 >
                   <ThumbsDown size={14} />
                 </button>
@@ -2412,7 +2412,7 @@ function MessageActionBar({
               {metrics && (
                 <div
                   className="message-latency-summary"
-                  aria-label="Metriche prestazioni messaggio"
+                  aria-label={t("chat.messageMetrics")}
                 >
                   <strong>{t("chat.metrics")}</strong>
                   <span>
@@ -2661,7 +2661,7 @@ function InlineTimeline({
   return (
     <div
       className={`inline-timeline ${collapsed ? "timeline-collapsed" : ""}`}
-      aria-label="Avanzamento attività"
+      aria-label={t("chat.activityProgress")}
     >
       <div className="timeline-header">
         <div>
@@ -2926,6 +2926,7 @@ function ArtifactCardRow({
   onToggle: () => void;
   onOpen: () => void;
 }) {
+  const { t } = useTranslation();
   const [counts, setCounts] = useState<{ added: number; removed: number } | null>(null);
 
   useEffect(() => {
@@ -2960,7 +2961,7 @@ function ArtifactCardRow({
         </span>
         <button type="button" className="artifact-name" onClick={onOpen} title="Apri nel pannello">
           <span className="artifact-fname">{artifact.name}</span>
-          {artifact.updated && <span className="artifact-updated">Modificato</span>}
+          {artifact.updated && <span className="artifact-updated">{t("chat.modified")}</span>}
           {counts && (
             <span className="diff-counts">
               <span className="add">+{counts.added}</span>{" "}
@@ -2972,8 +2973,8 @@ function ArtifactCardRow({
           type="button"
           className="artifact-quick"
           onClick={() => void triggerArtifactDownload(artifact)}
-          aria-label="Scarica"
-          title="Scarica"
+          aria-label={t("chat.action.download")}
+          title={t("chat.action.download")}
         >
           <Download size={14} />
         </button>
@@ -3267,6 +3268,7 @@ function GoalsPanel({
   onSeedConsumed?: () => void;
   onRefresh: () => void;
 }) {
+  const { t } = useTranslation();
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [newGoal, setNewGoal] = useState("");
   const [busy, setBusy] = useState(false);
@@ -3317,7 +3319,7 @@ function GoalsPanel({
       <header className="goals-head">
         <span className="goals-head-title">
           <Target size={16} />
-          <strong>Obiettivo del progetto</strong>
+          <strong>{t("chat.projectGoal")}</strong>
         </span>
         {data.goals.length > 0 && (
           <small>
@@ -3343,7 +3345,7 @@ function GoalsPanel({
 
       <textarea
         className="goals-compose"
-        placeholder="Scrivi un obiettivo — la direzione…"
+        placeholder={t("chat.goalPlaceholder")}
         rows={2}
         value={newGoal}
         onChange={(e) => setNewGoal(e.target.value)}
@@ -3374,7 +3376,7 @@ function GoalsPanel({
             <p className="goals-empty">Nessuna proposta — prova a scriverne uno tu.</p>
           ) : (
             <>
-              <div className="goals-section-label">Proposte dal progetto — modificabili</div>
+              <div className="goals-section-label">{t("chat.projectProposalsEditable")}</div>
               <div className="goals-steps">
                 {drafts.map((d, i) => (
                   <div key={i} className="goals-draft-card">
@@ -3408,7 +3410,7 @@ function GoalsPanel({
 
       {data.decisions.length > 0 && (
         <details className="goals-promote">
-          <summary>Oppure eleva una decisione direzionale a obiettivo ({data.decisions.length})</summary>
+          <summary>{t("chat.elevateDecisionToGoal")} ({data.decisions.length})</summary>
           <div className="goals-promote-list">
             {data.decisions.slice(0, 50).map((d) => (
               <label key={d.reference} className="goals-promote-item">
@@ -3446,6 +3448,7 @@ export function MemoryGraphPanel({
    *  toggle is hidden. */
   controlledMode?: "graph" | "wiki";
 }) {
+  const { t } = useTranslation();
   const [graph, setGraph] = useState<MemoryGraph | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -3617,7 +3620,7 @@ export function MemoryGraphPanel({
     return (
       <div className="workbench-empty">
         <Share2 size={28} />
-        <p>Carico la memoria del progetto…</p>
+        <p>{t("chat.loadingMemory")}</p>
       </div>
     );
   }
@@ -3931,6 +3934,7 @@ function Workbench({
   onGoalSeedConsumed?: () => void;
   operationalPlanMarkdown?: string;
 }) {
+  const { t } = useTranslation();
   // Project-folder browser state (File tab): the thread's linked folder, navigable.
   const [fsRoot, setFsRoot] = useState<string | null>(null);
   const [fsCwd, setFsCwd] = useState<string | null>(null);
@@ -4071,14 +4075,14 @@ function Workbench({
   return (
     <aside
       className={`workbench${expanded ? " expanded" : ""}`}
-      aria-label="Pannello di lavoro"
+      aria-label={t("chat.workbench")}
       style={expanded ? undefined : { width }}
     >
       {!expanded && (
         <div
           className="workbench-resize"
           role="separator"
-          aria-label="Ridimensiona pannello"
+          aria-label={t("chat.resizePanel")}
           onMouseDown={startResize}
         />
       )}
@@ -4097,8 +4101,8 @@ function Workbench({
           <button
             className="workbench-close"
             type="button"
-            aria-label="Chiudi pannello"
-            title="Chiudi pannello"
+            aria-label={t("chat.closePanel")}
+            title={t("chat.closePanel")}
             onClick={onClose}
           >
             <X size={16} />
@@ -4111,8 +4115,8 @@ function Workbench({
             <div className="workbench-breadcrumb">
               <button
                 type="button"
-                aria-label="Indietro"
-                title="Torna ai file"
+                aria-label={t("common.back")}
+                title={t("chat.backToFiles")}
                 onClick={() => setOpenFile(null)}
               >
                 <ChevronLeft size={14} />
@@ -4125,7 +4129,7 @@ function Workbench({
                 <button
                   type="button"
                   className={`workbench-diff-toggle${diffOn ? " active" : ""}`}
-                  title="Mostra le modifiche rispetto a git"
+                  title={t("chat.showGitDiff")}
                   onClick={() => setDiffOn((value) => !value)}
                 >
                   ± Diff
@@ -4141,7 +4145,7 @@ function Workbench({
               ) : openFile.binary ? (
                 <div className="workbench-empty">
                   <FileText size={24} />
-                  <p>File binario: anteprima non disponibile.</p>
+                  <p>{t("chat.binaryFileHint")}</p>
                 </div>
               ) : diffOn && openFile.modified ? (
                 <DiffView oldText={openFile.old_text} newText={openFile.text} />
@@ -4155,7 +4159,7 @@ function Workbench({
           <div className="workbench-files">
             {uploadedFiles.length > 0 && (
               <>
-                <div className="workbench-section-label">Caricati in questa chat</div>
+                <div className="workbench-section-label">{t("chat.uploadedInChat")}</div>
                 <ul className="workbench-file-list">
                   {uploadedFiles.map((file) => (
                     <li key={file.artifactId}>
@@ -4181,7 +4185,7 @@ function Workbench({
                 <div className="workbench-breadcrumb">
                   <button
                     type="button"
-                    aria-label="Cartella superiore"
+                    aria-label={t("chat.parentFolder")}
                     disabled={atRoot || fsLoading}
                     onClick={() => fsCwd && void loadFs(parentOf(fsCwd))}
                   >
@@ -4258,11 +4262,11 @@ function Workbench({
             {tasksLoading && activeTasks.length === 0 ? (
               <div className="workbench-empty">
                 <Loader2 size={22} className="spin" />
-                <p>Carico le attività…</p>
+                <p>{t("chat.loadingActivity")}</p>
               </div>
             ) : activeTasks.length > 0 ? (
               <>
-                <div className="workbench-section-label">Attività in corso e pianificate</div>
+                <div className="workbench-section-label">{t("chat.ongoingAndPlanned")}</div>
                 <ul className="workbench-file-list">
                   {activeTasks.map((item) => (
                     <li key={item.task_id}>
@@ -4274,8 +4278,8 @@ function Workbench({
                       <button
                         type="button"
                         className="wf-cancel"
-                        title="Annulla questo task"
-                        aria-label="Annulla task"
+                        title={t("chat.cancelTask")}
+                        aria-label={t("chat.cancelTask")}
                         onClick={() => void cancelTaskItem(item.task_id)}
                       >
                         <X size={13} />
@@ -4469,11 +4473,11 @@ function ArtifactsPanel({
   return (
     <aside
       className={`artifacts-panel${expanded ? " expanded" : ""}${embedded ? " embedded" : ""}`}
-      aria-label="File del progetto"
+      aria-label={t("chat.projectFiles")}
     >
       {!embedded && (
         <header className="artifacts-panel-head">
-          <strong>File del progetto</strong>
+          <strong>{t("chat.projectFiles")}</strong>
           <button
             type="button"
             aria-label={expanded ? "Riduci" : "Schermo intero"}
@@ -4512,7 +4516,7 @@ function ArtifactsPanel({
                 <div className="artifact-version-switch" aria-label="Versioni">
                   <button
                     type="button"
-                    aria-label="Versione precedente"
+                    aria-label={t("chat.prevVersion")}
                     disabled={slot === 0}
                     onClick={() => goToVersion(slot - 1)}
                   >
@@ -4523,7 +4527,7 @@ function ArtifactsPanel({
                   </span>
                   <button
                     type="button"
-                    aria-label="Versione successiva"
+                    aria-label={t("chat.nextVersion")}
                     disabled={slot === versions}
                     onClick={() => goToVersion(slot + 1)}
                   >
@@ -4536,7 +4540,7 @@ function ArtifactsPanel({
                   type="button"
                   className={showDiff ? "active" : ""}
                   onClick={() => setShowDiff((value) => !value)}
-                  title="Mostra le modifiche rispetto alla versione precedente"
+                  title={t("chat.showVersionDiff")}
                 >
                   Diff
                   {showDiff && diffCounts && (
@@ -4552,7 +4556,7 @@ function ArtifactsPanel({
                   type="button"
                   className={wrap ? "active" : ""}
                   onClick={() => setWrap((value) => !value)}
-                  title="A capo automatico"
+                  title={t("chat.wordWrap")}
                 >
                   Word wrap
                 </button>
@@ -4582,8 +4586,8 @@ function ArtifactsPanel({
                 type="button"
                 className="artifact-folder"
                 onClick={() => void openArtifactFolder(selected)}
-                aria-label="Apri cartella"
-                title="Apri cartella"
+                aria-label={t("chat.openFolder")}
+                title={t("chat.openFolder")}
               >
                 <FolderOpen size={14} />
               </button>
@@ -4999,6 +5003,7 @@ function AssistantMessageBody({
  * click (content-contextual via a model-emitted marker, not keyword parsing). Resolves the
  * project workspace from the thread, then saves each chosen objective as a `goal`. */
 function GoalProposeCard({ objectives, threadId }: { objectives: string[]; threadId: string }) {
+  const { t } = useTranslation();
   const [workspace, setWorkspace] = useState<string | null>(null);
   const [saved, setSaved] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState<number | null>(null);
@@ -5025,7 +5030,7 @@ function GoalProposeCard({ objectives, threadId }: { objectives: string[]; threa
     <div className="goal-propose-card">
       <div className="goal-propose-head">
         <Target size={14} />
-        <span>Obiettivi proposti — salvali nel progetto</span>
+        <span>{t("chat.proposedGoalsHint")}</span>
       </div>
       <div className="goal-propose-list">
         {objectives.map((o, i) => (
@@ -5058,6 +5063,7 @@ function PlanProposeCard({
   plan: PlanProposal;
   onAnswer: (message: string) => void;
 }) {
+  const { t } = useTranslation();
   const [phase, setPhase] = useState<"idle" | "editing" | "sent">("idle");
   const [feedback, setFeedback] = useState("");
   const [decision, setDecision] = useState("");
@@ -5073,7 +5079,7 @@ function PlanProposeCard({
     <div className="plan-card">
       <div className="plan-card-head">
         <CalendarClock size={15} />
-        <strong>Piano proposto</strong>
+        <strong>{t("chat.proposedPlan")}</strong>
         <span className="plan-card-gate">in attesa di conferma</span>
       </div>
       {plan.summary && <p className="plan-card-summary">{plan.summary}</p>}
@@ -5133,12 +5139,13 @@ function PlanProposeCard({
 /** Live operational plan rendered inline (Claude-Code todo style): a checklist with a
  *  status icon per step, updated as the agent calls update_plan (doing→done). */
 function PlanProgressCard({ steps }: { steps: PlanStep[] }) {
+  const { t } = useTranslation();
   const doneCount = steps.filter((s) => s.status === "done").length;
   return (
     <div className="plan-progress">
       <div className="plan-progress-head">
         <ListTodo size={14} />
-        <strong>Piano</strong>
+        <strong>{t("chat.plan")}</strong>
         <span className="plan-progress-count">
           {doneCount}/{steps.length}
         </span>
@@ -5621,6 +5628,7 @@ function FsAuthorizeCard({
 }
 
 function ComposioReconnectCard({ slug }: { slug: string }) {
+  const { t } = useTranslation();
   const [status, setStatus] = useState<"idle" | "running" | "done" | "error">("idle");
   const [note, setNote] = useState<string | null>(null);
   const name = slug.charAt(0).toUpperCase() + slug.slice(1);
@@ -5656,7 +5664,7 @@ function ComposioReconnectCard({ slug }: { slug: string }) {
     <div className="cmp-confirm">
       <div className="cmp-confirm-head">
         <ShieldCheck size={15} />
-        <strong>Collegamento scaduto</strong>
+        <strong>{t("chat.linkExpired")}</strong>
         <span className="cmp-confirm-name">{name}</span>
       </div>
       <div className="cmp-confirm-actions">
@@ -5941,6 +5949,7 @@ function InlineApprovalPanel({
   onReject: (approvalId: string) => void;
   session: ComputerSession;
 }) {
+  const { t } = useTranslation();
   const approval = approvals[0];
   const scopeOptions = approval?.scopeOptions ?? ["once"];
   const browserVisibilityOptions = approval?.browserVisibilityOptions ?? [];
@@ -5972,7 +5981,7 @@ function InlineApprovalPanel({
           <AlertCircle size={15} />
         </span>
         <div>
-          <strong>Serve una tua conferma per continuare</strong>
+          <strong>{t("chat.approvalRequired")}</strong>
           <small>{approval.risk === "high" ? "Rischio alto" : "Azione controllata"}</small>
         </div>
       </header>
@@ -5981,7 +5990,7 @@ function InlineApprovalPanel({
 
       {waitingSteps.length > 0 && (
         <div className="approval-plan-preview">
-          <span>Cosa sta per fare</span>
+          <span>{t("chat.aboutToDo")}</span>
           {waitingSteps.map((step) => {
             const Icon = surfaceIcons[step.surface];
             return (

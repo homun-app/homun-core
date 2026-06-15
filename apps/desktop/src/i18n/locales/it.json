@@ -331,7 +331,9 @@
     "cancelTask": "Annulla task",
     "prevVersion": "Versione precedente",
     "nextVersion": "Versione successiva",
-    "openFolder": "Apri cartella"
+    "openFolder": "Apri cartella",
+    "tools": "Strumenti",
+    "workbench": "Pannello di lavoro"
   },
   "task": {
     "blocked": {
