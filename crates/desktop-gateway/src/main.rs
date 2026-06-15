@@ -3597,12 +3597,12 @@ fn recall_memory_tool_schema() -> serde_json::Value {
         "type": "function",
         "function": {
             "name": "recall_memory",
-            "description": "Cerca nella memoria a lungo termine dell'utente (fatti, preferenze, persone, \
-decisioni passate e il loro perché) ciò che è pertinente alla richiesta. Usalo quando ti serve un \
-dettaglio personale o di progetto che potresti aver appreso prima e che NON è già nel profilo del \
-prompt, PRIMA di dire che non lo sai — e ANCHE PRIMA di CHIEDERE all'utente un suo possesso, una \
-persona o un contesto che dà per già noto (es. «la mia moto», «il mio capo»): recupera ciò che sai \
-e chiedi solo i dettagli che restano mancanti.",
+            "description": "Search the user's long-term memory (facts, preferences, people, past \
+decisions and their why) for what is relevant to the request. Use it when you need a personal or \
+project detail you may have learned before and that is NOT already in the prompt profile, BEFORE \
+saying you don't know it — and ALSO BEFORE ASKING the user for a possession, a person or a context \
+they take as already known (e.g. «my motorbike», «my boss»): retrieve what you know and ask only for \
+the details that remain missing.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -3622,11 +3622,11 @@ fn record_decision_tool_schema() -> serde_json::Value {
         "type": "function",
         "function": {
             "name": "record_decision",
-            "description": "Registra in memoria una DECISIONE presa durante il lavoro — vale per \
-QUALSIASI dominio (codice, documenti es. un preventivo cliente, dati, configurazioni), non solo \
-tecnico. Chiamalo DOPO una scelta non banale, così il PERCHÉ resta ricordato e non va ricostruito \
-ri-leggendo i file. Salva: cosa è stato deciso, il perché, le alternative scartate e gli oggetti \
-toccati. La decisione è legata al progetto corrente.",
+            "description": "Record in memory a DECISION made during work — valid for ANY domain \
+(code, documents e.g. a customer quote, data, configurations), not only technical. Call it AFTER \
+a non-trivial choice, so the WHY stays remembered and doesn't have to be reconstructed by re-reading \
+the files. Save: what was decided, the why, the discarded alternatives and the touched objects. The \
+decision is linked to the current project.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -3709,10 +3709,10 @@ fn forget_memory_tool_schema() -> serde_json::Value {
         "type": "function",
         "function": {
             "name": "forget_memory",
-            "description": "Cancella dalla memoria a lungo termine ciò che corrisponde alla query. Usalo \
-quando l'utente chiede di DIMENTICARE/eliminare un'informazione, o quando una decisione/fatto non vale \
-più ed è meglio rimuoverla (non solo aggiornarla). Cerca nei suoi scope e soft-elimina i match migliori; \
-riporta sempre all'utente COSA hai dimenticato.",
+            "description": "Delete from long-term memory what matches the query. Use it when the user \
+asks to FORGET/delete a piece of information, or when a decision/fact is no longer valid and it's \
+better to remove it (not just update it). It searches its scopes and soft-deletes the best matches; \
+always report to the user WHAT you forgot.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -3898,11 +3898,11 @@ fn update_plan_tool_schema() -> serde_json::Value {
         "type": "function",
         "function": {
             "name": "update_plan",
-            "description": "Crea o aggiorna il PIANO operativo a step di un compito NON banale (multi-step: \
-sviluppo, refactor, ricerca articolata). Compare nel pannello \"Piano\" e l'utente segue i progressi. \
-Chiamalo all'INIZIO con TUTTI gli step (status \"todo\", il primo \"doing\") e AGGIORNALO mentre procedi \
-(porta a \"done\" ciò che hai completato, metti \"doing\" lo step corrente). NON usarlo per richieste a un \
-solo passo.",
+            "description": "Create or update the operational step-by-step PLAN of a NON-trivial task \
+(multi-step: development, refactor, in-depth research). It appears in the \"Plan\" panel and the user \
+follows progress. Call it at the START with ALL steps (status \"todo\", the first \"doing\") and UPDATE \
+IT as you proceed (move to \"done\" what you completed, set \"doing\" the current step). Do NOT use it \
+for single-step requests.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -3970,9 +3970,9 @@ fn query_code_graph_tool_schema() -> serde_json::Value {
         "type": "function",
         "function": {
             "name": "query_code_graph",
-            "description": "Interroga la mappa del codice del progetto attivo: dato un simbolo \
-(funzione, file, classe), elenca chi lo chiama, cosa chiama e dove si trova. Usalo per \
-domande sull'architettura/struttura del codice del progetto corrente.",
+            "description": "Query the code map of the active project: given a symbol (function, file, \
+class), list who calls it, what it calls and where it's located. Use it for questions about the \
+architecture/structure of the current project's code.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -4209,12 +4209,11 @@ fn resolve_datetime_tool_schema() -> serde_json::Value {
         "type": "function",
         "function": {
             "name": "resolve_datetime",
-            "description": "Converte un riferimento temporale dell'utente (in QUALSIASI lingua: \
-\"domani mattina\", \"next Monday at 9\", \"pasado mañana\", \"tra 3 giorni\", \"il 15\") nella \
-data/ora ASSOLUTA corretta, calcolata rispetto ad ADESSO e al fuso dell'utente. CHIAMALO PRIMA di \
-usare qualunque data — non calcolare tu le date (sbagli facilmente \"oggi\"). Tu CLASSIFICHI il \
-riferimento compilando i campi qui sotto; il calcolo lo faccio io. Restituisce il valore ISO da \
-scrivere nei form o passare ad altri strumenti.",
+            "description": "Converts a user's time reference (in ANY language: \"tomorrow morning\", \
+\"next Monday at 9\", \"pasado mañana\", \"in 3 days\", \"the 15th\") into the correct ABSOLUTE \
+date/time, computed relative to NOW and the user's timezone. CALL IT BEFORE using any date — don't \
+compute dates yourself (you easily get \"today\" wrong). You CLASSIFY the reference by filling in the \
+fields below; I do the computation. Returns the ISO value to write into forms or pass to other tools.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -4267,12 +4266,12 @@ fn schedule_task_tool_schema() -> serde_json::Value {
         "type": "function",
         "function": {
             "name": "schedule_task",
-            "description": "Crea un'AUTOMAZIONE ricorrente a orario (una regola, visibile in \
-Automazioni). Usalo quando l'utente chiede di fare/controllare qualcosa periodicamente (es. \
-\"ogni mattina controlla le news su X\", \"ogni lunedì mandami il riepilogo\"). A ogni occorrenza \
-eseguo il 'goal' con tutti gli strumenti e ti CHIEDO CONFERMA prima di inviare/pubblicare. Per \
-trigger a EVENTO (non orari) usa create_automation. NON usarlo per azioni una-tantum immediate \
-(quelle falle ora).",
+            "description": "Create a recurring time-based AUTOMATION (a rule, visible in \
+Automations). Use it when the user asks to do/check something periodically (e.g. \
+\"every morning check the news on X\", \"every Monday send me the summary\"). On each occurrence \
+I run the 'goal' with all tools and ASK FOR CONFIRMATION before sending/publishing. For \
+EVENT-based (non-time) triggers use create_automation. Do NOT use it for one-off immediate actions \
+(do those now).",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -4497,7 +4496,7 @@ fn create_automation_tool_schema() -> serde_json::Value {
         "type": "function",
         "function": {
             "name": "create_automation",
-            "description": "Crea un'AUTOMAZIONE di prima classe: una regola «quando → allora». Il trigger è a ORARIO (ricorrenza) oppure a EVENTO (un messaggio in arrivo su un canale). L'azione è un prompt che eseguirai tu con tutti gli strumenti. Usalo quando l'utente vuole qualcosa di ricorrente o reattivo: «ogni venerdì mandami il riassunto», «quando mi scrive Mario preparami una bozza». L'automazione appare nella sezione Automazioni dell'app.",
+            "description": "Create a first-class AUTOMATION: a «when → then» rule. The trigger is time-based (recurrence) OR event-based (an incoming message on a channel). The action is a prompt that you will execute yourself with all tools. Use it when the user wants something recurring or reactive: «every Friday send me the summary», «when Mario writes me prepare a draft». The automation appears in the Automations section of the app.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -5137,7 +5136,7 @@ fn list_scheduled_tasks_tool_schema() -> serde_json::Value {
         "type": "function",
         "function": {
             "name": "list_scheduled_tasks",
-            "description": "Elenca i task pianificati/ricorrenti attivi (creati con schedule_task), con id, cosa fanno, ogni quanto e quando girano la prossima volta. Usalo prima di annullarne uno o quando l'utente chiede cosa hai in programma.",
+            "description": "List the active scheduled/recurring tasks (created with schedule_task), with id, what they do, how often and when they next run. Use it before canceling one or when the user asks what you have scheduled.",
             "parameters": { "type": "object", "properties": {} }
         }
     })
@@ -5349,7 +5348,7 @@ fn run_in_project_tool_schema() -> serde_json::Value {
         "type": "function",
         "function": {
             "name": "run_in_project",
-            "description": "Esegue un comando di shell NELLA CARTELLA DI PROGETTO (sul tuo sistema, sui file reali). Usalo per build/test/lint sul codice vero (VERIFY-BY-EXECUTION: leggi l'output reale e itera fino al verde) e per git. Per lavoro isolato usa-e-getta usa invece run_in_sandbox. I comandi distruttivi sono bloccati da uno scan di sicurezza.",
+            "description": "Run a shell command IN THE PROJECT FOLDER (on your system, on the real files). Use it for build/test/lint on the real code (VERIFY-BY-EXECUTION: read the real output and iterate until green) and for git. For isolated throwaway work use run_in_sandbox instead. Destructive commands are blocked by a security scan.",
             "parameters": {
                 "type": "object",
                 "properties": { "command": { "type": "string", "description": "Comando shell, es. \"cargo test\", \"npm run build\", \"git status\"" } },
@@ -5417,7 +5416,7 @@ fn create_skill_tool_schema() -> serde_json::Value {
         "type": "function",
         "function": {
             "name": "create_skill",
-            "description": "Crea una NUOVA skill personalizzata quando l'utente lo chiede (es. \"creami una skill che…\"). Una skill è un set di istruzioni RIUTILIZZABILI che seguirai quando serve. Fornisci: name (breve), description (QUANDO usarla — fa scattare la skill), instructions (i PASSI/regole in markdown). Per skill che eseguono comandi, scrivi nelle istruzioni i comandi da lanciare con run_in_sandbox/run_in_project.",
+            "description": "Create a NEW custom skill when the user asks for it (e.g. \"make me a skill that…\"). A skill is a REUSABLE set of instructions you will follow when needed. Provide: name (short), description (WHEN to use it — triggers the skill), instructions (the STEPS/rules in markdown). For skills that run commands, write the commands to launch in the instructions using run_in_sandbox/run_in_project.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -7818,7 +7817,7 @@ fn browser_navigate_tool_schema() -> serde_json::Value {
         "type": "function",
         "function": {
             "name": "browser_navigate",
-            "description": "Apre un URL nel browser reale e restituisce lo SNAPSHOT (testo accessibile, con i riferimenti [ref=...] degli elementi interattivi) della pagina caricata. Usalo per andare su un sito (es. una fonte di treni/voli). Dopo la navigazione leggi lo snapshot per decidere la prossima azione con browser_act.",
+            "description": "Open a URL in the real browser and return the SNAPSHOT (accessible text, with the [ref=...] references of interactive elements) of the loaded page. Use it to go to a site (e.g. a train/flight source). After navigation read the snapshot to decide the next action with browser_act.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -7867,7 +7866,7 @@ fn browser_act_tool_schema() -> serde_json::Value {
         "type": "function",
         "function": {
             "name": "browser_act",
-            "description": "Esegue UNA SOLA micro-azione sulla pagina corrente (un clic, scrivere in un campo, selezionare, premere un tasto, ecc.) e restituisce lo snapshot AGGIORNATO. Una azione alla volta: dopo ogni azione rileggi lo snapshot prima della successiva. Per i campi con autocompletamento usa kind='type' (la selezione del suggerimento è automatica). Non usare per acquisti, login o pagamenti: fermati e proponi all'utente.",
+            "description": "Perform ONE single micro-action on the current page (a click, writing in a field, selecting, pressing a key, etc.) and return the UPDATED snapshot. One action at a time: after each action re-read the snapshot before the next. For fields with autocomplete use kind='type' (the suggestion selection is automatic). Do not use for purchases, logins or payments: stop and propose to the user.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -8124,7 +8123,7 @@ fn create_artifact_tool_schema() -> serde_json::Value {
         "type": "function",
         "function": {
             "name": "create_artifact",
-            "description": "Crea un file 'artifact' (documento, codice, markdown, csv, html, json, testo, PDF) scrivendone il contenuto completo. Il file appare come artifact scaricabile e anteprimabile nella chat (pannello File). Usalo quando l'utente chiede di PRODURRE un documento/codice/PDF da consegnare, invece di incollarlo solo nel messaggio. PDF: se l'utente chiede un PDF, usa un name che finisce in \".pdf\" e scrivi il `content` in MARKDOWN (titoli #, elenchi -, tabelle, **grassetto**): viene impaginato in un vero PDF automaticamente. NON tentare di scrivere byte PDF a mano.",
+            "description": "Create an 'artifact' file (document, code, markdown, csv, html, json, text, PDF) by writing its full content. The file appears as a downloadable and previewable artifact in the chat (File panel). Use it when the user asks to PRODUCE a document/code/PDF to deliver, instead of just pasting it in the message. PDF: if the user asks for a PDF, use a name ending in \".pdf\" and write the `content` in MARKDOWN (headings #, lists -, tables, **bold**): it gets paginated into a real PDF automatically. Do NOT try to write PDF bytes by hand.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -8203,7 +8202,7 @@ fn find_capability_tool_schema() -> serde_json::Value {
         "type": "function",
         "function": {
             "name": "find_capability",
-            "description": "Scopri e ATTIVA gli strumenti NON presenti nel tuo set di base. Descrivi cosa vuoi FARE (es. \"navigare o leggere una pagina web\", \"cercare repository su GitHub\", \"elencare/leggere file e cartelle dell'utente\", \"eseguire comandi in un sandbox\", \"creare un documento/artefatto\", \"pianificare un task ricorrente\"). Ritorna gli strumenti adatti, GIÀ RICHIAMABILI dal turno successivo. Chiamalo PRIMA di rinunciare o di ripiegare sul browser: il browser stesso si attiva da qui ed è l'ultima risorsa.",
+            "description": "Discover and ACTIVATE the tools NOT present in your base set. Describe what you want to DO (e.g. \"navigate or read a web page\", \"search repositories on GitHub\", \"list/read the user's files and folders\", \"run commands in a sandbox\", \"create a document/artifact\", \"schedule a recurring task\"). Returns the suitable tools, ALREADY CALLABLE from the next turn. Call it BEFORE giving up or falling back to the browser: the browser itself activates from here and is the last resort.",
             "parameters": {
                 "type": "object",
                 "properties": {
