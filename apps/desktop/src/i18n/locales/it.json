@@ -1,4 +1,7 @@
 {
+  "shell": {
+    "resizeSidebarAria": "Ridimensiona la barra laterale"
+  },
   "common": {
     "save": "Salva",
     "cancel": "Annulla",
@@ -63,6 +66,32 @@
     },
     "queue": "Coda",
     "approvals": "Approvazioni"
+  },
+  "tasksView": {
+    "title": "Task e approvazioni",
+    "running": "in esecuzione",
+    "approval": "approval",
+    "queueAria": "Coda task",
+    "queue": "Coda",
+    "approvalCenterAria": "Centro approvazioni",
+    "approvalCenter": "Approval center",
+    "reject": "Rifiuta",
+    "approveAndContinue": "Approva e continua",
+    "noApprovals": "Nessuna approval in attesa.",
+    "resourceUsageAria": "Uso risorse runtime",
+    "resources": "Risorse",
+    "noResources": "Nessuna risorsa prenotata.",
+    "detailAria": "Dettaglio task redatto",
+    "redactedDetail": "Dettaglio redatto",
+    "selectTaskHint": "Seleziona un task per vedere lo stato.",
+    "status": "Stato",
+    "priority": "Priorita'",
+    "checkpoint": "Checkpoint",
+    "metadata": "Metadata",
+    "rawPayload": "Payload raw",
+    "blocked": "bloccato",
+    "notExposed": "non esposto",
+    "block": "Blocco"
   },
   "approval": {
     "browserAction": "Azione browser in attesa",

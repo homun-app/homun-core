@@ -1,4 +1,7 @@
 {
+  "shell": {
+    "resizeSidebarAria": "Resize the sidebar"
+  },
   "common": {
     "save": "Save",
     "cancel": "Cancel",
@@ -63,6 +66,32 @@
     },
     "queue": "Queue",
     "approvals": "Approvals"
+  },
+  "tasksView": {
+    "title": "Tasks and approvals",
+    "running": "running",
+    "approval": "approval",
+    "queueAria": "Task queue",
+    "queue": "Queue",
+    "approvalCenterAria": "Approval center",
+    "approvalCenter": "Approval center",
+    "reject": "Reject",
+    "approveAndContinue": "Approve and continue",
+    "noApprovals": "No approval pending.",
+    "resourceUsageAria": "Runtime resource usage",
+    "resources": "Resources",
+    "noResources": "No resource booked.",
+    "detailAria": "Redacted task detail",
+    "redactedDetail": "Redacted detail",
+    "selectTaskHint": "Select a task to see its status.",
+    "status": "Status",
+    "priority": "Priority",
+    "checkpoint": "Checkpoint",
+    "metadata": "Metadata",
+    "rawPayload": "Raw payload",
+    "blocked": "blocked",
+    "notExposed": "not exposed",
+    "block": "Block"
   },
   "approval": {
     "browserAction": "Browser action pending",

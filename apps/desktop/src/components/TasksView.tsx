@@ -7,6 +7,7 @@ import {
   PauseCircle,
   ShieldCheck,
 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import type {
   ApprovalItem,
   TaskDetailItem,
@@ -45,23 +46,24 @@ export function TasksView({
   onRejectApproval,
   onSelectTask,
 }: TasksViewProps) {
+  const { t } = useTranslation();
   return (
     <section className="tasks-view" aria-labelledby="tasks-title">
       <header className="topbar">
         <div>
-          <h2 id="tasks-title">Task e approvazioni</h2>
+          <h2 id="tasks-title">{t("tasksView.title")}</h2>
         </div>
         <div className="summary-strip">
           <strong>{tasks.filter((task) => task.status === "running").length}</strong>
-          <span>in esecuzione</span>
+          <span>{t("tasksView.running")}</span>
           <strong>{approvals.length}</strong>
-          <span>approval</span>
+          <span>{t("tasksView.approval")}</span>
         </div>
       </header>
 
       <div className="task-columns">
-        <section className="task-column" aria-label="Coda task">
-          <h3>Coda</h3>
+        <section className="task-column" aria-label={t("tasksView.queueAria")}>
+          <h3>{t("tasksView.queue")}</h3>
           <div className="task-list">
             {tasks.map((task) => (
               <button
@@ -85,8 +87,8 @@ export function TasksView({
           />
         </section>
 
-        <section className="task-column" aria-label="Centro approvazioni">
-          <h3>Approval center</h3>
+        <section className="task-column" aria-label={t("tasksView.approvalCenterAria")}>
+          <h3>{t("tasksView.approvalCenter")}</h3>
           {approvals.map((approval) => (
             <article className="approval-card" key={approval.id}>
               <div className="approval-header">
@@ -116,7 +118,7 @@ export function TasksView({
                   disabled={approvalBusyId === approval.id}
                   onClick={() => onRejectApproval(approval.id)}
                 >
-                  Rifiuta
+                  {t("tasksView.reject")}
                 </button>
                 <button
                   className="primary-button"
@@ -124,7 +126,7 @@ export function TasksView({
                   disabled={approvalBusyId === approval.id}
                   onClick={() => onApproveApproval(approval.id)}
                 >
-                  Approva e continua
+                  {t("tasksView.approveAndContinue")}
                 </button>
               </div>
             </article>
@@ -132,12 +134,12 @@ export function TasksView({
           {!approvals.length && (
             <div className="approval-empty">
               <Check size={17} />
-              <span>Nessuna approval in attesa.</span>
+              <span>{t("tasksView.noApprovals")}</span>
             </div>
           )}
 
-          <div className="resource-usage-panel" aria-label="Uso risorse runtime">
-            <h3>Risorse</h3>
+          <div className="resource-usage-panel" aria-label={t("tasksView.resourceUsageAria")}>
+            <h3>{t("tasksView.resources")}</h3>
             {resourceUsage.length ? (
               resourceUsage.map((usage) => (
                 <span className="resource-usage-row" key={usage.resourceClass}>
@@ -146,7 +148,7 @@ export function TasksView({
                 </span>
               ))
             ) : (
-              <p>Nessuna risorsa prenotata.</p>
+              <p>{t("tasksView.noResources")}</p>
             )}
           </div>
         </section>
@@ -162,36 +164,37 @@ function TaskDetailPanel({
   detail: TaskDetailItem | null;
   loading: boolean;
 }) {
+  const { t } = useTranslation();
   return (
-    <aside className="task-detail-panel" aria-label="Dettaglio task redatto">
-      <h3>Dettaglio redatto</h3>
-      {loading && <p>Caricamento dettaglio...</p>}
-      {!loading && !detail && <p>Seleziona un task per vedere lo stato.</p>}
+    <aside className="task-detail-panel" aria-label={t("tasksView.detailAria")}>
+      <h3>{t("tasksView.redactedDetail")}</h3>
+      {loading && <p>{t("common.loading")}</p>}
+      {!loading && !detail && <p>{t("tasksView.selectTaskHint")}</p>}
       {!loading && detail && (
         <dl>
           <div>
-            <dt>Stato</dt>
+            <dt>{t("tasksView.status")}</dt>
             <dd>{detail.status}</dd>
           </div>
           <div>
-            <dt>Priorita'</dt>
+            <dt>{t("tasksView.priority")}</dt>
             <dd>{detail.priority}</dd>
           </div>
           <div>
-            <dt>Checkpoint</dt>
+            <dt>{t("tasksView.checkpoint")}</dt>
             <dd>{detail.checkpointSummary}</dd>
           </div>
           <div>
-            <dt>Metadata</dt>
+            <dt>{t("tasksView.metadata")}</dt>
             <dd>{detail.metadataSummary}</dd>
           </div>
           <div>
-            <dt>Payload raw</dt>
-            <dd>{detail.exposesRawInput ? "bloccato" : "non esposto"}</dd>
+            <dt>{t("tasksView.rawPayload")}</dt>
+            <dd>{detail.exposesRawInput ? t("tasksView.blocked") : t("tasksView.notExposed")}</dd>
           </div>
           {detail.blockedReason && (
             <div>
-              <dt>Blocco</dt>
+              <dt>{t("tasksView.block")}</dt>
               <dd>{detail.blockedReason}</dd>
             </div>
           )}

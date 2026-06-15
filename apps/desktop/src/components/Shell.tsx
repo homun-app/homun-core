@@ -1,4 +1,5 @@
 import { useRef, useState, type CSSProperties, type PointerEvent, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import {
   ChatSearchModal,
   NavDrawer,
@@ -54,6 +55,7 @@ export function Shell({
   settingsSection,
   settingsSub,
 }: ShellProps) {
+  const { t } = useTranslation();
   const isSettings = activeView === "settings";
   const [searchOpen, setSearchOpen] = useState(false);
   const shellRef = useRef<HTMLDivElement>(null);
@@ -150,7 +152,7 @@ export function Shell({
           className="drawer-resizer"
           role="separator"
           aria-orientation="vertical"
-          aria-label="Ridimensiona la barra laterale"
+          aria-label={t("shell.resizeSidebarAria")}
           onPointerDown={startResize}
           onDoubleClick={() => {
             setDrawerWidth(DRAWER_DEFAULT_WIDTH);
