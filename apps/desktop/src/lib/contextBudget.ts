@@ -45,7 +45,7 @@ function compressOlderMessages(
   if (messages.length === 0) return [];
   const snippets = messages
     .map((message) => {
-      const label = message.role === "user" ? "Utente" : "Assistente";
+      const label = message.role === "user" ? "User" : "Assistant";
       return `${label}: ${firstUsefulLine(message.text)}`;
     })
     .filter(Boolean);

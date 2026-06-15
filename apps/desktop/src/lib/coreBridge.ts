@@ -2091,7 +2091,7 @@ export const coreBridge = {
     Promise.resolve({
       status: "skipped",
       task_id: null,
-      message: "Planner operativo non ancora estratto nel gateway Electron.",
+      message: "Operational planner not yet extracted in the Electron gateway.",
     }),
   runPromptPlanReadySteps: (_sessionId: string, _maxSteps = 4) =>
     electronRunNextTask(),
@@ -2159,7 +2159,7 @@ async function electronTaskExecutorStatus(): Promise<CoreTaskExecutorStatus> {
       status: "unavailable",
       last_tick_at: null,
       last_task_id: null,
-      last_message: "Executor locale non raggiungibile.",
+      last_message: "Local executor unreachable.",
       completed_count: 0,
       failure_count: 0,
     };
@@ -2241,7 +2241,7 @@ async function electronRunNextTask(): Promise<CorePromptPlanBatchRunResult> {
     return {
       status: "failed",
       completed: 0,
-      stopped_reason: "Executor locale non raggiungibile.",
+      stopped_reason: "Local executor unreachable.",
       results: [],
     };
   }
@@ -2885,7 +2885,7 @@ async function submitBrowserRuntimeChatPromptStream(
     throw new Error(`Provider di inferenza non disponibile: HTTP ${response.status}`);
   }
   if (!response.body) {
-    throw new Error("Il provider di inferenza non ha aperto lo stream.");
+    throw new Error("The inference provider did not open the stream.");
   }
 
   const reader = response.body.getReader();
@@ -2917,7 +2917,7 @@ async function submitBrowserRuntimeChatPromptStream(
         if (event.text) text = String(event.text);
         metrics = event.metrics ?? {};
       } else if (event.type === "error") {
-        throw new Error(String(event.message ?? "Errore runtime locale"));
+        throw new Error(String(event.message ?? "Local runtime error"));
       }
     }
   }
@@ -2942,7 +2942,7 @@ async function submitBrowserRuntimeChatPromptStream(
       role: "assistant",
       text: assistantText,
       timestamp,
-      metadata: "Modello locale",
+      metadata: "Local model",
       metrics: {
         prompt_tokens: metrics.prompt_tokens ?? 0,
         // `||` not `??`: the cloud stream sends 0 (not null), so persist the real
@@ -2991,7 +2991,7 @@ async function resumeBrowserRuntimeChatPromptStream(
     throw new Error(`Stream non più disponibile: HTTP ${response.status}`);
   }
   if (!response.body) {
-    throw new Error("Lo stream da riprendere non ha un corpo.");
+    throw new Error("The stream to resume has no body.");
   }
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
@@ -3013,7 +3013,7 @@ async function resumeBrowserRuntimeChatPromptStream(
         // Done is authoritative (sanitized final text) → replace the live preview.
         if (event.text) text = String(event.text);
       } else if (event.type === "error") {
-        throw new Error(String(event.message ?? "Errore runtime locale"));
+        throw new Error(String(event.message ?? "Local runtime error"));
       }
     }
   }
@@ -3033,7 +3033,7 @@ async function resumeBrowserRuntimeChatPromptStream(
       role: "assistant",
       text: text.trim(),
       timestamp,
-      metadata: "Modello locale",
+      metadata: "Local model",
       metrics: {
         prompt_tokens: 0,
         generation_tokens: 0,
@@ -3153,7 +3153,7 @@ async function openChatStreamWithGateway(
     // Keep the chat usable when the Rust desktop gateway is not running yet.
   }
 
-  throw new Error("Desktop Gateway locale non raggiungibile. Riavvia l'app desktop.");
+  throw new Error("Local Desktop Gateway unreachable. Restart the desktop app.");
 }
 
 function continuationPromptForMessage(previousText: string) {
