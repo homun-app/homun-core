@@ -59,6 +59,7 @@ import {
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import ForceGraph2D from "react-force-graph-2d";
 import type {
   ChangeEvent,
@@ -181,6 +182,7 @@ export function ChatView({
   onStreamingChange,
   seed,
 }: ChatViewProps) {
+  const { t } = useTranslation();
   const [computerSession, setComputerSession] = useState<ComputerSession>(() =>
     createLoadingComputerSession(computerSessionId),
   );
@@ -1619,7 +1621,7 @@ export function ChatView({
                 <header className="assistant-label system-label">
                   <Clock3 size={15} />
                   <strong>stato</strong>
-                  <span>Sistema</span>
+                  <span>{t("chat.roleSystem")}</span>
                 </header>
               )}
               {isStreamingMessage ? (
@@ -1849,7 +1851,7 @@ export function ChatView({
               <header className="assistant-label">
                 <Sparkles size={17} />
                 <strong>assistant</strong>
-                <span>Assistente</span>
+                <span>{t("chat.roleAssistant")}</span>
               </header>
               <AssistantThinkingState status={streamStatus} />
             </article>
@@ -2271,7 +2273,7 @@ function MessageActionBar({
       {canEdit && (
         <button type="button" onClick={onEdit} aria-label="Modifica messaggio" title="Modifica">
           <Pencil size={14} />
-          <span>Modifica</span>
+          <span>{t("common.edit")}</span>
         </button>
       )}
       {canReply && (
@@ -2323,11 +2325,11 @@ function MessageActionBar({
                 <>
                   <button type="button" role="menuitem" onClick={onExplainCode}>
                     <SquareTerminal size={14} />
-                    <span>Spiega codice</span>
+                    <span>{t("chat.action.explainCode")}</span>
                   </button>
                   <button type="button" role="menuitem" onClick={onImproveCode}>
                     <WandSparkles size={14} />
-                    <span>Migliora codice</span>
+                    <span>{t("chat.action.improveCode")}</span>
                   </button>
                 </>
               )}
@@ -2411,7 +2413,7 @@ function MessageActionBar({
                   className="message-latency-summary"
                   aria-label="Metriche prestazioni messaggio"
                 >
-                  <strong>Prestazioni</strong>
+                  <strong>{t("chat.metrics")}</strong>
                   <span>
                     Tempo al primo token
                     <b>{formatMetricSeconds(metrics.timeToFirstTokenSeconds)}</b>
@@ -2564,7 +2566,7 @@ function OperationalPlanPreview({
       <header>
         <span>
           <ListTodo size={16} />
-          <strong>Piano operativo</strong>
+          <strong>{t("chat.operationalPlan")}</strong>
         </span>
         <small>
           {completed.length} completati
@@ -2660,7 +2662,7 @@ function InlineTimeline({
     >
       <div className="timeline-header">
         <div>
-          <strong>Attività computer</strong>
+          <strong>{t("chat.computerActivity")}</strong>
           <span>
             {session.progressCurrent} / {session.progressTotal}
           </span>
@@ -4560,7 +4562,7 @@ function ArtifactsPanel({
                   }}
                 >
                   <Pencil size={14} />
-                  <span>Modifica</span>
+                  <span>{t("common.edit")}</span>
                 </button>
               )}
               <button
