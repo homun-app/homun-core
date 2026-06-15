@@ -410,7 +410,18 @@
     "channels": "Canali",
     "skills": "Skill",
     "addon": "Addon",
-    "computer": "Computer locale"
+    "computer": "Computer locale",
+    "activeProviderModel": "Modello attivo del provider",
+    "strengthsDesc": "Descrizione (in cosa eccelle)",
+    "tier": "Tier",
+    "contextWindow": "Context window (token)",
+    "addMcpServerManual": "Aggiungi server MCP manuale",
+    "enableAllGroup": "Abilita tutto il gruppo",
+    "browseCatalog": "Sfoglia il catalogo",
+    "security": "Sicurezza",
+    "openNovnc": "Apri noVNC",
+    "deleteAll": "Elimina tutto",
+    "whatYouNeed": "Cosa ti serve:"
   },
   "error": {
     "model": {

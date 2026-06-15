@@ -410,7 +410,18 @@
     "channels": "Channels",
     "skills": "Skills",
     "addon": "Addons",
-    "computer": "Local computer"
+    "computer": "Local computer",
+    "activeProviderModel": "Active provider model",
+    "strengthsDesc": "Description (what it excels at)",
+    "tier": "Tier",
+    "contextWindow": "Context window (tokens)",
+    "addMcpServerManual": "Add manual MCP server",
+    "enableAllGroup": "Enable entire group",
+    "browseCatalog": "Browse the catalog",
+    "security": "Security",
+    "openNovnc": "Open noVNC",
+    "deleteAll": "Delete all",
+    "whatYouNeed": "What you need:"
   },
   "error": {
     "model": {

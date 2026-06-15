@@ -197,6 +197,7 @@ export function SettingsView({ section, sub, onPluginsChanged }: SettingsViewPro
 /* ---------------------------------------------------------------- primitives */
 
 function CopyButton({ value, label = "Copia" }: { value: string; label?: string }) {
+  const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
   return (
     <button
@@ -237,6 +238,7 @@ function ToggleRow({
   settingKey: Parameters<typeof useSetting>[0];
   fallback: boolean;
 }) {
+  const { t } = useTranslation();
   const [value, setValue] = useSetting<boolean>(settingKey, fallback);
   return (
     <div className="set-trow">
@@ -409,6 +411,7 @@ function LanguageRow() {
 /* --------------------------------------------------------- approval routing */
 
 function ApprovalRoutingRow() {
+  const { t } = useTranslation();
   const [channel, setChannel] = useState<string>("in_app");
   const [target, setTarget] = useState<string>("");
   const [busy, setBusy] = useState(false);
@@ -477,7 +480,7 @@ function ApprovalRoutingRow() {
             if (c === "in_app") void save(c, "");
           }}
         >
-          <option value="in_app">Solo in app</option>
+          <option value="in_app">{t("settings.inAppOnly")}</option>
           <option value="telegram">Telegram</option>
           <option value="whatsapp">WhatsApp</option>
         </select>
@@ -544,6 +547,7 @@ function AccountPane({
 }: {
   computer: ContainedComputerLive | null;
 }) {
+  const { t } = useTranslation();
   const [name, setName] = useSetting("displayName", "Fabio Cantone");
   const [accountEmail, setAccountEmail] = useSetting<string>("email", "");
 
@@ -584,7 +588,7 @@ function AccountPane({
             <div className="tt">Workspace</div>
           </div>
           <div className="set-row-value">
-            <span>Personale</span>
+            <span>{t("sidebar.personal")}</span>
             <CopyButton value="Personale" />
           </div>
         </div>
@@ -642,6 +646,7 @@ function AccountPane({
 /* ---------------------------------------------------------------- appearance */
 
 function AppearancePane() {
+  const { t } = useTranslation();
   const [accent, setAccent] = useState(loadAccent());
   const [theme, setTheme] = useState<ThemeName>(loadTheme());
   // The user's own accents, shown as pills alongside the presets (persisted).
@@ -813,7 +818,7 @@ function AppearancePane() {
             }}
           >
             <Check size={14} />
-            <span>Aggiungi</span>
+            <span>{t("common.add")}</span>
           </button>
         )}
       </div>
@@ -830,6 +835,7 @@ function AppearancePane() {
 /* ------------------------------------------------------------------- general */
 
 function GeneralPane() {
+  const { t } = useTranslation();
   return (
     <>
       <div className="set-section-label">Conversazione</div>
@@ -890,6 +896,7 @@ const PROVIDER_PRESETS: Array<{
 /// run in parallel. Auto follows locality (loopback 1, cloud 4); the user can force
 /// a value — useful for Ollama on a big GPU, or to cap cloud spend.
 function ConcurrencyBlock() {
+  const { t } = useTranslation();
   const [view, setView] = useState<LlmConcurrencyView | null>(null);
   const [draft, setDraft] = useState<number>(4);
   const [manual, setManual] = useState<boolean>(false);
@@ -932,7 +939,7 @@ function ConcurrencyBlock() {
       <div className="mdl-row">
         <div className="mdl-row-main">
           <div className="mdl-row-top">
-            <strong>Richieste LLM in parallelo</strong>
+            <strong>{t("settings.concurrencyLabel")}</strong>
             <span className="set-badge green">Effettivo: {view.effective}</span>
           </div>
           <p className="mdl-detail-sub">
@@ -987,6 +994,7 @@ function RuntimePane({
   model: ActiveModelInfo | null;
   sub?: "routing" | "decisions" | "providers";
 }) {
+  const { t } = useTranslation();
   const [providers, setProviders] = useState<ProviderView[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [roles, setRoles] = useState<RoleView[]>([]);
@@ -1239,14 +1247,14 @@ function RuntimePane({
                 {modal === "add" && (
                   <>
                     <div className="mdl-detail-head">
-                      <h3>Aggiungi provider</h3>
+                      <h3>{t("settings.addProvider")}</h3>
                     </div>
                     <p className="mdl-detail-sub">
                       Qualsiasi endpoint OpenAI-compatibile, Anthropic o Ollama locale. La chiave è
                       cifrata nel secret store, mai mostrata.
                     </p>
                     <div className="mdl-field">
-                      <label>Tipo</label>
+                      <label>{t("settings.type")}</label>
                       <select
                         className="set-input"
                         value={presetId}
@@ -1265,11 +1273,11 @@ function RuntimePane({
                       </select>
                     </div>
                     <div className="mdl-field">
-                      <label>Nome</label>
+                      <label>{t("contacts.name")}</label>
                       <input className="set-input" placeholder={preset.label} value={label} onChange={(e) => setLabel(e.target.value)} />
                     </div>
                     <div className="mdl-field">
-                      <label>Endpoint (base URL)</label>
+                      <label>{t("settings.endpoint")}</label>
                       <input className="set-input" placeholder="https://api.openai.com/v1" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} />
                     </div>
                     <div className="mdl-field">
@@ -1440,6 +1448,7 @@ function ProviderDetailView({
     },
   ) => void;
 }) {
+  const { t } = useTranslation();
   const acting = busy === provider.id;
   const hasInferred = provider.models.some((m) => m.profile_source === "inferred" || !m.profile_source);
   // Which model row is open in the editor, plus its draft.
@@ -1517,7 +1526,7 @@ function ProviderDetailView({
       </button>
 
       <div className="mdl-field" style={{ marginTop: "var(--s4)" }}>
-        <label>Modello attivo del provider</label>
+        <label>{t("settings.activeProviderModel")}</label>
         <select
           className="set-input"
           value={provider.active_model ?? ""}
@@ -1590,7 +1599,7 @@ function ProviderDetailView({
             {editingId === m.id && (
               <div className="mdl-model-editor">
                 <div className="mdl-field">
-                  <label>Descrizione (in cosa eccelle)</label>
+                  <label>{t("settings.strengthsDesc")}</label>
                   <textarea
                     className="set-input"
                     rows={2}
@@ -1601,7 +1610,7 @@ function ProviderDetailView({
                 </div>
                 <div className="mdl-editor-grid">
                   <div className="mdl-field">
-                    <label>Tier</label>
+                    <label>{t("settings.tier")}</label>
                     <select
                       className="set-input"
                       value={draft.tier}
@@ -1613,7 +1622,7 @@ function ProviderDetailView({
                     </select>
                   </div>
                   <div className="mdl-field">
-                    <label>Context window (token)</label>
+                    <label>{t("settings.contextWindow")}</label>
                     <input
                       className="set-input"
                       type="number"
@@ -1685,6 +1694,7 @@ function ProviderDetailView({
 /* ------------------------------------------------------------------- privacy */
 
 function PrivacyPane() {
+  const { t } = useTranslation();
   return (
     <>
       <div className="set-section-label">Privacy</div>
@@ -1727,6 +1737,7 @@ type ConnectorsSub = "composio" | "fs" | "catalogo" | "attivita";
 // gone: each `sub` renders full-width. All data + coreBridge logic is unchanged —
 // only the layout that selects which detail to show.
 function ConnectorsPane({ sub = "composio" }: { sub?: ConnectorsSub }) {
+  const { t } = useTranslation();
   const [snap, setSnap] = useState<CoreCapabilitySnapshot | null>(null);
   const [note, setNote] = useState<string | null>(null);
 
@@ -1819,6 +1830,7 @@ function FilesystemServersDetail({
   onChanged: () => Promise<void>;
   onNote: (note: string | null) => void;
 }) {
+  const { t } = useTranslation();
   const [adding, setAdding] = useState(false);
   return (
     <div className="conn-stack">
@@ -1855,7 +1867,7 @@ function FilesystemServersDetail({
           onClick={() => setAdding(true)}
         >
           <Plus size={14} />
-          <span style={{ marginLeft: 6 }}>Aggiungi server MCP manuale</span>
+          <span style={{ marginLeft: 6 }}>{t("settings.addMcpServerManual")}</span>
         </button>
       )}
     </div>
@@ -2926,6 +2938,7 @@ function McpCatalogCard({
   onNote: (note: string | null) => void;
   onConnected: (providerId: string) => void;
 }) {
+  const { t } = useTranslation();
   const [values, setValues] = useState<Record<string, string>>({});
   const [reveal, setReveal] = useState<Record<string, boolean>>({});
   const [busy, setBusy] = useState(false);
@@ -3030,7 +3043,7 @@ function McpCatalogCard({
             </a>
           )}
           <div className="set-hint" style={{ fontSize: 12 }}>
-            <strong>Cosa ti serve:</strong>{" "}
+            <strong>{t("settings.whatYouNeed")}</strong>{" "}
             {server.inputs.length === 0
               ? "niente, si collega subito."
               : server.inputs
@@ -3100,6 +3113,7 @@ function McpCatalogCard({
 /* -------------------------------------------------------------------- skills */
 
 function SkillsPane() {
+  const { t } = useTranslation();
   const [resp, setResp] = useState<SkillsResponse | null>(null);
   const [tab, setTab] = useState<"attive" | "catalogo">("attive");
   // Which group is open inside "Skill attive" ("" = the two group cards).
@@ -3251,7 +3265,7 @@ function SkillsPane() {
             </button>
             {group === "homuncoder" && (
               <div className="skl-group-switch-row">
-                <span>Abilita tutto il gruppo</span>
+                <span>{t("settings.enableAllGroup")}</span>
                 <Toggle on={hcAllOn} onChange={(v) => void toggleGroup(v)} />
               </div>
             )}
@@ -3294,6 +3308,7 @@ function SkillsPane() {
 }
 
 function SkillsEmpty({ dir, onBrowse }: { dir?: string; onBrowse: () => void }) {
+  const { t } = useTranslation();
   return (
     <div className="skl-empty">
       <span className="conn-avatar lg">
@@ -3308,7 +3323,7 @@ function SkillsEmpty({ dir, onBrowse }: { dir?: string; onBrowse: () => void }) 
       {dir && <code className="skl-path">{dir}</code>}
       <button className="set-btn primary" type="button" onClick={onBrowse} style={{ alignSelf: "flex-start" }}>
         <Download size={14} />
-        <span style={{ marginLeft: 6 }}>Sfoglia il catalogo</span>
+        <span style={{ marginLeft: 6 }}>{t("settings.browseCatalog")}</span>
       </button>
     </div>
   );
@@ -3593,6 +3608,7 @@ function SkillDetailView({
   onToggle: (id: string, enabled: boolean) => Promise<void>;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const [raw, setRaw] = useState(false);
   return (
     <>
@@ -3683,6 +3699,7 @@ function SkillDetailView({
 }
 
 function SkillTree({ nodes, depth }: { nodes: SkillFileNode[]; depth: number }) {
+  const { t } = useTranslation();
   return (
     <ul className="skl-tree-list">
       {nodes.map((node) => (
@@ -3701,6 +3718,7 @@ function SkillTree({ nodes, depth }: { nodes: SkillFileNode[]; depth: number }) 
 }
 
 function SkillSecuritySection({ report }: { report: SkillSecurityReport }) {
+  const { t } = useTranslation();
   const level = report.blocked ? "high" : report.risk_score > 0 ? "warn" : "clean";
   const label =
     level === "high" ? "Rischio alto" : level === "warn" ? "Da rivedere" : "Pulita";
@@ -3708,7 +3726,7 @@ function SkillSecuritySection({ report }: { report: SkillSecurityReport }) {
     <div className={`skl-sec ${level}`}>
       <div className="skl-sec-head">
         <ShieldCheck size={15} />
-        <strong>Sicurezza</strong>
+        <strong>{t("settings.security")}</strong>
         <span className="skl-sec-badge">
           {label} · {report.risk_score}/100
         </span>
@@ -3744,6 +3762,7 @@ function SkillSecuritySection({ report }: { report: SkillSecurityReport }) {
 /* ------------------------------------------------------------------ computer */
 
 function ComputerPane({ computer }: { computer: ContainedComputerLive | null }) {
+  const { t } = useTranslation();
   const enabled = Boolean(computer?.enabled);
   const [status, setStatus] = useState<SystemStatus | null>(null);
   const [closing, setClosing] = useState(false);
@@ -3803,7 +3822,7 @@ function ComputerPane({ computer }: { computer: ContainedComputerLive | null }) 
               rel="noreferrer"
             >
               <ExternalLink size={14} />
-              <span style={{ marginLeft: 6 }}>Apri noVNC</span>
+              <span style={{ marginLeft: 6 }}>{t("settings.openNovnc")}</span>
             </a>
           </>
         ) : (
@@ -3874,6 +3893,7 @@ function ComputerPane({ computer }: { computer: ContainedComputerLive | null }) 
 }
 
 function DestinationsCard() {
+  const { t } = useTranslation();
   const [destinations, setDestinations] = useState<ArtifactDestination[]>([]);
   const [busy, setBusy] = useState(false);
 
@@ -3968,6 +3988,7 @@ function formatArtifactBytes(bytes: number) {
 }
 
 function ArtifactsCard() {
+  const { t } = useTranslation();
   const [usage, setUsage] = useState<ArtifactsUsage | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -4018,7 +4039,7 @@ function ArtifactsCard() {
             disabled={!usage?.base_path}
           >
             <Folder size={14} />
-            <span style={{ marginLeft: 6 }}>Apri cartella</span>
+            <span style={{ marginLeft: 6 }}>{t("chat.openFolder")}</span>
           </button>
           <button
             className="set-btn danger"
@@ -4027,7 +4048,7 @@ function ArtifactsCard() {
             onClick={() => void run(() => coreBridge.clearArtifacts())}
           >
             <Trash2 size={14} />
-            <span style={{ marginLeft: 6 }}>Elimina tutto</span>
+            <span style={{ marginLeft: 6 }}>{t("settings.deleteAll")}</span>
           </button>
         </div>
         {hasArtifacts ? (
