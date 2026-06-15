@@ -1,5 +1,6 @@
 import { Check, ChevronDown, Plus, Search, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 import {
   coreBridge,
@@ -16,42 +17,38 @@ import {
    server-side (SQL + graph relations + wiki + event-log) and self-protected. */
 
 const CONTACT_TYPES: { value: string; label: string }[] = [
-  { value: "unknown", label: "Da definire" },
-  { value: "self", label: "Sono io" },
-  { value: "family", label: "Famiglia" },
-  { value: "friend", label: "Amico/a" },
-  { value: "professional", label: "Professionale" },
-  { value: "colleague", label: "Collega" },
-  { value: "other", label: "Altro" },
+  { value: "unknown", label: "contacts.typeUnknown" },
+  { value: "self", label: "contacts.typeSelf" },
+  { value: "family", label: "contacts.typeFamily" },
+  { value: "friend", label: "contacts.typeFriend" },
+  { value: "professional", label: "contacts.typeProfessional" },
+  { value: "colleague", label: "contacts.typeColleague" },
+  { value: "other", label: "contacts.typeOther" },
 ];
 function contactTypeLabel(value: string): string {
-  return CONTACT_TYPES.find((t) => t.value === value)?.label ?? value;
+  return CONTACT_TYPES.find((ct) => ct.value === value)?.label ?? value;
 }
 function initial(name: string): string {
-  const t = name.trim();
-  return t ? t[0]!.toUpperCase() : "?";
+  const trimmed = name.trim();
+  return trimmed ? trimmed[0]!.toUpperCase() : "?";
 }
 /// Compact channel-response-mode chip for the contact list (only the meaningful modes;
 /// "" inherit and "draft" show nothing). short = the chip glyph, title = the tooltip.
-function responseModeBadge(mode?: string): { short: string; title: string } | null {
+function responseModeBadgeKey(mode?: string): string | null {
   switch (mode) {
-    case "automatic":
-      return { short: "⚡", title: "Risponde in automatico" };
-    case "approve":
-      return { short: "✋", title: "Prepara la risposta, la confermi prima dell'invio" };
-    case "silent":
-      return { short: "🔕", title: "Non risponde a questo contatto" };
-    default:
-      return null;
+    case "automatic": return "contacts.modeAutomatic";
+    case "approve": return "contacts.modeApprove";
+    case "silent": return "contacts.modeSilent";
+    default: return null;
   }
 }
 function normalizeName(name: string): string {
   return name.trim().toLowerCase();
 }
-function factTag(temporality: string): string {
-  if (temporality === "transient") return "ora";
-  if (temporality === "event") return "evento";
-  return "sempre";
+function factTagKey(temporality: string): string {
+  if (temporality === "transient") return "contacts.factTransient";
+  if (temporality === "event") return "contacts.factEvent";
+  return "contacts.factPermanent";
 }
 /// Tonal variant for a fact chip: events are highlighted teal (.brand), everything
 /// else stays neutral, matching the design's SEMPRE/EVENTO pills.
@@ -62,6 +59,7 @@ function factTagVariant(temporality: string): string {
 type MergePair = { from: CoreContact; into: CoreContact };
 
 export function ContactsView() {
+  const { t } = useTranslation();
   const [contacts, setContacts] = useState<CoreContact[] | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -85,7 +83,7 @@ export function ContactsView() {
   // Manual add — the curated path that isn't a channel identity (the other source
   // is inbound channel messages, which auto-create a contact).
   const newContact = async () => {
-    const name = window.prompt("Nome del nuovo contatto");
+    const name = window.prompt(t("contacts.promptNewContactName"));
     if (!name || !name.trim()) return;
     setBusy(true);
     setError(null);
@@ -236,17 +234,17 @@ export function ContactsView() {
         <label className="set-search contacts-search">
           <Search size={15} />
           <input
-            placeholder="Cerca per nome o canale"
+            placeholder={t("contacts.search")}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
         </label>
         <div className="set-select contacts-type-select">
           <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
-            <option value="all">Tutti i tipi</option>
-            {CONTACT_TYPES.map((t) => (
-              <option key={t.value} value={t.value}>
-                {t.label}
+            <option value="all">{t("contacts.allTypes")}</option>
+            {CONTACT_TYPES.map((ct) => (
+              <option key={ct.value} value={ct.value}>
+                {ct.label}
               </option>
             ))}
           </select>
@@ -267,7 +265,7 @@ export function ContactsView() {
 
       {suggestions.length > 0 && (
         <div className="contacts-suggest contacts-suggest-banner">
-          <div className="contacts-suggest-title">Possibili duplicati</div>
+          <div className="contacts-suggest-title">{t("contacts.possibleDuplicates")}</div>
           {suggestions.map((s) => (
             <div key={s.name} className="contacts-suggest-row">
               <span>
@@ -296,7 +294,7 @@ export function ContactsView() {
               {letterGroups.length > 1 && <div className="contacts-letter">{letter}</div>}
               <div className="set-cards-grid cols-2">
                 {items.map((c) => {
-                  const badge = responseModeBadge(c.response_mode);
+                  const badge = responseModeBadgeKey(c.response_mode);
                   return (
                     <button
                       key={c.reference}
@@ -330,7 +328,7 @@ export function ContactsView() {
                       <span className="set-contact-body">
                         <span className="set-contact-name">{c.name || "(senza nome)"}</span>
                         <span className="set-contact-sub">
-                          {contactTypeLabel(c.contact_type)}
+                          {t(contactTypeLabel(c.contact_type))}
                           {c.channels.length
                             ? ` · ${c.channels.map((ch) => ch.channel).join(", ")}`
                             : ""}
@@ -338,10 +336,10 @@ export function ContactsView() {
                       </span>
                       {badge && (
                         <span
-                          className={`contact-mode-badge mode-${c.response_mode}`}
-                          title={badge.title}
+                          className={`contact-mode-badge mode-`}
+                          title={t(badge)}
                         >
-                          {badge.short}
+                          {c.response_mode === "automatic" ? "⚡" : c.response_mode === "approve" ? "✋" : "🔕"}
                         </span>
                       )}
                       {c.memory_count > 0 && (
@@ -355,7 +353,7 @@ export function ContactsView() {
           ))}
         </div>
         {letterGroups.length > 1 && (
-          <div className="contacts-alpha" aria-label="Indice alfabetico">
+          <div className="contacts-alpha" aria-label={t("contacts.alphabetIndex")}>
             {letterGroups.map(([letter]) => (
               <button
                 key={letter}
@@ -471,6 +469,7 @@ function ContactCard({
   onDelete: () => void;
   onAssignProfile: (profileId: number | null, channel?: string) => void;
 }) {
+  const { t } = useTranslation();
   const [mergeTarget, setMergeTarget] = useState("");
   const others = contacts.filter((c) => c.reference !== contact.reference);
 
@@ -540,7 +539,7 @@ function ContactCard({
             {contact.is_self ? " · tu" : ""}
           </div>
           <div className="ms">
-            {contactTypeLabel(contact.contact_type)} · {contact.memory_count} messaggi
+            {t(contactTypeLabel(contact.contact_type))} · {contact.memory_count} messaggi
           </div>
         </div>
         {!contact.is_self && (
@@ -553,7 +552,7 @@ function ContactCard({
             Elimina
           </button>
         )}
-        <button type="button" className="set-modal-close" aria-label="Chiudi" onClick={onClose}>
+        <button type="button" className="set-modal-close" aria-label={t("contacts.close")} onClick={onClose}>
           <X size={17} />
         </button>
       </div>
@@ -561,7 +560,7 @@ function ContactCard({
       <div className="set-modal-body contacts-sheet-body">
         <div className="contacts-fields">
           <label className="contacts-field">
-            <span className="set-modal-label">Nome</span>
+            <span className="set-modal-label">{t("contacts.name")}</span>
             <input
               className="set-input"
               defaultValue={contact.name}
@@ -573,16 +572,16 @@ function ContactCard({
             />
           </label>
           <label className="contacts-field">
-            <span className="set-modal-label">Tipo di contatto</span>
+            <span className="set-modal-label">{t("contacts.contactType")}</span>
             <div className="set-select">
               <select
                 value={contact.contact_type}
                 disabled={busy}
                 onChange={(e) => onPatch({ contact_type: e.target.value })}
               >
-                {CONTACT_TYPES.map((t) => (
-                  <option key={t.value} value={t.value}>
-                    {t.label}
+                {CONTACT_TYPES.map((ct) => (
+                  <option key={ct.value} value={ct.value}>
+                    {ct.label}
                   </option>
                 ))}
               </select>
@@ -590,7 +589,7 @@ function ContactCard({
             </div>
           </label>
           <label className="contacts-field">
-            <span className="set-modal-label">Compleanno</span>
+            <span className="set-modal-label">{t("contacts.birthday")}</span>
             <input
               type="date"
               className="set-input"
@@ -603,11 +602,11 @@ function ContactCard({
             />
           </label>
           <label className="contacts-field">
-            <span className="set-modal-label">Note</span>
+            <span className="set-modal-label">{t("contacts.notes")}</span>
             <input
               className="set-input"
               defaultValue={contact.notes}
-              placeholder="es. fratello, collega di lavoro, cliente…"
+              placeholder={t("contacts.notesPlaceholder")}
               disabled={busy}
               onBlur={(e) => {
                 if (e.target.value !== contact.notes) onPatch({ notes: e.target.value });
@@ -617,7 +616,7 @@ function ContactCard({
         </div>
 
         <div className="contacts-section">
-          <div className="set-modal-label">Canali</div>
+          <div className="set-modal-label">{t("contacts.channels")}</div>
           {contact.channels.length ? (
             <div className="contacts-channels">
               {contact.channels.map((ch) => (
@@ -905,7 +904,7 @@ function ContactCard({
               {profile.facts.map((f, i) => (
                 <div key={f.reference || i} className="set-line-item contacts-fact">
                   <span className={`set-tag ${factTagVariant(f.temporality)} contacts-fact-tag`}>
-                    {factTag(f.temporality)}
+                    {t(factTagKey(f.temporality))}
                   </span>
                   <span className="contacts-fact-text">{f.text}</span>
                   {f.date && <span className="set-mono-faint contacts-fact-date">{f.date}</span>}
@@ -914,7 +913,7 @@ function ContactCard({
                       type="button"
                       className="contacts-fact-forget"
                       title="Dimentica questa informazione"
-                      aria-label="Dimentica"
+                      aria-label={t("contacts.forget")}
                       onClick={() => void forgetFact(f.reference)}
                     >
                       <X size={13} />
@@ -976,6 +975,7 @@ function ProfilesModal({
   onClose: () => void;
   onReload: () => void;
 }) {
+  const { t } = useTranslation();
   const createNew = async () => {
     const name = window.prompt("Nome del profilo (es. Lavoro, Personale)");
     if (!name || !name.trim()) return;
