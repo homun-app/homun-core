@@ -7,6 +7,7 @@ import {
   Sparkles,
   X,
 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import type { AutomationProposal, LearningInsight } from "../types";
 
 interface LearningViewProps {
@@ -15,33 +16,49 @@ interface LearningViewProps {
 }
 
 export function LearningView({ insights, proposals }: LearningViewProps) {
+  const { t } = useTranslation();
   const confirmed = insights.filter((item) => item.status === "confirmed").length;
   const review = insights.filter((item) => item.status !== "confirmed").length;
   const ready = proposals.filter((item) => item.status === "ready").length;
+
+  const statusLabel = (status: LearningInsight["status"]) => {
+    if (status === "confirmed") return t("learningView.status.confirmed");
+    if (status === "needs_review") return t("learningView.status.needsReview");
+    return t("learningView.status.candidate");
+  };
+  const riskLabel = (risk: AutomationProposal["risk"]) => {
+    if (risk === "high") return t("learningView.risk.high");
+    if (risk === "medium") return t("learningView.risk.medium");
+    return t("learningView.risk.low");
+  };
+  const proposalStatusLabel = (status: AutomationProposal["status"]) => {
+    if (status === "ready") return t("learningView.proposalStatus.ready");
+    if (status === "needs_connector") return t("learningView.proposalStatus.needsConnector");
+    return t("learningView.proposalStatus.needsApproval");
+  };
 
   return (
     <section className="learning-view" aria-labelledby="learning-title">
       <header className="learning-header">
         <div>
-          <p className="eyebrow">Auto-apprendimento locale</p>
-          <h2 id="learning-title">Cosa ho imparato</h2>
+          <p className="eyebrow">{t("learningView.eyebrow")}</p>
+          <h2 id="learning-title">{t("learningView.title")}</h2>
           <p className="lead-copy">
-            Abitudini, preferenze e automatismi restano leggibili e correggibili
-            prima di diventare azioni autonome.
+            {t("learningView.lead")}
           </p>
         </div>
-        <div className="learning-summary" aria-label="Sintesi apprendimento">
+        <div className="learning-summary" aria-label={t("learningView.summaryAria")}>
           <span>
             <strong>{confirmed}</strong>
-            confermate
+            {t("learningView.confirmed")}
           </span>
           <span>
             <strong>{review}</strong>
-            da rivedere
+            {t("learningView.toReview")}
           </span>
           <span>
             <strong>{ready}</strong>
-            automatismi pronti
+            {t("learningView.automationsReady")}
           </span>
         </div>
       </header>
@@ -50,8 +67,8 @@ export function LearningView({ insights, proposals }: LearningViewProps) {
         <section aria-labelledby="habits-title">
           <div className="learning-section-title">
             <div>
-              <h3 id="habits-title">Abitudini apprese</h3>
-              <small>Ogni insight mostra perche' esiste e come controllarlo.</small>
+              <h3 id="habits-title">{t("learningView.learnedHabits")}</h3>
+              <small>{t("learningView.habitsHint")}</small>
             </div>
           </div>
 
@@ -71,23 +88,23 @@ export function LearningView({ insights, proposals }: LearningViewProps) {
                   <span>{insight.domain}</span>
                   <span>{insight.cadence}</span>
                 </div>
-                <ul className="evidence-list" aria-label={`Prove per ${insight.title}`}>
+                <ul className="evidence-list" aria-label={t("learningView.evidenceAria", { title: insight.title })}>
                   {insight.evidence.map((item) => (
                     <li key={item}>{item}</li>
                   ))}
                 </ul>
-                <div className="privacy-control" aria-label={`Controlli privacy per ${insight.title}`}>
+                <div className="privacy-control" aria-label={t("learningView.privacyAria", { title: insight.title })}>
                   <button type="button">
                     <Check size={14} />
-                    Conferma
+                    {t("common.confirm")}
                   </button>
                   <button type="button">
                     <Pencil size={14} />
-                    Correggi
+                    {t("common.edit")}
                   </button>
                   <button type="button">
                     <X size={14} />
-                    Ignora
+                    {t("learningView.ignore")}
                   </button>
                 </div>
               </article>
@@ -98,8 +115,8 @@ export function LearningView({ insights, proposals }: LearningViewProps) {
         <section aria-labelledby="automation-title">
           <div className="learning-section-title">
             <div>
-              <h3 id="automation-title">Automatismi possibili</h3>
-              <small>Proposte create da pattern ricorrenti, mai attivate al buio.</small>
+              <h3 id="automation-title">{t("learningView.possibleAutomations")}</h3>
+              <small>{t("learningView.automationsHint")}</small>
             </div>
           </div>
 
@@ -108,7 +125,7 @@ export function LearningView({ insights, proposals }: LearningViewProps) {
               <article className="automation-proposal" key={proposal.id}>
                 <header>
                   <span className={`risk-badge ${proposal.risk}`}>{riskLabel(proposal.risk)}</span>
-                  <span>Autonomia {proposal.autonomyLevel}</span>
+                  <span>{t("learningView.autonomy")} {proposal.autonomyLevel}</span>
                 </header>
                 <h4>{proposal.title}</h4>
                 <p>{proposal.summary}</p>
@@ -127,11 +144,11 @@ export function LearningView({ insights, proposals }: LearningViewProps) {
                   </span>
                   <button className="secondary-button" type="button">
                     <Eye size={14} />
-                    Rivedi
+                    {t("learningView.review")}
                   </button>
                   <button className="primary-button" type="button">
                     <ShieldCheck size={14} />
-                    Prepara
+                    {t("learningView.prepare")}
                   </button>
                 </div>
               </article>
@@ -141,22 +158,4 @@ export function LearningView({ insights, proposals }: LearningViewProps) {
       </div>
     </section>
   );
-}
-
-function statusLabel(status: LearningInsight["status"]) {
-  if (status === "confirmed") return "Confermata";
-  if (status === "needs_review") return "Da rivedere";
-  return "Candidata";
-}
-
-function riskLabel(risk: AutomationProposal["risk"]) {
-  if (risk === "high") return "rischio alto";
-  if (risk === "medium") return "rischio medio";
-  return "rischio basso";
-}
-
-function proposalStatusLabel(status: AutomationProposal["status"]) {
-  if (status === "ready") return "Pronto";
-  if (status === "needs_connector") return "Serve connettore";
-  return "Serve approvazione";
 }

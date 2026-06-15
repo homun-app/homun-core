@@ -2,6 +2,80 @@
   "shell": {
     "resizeSidebarAria": "Ridimensiona la barra laterale"
   },
+  "months": {
+    "jan": "gen", "feb": "feb", "mar": "mar", "apr": "apr",
+    "may": "mag", "jun": "giu", "jul": "lug", "aug": "ago",
+    "sep": "set", "oct": "ott", "nov": "nov", "dec": "dic"
+  },
+  "learningView": {
+    "eyebrow": "Auto-apprendimento locale",
+    "title": "Cosa ho imparato",
+    "lead": "Abitudini, preferenze e automatismi restano leggibili e correggibili prima di diventare azioni autonome.",
+    "summaryAria": "Sintesi apprendimento",
+    "confirmed": "confermate",
+    "toReview": "da rivedere",
+    "automationsReady": "automatismi pronti",
+    "learnedHabits": "Abitudini apprese",
+    "habitsHint": "Ogni insight mostra perche' esiste e come controllarlo.",
+    "evidenceAria": "Prove per {{title}}",
+    "privacyAria": "Controlli privacy per {{title}}",
+    "ignore": "Ignora",
+    "possibleAutomations": "Automatismi possibili",
+    "automationsHint": "Proposte create da pattern ricorrenti, mai attivate al buio.",
+    "autonomy": "Autonomia",
+    "review": "Rivedi",
+    "prepare": "Prepara",
+    "status": {
+      "confirmed": "Confermata",
+      "needsReview": "Da rivedere",
+      "candidate": "Candidata"
+    },
+    "risk": {
+      "high": "rischio alto",
+      "medium": "rischio medio",
+      "low": "rischio basso"
+    },
+    "proposalStatus": {
+      "ready": "Pronto",
+      "needsConnector": "Serve connettore",
+      "needsApproval": "Serve approvazione"
+    }
+  },
+  "memoryView": {
+    "allProjects": "Tutti i progetti",
+    "allTypes": "Tutti i tipi",
+    "searchPlaceholder": "Cerca nella memoria…",
+    "consolidate": "Consolida",
+    "consolidating": "Consolido…",
+    "consolidateAllTitle": "Fonde i frammenti ed elimina il rumore della memoria personale",
+    "consolidateProjectTitle": "Fonde i frammenti ed elimina il rumore per questo progetto",
+    "consolidateReport": "Fusi {{merged}} · rimossi {{dropped}}",
+    "consolidateFailed": "Consolidamento non riuscito",
+    "export": "Esporta",
+    "exporting": "Esporto…",
+    "exportTitle": "Scarica memorie, entità e relazioni in un file JSON",
+    "memories": "memorie",
+    "entities": "entità",
+    "relations": "relazioni",
+    "wikiPages": "pagine wiki",
+    "tabInfo": "Info",
+    "tabGraph": "Grafo",
+    "tabWiki": "Wiki",
+    "noInfo": "Nessuna informazione",
+    "infoCount": "info",
+    "considered": "valutato",
+    "intended": "intenzione",
+    "confirmTitle": "Conferma (da usare)",
+    "deleteTitle": "Elimina dalla memoria",
+    "noInfoForFilters": "Nessuna informazione per i filtri scelti.",
+    "selectProjectHint": "Seleziona un progetto per vedere il grafo e la wiki di come le informazioni si connettono — come un cervello.",
+    "types": {
+      "decision": "Decisioni",
+      "fact": "Fatti",
+      "preference": "Preferenze",
+      "episode": "Conversazioni"
+    }
+  },
   "common": {
     "save": "Salva",
     "cancel": "Annulla",

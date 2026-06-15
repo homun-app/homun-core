@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Brain, Check, ChevronDown, Download, Search, Sparkles, Trash2, X } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 import {
   coreBridge,
@@ -13,19 +14,12 @@ import { MemoryGraphPanel } from "./ChatView";
 // how much was learned), then inspect the period — list (with delete) + the graph/wiki
 // of how the project's information connects.
 
-const TYPE_LABELS: Record<string, string> = {
-  decision: "Decisioni",
-  fact: "Fatti",
-  preference: "Preferenze",
-  episode: "Conversazioni",
-};
 const TYPE_COLORS: Record<string, string> = {
   decision: "#0ea5e9",
   fact: "#f59e0b",
   preference: "#a78bfa",
   episode: "#94a3b8",
 };
-const MONTHS = ["gen", "feb", "mar", "apr", "mag", "giu", "lug", "ago", "set", "ott", "nov", "dic"];
 
 // created_at is stored either as "unix:<seconds>" or an ISO/sql timestamp.
 function parseCreatedAt(raw: string): Date | null {
@@ -49,6 +43,24 @@ function dayLabel(raw: string): string {
 }
 
 export function MemoryView({ embedded = false }: { embedded?: boolean } = {}) {
+  const { t } = useTranslation();
+  const TYPE_LABELS = useMemo<Record<string, string>>(
+    () => ({
+      decision: t("memoryView.types.decision"),
+      fact: t("memoryView.types.fact"),
+      preference: t("memoryView.types.preference"),
+      episode: t("memoryView.types.episode"),
+    }),
+    [t],
+  );
+  const MONTHS = useMemo(
+    () => [
+      t("months.jan"), t("months.feb"), t("months.mar"), t("months.apr"),
+      t("months.may"), t("months.jun"), t("months.jul"), t("months.aug"),
+      t("months.sep"), t("months.oct"), t("months.nov"), t("months.dec"),
+    ],
+    [t],
+  );
   const [items, setItems] = useState<CoreMemoryItem[] | null>(null);
   const [scopes, setScopes] = useState<CoreMemoryScope[]>([]);
   const [workspaceFilter, setWorkspaceFilter] = useState("all");
@@ -157,7 +169,7 @@ export function MemoryView({ embedded = false }: { embedded?: boolean } = {}) {
       <header className="memview-head">
         {!embedded && (
           <div className="memview-title">
-            <Brain size={20} /> Memoria
+            <Brain size={20} /> {t("nav.memory")}
           </div>
         )}
         <div className="memview-filters">
@@ -169,7 +181,7 @@ export function MemoryView({ embedded = false }: { embedded?: boolean } = {}) {
                 setSelectedMonth(null);
               }}
             >
-              <option value="all">Tutti i progetti</option>
+              <option value="all">{t("memoryView.allProjects")}</option>
               {workspaces.map((w) => (
                 <option key={w.id} value={w.id}>
                   {w.label}
@@ -180,7 +192,7 @@ export function MemoryView({ embedded = false }: { embedded?: boolean } = {}) {
           </label>
           <label className="set-select memview-select">
             <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
-              <option value="all">Tutti i tipi</option>
+              <option value="all">{t("memoryView.allTypes")}</option>
               {Object.entries(TYPE_LABELS).map(([k, v]) => (
                 <option key={k} value={k}>
                   {v}
@@ -194,7 +206,7 @@ export function MemoryView({ embedded = false }: { embedded?: boolean } = {}) {
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Cerca nella memoria…"
+              placeholder={t("memoryView.searchPlaceholder")}
             />
           </label>
           <button
@@ -203,8 +215,8 @@ export function MemoryView({ embedded = false }: { embedded?: boolean } = {}) {
             disabled={consolidating}
             title={
               workspaceFilter === "all"
-                ? "Fonde i frammenti ed elimina il rumore della memoria personale"
-                : "Fonde i frammenti ed elimina il rumore per questo progetto"
+                ? t("memoryView.consolidateAllTitle")
+                : t("memoryView.consolidateProjectTitle")
             }
             onClick={() => {
               setConsolidating(true);
@@ -212,26 +224,26 @@ export function MemoryView({ embedded = false }: { embedded?: boolean } = {}) {
               coreBridge
                 .consolidateMemory(workspaceFilter === "all" ? undefined : workspaceFilter)
                 .then((r) => {
-                  setReport(`Fusi ${r.merged} · rimossi ${r.dropped}`);
+                  setReport(t("memoryView.consolidateReport", { merged: r.merged, dropped: r.dropped }));
                   reload();
                 })
-                .catch(() => setReport("Consolidamento non riuscito"))
+                .catch(() => setReport(t("memoryView.consolidateFailed")))
                 .finally(() => setConsolidating(false));
             }}
           >
             <Sparkles size={13} />
-            {consolidating ? "Consolido…" : "Consolida"}
+            {consolidating ? t("memoryView.consolidating") : t("memoryView.consolidate")}
           </button>
           {report && <span className="memview-report">{report}</span>}
           <button
             type="button"
             className="set-btn"
             disabled={exporting}
-            title="Scarica memorie, entità e relazioni in un file JSON"
+            title={t("memoryView.exportTitle")}
             onClick={exportMemory}
           >
             <Download size={13} />
-            {exporting ? "Esporto…" : "Esporta"}
+            {exporting ? t("memoryView.exporting") : t("memoryView.export")}
           </button>
         </div>
       </header>
@@ -239,19 +251,19 @@ export function MemoryView({ embedded = false }: { embedded?: boolean } = {}) {
       {dashboard && (
         <div className="set-stats memview-stats">
           <span>
-            <strong>{dashboard.total_memories}</strong> memorie
+            <strong>{dashboard.total_memories}</strong> {t("memoryView.memories")}
           </span>
           <span className="sep">·</span>
           <span>
-            <strong>{dashboard.total_entities}</strong> entità
+            <strong>{dashboard.total_entities}</strong> {t("memoryView.entities")}
           </span>
           <span className="sep">·</span>
           <span>
-            <strong>{dashboard.total_relations}</strong> relazioni
+            <strong>{dashboard.total_relations}</strong> {t("memoryView.relations")}
           </span>
           <span className="sep">·</span>
           <span>
-            <strong>{dashboard.total_wiki_pages}</strong> pagine wiki
+            <strong>{dashboard.total_wiki_pages}</strong> {t("memoryView.wikiPages")}
           </span>
         </div>
       )}
@@ -259,9 +271,9 @@ export function MemoryView({ embedded = false }: { embedded?: boolean } = {}) {
       <div className="set-seg memview-tabs" role="tablist">
         {(
           [
-            ["info", "Info"],
-            ["graph", "Grafo"],
-            ["wiki", "Wiki"],
+            ["info", t("memoryView.tabInfo")],
+            ["graph", t("memoryView.tabGraph")],
+            ["wiki", t("memoryView.tabWiki")],
           ] as const
         ).map(([key, label]) => (
           <button
@@ -281,7 +293,7 @@ export function MemoryView({ embedded = false }: { embedded?: boolean } = {}) {
         <div className="memview-info">
           <div className="memview-timeline" role="group" aria-label="Timeline">
             {timeline.length === 0 ? (
-              <span className="memview-empty">Nessuna informazione</span>
+              <span className="memview-empty">{t("memoryView.noInfo")}</span>
             ) : (
               timeline.map((t) => {
                 const [y, mo] = t.month.split("-");
@@ -306,7 +318,7 @@ export function MemoryView({ embedded = false }: { embedded?: boolean } = {}) {
             )}
           </div>
           <div className="memview-list-head">
-            {visible.length} info{selectedMonth ? ` · ${selectedMonth}` : ""}
+            {visible.length} {t("memoryView.infoCount")}{selectedMonth ? ` · ${selectedMonth}` : ""}
           </div>
           <div className="set-line-list memview-list">
             {visible.map((it) => (
@@ -319,10 +331,10 @@ export function MemoryView({ embedded = false }: { embedded?: boolean } = {}) {
                   <div className="memview-item-text">
                     {it.text}
                     {it.certainty === "considered" && (
-                      <span className="set-tag amber memview-chip">valutato</span>
+                      <span className="set-tag amber memview-chip">{t("memoryView.considered")}</span>
                     )}
                     {it.certainty === "intended" && (
-                      <span className="set-tag brand memview-chip">intenzione</span>
+                      <span className="set-tag brand memview-chip">{t("memoryView.intended")}</span>
                     )}
                   </div>
                   <div className="memview-item-meta">
@@ -336,7 +348,7 @@ export function MemoryView({ embedded = false }: { embedded?: boolean } = {}) {
                       <button
                         type="button"
                         className="memview-confirm"
-                        title="Conferma (da usare)"
+                        title={t("memoryView.confirmTitle")}
                         disabled={busy}
                         onClick={() => decide(it.reference, "confirm")}
                       >
@@ -345,7 +357,7 @@ export function MemoryView({ embedded = false }: { embedded?: boolean } = {}) {
                       <button
                         type="button"
                         className="memview-reject"
-                        title="Rifiuta"
+                        title={t("common.cancel")}
                         disabled={busy}
                         onClick={() => decide(it.reference, "reject")}
                       >
@@ -356,7 +368,7 @@ export function MemoryView({ embedded = false }: { embedded?: boolean } = {}) {
                   <button
                     type="button"
                     className="memview-del"
-                    title="Elimina dalla memoria"
+                    title={t("memoryView.deleteTitle")}
                     disabled={busy}
                     onClick={() => decide(it.reference, "delete")}
                   >
@@ -366,7 +378,7 @@ export function MemoryView({ embedded = false }: { embedded?: boolean } = {}) {
               </div>
             ))}
             {visible.length === 0 && (
-              <p className="memview-empty">Nessuna informazione per i filtri scelti.</p>
+              <p className="memview-empty">{t("memoryView.noInfoForFilters")}</p>
             )}
           </div>
         </div>
@@ -383,8 +395,7 @@ export function MemoryView({ embedded = false }: { embedded?: boolean } = {}) {
             <div className="memview-graph-hint">
               <Brain size={30} />
               <p>
-                Seleziona un progetto per vedere il <strong>grafo</strong> e la <strong>wiki</strong>{" "}
-                di come le informazioni si connettono — come un cervello.
+                {t("memoryView.selectProjectHint")}
               </p>
             </div>
           )}

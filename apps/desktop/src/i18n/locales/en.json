@@ -2,6 +2,80 @@
   "shell": {
     "resizeSidebarAria": "Resize the sidebar"
   },
+  "months": {
+    "jan": "Jan", "feb": "Feb", "mar": "Mar", "apr": "Apr",
+    "may": "May", "jun": "Jun", "jul": "Jul", "aug": "Aug",
+    "sep": "Sep", "oct": "Oct", "nov": "Nov", "dec": "Dec"
+  },
+  "learningView": {
+    "eyebrow": "Local self-learning",
+    "title": "What I learned",
+    "lead": "Habits, preferences and automations stay readable and correctable before becoming autonomous actions.",
+    "summaryAria": "Learning summary",
+    "confirmed": "confirmed",
+    "toReview": "to review",
+    "automationsReady": "automations ready",
+    "learnedHabits": "Learned habits",
+    "habitsHint": "Each insight shows why it exists and how to control it.",
+    "evidenceAria": "Evidence for {{title}}",
+    "privacyAria": "Privacy controls for {{title}}",
+    "ignore": "Ignore",
+    "possibleAutomations": "Possible automations",
+    "automationsHint": "Proposals created from recurring patterns, never activated blindly.",
+    "autonomy": "Autonomy",
+    "review": "Review",
+    "prepare": "Prepare",
+    "status": {
+      "confirmed": "Confirmed",
+      "needsReview": "Needs review",
+      "candidate": "Candidate"
+    },
+    "risk": {
+      "high": "high risk",
+      "medium": "medium risk",
+      "low": "low risk"
+    },
+    "proposalStatus": {
+      "ready": "Ready",
+      "needsConnector": "Connector needed",
+      "needsApproval": "Approval needed"
+    }
+  },
+  "memoryView": {
+    "allProjects": "All projects",
+    "allTypes": "All types",
+    "searchPlaceholder": "Search memory…",
+    "consolidate": "Consolidate",
+    "consolidating": "Consolidating…",
+    "consolidateAllTitle": "Merges fragments and removes noise from personal memory",
+    "consolidateProjectTitle": "Merges fragments and removes noise for this project",
+    "consolidateReport": "Merged {{merged}} · removed {{dropped}}",
+    "consolidateFailed": "Consolidation failed",
+    "export": "Export",
+    "exporting": "Exporting…",
+    "exportTitle": "Download memories, entities and relations as a JSON file",
+    "memories": "memories",
+    "entities": "entities",
+    "relations": "relations",
+    "wikiPages": "wiki pages",
+    "tabInfo": "Info",
+    "tabGraph": "Graph",
+    "tabWiki": "Wiki",
+    "noInfo": "No information",
+    "infoCount": "items",
+    "considered": "considered",
+    "intended": "intention",
+    "confirmTitle": "Confirm (in use)",
+    "deleteTitle": "Delete from memory",
+    "noInfoForFilters": "No information for the chosen filters.",
+    "selectProjectHint": "Select a project to see the graph and wiki of how information connects — like a brain.",
+    "types": {
+      "decision": "Decisions",
+      "fact": "Facts",
+      "preference": "Preferences",
+      "episode": "Conversations"
+    }
+  },
   "common": {
     "save": "Save",
     "cancel": "Cancel",
