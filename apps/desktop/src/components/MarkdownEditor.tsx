@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { Bold, Code, Heading, Italic, Link2, List, ListOrdered, Quote } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 import { RichMessage } from "./RichMessage";
 
@@ -16,6 +17,7 @@ export function MarkdownEditor({
   rows?: number;
 }) {
   const ref = useRef<HTMLTextAreaElement | null>(null);
+  const { t } = useTranslation();
   const [tab, setTab] = useState<"write" | "preview">("write");
 
   const surround = (before: string, after = before) => {
@@ -47,28 +49,28 @@ export function MarkdownEditor({
   return (
     <div className="md-editor">
       <div className="md-editor-toolbar">
-        <button type="button" title="Grassetto" onClick={() => surround("**")}>
+        <button type="button" title={t("mdEditor.bold")} onClick={() => surround("**")}>
           <Bold size={14} />
         </button>
-        <button type="button" title="Corsivo" onClick={() => surround("_")}>
+        <button type="button" title={t("mdEditor.italic")} onClick={() => surround("_")}>
           <Italic size={14} />
         </button>
-        <button type="button" title="Titolo" onClick={() => linePrefix("## ")}>
+        <button type="button" title={t("mdEditor.heading")} onClick={() => linePrefix("## ")}>
           <Heading size={14} />
         </button>
-        <button type="button" title="Elenco puntato" onClick={() => linePrefix("- ")}>
+        <button type="button" title={t("mdEditor.bulletList")} onClick={() => linePrefix("- ")}>
           <List size={14} />
         </button>
-        <button type="button" title="Elenco numerato" onClick={() => linePrefix("1. ")}>
+        <button type="button" title={t("mdEditor.numberedList")} onClick={() => linePrefix("1. ")}>
           <ListOrdered size={14} />
         </button>
-        <button type="button" title="Citazione" onClick={() => linePrefix("> ")}>
+        <button type="button" title={t("mdEditor.quote")} onClick={() => linePrefix("> ")}>
           <Quote size={14} />
         </button>
-        <button type="button" title="Codice" onClick={() => surround("`")}>
+        <button type="button" title={t("mdEditor.code")} onClick={() => surround("`")}>
           <Code size={14} />
         </button>
-        <button type="button" title="Link" onClick={() => surround("[", "](https://)")}>
+        <button type="button" title={t("mdEditor.link")} onClick={() => surround("[", "](https://)")}>
           <Link2 size={14} />
         </button>
         <span className="md-editor-spacer" />
