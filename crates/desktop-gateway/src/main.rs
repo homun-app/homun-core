@@ -3608,7 +3608,7 @@ the details that remain missing.",
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "Cosa cercare in memoria (parole chiave o domanda)."
+                        "description": "What to search in memory (keywords or question)."
                     }
                 },
                 "required": ["query"]
@@ -3630,14 +3630,14 @@ decision is linked to the current project.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "summary": { "type": "string", "description": "Cosa è stato deciso/fatto, in una frase (es. \"Spostato il preventivo ACME a sconto 10%\")." },
-                    "rationale": { "type": "string", "description": "Il PERCHÉ della scelta." },
+                    "summary": { "type": "string", "description": "What was decided/done, in one sentence (e.g. \"Moved the ACME quote to 10% discount\")." },
+                    "rationale": { "type": "string", "description": "The WHY of the choice." },
                     "alternatives": {
                         "type": "array",
                         "items": { "type": "object", "properties": { "option": { "type": "string" }, "rejected_because": { "type": "string" } } },
-                        "description": "Alternative valutate e scartate, col motivo. Opzionale."
+                        "description": "Evaluated and discarded alternatives, with the reason. Optional."
                     },
-                    "affects": { "type": "array", "items": { "type": "string" }, "description": "Oggetti toccati: file, documento, contatto, ecc. Opzionale." }
+                    "affects": { "type": "array", "items": { "type": "string" }, "description": "Touched objects: file, document, contact, etc. Optional." }
                 },
                 "required": ["summary", "rationale"]
             }
@@ -3716,8 +3716,8 @@ always report to the user WHAT you forgot.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "query": { "type": "string", "description": "Cosa dimenticare (parole chiave o frase)." },
-                    "reason": { "type": "string", "description": "Perché (opzionale)." }
+                    "query": { "type": "string", "description": "What to forget (keywords or phrase)." },
+                    "reason": { "type": "string", "description": "Why (optional)." }
                 },
                 "required": ["query"]
             }
@@ -3908,13 +3908,13 @@ for single-step requests.",
                 "properties": {
                     "steps": {
                         "type": "array",
-                        "description": "Gli step del piano, in ordine.",
+                        "description": "The plan steps, in order.",
                         "items": {
                             "type": "object",
                             "properties": {
-                                "title": { "type": "string", "description": "Cosa fa lo step (breve, imperativo)." },
-                                "status": { "type": "string", "enum": ["todo", "doing", "done", "blocked"], "description": "Stato corrente dello step." },
-                                "detail": { "type": "string", "description": "Dettaglio opzionale." }
+                                "title": { "type": "string", "description": "What the step does (short, imperative)." },
+                                "status": { "type": "string", "enum": ["todo", "doing", "done", "blocked"], "description": "Current status of the step." },
+                                "detail": { "type": "string", "description": "Optional detail." }
                             },
                             "required": ["title", "status"]
                         }
@@ -3976,7 +3976,7 @@ architecture/structure of the current project's code.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "symbol": { "type": "string", "description": "Nome del simbolo da esplorare (es. \"cmd_add\", \"main.py\")" }
+                    "symbol": { "type": "string", "description": "Name of the symbol to explore (e.g. \"cmd_add\", \"main.py\")" }
                 },
                 "required": ["symbol"]
             }
@@ -4000,7 +4000,7 @@ successo a questo file'.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "query": { "type": "string", "description": "File, simbolo o tema (es. \"trello_wrapper.py\", \"retry\", \"cache\")" }
+                    "query": { "type": "string", "description": "File, symbol or theme (e.g. \"trello_wrapper.py\", \"retry\", \"cache\")" }
                 },
                 "required": ["query"]
             }
@@ -4020,7 +4020,7 @@ PREFERISCILO SEMPRE al browser per le query su GitHub.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "query": { "type": "string", "description": "Termini di ricerca (nome, keyword di problema/implementazione). Supporta i qualificatori GitHub, es. \"todo cli language:python stars:>50\"." }
+                    "query": { "type": "string", "description": "Search terms (name, problem/implementation keyword). Supports GitHub qualifiers, e.g. \"todo cli language:python stars:>50\"." }
                 },
                 "required": ["query"]
             }
@@ -4226,33 +4226,33 @@ weekday: un giorno della settimana (usa weekday + which). relative_unit: \"tra N
                     },
                     "offset_days": {
                         "type": "integer",
-                        "description": "Per kind=relative_day: 0=oggi, 1=domani, -1=ieri, 2=dopodomani, ecc."
+                        "description": "For kind=relative_day: 0=today, 1=tomorrow, -1=yesterday, 2=day-after-tomorrow, etc."
                     },
                     "weekday": {
                         "type": "string",
-                        "description": "Per kind=weekday: lunedì..domenica (o monday..sunday, qualsiasi lingua)."
+                        "description": "For kind=weekday: monday..sunday (or monday..sunday, any language)."
                     },
                     "which": {
                         "type": "string",
                         "enum": ["upcoming", "this", "next"],
-                        "description": "Per kind=weekday: upcoming=il più vicino futuro (default), this=questa settimana, next=settimana prossima."
+                        "description": "For kind=weekday: upcoming=the closest future (default), this=this week, next=next week."
                     },
-                    "n": { "type": "integer", "description": "Per kind=relative_unit: quante unità (es. 3)." },
+                    "n": { "type": "integer", "description": "For kind=relative_unit: how many units (e.g. 3)." },
                     "unit": {
                         "type": "string",
                         "enum": ["day", "week", "month"],
-                        "description": "Per kind=relative_unit: l'unità (giorno/settimana/mese)."
+                        "description": "For kind=relative_unit: the unit (day/week/month)."
                     },
-                    "date": { "type": "string", "description": "Per kind=absolute: data ISO YYYY-MM-DD." },
-                    "time": { "type": "string", "description": "Orario \"HH:MM\" se l'utente lo indica (es. \"07:00\"). Opzionale." },
+                    "date": { "type": "string", "description": "For kind=absolute: ISO date YYYY-MM-DD." },
+                    "time": { "type": "string", "description": "Time \"HH:MM\" if the user specifies it (e.g. \"07:00\"). Optional." },
                     "part": {
                         "type": "string",
                         "enum": ["morning", "afternoon", "evening", "night"],
-                        "description": "Parte del giorno se non c'è un orario preciso (es. \"di mattina\"). Opzionale."
+                        "description": "Part of day if there's no precise time (e.g. \"in the morning\"). Optional."
                     },
                     "must_be_future": {
                         "type": "boolean",
-                        "description": "Default true: rifiuta una data/ora già passata (per prenotazioni/ricerche). Metti false solo se serve una data passata."
+                        "description": "Default true: rejects an already-past date/time (for bookings/searches). Set false only if a past date is needed."
                     }
                 },
                 "required": ["kind"]
@@ -4277,7 +4277,7 @@ EVENT-based (non-time) triggers use create_automation. Do NOT use it for one-off
                 "properties": {
                     "goal": {
                         "type": "string",
-                        "description": "Cosa fare a ogni esecuzione, formulato come un'istruzione completa (es. \"Cerca sul web le ultime notizie su Jannik Sinner e riassumile\")."
+                        "description": "What to do on each execution, phrased as a complete instruction (e.g. \"Search the web for the latest news on Jannik Sinner and summarize them\")."
                     },
                     "every": {
                         "type": "string",
@@ -4500,17 +4500,17 @@ fn create_automation_tool_schema() -> serde_json::Value {
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "title": { "type": "string", "description": "Titolo breve dell'automazione" },
-                    "prompt": { "type": "string", "description": "Cosa fare quando scatta, in linguaggio naturale" },
-                    "trigger_type": { "type": "string", "enum": ["schedule", "event"], "description": "schedule = a orario; event = a un messaggio in arrivo su un canale" },
+                    "title": { "type": "string", "description": "Short title of the automation" },
+                    "prompt": { "type": "string", "description": "What to do when it triggers, in natural language" },
+                    "trigger_type": { "type": "string", "enum": ["schedule", "event"], "description": "schedule = time-based; event = on an incoming message on a channel" },
                     "recurrence": { "type": "string", "description": "Solo schedule. Formati: daily@HH:MM | weekly@<gg>@HH:MM | dow@<gg,gg,…>@<HH:MM,HH:MM,…> per PIÙ GIORNI e PIÙ ORARI (es. \"dow@mon,wed,fri@08:00,12:00,18:00\"; usa dow@*@HH:MM,… per ogni giorno) | every Nh | every Nd. Giorni: mon,tue,wed,thu,fri,sat,sun." },
-                    "timezone": { "type": "string", "description": "Solo schedule: fuso IANA (default: fuso dell'utente)" },
-                    "event_channel": { "type": "string", "description": "Solo event su canale: whatsapp | telegram (vuoto = qualsiasi canale)" },
-                    "event_from": { "type": "string", "description": "Solo event su canale: nome o numero del mittente (vuoto = chiunque)" },
+                    "timezone": { "type": "string", "description": "Schedule only: IANA timezone (default: user's timezone)" },
+                    "event_channel": { "type": "string", "description": "Channel event only: whatsapp | telegram (empty = any channel)" },
+                    "event_from": { "type": "string", "description": "Channel event only: sender's name or number (empty = anyone)" },
                     "event_tool": { "type": "string", "description": "Solo event su SERVIZIO COLLEGATO (Gmail/Calendar/Slack/MCP/…): il nome ESATTO del tool di lettura da interrogare ciclicamente (scoprilo con find_capability), es. \"GMAIL_FETCH_EMAILS\". Lascia vuoto per un evento su canale." },
                     "event_args": { "type": "object", "description": "Solo con event_tool: gli argomenti della query (es. {\"query\":\"is:unread from:mario\"})" },
                     "event_key_field": { "type": "string", "description": "Solo con event_tool: il campo che identifica univocamente un elemento (per non rifare scattare i già visti), es. \"messageId\", \"id\"." },
-                    "require_confirmation": { "type": "boolean", "description": "true (default) = chiede conferma prima di inviare/pubblicare; false = autonoma" }
+                    "require_confirmation": { "type": "boolean", "description": "true (default) = asks for confirmation before sending/publishing; false = autonomous" }
                 },
                 "required": ["title", "prompt", "trigger_type"]
             }
@@ -5147,11 +5147,11 @@ fn cancel_scheduled_task_tool_schema() -> serde_json::Value {
         "type": "function",
         "function": {
             "name": "cancel_scheduled_task",
-            "description": "Annulla un task pianificato così non verrà più eseguito. Passa l'id ESATTO ottenuto da list_scheduled_tasks. Usalo quando l'utente vuole fermare un'attività ricorrente.",
+            "description": "Cancel a scheduled task so it won't run anymore. Pass the EXACT id obtained from list_scheduled_tasks. Use it when the user wants to stop a recurring activity.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "task_id": { "type": "string", "description": "id del task pianificato da annullare (da list_scheduled_tasks)" }
+                    "task_id": { "type": "string", "description": "id of the scheduled task to cancel (from list_scheduled_tasks)" }
                 },
                 "required": ["task_id"]
             }
@@ -5258,7 +5258,7 @@ fn read_file_tool_schema() -> serde_json::Value {
             "description": "Legge un file della CARTELLA DI PROGETTO (i tuoi file reali, in-place — non la sandbox). Percorso RELATIVO alla radice del progetto. Usalo per ispezionare il codice prima di modificarlo.",
             "parameters": {
                 "type": "object",
-                "properties": { "path": { "type": "string", "description": "Percorso relativo alla radice del progetto, es. \"src/main.rs\"" } },
+                "properties": { "path": { "type": "string", "description": "Relative path to the project root, e.g. \"src/main.rs\"" } },
                 "required": ["path"]
             }
         }
@@ -5274,8 +5274,8 @@ fn write_file_tool_schema() -> serde_json::Value {
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "path": { "type": "string", "description": "Percorso relativo alla radice del progetto" },
-                    "content": { "type": "string", "description": "Contenuto COMPLETO del file" }
+                    "path": { "type": "string", "description": "Relative path to the project root" },
+                    "content": { "type": "string", "description": "COMPLETE content of the file" }
                 },
                 "required": ["path", "content"]
             }
@@ -5293,8 +5293,8 @@ fn edit_file_tool_schema() -> serde_json::Value {
                 "type": "object",
                 "properties": {
                     "path": { "type": "string", "description": "Percorso relativo alla radice del progetto" },
-                    "old_string": { "type": "string", "description": "Testo esatto da sostituire (univoco nel file)" },
-                    "new_string": { "type": "string", "description": "Testo sostitutivo" }
+                    "old_string": { "type": "string", "description": "Exact text to replace (unique in the file)" },
+                    "new_string": { "type": "string", "description": "Replacement text" }
                 },
                 "required": ["path", "old_string", "new_string"]
             }
@@ -5318,10 +5318,10 @@ fn list_directory_tool_schema() -> serde_json::Value {
         "type": "function",
         "function": {
             "name": "list_directory",
-            "description": "Elenca file e cartelle di una directory ASSOLUTA sul computer dell'utente (es. /Users/tuo/Projects o ~/Documents). USALO quando l'utente chiede di vedere/elencare cartelle o file del suo computer. Funziona nelle cartelle AUTORIZZATE (Destinazioni + cartella di progetto). NON confonderlo con list_files (che elenca solo la cartella di progetto).",
+            "description": "List files and folders of an ABSOLUTE directory on the user's computer (e.g. /Users/your/Projects or ~/Documents). USE IT when the user asks to see/list folders or files of their computer. Works in AUTHORIZED folders (Destinations + project folder). Do NOT confuse it with list_files (which lists only the project folder).",
             "parameters": {
                 "type": "object",
-                "properties": { "path": { "type": "string", "description": "Percorso ASSOLUTO della cartella (es. /Users/tuo/Projects)" } },
+                "properties": { "path": { "type": "string", "description": "ABSOLUTE path of the folder (e.g. /Users/your/Projects)" } },
                 "required": ["path"]
             }
         }
@@ -5336,7 +5336,7 @@ fn read_text_file_tool_schema() -> serde_json::Value {
             "description": "Legge un file di testo da un percorso ASSOLUTO sul computer dell'utente, se in una cartella autorizzata. Per i file della cartella di progetto usa invece read_file (percorso relativo).",
             "parameters": {
                 "type": "object",
-                "properties": { "path": { "type": "string", "description": "Percorso ASSOLUTO del file" } },
+                "properties": { "path": { "type": "string", "description": "ABSOLUTE path of the file" } },
                 "required": ["path"]
             }
         }
@@ -5351,7 +5351,7 @@ fn run_in_project_tool_schema() -> serde_json::Value {
             "description": "Run a shell command IN THE PROJECT FOLDER (on your system, on the real files). Use it for build/test/lint on the real code (VERIFY-BY-EXECUTION: read the real output and iterate until green) and for git. For isolated throwaway work use run_in_sandbox instead. Destructive commands are blocked by a security scan.",
             "parameters": {
                 "type": "object",
-                "properties": { "command": { "type": "string", "description": "Comando shell, es. \"cargo test\", \"npm run build\", \"git status\"" } },
+                "properties": { "command": { "type": "string", "description": "Shell command, e.g. \"cargo test\", \"npm run build\", \"git status\"" } },
                 "required": ["command"]
             }
         }
@@ -5372,7 +5372,7 @@ fn list_addons_tool_schema() -> serde_json::Value {
         "type": "function",
         "function": {
             "name": "list_addons",
-            "description": "Elenca gli addon (process-skill) installati: automazioni verticali configurabili (es. fatturazione). Usalo quando l'utente chiede cosa sai fare per il suo lavoro o vuole adattare un processo.",
+            "description": "List the installed addons (process-skill): configurable vertical automations (e.g. invoicing). Use it when the user asks what you can do for their work or wants to adapt a process.",
             "parameters": { "type": "object", "properties": {} }
         }
     })
@@ -5383,10 +5383,10 @@ fn show_addon_tool_schema() -> serde_json::Value {
         "type": "function",
         "function": {
             "name": "show_addon",
-            "description": "Mostra i campi configurabili di un addon e quali sono APERTI (adattabili) o BLOCCATI (invarianti — es. fiscali/legali). Usalo PRIMA di personalizzare, per sapere chiavi e valori attuali.",
+            "description": "Show the configurable fields of an addon and which are OPEN (adaptable) or LOCKED (invariants — e.g. fiscal/legal). Use it BEFORE customizing, to know the keys and current values.",
             "parameters": {
                 "type": "object",
-                "properties": { "addon_id": { "type": "string", "description": "id dell'addon (da list_addons)" } },
+                "properties": { "addon_id": { "type": "string", "description": "id of the addon (from list_addons)" } },
                 "required": ["addon_id"]
             }
         }
@@ -5403,7 +5403,7 @@ fn customize_addon_tool_schema() -> serde_json::Value {
                 "type": "object",
                 "properties": {
                     "addon_id": { "type": "string", "description": "id dell'addon (da list_addons)" },
-                    "changes": { "type": "object", "description": "Mappa chiave→nuovo valore, solo per i campi aperti" }
+                    "changes": { "type": "object", "description": "Map key→new value, only for open fields" }
                 },
                 "required": ["addon_id", "changes"]
             }
@@ -5420,9 +5420,9 @@ fn create_skill_tool_schema() -> serde_json::Value {
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "name": { "type": "string", "description": "Nome breve, es. \"Riepilogo spese\"" },
-                    "description": { "type": "string", "description": "QUANDO usarla (condizioni di attivazione)" },
-                    "instructions": { "type": "string", "description": "I passi/regole da seguire (markdown)" }
+                    "name": { "type": "string", "description": "Short name, e.g. \"Expense summary\"" },
+                    "description": { "type": "string", "description": "WHEN to use it (activation conditions)" },
+                    "instructions": { "type": "string", "description": "The steps/rules to follow (markdown)" }
                 },
                 "required": ["name", "description", "instructions"]
             }
@@ -7823,7 +7823,7 @@ fn browser_navigate_tool_schema() -> serde_json::Value {
                 "properties": {
                     "url": {
                         "type": "string",
-                        "description": "URL completo da aprire, es. 'https://www.trenitalia.com'."
+                        "description": "Full URL to open, e.g. 'https://www.trenitalia.com'."
                     },
                     "target": {
                         "type": "string",
@@ -7846,7 +7846,7 @@ fn browser_snapshot_tool_schema() -> serde_json::Value {
         "type": "function",
         "function": {
             "name": "browser_snapshot",
-            "description": "Rilegge lo SNAPSHOT della pagina corrente (testo accessibile + riferimenti [ref=...]). Chiamalo per aggiornare la tua visione della pagina dopo che è cambiata (es. dopo un caricamento dinamico) o se hai perso il contesto della pagina. Sola lettura, non modifica nulla.",
+            "description": "Re-read the SNAPSHOT of the current page (accessible text + [ref=...] references). Call it to refresh your view of the page after it changed (e.g. after dynamic loading) or if you lost the page context. Read-only, doesn't modify anything.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -7877,9 +7877,9 @@ fn browser_act_tool_schema() -> serde_json::Value {
                     },
                     "ref": {
                         "type": "string",
-                        "description": "Riferimento dell'elemento bersaglio dallo snapshot, es. 'e5' (dal token [ref=e5])."
+                        "description": "Reference of the target element from the snapshot, e.g. 'e5' (from the token [ref=e5])."
                     },
-                    "text": { "type": "string", "description": "Testo da digitare (kind='type') o valore (kind='fill')." },
+                    "text": { "type": "string", "description": "Text to type (kind='type') or value (kind='fill')." },
                     "value": { "type": "string", "description": "Valore da selezionare (kind='select'/'select_option')." },
                     "values": { "type": "array", "items": { "type": "string" }, "description": "Valori multipli per una selezione multipla." },
                     "submit": { "type": "boolean", "description": "Se true, invia il form dopo aver scritto (equivale a premere Invio)." },
@@ -7898,7 +7898,7 @@ fn browser_screenshot_tool_schema() -> serde_json::Value {
         "type": "function",
         "function": {
             "name": "browser_screenshot",
-            "description": "Cattura uno screenshot della pagina corrente e te lo mostra come immagine. Usalo SOLO quando lo snapshot testuale non basta (es. layout grafico, mappa, calendario, contenuto reso solo come immagine). Sola lettura.",
+            "description": "Capture a screenshot of the current page and show it to you as an image. Use it ONLY when the text snapshot is not enough (e.g. graphic layout, map, calendar, content rendered only as an image). Read-only.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -7917,7 +7917,7 @@ fn browser_tabs_tool_schema() -> serde_json::Value {
         "type": "function",
         "function": {
             "name": "browser_tabs",
-            "description": "Elenca le schede (tab) attualmente aperte nel browser, con id, URL e titolo. Usa l'id di una scheda come parametro 'target' degli altri strumenti browser per operarci sopra. Sola lettura, non modifica nulla.",
+            "description": "List the tabs currently open in the browser, with id, URL and title. Use a tab's id as the 'target' parameter of the other browser tools to operate on it. Read-only, doesn't modify anything.",
             "parameters": { "type": "object", "properties": {} }
         }
     })
@@ -7928,7 +7928,7 @@ fn browser_dialog_tool_schema() -> serde_json::Value {
         "type": "function",
         "function": {
             "name": "browser_dialog",
-            "description": "Rispondi a un dialogo NATIVO del browser (alert/confirm/prompt/beforeunload) che blocca la pagina. Usalo quando un'azione riporta 'blocked by dialog' o compare un popup nativo. NON usarlo per accettare acquisti/pagamenti.",
+            "description": "Reply to a NATIVE browser dialog (alert/confirm/prompt/beforeunload) that blocks the page. Use it when an action reports 'blocked by dialog' or a native popup appears. Do NOT use it to accept purchases/payments.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -8083,11 +8083,11 @@ fn use_skill_tool_schema() -> serde_json::Value {
         "type": "function",
         "function": {
             "name": "use_skill",
-            "description": "Carica le istruzioni complete (SKILL.md) di una skill installata, dato il suo id. Chiamalo quando la richiesta corrisponde a una skill elencata in SKILL INSTALLATE, poi segui le istruzioni ricevute.",
+            "description": "Load the full instructions (SKILL.md) of an installed skill, given its id. Call it when the request matches a skill listed in INSTALLED SKILLS, then follow the received instructions.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "id": { "type": "string", "description": "id della skill, es. 'weather'" }
+                    "id": { "type": "string", "description": "id of the skill, e.g. 'weather'" }
                 },
                 "required": ["id"]
             }
@@ -8102,11 +8102,11 @@ fn run_in_sandbox_tool_schema() -> serde_json::Value {
         "type": "function",
         "function": {
             "name": "run_in_sandbox",
-            "description": "Esegue un comando di shell nel computer contenuto (sandbox isolata: bash, curl, python, git, compilatori). Usalo per: eseguire comandi/script, elaborare dati, e SOPRATTUTTO per VERIFICARE ESEGUENDO — lancia build/test/lint o esegui il codice e leggi l'output REALE invece di assumere che codice o calcoli siano corretti. Restituisce stdout/stderr. Itera sui fallimenti finché la verifica passa.",
+            "description": "Run a shell command in the contained computer (isolated sandbox: bash, curl, python, git, compilers). Use it to: run commands/scripts, process data, and ABOVE ALL to VERIFY BY EXECUTING — run build/test/lint or execute the code and read the REAL output instead of assuming code or calculations are correct. Returns stdout/stderr. Iterate on failures until the verification passes.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "command": { "type": "string", "description": "Comando shell da eseguire, es. \"curl -s wttr.in/Roma?format=3\"" },
+                    "command": { "type": "string", "description": "Shell command to run, e.g. \"curl -s wttr.in/Roma?format=3\"" },
                     "skill_id": { "type": "string", "description": "id della skill di contesto (opzionale; imposta la working dir)" }
                 },
                 "required": ["command"]
@@ -8127,7 +8127,7 @@ fn create_artifact_tool_schema() -> serde_json::Value {
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "name": { "type": "string", "description": "Nome file con estensione, es. \"report.md\", \"script.py\", \"dati.csv\", \"preventivo.pdf\"" },
+                    "name": { "type": "string", "description": "File name with extension, e.g. \"report.md\", \"script.py\", \"data.csv\", \"quote.pdf\"" },
                     "content": { "type": "string", "description": "Contenuto COMPLETO del file. Per i .pdf: scrivilo in Markdown (verrà reso in PDF)." }
                 },
                 "required": ["name", "content"]
@@ -8208,7 +8208,7 @@ fn find_capability_tool_schema() -> serde_json::Value {
                 "properties": {
                     "intent": {
                         "type": "string",
-                        "description": "Cosa vuoi fare, in parole semplici (es. \"cercare su GitHub\", \"leggere un PDF dell'utente\", \"navigare un sito\")."
+                        "description": "What you want to do, in plain words (e.g. \"search on GitHub\", \"read a user's PDF\", \"navigate a site\")."
                     }
                 },
                 "required": ["intent"]
