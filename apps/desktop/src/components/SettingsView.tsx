@@ -150,14 +150,7 @@ export function SettingsView({ section, sub, onPluginsChanged }: SettingsViewPro
 
   return (
     <section
-      className={`settings-view ${
-        section === "runtime" ||
-        section === "connections" ||
-        section === "skills" ||
-        section === "contacts"
-          ? "settings-wide"
-          : ""
-      }`}
+      className="settings-view"
       aria-labelledby="settings-title"
     >
       <div className="set-pane">
