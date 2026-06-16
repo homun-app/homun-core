@@ -1005,6 +1005,9 @@
     "update": "Aggiorna",
     "updating": "Redeploy in corso…",
     "updateStarted": "Redeploy avviato — l'app si riavvierà a breve.",
-    "desktopUpdateBody": "La versione {{version}} è disponibile — scaricala e riavvia per installarla."
+    "desktopUpdateBody": "La versione {{version}} è disponibile — scaricala e riavvia per installarla.",
+    "desktopUpdateRestarts": "Download in corso — l'app si riavvia da sola al termine.",
+    "downloading": "Scarico… {{percent}}%",
+    "restarting": "Riavvio…"
   }
 }
