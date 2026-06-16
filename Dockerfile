@@ -47,12 +47,16 @@ COPY --from=web /app/desktop/dist /app/web
 # host daemon (via a mounted /var/run/docker.sock). Enabled only when the socket
 # is present; see docs/self-host.md.
 COPY runtimes/contained-computer /app/contained-computer
+# Default skills (HomunCoder methodology) — seeded into HOMUN_DATA_DIR/skills on
+# first run so a fresh deploy ships them by default.
+COPY resources/default-skills /app/default-skills
 
 ENV HOMUN_DESKTOP_GATEWAY_HOST=0.0.0.0 \
     HOMUN_DESKTOP_GATEWAY_PORT=18765 \
     HOMUN_WEB_DIR=/app/web \
     HOMUN_DATA_DIR=/data \
-    HOMUN_CONTAINED_COMPUTER_UP=/app/contained-computer/up.sh
+    HOMUN_CONTAINED_COMPUTER_UP=/app/contained-computer/up.sh \
+    HOMUN_DEFAULT_SKILLS_DIR=/app/default-skills
 EXPOSE 18765
 VOLUME ["/data"]
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
