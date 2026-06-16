@@ -32,10 +32,9 @@ export interface PluginManifest {
 export const pluginRegistry: PluginManifest[] = [
   {
     id: "proattivita",
-    name: "Proattività",
-    description:
-      "Suggerimenti proattivi sui tuoi progetti e sul personale, come schede. Apri quello che ti serve e creo la chat nello spazio giusto.",
-    navLabel: "Proattività",
+    name: "proattivita.title",
+    description: "proattivita.lead",
+    navLabel: "proattivita.title",
     navIcon: Lightbulb,
     capabilities: [
       "suggestions.read",

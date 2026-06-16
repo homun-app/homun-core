@@ -60,8 +60,8 @@ import type {
 
 const defaultChatThread: ChatThread = {
   threadId: "thread_active_prompt",
-  title: "Nuovo compito",
-  subtitle: "Sessione locale pronta",
+  title: "New task",
+  subtitle: "Local session ready",
   status: "active",
   pinned: false,
   computerSessionId: "computer_active_prompt",
@@ -281,15 +281,15 @@ function humanizeTaskBlockedReasonKey(reason: string | null): string | null {
 
 function summarizeSafeValue(value: unknown): string {
   if (value === null || value === undefined) {
-    return "Nessun dato redatto disponibile";
+    return "No redacted data available";
   }
   if (typeof value === "number" || typeof value === "boolean") {
     return String(value);
   }
   if (typeof value === "string") {
     return value.toLowerCase().includes("redacted")
-      ? "Payload redatto"
-      : "Dato redatto disponibile";
+      ? "Redacted payload"
+      : "Redacted data available";
   }
   if (Array.isArray(value)) {
     return `Lista redatta (${value.length})`;
@@ -298,7 +298,7 @@ function summarizeSafeValue(value: unknown): string {
     const record = value as Record<string, unknown>;
     const recovery = record.desktop_recovery as Record<string, unknown> | undefined;
     if (recovery?.state === "requeued_after_restart") {
-      return "Recuperato dopo riavvio · risorse rilasciate";
+      return "Recovered after restart · resources released";
     }
     const approval = record.approval as Record<string, unknown> | undefined;
     if (approval?.decision) {
@@ -321,7 +321,7 @@ function summarizeSafeValue(value: unknown): string {
       ? `JSON redatto · ${visibleKeys.join(", ")}`
       : "JSON redatto disponibile";
   }
-  return "Dato redatto disponibile";
+  return "Redacted data available";
 }
 
 function mapCoreTaskDetail(detail: CoreTaskDetail): TaskDetailItem {
@@ -397,15 +397,15 @@ function capabilityType(value: string): ConnectionItem["type"] {
 }
 
 function providerDisplayName(providerId: string): string {
-  if (providerId === "browser") return "Il mio browser";
+  if (providerId === "browser") return "My browser";
   return providerId;
 }
 
 function connectionDescription(providerId: string): string {
   if (providerId === "browser") {
-    return "Azioni locali con Playwright/CDP, snapshot redatti e conferme.";
+    return "Local actions with Playwright/CDP, redacted snapshots and confirmations.";
   }
-  return "Connettore locale registrato nel capability registry.";
+  return "Local connector registered in the capability registry.";
 }
 
 function fallbackTaskDetail(task: TaskItem): TaskDetailItem {
@@ -416,13 +416,14 @@ function fallbackTaskDetail(task: TaskItem): TaskDetailItem {
     status: task.status,
     priority: task.priority,
     blockedReason: task.blockedReason,
-    checkpointSummary: "Read model locale non ancora collegato al gateway",
-    metadataSummary: "Apri l'app desktop per il dettaglio core reale",
+    checkpointSummary: "Local read model not yet connected to the gateway",
+    metadataSummary: "Open the desktop app for real core detail",
     exposesRawInput: false,
   };
 }
 
 export default function App() {
+  const { t } = useTranslation();
   const [activeView, setActiveView] = useState<ViewId>("chat");
   const [previousView, setPreviousView] = useState<ViewId>("chat");
   // Addon/plugin enabled-state (ADR 0011 §10-A): drives which registry plugins
@@ -600,7 +601,7 @@ export default function App() {
         threadId: `thread_preview_${Date.now()}`,
         computerSessionId: "computer_active_prompt",
         taskId: "task_prompt_session",
-        subtitle: "Electron con gateway locale in estrazione",
+        subtitle: "Electron with local gateway in extraction",
         updatedAt: "ora",
         messageCount: 1,
       };
@@ -674,7 +675,7 @@ export default function App() {
   );
   const composedNavItems: NavItem[] = [
     ...staticNavItems,
-    ...enabledPlugins.map((p) => ({ id: p.id as ViewId, label: p.navLabel, icon: p.navIcon })),
+    ...enabledPlugins.map((p) => ({ id: p.id as ViewId, label: t(p.navLabel), icon: p.navIcon })),
   ];
   // The host capability surface handed to each plugin panel (ADR 0011 §6).
   const pluginHost: PluginHost = { openChat: handleOpenSuggestion };
@@ -942,7 +943,7 @@ export default function App() {
       applyTaskQueueSnapshot(
         await coreBridge.rejectApproval(
           approvalId,
-          "Rifiutato dall'utente dalla UI desktop.",
+          "Rejected by the user from the desktop UI.",
         ),
       );
       await refreshSelectedTaskDetail(selectedTaskId);
@@ -1099,7 +1100,7 @@ export default function App() {
     >
       <main
         className={`workspace ${isSettings ? "settings-workspace" : ""}`}
-        aria-label="Area di lavoro principale"
+        aria-label={t("app.mainWorkspace")}
       >
         {activeView === "chat" && (
           <ChatView
@@ -1168,7 +1169,7 @@ export default function App() {
         {activeView === "brain" && (
           <ShallowView
             title="Brain Audit"
-            eyebrow="Piani spiegabili"
+            eyebrow={t("app.explainablePlans")}
             description={`Route, tool caricati, memory refs e step subagent sono persistiti senza raw payload. ${contextBudgetSummary(brainRun.contextBudget)}`}
             stats={[
               { label: "Route", value: brainRun.route },
@@ -1214,6 +1215,6 @@ function contextBudgetSummary(
     (total, item) => total + item.estimatedOutputTokens,
     0,
   );
-  if (budget.length === 0) return "Nessuna compressione applicata.";
+  if (budget.length === 0) return "No compression applied.";
   return `${compressed}/${budget.length} contesti compressi, ${inputTokens} -> ${outputTokens} token stimati, ${redacted} redazioni.`;
 }

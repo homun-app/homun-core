@@ -93,7 +93,7 @@ export function NavigationRail({
               key={item.id}
               type="button"
               aria-label={item.label}
-              title={item.label}
+              title={t(item.label)}
               onClick={() => onNavigate(item.id)}
             >
               <Icon size={18} />
@@ -634,7 +634,7 @@ export function NavDrawer({
               onClick={() => (isSearch ? onSearchChat() : onNavigate(item.id))}
             >
               {isSearch ? <Search size={17} /> : <Icon size={17} />}
-              <span>{isSearch ? t("sidebar.search") : item.label}</span>
+              <span>{isSearch ? t("sidebar.search") : t(item.label)}</span>
               {item.badge && <em>{item.badge}</em>}
             </button>
           );
@@ -893,7 +893,7 @@ export function SettingsDrawer({
                       }}
                     >
                       <Icon size={16} />
-                      <span>{item.label}</span>
+                      <span>{t(item.label)}</span>
                     </button>
                     {submenu && isActive &&
                       submenu.items.map((sub) => (
@@ -908,7 +908,7 @@ export function SettingsDrawer({
                             onSelectSub(sub.id);
                           }}
                         >
-                          <span>{sub.label}</span>
+                          <span>{t(sub.label)}</span>
                         </button>
                       ))}
                   </div>
