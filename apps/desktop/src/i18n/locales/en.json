@@ -443,7 +443,12 @@
     "preview": "Preview",
     "source": "Source",
     "scopePersonal": "Personal (applies everywhere)",
-    "scopeProject": "Active project"
+    "scopeProject": "Active project",
+    "subnavRouting": "Model per task",
+    "subnavDecisions": "Routing decisions",
+    "subnavProviders": "Providers",
+    "subnavCatalog": "MCP catalog",
+    "subnavActivity": "Activity"
   },
   "error": {
     "model": {

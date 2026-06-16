@@ -92,7 +92,7 @@ export function NavigationRail({
               className={`rail-button ${activeView === item.id ? "active" : ""}`}
               key={item.id}
               type="button"
-              aria-label={item.label}
+              aria-label={t(item.label)}
               title={t(item.label)}
               onClick={() => onNavigate(item.id)}
             >
@@ -816,9 +816,9 @@ const SETTINGS_SUBNAV: Partial<
   runtime: {
     defaultSub: "routing",
     items: [
-      { id: "routing", label: "Modello per compito" },
-      { id: "decisions", label: "Decisioni di routing" },
-      { id: "providers", label: "Provider" },
+      { id: "routing", label: "settings.subnavRouting" },
+      { id: "decisions", label: "settings.subnavDecisions" },
+      { id: "providers", label: "settings.subnavProviders" },
     ],
   },
   connections: {
@@ -826,8 +826,8 @@ const SETTINGS_SUBNAV: Partial<
     items: [
       { id: "composio", label: "Composio" },
       { id: "fs", label: "filesystem" },
-      { id: "catalogo", label: "Catalogo MCP" },
-      { id: "attivita", label: "Attività" },
+      { id: "catalogo", label: "settings.subnavCatalog" },
+      { id: "attivita", label: "settings.subnavActivity" },
     ],
   },
 };
@@ -869,7 +869,7 @@ export function SettingsDrawer({
       <nav className="drawer-nav settings-nav">
         {groups.map((group) => (
           <div key={group}>
-            <div className="set-nav-group">{settingsGroupLabels[group]}</div>
+            <div className="set-nav-group">{t(settingsGroupLabels[group])}</div>
             {settingsSections
               .filter((item) => item.group === group)
               .map((item) => {

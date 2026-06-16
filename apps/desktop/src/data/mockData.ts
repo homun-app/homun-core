@@ -77,7 +77,7 @@ export const computerSession: ComputerSession = {
     },
     {
       id: "shell",
-      label: "Terminale",
+      label: "Terminal",
       status: "idle",
       detail: "Ready for local checks",
     },
@@ -217,7 +217,7 @@ export const approvals: ApprovalItem[] = [
 ];
 
 export const runtimeHealth: RuntimeHealth[] = [
-  { label: "Modello", status: "ready", detail: "Inference provider configured" },
+  { label: "Model", status: "ready", detail: "Inference provider configured" },
   { label: "Browser", status: "running", detail: "Assistant profile active" },
   { label: "Task Runtime", status: "running", detail: "3 tasks queued" },
 ];

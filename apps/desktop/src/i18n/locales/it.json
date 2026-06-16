@@ -443,7 +443,12 @@
     "preview": "Anteprima",
     "source": "Sorgente",
     "scopePersonal": "Personale (vale ovunque)",
-    "scopeProject": "Progetto attivo"
+    "scopeProject": "Progetto attivo",
+    "subnavRouting": "Modello per compito",
+    "subnavDecisions": "Decisioni di routing",
+    "subnavProviders": "Provider",
+    "subnavCatalog": "Catalogo MCP",
+    "subnavActivity": "Attività"
   },
   "error": {
     "model": {
