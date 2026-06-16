@@ -196,9 +196,10 @@ export function SettingsView({ section, sub, onPluginsChanged }: SettingsViewPro
 
 /* ---------------------------------------------------------------- primitives */
 
-function CopyButton({ value, label = "Copia" }: { value: string; label?: string }) {
+function CopyButton({ value, label }: { value: string; label?: string }) {
   const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
+  const resolvedLabel = label ?? t("settings.copy");
   return (
     <button
       className="set-btn"
@@ -210,7 +211,7 @@ function CopyButton({ value, label = "Copia" }: { value: string; label?: string 
       }}
     >
       {copied ? <Check size={14} /> : <Copy size={14} />}
-      <span style={{ marginLeft: 6 }}>{copied ? "Copiato" : label}</span>
+      <span style={{ marginLeft: 6 }}>{copied ? t("settings.copied") : resolvedLabel}</span>
     </button>
   );
 }
@@ -281,6 +282,7 @@ const COMMON_ZONES = [
 ];
 
 function TimezoneRow() {
+  const { t } = useTranslation();
   const [info, setInfo] = useState<TimezoneInfo | null>(null);
   const [busy, setBusy] = useState(false);
   const detected = (() => {
@@ -318,11 +320,11 @@ function TimezoneRow() {
   return (
     <div className="set-trow">
       <div>
-        <div className="tt">Fuso orario</div>
+        <div className="tt">{t("settings.timezone")}</div>
         <div className="td">
           {info
-            ? `In uso: ${info.effective} — ${info.now}`
-            : "Caricamento…"}
+            ? t("settings.timezoneInUse", { effective: info.effective, now: info.now })
+            : t("common.loading")}
         </div>
       </div>
       <select
@@ -332,7 +334,7 @@ function TimezoneRow() {
         onChange={(event) => void change(event.target.value)}
       >
         <option value="">
-          Segui il sistema{detected ? ` (${detected})` : ""}
+          {t("settings.followSystem")}{detected ? ` (${detected})` : ""}
         </option>
         {zones.map((z) => (
           <option key={z} value={z}>
@@ -451,9 +453,9 @@ function ApprovelRoutingRow() {
       );
       setChannel(r.channel);
       setTarget(r.target ?? "");
-      setNote("Saveto.");
+      setNote(t("settings.saved"));
     } catch (error) {
-      setNote((error as Error).message || "Not saved.");
+      setNote((error as Error).message || t("settings.notSaved"));
     } finally {
       setBusy(false);
     }
@@ -464,7 +466,7 @@ function ApprovelRoutingRow() {
     <div className="set-rows">
       <div className="set-trow">
         <div>
-          <div className="tt">Dove ricevere le conferme</div>
+          <div className="tt">{t("settings.whereToReceiveApprovals")}</div>
           <div className="td">
             Authorization requests (sends, publications) arrive here — so you can
             approve them remotely too. Only your number can authorize.
@@ -489,7 +491,7 @@ function ApprovelRoutingRow() {
         <div className="set-trow">
           <div>
             <div className="tt">
-              Il tuo chat id su {channel === "telegram" ? "Telegram" : "WhatsApp"}
+              {t("settings.yourChatIdOn", { channel: channel === "telegram" ? "Telegram" : "WhatsApp" })}
             </div>
             <div className="td">
               {channel === "telegram"
@@ -502,7 +504,7 @@ function ApprovelRoutingRow() {
               className="set-input set-row-input"
               disabled={busy}
               value={target}
-              placeholder={channel === "telegram" ? "es. 8205578468 (chat id)" : "es. 393331234567"}
+              placeholder={channel === "telegram" ? t("settings.chatIdPlaceholder") : t("settings.phonePlaceholder")}
               onChange={(e) => setTarget(e.target.value)}
               onBlur={() => void save(channel, target)}
               onKeyDown={(e) => {
@@ -511,7 +513,7 @@ function ApprovelRoutingRow() {
             />
             {detected.length > 0 && (
               <div className="approval-detected">
-                <span className="approval-detected-label">Rilevati di recente:</span>
+                <span className="approval-detected-label">{t("settings.recentlyDetected")}</span>
                 {detected.map((d) => {
                   const active = d.id === target.trim();
                   return (
@@ -520,7 +522,7 @@ function ApprovelRoutingRow() {
                       type="button"
                       className={`approval-chip${active ? " is-active" : ""}`}
                       disabled={busy}
-                      title={`Usa ${d.id}`}
+                      title={t("settings.use", { id: d.id })}
                       onClick={() => {
                         setTarget(d.id);
                         void save(channel, d.id);
@@ -553,17 +555,17 @@ function AccountPane({
 
   return (
     <>
-      <div className="set-section-label">Profilo</div>
+      <div className="set-section-label">{t("settings.profile")}</div>
       <div className="set-rows">
         <div className="set-trow">
           <div>
-            <div className="tt">Immagine profilo</div>
+            <div className="tt">{t("settings.profileImage")}</div>
           </div>
           <span className="set-profile-avatar" aria-hidden />
         </div>
         <div className="set-trow">
           <div>
-            <div className="tt">Nome completo</div>
+            <div className="tt">{t("settings.fullName")}</div>
           </div>
           <input
             className="set-input set-row-input"
@@ -580,7 +582,7 @@ function AccountPane({
             className="set-input set-row-input"
             value={accountEmail}
             onChange={(event) => setAccountEmail(event.target.value)}
-            placeholder="tu@esempio.com"
+            placeholder={t("settings.emailPlaceholder")}
           />
         </div>
         <div className="set-trow">
@@ -606,37 +608,36 @@ function AccountPane({
             </div>
           </div>
           <span className={`set-badge ${computer?.enabled ? "green" : "muted"}`}>
-            {computer?.enabled ? "Attivo" : "Spento"}
+            {computer?.enabled ? t("settings.on") : t("settings.off")}
           </span>
         </div>
       </div>
 
-      <div className="set-section-label">Date and time</div>
+      <div className="set-section-label">{t("settings.dateAndTime")}</div>
       <div className="set-rows">
         <TimezoneRow />
       </div>
       <p className="set-hint">
-        Il fuso decide come l'assistente interpreta "oggi", "domani" e gli orari — e viene
-        also applied to the contained browser, so date-based searches use the right day.
+        {t("settings.timezoneHint")}
       </p>
 
-      <div className="set-section-label">Language</div>
+      <div className="set-section-label">{t("settings.language")}</div>
       <div className="set-rows">
         <LanguageRow />
       </div>
       <p className="set-hint">
-        La lingua in cui l'assistente risponde e parla. L'interfaccia segue la stessa scelta.
+        {t("settings.languageHint")}
       </p>
 
-      <p className="set-hint">Tutto resta sul tuo dispositivo: memoria, task e audit non lasciano il computer.</p>
+      <p className="set-hint">{t("settings.everythingLocalHint")}</p>
 
       <div className="set-danger">
         <div>
-          <div className="dt">Delete dati locali</div>
-          <div className="dd">Rimuove memoria, task e audit dal dispositivo. Irreversibile.</div>
+          <div className="dt">{t("settings.deleteLocalData")}</div>
+          <div className="dd">{t("settings.deleteLocalDataDesc")}</div>
         </div>
-        <button className="set-btn danger" type="button" disabled title="Disponibile a breve">
-          Delete dati
+        <button className="set-btn danger" type="button" disabled title={t("settings.availableSoon")}>
+          {t("settings.deleteData")}
         </button>
       </div>
     </>
@@ -695,10 +696,9 @@ function AppearancePane() {
   const norm = accent.toLowerCase();
   return (
     <div className="appearance-pane">
-      <div className="appearance-eyebrow">Tema · superficie</div>
+      <div className="appearance-eyebrow">{t("settings.themeSurface")}</div>
       <p className="set-hint">
-        The interface background tones. The accent stays the one chosen below — the two choices
-        combinano.
+        {t("settings.themeSurfaceHint")}
       </p>
       <div className="appearance-themes">
         {THEME_PRESETS.map((t) => {
@@ -732,10 +732,10 @@ function AppearancePane() {
       </div>
 
       <div className="appearance-eyebrow" style={{ marginTop: "var(--s5)" }}>
-        Accento
+        {t("settings.accent")}
       </div>
       <p className="set-hint">
-        L'accento del brand è il teal. Puoi renderlo tuo — si applica subito a tutta l'app.
+        {t("settings.accentHint")}
       </p>
       <div className="appearance-accents">
         {ACCENT_PRESETS.map((preset) => {
@@ -763,7 +763,7 @@ function AppearancePane() {
               <button
                 type="button"
                 title={hex.toUpperCase()}
-                aria-label={`Accento ${hex.toUpperCase()}`}
+                aria-label={t("settings.accentNamed", { hex: hex.toUpperCase() })}
                 className={`appearance-accent ${active ? "active" : ""}`}
                 onClick={() => pick(hex)}
               >
@@ -774,7 +774,7 @@ function AppearancePane() {
               <button
                 type="button"
                 className="appearance-accent-del"
-                aria-label={`Remove colore ${hex.toUpperCase()}`}
+                aria-label={t("settings.removeColor", { hex: hex.toUpperCase() })}
                 title={t("common.remove")}
                 onClick={() => removeCustom(hex)}
               >
@@ -797,7 +797,7 @@ function AppearancePane() {
             {!draft && <Plus size={13} />}
           </span>
           <span className="appearance-accent-name">
-            {draft ? draft.toUpperCase() : "Personalizzato"}
+            {draft ? draft.toUpperCase() : t("settings.custom")}
           </span>
           <input
             type="color"
@@ -811,7 +811,7 @@ function AppearancePane() {
           <button
             type="button"
             className="appearance-accent-confirm"
-            title={`Add ${draft.toUpperCase()}`}
+            title={t("settings.addColor", { hex: draft.toUpperCase() })}
             onClick={() => {
               addCustom(draft);
               setDraft(null);
@@ -824,9 +824,9 @@ function AppearancePane() {
       </div>
       <div className="appearance-preview">
         <button type="button" className="appearance-preview-btn">
-          Pulsante primario
+          {t("settings.primaryButton")}
         </button>
-        <span className="appearance-preview-link">link colorato</span>
+        <span className="appearance-preview-link">{t("settings.coloredLink")}</span>
       </div>
     </div>
   );
@@ -838,7 +838,7 @@ function GeneralPane() {
   const { t } = useTranslation();
   return (
     <>
-      <div className="set-section-label">Conversation</div>
+      <div className="set-section-label">{t("settings.conversation")}</div>
       <div className="set-rows">
         <ToggleRow
           title={t("settings.streamingResponses")}
@@ -854,7 +854,7 @@ function GeneralPane() {
         />
       </div>
       <p className="set-hint">
-        Appearance e lingua seguono il sistema. Tema scuro e altre preferenze arriveranno qui.
+        {t("settings.generalHint")}
       </p>
     </>
   );
@@ -881,13 +881,13 @@ const PROVIDER_PRESETS: Array<{
   { id: "xai", label: "xAI (Grok)", baseUrl: "https://api.x.ai/v1", kind: "openai_compat" },
   { id: "moonshot", label: "Moonshot (Kimi)", baseUrl: "https://api.moonshot.ai/v1", kind: "openai_compat" },
   { id: "mistral", label: "Mistral", baseUrl: "https://api.mistral.ai/v1", kind: "openai_compat" },
-  { id: "ollama", label: "Ollama (locale)", baseUrl: "http://127.0.0.1:11434/v1", kind: "ollama" },
+  { id: "ollama", label: "Ollama (local)", baseUrl: "http://127.0.0.1:11434/v1", kind: "ollama" },
   {
     id: "ollama-cloud",
     label: "Ollama Cloud",
     baseUrl: "https://ollama.com/v1",
     kind: "openai_compat",
-    hint: "Modelli :cloud — chiave da ollama.com/settings/keys",
+    hint: ":cloud models — key from ollama.com/settings/keys",
   },
   { id: "custom", label: "Custom", baseUrl: "", kind: "openai_compat" },
 ];
@@ -934,19 +934,18 @@ function ConcurrencyBlock() {
   return (
     <>
       <div className="set-section-label" style={{ marginTop: "var(--s4)" }}>
-        Concurrency
+        {t("settings.concurrency")}
       </div>
       <div className="mdl-row">
         <div className="mdl-row-main">
           <div className="mdl-row-top">
             <strong>{t("settings.concurrencyLabel")}</strong>
-            <span className="set-badge green">Effettivo: {view.effective}</span>
+            <span className="set-badge green">{t("settings.effective", { value: view.effective })}</span>
           </div>
           <p className="mdl-detail-sub">
-            Quante inferenze il runtime lascia girare contemporaneamente. Automatico in base al
-            provider (locale 1, cloud 4).
+            {t("settings.concurrencyDesc")}
             {view.inferred_local
-              ? " Local provider detected: high concurrency can saturate memory."
+              ? ` ${t("settings.concurrencyLocalWarn")}`
               : ""}
           </p>
         </div>
@@ -957,10 +956,10 @@ function ConcurrencyBlock() {
               checked={!manual}
               onChange={(e) => setManual(!e.target.checked)}
             />
-            Automatico
+            {t("settings.automatic")}
           </label>
           {!manual && (
-            <span className="set-hint">({view.inferred_local ? "1, locale" : "4, cloud"})</span>
+            <span className="set-hint">({view.inferred_local ? t("settings.localCount") : t("settings.cloudCount")})</span>
           )}
           {manual && (
             <input
@@ -979,7 +978,7 @@ function ConcurrencyBlock() {
             disabled={busy || !dirty}
             onClick={apply}
           >
-            {busy ? "Salvo…" : "Save"}
+            {busy ? t("settings.saving") : t("common.save")}
           </button>
         </div>
       </div>
@@ -1051,7 +1050,7 @@ function RuntimePane({
       await reloadRoles();
       if (ok) setNote(ok);
     } catch (error) {
-      setNote(`Operazione non riuscita: ${(error as Error).message}`);
+      setNote(t("settings.operationFailed", { message: (error as Error).message }));
     } finally {
       setBusy(null);
     }
@@ -1070,7 +1069,7 @@ function RuntimePane({
             })();
       setRoles((await coreBridge.setRole(input)).roles);
     } catch (error) {
-      setNote(`Operazione non riuscita: ${(error as Error).message}`);
+      setNote(t("settings.operationFailed", { message: (error as Error).message }));
     } finally {
       setBusy(null);
     }
@@ -1121,13 +1120,13 @@ function RuntimePane({
       {/* ── routing → roles → model table ─────────────────────────── */}
       {sub === "routing" && (
         <>
-          <div className="set-section-label">Model per task</div>
+          <div className="set-section-label">{t("settings.subnavRouting")}</div>
           <p className="mdl-detail-sub" style={{ paddingLeft: "var(--s3)" }}>
             The router automatically picks the best model among the eligible ones; you can
             force a specific one.
           </p>
           {roles.length === 0 ? (
-            <p className="set-hint">Add un provider e aggiorna i suoi modelli.</p>
+            <p className="set-hint">{t("settings.addProviderAndRefresh")}</p>
           ) : (
             roles.map((role) => {
               const value = role.auto ? "auto" : `${role.binding_provider_id}::${role.binding_model}`;
@@ -1181,14 +1180,14 @@ function RuntimePane({
                     <strong>{d.chosen_model}</strong>
                     <span className={`set-badge ${d.stage === "semantic" ? "green" : "muted"}`}>
                       {d.stage === "semantic"
-                        ? "semantico"
+                        ? t("settings.stageSemantic")
                         : d.stage === "single_candidate"
-                          ? "unico"
+                          ? t("settings.stageSingle")
                           : d.stage === "heuristic_disabled"
-                            ? "euristico"
-                            : "fallback"}
+                            ? t("settings.stageHeuristic")
+                            : t("settings.stageFallback")}
                     </span>
-                    <span className="mdl-row-meta">{d.role} · {d.candidates.length} candidati</span>
+                    <span className="mdl-row-meta">{d.role} · {t("settings.candidates", { count: d.candidates.length })}</span>
                   </div>
                   <p className="mdl-detail-sub">«{d.goal}»</p>
                 </div>
@@ -1217,12 +1216,12 @@ function RuntimePane({
                   <div className="set-prov-top">
                     <span className="set-prov-mark">{provider.label.slice(0, 1).toUpperCase()}</span>
                     <span className="set-prov-name">{provider.label}</span>
-                    <span className={`set-prov-dot ${isActive ? "on" : ""}`} title={isActive ? "Attivo" : undefined} />
+                    <span className={`set-prov-dot ${isActive ? "on" : ""}`} title={isActive ? t("settings.active2") : undefined} />
                   </div>
                   <div className="set-prov-meta">
                     {provider.models.length > 0
-                      ? `${provider.models.length} modelli`
-                      : "nessun modello"}
+                      ? t("settings.modelCount", { count: provider.models.length })
+                      : t("settings.noModel")}
                     {" · "}
                     {provider.kind}
                   </div>
@@ -1250,8 +1249,7 @@ function RuntimePane({
                       <h3>{t("settings.addProvider")}</h3>
                     </div>
                     <p className="mdl-detail-sub">
-                      Qualsiasi endpoint OpenAI-compatibile, Anthropic o Ollama locale. La chiave è
-                      cifrata nel secret store, mai mostrata.
+                      {t("settings.addProviderDesc")}
                     </p>
                     <div className="mdl-field">
                       <label>{t("settings.type")}</label>
@@ -1479,18 +1477,18 @@ function ProviderDetailView({
         <h3>{provider.label}</h3>
         <div className="mdl-detail-actions">
           {isActive ? (
-            <span className="set-badge green">Attivo</span>
+            <span className="set-badge green">{t("settings.active2")}</span>
           ) : (
             <button className="set-btn" type="button" disabled={acting} onClick={onActivate}>
-              Imposta attivo
+              {t("settings.setActive")}
             </button>
           )}
           <button className="set-btn danger" type="button" disabled={acting} onClick={onRemove}>
-            <Trash2 size={14} /> Remove
+            <Trash2 size={14} /> {t("common.remove")}
           </button>
         </div>
       </div>
-      <p className="mdl-detail-sub">{provider.kind} · {provider.has_key ? "chiave configurata" : "senza chiave"}</p>
+      <p className="mdl-detail-sub">{provider.kind} · {provider.has_key ? t("settings.keyConfigured") : t("settings.noKey")}</p>
 
       <div className="mdl-field">
         <label>API address</label>
@@ -1510,7 +1508,7 @@ function ProviderDetailView({
             value={editKey}
             onChange={(event) => setEditKey(event.target.value)}
           />
-          <button className="mdl-icon-btn" type="button" aria-label="Mostra/nascondi" onClick={() => setShowKey(!showKey)}>
+          <button className="mdl-icon-btn" type="button" aria-label={t("settings.showHide")} onClick={() => setShowKey(!showKey)}>
             {showKey ? <EyeOff size={15} /> : <Eye size={15} />}
           </button>
         </div>
@@ -1522,7 +1520,7 @@ function ProviderDetailView({
         disabled={acting}
         onClick={onSaveConnection}
       >
-        Save endpoint/chiave
+        {t("settings.saveEndpointKey")}
       </button>
 
       <div className="mdl-field" style={{ marginTop: "var(--s4)" }}>
@@ -1533,7 +1531,7 @@ function ProviderDetailView({
           disabled={acting}
           onChange={(event) => onSetModel(event.target.value)}
         >
-          {provider.models.length === 0 && <option value="">— nessun modello: aggiorna —</option>}
+          {provider.models.length === 0 && <option value="">{t("settings.noModelRefresh")}</option>}
           {provider.active_model && !provider.models.some((m) => m.id === provider.active_model) && (
             <option value={provider.active_model}>{provider.active_model}</option>
           )}
@@ -1547,7 +1545,7 @@ function ProviderDetailView({
       </div>
 
       <div className="mdl-models-head">
-        <span>Modelli ({provider.models.length})</span>
+        <span>{t("settings.models", { count: provider.models.length })}</span>
         <div className="mdl-detail-actions">
           <button className="set-btn" type="button" disabled={acting} onClick={onRefreshModels}>
             <RefreshCw size={14} /> Refresh
@@ -1560,14 +1558,14 @@ function ProviderDetailView({
               title={t("settings.describeNoProfile")}
               onClick={onGenerateProfiles}
             >
-              <Sparkles size={14} /> Genera profili
+              <Sparkles size={14} /> {t("settings.generateProfiles")}
             </button>
           )}
         </div>
       </div>
       <div className="mdl-models">
         {provider.models.length === 0 && (
-          <p className="set-hint">Nessun modello. Premi "Refresh" per leggere il catalogo.</p>
+          <p className="set-hint">{t("settings.noModelsRefreshHint")}</p>
         )}
         {provider.models.map((m) => (
           <div className="mdl-model-cell" key={m.id}>
@@ -1581,7 +1579,7 @@ function ProviderDetailView({
                   {m.reasoning && <span className="mdl-tag think">reasoning</span>}
                   {m.context_window ? <span className="mdl-tag">{formatK(m.context_window)} ctx</span> : null}
                   {m.tier && <span className="mdl-tag tier">{m.tier}</span>}
-                  {m.profile_source === "user" && <span className="mdl-tag user">tuo</span>}
+                  {m.profile_source === "user" && <span className="mdl-tag user">{t("settings.yours")}</span>}
                 </div>
                 {m.strengths ? (
                   <span className="mdl-model-str" title={m.strengths}>{m.strengths}</span>
@@ -1603,7 +1601,7 @@ function ProviderDetailView({
                   <textarea
                     className="set-input"
                     rows={2}
-                    placeholder="es. Coding & agentic frontier. 1M context. Multimodale."
+                    placeholder={t("settings.strengthsPlaceholder")}
                     value={draft.strengths}
                     onChange={(e) => setDraft({ ...draft, strengths: e.target.value })}
                   />
@@ -1626,7 +1624,7 @@ function ProviderDetailView({
                     <input
                       className="set-input"
                       type="number"
-                      placeholder="es. 1000000"
+                      placeholder={t("settings.contextWindowPlaceholder")}
                       value={draft.contextWindow}
                       onChange={(e) => setDraft({ ...draft, contextWindow: e.target.value })}
                     />
@@ -1676,7 +1674,7 @@ function ProviderDetailView({
                     setEditingId(null);
                   }}
                 >
-                  Save modello
+                  {t("settings.saveModel")}
                 </button>
               </div>
             )}
@@ -1684,8 +1682,8 @@ function ProviderDetailView({
         ))}
       </div>
       <div className="set-meter" style={{ marginTop: "var(--s3)" }}>
-        <span className="k"><Cpu size={15} /> Contesto modello attivo</span>
-        <span className="v">{contextWindow ? `~${formatK(contextWindow)} token` : "n/d"}</span>
+        <span className="k"><Cpu size={15} /> {t("settings.activeModelContext")}</span>
+        <span className="v">{contextWindow ? t("settings.tokenApprox", { value: formatK(contextWindow) }) : t("settings.na")}</span>
       </div>
     </>
   );
@@ -1701,7 +1699,7 @@ function PrivacyPane() {
       <div className="set-rows">
         <ToggleRow
           title={t("settings.localFirstDefault")}
-          description="Memory, task e audit restano sul dispositivo salvo opt-in esplicito."
+          description={t("settings.localFirstDesc")}
           settingKey="privacy.localFirst"
           fallback={true}
         />
@@ -1718,7 +1716,7 @@ function PrivacyPane() {
           fallback={true}
         />
       </div>
-      <div className="set-section-label">Approvezione remota</div>
+      <div className="set-section-label">{t("settings.remoteApproval")}</div>
       <ApprovelRoutingRow />
       <p className="set-hint">
         <ShieldCheck size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />
@@ -1835,7 +1833,7 @@ function FilesystemServersDetail({
   return (
     <div className="conn-stack">
       {mcpList.length === 0 && !adding && (
-        <p className="set-hint">Nessun server MCP locale collegato.</p>
+        <p className="set-hint">{t("settings.noLocalMcpServer")}</p>
       )}
 
       {mcpList.map(([id, info]) => (
@@ -1877,23 +1875,24 @@ function FilesystemServersDetail({
 // Recent connector tool executions — the audit half of roadmap #6. Shows what the
 // assistant actually ran (Composio/MCP), with a failure category so a broken
 // connector is visible at a glance (auth → reconnect, rate_limit → wait, …).
-const RUN_ERROR_LABEL: Record<string, string> = {
-  auth: "autenticazione",
-  rate_limit: "rate limit",
-  forbidden: "permessi",
-  unavailable: "non raggiungibile",
-  other: "errore",
+const RUN_ERROR_LABEL_KEY: Record<string, string> = {
+  auth: "settings.runErrAuth",
+  rate_limit: "settings.runErrRateLimit",
+  forbidden: "settings.runErrForbidden",
+  unavailable: "settings.runErrUnavailable",
+  other: "settings.runErrOther",
 };
 
-function runRelTime(ts: number): string {
+function runRelTime(ts: number, t: (k: string, o?: Record<string, unknown>) => string): string {
   const secs = Math.max(0, Math.floor(Date.now() / 1000 - ts));
-  if (secs < 60) return "ora";
-  if (secs < 3600) return `${Math.floor(secs / 60)} min fa`;
-  if (secs < 86400) return `${Math.floor(secs / 3600)} h fa`;
-  return `${Math.floor(secs / 86400)} g fa`;
+  if (secs < 60) return t("settings.timeNow");
+  if (secs < 3600) return t("settings.minutesAgo", { count: Math.floor(secs / 60) });
+  if (secs < 86400) return t("settings.hoursAgo", { count: Math.floor(secs / 3600) });
+  return t("settings.daysAgo", { count: Math.floor(secs / 86400) });
 }
 
 function ConnectorActivityDetail() {
+  const { t } = useTranslation();
   const [runs, setRuns] = useState<ConnectorToolRun[] | null>(null);
   const load = () => {
     coreBridge
@@ -1909,24 +1908,24 @@ function ConnectorActivityDetail() {
     <div className="conn-activity">
       <div className="conn-activity-head">
         <div>
-          <h3 className="conn-activity-title">Activity dei connettori</h3>
+          <h3 className="conn-activity-title">{t("settings.connectorsActivity")}</h3>
           <p className="set-hint" style={{ margin: 0 }}>
             Latest runs of connected tools (Composio and MCP) in chats.
           </p>
         </div>
         <button type="button" className="set-btn" onClick={load}>
-          Refresh
+          {t("settings.refresh")}
         </button>
       </div>
       {runs === null ? (
-        <p className="set-hint">Carico…</p>
+        <p className="set-hint">{t("settings.loadingShort")}</p>
       ) : runs.length === 0 ? (
-        <p className="set-hint">Ancora nessuna esecuzione registrata.</p>
+        <p className="set-hint">{t("settings.noRunsYet")}</p>
       ) : (
         <div className="tool-runs">
           {runs.map((r, i) => (
             <div className={`tool-run ${r.ok ? "ok" : "fail"}`} key={`${r.ts}-${i}`}>
-              <span className="tool-run-icon" title={r.ok ? "Riuscito" : "Fallito"}>
+              <span className="tool-run-icon" title={r.ok ? t("settings.succeeded") : t("settings.failed")}>
                 {r.ok ? <Check size={13} /> : <AlertTriangle size={13} />}
               </span>
               <span className="tool-run-tool" title={r.tool}>
@@ -1935,13 +1934,13 @@ function ConnectorActivityDetail() {
               <span className="mdl-tag tool-run-kind">{r.kind}</span>
               {!r.ok && r.error_kind && (
                 <span className="tool-run-err">
-                  {RUN_ERROR_LABEL[r.error_kind] ?? r.error_kind}
+                  {RUN_ERROR_LABEL_KEY[r.error_kind] ? t(RUN_ERROR_LABEL_KEY[r.error_kind]) : r.error_kind}
                 </span>
               )}
               {r.duration_ms != null && (
                 <span className="tool-run-dur">{r.duration_ms} ms</span>
               )}
-              <span className="tool-run-time">{runRelTime(r.ts)}</span>
+              <span className="tool-run-time">{runRelTime(r.ts, t)}</span>
             </div>
           ))}
         </div>
@@ -1966,14 +1965,14 @@ function ComposioConnectionsList() {
   if (!conns || conns.length === 0)
     return (
       <p className="set-hint">
-        Nessun account collegato. Collega un toolkit dalla scheda Toolkit.
+        {t("settings.noLinkedAccount")}
       </p>
     );
   const label = (s: string) =>
-    s === "ACTIVE" ? "attiva" : s === "EXPIRED" ? "scaduta" : s.toLowerCase();
+    s === "ACTIVE" ? t("settings.statusActive") : s === "EXPIRED" ? t("settings.statusExpired") : s.toLowerCase();
   return (
     <div className="cmp-connlist">
-      <div className="cmp-connlist-head">Account collegati</div>
+      <div className="cmp-connlist-head">{t("settings.linkedAccounts")}</div>
       {conns.map((c) => (
         <div className="cmp-connrow" key={c.id}>
           <span className="cmp-connrow-kit">{c.toolkit_slug || c.id}</span>
@@ -2009,6 +2008,7 @@ function ComposioDetail({
   onChanged: () => Promise<void>;
   onNote: (note: string | null) => void;
 }) {
+  const { t } = useTranslation();
   const [apiKey, setApiKey] = useState("");
   const [toolkits, setToolkits] = useState<ComposioToolkit[]>([]);
   const [busy, setBusy] = useState(false);
@@ -2049,14 +2049,14 @@ function ComposioDetail({
     onNote(null);
     try {
       const result = await coreBridge.composioConnect(apiKey.trim());
-      onNote(`Composio collegato (${result.tools_cached} strumenti).`);
+      onNote(t("settings.composioLinked", { count: result.tools_cached }));
       setApiKey("");
       setEditingKey(false);
       setKitsError(null);
       await onChanged();
       await loadToolkits();
     } catch (error) {
-      onNote(`Composio non collegato: ${(error as Error).message}`);
+      onNote(t("settings.composioNotLinked", { message: (error as Error).message }));
     } finally {
       setBusy(false);
     }
@@ -2076,7 +2076,7 @@ function ComposioDetail({
             <p className="mdl-detail-sub">
               {connected
                 ? connectedCount > 0
-                  ? `Connesso · ${connectedCount} ${connectedCount === 1 ? "servizio collegato" : "servizi collegati"}`
+                  ? t("settings.connectedServices", { count: connectedCount })
                   : "Connected · no service linked yet"
                 : "Cloud toolkit hub (Gmail, GitHub, Slack…) with managed OAuth."}
             </p>
@@ -2087,7 +2087,7 @@ function ComposioDetail({
               type="button"
               onClick={() => setEditingKey(true)}
             >
-              Cambia chiave
+              {t("settings.changeKey")}
             </button>
           )}
           <span className={`set-badge ${connected ? "green" : "muted"}`}>
@@ -2157,7 +2157,7 @@ function ComposioDetail({
               className={`set-seg-item ${tab === "account" ? "active" : ""}`}
               onClick={() => setTab("account")}
             >
-              Account collegati
+              {t("settings.linkedAccounts")}
             </button>
             <button
               type="button"
@@ -2166,7 +2166,7 @@ function ComposioDetail({
               className={`set-seg-item ${tab === "consentiti" ? "active" : ""}`}
               onClick={() => setTab("consentiti")}
             >
-              Consentiti
+              {t("settings.allowed")}
             </button>
           </div>
 
@@ -2189,6 +2189,7 @@ function ComposioDetail({
 /** Tools the user marked "always allow": run without per-call confirmation.
  *  Listed here so the user can revoke them. */
 function AllowedToolsSection() {
+  const { t } = useTranslation();
   const [tools, setTools] = useState<AllowedTool[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
 
@@ -2222,7 +2223,7 @@ function AllowedToolsSection() {
 
   return (
     <div className="cmp-allowed">
-      <div className="mdl-detail-section-label">Sempre consentiti (eseguiti senza conferma)</div>
+      <div className="mdl-detail-section-label">{t("settings.alwaysAllowed")}</div>
       <div className="cmp-allowed-list">
         {tools.map((tool) => (
           <div key={tool.slug} className="cmp-allowed-row">
@@ -2233,8 +2234,8 @@ function AllowedToolsSection() {
               className="mdl-icon-btn"
               type="button"
               disabled={busy === tool.slug}
-              title={`Revoca: ${tool.name} chiederà di nuovo conferma`}
-              aria-label={`Revoca ${tool.name}`}
+              title={t("settings.revokeTitle", { name: tool.name })}
+              aria-label={t("settings.revoke", { name: tool.name })}
               onClick={() => void revoke(tool.slug)}
             >
               <Trash2 size={14} />
@@ -2351,14 +2352,14 @@ function ComposioToolkitBrowser({
       const result = await coreBridge.composioLink(kit.slug, input);
       redirect = result.redirect_url || "";
     } catch (error) {
-      onNote(`Collegamento non riuscito: ${(error as Error).message}`);
+      onNote(t("settings.linkFailed", { message: (error as Error).message }));
       return;
     }
     if (redirect) {
       window.open(redirect, "_blank", "noopener,noreferrer");
-      onNote(`Autorizza ${kit.name} nel browser, poi torna qui.`);
+      onNote(t("settings.authorizeInBrowser", { name: kit.name }));
     } else {
-      onNote(`Collego ${kit.name}…`);
+      onNote(t("settings.linking", { name: kit.name }));
     }
     setPolling((prev) => new Set(prev).add(kit.slug));
     // OAuth needs the user to authorize in the browser (slow); an API-key
@@ -2369,7 +2370,7 @@ function ComposioToolkitBrowser({
       await new Promise((r) => setTimeout(r, step));
       const map = await refreshConnections();
       if (map[kit.slug] === "connected") {
-        onNote(`${kit.name} connesso.`);
+        onNote(t("settings.kitConnected", { name: kit.name }));
         break;
       }
     }
@@ -2415,7 +2416,7 @@ function ComposioToolkitBrowser({
       )}
 
       {loading ? (
-        <p className="set-hint">Carico i toolkit…</p>
+        <p className="set-hint">{t("settings.loadingToolkits")}</p>
       ) : (
         <div className="cmp-grid">
           {filtered.slice(0, 120).map((kit) => (
@@ -2426,11 +2427,11 @@ function ComposioToolkitBrowser({
               onClick={() => setModalKit(kit)}
             />
           ))}
-          {filtered.length === 0 && <p className="set-hint">Nessun toolkit trovato.</p>}
+          {filtered.length === 0 && <p className="set-hint">{t("settings.noToolkitFound")}</p>}
         </div>
       )}
       {filtered.length > 120 && (
-        <p className="set-hint">Mostrati 120 di {filtered.length} — affina la ricerca.</p>
+        <p className="set-hint">{t("settings.showing120", { total: filtered.length })}</p>
       )}
 
       {modalKit && (
@@ -2454,6 +2455,7 @@ function ComposioCard({
   state: KitState;
   onClick: () => void;
 }) {
+  const { t } = useTranslation();
   const [imgOk, setImgOk] = useState(Boolean(kit.logo));
   return (
     <button type="button" className={`cmp-card ${state}`} onClick={onClick}>
@@ -2465,9 +2467,9 @@ function ComposioCard({
         )}
       </span>
       <span className="cmp-card-name">{kit.name}</span>
-      {state === "connected" && <span className="cmp-status connected">Connesso</span>}
-      {state === "connecting" && <span className="cmp-status connecting">In corso…</span>}
-      {state === "expired" && <span className="cmp-status expired">Scaduto · Riconnetti</span>}
+      {state === "connected" && <span className="cmp-status connected">{t("settings.connected")}</span>}
+      {state === "connecting" && <span className="cmp-status connecting">{t("settings.inProgress")}</span>}
+      {state === "expired" && <span className="cmp-status expired">{t("settings.expiredReconnect")}</span>}
     </button>
   );
 }
@@ -2575,18 +2577,18 @@ function ConnectModal({
             )}
           </span>
           <div className="conn-detail-titletext">
-            <h3 className="mdl-detail-title">Collega {kit.name}</h3>
+            <h3 className="mdl-detail-title">{t("settings.linkKit", { name: kit.name })}</h3>
             <p className="mdl-detail-sub">
-              {state === "connected" ? `${kit.name} è già connesso.` : `Collega il tuo account ${kit.name}.`}
+              {state === "connected" ? t("settings.kitAlreadyConnected", { name: kit.name }) : t("settings.linkYourAccount", { name: kit.name })}
             </p>
           </div>
-          <button className="mdl-icon-btn" type="button" aria-label="Close" onClick={onClose}>
+          <button className="mdl-icon-btn" type="button" aria-label={t("common.close")} onClick={onClose}>
             <X size={16} />
           </button>
         </div>
 
         {loading ? (
-          <div className="cmp-modal-note">Leggo cosa richiede {kit.name}…</div>
+          <div className="cmp-modal-note">{t("settings.readingRequirements", { name: kit.name })}</div>
         ) : (
           <>
             <div className="cmp-modal-note">
@@ -2605,14 +2607,14 @@ function ConnectModal({
                   className={useManaged ? "active" : ""}
                   onClick={() => setUseManaged(true)}
                 >
-                  OAuth (consigliato)
+                  {t("settings.oauthRecommended")}
                 </button>
                 <button
                   type="button"
                   className={!useManaged ? "active" : ""}
                   onClick={() => setUseManaged(false)}
                 >
-                  Credenziali mie
+                  {t("settings.myCredentials")}
                 </button>
               </div>
             )}
@@ -2636,8 +2638,8 @@ function ConnectModal({
                 connect "does nothing". */}
             {!legacy && active?.mode === "OAUTH2" && !active.managed && (
               <p className="cmp-modal-callback">
-                Nell'app OAuth di {kit.name} (pannello sviluppatore) aggiungi questo{" "}
-                <strong>Redirect URI</strong>, otherwise consent fails:
+                {t("settings.callbackPrefix", { name: kit.name })}{" "}
+                <strong>Redirect URI</strong>{t("settings.callbackSuffix")}
                 <code
                   onClick={() =>
                     void navigator.clipboard?.writeText(
@@ -2661,9 +2663,9 @@ function ConnectModal({
         >
           {isOAuthManaged || renderFields.length === 0
             ? state === "connected"
-              ? `Riconnetti ${kit.name}`
-              : `Collega ${kit.name}`
-            : `Collega ${kit.name}`}
+              ? t("settings.reconnectKit", { name: kit.name })
+              : t("settings.linkKit", { name: kit.name })
+            : t("settings.linkKit", { name: kit.name })}
         </button>
       </div>
     </div>
@@ -2679,6 +2681,7 @@ function McpAddDetail({
   onNote: (note: string | null) => void;
   onConnected: (providerId: string) => void;
 }) {
+  const { t } = useTranslation();
   const [name, setName] = useState("");
   const [command, setCommand] = useState("");
   const [args, setArgs] = useState("");
@@ -2687,35 +2690,34 @@ function McpAddDetail({
   return (
     <>
       <div className="mdl-detail-head">
-        <h3 className="mdl-detail-title">Add un server MCP</h3>
+        <h3 className="mdl-detail-title">{t("settings.addMcpServer")}</h3>
         <p className="mdl-detail-sub">
-          Un server MCP (Model Context Protocol) espone strumenti via stdio. Indica comando e
-          arguments to start it.
+          {t("settings.addMcpServerDesc")}
         </p>
       </div>
       <div className="mdl-field">
-        <label className="mdl-field-label">Nome</label>
+        <label className="mdl-field-label">{t("settings.nameLabel")}</label>
         <input
           className="set-input"
-          placeholder="es. GitHub MCP"
+          placeholder={t("settings.mcpNamePlaceholder")}
           value={name}
           onChange={(e) => setName(e.target.value)}
         />
       </div>
       <div className="mdl-field">
-        <label className="mdl-field-label">Comando</label>
+        <label className="mdl-field-label">{t("settings.commandLabel")}</label>
         <input
           className="set-input"
-          placeholder="es. npx"
+          placeholder={t("settings.commandPlaceholder")}
           value={command}
           onChange={(e) => setCommand(e.target.value)}
         />
       </div>
       <div className="mdl-field">
-        <label className="mdl-field-label">Argomenti</label>
+        <label className="mdl-field-label">{t("settings.argumentsLabel")}</label>
         <input
           className="set-input"
-          placeholder="separati da spazio — es. -y @owner/mcp-server"
+          placeholder={t("settings.argumentsPlaceholder")}
           value={args}
           onChange={(e) => setArgs(e.target.value)}
         />
@@ -2737,7 +2739,7 @@ function McpAddDetail({
             onNote(
               result.discovery_error
                 ? `Connected with warning: ${result.discovery_error}`
-                : `Connesso: ${result.tools_cached} strumenti da ${result.provider_id}.`,
+                : t("settings.connectedTools", { count: result.tools_cached, source: result.provider_id }),
             );
             setName("");
             setCommand("");
@@ -2745,14 +2747,14 @@ function McpAddDetail({
             await onChanged();
             onConnected(result.provider_id);
           } catch (error) {
-            onNote(`Connessione MCP non riuscita: ${(error as Error).message}`);
+            onNote(t("settings.mcpConnectionFailed", { message: (error as Error).message }));
           } finally {
             setBusy(false);
           }
         }}
       >
         <Plus size={14} />
-        <span style={{ marginLeft: 6 }}>{busy ? "Connessione…" : "Add MCP"}</span>
+        <span style={{ marginLeft: 6 }}>{busy ? t("settings.connecting") : t("settings.addMcp")}</span>
       </button>
     </>
   );
@@ -2777,16 +2779,16 @@ function McpServerDetail({
   const tools = (snap?.tools ?? []).filter((tool) => tool.provider_id === providerId);
   const [busy, setBusy] = useState(false);
   const disconnect = async () => {
-    if (!window.confirm(`Disconnettere ${info.name}? Verrà rimosso dai server collegati.`)) return;
+    if (!window.confirm(t("settings.disconnectConfirm", { name: info.name }))) return;
     setBusy(true);
     onNote(null);
     try {
       await coreBridge.mcpDisconnect(providerId);
-      onNote(`${info.name} disconnesso.`);
+      onNote(t("settings.disconnected", { name: info.name }));
       await onChanged();
       onDisconnected();
     } catch (error) {
-      onNote(`Disconnessione non riuscita: ${(error as Error).message}`);
+      onNote(t("settings.disconnectionFailed", { message: (error as Error).message }));
     } finally {
       setBusy(false);
     }
@@ -2801,10 +2803,10 @@ function McpServerDetail({
           <div className="conn-detail-titletext">
             <h3 className="mdl-detail-title">{info.name}</h3>
             <p className="mdl-detail-sub">
-              {providerId} · {info.tools} strumenti
+              {providerId} · {t("settings.toolsCount", { count: info.tools })}
             </p>
           </div>
-          <span className="set-badge green">Connesso</span>
+          <span className="set-badge green">{t("settings.connected")}</span>
           <button
             className="set-btn"
             type="button"
@@ -2814,7 +2816,7 @@ function McpServerDetail({
             style={{ marginLeft: "auto" }}
           >
             <Trash2 size={14} />
-            <span style={{ marginLeft: 6 }}>{busy ? "…" : "Disconnetti"}</span>
+            <span style={{ marginLeft: 6 }}>{busy ? "…" : t("settings.disconnect")}</span>
           </button>
         </div>
       </div>
@@ -2829,7 +2831,7 @@ function McpServerDetail({
             <span className="mdl-tag">{tool.action}</span>
           </div>
         ))}
-        {tools.length === 0 && <p className="set-hint">Nessuno strumento esposto.</p>}
+        {tools.length === 0 && <p className="set-hint">{t("settings.noToolExposed")}</p>}
       </div>
     </>
   );
@@ -2862,7 +2864,7 @@ function McpCatalogDetail({
     try {
       setServers(await coreBridge.mcpRegistry(q));
     } catch (e) {
-      setError(`Registry non raggiungibile: ${(e as Error).message}`);
+      setError(t("settings.registryUnreachable", { message: (e as Error).message }));
     } finally {
       setLoading(false);
     }
@@ -2897,7 +2899,7 @@ function McpCatalogDetail({
         />
         <button className="set-btn" type="submit" disabled={loading}>
           <Search size={14} />
-          <span style={{ marginLeft: 6 }}>{loading ? "Cerco…" : "Cerca"}</span>
+          <span style={{ marginLeft: 6 }}>{loading ? t("settings.searching") : t("common.search")}</span>
         </button>
       </form>
       {error && <p className="set-hint">{error}</p>}
@@ -2917,7 +2919,7 @@ function McpCatalogDetail({
           />
         ))}
         {!loading && servers.length === 0 && !error && (
-          <p className="set-hint">Nessun risultato.</p>
+          <p className="set-hint">{t("settings.noResults")}</p>
         )}
       </div>
     </>
@@ -2984,12 +2986,12 @@ function McpCatalogCard({
       onNote(
         result.discovery_error
           ? `Connected with warning: ${result.discovery_error}`
-          : `Connesso: ${result.tools_cached} strumenti da ${server.name}.`,
+          : t("settings.connectedTools", { count: result.tools_cached, source: server.name }),
       );
       await onChanged();
       onConnected(result.provider_id);
     } catch (error) {
-      onNote(`Connessione non riuscita: ${(error as Error).message}`);
+      onNote(t("settings.connectionFailed", { message: (error as Error).message }));
     } finally {
       setBusy(false);
     }
@@ -3002,13 +3004,13 @@ function McpCatalogCard({
           <span className="conn-tool-name">
             {server.name}
             {server.official && (
-              <span className="set-badge green" style={{ marginLeft: 8 }} title="Server di riferimento ufficiale">
-                <ShieldCheck size={12} /> Ufficiale
+              <span className="set-badge green" style={{ marginLeft: 8 }} title={t("settings.officialReferenceServer")}>
+                <ShieldCheck size={12} /> {t("settings.official")}
               </span>
             )}
             {connected && (
               <span className="set-badge" style={{ marginLeft: 8 }}>
-                Collegato
+                {t("settings.linked")}
               </span>
             )}
           </span>
@@ -3025,11 +3027,11 @@ function McpCatalogCard({
             onClick={onToggle}
             title={t("settings.showDetailsConnect")}
           >
-            <span>{expanded ? "Nascondi" : "Dettagli"}</span>
+            <span>{expanded ? t("settings.hide") : t("settings.details")}</span>
           </button>
         ) : (
           <span className="mdl-tag" title={server.note ?? ""}>
-            non supportato
+            {t("settings.notSupported")}
           </span>
         )}
       </div>
@@ -3044,23 +3046,23 @@ function McpCatalogCard({
               className="set-hint"
               style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12 }}
             >
-              Pagina del progetto <ExternalLink size={12} />
+              {t("settings.projectPage")} <ExternalLink size={12} />
             </a>
           )}
           <div className="set-hint" style={{ fontSize: 12 }}>
             <strong>{t("settings.whatYouNeed")}</strong>{" "}
             {server.inputs.length === 0
-              ? "niente, si collega subito."
+              ? t("settings.nothingConnectsImmediately")
               : server.inputs
                   .map(
                     (i) =>
-                      `${i.label}${i.secret ? " (segreto)" : ""}${i.required ? "" : " (opzionale)"}`,
+                      `${i.label}${i.secret ? ` ${t("settings.secretParen")}` : ""}${i.required ? "" : ` ${t("settings.optionalParen")}`}`,
                   )
                   .join(", ")}
           </div>
           <div>
             <div className="mdl-detail-section-label">
-              {server.transport === "http" ? "Endpoint" : "Comando"}
+              {server.transport === "http" ? t("settings.endpointLabel") : t("settings.commandLabel")}
             </div>
             <code style={{ fontSize: 11, opacity: 0.75, wordBreak: "break-all" }}>
               {server.command} {server.args.join(" ")}
@@ -3074,7 +3076,7 @@ function McpCatalogCard({
               <label className="mdl-field-label">
                 {input.label}
                 {input.required ? " *" : " (optional)"}
-                {input.secret && " · segreto"}
+                {input.secret && ` · ${t("settings.secret")}`}
               </label>
               <div style={{ display: "flex", gap: 6 }}>
                 <input
@@ -3091,7 +3093,7 @@ function McpCatalogCard({
                     className="set-btn"
                     type="button"
                     onClick={() => setReveal((prev) => ({ ...prev, [input.key]: !prev[input.key] }))}
-                    title={reveal[input.key] ? "Nascondi" : "Mostra"}
+                    title={reveal[input.key] ? t("settings.hide") : t("settings.show")}
                   >
                     {reveal[input.key] ? <EyeOff size={14} /> : <Eye size={14} />}
                   </button>
@@ -3107,7 +3109,7 @@ function McpCatalogCard({
             onClick={() => void connect()}
           >
             <Download size={14} />
-            <span style={{ marginLeft: 6 }}>{busy ? "Connessione…" : "Connetti"}</span>
+            <span style={{ marginLeft: 6 }}>{busy ? t("settings.connecting") : t("settings.connect")}</span>
           </button>
         </div>
       )}
@@ -3134,7 +3136,7 @@ function SkillssPane() {
       try {
         setResp(await coreBridge.skills());
       } catch (e) {
-        setError(`Impossibile leggere le skill: ${(e as Error).message}`);
+        setError(t("settings.cannotReadSkills", { message: (e as Error).message }));
       }
     })();
   }, []);
@@ -3167,7 +3169,7 @@ function SkillssPane() {
       setResp(r);
       setDetail((d) => (d && d.id === id ? { ...d, enabled } : d));
     } catch (e) {
-      setError(`Refreshmento non riuscito: ${(e as Error).message}`);
+      setError(t("settings.updateFailed", { message: (e as Error).message }));
     } finally {
       setBusy(false);
     }
@@ -3189,7 +3191,7 @@ function SkillssPane() {
       }
       if (last) setResp(last);
     } catch (e) {
-      setError(`Refreshmento gruppo non riuscito: ${(e as Error).message}`);
+      setError(t("settings.groupUpdateFailed", { message: (e as Error).message }));
     } finally {
       setBusy(false);
     }
@@ -3201,7 +3203,7 @@ function SkillssPane() {
     <div key={s.id} className="skl-card">
       <button type="button" className="skl-card-body" onClick={() => setSelected(s.id)}>
         <span className="skl-card-name">{s.name}</span>
-        <span className="skl-card-meta">origine: {s.source}</span>
+        <span className="skl-card-meta">{t("settings.origin", { source: s.source })}</span>
       </button>
       <Toggle on={s.enabled} onChange={(v) => void toggle(s.id, v)} />
     </div>
@@ -3215,14 +3217,14 @@ function SkillssPane() {
           className={`set-seg-item ${tab === "attive" ? "active" : ""}`}
           onClick={() => setTab("attive")}
         >
-          Skills attive
+          {t("settings.activeSkills")}
         </button>
         <button
           type="button"
           className={`set-seg-item ${tab === "catalogo" ? "active" : ""}`}
           onClick={() => setTab("catalogo")}
         >
-          Catalogo
+          {t("settings.catalog")}
         </button>
       </div>
 
@@ -3236,11 +3238,11 @@ function SkillssPane() {
                 <span className="skl-group-icon brand">
                   <Sparkles size={17} />
                 </span>
-                <span className="skl-group-name">Skills personali</span>
+                <span className="skl-group-name">{t("settings.personalSkills")}</span>
                 <ChevronRight size={16} className="skl-group-chev" />
               </div>
               <div className="skl-group-meta">
-                {personalSkillss.length} skill · tue, attive sempre
+                {t("settings.personalSkillsMeta", { count: personalSkillss.length })}
               </div>
             </button>
             {homuncoderSkillss.length > 0 && (
@@ -3257,7 +3259,7 @@ function SkillssPane() {
                   <ChevronRight size={16} className="skl-group-chev" />
                 </div>
                 <div className="skl-group-meta">
-                  {homuncoderSkillss.length} skill · pacchetto coding
+                  {t("settings.homuncoderMeta", { count: homuncoderSkillss.length })}
                 </div>
               </button>
             )}
@@ -3300,7 +3302,7 @@ function SkillssPane() {
               />
             ) : (
               <div className="set-modal-body">
-                <p className="set-hint">Carico…</p>
+                <p className="set-hint">{t("settings.loadingShort")}</p>
               </div>
             )}
           </div>
@@ -3319,11 +3321,9 @@ function SkillssEmpty({ dir, onBrowse }: { dir?: string; onBrowse: () => void })
       <span className="conn-avatar lg">
         <Sparkles size={20} />
       </span>
-      <h3 className="mdl-detail-title">Nessuna skill installata</h3>
+      <h3 className="mdl-detail-title">{t("settings.noSkillInstalled")}</h3>
       <p className="mdl-detail-sub">
-        A skill is a folder in Agent Skills format: a <code>SKILL.md</code> with a name and
-        description (what the model reads to decide when to use it). Put them in this
-        cartella e compariranno qui automaticamente:
+        {t("settings.skillFolderHint")}
       </p>
       {dir && <code className="skl-path">{dir}</code>}
       <button className="set-btn primary" type="button" onClick={onBrowse} style={{ alignSelf: "flex-start" }}>
@@ -3356,7 +3356,7 @@ function MarketplaceView({
     try {
       setData(await coreBridge.skillCatalog(q || undefined, cat || undefined));
     } catch (e) {
-      setNote(`Catalogo non disponibile: ${(e as Error).message}`);
+      setNote(t("settings.catalogUnavailable", { message: (e as Error).message }));
     } finally {
       setLoading(false);
     }
@@ -3378,9 +3378,9 @@ function MarketplaceView({
       const r = await coreBridge.catalogInstall(slug);
       onInstalled(r, slug);
       setPreviewSlug(null);
-      setNote(`Installata: ${name}.`);
+      setNote(t("settings.installed", { name }));
     } catch (e) {
-      setNote(`Installazione non riuscita: ${(e as Error).message}`);
+      setNote(t("settings.installationFailed", { message: (e as Error).message }));
     } finally {
       setBusy(null);
     }
@@ -3394,10 +3394,10 @@ function MarketplaceView({
             <Download size={18} />
           </span>
           <div className="conn-detail-titletext">
-            <h3 className="mdl-detail-title">Catalogo skill</h3>
+            <h3 className="mdl-detail-title">{t("settings.skillCatalog")}</h3>
             <p className="mdl-detail-sub">
               {data ? `${data.total} skills in the registry.` : "Browse and install from the registry."}{" "}
-              Sono codice: installa solo ciò di cui ti fidi.
+              {t("settings.skillsAreCode")}
             </p>
           </div>
         </div>
@@ -3407,7 +3407,7 @@ function MarketplaceView({
         <Search size={15} />
         <input
           className="conn-search-input"
-          placeholder={t("settings.searchSkillss")}
+          placeholder={t("settings.searchSkills")}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
@@ -3436,7 +3436,7 @@ function MarketplaceView({
       )}
 
       {loading ? (
-        <p className="set-hint">Carico il catalogo…</p>
+        <p className="set-hint">{t("settings.loadingCatalog")}</p>
       ) : (
         <div className="conn-kit-grid">
           {skills.map((skill) => {
@@ -3447,7 +3447,7 @@ function MarketplaceView({
                 className="conn-kit market clickable"
                 role="button"
                 tabIndex={0}
-                title={`Dettaglio ${skill.name}`}
+                title={t("settings.detailOf", { name: skill.name })}
                 onClick={() => setPreviewSlug(skill.slug)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") setPreviewSlug(skill.slug);
@@ -3461,14 +3461,14 @@ function MarketplaceView({
                   <div className="conn-kit-meta market">{skill.description || skill.slug}</div>
                 </div>
                 {already ? (
-                  <span className="set-badge dot green">installata</span>
+                  <span className="set-badge dot green">{t("settings.installedBadge")}</span>
                 ) : (
                   <button
                     className="mdl-icon-btn"
                     type="button"
                     disabled={busy === skill.slug}
-                    title={`Installa ${skill.name}`}
-                    aria-label={`Installa ${skill.name}`}
+                    title={t("settings.install", { name: skill.name })}
+                    aria-label={t("settings.install", { name: skill.name })}
                     onClick={(e) => {
                       e.stopPropagation();
                       void install(skill.slug, skill.name);
@@ -3481,7 +3481,7 @@ function MarketplaceView({
             );
           })}
           {!loading && skills.length === 0 && (
-            <p className="set-hint">Nessuna skill per questo filtro.</p>
+            <p className="set-hint">{t("settings.noSkillForFilter")}</p>
           )}
         </div>
       )}
@@ -3552,7 +3552,7 @@ function CatalogPreviewModal({
           </button>
         </div>
 
-        {error && <p className="cmp-confirm-err">Preview non disponibile: {error}</p>}
+        {error && <p className="cmp-confirm-err">{t("settings.previewUnavailable", { error })}</p>}
 
         {preview && (
           <>
@@ -3630,14 +3630,14 @@ function SkillsDetailView({
             {detail.version ? ` · v${detail.version}` : ""}
           </div>
         </div>
-        <label className="skl-modal-active" title="Attiva o disattiva la skill">
+        <label className="skl-modal-active" title={t("settings.toggleSkill")}>
           <Toggle
             on={detail.enabled}
             onChange={(v) => {
               if (!busy) void onToggle(detail.id, v);
             }}
           />
-          <span>{detail.enabled ? "Attiva" : "Disattivata"}</span>
+          <span>{detail.enabled ? t("settings.skillEnabled") : t("settings.skillDisabled")}</span>
         </label>
         <button className="set-modal-close" type="button" aria-label="Close" onClick={onClose}>
           <X size={17} />
@@ -3646,8 +3646,8 @@ function SkillsDetailView({
 
       <div className="set-modal-body">
         <div className="skl-pills">
-          <span className="set-tag">origine: {detail.source}</span>
-          {detail.license && <span className="set-tag">licenza: {detail.license}</span>}
+          <span className="set-tag">{t("settings.origin", { source: detail.source })}</span>
+          {detail.license && <span className="set-tag">{t("settings.license", { license: detail.license })}</span>}
           {(detail.allowed_tools ?? []).map((t) => (
             <span key={t} className="set-tag brand">
               {t}
@@ -3737,16 +3737,16 @@ function SkillsSecuritySection({ report }: { report: SkillsSecurityReport }) {
         <span className="skl-sec-badge">
           {label} · {report.risk_score}/100
         </span>
-        <span className="skl-sec-files">{report.scanned_files} file analizzati</span>
+        <span className="skl-sec-files">{t("settings.filesAnalyzed", { count: report.scanned_files })}</span>
       </div>
       {report.warnings.length === 0 ? (
-        <p className="skl-sec-clean">Nessun pattern sospetto rilevato.</p>
+        <p className="skl-sec-clean">{t("settings.noSuspiciousPattern")}</p>
       ) : (
         <ul className="skl-sec-list">
           {report.warnings.slice(0, 20).map((w, i) => (
             <li key={`${w.file}-${w.line}-${i}`} className={`skl-sec-warn ${w.severity}`}>
               <span className="skl-sec-sev">
-                {w.severity === "critical" ? "CRITICO" : "ATTENZIONE"}
+                {w.severity === "critical" ? t("settings.severityCritical") : t("settings.severityWarning")}
               </span>
               <span className="skl-sec-desc">{w.description}</span>
               {w.file && (
@@ -3758,7 +3758,7 @@ function SkillsSecuritySection({ report }: { report: SkillsSecurityReport }) {
             </li>
           ))}
           {report.warnings.length > 20 && (
-            <li className="set-hint">+{report.warnings.length - 20} altri…</li>
+            <li className="set-hint">{t("settings.moreWarnings", { count: report.warnings.length - 20 })}</li>
           )}
         </ul>
       )}
@@ -3790,13 +3790,13 @@ function ComputerPane({ computer }: { computer: ContainedComputerLive | null }) 
 
   const docker = status?.docker;
   const dockerLabel = !docker
-    ? "Verifica…"
+    ? t("settings.checking")
     : !docker.installed
       ? "Not installed"
       : !docker.running
-        ? "Installato, non running"
+        ? t("settings.installedNotRunning")
         : docker.container_up
-          ? "Attivo · container su"
+          ? t("settings.activeContainerUp")
           : "Running · container off";
   const dockerOk = Boolean(docker?.running && docker.container_up);
 
@@ -3807,13 +3807,13 @@ function ComputerPane({ computer }: { computer: ContainedComputerLive | null }) 
       {/* Status card — title + subtitle left, live-state badge right (design 530). */}
       <div className="set-card set-computer-status">
         <div>
-          <div className="set-card-name">Status</div>
+          <div className="set-card-name">{t("settings.status")}</div>
           <div className="set-computer-status-sub">
-            Browser reale contenuto · vista live noVNC
+            {t("settings.realContainedBrowser")}
           </div>
         </div>
         <span className={`set-badge dot ${enabled ? "green" : "muted"}`}>
-          {enabled ? "Attivo" : "Spento"}
+          {enabled ? t("settings.on") : t("settings.off")}
         </span>
       </div>
 
@@ -3821,7 +3821,7 @@ function ComputerPane({ computer }: { computer: ContainedComputerLive | null }) 
       <div className="set-computer-live">
         {liveUrl ? (
           <>
-            <iframe className="set-computer-live-frame" src={liveUrl} title="Vista live · noVNC" />
+            <iframe className="set-computer-live-frame" src={liveUrl} title={t("settings.liveViewNovnc")} />
             <a
               className="set-btn set-computer-live-open"
               href={liveUrl}
@@ -3834,12 +3834,12 @@ function ComputerPane({ computer }: { computer: ContainedComputerLive | null }) 
           </>
         ) : (
           <div className="set-computer-live-empty">
-            <span className="set-computer-live-empty-label">vista live · noVNC</span>
+            <span className="set-computer-live-empty-label">{t("settings.liveViewNovncLower")}</span>
           </div>
         )}
       </div>
 
-      <div className="set-section-label">Sistema</div>
+      <div className="set-section-label">{t("settings.system")}</div>
       <div className="set-rows">
         <div className="set-row">
           <div>
@@ -3847,12 +3847,12 @@ function ComputerPane({ computer }: { computer: ContainedComputerLive | null }) 
             <div className="rv">{dockerLabel}</div>
           </div>
           <span className={`set-badge ${dockerOk ? "green" : "muted"}`}>
-            {dockerOk ? "OK" : "Attenzione"}
+            {dockerOk ? "OK" : t("settings.warning")}
           </span>
         </div>
         <div className="set-row">
           <div>
-            <div className="rk">Memory — assistente</div>
+            <div className="rk">{t("settings.memoryAssistant")}</div>
             <div className="rv">{status ? `${status.gateway_memory_mb} MB` : "—"}</div>
           </div>
           {status?.container_memory_mb != null && (
@@ -3864,7 +3864,7 @@ function ComputerPane({ computer }: { computer: ContainedComputerLive | null }) 
         </div>
         <div className="set-row">
           <div>
-            <div className="rk">Sessioni browser attive</div>
+            <div className="rk">{t("settings.activeBrowserSessions")}</div>
             <div className="rv">{status ? status.browser_sessions : "—"}</div>
           </div>
           <button
@@ -3877,7 +3877,7 @@ function ComputerPane({ computer }: { computer: ContainedComputerLive | null }) 
               try {
                 const result = await coreBridge.closeAllBrowsers();
                 setClosedNote(
-                  `Chiuse ${result.closed_sessions} sessioni e ${result.closed_tabs} schede.`,
+                  t("settings.closedSessionsTabs", { sessions: result.closed_sessions, tabs: result.closed_tabs }),
                 );
                 await refresh();
               } catch {
@@ -3941,10 +3941,10 @@ function DestinationsCard() {
 
   return (
     <>
-      <div className="set-section-label">Cartelle di destinazione</div>
+      <div className="set-section-label">{t("settings.destinationFolders")}</div>
       <div className="set-card">
         <div className="set-card-top">
-          <span className="set-card-name">Dove l'assistente può salvare i file</span>
+          <span className="set-card-name">{t("settings.whereAssistantSaves")}</span>
           <button className="set-btn" type="button" disabled={busy} onClick={() => void add()}>
             <Plus size={14} />
             <span style={{ marginLeft: 6 }}>{t("common.add")}</span>
@@ -3952,8 +3952,7 @@ function DestinationsCard() {
         </div>
         <div className="set-card-divider" />
         <p className="set-meter-sub">
-          Authorized folders where the assistant can copy generated files (e.g. ~/Reports), on
-          richiesta o in automazione. Può scrivere SOLO qui.
+          {t("settings.destinationsDesc")}
         </p>
         {destinations.length ? (
           <div className="set-rows" style={{ marginTop: 8 }}>
@@ -3972,7 +3971,7 @@ function DestinationsCard() {
                   className="set-btn"
                   type="button"
                   disabled={busy}
-                  aria-label={`Remove ${destination.label}`}
+                  aria-label={t("settings.removeNamed", { name: destination.label })}
                   onClick={() => void remove(destination.path)}
                 >
                   <Trash2 size={14} />
@@ -3981,7 +3980,7 @@ function DestinationsCard() {
             ))}
           </div>
         ) : (
-          <p className="set-hint">Nessuna cartella autorizzata. Addne una per consentire i salvataggi.</p>
+          <p className="set-hint">{t("settings.noAuthorizedFolder")}</p>
         )}
       </div>
     </>
@@ -4024,19 +4023,19 @@ function ArtifactsCard() {
 
   return (
     <>
-      <div className="set-section-label">File generati (artifacts)</div>
+      <div className="set-section-label">{t("settings.generatedFiles")}</div>
       <div className="set-card">
         <div className="set-card-top">
-          <span className="set-card-name">Spazio usato</span>
+          <span className="set-card-name">{t("settings.spaceUsed")}</span>
           <span className="set-badge muted">
             {usage ? formatArtifactBytes(usage.total_bytes) : "—"}
           </span>
         </div>
         <div className="set-card-divider" />
         <p className="set-meter-sub">
-          I file creati dalle skill restano sul disco{usage?.base_path ? ` in ${usage.base_path}` : ""}.
-          Delete what you do not need to save space. Deleted conversations clean up the
-          loro file automaticamente.
+          {t("settings.artifactsDesc", {
+            location: usage?.base_path ? t("settings.artifactsLocation", { path: usage.base_path }) : "",
+          })}
         </p>
         <div className="set-meter" style={{ marginTop: 8, gap: 8 }}>
           <button
@@ -4082,7 +4081,7 @@ function ArtifactsCard() {
             ))}
           </div>
         ) : (
-          <p className="set-hint">Nessun file generato finora.</p>
+          <p className="set-hint">{t("settings.noGeneratedFile")}</p>
         )}
       </div>
     </>
@@ -4117,6 +4116,7 @@ function TelegramSection({
 }: {
   onStatusChange?: (status: CoreTelegramStatus | null) => void;
 }) {
+  const { t } = useTranslation();
   const [status, setStatus] = useState<CoreTelegramStatus | null>(null);
   const [token, setToken] = useState("");
   const [busy, setBusy] = useState(false);
@@ -4162,14 +4162,14 @@ function TelegramSection({
 
   return (
     <>
-      <div className="set-modal-label">Status</div>
+      <div className="set-modal-label">{t("settings.status")}</div>
       {status?.connected ? (
         <div className="set-card chan-status-card">
           <div className="chan-status-on">
             <span className="chan-status-check" aria-hidden>
               <Check size={11} strokeWidth={2.6} />
             </span>
-            Connesso{status.bot_username ? ` — @${status.bot_username}` : ""}
+            {t("settings.connected")}{status.bot_username ? ` — @${status.bot_username}` : ""}
           </div>
           <button
             className="set-btn danger"
@@ -4177,7 +4177,7 @@ function TelegramSection({
             disabled={busy}
             onClick={() => void disconnect()}
           >
-            Disconnetti
+            {t("settings.disconnect")}
           </button>
         </div>
       ) : (
@@ -4189,7 +4189,7 @@ function TelegramSection({
           <div className="chan-connect-field">
             <input
               type="password"
-              placeholder="token bot (123456:ABC…) — vuoto se già salvato"
+              placeholder={t("settings.botTokenPlaceholder")}
               value={token}
               onChange={(e) => setToken(e.target.value)}
               style={{ flex: 1 }}
@@ -4200,11 +4200,11 @@ function TelegramSection({
               disabled={busy}
               onClick={() => void connect()}
             >
-              Connetti
+              {t("settings.connect")}
             </button>
           </div>
           {status?.running && !status.connected && (
-            <p className="set-hint">Bridge avviato, verifica del token in corso…</p>
+            <p className="set-hint">{t("settings.bridgeVerifyingToken")}</p>
           )}
           {status?.error && (
             <p className="set-hint" style={{ color: "var(--danger)" }}>
@@ -4223,6 +4223,7 @@ function TelegramSection({
 }
 
 function ChannelsPane() {
+  const { t } = useTranslation();
   const [status, setStatus] = useState<WhatsAppStatus | null>(null);
   const [phone, setPhone] = useState("");
   const [busy, setBusy] = useState(false);
@@ -4331,14 +4332,14 @@ function ChannelsPane() {
   // channels, matching the design copy ("vale per tutti i canali").
   const sharedSettings = (
     <>
-      <div className="set-modal-label">Auto-risposta</div>
+      <div className="set-modal-label">{t("settings.autoReply")}</div>
       <div className="set-card rows chan-settings-rows">
         <div className="set-trow">
           <div>
-            <div className="tt">Canale attivo</div>
+            <div className="tt">{t("settings.activeChannel")}</div>
             <div className="td">
               {settings?.enabled
-                ? "I messaggi in arrivo vengono elaborati."
+                ? t("settings.incomingProcessed")
                 : "Master switch: all incoming messages are ignored."}
             </div>
           </div>
@@ -4351,9 +4352,9 @@ function ChannelsPane() {
         </div>
         <div className="set-trow">
           <div>
-            <div className="tt">Auto-risposta (solo testo)</div>
+            <div className="tt">{t("settings.autoReplyTextOnly")}</div>
             <div className="td">
-              Risponde da sola ai contatti in allowlist; le altre azioni restano dietro conferma.
+              {t("settings.autoReplyDesc")}
             </div>
           </div>
           <Toggle
@@ -4366,15 +4367,13 @@ function ChannelsPane() {
       </div>
       {settings && !settings.enabled && (
         <p className="set-hint">
-          Il canale è spento: l'auto-risposta non scatta finché non riattivi «Canale attivo».
+          {t("settings.channelOffHint")}
         </p>
       )}
 
       <div className="set-modal-label">Allowlist</div>
       <p className="set-hint" style={{ marginTop: 0 }}>
-        Solo questi contatti possono ricevere una risposta automatica (vale per tutti i canali).
-        WhatsApp: international number without "+" (e.g. 39333…) or full JID (e.g. 1234@lid).
-        Telegram: numeric user id (e.g. 123456789).
+        {t("settings.allowlistHint")}
       </p>
       {settings && settings.allowlist.length > 0 ? (
         <div className="set-card rows chan-allow-rows">
@@ -4393,11 +4392,11 @@ function ChannelsPane() {
           ))}
         </div>
       ) : (
-        <p className="set-hint">Nessun contatto in allowlist.</p>
+        <p className="set-hint">{t("settings.noContactInAllowlist")}</p>
       )}
       <div className="chan-allow-add">
         <input
-          placeholder="numero o id…"
+          placeholder={t("settings.numberOrIdPlaceholder")}
           className="chan-allow-input"
           value={newContact}
           onChange={(e) => setNewContact(e.target.value)}
@@ -4420,8 +4419,7 @@ function ChannelsPane() {
         </p>
       )}
       <p className="set-hint">
-        I messaggi in arrivo sono trattati come dati non fidati: l'auto-risposta (solo testo) vale
-        unicamente per i contatti in allowlist e le azioni restano dietro conferma.
+        {t("settings.untrustedDataHint")}
       </p>
     </>
   );
@@ -4435,9 +4433,9 @@ function ChannelsPane() {
             <span className="set-channel-name">WhatsApp</span>
           </div>
           {whatsappConnected ? (
-            <span className="set-badge dot green">Connesso</span>
+            <span className="set-badge dot green">{t("settings.connected")}</span>
           ) : (
-            <span className="set-badge muted">Non connesso</span>
+            <span className="set-badge muted">{t("settings.notConnected")}</span>
           )}
         </button>
 
@@ -4447,15 +4445,15 @@ function ChannelsPane() {
             <span className="set-channel-name">Telegram</span>
           </div>
           {telegramConnected ? (
-            <span className="set-badge dot green">Connesso</span>
+            <span className="set-badge dot green">{t("settings.connected")}</span>
           ) : (
-            <span className="set-badge muted">Non connesso</span>
+            <span className="set-badge muted">{t("settings.notConnected")}</span>
           )}
         </button>
 
         <div className="set-add-card" aria-hidden>
           <Plus size={14} strokeWidth={1.9} />
-          Add canale
+          {t("settings.addChannel")}
         </div>
       </div>
 
@@ -4467,7 +4465,7 @@ function ChannelsPane() {
             <div className="set-modal-head">
               <span className="set-channel-icon telegram">{telegramMark}</span>
               <span className="mt">Telegram</span>
-              {telegramConnected && <span className="set-badge dot green">Connesso</span>}
+              {telegramConnected && <span className="set-badge dot green">{t("settings.connected")}</span>}
               <button
                 className="set-modal-close"
                 type="button"
@@ -4492,7 +4490,7 @@ function ChannelsPane() {
             <div className="set-modal-head">
               <span className="set-channel-icon whatsapp">{whatsappMark}</span>
               <span className="mt">WhatsApp</span>
-              {whatsappConnected && <span className="set-badge dot green">Connesso</span>}
+              {whatsappConnected && <span className="set-badge dot green">{t("settings.connected")}</span>}
               <button
                 className="set-modal-close"
                 type="button"
@@ -4503,14 +4501,14 @@ function ChannelsPane() {
               </button>
             </div>
             <div className="set-modal-body">
-              <div className="set-modal-label">Status</div>
+              <div className="set-modal-label">{t("settings.status")}</div>
               {whatsappConnected ? (
                 <div className="set-card chan-status-card">
                   <div className="chan-status-on">
                     <span className="chan-status-check" aria-hidden>
                       <Check size={11} strokeWidth={2.6} />
                     </span>
-                    Connesso
+                    {t("settings.connected")}
                   </div>
                   <button
                     className="set-btn danger"
@@ -4518,14 +4516,14 @@ function ChannelsPane() {
                     disabled={busy}
                     onClick={() => void disconnect()}
                   >
-                    Disconnetti
+                    {t("settings.disconnect")}
                   </button>
                 </div>
               ) : status?.pair_code ? (
                 <div className="set-card chan-connect-card">
                   <p className="set-hint" style={{ marginTop: 0 }}>
-                    Sul telefono: WhatsApp ▸ Dispositivi collegati ▸ Collega un dispositivo ▸{" "}
-                    <strong>Link with phone number</strong>, then enter:
+                    {t("settings.whatsappPairPrefix")}{" "}
+                    <strong>Link with phone number</strong>{t("settings.whatsappPairSuffix")}
                   </p>
                   <div className="chan-pair-code">{status.pair_code}</div>
                   <button
@@ -4535,19 +4533,17 @@ function ChannelsPane() {
                     onClick={() => void disconnect()}
                     style={{ alignSelf: "flex-start" }}
                   >
-                    Cancel
+                    {t("common.cancel")}
                   </button>
                 </div>
               ) : (
                 <div className="set-card chan-connect-card">
                   <p className="set-hint" style={{ marginTop: 0 }}>
-                    If you already linked the device, press <strong>Connect</strong> (reuse the
-                    sessione salvata). Per il primo collegamento, inserisci il numero in formato
-                    international without "+" (e.g. 39333…).
+                    {t("settings.whatsappConnectPrefix")} <strong>Connect</strong>{t("settings.whatsappConnectSuffix")}
                   </p>
                   <div className="chan-connect-field">
                     <input
-                      placeholder="numero di telefono (solo primo collegamento)"
+                      placeholder={t("settings.phoneNumberPlaceholder")}
                       value={phone}
                       onChange={(e) => setPhone(e.target.value)}
                       style={{ flex: 1 }}
@@ -4558,11 +4554,11 @@ function ChannelsPane() {
                       disabled={busy}
                       onClick={() => void connect()}
                     >
-                      Connetti
+                      {t("settings.connect")}
                     </button>
                   </div>
                   {status?.running && (
-                    <p className="set-hint">Bridge avviato, in attesa di connessione/codice…</p>
+                    <p className="set-hint">{t("settings.bridgeWaitingConnection")}</p>
                   )}
                   {error && (
                     <p className="set-hint" style={{ color: "var(--danger)" }}>
@@ -4583,18 +4579,14 @@ function ChannelsPane() {
 /* --------------------------------------------------------------- memory */
 
 function MemoryPane() {
+  const { t } = useTranslation();
   return (
     <>
       <p className="set-hint" style={{ marginTop: 0 }}>
-        Qui vedi e gestisci ciò che l'assistente ha imparato su di te. La memoria
-        <strong> personale</strong> applies to all projects; the
-        <strong> progetto</strong> only in the active one. Sensitive data (e.g. data
-        personali o documenti) restano <em>da confermare</em> e non vengono usati
-        finché non li approvi.
+        {t("settings.memoryPaneIntro")}
       </p>
       <p className="set-hint">
-        I <strong>contatti</strong> (persone, canali, schede) si gestiscono nella sezione
-        <strong>Contacts</strong> here in settings.
+        {t("settings.memoryPaneContacts")}
       </p>
       <MemoryItemsList />
     </>
@@ -4654,11 +4646,10 @@ function MemoryItemsList() {
 
   return (
     <>
-      <div className="set-section-label">Cosa ricordo di te</div>
+      <div className="set-section-label">{t("settings.whatIRemember")}</div>
       {items.length === 0 ? (
         <p className="set-hint">
-          I have not stored anything yet. Tell me your preferences or information in chat and I
-          imparerò automaticamente.
+          {t("settings.nothingStoredYet")}
         </p>
       ) : (
         groups.map((group) => {
@@ -4691,7 +4682,7 @@ function MemoryItemsList() {
                         )}
                         <div className="rk">
                           {item.memory_type}
-                          {item.status === "candidate" ? " · da confermare" : ""}
+                          {item.status === "candidate" ? ` · ${t("settings.toConfirm")}` : ""}
                           {item.sensitivity !== "internal" && item.sensitivity !== "public"
                             ? ` · ${item.sensitivity}`
                             : ""}
@@ -4753,7 +4744,7 @@ function MemoryItemsList() {
                               disabled={busy}
                               onClick={() => void decide(item.reference, "delete")}
                             >
-                              Dimentica
+                              {t("settings.forget")}
                             </button>
                           </>
                         )}
@@ -4806,8 +4797,7 @@ function AddonsPane({ onChanged }: { onChanged?: () => void }) {
   return (
     <>
       <p className="set-hint">
-        Gli addon estendono Homun con un pannello e un motore propri. Staccandone uno spariscono
-        sia la sua voce di navigazione sia il suo motore.
+        {t("settings.addonsIntro")}
       </p>
       <div className="addon-list">
         {pluginRegistry.map((p) => {

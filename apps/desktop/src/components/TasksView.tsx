@@ -134,7 +134,7 @@ export function TasksView({
           {!approvals.length && (
             <div className="approval-empty">
               <Check size={17} />
-              <span>{t("tasksView.noApprovels")}</span>
+              <span>{t("tasksView.noApprovals")}</span>
             </div>
           )}
 

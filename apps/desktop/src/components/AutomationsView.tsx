@@ -317,13 +317,13 @@ export function AutomationsView({
                   className={scheduleMode === "daily" ? "active" : ""}
                   onClick={() => setScheduleMode("daily")}
                 >
-                  Ogni giorno
+                  {t("automations.everyDay")}
                 </button>
                 <button
                   className={scheduleMode === "days" ? "active" : ""}
                   onClick={() => setScheduleMode("days")}
                 >
-                  Giorni scelti
+                  {t("automations.selectedDays")}
                 </button>
                 <button
                   className={scheduleMode === "interval" ? "active" : ""}
@@ -477,11 +477,7 @@ export function AutomationsView({
                     onChange={(e) => setConnectorArgs(e.target.value)}
                     placeholder={t("automations.whenTriggerPlaceholder")}
                   />
-                  <p className="auto-hint">
-                    Describe it in words: I translate it. The technical field to avoid
-                    doppioni è impostato in automatico ({connectorKey}). Per setup precisi,
-                    chiedimelo in chat.
-                  </p>
+                  <p className="auto-hint">{t("automations.whenTriggerHint", { connectorKey })}</p>
                 </div>
               )}
             </div>
@@ -511,7 +507,7 @@ export function AutomationsView({
               Cancel
             </button>
             <button className="auto-btn-accent" onClick={save} disabled={!canSave}>
-              Create automazione
+              {t("automations.createAutomation")}
             </button>
           </div>
         </div>
@@ -542,7 +538,7 @@ export function AutomationsView({
               <div className="auto-card-meta">
                 {a.trigger.type === "schedule" && a.next_run && (
                   <span>
-                    <Clock3 size={12} aria-hidden /> prossima: {formatWhen(a.next_run)}
+                    <Clock3 size={12} aria-hidden /> {t("automations.next")}: {formatWhen(a.next_run)}
                   </span>
                 )}
                 {a.last_fired_at && <span>{t("automations.last")}: {formatWhen(a.last_fired_at)}</span>}

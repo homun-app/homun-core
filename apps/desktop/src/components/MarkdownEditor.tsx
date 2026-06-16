@@ -100,7 +100,7 @@ export function MarkdownEditor({
         />
       ) : (
         <div className="md-editor-preview">
-          <RichMessage text={value || "_(vuoto)_"} />
+          <RichMessage text={value || t("mdEditor.emptyPreview")} />
         </div>
       )}
     </div>

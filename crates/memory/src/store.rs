@@ -1869,11 +1869,11 @@ mod fts_query_tests {
 
     #[test]
     fn or_query_from_natural_language_question() {
-        let q = fts_or_query("Perché abbiamo scelto JSON invece di SQLite?");
-        assert!(q.contains("\"json\""), "manca json: {q}");
-        assert!(q.contains("\"sqlite\""), "manca sqlite: {q}");
-        assert!(q.contains(" OR "), "non è OR: {q}");
-        assert!(!q.contains("\"di\""), "non deve includere token <3: {q}");
+        let q = fts_or_query("Why did we choose JSON instead of SQLite?");
+        assert!(q.contains("\"json\""), "missing json: {q}");
+        assert!(q.contains("\"sqlite\""), "missing sqlite: {q}");
+        assert!(q.contains(" OR "), "not OR: {q}");
+        assert!(!q.contains("\"of\""), "must not include token <3: {q}");
         assert_eq!(fts_or_query("?? !! a b"), "");
     }
 }

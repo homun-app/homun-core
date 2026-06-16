@@ -144,23 +144,23 @@ fn infer_profile(lower: &str, modality: &str) -> ModelProfile {
         confidence: 80,
     };
     if modality == "embedding" {
-        return curated(ModelTier::Fast, "Embedding per memoria/RAG.");
+        return curated(ModelTier::Fast, "Embeddings for memory/RAG.");
     }
     if modality == "image" {
-        return curated(ModelTier::Balanced, "Generazione di immagini.");
+        return curated(ModelTier::Balanced, "Image generation.");
     }
     // Small/fast tiers FIRST (so "gpt-4o-mini" → fast, not balanced).
     let fast_name_markers = ["mini", "haiku", "flash", "small", "ministral", "gemma", "lite", "nano", "tiny"];
     if fast_name_markers.iter().any(|m| lower.contains(m)) || has_small_param_size(lower) {
         return curated(
             ModelTier::Fast,
-            "Veloce ed economico: estrazione, classificazione, task brevi.",
+            "Fast and cheap: extraction, classification, short tasks.",
         );
     }
     if is_reasoning_model(lower) {
         return curated(
             ModelTier::Reasoning,
-            "Ragionamento profondo: problemi complessi, pianificazione, coding agentico.",
+            "Deep reasoning: complex problems, planning, agentic coding.",
         );
     }
     let balanced_families = [
@@ -170,7 +170,7 @@ fn infer_profile(lower: &str, modality: &str) -> ModelProfile {
     if balanced_families.iter().any(|m| lower.contains(m)) {
         return curated(
             ModelTier::Balanced,
-            "Uso generale forte: comprensione, tool-use, contesto ampio.",
+            "Strong general purpose: comprehension, tool-use, large context.",
         );
     }
     ModelProfile {

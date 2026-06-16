@@ -247,7 +247,7 @@ fn layout(title: &str, blocks: &[Block]) -> Vec<Line> {
 
 /// Renders Markdown to a paginated A4 PDF and returns its bytes.
 pub fn markdown_to_pdf(title: &str, markdown: &str) -> Result<Vec<u8>, String> {
-    let doc_title = if title.trim().is_empty() { "Documento" } else { title.trim() };
+    let doc_title = if title.trim().is_empty() { "Document" } else { title.trim() };
     let (doc, page1, layer1): (PdfDocumentReference, _, _) = printpdf::PdfDocument::new(
         doc_title,
         Mm(PAGE_W_MM as f32),
@@ -304,8 +304,8 @@ mod tests {
 
     #[test]
     fn renders_markdown_to_valid_pdf() {
-        let md = "# Preventivo ACME\n\nConsulenza 3 giornate.\n\n- Voce uno\n- Voce due\n\n| Nave | Prezzo |\n|---|---|\n| Cruise Roma | 135€ |\n\n```\ncode line\n```\n";
-        let bytes = markdown_to_pdf("Preventivo", md).expect("render");
+        let md = "# ACME Quote\n\nConsulting 3 days.\n\n- Item one\n- Item two\n\n| Ship | Price |\n|---|---|\n| Cruise Roma | 135€ |\n\n```\ncode line\n```\n";
+        let bytes = markdown_to_pdf("Quote", md).expect("render");
         // Valid PDFs start with the %PDF- header and are non-trivial in size.
         assert!(bytes.starts_with(b"%PDF-"), "missing PDF header");
         assert!(bytes.len() > 800, "PDF unexpectedly small: {}", bytes.len());
@@ -313,7 +313,7 @@ mod tests {
 
     #[test]
     fn wrap_breaks_long_text() {
-        let long = "parola ".repeat(80);
+        let long = "word ".repeat(80);
         let lines = wrap(&long, 11.0, false);
         assert!(lines.len() > 1, "long text should wrap to multiple lines");
     }

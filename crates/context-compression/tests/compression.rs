@@ -54,12 +54,12 @@ fn browser_text_preserves_title_and_urls_but_strips_query_secrets() {
 #[test]
 fn chat_history_keeps_recent_turns_and_collapses_older_context() {
     let input = [
-        "Utente: primo messaggio molto vecchio sul progetto Acme",
-        "Assistant: risposta molto vecchia con dettagli non essenziali",
-        "Utente: preferisco Rust",
-        "Assistant: nota ricevuta",
-        "Utente: ora fammi un esempio",
-        "Assistant: ecco un esempio breve",
+        "User: very first old message about the Acme project",
+        "Assistant: very old answer with non-essential details",
+        "User: I prefer Rust",
+        "Assistant: noted",
+        "User: now give me an example",
+        "Assistant: here is a short example",
     ]
     .join("\n");
 
@@ -70,12 +70,12 @@ fn chat_history_keeps_recent_turns_and_collapses_older_context() {
 
     assert!(result.compressed);
     assert!(result.text.contains("Earlier context"));
-    assert!(result.text.contains("Utente: ora fammi un esempio"));
-    assert!(result.text.contains("Assistant: ecco un esempio breve"));
+    assert!(result.text.contains("User: now give me an example"));
+    assert!(result.text.contains("Assistant: here is a short example"));
     assert!(
         !result
             .text
-            .contains("risposta molto vecchia con dettagli non essenziali")
+            .contains("very old answer with non-essential details")
     );
 }
 

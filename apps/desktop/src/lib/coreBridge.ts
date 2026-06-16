@@ -2923,7 +2923,7 @@ async function submitBrowserRuntimeChatPromptStream(
   );
   const response = stream.response;
   if (!response.ok) {
-    throw new Error(`Provider di inferenza non disponibile: HTTP ${response.status}`);
+    throw new Error(`Inference provider unavailable: HTTP ${response.status}`);
   }
   if (!response.body) {
     throw new Error("The inference provider did not open the stream.");
@@ -3199,10 +3199,10 @@ async function openChatStreamWithGateway(
 
 function continuationPromptForMessage(previousText: string) {
   return [
-    "Continue il testo seguente esattamente dal punto in cui si e' interrotto.",
+    "Continue the following text exactly from the point where it was interrupted.",
     "Do not repeat already written parts. If the text is code, return only the continuation and keep the same markdown format.",
     "",
-    "Testo gia' scritto:",
+    "Text already written:",
     previousText.trim(),
   ].join("\n");
 }
@@ -3257,19 +3257,19 @@ function browserComputerSession(
     surfaces: [
       {
         surface: "logs",
-        label: "Chat locale",
+        label: "Local chat",
         status: "running",
-        detail_redacted: "Chat tramite provider di inferenza",
+        detail_redacted: "Chat via the inference provider",
       },
     ],
-    activity_title: "Chat locale",
-    activity_subtitle: "Inferenza tramite provider configurato",
+    activity_title: "Local chat",
+    activity_subtitle: "Inference via the configured provider",
     progress_current: 1,
     progress_total: 1,
     elapsed_seconds: elapsedSeconds,
     preview_frame_ref: null,
     current_url_redacted: null,
-    terminal_excerpt_redacted: ["Chat collegata al provider di inferenza."],
+    terminal_excerpt_redacted: ["Chat connected to the inference provider."],
     artifact_refs: [],
     timeline: [],
     approval_state: "not_required",

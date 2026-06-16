@@ -153,11 +153,11 @@ pub fn validate_overlay(skill: &ProcessSkill, overlay: &Overlay) -> Vec<Violatio
         match skill.field(key) {
             None => violations.push(Violation {
                 key: key.clone(),
-                reason: "campo inesistente nel componente".to_string(),
+                reason: "field does not exist in the component".to_string(),
             }),
             Some(field) if !field.editable => violations.push(Violation {
                 key: key.clone(),
-                reason: "campo BLOCCATO (invariante): non personalizzabile".to_string(),
+                reason: "LOCKED field (invariant): not customizable".to_string(),
             }),
             Some(_) => {}
         }
@@ -166,12 +166,12 @@ pub fn validate_overlay(skill: &ProcessSkill, overlay: &Overlay) -> Vec<Violatio
         if !skill.allows_custom_fields {
             violations.push(Violation {
                 key: added.key.clone(),
-                reason: "questo componente non consente campi personalizzati".to_string(),
+                reason: "this component does not allow custom fields".to_string(),
             });
         } else if skill.field(&added.key).is_some() {
             violations.push(Violation {
                 key: added.key.clone(),
-                reason: "esiste già un campo con questa chiave".to_string(),
+                reason: "a field with this key already exists".to_string(),
             });
         }
     }
@@ -207,10 +207,10 @@ pub fn apply_overlay(skill: &ProcessSkill, overlay: &Overlay) -> ProcessSkill {
 pub fn invoicing_example() -> ProcessSkill {
     ProcessSkill {
         id: "invoicing".to_string(),
-        name: "Fatturazione".to_string(),
+        name: "Invoicing".to_string(),
         version: 1,
         description:
-            "Genera una bozza di fattura conforme (SdI/IVA) dai dati di una richiesta.".to_string(),
+            "Generates a compliant invoice draft (SdI/VAT) from the data of a request.".to_string(),
         origin: Origin::Installed,
         trigger: Trigger::Channel {
             source: "whatsapp".to_string(),
@@ -219,35 +219,35 @@ pub fn invoicing_example() -> ProcessSkill {
             Step {
                 id: "collect".to_string(),
                 kind: StepKind::Agent,
-                description: "Raccogli cliente, voci e importi dalla richiesta".to_string(),
+                description: "Collect customer, line items and amounts from the request".to_string(),
                 locked: false,
                 requires_approval: false,
             },
             Step {
                 id: "compute_totals".to_string(),
                 kind: StepKind::Deterministic,
-                description: "Calcola imponibile, IVA e totale".to_string(),
+                description: "Compute taxable amount, VAT and total".to_string(),
                 locked: true,
                 requires_approval: false,
             },
             Step {
                 id: "assign_number".to_string(),
                 kind: StepKind::Deterministic,
-                description: "Numerazione legale progressiva".to_string(),
+                description: "Sequential legal numbering".to_string(),
                 locked: true,
                 requires_approval: false,
             },
             Step {
                 id: "render".to_string(),
                 kind: StepKind::Deterministic,
-                description: "Comporre il documento dal template".to_string(),
+                description: "Compose the document from the template".to_string(),
                 locked: false,
                 requires_approval: false,
             },
             Step {
                 id: "deliver".to_string(),
                 kind: StepKind::Agent,
-                description: "Invia la bozza all'utente per conferma".to_string(),
+                description: "Send the draft to the user for confirmation".to_string(),
                 locked: false,
                 requires_approval: true,
             },
@@ -255,7 +255,7 @@ pub fn invoicing_example() -> ProcessSkill {
         config: vec![
             ConfigField {
                 key: "company_name".to_string(),
-                label: "Ragione sociale".to_string(),
+                label: "Company name".to_string(),
                 field_type: FieldType::Text,
                 value: Value::String(String::new()),
                 editable: true,
@@ -269,21 +269,21 @@ pub fn invoicing_example() -> ProcessSkill {
             },
             ConfigField {
                 key: "invoice_title".to_string(),
-                label: "Titolo del documento".to_string(),
+                label: "Document title".to_string(),
                 field_type: FieldType::Text,
-                value: Value::String("Fattura".to_string()),
+                value: Value::String("Invoice".to_string()),
                 editable: true,
             },
             ConfigField {
                 key: "vat_rate".to_string(),
-                label: "Aliquota IVA (%)".to_string(),
+                label: "VAT rate (%)".to_string(),
                 field_type: FieldType::Number,
                 value: serde_json::json!(22),
                 editable: false, // LOCKED: fiscal invariant
             },
             ConfigField {
                 key: "numbering_scheme".to_string(),
-                label: "Schema di numerazione".to_string(),
+                label: "Numbering scheme".to_string(),
                 field_type: FieldType::Text,
                 value: Value::String("YYYY/NNN".to_string()),
                 editable: false, // LOCKED: legal invariant

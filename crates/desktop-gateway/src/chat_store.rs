@@ -1438,7 +1438,7 @@ impl ChatStore {
                 updated_at integer not null
             );
 
-            -- 'Marco su Telegram aziendale → profilo Lavoro': per-channel override.
+            -- 'Marco on company Telegram → Work profile': per-channel override.
             create table if not exists contact_channel_profiles (
                 contact_id integer not null references contacts(id) on delete cascade,
                 channel text not null,
@@ -1446,7 +1446,7 @@ impl ChatStore {
                 primary key(contact_id, channel)
             );
 
-            -- Social graph between curated contacts ('Laura è la moglie di Marco').
+            -- Social graph between curated contacts ('Laura is Marco's wife').
             create table if not exists contact_relationships (
                 id integer primary key autoincrement,
                 from_contact_id integer not null references contacts(id) on delete cascade,
@@ -2206,10 +2206,10 @@ mod tests {
             dedup_key: key.to_string(),
             ..Default::default()
         };
-        let liked = store.insert_suggestion(&mk("proj", "k1", "Utile")).unwrap();
-        let disliked = store.insert_suggestion(&mk("proj", "k2", "Rumore")).unwrap();
-        store.insert_suggestion(&mk("proj", "k3", "Intatta")).unwrap();
-        let personal = store.insert_suggestion(&mk("__personal__", "p1", "Altro scope")).unwrap();
+        let liked = store.insert_suggestion(&mk("proj", "k1", "Useful")).unwrap();
+        let disliked = store.insert_suggestion(&mk("proj", "k2", "Noise")).unwrap();
+        store.insert_suggestion(&mk("proj", "k3", "Untouched")).unwrap();
+        let personal = store.insert_suggestion(&mk("__personal__", "p1", "Other scope")).unwrap();
         store.set_suggestion_status(liked, "accepted", Some("liked"), None).unwrap();
         store.set_suggestion_status(disliked, "dismissed", Some("disliked"), None).unwrap();
         store.set_suggestion_status(personal, "dismissed", Some("disliked"), None).unwrap();
@@ -2217,8 +2217,8 @@ mod tests {
         // Only acted cards of the scope, newest first; the untouched one is excluded.
         let fb = store.recent_feedback("proj", 10).unwrap();
         assert_eq!(fb.len(), 2);
-        assert!(fb.iter().any(|(f, _, t)| f == "liked" && t == "Utile"));
-        assert!(fb.iter().any(|(f, _, t)| f == "disliked" && t == "Rumore"));
+        assert!(fb.iter().any(|(f, _, t)| f == "liked" && t == "Useful"));
+        assert!(fb.iter().any(|(f, _, t)| f == "disliked" && t == "Noise"));
         // Scope isolation: the personal feedback doesn't leak into proj.
         assert_eq!(store.recent_feedback("__personal__", 10).unwrap().len(), 1);
     }
@@ -2231,7 +2231,7 @@ mod tests {
         let user = ChatMessage {
             id: "user_1".to_string(),
             role: "user".to_string(),
-            text: "dimmi una barzelletta".to_string(),
+            text: "tell me a joke".to_string(),
             timestamp: timestamp.clone(),
             metadata: None,
             metrics: None,
@@ -2244,9 +2244,9 @@ mod tests {
         let assistant = ChatMessage {
             id: "assistant_1".to_string(),
             role: "assistant".to_string(),
-            text: "Certo.".to_string(),
+            text: "Sure.".to_string(),
             timestamp,
-            metadata: Some("Modello locale".to_string()),
+            metadata: Some("Local model".to_string()),
             metrics: Some(serde_json::json!({"generation_tokens": 2})),
             feedback: None,
             saved_memory_ref: None,
@@ -2266,7 +2266,7 @@ mod tests {
                 .unwrap()
                 .threads
                 .iter()
-                .any(|item| item.title == "dimmi una barzelletta")
+                .any(|item| item.title == "tell me a joke")
         );
     }
 

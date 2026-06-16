@@ -131,41 +131,41 @@ fn customize(addon_id: &str, changes: BTreeMap<String, Value>) -> Result<Process
 pub fn addons_list_text() -> String {
     let skills = list_effective();
     if skills.is_empty() {
-        return "Nessun addon installato.".to_string();
+        return "No addon installed.".to_string();
     }
-    let mut lines = vec!["Addon installati:".to_string()];
+    let mut lines = vec!["Installed addons:".to_string()];
     for skill in skills {
         lines.push(format!("- {} (id={}) — {}", skill.name, skill.id, skill.description));
     }
-    lines.push("Usa show_addon(id) per vederne i campi, customize_addon per adattarlo.".to_string());
+    lines.push("Use show_addon(id) to see its fields, customize_addon to adapt it.".to_string());
     lines.join("\n")
 }
 
 pub fn addon_show_text(addon_id: &str) -> String {
     let Some(skill) = effective_skill(addon_id) else {
-        return format!("Nessun addon con id '{addon_id}'. Usa list_addons.");
+        return format!("No addon with id '{addon_id}'. Use list_addons.");
     };
     let mut out = format!(
-        "Addon «{}» (id={}) v{}\n{}\n\nCampi configurabili (APERTO = adattabile, BLOCCATO = invariante):",
+        "Addon «{}» (id={}) v{}\n{}\n\nConfigurable fields (OPEN = adaptable, LOCKED = invariant):",
         skill.name, skill.id, skill.version, skill.description
     );
     for field in &skill.config {
         let zone = if field.editable {
-            "APERTO"
+            "OPEN"
         } else {
-            "BLOCCATO"
+            "LOCKED"
         };
         out.push_str(&format!(
             "\n- {} «{}» = {} · {zone}",
             field.key, field.label, field.value
         ));
     }
-    out.push_str("\n\nPassi:");
+    out.push_str("\n\nSteps:");
     for step in &skill.steps {
         out.push_str(&format!(
             "\n- {}{}",
             step.description,
-            if step.locked { " (bloccato)" } else { "" }
+            if step.locked { " (locked)" } else { "" }
         ));
     }
     out
@@ -173,14 +173,14 @@ pub fn addon_show_text(addon_id: &str) -> String {
 
 pub fn addon_customize_text(addon_id: &str, changes_value: &Value) -> String {
     let Some(map) = changes_value.as_object() else {
-        return "Le modifiche devono essere un oggetto {campo: valore}.".to_string();
+        return "Changes must be an object {field: value}.".to_string();
     };
     let changes: BTreeMap<String, Value> = map
         .iter()
         .map(|(key, value)| (key.clone(), value.clone()))
         .collect();
     if changes.is_empty() {
-        return "Nessuna modifica indicata.".to_string();
+        return "No changes specified.".to_string();
     }
     match customize(addon_id, changes) {
         Ok(effective) => {
@@ -191,24 +191,24 @@ pub fn addon_customize_text(addon_id: &str, changes_value: &Value) -> String {
                 .map(|field| format!("{}={}", field.key, field.value))
                 .collect();
             format!(
-                "✅ Personalizzazione salvata per «{}» (v{}). Campi aperti ora: {}",
+                "✅ Customization saved for «{}» (v{}). Open fields now: {}",
                 effective.name,
                 effective.version,
                 open.join(", ")
             )
         }
-        Err(CustomizeError::NotFound) => format!("Nessun addon con id '{addon_id}'."),
+        Err(CustomizeError::NotFound) => format!("No addon with id '{addon_id}'."),
         Err(CustomizeError::Invalid(violations)) => {
             let msgs: Vec<String> = violations
                 .iter()
                 .map(|v| format!("• '{}' — {}", v.key, v.reason))
                 .collect();
             format!(
-                "Non ho applicato NULLA: alcune modifiche violano il contratto del componente \
-(i campi bloccati sono invarianti, es. fiscali/legali):\n{}",
+                "I applied NOTHING: some changes violate the component's contract \
+(locked fields are invariant, e.g. fiscal/legal):\n{}",
                 msgs.join("\n")
             )
         }
-        Err(CustomizeError::Io(error)) => format!("Errore nel salvataggio: {error}"),
+        Err(CustomizeError::Io(error)) => format!("Error saving: {error}"),
     }
 }

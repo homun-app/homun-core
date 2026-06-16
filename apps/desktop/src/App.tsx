@@ -293,7 +293,7 @@ function summarizeSafeValue(value: unknown): string {
       : "Redacted data available";
   }
   if (Array.isArray(value)) {
-    return `Lista redatta (${value.length})`;
+    return `Redacted list (${value.length})`;
   }
   if (typeof value === "object") {
     const record = value as Record<string, unknown>;
@@ -304,7 +304,7 @@ function summarizeSafeValue(value: unknown): string {
     const approval = record.approval as Record<string, unknown> | undefined;
     if (approval?.decision) {
       return `Approvel ${String(approval.decision)} · ${String(
-        approval.action ?? "azione redatta",
+        approval.action ?? i18n.t("common.redactedAction"),
       )}`;
     }
     const prompt = record.prompt as Record<string, unknown> | undefined;
@@ -319,8 +319,8 @@ function summarizeSafeValue(value: unknown): string {
       .filter((key) => !/raw|payload|input|content|secret/i.test(key))
       .slice(0, 4);
     return visibleKeys.length
-      ? `JSON redatto · ${visibleKeys.join(", ")}`
-      : "JSON redatto disponibile";
+      ? `Redacted JSON · ${visibleKeys.join(", ")}`
+      : "Redacted JSON available";
   }
   return "Redacted data available";
 }
@@ -1237,5 +1237,5 @@ function contextBudgetSummary(
     0,
   );
   if (budget.length === 0) return "No compression applied.";
-  return `${compressed}/${budget.length} contesti compressi, ${inputTokens} -> ${outputTokens} token stimati, ${redacted} redazioni.`;
+  return `Compressed ${compressed}/${budget.length} contexts, ${inputTokens} -> ${outputTokens} estimated tokens, ${redacted} redactions.`;
 }

@@ -217,9 +217,9 @@ pub fn seeded_ready_message(thread_id: &str, timestamp: String) -> ChatMessage {
     ChatMessage {
         id: format!("{thread_id}_ready"),
         role: "assistant".to_string(),
-        text: "Sono pronto. Scrivimi pure: rispondo in locale.".to_string(),
+        text: "I'm ready. Go ahead and write to me: I answer locally.".to_string(),
         timestamp,
-        metadata: Some("Modello locale".to_string()),
+        metadata: Some("Local model".to_string()),
         metrics: None,
         feedback: None,
         saved_memory_ref: None,
@@ -268,7 +268,7 @@ fn render_runtime_prompt(prompt: &str, compressed_context: &str) -> String {
     let context_block = if compressed_context.is_empty() {
         String::new()
     } else {
-        format!("Contesto recente della chat:\n{compressed_context}\n\n")
+        format!("Recent chat context:\n{compressed_context}\n\n")
     };
 
     [
@@ -346,15 +346,15 @@ mod tests {
     #[test]
     fn prompt_builder_keeps_recent_context_for_followups() {
         let response = build_chat_runtime_prompt(&BuildPromptRequest {
-            prompt: "dimmene un'altra".to_string(),
+            prompt: "tell me another one".to_string(),
             context: vec![
                 ChatContextMessage {
                     role: ChatContextRole::User,
-                    text: "dimmi una barzelletta".to_string(),
+                    text: "tell me a joke".to_string(),
                 },
                 ChatContextMessage {
                     role: ChatContextRole::Assistant,
-                    text: "Perche' gli scienziati preferiscono gli occhielli?".to_string(),
+                    text: "Why do scientists prefer eyelets?".to_string(),
                 },
             ],
             max_context_chars: Some(1_000),
@@ -363,19 +363,19 @@ mod tests {
         assert!(
             response
                 .runtime_prompt
-                .contains("Contesto recente della chat")
+                .contains("Recent chat context")
         );
         assert!(
             response
                 .runtime_prompt
-                .contains("User: dimmi una barzelletta")
+                .contains("User: tell me a joke")
         );
         assert!(
             response
                 .runtime_prompt
-                .contains("Assistant: Perche' gli scienziati")
+                .contains("Assistant: Why do scientists")
         );
-        assert!(response.runtime_prompt.contains("User: dimmene un'altra"));
+        assert!(response.runtime_prompt.contains("User: tell me another one"));
     }
 
     #[test]
@@ -388,7 +388,7 @@ mod tests {
 
         // Default/small budget: the per-message small-model clamp (2K) truncates.
         let small = build_chat_runtime_prompt(&BuildPromptRequest {
-            prompt: "continua".to_string(),
+            prompt: "continue".to_string(),
             context: context.clone(),
             max_context_chars: Some(DEFAULT_CONTEXT_BUDGET_CHARS),
         });
@@ -396,7 +396,7 @@ mod tests {
 
         // Capable budget: the whole message survives (promptjuice passes through).
         let capable = build_chat_runtime_prompt(&BuildPromptRequest {
-            prompt: "continua".to_string(),
+            prompt: "continue".to_string(),
             context,
             max_context_chars: Some(chat_budget_for_window_tokens()),
         });
@@ -410,10 +410,10 @@ mod tests {
     #[test]
     fn prompt_builder_redacts_sensitive_context_before_returning_to_renderer() {
         let response = build_chat_runtime_prompt(&BuildPromptRequest {
-            prompt: "riprendi da qui".to_string(),
+            prompt: "pick up from here".to_string(),
             context: vec![ChatContextMessage {
                 role: ChatContextRole::User,
-                text: "la mia email e' fabio@example.com token=sk-secret".to_string(),
+                text: "my email is fabio@example.com token=sk-secret".to_string(),
             }],
             max_context_chars: Some(1_000),
         });
@@ -433,25 +433,25 @@ mod tests {
                 [
                     ChatContextMessage {
                         role: ChatContextRole::User,
-                        text: format!("messaggio vecchio numero {index} con molto testo ripetuto"),
+                        text: format!("old message number {index} with lots of repeated text"),
                     },
                     ChatContextMessage {
                         role: ChatContextRole::Assistant,
-                        text: format!("risposta vecchia numero {index} con dettagli ripetuti"),
+                        text: format!("old reply number {index} with repeated details"),
                     },
                 ]
             })
             .collect::<Vec<_>>();
 
         let response = build_chat_runtime_prompt(&BuildPromptRequest {
-            prompt: "continua".to_string(),
+            prompt: "continue".to_string(),
             context,
             max_context_chars: Some(500),
         });
 
         assert!(response.compression.compressed);
         assert!(response.runtime_prompt.contains("Earlier context"));
-        assert!(response.runtime_prompt.contains("User: continua"));
+        assert!(response.runtime_prompt.contains("User: continue"));
         assert!(response.compression.output_chars <= 500);
     }
 

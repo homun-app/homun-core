@@ -244,7 +244,7 @@ export function ContactsView() {
             <option value="all">{t("contacts.allTypes")}</option>
             {CONTACT_TYPES.map((ct) => (
               <option key={ct.value} value={ct.value}>
-                {ct.label}
+                {t(ct.label)}
               </option>
             ))}
           </select>
@@ -256,10 +256,10 @@ export function ContactsView() {
           onClick={() => void newContact()}
           disabled={busy}
         >
-          <Plus size={13} /> Nuovo contatto
+          <Plus size={13} /> {t("contacts.newContact")}
         </button>
         <button type="button" className="set-btn" onClick={() => setShowProfiles(true)}>
-          Profili
+          {t("contacts.profiles")}
         </button>
       </div>
 
@@ -268,15 +268,13 @@ export function ContactsView() {
           <div className="contacts-suggest-title">{t("contacts.possibleDuplicates")}</div>
           {suggestions.map((s) => (
             <div key={s.name} className="contacts-suggest-row">
-              <span>
-                «{s.name}» in {s.refs.length} schede
-              </span>
+              <span>{t("contacts.duplicateInCards", { name: s.name, count: s.refs.length })}</span>
               <button
                 type="button"
                 className="set-btn"
                 onClick={() => openMerge(s.refs[1]!, s.refs[0]!)}
               >
-                Unisci
+                {t("contacts.merge")}
               </button>
             </div>
           ))}
@@ -326,7 +324,7 @@ export function ContactsView() {
                     >
                       <span className="set-contact-avatar">{initial(c.name)}</span>
                       <span className="set-contact-body">
-                        <span className="set-contact-name">{c.name || "(senza nome)"}</span>
+                        <span className="set-contact-name">{c.name || t("contacts.unnamed")}</span>
                         <span className="set-contact-sub">
                           {t(contactTypeLabel(c.contact_type))}
                           {c.channels.length
@@ -372,9 +370,7 @@ export function ContactsView() {
       </div>
 
       {contacts && filtered.length === 0 && (
-        <p className="set-hint">
-          Nessun contatto. Arrivano dai canali (WhatsApp/Telegram) o aggiungili a mano.
-        </p>
+        <p className="set-hint">{t("contacts.emptyHint")}</p>
       )}
 
       {open && (
@@ -409,11 +405,12 @@ export function ContactsView() {
         <div className="set-modal-overlay">
           <div className="set-modal-scrim" onClick={() => !busy && setPending(null)} />
           <div className="set-modal contacts-merge-modal">
-            <h3 className="contacts-merge-title">Unire i contatti?</h3>
+            <h3 className="contacts-merge-title">{t("contacts.mergeConfirmTitle")}</h3>
             <p className="contacts-merge-text">
-              <strong>«{pending.from.name || "(senza nome)"}»</strong> sparirà; i suoi canali e la
-              sua memoria passano a <strong>«{pending.into.name || "(senza nome)"}»</strong>
-              {pending.into.is_self ? " (te)" : ""}.
+              <strong>«{pending.from.name || t("contacts.unnamed")}»</strong>{" "}
+              {t("contacts.mergeConfirmBody")}{" "}
+              <strong>«{pending.into.name || t("contacts.unnamed")}»</strong>
+              {pending.into.is_self ? ` ${t("contacts.mergeConfirmYou")}` : ""}.
             </p>
             {error && (
               <p className="set-hint" style={{ color: "var(--danger)" }}>
@@ -422,7 +419,7 @@ export function ContactsView() {
             )}
             <div className="contacts-modal-actions">
               <button type="button" className="set-btn" disabled={busy} onClick={() => setPending(null)}>
-                Cancel
+                {t("contacts.cancel")}
               </button>
               <button
                 type="button"
@@ -430,7 +427,7 @@ export function ContactsView() {
                 disabled={busy}
                 onClick={() => void confirmMerge()}
               >
-                Unisci
+                {t("contacts.merge")}
               </button>
             </div>
           </div>
@@ -535,11 +532,12 @@ function ContactCard({
         </span>
         <div>
           <div className="mt">
-            {contact.name || "(senza nome)"}
-            {contact.is_self ? " · tu" : ""}
+            {contact.name || t("contacts.unnamed")}
+            {contact.is_self ? ` · ${t("contacts.you")}` : ""}
           </div>
           <div className="ms">
-            {t(contactTypeLabel(contact.contact_type))} · {contact.memory_count} messaggi
+            {t(contactTypeLabel(contact.contact_type))} ·{" "}
+            {t("contacts.messageCount", { count: contact.memory_count })}
           </div>
         </div>
         {!contact.is_self && (
@@ -581,7 +579,7 @@ function ContactCard({
               >
                 {CONTACT_TYPES.map((ct) => (
                   <option key={ct.value} value={ct.value}>
-                    {ct.label}
+                    {t(ct.label)}
                   </option>
                 ))}
               </select>
@@ -627,16 +625,16 @@ function ContactCard({
               ))}
             </div>
           ) : (
-            <p className="set-hint">Nessun canale collegato.</p>
+            <p className="set-hint">{t("contacts.noChannels")}</p>
           )}
         </div>
 
         <div className="contacts-section contacts-section-rule">
-          <div className="contacts-section-title">Persona e risposta</div>
+          <div className="contacts-section-title">{t("contacts.personaSection")}</div>
           <div className="contacts-fields">
             {profiles.length > 0 && (
               <label className="contacts-field">
-                <span className="set-modal-label">Profilo</span>
+                <span className="set-modal-label">{t("contacts.profile")}</span>
                 <div className="set-select">
                   <select
                     value={contact.profile_id ?? ""}
@@ -659,7 +657,7 @@ function ContactCard({
             {profiles.length > 0 &&
               [...new Set(contact.channels.map((ch) => ch.channel))].map((channel) => (
                 <label className="contacts-field" key={channel}>
-                  <span className="set-modal-label">Profilo su {channel}</span>
+                  <span className="set-modal-label">{t("contacts.profileOnChannel", { channel })}</span>
                   <div className="set-select">
                     <select
                       value={
@@ -671,7 +669,7 @@ function ContactCard({
                         onAssignProfile(e.target.value ? Number(e.target.value) : null, channel)
                       }
                     >
-                      <option value="">Come il profilo base</option>
+                      <option value="">{t("contacts.sameAsBaseProfile")}</option>
                       {profiles.map((p) => (
                         <option key={p.id} value={p.id}>
                           {p.name}
@@ -683,15 +681,15 @@ function ContactCard({
                 </label>
               ))}
             <label className="contacts-field">
-              <span className="set-modal-label">Modalità di risposta sui canali</span>
+              <span className="set-modal-label">{t("contacts.channelResponseMode")}</span>
               <div className="set-select">
                 <select
                   value={contact.response_mode}
                   disabled={busy}
                   onChange={(e) => onPatch({ response_mode: e.target.value })}
                 >
-                  <option value="">Eredita (impostazioni canali)</option>
-                  <option value="automatic">Automatica — rispondi subito</option>
+                  <option value="">{t("contacts.modeInherit")}</option>
+                  <option value="automatic">{t("contacts.modeAutomaticOption")}</option>
                   <option value="approve">
                     Approve — I prepare the reply, you confirm before sending
                   </option>
@@ -702,11 +700,11 @@ function ContactCard({
               </div>
             </label>
             <label className="contacts-field">
-              <span className="set-modal-label">Tono di voce</span>
+              <span className="set-modal-label">{t("contacts.toneOfVoice")}</span>
               <input
                 className="set-input"
                 defaultValue={contact.tone_of_voice}
-                placeholder="es. formale, amichevole, scherzoso…"
+                placeholder={t("contacts.toneOfVoicePlaceholder")}
                 disabled={busy}
                 onBlur={(e) => {
                   if (e.target.value !== contact.tone_of_voice)
@@ -715,11 +713,11 @@ function ContactCard({
               />
             </label>
             <label className="contacts-field contacts-field-wide">
-              <span className="set-modal-label">Istruzioni persona</span>
+              <span className="set-modal-label">{t("contacts.personaInstructions")}</span>
               <input
                 className="set-input"
                 defaultValue={contact.persona_instructions}
-                placeholder="es. è un cliente: professionale, dagli del lei, niente dettagli privati"
+                placeholder={t("contacts.personaInstructionsPlaceholder")}
                 disabled={busy}
                 onBlur={(e) => {
                   if (e.target.value !== contact.persona_instructions)
@@ -732,33 +730,34 @@ function ContactCard({
 
         <div className="contacts-section contacts-section-rule">
           <div className="contacts-section-title">
-            Perimetro <span className="contacts-section-note">(cosa può vedere l'assistente)</span>
+            {t("contacts.perimeterSection")}{" "}
+            <span className="contacts-section-note">{t("contacts.perimeterNote")}</span>
           </div>
           {perimeter === null ? (
-            <p className="set-hint">Carico…</p>
+            <p className="set-hint">{t("contacts.loading")}</p>
           ) : (
             <>
               <div className="contacts-fields">
                 <label className="contacts-field">
-                  <span className="set-modal-label">Memory utilizzabile</span>
+                  <span className="set-modal-label">{t("contacts.usableMemory")}</span>
                   <div className="set-select">
                     <select
                       value={perimeter.memory_scope}
                       disabled={busy}
                       onChange={(e) => savePerimeter({ ...perimeter, memory_scope: e.target.value })}
                     >
-                      <option value="contact_only">Solo la storia con questo contatto</option>
-                      <option value="personal">Anche la memoria personale (fidato)</option>
+                      <option value="contact_only">{t("contacts.memoryContactOnly")}</option>
+                      <option value="personal">{t("contacts.memoryPersonal")}</option>
                     </select>
                     <ChevronDown size={12} className="chev" />
                   </div>
                 </label>
                 <label className="contacts-field">
-                  <span className="set-modal-label">Tools vietati (separati da virgola)</span>
+                  <span className="set-modal-label">{t("contacts.deniedTools")}</span>
                   <input
                     className="set-input"
                     defaultValue={perimeter.tools_denied.join(", ")}
-                    placeholder="es. browser, recall_memory"
+                    placeholder={t("contacts.deniedToolsPlaceholder")}
                     disabled={busy}
                     onBlur={(e) => {
                       const list = e.target.value
@@ -784,7 +783,7 @@ function ContactCard({
                   <span className="contacts-check-box" aria-hidden="true">
                     <Check size={11} />
                   </span>
-                  Può sentir nominare altri contatti
+                  {t("contacts.canHearOtherContacts")}
                 </label>
                 <label className="contacts-check">
                   <input
@@ -798,7 +797,7 @@ function ContactCard({
                   <span className="contacts-check-box" aria-hidden="true">
                     <Check size={11} />
                   </span>
-                  Può conoscere impegni e calendario
+                  {t("contacts.canSeeCalendar")}
                 </label>
               </div>
             </>
@@ -806,13 +805,13 @@ function ContactCard({
         </div>
 
         <div className="contacts-section contacts-section-rule">
-          <div className="contacts-section-title">Relazioni</div>
+          <div className="contacts-section-title">{t("contacts.relationsSection")}</div>
           {relations === null ? (
-            <p className="set-hint">Carico…</p>
+            <p className="set-hint">{t("contacts.loading")}</p>
           ) : (
             <>
               {relations.length === 0 && (
-                <p className="set-hint contacts-rel-empty">Nessuna relazione registrata.</p>
+                <p className="set-hint contacts-rel-empty">{t("contacts.noRelations")}</p>
               )}
               {relations.map((r) => (
                 <div key={r.id} className="contacts-relation-row">
@@ -836,7 +835,7 @@ function ContactCard({
                     disabled={busy}
                     onChange={(e) => setRelOther(e.target.value)}
                   >
-                    <option value="">Contatto…</option>
+                    <option value="">{t("contacts.contactPlaceholder")}</option>
                     {others.map((o) => (
                       <option key={o.reference} value={o.reference}>
                         {o.name}
@@ -847,7 +846,7 @@ function ContactCard({
                 </div>
                 <input
                   className="set-input"
-                  placeholder="relazione (es. moglie, collega, capo)"
+                  placeholder={t("contacts.relationPlaceholder")}
                   value={relType}
                   disabled={busy}
                   onChange={(e) => setRelType(e.target.value)}
@@ -875,7 +874,7 @@ function ContactCard({
 
         <div className="contacts-section contacts-section-rule">
           <div className="contacts-section-head">
-            <span className="contacts-section-title">Cosa so di lui/lei</span>
+            <span className="contacts-section-title">{t("contacts.whatIKnowSection")}</span>
             {profile && (profile.episode_count > 0 || profile.facts.length > 0) && (
               <button
                 type="button"
@@ -884,20 +883,20 @@ function ContactCard({
                 onClick={() => void refreshProfile()}
               >
                 {refreshing
-                  ? "Analizzo…"
+                  ? t("contacts.analyzing")
                   : profile.facts.length === 0
-                    ? "Genera dai messaggi"
-                    : "Refresh"}
+                    ? t("contacts.generateFromMessages")
+                    : t("contacts.refresh")}
               </button>
             )}
           </div>
           {profile === null ? (
-            <p className="set-hint">Carico…</p>
+            <p className="set-hint">{t("contacts.loading")}</p>
           ) : profile.facts.length === 0 ? (
             <p className="set-hint">
               {profile.episode_count === 0
-                ? "Nessun messaggio ancora."
-                : "Nessuna informazione estratta. Premi «Genera dai messaggi»."}
+                ? t("contacts.noMessagesYet")
+                : t("contacts.noInfoExtracted")}
             </p>
           ) : (
             <div className="set-line-list contacts-facts">
@@ -926,7 +925,7 @@ function ContactCard({
         </div>
 
         <div className="contacts-section contacts-section-rule">
-          <div className="set-modal-label">Unisci a un altro contatto</div>
+          <div className="set-modal-label">{t("contacts.mergeIntoAnother")}</div>
           <div className="contacts-merge-row">
             <div className="set-select contacts-merge-select">
               <select
@@ -934,7 +933,7 @@ function ContactCard({
                 disabled={busy}
                 onChange={(e) => setMergeTarget(e.target.value)}
               >
-                <option value="">— scegli un contatto —</option>
+                <option value="">{t("contacts.chooseContact")}</option>
                 {others.map((o) => (
                   <option key={o.reference} value={o.reference}>
                     {o.name || o.reference}
@@ -952,7 +951,7 @@ function ContactCard({
                 if (target) onMerge(target);
               }}
             >
-              Unisci
+              {t("contacts.merge")}
             </button>
           </div>
           <p className="set-hint contacts-merge-hint">
@@ -977,7 +976,7 @@ function ProfilesModal({
 }) {
   const { t } = useTranslation();
   const createNew = async () => {
-    const name = window.prompt("Nome del profilo (es. Lavoro, Personal)");
+    const name = window.prompt(t("contacts.promptProfileName"));
     if (!name || !name.trim()) return;
     await coreBridge.createProfile({ name: name.trim() });
     onReload();
@@ -988,24 +987,21 @@ function ProfilesModal({
       <div className="set-modal contacts-profiles-modal">
         <div className="set-modal-head">
           <div>
-            <div className="mt">Profili di risposta</div>
-            <div className="ms">
-              Reusable personas: tone and instructions you assign to contacts (also per
-              canale, es. «Marco su Telegram → Lavoro»).
-            </div>
+            <div className="mt">{t("contacts.responseProfilesTitle")}</div>
+            <div className="ms">{t("contacts.responseProfilesDesc")}</div>
           </div>
-          <button type="button" className="set-modal-close" aria-label="Close" onClick={onClose}>
+          <button type="button" className="set-modal-close" aria-label={t("contacts.close")} onClick={onClose}>
             <X size={17} />
           </button>
         </div>
         <div className="set-modal-body">
-          {profiles.length === 0 && <p className="set-hint">Nessun profilo ancora.</p>}
+          {profiles.length === 0 && <p className="set-hint">{t("contacts.noProfilesYet")}</p>}
           {profiles.map((p) => (
             <div key={p.id} className="contacts-profile-row">
               <input
                 className="set-input"
                 defaultValue={p.name}
-                placeholder="nome"
+                placeholder={t("contacts.profileNamePlaceholder")}
                 onBlur={(e) => {
                   const v = e.target.value.trim();
                   if (v && v !== p.name)
@@ -1015,7 +1011,7 @@ function ProfilesModal({
               <input
                 className="set-input"
                 defaultValue={p.tone_of_voice}
-                placeholder="tono (es. professionale)"
+                placeholder={t("contacts.profileTonePlaceholder")}
                 onBlur={(e) => {
                   if (e.target.value !== p.tone_of_voice)
                     void coreBridge
@@ -1026,7 +1022,7 @@ function ProfilesModal({
               <input
                 className="set-input"
                 defaultValue={p.instructions}
-                placeholder="istruzioni (es. dai del lei, niente dettagli privati)"
+                placeholder={t("contacts.profileInstructionsPlaceholder")}
                 onBlur={(e) => {
                   if (e.target.value !== p.instructions)
                     void coreBridge
@@ -1037,9 +1033,9 @@ function ProfilesModal({
               <button
                 type="button"
                 className="set-btn danger contacts-profile-del"
-                title="Delete profilo"
+                title={t("contacts.deleteProfile")}
                 onClick={() => {
-                  if (window.confirm(`Deletere il profilo "${p.name}"?`))
+                  if (window.confirm(t("contacts.deleteProfileConfirm", { name: p.name })))
                     void coreBridge.deleteProfile(p.id).then(onReload);
                 }}
               >
@@ -1049,10 +1045,10 @@ function ProfilesModal({
           ))}
           <div className="contacts-modal-actions">
             <button type="button" className="set-btn primary" onClick={() => void createNew()}>
-              <Plus size={13} /> Nuovo profilo
+              <Plus size={13} /> {t("contacts.newProfile")}
             </button>
             <button type="button" className="set-btn" onClick={onClose}>
-              Close
+              {t("contacts.close")}
             </button>
           </div>
         </div>

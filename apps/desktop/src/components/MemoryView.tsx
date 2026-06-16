@@ -102,7 +102,7 @@ export function MemoryView({ embedded = false }: { embedded?: boolean } = {}) {
         const url = URL.createObjectURL(blob);
         const link = document.createElement("a");
         link.href = url;
-        link.download = `homun-memoria-${new Date().toISOString().slice(0, 10)}.json`;
+        link.download = `homun-memory-${new Date().toISOString().slice(0, 10)}.json`;
         document.body.appendChild(link);
         link.click();
         link.remove();

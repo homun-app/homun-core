@@ -19,7 +19,7 @@ export function mapCoreComputerSession(
     title: item.title,
     detail: item.payload_redacted
       ? item.subtitle_redacted
-      : "Dettaglio non mostrato: payload non redatto",
+      : "Detail not shown: payload not redacted",
     status: toTimelineStatus(item.status, item.approval_required),
     timestamp: formatClock(item.started_at),
     markdown: item.markdown_redacted ?? undefined,
@@ -36,7 +36,7 @@ export function mapCoreComputerSession(
     progressTotal: Math.max(snapshot.progress_total, 1),
     previewTitle: snapshot.current_url_redacted ?? "Local session",
     previewDetail: snapshot.preview_frame_ref
-      ? `Preview redatta disponibile: ${snapshot.preview_frame_ref}`
+      ? `Redacted preview available: ${snapshot.preview_frame_ref}`
       : "Preview not yet available",
     previewArtifactId: previewArtifact?.artifact_id,
     terminalExcerpt: snapshot.terminal_excerpt_redacted,
@@ -45,14 +45,14 @@ export function mapCoreComputerSession(
       id: toSurfaceKind(surface.surface),
       label: surface.label,
       status: toSurfaceStatus(surface.status),
-      detail: surface.detail_redacted ?? "Nessun dettaglio operativo",
+      detail: surface.detail_redacted ?? "No operational detail",
     })),
     timeline,
     artifacts: snapshot.artifact_refs.map((artifact) => ({
       id: artifact.artifact_id,
       name: artifact.title_redacted,
       kind: toArtifactKind(artifact.kind),
-      detail: `${formatBytes(artifact.size_bytes)} · ${artifact.preview_ref ? "preview redatta" : "solo metadati"}`,
+      detail: `${formatBytes(artifact.size_bytes)} · ${artifact.preview_ref ? "redacted preview" : "metadata only"}`,
       previewRef: artifact.preview_ref ?? undefined,
     })),
     source: "core",
@@ -63,14 +63,14 @@ export function createLoadingComputerSession(sessionId: string): ComputerSession
   return {
     id: sessionId,
     title: "Local computer",
-    subtitle: "Caricamento sessione dal core locale",
+    subtitle: "Loading session from the local core",
     status: "running",
     activeSurface: "browser",
     elapsed: "0s",
     progressCurrent: 0,
     progressTotal: 1,
-    previewTitle: "Connessione al Rust Core",
-    previewDetail: "Lettura del read model UI-safe in corso",
+    previewTitle: "Connecting to the Rust Core",
+    previewDetail: "Reading the UI-safe read model…",
     terminalExcerpt: [],
     operationalPlanMarkdown: undefined,
     surfaces: defaultSurfaces("waiting"),
@@ -86,15 +86,15 @@ export function createUnavailableComputerSession(
 ): ComputerSession {
   return {
     id: sessionId,
-    title: "Local computer non collegato",
+    title: "Local computer not connected",
     subtitle: reason,
     status: "waiting_user",
     activeSurface: "logs",
     elapsed: "0s",
     progressCurrent: 0,
     progressTotal: 1,
-    previewTitle: "Gateway locale non disponibile",
-    previewDetail: "Il read model operativo sara' esposto dal gateway Rust autonomo.",
+    previewTitle: "Local gateway unavailable",
+    previewDetail: "The operational read model will be exposed by the standalone Rust gateway.",
     terminalExcerpt: ["local-computer % waiting for local gateway"],
     operationalPlanMarkdown: undefined,
     surfaces: defaultSurfaces("waiting"),
@@ -102,10 +102,10 @@ export function createUnavailableComputerSession(
       {
         id: "bridge-unavailable",
         surface: "logs",
-        title: "Bridge locale non disponibile",
+        title: "Local bridge unavailable",
         detail: reason,
         status: "waiting",
-        timestamp: "ora",
+        timestamp: "now",
       },
     ],
     artifacts: [],
@@ -115,10 +115,10 @@ export function createUnavailableComputerSession(
 
 function defaultSurfaces(status: "idle" | "running" | "waiting" | "done") {
   return [
-    { id: "browser" as const, label: "Browser", status, detail: "Superficie browser" },
-    { id: "shell" as const, label: "Terminal", status, detail: "Superficie shell" },
-    { id: "files" as const, label: "File", status, detail: "Artifact redatti" },
-    { id: "logs" as const, label: "Log", status, detail: "Timeline redatta" },
+    { id: "browser" as const, label: "Browser", status, detail: "Browser surface" },
+    { id: "shell" as const, label: "Terminal", status, detail: "Shell surface" },
+    { id: "files" as const, label: "File", status, detail: "Redacted artifacts" },
+    { id: "logs" as const, label: "Log", status, detail: "Redacted timeline" },
   ];
 }
 
@@ -180,8 +180,8 @@ function formatElapsed(seconds: number): string {
 
 function formatClock(value: string): string {
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "ora";
-  return new Intl.DateTimeFormat("it-IT", {
+  if (Number.isNaN(date.getTime())) return "now";
+  return new Intl.DateTimeFormat(undefined, {
     hour: "2-digit",
     minute: "2-digit",
   }).format(date);

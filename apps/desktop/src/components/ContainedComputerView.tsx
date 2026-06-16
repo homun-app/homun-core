@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Loader2, MonitorPlay, Power } from "lucide-react";
 import { coreBridge, type ContainedComputerLive } from "../lib/coreBridge";
 
@@ -7,6 +8,7 @@ import { coreBridge, type ContainedComputerLive } from "../lib/coreBridge";
 // never a window that takes over the host desktop. Input goes straight to the
 // embedded view, so this doubles as the takeover surface.
 export function ContainedComputerView() {
+  const { t } = useTranslation();
   const [live, setLive] = useState<ContainedComputerLive | null>(null);
   const [error, setError] = useState(false);
 
@@ -65,7 +67,7 @@ export function ContainedComputerView() {
           <div className="cc-placeholder">
             <strong>Contained computer is off</strong>
             <small>
-              Avvialo e abilita la modalità, poi ricarica:
+              {t("common.startAndEnableThenReload")}
             </small>
             <pre className="cc-cmd">
               cd runtimes/contained-computer &amp;&amp; ./up.sh{"\n"}

@@ -345,7 +345,7 @@ export const connections: ConnectionItem[] = [
   },
   {
     id: "calendar",
-    name: "Calendario",
+    name: "Calendar",
     type: "managed",
     status: "disabled",
     description: "Optional managed provider, requires cloud opt-in.",

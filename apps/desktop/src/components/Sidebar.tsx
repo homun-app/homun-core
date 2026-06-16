@@ -362,7 +362,7 @@ function ProjectsNav({
                         title={project.folder ?? t("sidebar.noFolder")}
                         onClick={() => void linkProjectFolder(project.id)}
                       >
-                        Cartella
+                        {t("sidebar.folder")}
                       </button>
                       <button
                         className="link-button danger"
@@ -493,8 +493,9 @@ function ProjectsNav({
               </button>
             </header>
             <p className="drawer-modal-hint">
-              A project works <strong>inside a folder</strong>: generated files and
-              artefatti finiscono lì.
+              {t("sidebar.projectFolderHintPre")}
+              <strong>{t("sidebar.projectFolderHintBold")}</strong>
+              {t("sidebar.projectFolderHintPost")}
             </p>
             <input
               className="set-input drawer-modal-input"
@@ -789,13 +790,13 @@ export function NavDrawer({
 
       <footer className="drawer-footer">
         <div className="drawer-persistent-actions" aria-label={t("sidebar.persistentActions")}>
-          <button className="drawer-footer-action" type="button" aria-label="Notifiche" title={t("sidebar.notifications")}>
+          <button className="drawer-footer-action" type="button" aria-label={t("sidebar.notifications")} title={t("sidebar.notifications")}>
             <Bell size={16} />
           </button>
           <button
             className="drawer-footer-action drawer-settings-action"
             type="button"
-            aria-label="Impostazioni"
+            aria-label={t("sidebar.settings")}
             title={t("sidebar.settings")}
             onClick={() => onNavigate("settings")}
           >
@@ -852,7 +853,7 @@ export function SettingsDrawer({
   const [workspaceName] = useSetting("workspaceName", "Personal");
   const groups: Array<"account" | "capabilities"> = ["account", "capabilities"];
   return (
-    <aside className="nav-drawer settings-drawer set-nav" aria-label="Impostazioni">
+    <aside className="nav-drawer settings-drawer set-nav" aria-label={t("sidebar.settings")}>
       <button className="set-nav-back" type="button" onClick={onBack}>
         <ArrowLeft size={15} />
         <span>{t("sidebar.backToApp")}</span>
@@ -927,12 +928,12 @@ export function SettingsDrawer({
       {/* Persistent footer — mirrors the main drawer's [bell + gear], but in Settings
           the gear becomes a back-to-app arrow (you're already in Settings). */}
       <footer className="drawer-footer">
-        <div className="drawer-persistent-actions" aria-label="Azioni persistenti">
+        <div className="drawer-persistent-actions" aria-label={t("sidebar.persistentActions")}>
           <button
             className="drawer-footer-action"
             type="button"
-            aria-label="Notifiche"
-            title="Notifiche"
+            aria-label={t("sidebar.notifications")}
+            title={t("sidebar.notifications")}
           >
             <Bell size={16} />
           </button>
@@ -940,7 +941,7 @@ export function SettingsDrawer({
             className="drawer-footer-action"
             type="button"
             aria-label={t("sidebar.backToApp")}
-            title="Torna all'app"
+            title={t("sidebar.backToApp")}
             onClick={onBack}
           >
             <ArrowLeft size={16} />

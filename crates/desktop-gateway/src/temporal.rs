@@ -109,9 +109,9 @@ impl std::fmt::Display for TemporalError {
         match self {
             TemporalError::Past { chosen, now } => write!(
                 f,
-                "la data/ora «{chosen}» è nel passato (adesso è {now}): scegline una futura"
+                "the date/time «{chosen}» is in the past (now is {now}): pick a future one"
             ),
-            TemporalError::Invalid(why) => write!(f, "riferimento temporale non valido: {why}"),
+            TemporalError::Invalid(why) => write!(f, "invalid temporal reference: {why}"),
         }
     }
 }
@@ -220,13 +220,13 @@ pub fn resolve(
         );
         match intent.time {
             TimeSpec::None => base,
-            TimeSpec::At { hour, minute } => format!("{base} alle {hour:02}:{minute:02}"),
+            TimeSpec::At { hour, minute } => format!("{base} at {hour:02}:{minute:02}"),
             TimeSpec::Part(part) => {
                 let label = match part {
-                    DayPart::Morning => "mattina",
-                    DayPart::Afternoon => "pomeriggio",
-                    DayPart::Evening => "sera",
-                    DayPart::Night => "notte",
+                    DayPart::Morning => "morning",
+                    DayPart::Afternoon => "afternoon",
+                    DayPart::Evening => "evening",
+                    DayPart::Night => "night",
                 };
                 format!("{base} ({label})")
             }
@@ -252,7 +252,7 @@ pub fn resolve(
 
 fn now_human(anchor: &jiff::Zoned) -> String {
     format!(
-        "{} {} {} {} alle {:02}:{:02}",
+        "{} {} {} {} at {:02}:{:02}",
         crate::weekday_it(anchor.weekday()),
         anchor.day(),
         crate::month_it(anchor.month()),
@@ -335,7 +335,7 @@ pub fn intent_from_json(args: &serde_json::Value) -> Result<TemporalIntent, Temp
                 .get("weekday")
                 .and_then(|v| v.as_str())
                 .and_then(parse_weekday)
-                .ok_or_else(|| TemporalError::Invalid("weekday mancante o non riconosciuto".into()))?;
+                .ok_or_else(|| TemporalError::Invalid("weekday missing or not recognized".into()))?;
             // Absent → Upcoming (soonest), the intuitive default for a bare weekday.
             let which = match args.get("which").and_then(|v| v.as_str()).unwrap_or("") {
                 "this" | "questo" | "questa" | "esta" | "ce" | "diese" => Which::This,
@@ -358,16 +358,16 @@ pub fn intent_from_json(args: &serde_json::Value) -> Result<TemporalIntent, Temp
             let raw = args
                 .get("date")
                 .and_then(|v| v.as_str())
-                .ok_or_else(|| TemporalError::Invalid("date (YYYY-MM-DD) mancante".into()))?;
+                .ok_or_else(|| TemporalError::Invalid("date (YYYY-MM-DD) missing".into()))?;
             let date: jiff::civil::Date = raw
                 .trim()
                 .parse()
-                .map_err(|_| TemporalError::Invalid(format!("data non valida: {raw}")))?;
+                .map_err(|_| TemporalError::Invalid(format!("invalid date: {raw}")))?;
             DayRef::Absolute(date)
         }
         other => {
             return Err(TemporalError::Invalid(format!(
-                "kind sconosciuto: «{other}» (usa relative_day|weekday|relative_unit|absolute)"
+                "unknown kind: «{other}» (use relative_day|weekday|relative_unit|absolute)"
             )))
         }
     };

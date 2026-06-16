@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   Check,
   ChevronDown,
@@ -26,6 +27,7 @@ const IDLE: ContainedComputerLive = {
 // while the contained browser is working. Header + live "Activity progress"
 // checklist; expand to the live view; fullscreen for the overlay. Hidden idle.
 export function ChatComputerPanel() {
+  const { t } = useTranslation();
   const [live, setLive] = useState<ContainedComputerLive | null>(null);
   // "bar" (collapsed, default) | "expanded" (live inline) | "full" (overlay)
   const [view, setView] = useState<"bar" | "expanded" | "full">("bar");
@@ -81,7 +83,7 @@ export function ChatComputerPanel() {
   // contained display, scaled to fit and proportioned, with no noVNC toolbar.
   const base = live.novnc_url.replace("/vnc.html", "/lfpa-view.html");
   const src = `${base}${base.includes("?") ? "&" : "?"}view_only=1`;
-  const activity = live.activity?.trim() || "sta lavorando…";
+  const activity = live.activity?.trim() || t("chat.working");
   const fullscreen = view === "full";
   const showStage = view === "expanded" || fullscreen;
   const steps = live.steps ?? [];
@@ -113,8 +115,8 @@ export function ChatComputerPanel() {
               className="cc-icon-btn"
               type="button"
               onClick={() => setView(fullscreen ? "expanded" : "full")}
-              title={fullscreen ? "Riduci" : "Schermo intero"}
-              aria-label={fullscreen ? "Riduci" : "Schermo intero"}
+              title={fullscreen ? t("chat.collapse") : t("chat.fullscreen")}
+              aria-label={fullscreen ? t("chat.collapse") : t("chat.fullscreen")}
             >
               {fullscreen ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
             </button>
@@ -123,8 +125,8 @@ export function ChatComputerPanel() {
             className="cc-icon-btn"
             type="button"
             onClick={() => setView(view === "bar" ? "expanded" : "bar")}
-            title={view === "bar" ? "Mostra il browser" : "Collapse"}
-            aria-label={view === "bar" ? "Mostra il browser" : "Collapse"}
+            title={view === "bar" ? t("chat.showBrowser") : t("chat.collapse")}
+            aria-label={view === "bar" ? t("chat.showBrowser") : t("chat.collapse")}
           >
             {view === "bar" ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
           </button>
@@ -140,8 +142,8 @@ export function ChatComputerPanel() {
                 className="cc-thumb"
                 type="button"
                 onClick={() => setView("expanded")}
-                title="Espandi il computer"
-                aria-label="Espandi il computer"
+                title={t("chat.expandComputer")}
+                aria-label={t("chat.expandComputer")}
               >
                 <iframe
                   className="cc-thumb-frame"
@@ -172,7 +174,7 @@ export function ChatComputerPanel() {
                 ))}
                 <li className="cc-step running">
                   <Loader2 size={13} className="spin" />
-                  <span>{steps.length === 0 ? "Avvio…" : "in corso…"}</span>
+                  <span>{steps.length === 0 ? t("chat.starting") : t("chat.inProgress")}</span>
                 </li>
               </ul>
             </div>
@@ -208,6 +210,7 @@ function TerminalDock({
   expanded: boolean;
   onToggle: () => void;
 }) {
+  const { t } = useTranslation();
   const bodyRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     // Keep the latest line in view as commands/output arrive.
@@ -218,8 +221,8 @@ function TerminalDock({
 
   const last = entries[entries.length - 1];
   const summary = running
-    ? last?.command ?? "esecuzione…"
-    : `${entries.length} ${entries.length === 1 ? "comando" : "comandi"}`;
+    ? last?.command ?? t("chat.executing")
+    : `${entries.length} ${entries.length === 1 ? t("chat.commandCount_one") : t("chat.commandCount_other")}`;
 
   return (
     <div className={`cc-dock ${expanded ? "expanded" : "bar"}`}>
@@ -240,8 +243,8 @@ function TerminalDock({
           className="cc-icon-btn"
           type="button"
           onClick={onToggle}
-          title={expanded ? "Collapse" : "Mostra il terminale"}
-          aria-label={expanded ? "Collapse" : "Mostra il terminale"}
+          title={expanded ? t("chat.collapse") : t("chat.showTerminal")}
+          aria-label={expanded ? t("chat.collapse") : t("chat.showTerminal")}
         >
           {expanded ? <ChevronDown size={15} /> : <ChevronUp size={15} />}
         </button>

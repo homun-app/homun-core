@@ -422,9 +422,9 @@ fn migrate_legacy_data_dir() {
             ),
         },
         LegacyDirAction::WarnCollision => eprintln!(
-            "[homun] WARN: due cartelle dati coesistono — uso {} ma {} esiste ancora \
-             (possibili dati più recenti lì). Se l'app sembra VUOTA: ferma il gateway, \
-             metti da parte {} e rinomina {} in {}.",
+            "[homun] WARN: two data folders coexist — using {} but {} still exists \
+             (possibly more recent data there). If the app looks EMPTY: stop the gateway, \
+             set {} aside and rename {} to {}.",
             current.display(),
             legacy.display(),
             current.display(),
@@ -863,8 +863,8 @@ async fn create_chat_thread(
 /// supervisor reasons over "Progetto Acme" rather than an opaque id.
 fn scope_display_name(scope: &str) -> String {
     match scope {
-        PERSONAL_WORKSPACE => "Personale".to_string(),
-        THREADS_WORKSPACE => "Conversazioni".to_string(),
+        PERSONAL_WORKSPACE => "Personal".to_string(),
+        THREADS_WORKSPACE => "Conversations".to_string(),
         other => load_workspaces_file()
             .workspaces
             .iter()
@@ -918,7 +918,7 @@ fn gather_recent_connector_activity(state: &AppState, cap: usize) -> Vec<String>
             let status = if r.ok {
                 "ok".to_string()
             } else {
-                format!("errore:{}", r.error_kind.as_deref().unwrap_or("?"))
+                format!("error:{}", r.error_kind.as_deref().unwrap_or("?"))
             };
             match r.summary.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
                 Some(s) => format!("- {} [{status}] {s}", r.tool),
@@ -1084,7 +1084,7 @@ const KNOWN_PLUGINS: &[&str] = &["proattivita"];
 async fn run_proactive_review(state: &AppState, scope: &str) -> Option<i64> {
     // The engine is part of the addon: if proattivita is detached, it doesn't run.
     if !lock_store(state).map(|s| s.plugin_enabled("proattivita")).unwrap_or(true) {
-        eprintln!("[proattività] addon disattivato, salto");
+        eprintln!("[proactivity] addon disabled, skipping");
         return None;
     }
     let memory = gather_scope_memory(state, scope, 60);
@@ -1096,7 +1096,7 @@ async fn run_proactive_review(state: &AppState, scope: &str) -> Option<i64> {
     // proactivity at day 1 (no separate subsystem).
     let is_personal = scope == PERSONAL_WORKSPACE;
     if memory.is_empty() && activity.is_empty() && !is_personal {
-        eprintln!("[proattività] review '{scope}': nessun contesto, salto");
+        eprintln!("[proactivity] review '{scope}': no context, skipping");
         return None;
     }
     // What's already on the board for this scope — an extra no-repeat signal
@@ -1111,17 +1111,17 @@ async fn run_proactive_review(state: &AppState, scope: &str) -> Option<i64> {
 
     let mut brief = format!("SCOPE: {}\n\n", scope_display_name(scope));
     if !memory.is_empty() {
-        brief.push_str("MEMORIA DELLO SCOPE (decisioni/goal/fatti/preferenze):\n");
+        brief.push_str("SCOPE MEMORY (decisions/goals/facts/preferences):\n");
         brief.push_str(&memory.join("\n"));
         brief.push_str("\n\n");
     }
     if !activity.is_empty() {
-        brief.push_str("ATTIVITÀ RECENTE DEI CONNETTORI:\n");
+        brief.push_str("RECENT CONNECTOR ACTIVITY:\n");
         brief.push_str(&activity.join("\n"));
         brief.push_str("\n\n");
     }
     if !pending.is_empty() {
-        brief.push_str("CARD GIÀ PRESENTI (NON ripeterle, nemmeno parafrasate):\n");
+        brief.push_str("CARDS ALREADY PRESENT (do NOT repeat them, not even paraphrased):\n");
         brief.push_str(&pending.join("\n"));
         brief.push_str("\n\n");
     }
@@ -1131,12 +1131,12 @@ async fn run_proactive_review(state: &AppState, scope: &str) -> Option<i64> {
         .and_then(|s| s.recent_feedback(scope, 12).ok())
         .unwrap_or_default();
     if !feedback.is_empty() {
-        brief.push_str("FEEDBACK DELL'UTENTE (impara da qui):\n");
+        brief.push_str("USER FEEDBACK (learn from this):\n");
         for (verdict, kind, title) in &feedback {
-            let mark = if verdict == "liked" { "UTILE" } else { "NON UTILE" };
+            let mark = if verdict == "liked" { "USEFUL" } else { "NOT USEFUL" };
             brief.push_str(&format!("- [{mark}] ({kind}) {title}\n"));
         }
-        eprintln!("[proattività] review '{scope}': {} segnali di feedback in contesto", feedback.len());
+        eprintln!("[proactivity] review '{scope}': {} feedback signals in context", feedback.len());
     }
 
     let root = call_memory_json(state, PROACTIVE_SUPERVISOR_SYSTEM, &brief).await?;
@@ -1144,7 +1144,7 @@ async fn run_proactive_review(state: &AppState, scope: &str) -> Option<i64> {
 
     let store = lock_store(state).ok()?;
     if store.suggestion_dedup_exists(scope, &input.dedup_key).unwrap_or(false) {
-        eprintln!("[proattività] review '{scope}': duplicato '{}', salto", input.dedup_key);
+        eprintln!("[proactivity] review '{scope}': duplicate '{}', skipping", input.dedup_key);
         return None;
     }
     // Fix 3 (anti re-propose): the exact key only catches identical anchors. The
@@ -1154,13 +1154,13 @@ async fn run_proactive_review(state: &AppState, scope: &str) -> Option<i64> {
     let anchors = store.recent_suggestion_anchors(scope, 150).unwrap_or_default();
     if is_semantic_duplicate(&input.dedup_key, &input.title, &anchors) {
         eprintln!(
-            "[proattività] review '{scope}': near-duplicato di una card già emessa ('{}'), salto",
+            "[proactivity] review '{scope}': near-duplicate of a card already emitted ('{}'), skipping",
             input.title
         );
         return None;
     }
     let id = store.insert_suggestion(&input).ok()?;
-    eprintln!("[proattività] review '{scope}': card #{id} '{}'", input.title);
+    eprintln!("[proactivity] review '{scope}': card #{id} '{}'", input.title);
     Some(id)
 }
 
@@ -1242,7 +1242,7 @@ async fn proactivity_auto_review_tick(state: &AppState) {
     if let Ok(store) = lock_store(state) {
         let _ = store.set_flag(&format!("auto_review_at:{scope}"), &now.to_string());
     }
-    eprintln!("[proattività] auto-review scope '{scope}' (idle + orario ok)");
+    eprintln!("[proactivity] auto-review scope '{scope}' (idle + hours ok)");
     let _ = run_proactive_review(state, &scope).await;
 }
 
@@ -1285,7 +1285,7 @@ fn cancel_homun_checkins(state: &AppState) {
                 &user,
                 &workspace,
                 local_first_task_runtime::TaskStatus::Cancelled,
-                Some("check-in Homun disattivato"),
+                Some("Homun check-in disabled"),
             );
         }
     }
@@ -1339,7 +1339,7 @@ fn gc_stale_tasks(state: &AppState) {
                     user,
                     workspace,
                     local_first_task_runtime::TaskStatus::Cancelled,
-                    Some("GC: task d'esecuzione obsoleto"),
+                    Some("GC: stale execution task"),
                 );
                 cancelled += 1;
                 continue;
@@ -1694,7 +1694,7 @@ fn format_memory_block(personal: &[String], project: &[String], budget: usize) -
     if budget == 0 {
         return None;
     }
-    let sections = [("Personale", personal), ("Progetto", project)];
+    let sections = [("Personal", personal), ("Project", project)];
     let mut body = String::new();
     let mut used = 0usize;
     let mut truncated = false;
@@ -1731,12 +1731,12 @@ fn format_memory_block(personal: &[String], project: &[String], budget: usize) -
         return None;
     }
     let mut block = String::from(
-        "PROFILO E MEMORIA — ciò che ricordi dell'utente e del progetto. Usalo se \
-pertinente; non elencarlo a pappagallo e non inventare nulla che non sia qui.\n",
+        "PROFILE AND MEMORY — what you remember about the user and the project. Use it if \
+relevant; don't list it back verbatim and don't invent anything that isn't here.\n",
     );
     block.push_str(&body);
     if truncated {
-        block.push_str("- … (altro disponibile in memoria)\n");
+        block.push_str("- … (more available in memory)\n");
     }
     Some(block.trim_end().to_string())
 }
@@ -2288,7 +2288,7 @@ fn rebuild_decisions_wiki(
     });
 
     let mut body = String::from(
-        "# Decisioni del progetto\n\n> Pagina generata dalla memoria (modificabile a mano: le correzioni rientrano nello strutturato).\n\n",
+        "# Project decisions\n\n> Page generated from memory (editable by hand: corrections flow back into the structured store).\n\n",
     );
     let mut linked = Vec::new();
     for memory in &decisions {
@@ -2337,7 +2337,7 @@ fn rebuild_decisions_wiki(
         user_id: user_id.clone(),
         workspace_id: workspace.clone(),
         path: path.to_string(),
-        title: "Decisioni del progetto".to_string(),
+        title: "Project decisions".to_string(),
         body,
         linked_refs: linked,
         privacy_domain: PrivacyDomain::new("work"),
@@ -2404,7 +2404,7 @@ fn rebuild_profile_wiki(
         }
     }
     let mut body = String::from(
-        "# Profilo personale\n\n> Pagina generata dalla memoria (modificabile a mano: le correzioni rientrano nello strutturato).\n\n",
+        "# Personal profile\n\n> Page generated from memory (editable by hand: corrections flow back into the structured store).\n\n",
     );
     // "Generale" last; entities alphabetical.
     let mut keys: Vec<&String> = sections.keys().collect();
@@ -2427,7 +2427,7 @@ fn rebuild_profile_wiki(
         user_id: user_id.clone(),
         workspace_id: workspace.clone(),
         path: path.to_string(),
-        title: "Profilo personale".to_string(),
+        title: "Personal profile".to_string(),
         body,
         linked_refs: linked,
         privacy_domain: PrivacyDomain::new("personal"),
@@ -2474,11 +2474,11 @@ fn rebuild_project_brief(
         return; // nothing to brief yet
     }
     let mut body = String::from(
-        "# Brief del progetto\n\n> Vista generata (modificabile a mano): obiettivi + stato. \
-Le modifiche restano. È ciò che l'assistente tiene SEMPRE presente del progetto.\n\n## Obiettivi\n\n",
+        "# Project brief\n\n> Generated view (editable by hand): objectives + status. \
+Your edits stick. It's what the assistant ALWAYS keeps in mind about the project.\n\n## Objectives\n\n",
     );
     if goals.is_empty() {
-        body.push_str("_Nessun obiettivo registrato — modifica questa pagina per definire dove sta andando il progetto._\n\n");
+        body.push_str("_No objective recorded — edit this page to define where the project is heading._\n\n");
     } else {
         for g in &goals {
             body.push_str(&format!("- {g}\n"));
@@ -2486,7 +2486,7 @@ Le modifiche restano. È ciò che l'assistente tiene SEMPRE presente del progett
         body.push('\n');
     }
     if !decisions.is_empty() {
-        body.push_str("## Stato e decisioni recenti\n\n");
+        body.push_str("## Recent status and decisions\n\n");
         for d in decisions.iter().take(6) {
             body.push_str(&format!("- {d}\n"));
         }
@@ -2503,7 +2503,7 @@ Le modifiche restano. È ciò che l'assistente tiene SEMPRE presente del progett
         user_id: user_id.clone(),
         workspace_id: workspace.clone(),
         path: path.to_string(),
-        title: "Brief del progetto".to_string(),
+        title: "Project brief".to_string(),
         body,
         linked_refs: Vec::new(),
         privacy_domain: PrivacyDomain::new("personal"),
@@ -2539,10 +2539,10 @@ fn project_objective_block(state: &AppState) -> Option<String> {
         return None;
     }
     let mut block = String::from(
-        "🎯 OBIETTIVO DEL PROGETTO — è la STELLA POLARE. Ogni implementazione, modifica o \
-documento deve SERVIRE questo obiettivo. Mantieni il focus: se la richiesta sembra \
-deviare, allargarsi oltre l'obiettivo, o reintrodurre qualcosa che gli va contro, \
-FALLO NOTARE prima di procedere. Gli obiettivi:",
+        "🎯 PROJECT OBJECTIVE — this is the NORTH STAR. Every implementation, change, or \
+document must SERVE this objective. Stay focused: if the request seems to \
+drift, expand beyond the objective, or reintroduce something that goes against it, \
+POINT IT OUT before proceeding. The objectives:",
     );
     for g in &goals {
         block.push_str(&format!("\n- {g}"));
@@ -2571,7 +2571,7 @@ fn project_brief_block(state: &AppState) -> Option<String> {
     }
     let capped: String = body.chars().take(2000).collect();
     Some(format!(
-        "BRIEF DEL PROGETTO (obiettivi e stato — dove sta andando; tienilo presente, non deviare):\n{capped}"
+        "PROJECT BRIEF (objectives and status — where it's heading; keep it in mind, don't drift):\n{capped}"
     ))
 }
 
@@ -2604,7 +2604,7 @@ fn recent_work_block(state: &AppState) -> Option<String> {
     }
     let capped: String = out.lines().take(8).collect::<Vec<_>>().join("\n").chars().take(1200).collect();
     Some(format!(
-        "LAVORO RECENTE (ultimi commit del progetto — riprendi il filo, non ripartire da zero):\n{capped}"
+        "RECENT WORK (the project's latest commits — pick up the thread, don't start from scratch):\n{capped}"
     ))
 }
 
@@ -2768,7 +2768,7 @@ async fn consolidate_scope(
             };
             for reference in &redundant {
                 if facade
-                    .delete_memory(&lifecycle, reference, "duplicato fuso (consolidamento)")
+                    .delete_memory(&lifecycle, reference, "merged duplicate (consolidation)")
                     .is_ok()
                 {
                     merged += 1;
@@ -2854,7 +2854,7 @@ If there is nothing to do: {\"merges\":[],\"drops\":[]}.";
             let _ = facade.confirm_memory(&lifecycle, &record.reference, "consolidated");
             for idx in &from {
                 if let Some((reference, _, _)) = mems.get(*idx) {
-                    let _ = facade.delete_memory(&lifecycle, reference, "fuso in consolidamento");
+                    let _ = facade.delete_memory(&lifecycle, reference, "merged in consolidation");
                 }
             }
             merged += 1;
@@ -3173,7 +3173,7 @@ fn sweep_graph_orphans(state: &AppState, workspace: &MemoryWorkspaceId) {
             &entity.reference,
             &user,
             workspace,
-            "orfana: nessuna memoria viva la riguarda",
+            "orphan: no live memory references it",
         );
     }
     // F6: refresh the human-readable profile view from the (now-consistent) graph.
@@ -3212,18 +3212,18 @@ fn summarize_tool_action(name: &str, args_raw: &str) -> Option<String> {
     };
     let clip = |text: String, n: usize| text.chars().take(n).collect::<String>();
     let line = match name {
-        "write_file" | "edit_file" => format!("modificato file {}", field("path")),
-        "create_artifact" => format!("creato artefatto {}", field("name")),
+        "write_file" | "edit_file" => format!("edited file {}", field("path")),
+        "create_artifact" => format!("created artifact {}", field("name")),
         "save_artifact" => {
             let target = if field("name").is_empty() { field("path") } else { field("name") };
-            format!("salvato {target}")
+            format!("saved {target}")
         }
-        "run_in_project" => format!("eseguito nel progetto: {}", clip(field("command"), 120)),
-        "run_in_sandbox" => format!("eseguito in sandbox: {}", clip(field("command"), 120)),
-        "create_skill" => format!("creata skill {}", field("name")),
-        "customize_addon" => format!("personalizzato addon {}", field("addon_id")),
-        "schedule_task" => format!("pianificato task: {}", clip(field("prompt"), 80)),
-        "cancel_scheduled_task" => format!("annullato task {}", field("task_id")),
+        "run_in_project" => format!("ran in the project: {}", clip(field("command"), 120)),
+        "run_in_sandbox" => format!("ran in sandbox: {}", clip(field("command"), 120)),
+        "create_skill" => format!("created skill {}", field("name")),
+        "customize_addon" => format!("customized addon {}", field("addon_id")),
+        "schedule_task" => format!("scheduled task: {}", clip(field("prompt"), 80)),
+        "cancel_scheduled_task" => format!("cancelled task {}", field("task_id")),
         // Pure reads / discovery → nothing to remember.
         "read_file" | "read_text_file" | "list_files" | "list_directory" | "recall_memory"
         | "suggest_capabilities" => return None,
@@ -3429,25 +3429,25 @@ substantially updated decisions relative to these):\n{known_decisions}"
     };
     let exchange = match speaker {
         Some(name) => {
-            format!("MESSAGGIO da {name} (canale):\n{user_message}\n\nRISPOSTA: {assistant_message}")
+            format!("MESSAGE from {name} (channel):\n{user_message}\n\nREPLY: {assistant_message}")
         }
         None => {
             // On a confirmation turn, prepend the assistant's PREVIOUS question so a
             // bare "sì"/"no, …" can be grounded into the fact it confirms or corrects.
             let preface = match prev_assistant {
                 Some(p) if is_confirmation && !p.trim().is_empty() => format!(
-                    "ASSISTENTE (turno precedente — ciò a cui l'utente sta rispondendo): {}\n\n",
+                    "ASSISTANT (previous turn — what the user is replying to): {}\n\n",
                     p.trim()
                 ),
                 _ => String::new(),
             };
-            format!("{preface}UTENTE: {user_message}\n\nASSISTENTE: {assistant_message}")
+            format!("{preface}USER: {user_message}\n\nASSISTANT: {assistant_message}")
         }
     };
     let user_content = if actions.trim().is_empty() {
         exchange
     } else {
-        format!("{exchange}\n\nAZIONI ESEGUITE in questo turno:\n{actions}")
+        format!("{exchange}\n\nACTIONS PERFORMED this turn:\n{actions}")
     };
     let payload = serde_json::json!({
         "model": model,
@@ -3686,9 +3686,9 @@ fn record_decision(state: &AppState, args: &serde_json::Value) -> String {
     };
     // The "why" lives in the text too, so the existing recall (which surfaces the
     // record text) shows it without needing to render the structured fields.
-    let text = redact_sensitive_text(&format!("{summary} — perché: {rationale}"));
+    let text = redact_sensitive_text(&format!("{summary} — why: {rationale}"));
     let Ok(facade) = lock_memory_facade(state) else {
-        return "Memoria non disponibile.".to_string();
+        return "Memory unavailable.".to_string();
     };
     let record = facade.create_memory_candidate(MemoryCreateRequest {
         request: lifecycle.clone(),
@@ -3711,10 +3711,10 @@ fn record_decision(state: &AppState, args: &serde_json::Value) -> String {
         Ok(rec) => {
             let _ = facade.confirm_memory(&lifecycle, &rec.reference, "decision recorded by agent");
             rebuild_decisions_wiki(&facade, &user, &workspace);
-            "✅ Decisione registrata in memoria (il perché resterà disponibile nei prossimi turni e \
-nelle prossime sessioni).".to_string()
+            "✅ Decision recorded in memory (the why will stay available in upcoming turns and \
+in future sessions).".to_string()
         }
-        Err(error) => format!("Non sono riuscito a registrare la decisione: {error}"),
+        Err(error) => format!("I couldn't record the decision: {error}"),
     }
 }
 
@@ -3857,12 +3857,12 @@ fn forget_topic_in_scope(
 fn forget_memory(state: &AppState, args: &serde_json::Value) -> String {
     let query = args.get("query").and_then(|q| q.as_str()).unwrap_or("").trim().to_string();
     if query.is_empty() {
-        return "Per dimenticare qualcosa indica cosa (query).".to_string();
+        return "To forget something, tell me what (query).".to_string();
     }
     let reason = args
         .get("reason")
         .and_then(|r| r.as_str())
-        .unwrap_or("oblio richiesto dall'utente");
+        .unwrap_or("forgetting requested by the user");
     // Contact-backed entities are people with a card — never topic-forget those
     // (the address book has its own delete). Gathered before the facade lock.
     let protected: std::collections::HashSet<String> = lock_store(state)
@@ -3871,7 +3871,7 @@ fn forget_memory(state: &AppState, args: &serde_json::Value) -> String {
         .map(|cs| cs.into_iter().filter_map(|c| c.entity_ref).collect())
         .unwrap_or_default();
     let Ok(facade) = lock_memory_facade(state) else {
-        return "Memoria non disponibile.".to_string();
+        return "Memory unavailable.".to_string();
     };
     let user = gateway_memory_user_id();
     let active = gateway_memory_workspace_id();
@@ -3896,14 +3896,14 @@ fn forget_memory(state: &AppState, args: &serde_json::Value) -> String {
         }
     }
     if deleted.is_empty() {
-        format!("Non ho trovato in memoria nulla che corrisponda a «{query}».")
+        format!("I didn't find anything in memory matching «{query}».")
     } else {
         let list = deleted
             .iter()
             .map(|d| format!("- {}", d.chars().take(90).collect::<String>()))
             .collect::<Vec<_>>()
             .join("\n");
-        format!("🗑️ Ho dimenticato {} elemento/i dalla memoria:\n{list}", deleted.len())
+        format!("🗑️ I forgot {} item(s) from memory:\n{list}", deleted.len())
     }
 }
 
@@ -4007,10 +4007,10 @@ fn query_git_history_tool_schema() -> serde_json::Value {
         "type": "function",
         "function": {
             "name": "query_git_history",
-            "description": "Interroga la STORIA git del progetto attivo: dato un file, un simbolo o un \
-tema, restituisce i commit rilevanti (messaggio = il PERCHÉ, con data) e quando il codice \
-relativo è cambiato. Usalo per 'perché/quando è cambiato X', 'la storia di Y', 'cosa è \
-successo a questo file'.",
+            "description": "Query the git HISTORY of the active project: given a file, a symbol, or a \
+theme, returns the relevant commits (message = the WHY, with date) and when the related \
+code changed. Use it for 'why/when did X change', 'the history of Y', 'what \
+happened to this file'.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -4027,10 +4027,10 @@ fn github_search_tool_schema() -> serde_json::Value {
         "type": "function",
         "function": {
             "name": "github_search",
-            "description": "Cerca REPOSITORY su GitHub via API (veloce e strutturato, NIENTE browser). \
-Usalo per \"cerca su GitHub\", trovare progetti simili/concorrenti, valutare l'unicità di un'idea, o \
-ispezionare repo per stelle/linguaggio/freschezza. Restituisce i top repo ordinati per stelle. \
-PREFERISCILO SEMPRE al browser per le query su GitHub.",
+            "description": "Search REPOSITORIES on GitHub via API (fast and structured, NO browser). \
+Use it for \"search GitHub\", finding similar/competing projects, assessing the uniqueness of an idea, or \
+inspecting repos for stars/language/freshness. Returns the top repos sorted by stars. \
+ALWAYS PREFER it over the browser for GitHub queries.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -4061,17 +4061,17 @@ async fn github_search(state: &AppState, query: &str) -> String {
         .await;
     let resp = match resp {
         Ok(r) if r.status().is_success() => r,
-        Ok(r) => return format!("Ricerca GitHub fallita (HTTP {}).", r.status()),
-        Err(_) => return "Ricerca GitHub non riuscita (rete).".to_string(),
+        Ok(r) => return format!("GitHub search failed (HTTP {}).", r.status()),
+        Err(_) => return "GitHub search failed (network).".to_string(),
     };
     let Ok(json) = resp.json::<serde_json::Value>().await else {
-        return "Risposta GitHub illeggibile.".to_string();
+        return "Unreadable GitHub response.".to_string();
     };
     let items = json.get("items").and_then(|v| v.as_array()).cloned().unwrap_or_default();
     if items.is_empty() {
-        return format!("Nessun repository trovato su GitHub per «{query}».");
+        return format!("No repository found on GitHub for «{query}».");
     }
-    let mut out = format!("Risultati GitHub per «{query}» (top per stelle):");
+    let mut out = format!("GitHub results for «{query}» (top by stars):");
     for it in items.iter().take(8) {
         let name = it.get("full_name").and_then(|v| v.as_str()).unwrap_or("?");
         let stars = it.get("stargazers_count").and_then(|v| v.as_u64()).unwrap_or(0);
@@ -4091,7 +4091,7 @@ async fn github_search(state: &AppState, query: &str) -> String {
 fn query_git_history(query: &str) -> String {
     let q = query.trim();
     if q.is_empty() {
-        return "Indica un file, simbolo o tema.".to_string();
+        return "Indicate a file, symbol or topic.".to_string();
     }
     let ws = gateway_memory_workspace_id();
     let folder = load_workspaces_file()
@@ -4101,7 +4101,7 @@ fn query_git_history(query: &str) -> String {
         .and_then(|w| w.folder)
         .filter(|f| !f.trim().is_empty());
     let Some(folder) = folder else {
-        return "Questo scope non è un progetto con cartella.".to_string();
+        return "This scope is not a project with a folder.".to_string();
     };
     let root = std::path::Path::new(&folder);
     let is_git = std::process::Command::new("git")
@@ -4112,7 +4112,7 @@ fn query_git_history(query: &str) -> String {
         .map(|o| o.status.success())
         .unwrap_or(false);
     if !is_git {
-        return "Questo progetto non è ancora sotto git (nessuna storia da consultare).".to_string();
+        return "This project isn't under git yet (no history to consult).".to_string();
     }
     let run = |args: &[&str]| -> String {
         std::process::Command::new("git")
@@ -4138,17 +4138,17 @@ fn query_git_history(query: &str) -> String {
         String::new()
     };
     if by_msg.is_empty() && by_code.is_empty() && by_path.is_empty() {
-        return format!("Nessun commit trovato per «{q}» (forse è codice non ancora committato).");
+        return format!("No commit found for «{q}» (maybe it's code not yet committed).");
     }
-    let mut out = format!("Storia git per «{q}»:\n");
+    let mut out = format!("Git history for «{q}»:\n");
     if !by_msg.is_empty() {
-        out.push_str(&format!("\n**Commit che la citano (perché):**\n{by_msg}\n"));
+        out.push_str(&format!("\n**Commits that mention it (why):**\n{by_msg}\n"));
     }
     if !by_path.is_empty() {
-        out.push_str(&format!("\n**Storia del file:**\n{by_path}\n"));
+        out.push_str(&format!("\n**File history:**\n{by_path}\n"));
     }
     if !by_code.is_empty() {
-        out.push_str(&format!("\n**Quando il codice con «{q}» è cambiato:**\n{by_code}\n"));
+        out.push_str(&format!("\n**When the code with «{q}» changed:**\n{by_code}\n"));
     }
     out
 }
@@ -4156,10 +4156,10 @@ fn query_git_history(query: &str) -> String {
 fn query_code_graph(state: &AppState, symbol: &str) -> String {
     let needle = symbol.trim().to_lowercase();
     if needle.is_empty() {
-        return "Indica un simbolo (funzione/file) da esplorare.".to_string();
+        return "Specify a symbol (function/file) to explore.".to_string();
     }
     let Ok(facade) = lock_memory_facade(state) else {
-        return "Memoria non disponibile.".to_string();
+        return "Memory unavailable.".to_string();
     };
     let user = gateway_memory_user_id();
     let ws = gateway_memory_workspace_id();
@@ -4170,14 +4170,14 @@ fn query_code_graph(state: &AppState, symbol: &str) -> String {
         .filter(|e| e.entity_type.starts_with("code_"))
         .collect();
     if code.is_empty() {
-        return "Per questo progetto non c'è ancora una mappa del codice.".to_string();
+        return "There's no code map for this project yet.".to_string();
     }
     let Some(target) = code
         .iter()
         .find(|e| e.name.to_lowercase() == needle)
         .or_else(|| code.iter().find(|e| e.name.to_lowercase().contains(&needle)))
     else {
-        return format!("Non trovo «{symbol}» nella mappa del codice del progetto.");
+        return format!("I can't find «{symbol}» in the project's code map.");
     };
     let tref = target.reference.to_string();
     let name_by_ref: std::collections::HashMap<String, String> =
@@ -4208,12 +4208,12 @@ fn query_code_graph(state: &AppState, symbol: &str) -> String {
     if let Some(c) = container { out.push_str(&format!(" (in {c})")); }
     out.push('\n');
     if callers.is_empty() {
-        out.push_str("- Nessun chiamante noto.\n");
+        out.push_str("- No known callers.\n");
     } else {
-        out.push_str(&format!("- Chiamato da: {}\n", callers.join(", ")));
+        out.push_str(&format!("- Called by: {}\n", callers.join(", ")));
     }
     if !calls.is_empty() {
-        out.push_str(&format!("- Usa/chiama: {}\n", calls.join(", ")));
+        out.push_str(&format!("- Uses/calls: {}\n", calls.join(", ")));
     }
     out
 }
@@ -4234,9 +4234,9 @@ fields below; I do the computation. Returns the ISO value to write into forms or
                     "kind": {
                         "type": "string",
                         "enum": ["relative_day", "weekday", "relative_unit", "absolute"],
-                        "description": "relative_day: oggi/domani/ieri/dopodomani (usa offset_days). \
-weekday: un giorno della settimana (usa weekday + which). relative_unit: \"tra N giorni/settimane/mesi\" \
-(usa n + unit). absolute: data esplicita (usa date)."
+                        "description": "relative_day: today/tomorrow/yesterday/day-after-tomorrow (use offset_days). \
+weekday: a day of the week (use weekday + which). relative_unit: \"in N days/weeks/months\" \
+(use n + unit). absolute: explicit date (use date)."
                     },
                     "offset_days": {
                         "type": "integer",
@@ -4295,11 +4295,11 @@ EVENT-based (non-time) triggers use create_automation. Do NOT use it for one-off
                     },
                     "every": {
                         "type": "string",
-                        "description": "Quando/ogni quanto ripetere. INTERVALLO: \"every 30m\", \"every 6h\", \"every 1d\", \"every 1w\". ANCORATO: \"daily@08:00\", \"weekly@mon@09:30\". PIÙ GIORNI/ORARI: \"dow@mon,wed,fri@08:00,12:00,18:00\" (o \"dow@*@09:00\" per ogni giorno). Giorni: mon..sun o lun..dom."
+                        "description": "When/how often to repeat. INTERVAL: \"every 30m\", \"every 6h\", \"every 1d\", \"every 1w\". ANCHORED: \"daily@08:00\", \"weekly@mon@09:30\". MULTIPLE DAYS/TIMES: \"dow@mon,wed,fri@08:00,12:00,18:00\" (or \"dow@*@09:00\" for every day). Days: mon..sun or lun..dom."
                     },
                     "timezone": {
                         "type": "string",
-                        "description": "Fuso orario IANA per le regole ancorate a un orario (es. \"Europe/Rome\"). Opzionale: se assente uso il fuso del sistema. Irrilevante per gli intervalli."
+                        "description": "IANA timezone for rules anchored to a time (e.g. \"Europe/Rome\"). Optional: if absent I use the system timezone. Irrelevant for intervals."
                     }
                 },
                 "required": ["goal", "every"]
@@ -4319,7 +4319,7 @@ EVENT-based (non-time) triggers use create_automation. Do NOT use it for one-off
 fn schedule_proactive_task(state: &AppState, goal: &str, every: &str, tz: Option<&str>) -> String {
     let now = OffsetDateTime::now_utc();
     let Some(next) = local_first_task_runtime::next_occurrence(every, tz, now) else {
-        return format!("Pianificazione '{every}' non valida. Usa un intervallo (\"every 6h\", \"every 1d\") o un orario (\"daily@08:00\", \"weekly@mon@09:30\").");
+        return format!("Schedule '{every}' is not valid. Use an interval (\"every 6h\", \"every 1d\") or a time (\"daily@08:00\", \"weekly@mon@09:30\").");
     };
     let id = format!("sched_{}", uuid::Uuid::new_v4().simple());
     let mut task = TaskRecord::new(
@@ -4336,12 +4336,12 @@ fn schedule_proactive_task(state: &AppState, goal: &str, every: &str, tz: Option
     match lock_task_store(state) {
         Ok(store) => match store.insert_task(&task) {
             Ok(()) => format!(
-                "✅ Pianificato: «{goal}» ({every}). Prima esecuzione: {next}. \
-Ti aggiornerò nel thread «Pianificato»."
+                "✅ Scheduled: «{goal}» ({every}). First execution: {next}. \
+I'll keep you posted in the «Scheduled» thread."
             ),
-            Err(error) => format!("Non sono riuscito a pianificare il task: {error}"),
+            Err(error) => format!("I couldn't schedule the task: {error}"),
         },
-        Err(_) => "Store dei task non disponibile: pianificazione non riuscita.".to_string(),
+        Err(_) => "Task store unavailable: scheduling failed.".to_string(),
     }
 }
 
@@ -4363,13 +4363,13 @@ struct AutomationCreateRequest {
 fn humanize_recurrence(rec: &str) -> String {
     fn day_label(d: &str) -> &str {
         match d.trim() {
-            "mon" => "Lun",
-            "tue" => "Mar",
-            "wed" => "Mer",
-            "thu" => "Gio",
-            "fri" => "Ven",
-            "sat" => "Sab",
-            "sun" => "Dom",
+            "mon" => "Mon",
+            "tue" => "Tue",
+            "wed" => "Wed",
+            "thu" => "Thu",
+            "fri" => "Fri",
+            "sat" => "Sat",
+            "sun" => "Sun",
             other => other,
         }
     }
@@ -4378,7 +4378,7 @@ fn humanize_recurrence(rec: &str) -> String {
         if let Some((days, times)) = rest.trim_start_matches(['@', ' ']).split_once('@') {
             let times_h = times.split(',').map(str::trim).collect::<Vec<_>>().join(", ");
             let days_h = if matches!(days.trim(), "*" | "all" | "daily" | "") {
-                "Ogni giorno".to_string()
+                "Every day".to_string()
             } else {
                 days.split(',').map(day_label).collect::<Vec<_>>().join(", ")
             };
@@ -4386,7 +4386,7 @@ fn humanize_recurrence(rec: &str) -> String {
         }
     }
     if let Some(t) = lower.strip_prefix("daily") {
-        return format!("Ogni giorno · {}", t.trim_start_matches(['@', ' ']).trim());
+        return format!("Every day · {}", t.trim_start_matches(['@', ' ']).trim());
     }
     if let Some(rest) = lower.strip_prefix("weekly") {
         let rest = rest.trim_start_matches(['@', ' ']);
@@ -4395,7 +4395,7 @@ fn humanize_recurrence(rec: &str) -> String {
         }
     }
     if lower.starts_with("every") {
-        return rec.replacen("every", "Ogni", 1);
+        return rec.replacen("every", "Every", 1);
     }
     rec.to_string()
 }
@@ -4404,28 +4404,28 @@ fn humanize_recurrence(rec: &str) -> String {
 fn automation_trigger_summary(trigger: &AutomationTrigger) -> String {
     match trigger {
         AutomationTrigger::Schedule { recurrence, .. } => {
-            format!("Orario · {}", humanize_recurrence(recurrence))
+            format!("Schedule · {}", humanize_recurrence(recurrence))
         }
         AutomationTrigger::Event { event } => match event {
             EventTrigger::ChannelMessage { channel, from } => {
-                let ch = channel.as_deref().unwrap_or("qualsiasi canale");
+                let ch = channel.as_deref().unwrap_or("any channel");
                 match from {
-                    Some(f) => format!("Quando {f} scrive su {ch}"),
-                    None => format!("Messaggio su {ch}"),
+                    Some(f) => format!("When {f} writes on {ch}"),
+                    None => format!("Message on {ch}"),
                 }
             }
             EventTrigger::EmailReceived { from } => match from {
-                Some(f) => format!("Email da {f}"),
-                None => "Email ricevuta".to_string(),
+                Some(f) => format!("Email from {f}"),
+                None => "Email received".to_string(),
             },
-            EventTrigger::FileChanged { path } => format!("File modificato: {path}"),
+            EventTrigger::FileChanged { path } => format!("File changed: {path}"),
             EventTrigger::MemoryUpdated { topic } => match topic {
-                Some(t) => format!("Memoria aggiornata: {t}"),
-                None => "Memoria aggiornata".to_string(),
+                Some(t) => format!("Memory updated: {t}"),
+                None => "Memory updated".to_string(),
             },
             EventTrigger::ConnectorPoll { tool, label, .. } => match label {
-                Some(l) => format!("Evento · {l}"),
-                None => format!("Evento · {tool}"),
+                Some(l) => format!("Event · {l}"),
+                None => format!("Event · {tool}"),
             },
         },
     }
@@ -4477,7 +4477,7 @@ fn materialize_automation_task(
     };
     let now = OffsetDateTime::now_utc();
     let next = local_first_task_runtime::next_occurrence(&recurrence, tz.as_deref(), now)
-        .ok_or_else(|| format!("ricorrenza '{recurrence}' non valida"))?;
+        .ok_or_else(|| format!("recurrence '{recurrence}' is not valid"))?;
     let task_id = format!("autorun_{}", uuid::Uuid::new_v4().simple());
     let mut task = TaskRecord::new(
         task_id.clone(),
@@ -4501,7 +4501,7 @@ fn cancel_automation_task(store: &TaskStore, task_id: &str) {
         &gateway_user_id(),
         &gateway_workspace_id(),
         TaskStatus::Cancelled,
-        Some("automazione disattivata o eliminata"),
+        Some("automation disabled or deleted"),
     );
 }
 
@@ -4517,13 +4517,13 @@ fn create_automation_tool_schema() -> serde_json::Value {
                     "title": { "type": "string", "description": "Short title of the automation" },
                     "prompt": { "type": "string", "description": "What to do when it triggers, in natural language" },
                     "trigger_type": { "type": "string", "enum": ["schedule", "event"], "description": "schedule = time-based; event = on an incoming message on a channel" },
-                    "recurrence": { "type": "string", "description": "Solo schedule. Formati: daily@HH:MM | weekly@<gg>@HH:MM | dow@<gg,gg,…>@<HH:MM,HH:MM,…> per PIÙ GIORNI e PIÙ ORARI (es. \"dow@mon,wed,fri@08:00,12:00,18:00\"; usa dow@*@HH:MM,… per ogni giorno) | every Nh | every Nd. Giorni: mon,tue,wed,thu,fri,sat,sun." },
+                    "recurrence": { "type": "string", "description": "Schedule only. Formats: daily@HH:MM | weekly@<dd>@HH:MM | dow@<dd,dd,…>@<HH:MM,HH:MM,…> for MULTIPLE DAYS and MULTIPLE TIMES (e.g. \"dow@mon,wed,fri@08:00,12:00,18:00\"; use dow@*@HH:MM,… for every day) | every Nh | every Nd. Days: mon,tue,wed,thu,fri,sat,sun." },
                     "timezone": { "type": "string", "description": "Schedule only: IANA timezone (default: user's timezone)" },
                     "event_channel": { "type": "string", "description": "Channel event only: whatsapp | telegram (empty = any channel)" },
                     "event_from": { "type": "string", "description": "Channel event only: sender's name or number (empty = anyone)" },
-                    "event_tool": { "type": "string", "description": "Solo event su SERVIZIO COLLEGATO (Gmail/Calendar/Slack/MCP/…): il nome ESATTO del tool di lettura da interrogare ciclicamente (scoprilo con find_capability), es. \"GMAIL_FETCH_EMAILS\". Lascia vuoto per un evento su canale." },
-                    "event_args": { "type": "object", "description": "Solo con event_tool: gli argomenti della query (es. {\"query\":\"is:unread from:mario\"})" },
-                    "event_key_field": { "type": "string", "description": "Solo con event_tool: il campo che identifica univocamente un elemento (per non rifare scattare i già visti), es. \"messageId\", \"id\"." },
+                    "event_tool": { "type": "string", "description": "Only for event on a CONNECTED SERVICE (Gmail/Calendar/Slack/MCP/…): the EXACT name of the read tool to poll cyclically (discover it with find_capability), e.g. \"GMAIL_FETCH_EMAILS\". Leave empty for a channel event." },
+                    "event_args": { "type": "object", "description": "Only with event_tool: the query arguments (e.g. {\"query\":\"is:unread from:mario\"})" },
+                    "event_key_field": { "type": "string", "description": "Only with event_tool: the field that uniquely identifies an item (so already-seen ones don't trigger again), e.g. \"messageId\", \"id\"." },
                     "require_confirmation": { "type": "boolean", "description": "true (default) = asks for confirmation before sending/publishing; false = autonomous" }
                 },
                 "required": ["title", "prompt", "trigger_type"]
@@ -4548,7 +4548,7 @@ fn create_automation_from_chat(state: &AppState, args_raw: &str) -> String {
     let title = s("title");
     let prompt = s("prompt");
     if title.is_empty() || prompt.is_empty() {
-        return "Per creare un'automazione servono almeno il titolo e cosa fare (prompt).".to_string();
+        return "Creating an automation requires at least the title and what to do (prompt).".to_string();
     }
     let trigger = if s("trigger_type") == "event" {
         // Event on a connected service (Gmail/Calendar/Slack/MCP/…) via polling, when a
@@ -4556,7 +4556,7 @@ fn create_automation_from_chat(state: &AppState, args_raw: &str) -> String {
         if let Some(tool) = opt("event_tool") {
             let key_field = s("event_key_field");
             if key_field.is_empty() {
-                return "Per un evento su un servizio collegato serve event_key_field (il campo che identifica un elemento, es. \"messageId\").".to_string();
+                return "An event on a connected service requires event_key_field (the field that identifies an item, e.g. \"messageId\").".to_string();
             }
             let event_args = args.get("event_args").cloned().unwrap_or_else(|| serde_json::json!({}));
             AutomationTrigger::Event {
@@ -4578,7 +4578,7 @@ fn create_automation_from_chat(state: &AppState, args_raw: &str) -> String {
     } else {
         let recurrence = s("recurrence");
         if recurrence.is_empty() {
-            return "Per un'automazione a orario serve la ricorrenza (es. \"daily@08:00\", \"weekly@fri@18:00\", \"every 6h\").".to_string();
+            return "A time-based automation requires the recurrence (e.g. \"daily@08:00\", \"weekly@fri@18:00\", \"every 6h\").".to_string();
         }
         let tz = opt("timezone").or_else(|| Some(effective_user_tz_name()));
         AutomationTrigger::Schedule { recurrence, tz }
@@ -4590,7 +4590,7 @@ fn create_automation_from_chat(state: &AppState, args_raw: &str) -> String {
     };
     let store = match lock_task_store(state) {
         Ok(store) => store,
-        Err(_) => return "Store dei task non disponibile.".to_string(),
+        Err(_) => return "Task store unavailable.".to_string(),
     };
     // Dedup: a near-identical existing automation (same trigger kind + >0.6 prompt overlap).
     let new_kind = match &trigger {
@@ -4609,7 +4609,7 @@ fn create_automation_from_chat(state: &AppState, args_raw: &str) -> String {
             let uni = new_tokens.union(&a_tokens).count().max(1);
             if inter as f64 / uni as f64 > 0.6 {
                 return format!(
-                    "Esiste già un'automazione simile: «{}». Non ne creo un duplicato (gestiscila dalla sezione Automazioni).",
+                    "A similar automation already exists: «{}». I won't create a duplicate (manage it from the Automations section).",
                     a.title
                 );
             }
@@ -4634,13 +4634,13 @@ fn create_automation_from_chat(state: &AppState, args_raw: &str) -> String {
     };
     match materialize_automation_task(&store, &automation) {
         Ok(task_id) => automation.task_id = task_id,
-        Err(msg) => return format!("Ricorrenza non valida: {msg}"),
+        Err(msg) => return format!("Invalid recurrence: {msg}"),
     }
     if store.upsert_automation(&automation).is_err() {
-        return "Non sono riuscito a salvare l'automazione.".to_string();
+        return "I couldn't save the automation.".to_string();
     }
     format!(
-        "✅ Automazione creata: «{}» — {}. La trovi nella sezione Automazioni.",
+        "✅ Automation created: «{}» — {}. You'll find it in the Automations section.",
         automation.title,
         automation_trigger_summary(&automation.trigger)
     )
@@ -4802,7 +4802,7 @@ fn connector_fire_run(
         .take(2000)
         .collect();
     let goal = format!(
-        "{}\n\n[Evento scatenante: {label}]\nDato dell'evento (JSON):\n{item_str}",
+        "{}\n\n[Triggering event: {label}]\nEvent data (JSON):\n{item_str}",
         automation.prompt
     );
     let mut task = TaskRecord::new(
@@ -4856,7 +4856,7 @@ fn fire_channel_event_automations(state: &AppState, channel: &str, message: &Cha
         }
         let task_id = format!("autorun_{}", uuid::Uuid::new_v4().simple());
         let goal = format!(
-            "{}\n\n[Evento scatenante: messaggio {channel} da {speaker}]\nContenuto del messaggio: {}",
+            "{}\n\n[Triggering event: {channel} message from {speaker}]\nMessage content: {}",
             automation.prompt, message.content
         );
         let mut task = TaskRecord::new(
@@ -5052,7 +5052,7 @@ async fn automations_list(
     State(state): State<AppState>,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
     let store = lock_task_store(&state)
-        .map_err(|_| GatewayError { status: StatusCode::SERVICE_UNAVAILABLE, code: "task_store", message: "store dei task non disponibile".into() })?;
+        .map_err(|_| GatewayError { status: StatusCode::SERVICE_UNAVAILABLE, code: "task_store", message: "task store unavailable".into() })?;
     let items = store
         .list_automations(&gateway_user_id(), &gateway_workspace_id())
         .map_err(|e| GatewayError { status: StatusCode::INTERNAL_SERVER_ERROR, code: "automations_list", message: e.to_string() })?;
@@ -5069,7 +5069,7 @@ async fn automation_create(
     // Validate a schedule trigger's recurrence up front (fail fast, like schedule_task).
     if let AutomationTrigger::Schedule { recurrence, tz } = &req.trigger {
         if local_first_task_runtime::next_occurrence(recurrence, tz.as_deref(), OffsetDateTime::now_utc()).is_none() {
-            return Err(GatewayError { status: StatusCode::BAD_REQUEST, code: "bad_recurrence", message: format!("ricorrenza '{recurrence}' non valida") });
+            return Err(GatewayError { status: StatusCode::BAD_REQUEST, code: "bad_recurrence", message: format!("recurrence '{recurrence}' is not valid") });
         }
     }
     let now = OffsetDateTime::now_utc();
@@ -5090,7 +5090,7 @@ async fn automation_create(
         state: None,
     };
     let store = lock_task_store(&state)
-        .map_err(|_| GatewayError { status: StatusCode::SERVICE_UNAVAILABLE, code: "task_store", message: "store dei task non disponibile".into() })?;
+        .map_err(|_| GatewayError { status: StatusCode::SERVICE_UNAVAILABLE, code: "task_store", message: "task store unavailable".into() })?;
     // Schedule + enabled → materialize the recurring task that drives it now.
     automation.task_id = materialize_automation_task(&store, &automation)
         .map_err(|msg| GatewayError { status: StatusCode::BAD_REQUEST, code: "bad_recurrence", message: msg })?;
@@ -5105,11 +5105,11 @@ async fn automation_toggle(
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
     let store = lock_task_store(&state)
-        .map_err(|_| GatewayError { status: StatusCode::SERVICE_UNAVAILABLE, code: "task_store", message: "store dei task non disponibile".into() })?;
+        .map_err(|_| GatewayError { status: StatusCode::SERVICE_UNAVAILABLE, code: "task_store", message: "task store unavailable".into() })?;
     let mut automation = store
         .get_automation(&id, &gateway_user_id(), &gateway_workspace_id())
         .map_err(|e| GatewayError { status: StatusCode::INTERNAL_SERVER_ERROR, code: "automation_get", message: e.to_string() })?
-        .ok_or_else(|| GatewayError { status: StatusCode::NOT_FOUND, code: "automation_missing", message: "automazione non trovata".into() })?;
+        .ok_or_else(|| GatewayError { status: StatusCode::NOT_FOUND, code: "automation_missing", message: "automation not found".into() })?;
     automation.enabled = !automation.enabled;
     automation.updated_at = OffsetDateTime::now_utc();
     if automation.enabled {
@@ -5133,7 +5133,7 @@ async fn automation_delete(
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
     let store = lock_task_store(&state)
-        .map_err(|_| GatewayError { status: StatusCode::SERVICE_UNAVAILABLE, code: "task_store", message: "store dei task non disponibile".into() })?;
+        .map_err(|_| GatewayError { status: StatusCode::SERVICE_UNAVAILABLE, code: "task_store", message: "task store unavailable".into() })?;
     // Stop the driving task (if any) before removing the rule.
     if let Ok(Some(existing)) = store.get_automation(&id, &gateway_user_id(), &gateway_workspace_id()) {
         if let Some(tid) = existing.task_id.as_deref() {
@@ -5177,11 +5177,11 @@ fn cancel_scheduled_task_tool_schema() -> serde_json::Value {
 fn list_scheduled_tasks(state: &AppState) -> String {
     let store = match lock_task_store(state) {
         Ok(store) => store,
-        Err(_) => return "Store dei task non disponibile.".to_string(),
+        Err(_) => return "Task store unavailable.".to_string(),
     };
     let tasks = match store.list_tasks(&gateway_user_id(), &gateway_workspace_id()) {
         Ok(tasks) => tasks,
-        Err(error) => return format!("Errore nella lettura dei task: {error}"),
+        Err(error) => return format!("Error reading tasks: {error}"),
     };
     let mut rows: Vec<String> = Vec::new();
     for task in tasks {
@@ -5197,21 +5197,21 @@ fn list_scheduled_tasks(state: &AppState) -> String {
         ) {
             continue;
         }
-        let every = task.recurrence.as_deref().unwrap_or("una tantum");
+        let every = task.recurrence.as_deref().unwrap_or("one-off");
         let next = task
             .not_before
             .map(|n| n.to_string())
             .unwrap_or_else(|| "—".to_string());
         rows.push(format!(
-            "- id={} · «{}» · ogni {every} · prossima: {next}",
+            "- id={} · «{}» · every {every} · next: {next}",
             task.task_id.as_str(),
             task.goal
         ));
     }
     if rows.is_empty() {
-        "Nessun task pianificato attivo.".to_string()
+        "No active scheduled tasks.".to_string()
     } else {
-        format!("Task pianificati attivi:\n{}", rows.join("\n"))
+        format!("Active scheduled tasks:\n{}", rows.join("\n"))
     }
 }
 
@@ -5221,11 +5221,11 @@ fn list_scheduled_tasks(state: &AppState) -> String {
 fn cancel_scheduled_task(state: &AppState, task_id: &str) -> String {
     let id = task_id.trim();
     if id.is_empty() {
-        return "Specifica l'id del task (usa prima list_scheduled_tasks).".to_string();
+        return "Specify the task id (use list_scheduled_tasks first).".to_string();
     }
     let store = match lock_task_store(state) {
         Ok(store) => store,
-        Err(_) => return "Store dei task non disponibile.".to_string(),
+        Err(_) => return "Task store unavailable.".to_string(),
     };
     let user = gateway_user_id();
     let workspace = gateway_workspace_id();
@@ -5233,12 +5233,12 @@ fn cancel_scheduled_task(state: &AppState, task_id: &str) -> String {
     let task = match store.get_task(&tid, &user, &workspace) {
         Ok(Some(task)) => task,
         Ok(None) => {
-            return format!("Nessun task con id '{id}'. Usa list_scheduled_tasks per gli id esatti.")
+            return format!("No task with id '{id}'. Use list_scheduled_tasks for the exact ids.")
         }
-        Err(error) => return format!("Errore: {error}"),
+        Err(error) => return format!("Error: {error}"),
     };
     if task.kind != "proactive_prompt" {
-        return "Posso annullare solo task pianificati (proactive_prompt).".to_string();
+        return "I can only cancel scheduled tasks (proactive_prompt).".to_string();
     }
     if matches!(
         task.status,
@@ -5247,20 +5247,20 @@ fn cancel_scheduled_task(state: &AppState, task_id: &str) -> String {
             | local_first_task_runtime::TaskStatus::Failed
             | local_first_task_runtime::TaskStatus::Expired
     ) {
-        return format!("Il task «{}» è già terminato, non attivo.", task.goal);
+        return format!("The task «{}» is already finished, not active.", task.goal);
     }
     match store.update_task_status(
         &tid,
         &user,
         &workspace,
         local_first_task_runtime::TaskStatus::Cancelled,
-        Some("annullato dall'utente"),
+        Some("cancelled by the user"),
     ) {
         Ok(()) => format!(
-            "✅ Task pianificato «{}» annullato: non verrà più eseguito.",
+            "✅ Scheduled task «{}» cancelled: it won't run again.",
             task.goal
         ),
-        Err(error) => format!("Non sono riuscito ad annullare il task: {error}"),
+        Err(error) => format!("I couldn't cancel the task: {error}"),
     }
 }
 
@@ -5269,7 +5269,7 @@ fn read_file_tool_schema() -> serde_json::Value {
         "type": "function",
         "function": {
             "name": "read_file",
-            "description": "Legge un file della CARTELLA DI PROGETTO (i tuoi file reali, in-place — non la sandbox). Percorso RELATIVO alla radice del progetto. Usalo per ispezionare il codice prima di modificarlo.",
+            "description": "Read a file from the PROJECT FOLDER (your real files, in-place — not the sandbox). Path RELATIVE to the project root. Use it to inspect code before modifying it.",
             "parameters": {
                 "type": "object",
                 "properties": { "path": { "type": "string", "description": "Relative path to the project root, e.g. \"src/main.rs\"" } },
@@ -5284,7 +5284,7 @@ fn write_file_tool_schema() -> serde_json::Value {
         "type": "function",
         "function": {
             "name": "write_file",
-            "description": "Crea o SOVRASCRIVE un file nella cartella di progetto (in-place, file reale). Percorso relativo; crea le cartelle mancanti. Per modifiche puntuali a un file esistente preferisci edit_file.",
+            "description": "Create or OVERWRITE a file in the project folder (in-place, real file). Relative path; creates missing folders. For targeted edits to an existing file prefer edit_file.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -5302,11 +5302,11 @@ fn edit_file_tool_schema() -> serde_json::Value {
         "type": "function",
         "function": {
             "name": "edit_file",
-            "description": "Modifica un file di progetto sostituendo una stringa ESATTA con un'altra (in-place sul file reale). 'old_string' deve comparire UNA sola volta nel file: se è ambiguo aggiungi righe di contesto. Leggi prima con read_file.",
+            "description": "Edit a project file by replacing an EXACT string with another (in-place on the real file). 'old_string' must appear ONLY ONCE in the file: if it's ambiguous add context lines. Read it first with read_file.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "path": { "type": "string", "description": "Percorso relativo alla radice del progetto" },
+                    "path": { "type": "string", "description": "Relative path to the project root" },
                     "old_string": { "type": "string", "description": "Exact text to replace (unique in the file)" },
                     "new_string": { "type": "string", "description": "Replacement text" }
                 },
@@ -5321,7 +5321,7 @@ fn list_files_tool_schema() -> serde_json::Value {
         "type": "function",
         "function": {
             "name": "list_files",
-            "description": "Elenca i file della cartella di progetto (salta .git/node_modules/target/…). Usalo per orientarti nella struttura del progetto.",
+            "description": "List the files in the project folder (skips .git/node_modules/target/…). Use it to find your way around the project structure.",
             "parameters": { "type": "object", "properties": {} }
         }
     })
@@ -5347,7 +5347,7 @@ fn read_text_file_tool_schema() -> serde_json::Value {
         "type": "function",
         "function": {
             "name": "read_text_file",
-            "description": "Legge un file di testo da un percorso ASSOLUTO sul computer dell'utente, se in una cartella autorizzata. Per i file della cartella di progetto usa invece read_file (percorso relativo).",
+            "description": "Read a text file from an ABSOLUTE path on the user's computer, if in an authorized folder. For project-folder files use read_file instead (relative path).",
             "parameters": {
                 "type": "object",
                 "properties": { "path": { "type": "string", "description": "ABSOLUTE path of the file" } },
@@ -5412,11 +5412,11 @@ fn customize_addon_tool_schema() -> serde_json::Value {
         "type": "function",
         "function": {
             "name": "customize_addon",
-            "description": "Personalizza un addon a parole: applica modifiche ai SOLI campi APERTI (es. titolo documento, logo, default). Le modifiche ai campi BLOCCATI (invarianti fiscali/legali) vengono rifiutate e spiegate. 'changes' è un oggetto {chiave: nuovo_valore} con le chiavi viste in show_addon.",
+            "description": "Customize an addon in words: applies changes to OPEN fields ONLY (e.g. document title, logo, defaults). Changes to LOCKED fields (fiscal/legal invariants) are rejected and explained. 'changes' is an object {key: new_value} with the keys seen in show_addon.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "addon_id": { "type": "string", "description": "id dell'addon (da list_addons)" },
+                    "addon_id": { "type": "string", "description": "id of the addon (from list_addons)" },
                     "changes": { "type": "object", "description": "Map key→new value, only for open fields" }
                 },
                 "required": ["addon_id", "changes"]
@@ -5476,16 +5476,16 @@ fn project_root_for_thread(state: &AppState, thread_id: Option<&str>) -> Option<
 fn jail_in_root(root: &std::path::Path, rel: &str) -> Result<PathBuf, String> {
     let rel = rel.trim();
     if rel.is_empty() {
-        return Err("percorso vuoto".to_string());
+        return Err("empty path".to_string());
     }
     let candidate = std::path::Path::new(rel);
     for component in candidate.components() {
         match component {
             std::path::Component::ParentDir => {
-                return Err("'..' non consentito (fuori dal progetto)".to_string());
+                return Err("'..' not allowed (outside the project)".to_string());
             }
             std::path::Component::Prefix(_) | std::path::Component::RootDir => {
-                return Err("usa un percorso RELATIVO alla cartella di progetto".to_string());
+                return Err("use a path RELATIVE to the project folder".to_string());
             }
             _ => {}
         }
@@ -5493,14 +5493,14 @@ fn jail_in_root(root: &std::path::Path, rel: &str) -> Result<PathBuf, String> {
     let joined = root.join(candidate);
     let root_canon = root
         .canonicalize()
-        .map_err(|e| format!("cartella di progetto non accessibile: {e}"))?;
+        .map_err(|e| format!("project folder not accessible: {e}"))?;
     // Symlink-escape guard: canonicalize the deepest ancestor that exists.
     let mut ancestor = joined.clone();
     loop {
         if ancestor.exists() {
             if let Ok(canon) = ancestor.canonicalize() {
                 if !canon.starts_with(&root_canon) {
-                    return Err("percorso fuori dalla cartella di progetto".to_string());
+                    return Err("path outside the project folder".to_string());
                 }
             }
             break;
@@ -5514,8 +5514,8 @@ fn jail_in_root(root: &std::path::Path, rel: &str) -> Result<PathBuf, String> {
 }
 
 fn no_project_folder_msg() -> String {
-    "Questo progetto non ha una cartella associata: aprine/creane uno con una cartella \
-(le destinazioni autorizzate), oppure usa run_in_sandbox per lavoro usa-e-getta.".to_string()
+    "This project has no folder associated with it: open/create one with a folder \
+(the authorized destinations), or use run_in_sandbox for throwaway work.".to_string()
 }
 
 const FS_LIST_CAP: usize = 400;
@@ -5576,7 +5576,7 @@ fn fs_resolve_authorized(
 ) -> Result<PathBuf, FsAuthIssue> {
     let Some(path) = fs_expand_abs(path_str) else {
         return Err(FsAuthIssue::Invalid(
-            "Indica un percorso ASSOLUTO (es. /Users/tuo/Projects).".to_string(),
+            "Provide an ABSOLUTE path (e.g. /Users/you/Projects).".to_string(),
         ));
     };
     let roots = fs_authorized_roots(state, thread_id);
@@ -5592,7 +5592,7 @@ fn fs_resolve_authorized(
 fn fs_list_dir_contents(path: &std::path::Path) -> String {
     let read = match std::fs::read_dir(path) {
         Ok(read) => read,
-        Err(error) => return format!("Impossibile elencare «{}»: {error}", path.display()),
+        Err(error) => return format!("Could not list «{}»: {error}", path.display()),
     };
     let (mut dirs, mut files): (Vec<String>, Vec<String>) = (Vec::new(), Vec::new());
     for entry in read.flatten() {
@@ -5606,7 +5606,7 @@ fn fs_list_dir_contents(path: &std::path::Path) -> String {
     dirs.sort();
     files.sort();
     let total = dirs.len() + files.len();
-    let mut out = format!("Contenuto di {}:\n", path.display());
+    let mut out = format!("Contents of {}:\n", path.display());
     let mut shown = 0usize;
     for d in dirs.iter().take(FS_LIST_CAP) {
         out.push_str(&format!("📁 {d}/\n"));
@@ -5617,9 +5617,9 @@ fn fs_list_dir_contents(path: &std::path::Path) -> String {
         shown += 1;
     }
     if total == 0 {
-        out.push_str("(cartella vuota)\n");
+        out.push_str("(empty folder)\n");
     } else if total > shown {
-        out.push_str(&format!("[…e altri {} elementi]\n", total - shown));
+        out.push_str(&format!("[…and {} more items]\n", total - shown));
     }
     out
 }
@@ -5843,7 +5843,7 @@ async fn fs_file(
                 .await
                 .unwrap_or_else(|_| FsFilePayload {
                     authorized: true,
-                    error: Some("errore interno".to_string()),
+                    error: Some("internal error".to_string()),
                     ..Default::default()
                 });
             Ok(Json(payload))
@@ -5866,10 +5866,10 @@ fn fs_read_text(path: &std::path::Path) -> String {
     match std::fs::read_to_string(path) {
         Ok(content) if content.len() > PROJECT_READ_MAX_CHARS => {
             let head: String = content.chars().take(PROJECT_READ_MAX_CHARS).collect();
-            format!("{head}\n[…troncato a {PROJECT_READ_MAX_CHARS} caratteri]")
+            format!("{head}\n[…truncated to {PROJECT_READ_MAX_CHARS} characters]")
         }
         Ok(content) => content,
-        Err(error) => format!("Impossibile leggere «{}»: {error}", path.display()),
+        Err(error) => format!("Could not read «{}»: {error}", path.display()),
     }
 }
 
@@ -5878,7 +5878,7 @@ fn fs_read_text(path: &std::path::Path) -> String {
 /// authorize card so the user grants access WITHOUT leaving the conversation.
 fn fs_authorize_folder(path: &std::path::Path) -> Result<(), String> {
     if !path.is_dir() {
-        return Err(format!("«{}» non è una cartella esistente.", path.display()));
+        return Err(format!("«{}» is not an existing folder.", path.display()));
     }
     let path_str = path.display().to_string();
     let label = path
@@ -5900,18 +5900,18 @@ fn read_project_file(state: &AppState, thread_id: Option<&str>, rel: &str) -> St
     };
     let path = match jail_in_root(&root, rel) {
         Ok(path) => path,
-        Err(error) => return format!("Percorso non valido: {error}"),
+        Err(error) => return format!("Invalid path: {error}"),
     };
     match std::fs::read_to_string(&path) {
         Ok(content) => {
             if content.len() > PROJECT_READ_MAX_CHARS {
                 let head: String = content.chars().take(PROJECT_READ_MAX_CHARS).collect();
-                format!("{head}\n[…troncato: file più lungo di {PROJECT_READ_MAX_CHARS} caratteri]")
+                format!("{head}\n[…truncated: file longer than {PROJECT_READ_MAX_CHARS} characters]")
             } else {
                 content
             }
         }
-        Err(error) => format!("Impossibile leggere '{rel}': {error}"),
+        Err(error) => format!("Could not read '{rel}': {error}"),
     }
 }
 
@@ -5921,16 +5921,16 @@ fn write_project_file(state: &AppState, thread_id: Option<&str>, rel: &str, cont
     };
     let path = match jail_in_root(&root, rel) {
         Ok(path) => path,
-        Err(error) => return format!("Percorso non valido: {error}"),
+        Err(error) => return format!("Invalid path: {error}"),
     };
     if let Some(parent) = path.parent() {
         if let Err(error) = std::fs::create_dir_all(parent) {
-            return format!("Impossibile creare le cartelle per '{rel}': {error}");
+            return format!("Could not create the folders for '{rel}': {error}");
         }
     }
     match std::fs::write(&path, content) {
-        Ok(()) => format!("✅ Scritto '{rel}' ({} byte).", content.len()),
-        Err(error) => format!("Impossibile scrivere '{rel}': {error}"),
+        Ok(()) => format!("✅ Wrote '{rel}' ({} bytes).", content.len()),
+        Err(error) => format!("Could not write '{rel}': {error}"),
     }
 }
 
@@ -5942,31 +5942,31 @@ fn edit_project_file(
     new: &str,
 ) -> String {
     if old.is_empty() {
-        return "Per modificare serve 'old_string' non vuoto (usa write_file per creare).".to_string();
+        return "Editing requires a non-empty 'old_string' (use write_file to create).".to_string();
     }
     let Some(root) = project_root_for_thread(state, thread_id) else {
         return no_project_folder_msg();
     };
     let path = match jail_in_root(&root, rel) {
         Ok(path) => path,
-        Err(error) => return format!("Percorso non valido: {error}"),
+        Err(error) => return format!("Invalid path: {error}"),
     };
     let content = match std::fs::read_to_string(&path) {
         Ok(content) => content,
-        Err(error) => return format!("Impossibile leggere '{rel}': {error}"),
+        Err(error) => return format!("Could not read '{rel}': {error}"),
     };
     let occurrences = content.matches(old).count();
     match occurrences {
-        0 => format!("Testo da sostituire non trovato in '{rel}'. Copia esattamente il contenuto attuale."),
+        0 => format!("Text to replace not found in '{rel}'. Copy the current content exactly."),
         1 => {
             let updated = content.replacen(old, new, 1);
             match std::fs::write(&path, &updated) {
-                Ok(()) => format!("✅ Modificato '{rel}'."),
-                Err(error) => format!("Impossibile scrivere '{rel}': {error}"),
+                Ok(()) => format!("✅ Edited '{rel}'."),
+                Err(error) => format!("Could not write '{rel}': {error}"),
             }
         }
         n => format!(
-            "'old_string' compare {n} volte in '{rel}': è ambiguo. Aggiungi contesto attorno per renderlo unico."
+            "'old_string' appears {n} times in '{rel}': it's ambiguous. Add surrounding context to make it unique."
         ),
     }
 }
@@ -6014,13 +6014,13 @@ fn list_project_files(state: &AppState, thread_id: Option<&str>) -> String {
         }
     }
     if out.is_empty() {
-        "Cartella di progetto vuota (o solo file nascosti/ignorati).".to_string()
+        "Empty project folder (or only hidden/ignored files).".to_string()
     } else {
         out.sort();
-        let mut text = format!("File del progetto (root: {}):\n", root.display());
+        let mut text = format!("Project files (root: {}):\n", root.display());
         text.push_str(&out.join("\n"));
         if out.len() >= PROJECT_LIST_MAX_ENTRIES {
-            text.push_str(&format!("\n[…elenco troncato a {PROJECT_LIST_MAX_ENTRIES} voci]"));
+            text.push_str(&format!("\n[…list truncated to {PROJECT_LIST_MAX_ENTRIES} entries]"));
         }
         text
     }
@@ -6038,7 +6038,7 @@ const PROJECT_CMD_MAX_OUTPUT_CHARS: usize = 16_000;
 async fn run_in_project(state: &AppState, thread_id: Option<&str>, command: &str) -> String {
     let command = command.trim();
     if command.is_empty() {
-        return "Comando vuoto.".to_string();
+        return "Empty command.".to_string();
     }
     let Some(root) = project_root_for_thread(state, thread_id) else {
         return no_project_folder_msg();
@@ -6046,8 +6046,8 @@ async fn run_in_project(state: &AppState, thread_id: Option<&str>, command: &str
     let scan = skill_security::scan_blobs(&[("command".to_string(), command.to_string())]);
     if scan.blocked {
         return format!(
-            "Comando NON eseguito: bloccato dallo scan di sicurezza (rischio {}/100). \
-Riformula senza operazioni distruttive.",
+            "Command NOT executed: blocked by the security scan (risk {}/100). \
+Reformulate it without destructive operations.",
             scan.risk_score
         );
     }
@@ -6074,18 +6074,18 @@ Riformula senza operazioni distruttive.",
                 .status
                 .code()
                 .map(|c| c.to_string())
-                .unwrap_or_else(|| "terminato da segnale".to_string());
+                .unwrap_or_else(|| "terminated by signal".to_string());
             let body: String = combined.chars().take(PROJECT_CMD_MAX_OUTPUT_CHARS).collect();
             let body = if body.trim().is_empty() {
-                "(nessun output)"
+                "(no output)"
             } else {
                 body.as_str()
             };
             format!("[exit {code}]\n{body}")
         }
-        Ok(Err(error)) => format!("Impossibile eseguire il comando: {error}"),
+        Ok(Err(error)) => format!("Could not run the command: {error}"),
         Err(_) => format!(
-            "Comando interrotto: superato il timeout di {PROJECT_CMD_TIMEOUT_SECS}s (processo terminato)."
+            "Command interrupted: exceeded the {PROJECT_CMD_TIMEOUT_SECS}s timeout (process terminated)."
         ),
     }
 }
@@ -6104,7 +6104,7 @@ fn format_recall_entry(summary: &str, metadata: &serde_json::Value) -> String {
     let mut out = summary.to_string();
     if let Some(rationale) = decision.get("rationale").and_then(|r| r.as_str()) {
         if !rationale.is_empty() && !summary.contains(rationale) {
-            out.push_str(&format!(" — perché: {rationale}"));
+            out.push_str(&format!(" — why: {rationale}"));
         }
     }
     if let Some(alternatives) = decision.get("alternatives").and_then(|a| a.as_array()) {
@@ -6119,12 +6119,12 @@ fn format_recall_entry(summary: &str, metadata: &serde_json::Value) -> String {
                 Some(if why.is_empty() {
                     option.to_string()
                 } else {
-                    format!("{option} (scartata: {why})")
+                    format!("{option} (rejected: {why})")
                 })
             })
             .collect();
         if !rejected.is_empty() {
-            out.push_str(&format!(" [alternative scartate: {}]", rejected.join("; ")));
+            out.push_str(&format!(" [rejected alternatives: {}]", rejected.join("; ")));
         }
     }
     out
@@ -6169,7 +6169,7 @@ fn decisions_for_path(state: &AppState, path: &str) -> Option<String> {
         return None;
     }
     let mut lines = vec![format!(
-        "📌 Decisioni passate su «{base}» (dalla memoria — tienile presenti, non ri-dedurle):"
+        "📌 Past decisions about «{base}» (from memory — keep them in mind, don't re-derive them):"
     )];
     for item in page.items {
         lines.push(format!("- {}", format_recall_entry(&item.summary, &item.metadata)));
@@ -6205,14 +6205,14 @@ fn relevant_code_components_for_prompt(state: &AppState, prompt: &str) -> Option
         return None;
     }
     let kind = |t: &str| match t {
-        "code_symbol" => "funzione/metodo",
+        "code_symbol" => "function/method",
         "code_file" => "file",
-        "code_doc" => "documento",
-        _ => "elemento",
+        "code_doc" => "document",
+        _ => "element",
     };
     let mut block = String::from(
-        "COMPONENTI GIÀ ESISTENTI pertinenti alla richiesta (dalla mappa del codice — \
-NON ricrearli, ESTENDI/riusa quelli giusti; usa query_code_graph per i dettagli):",
+        "ALREADY EXISTING COMPONENTS relevant to the request (from the code map — \
+do NOT recreate them, EXTEND/reuse the right ones; use query_code_graph for details):",
     );
     for (name, etype, src) in hits.iter().take(15) {
         let loc = if src.is_empty() { String::new() } else { format!(" — {src}") };
@@ -6314,8 +6314,8 @@ async fn relevant_memory_for_prompt(state: &AppState, prompt: &str) -> Option<St
         return None;
     }
     Some(format!(
-        "MEMORIA PERTINENTE ALLA RICHIESTA (è ciò che tu/l'utente avete GIÀ stabilito — \
-trattala come fatto acquisito; NON dire \"non ho una decisione in memoria\" se è qui sotto):\n{}",
+        "MEMORY RELEVANT TO THE REQUEST (this is what you/the user have ALREADY established — \
+treat it as established fact; do NOT say \"I have no decision in memory\" if it's below here):\n{}",
         lines.join("\n")
     ))
 }
@@ -6323,10 +6323,10 @@ trattala come fatto acquisito; NON dire \"non ho una decisione in memoria\" se �
 fn recall_memory(state: &AppState, query: &str) -> String {
     let query = query.trim();
     if query.is_empty() {
-        return "Nessuna query fornita.".to_string();
+        return "No query provided.".to_string();
     }
     let Ok(facade) = lock_memory_facade(state) else {
-        return "Memoria non disponibile.".to_string();
+        return "Memory unavailable.".to_string();
     };
     let user = gateway_memory_user_id();
     let active = gateway_memory_workspace_id();
@@ -6388,7 +6388,7 @@ fn recall_memory(state: &AppState, query: &str) -> String {
             .filter(|m| {
                 terms.is_empty() || terms.iter().any(|t| m.text.to_lowercase().contains(t))
             })
-            .map(|m| format!("- [conversazione] {}", m.text))
+            .map(|m| format!("- [conversation] {}", m.text))
             .collect();
         hits.truncate(8);
         lines.extend(hits);
@@ -6417,11 +6417,11 @@ fn recall_memory(state: &AppState, query: &str) -> String {
     }
     }
     if lines.is_empty() {
-        format!("Nessun ricordo pertinente a «{query}».")
+        format!("No memories relevant to «{query}».")
     } else if in_project {
-        format!("Ricordi pertinenti a QUESTO progetto:\n{}", lines.join("\n"))
+        format!("Memories relevant to THIS project:\n{}", lines.join("\n"))
     } else {
-        format!("Ricordi pertinenti dalla memoria:\n{}", lines.join("\n"))
+        format!("Relevant memories from memory:\n{}", lines.join("\n"))
     }
 }
 
@@ -6468,8 +6468,8 @@ async fn generate_stream(
     Err(GatewayError {
         status: StatusCode::SERVICE_UNAVAILABLE,
         code: "no_inference_provider",
-        message: "Nessun provider configurato. Imposta un endpoint OpenAI-compatibile in \
-Impostazioni → Modello & Runtime."
+        message: "No provider configured. Set an OpenAI-compatible endpoint in \
+Settings → Model & Runtime."
             .to_string(),
     })
 }
@@ -6499,7 +6499,7 @@ async fn improve_prompt(
     let (base_url, model, api_key) = chat_openai_stream_config().ok_or_else(|| GatewayError {
         status: StatusCode::SERVICE_UNAVAILABLE,
         code: "no_inference_provider",
-        message: "Nessun provider configurato.".to_string(),
+        message: "No provider configured.".to_string(),
     })?;
     let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
     let system = "You are an assistant that REWRITES prompts to make them clearer, more specific \
@@ -6522,20 +6522,20 @@ Return ONLY the rewritten prompt, as plain text, without preamble, quotes or exp
     let resp = builder.json(&payload).send().await.map_err(|error| GatewayError {
         status: StatusCode::BAD_GATEWAY,
         code: "improve_prompt_failed",
-        message: format!("Provider non raggiungibile: {error}"),
+        message: format!("Provider unreachable: {error}"),
     })?;
     if !resp.status().is_success() {
         let status = resp.status();
         return Err(GatewayError {
             status: StatusCode::BAD_GATEWAY,
             code: "improve_prompt_failed",
-            message: format!("Provider ha risposto {status}"),
+            message: format!("Provider responded {status}"),
         });
     }
     let body: serde_json::Value = resp.json().await.map_err(|error| GatewayError {
         status: StatusCode::BAD_GATEWAY,
         code: "improve_prompt_failed",
-        message: format!("Risposta non valida: {error}"),
+        message: format!("Invalid response: {error}"),
     })?;
     let improved = body
         .get("choices")
@@ -6729,7 +6729,7 @@ async fn seed_assistant_message(
         return Err(GatewayError {
             status: StatusCode::BAD_REQUEST,
             code: "empty_message",
-            message: "Messaggio vuoto.".to_string(),
+            message: "Empty message.".to_string(),
         });
     }
     let snapshot = lock_store(&state)?
@@ -6769,13 +6769,13 @@ async fn transcribe_audio(
         .map_err(|e| GatewayError {
             status: StatusCode::BAD_REQUEST,
             code: "bad_audio",
-            message: format!("Audio non valido: {e}"),
+            message: format!("Invalid audio: {e}"),
         })?;
     if bytes.is_empty() {
         return Err(GatewayError {
             status: StatusCode::BAD_REQUEST,
             code: "bad_audio",
-            message: "Audio vuoto.".to_string(),
+            message: "Empty audio.".to_string(),
         });
     }
     // Ensure the contained computer (and its Whisper server) is running.
@@ -6805,7 +6805,7 @@ async fn transcribe_audio(
     let resp = builder.send().await.map_err(|e| GatewayError {
         status: StatusCode::BAD_GATEWAY,
         code: "transcribe_failed",
-        message: format!("Server STT non raggiungibile: {e}"),
+        message: format!("STT server unreachable: {e}"),
     })?;
     if !resp.status().is_success() {
         let status = resp.status();
@@ -6813,13 +6813,13 @@ async fn transcribe_audio(
         return Err(GatewayError {
             status: StatusCode::BAD_GATEWAY,
             code: "transcribe_failed",
-            message: format!("STT ha risposto {status}: {}", body.chars().take(200).collect::<String>()),
+            message: format!("STT responded {status}: {}", body.chars().take(200).collect::<String>()),
         });
     }
     let body: serde_json::Value = resp.json().await.map_err(|e| GatewayError {
         status: StatusCode::BAD_GATEWAY,
         code: "transcribe_failed",
-        message: format!("Risposta STT non valida: {e}"),
+        message: format!("Invalid STT response: {e}"),
     })?;
     Ok(Json(TranscribeResponse {
         text: body.get("text").and_then(|t| t.as_str()).unwrap_or("").trim().to_string(),
@@ -7305,7 +7305,7 @@ async fn collect_openai_stream(
                 // rather than killing the turn (better a truncated answer than an
                 // error); only fail hard if nothing came through.
                 if raw.trim().is_empty() {
-                    return Err("nessun token dal modello entro il tempo di inattività".to_string());
+                    return Err("no token from the model within the idle window".to_string());
                 }
                 break;
             }
@@ -7541,7 +7541,7 @@ async fn collect_ollama_native_stream(
         match tokio::time::timeout(wait, stream.next()).await {
             Err(_) => {
                 if content.is_empty() && tool_calls.is_empty() {
-                    return Err("nessun token dal modello entro il tempo di inattività".to_string());
+                    return Err("no token from the model within the idle window".to_string());
                 }
                 break;
             }
@@ -7841,11 +7841,11 @@ fn browser_navigate_tool_schema() -> serde_json::Value {
                     },
                     "target": {
                         "type": "string",
-                        "description": "id della scheda (tab) su cui operare; default: la scheda corrente."
+                        "description": "id of the tab to operate on; default: the current tab."
                     },
                     "new_tab": {
                         "type": "boolean",
-                        "description": "apri in una NUOVA scheda invece di riusare quella corrente."
+                        "description": "open in a NEW tab instead of reusing the current one."
                     }
                 },
                 "required": ["url"]
@@ -7866,7 +7866,7 @@ fn browser_snapshot_tool_schema() -> serde_json::Value {
                 "properties": {
                     "target": {
                         "type": "string",
-                        "description": "id della scheda (tab) su cui operare; default: la scheda corrente."
+                        "description": "id of the tab to operate on; default: the current tab."
                     }
                 }
             }
@@ -7887,18 +7887,18 @@ fn browser_act_tool_schema() -> serde_json::Value {
                     "kind": {
                         "type": "string",
                         "enum": ["click","type","fill","select","select_option","press","press_key","hover","scroll","scrollIntoView","wait"],
-                        "description": "Tipo di azione. 'type' scrive con eventuale autocompletamento; 'fill' imposta direttamente il valore; 'wait' attende."
+                        "description": "Type of action. 'type' writes with possible autocomplete; 'fill' sets the value directly; 'wait' waits."
                     },
                     "ref": {
                         "type": "string",
                         "description": "Reference of the target element from the snapshot, e.g. 'e5' (from the token [ref=e5])."
                     },
                     "text": { "type": "string", "description": "Text to type (kind='type') or value (kind='fill')." },
-                    "value": { "type": "string", "description": "Valore da selezionare (kind='select'/'select_option')." },
-                    "values": { "type": "array", "items": { "type": "string" }, "description": "Valori multipli per una selezione multipla." },
-                    "submit": { "type": "boolean", "description": "Se true, invia il form dopo aver scritto (equivale a premere Invio)." },
-                    "key": { "type": "string", "description": "Tasto da premere (kind='press'/'press_key'), es. 'Enter', 'ArrowDown'." },
-                    "target": { "type": "string", "description": "id della scheda (tab) su cui operare; default: la scheda corrente." }
+                    "value": { "type": "string", "description": "Value to select (kind='select'/'select_option')." },
+                    "values": { "type": "array", "items": { "type": "string" }, "description": "Multiple values for a multi-select." },
+                    "submit": { "type": "boolean", "description": "If true, submit the form after writing (equivalent to pressing Enter)." },
+                    "key": { "type": "string", "description": "Key to press (kind='press'/'press_key'), e.g. 'Enter', 'ArrowDown'." },
+                    "target": { "type": "string", "description": "id of the tab to operate on; default: the current tab." }
                 },
                 "required": ["kind"]
             }
@@ -7916,9 +7916,9 @@ fn browser_screenshot_tool_schema() -> serde_json::Value {
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "full_page": { "type": "boolean", "description": "Se true cattura l'intera pagina scrollabile, altrimenti solo la porzione visibile." },
-                    "marks": { "type": "boolean", "description": "true per disegnare numeri sugli elementi cliccabili e ricevere la legenda numero→elemento (utile per agire con precisione su pagine visivamente ambigue)." },
-                    "target": { "type": "string", "description": "id della scheda (tab) su cui operare; default: la scheda corrente." }
+                    "full_page": { "type": "boolean", "description": "If true capture the entire scrollable page, otherwise only the visible portion." },
+                    "marks": { "type": "boolean", "description": "true to draw numbers on clickable elements and get the number→element legend (useful for acting precisely on visually ambiguous pages)." },
+                    "target": { "type": "string", "description": "id of the tab to operate on; default: the current tab." }
                 }
             }
         }
@@ -7946,8 +7946,8 @@ fn browser_dialog_tool_schema() -> serde_json::Value {
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "accept": { "type": "boolean", "description": "true per confermare (OK), false per annullare/chiudere. Default: false." },
-                    "prompt_text": { "type": "string", "description": "Testo da inserire se è un dialogo di tipo prompt." }
+                    "accept": { "type": "boolean", "description": "true to confirm (OK), false to cancel/close. Default: false." },
+                    "prompt_text": { "type": "string", "description": "Text to enter if it's a prompt-type dialog." }
                 }
             }
         }
@@ -7981,22 +7981,22 @@ fn create_skill(name: &str, description: &str, instructions: &str) -> String {
     let description = description.trim();
     let instructions = instructions.trim();
     if name.is_empty() || description.is_empty() || instructions.is_empty() {
-        return "Per creare una skill servono: nome, descrizione (QUANDO usarla) e istruzioni (cosa fare).".to_string();
+        return "Creating a skill requires: name, description (WHEN to use it) and instructions (what to do).".to_string();
     }
     let Ok(data_dir) = gateway_data_dir() else {
-        return "Cartella dati non disponibile.".to_string();
+        return "Data folder unavailable.".to_string();
     };
     let dir = skills::skills_root(&data_dir);
     let slug = slugify_skill_name(name);
     if slug.is_empty() {
-        return "Il nome non genera un id valido: usa lettere o numeri.".to_string();
+        return "The name doesn't produce a valid id: use letters or numbers.".to_string();
     }
     let skill_dir = dir.join(&slug);
     if skill_dir.exists() {
-        return format!("Esiste già una skill con id '{slug}'. Scegli un altro nome.");
+        return format!("A skill with id '{slug}' already exists. Choose another name.");
     }
     if let Err(error) = fs::create_dir_all(&skill_dir) {
-        return format!("Impossibile creare la cartella della skill: {error}");
+        return format!("Could not create the skill folder: {error}");
     }
     let desc_yaml =
         serde_json::to_string(description).unwrap_or_else(|_| format!("\"{description}\""));
@@ -8004,14 +8004,14 @@ fn create_skill(name: &str, description: &str, instructions: &str) -> String {
         format!("---\nname: {name}\nslug: {slug}\nversion: 1.0.0\ndescription: {desc_yaml}\n---\n\n{instructions}\n");
     if let Err(error) = fs::write(skill_dir.join("SKILL.md"), &content) {
         let _ = fs::remove_dir_all(&skill_dir);
-        return format!("Impossibile scrivere la skill: {error}");
+        return format!("Could not write the skill: {error}");
     }
     let mut origins = load_skills_origins();
     origins.insert(slug.clone(), "authored".to_string());
     let _ = save_skills_origins(&origins);
     format!(
-        "✅ Skill «{name}» creata (id={slug}) e attiva. Provala: dimmi \"usa la skill {name}\" \
-o chiedimi qualcosa che la attivi."
+        "✅ Skill «{name}» created (id={slug}) and active. Try it: tell me \"use the skill {name}\" \
+or ask me something that triggers it."
     )
 }
 
@@ -8121,7 +8121,7 @@ fn run_in_sandbox_tool_schema() -> serde_json::Value {
                 "type": "object",
                 "properties": {
                     "command": { "type": "string", "description": "Shell command to run, e.g. \"curl -s wttr.in/Roma?format=3\"" },
-                    "skill_id": { "type": "string", "description": "id della skill di contesto (opzionale; imposta la working dir)" }
+                    "skill_id": { "type": "string", "description": "id of the context skill (optional; sets the working dir)" }
                 },
                 "required": ["command"]
             }
@@ -8142,7 +8142,7 @@ fn create_artifact_tool_schema() -> serde_json::Value {
                 "type": "object",
                 "properties": {
                     "name": { "type": "string", "description": "File name with extension, e.g. \"report.md\", \"script.py\", \"data.csv\", \"quote.pdf\"" },
-                    "content": { "type": "string", "description": "Contenuto COMPLETO del file. Per i .pdf: scrivilo in Markdown (verrà reso in PDF)." }
+                    "content": { "type": "string", "description": "COMPLETE content of the file. For .pdf: write it in Markdown (it will be rendered to PDF)." }
                 },
                 "required": ["name", "content"]
             }
@@ -8163,15 +8163,15 @@ fn save_artifact_tool_schema(destinations: &[ArtifactDestination]) -> serde_json
         "function": {
             "name": "save_artifact",
             "description": format!(
-                "Copia un file generato (artifact, salvato in $OUTPUT_DIR) in una cartella di \
-destinazione AUTORIZZATA dall'utente. Destinazioni disponibili: {labels}. Usalo quando l'utente \
-chiede di salvare/esportare un file in una cartella."
+                "Copy a generated file (artifact, saved in $OUTPUT_DIR) to a destination folder \
+AUTHORIZED by the user. Available destinations: {labels}. Use it when the user \
+asks to save/export a file to a folder."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "file": { "type": "string", "description": "Nome del file artifact da copiare, es. \"report.xlsx\"" },
-                    "destination": { "type": "string", "description": format!("Etichetta della destinazione tra: {labels}") }
+                    "file": { "type": "string", "description": "Name of the artifact file to copy, e.g. \"report.xlsx\"" },
+                    "destination": { "type": "string", "description": format!("Destination label among: {labels}") }
                 },
                 "required": ["file", "destination"]
             }
@@ -8544,14 +8544,14 @@ when the answer is long. Reply in {language}, clear and well-structured.",
     };
     let system = if has_code_map {
         format!(
-            "{system}\n\nMAPPA DEL CODICE: questo progetto ha una mappa del codice \
-indicizzata. Per domande su STRUTTURA o DIPENDENZE del codice — \"che metodi/funzioni \
-ha X\", \"chi chiama/usa Y\", \"cosa usa Z\", \"dove è definito/quali file usano W\" — \
-chiama PRIMA `query_code_graph` (è istantaneo e autorevole). Per la STORIA o il PERCHÉ \
-NEL TEMPO — \"perché/quando è cambiato X\", \"la storia di Y\" — usa `query_git_history` \
-(i messaggi di commit sono il perché). Ricorri a read_file/list_files/run_in_project SOLO \
-se mappa e storia non bastano (es. leggere il CORPO di una funzione). NON grepare/elencare \
-file per domande a cui mappa o storia rispondono già."
+            "{system}\n\nCODE MAP: this project has an indexed code map. \
+For questions about code STRUCTURE or DEPENDENCIES — \"what methods/functions \
+does X have\", \"who calls/uses Y\", \"what does Z use\", \"where is W defined/which files use it\" — \
+call `query_code_graph` FIRST (it's instant and authoritative). For HISTORY or the WHY \
+OVER TIME — \"why/when did X change\", \"the history of Y\" — use `query_git_history` \
+(commit messages are the why). Resort to read_file/list_files/run_in_project ONLY \
+if the map and history aren't enough (e.g. reading the BODY of a function). Do NOT grep/list \
+files for questions the map or history already answer."
         )
     } else {
         system
@@ -8608,29 +8608,29 @@ file per domande a cui mappa o storia rispondono già."
         system
     } else {
         format!(
-            "{system}\n\nSTRUMENTI SERVIZI COLLEGATI: l'utente ha collegato dei servizi (es. Gmail, \
-Google Calendar). Per accedervi NON dire che non puoi: chiama `find_capability` con una query \
-sull'intento (es. \"unread emails\", \"send email\", \"calendar events today\") per scoprire lo \
-strumento adatto, poi CHIAMA lo strumento trovato con gli argomenti completi.\n\
-SCELTA STRUMENTO: usa UN SOLO strumento che corrisponde ESATTAMENTE all'intento — per \
-AGGIUNGERE/CREARE usa create/add/quick_add, per LEGGERE usa fetch/list. NON chiamare MAI strumenti \
-distruttivi (delete/remove/cancel) se l'utente non lo chiede esplicitamente. find_capability \
-trova gli strumenti del servizio: per MODIFICARE qualcosa di esistente (es. la data di \
-un evento) usa update/patch (NON 'move', che sposta tra calendari). NON concludere che manca uno \
-strumento dopo una sola ricerca.\n\
-DATE E ORE: calcola SEMPRE la data/ora ASSOLUTA partendo da 'Oggi è ...' sopra (es. domani = oggi \
-+ 1 giorno) e passala allo strumento in formato ESPLICITO ISO 8601 con il fuso (es. \
-start_datetime: 2026-06-08T11:00:00+02:00, end_datetime un'ora dopo). NON passare parole relative \
-come \"domani\"/\"oggi\" negli argomenti: il parsing del servizio puo' sbagliare giorno. Preferisci \
-uno strumento con start/end espliciti rispetto al \"quick add\" testuale per gli orari.\n\
-AZIONI DI SCRITTURA (inviare/eliminare/modificare): CHIAMA comunque lo strumento con gli argomenti \
-completi — il sistema mostrerà AUTOMATICAMENTE all'utente una card di conferma prima di eseguire. \
-NON rifiutare, NON dire che non puoi inviare e NON chiedere all'utente di farlo manualmente: il tuo \
-compito è chiamare lo strumento giusto, alla conferma pensa l'interfaccia.\n\
-CONTEGGI (es. \"quante email non lette\"): usa il filtro corretto (per Gmail query \"is:unread\") e \
-riporta il TOTALE indicato dal risultato (campo tipo resultSizeEstimate / total / nextPageToken \
-assente), NON il numero di messaggi della singola pagina restituita; se il risultato è paginato e \
-non dà un totale affidabile, dichiara che è una stima."
+            "{system}\n\nCONNECTED-SERVICE TOOLS: the user has connected some services (e.g. Gmail, \
+Google Calendar). To access them do NOT say you can't: call `find_capability` with a query \
+about the intent (e.g. \"unread emails\", \"send email\", \"calendar events today\") to discover the \
+right tool, then CALL the found tool with the complete arguments.\n\
+TOOL CHOICE: use ONE SINGLE tool that matches the intent EXACTLY — for \
+ADDING/CREATING use create/add/quick_add, for READING use fetch/list. NEVER call destructive \
+tools (delete/remove/cancel) unless the user explicitly asks. find_capability \
+finds the service's tools: to MODIFY something existing (e.g. the date of \
+an event) use update/patch (NOT 'move', which moves between calendars). Do NOT conclude that a \
+tool is missing after a single search.\n\
+DATES AND TIMES: ALWAYS compute the ABSOLUTE date/time starting from 'Today is ...' above (e.g. tomorrow = today \
++ 1 day) and pass it to the tool in EXPLICIT ISO 8601 format with the timezone (e.g. \
+start_datetime: 2026-06-08T11:00:00+02:00, end_datetime one hour later). Do NOT pass relative words \
+like \"tomorrow\"/\"today\" in the arguments: the service's parsing may get the day wrong. Prefer \
+a tool with explicit start/end over the textual \"quick add\" for times.\n\
+WRITE ACTIONS (send/delete/modify): CALL the tool anyway with the complete arguments \
+— the system will AUTOMATICALLY show the user a confirmation card before executing. \
+Do NOT refuse, do NOT say you can't send, and do NOT ask the user to do it manually: your \
+job is to call the right tool, the interface handles confirmation.\n\
+COUNTS (e.g. \"how many unread emails\"): use the correct filter (for Gmail query \"is:unread\") and \
+report the TOTAL indicated by the result (a field like resultSizeEstimate / total / nextPageToken \
+absent), NOT the number of messages on the single returned page; if the result is paginated and \
+doesn't give a reliable total, state that it's an estimate."
         )
     };
     // Connected-but-EXPIRED services: the integration EXISTS, the OAuth lapsed. Tell
@@ -8640,12 +8640,12 @@ non dà un totale affidabile, dichiara che è una stima."
         system
     } else {
         format!(
-            "{system}\n\nSERVIZI COLLEGATI MA SCADUTI (slug): {}. Il collegamento ESISTE ma \
-l'autorizzazione e' SCADUTA. Se l'utente chiede uno di questi servizi: NON dire che non hai \
-l'integrazione; spiega in UNA frase che il collegamento e' scaduto e basta riautorizzarlo, e \
-INCLUDI nella risposta il marker (riga a se') `‹‹COMPOSIO_RECONNECT››<slug>‹‹/COMPOSIO_RECONNECT››` \
-col solo slug del servizio interessato (es. gmail): l'interfaccia mostrera' un pulsante \
-\"Riconnetti\" che riapre l'autorizzazione in un clic.",
+            "{system}\n\nCONNECTED BUT EXPIRED SERVICES (slug): {}. The connection EXISTS but \
+the authorization has EXPIRED. If the user asks for one of these services: do NOT say you don't have \
+the integration; explain in ONE sentence that the connection has expired and just needs reauthorizing, and \
+INCLUDE in the reply the marker (on its own line) `‹‹COMPOSIO_RECONNECT››<slug>‹‹/COMPOSIO_RECONNECT››` \
+with only the slug of the affected service (e.g. gmail): the interface will show a \
+\"Reconnect\" button that reopens authorization in one click.",
             catalog.inactive.join(", ")
         )
     };
@@ -8673,36 +8673,36 @@ col solo slug del servizio interessato (es. gmail): l'interfaccia mostrera' un p
     // rules dominate the generic orchestrator voice.
     let system = if let Some(cx) = &contact_ctx {
         let mut block = format!(
-            "RISPOSTA A UN CONTATTO VIA CANALE: stai rispondendo a {} su un canale di \
-messaggistica, per conto dell'utente. Stile chat: naturale e conciso.",
+            "REPLYING TO A CONTACT VIA CHANNEL: you are replying to {} on a \
+messaging channel, on behalf of the user. Chat style: natural and concise.",
             cx.name
         );
         if !cx.tone_of_voice.trim().is_empty() {
-            block.push_str(&format!(" TONO RICHIESTO: {}.", cx.tone_of_voice.trim()));
+            block.push_str(&format!(" REQUESTED TONE: {}.", cx.tone_of_voice.trim()));
         }
         if !cx.persona_instructions.trim().is_empty() {
             block.push_str(&format!(
-                "\nISTRUZIONI PERSONA (seguile sempre): {}",
+                "\nPERSONA INSTRUCTIONS (always follow them): {}",
                 cx.persona_instructions.trim()
             ));
         }
         if !cx.relationships.is_empty() {
             block.push_str(&format!(
-                "\nRELAZIONI NOTE di {}: {}.",
+                "\nKNOWN RELATIONSHIPS of {}: {}.",
                 cx.name,
                 cx.relationships.join("; ")
             ));
         }
         if !cx.perimeter.can_see_contacts {
             block.push_str(
-                "\n[PRIVACY] NON menzionare MAI altri contatti, persone o relazioni \
-dell'utente: con questa persona conosci SOLO lei.",
+                "\n[PRIVACY] NEVER mention other contacts, people or relationships \
+of the user: with this person you know ONLY them.",
             );
         }
         if !cx.perimeter.can_see_calendar {
             block.push_str(
-                "\n[PRIVACY] NON menzionare MAI impegni, appuntamenti o eventi di \
-calendario dell'utente.",
+                "\n[PRIVACY] NEVER mention the user's commitments, appointments or \
+calendar events.",
             );
         }
         format!("{block}\n\n{system}")
@@ -8718,34 +8718,34 @@ calendario dell'utente.",
             .collect::<Vec<_>>()
             .join("\n");
         let methodology = if is_project && enabled_skills.iter().any(|(id, _, _)| homuncoder.contains(id)) {
-            "\nMETODOLOGIA (HomunCoder) — per il lavoro di SVILUPPO segui le abitudini evidence-first: \
-pianifica con update_plan, RICORDA/registra le decisioni col loro perché, e VERIFICA eseguendo \
-(build/test/lint) prima di dire \"fatto\". Quando applichi una di queste discipline, chiama PRIMA \
-`use_skill` con la skill adatta (roadmap-first-planning, systematic-debugging, test-first-development, \
-verification-before-completion, code-review-discipline, …) — così l'utente VEDE quale metodologia \
-stai seguendo — e poi seguine le istruzioni. Non limitarti a citarla: caricala davvero con use_skill."
+            "\nMETHODOLOGY (HomunCoder) — for DEVELOPMENT work follow the evidence-first habits: \
+plan with update_plan, REMEMBER/record decisions with their why, and VERIFY by executing \
+(build/test/lint) before saying \"done\". When you apply one of these disciplines, call \
+`use_skill` FIRST with the right skill (roadmap-first-planning, systematic-debugging, test-first-development, \
+verification-before-completion, code-review-discipline, …) — so the user SEES which methodology \
+you're following — and then follow its instructions. Don't just cite it: actually load it with use_skill."
         } else {
             ""
         };
         format!(
-            "{system}\n\nSKILL INSTALLATE — quando la richiesta corrisponde alla descrizione di una \
-di queste, PREFERISCILA al browser: chiama `use_skill` con il suo id per ricevere le istruzioni \
-complete (SKILL.md). Poi ESEGUI i comandi che la skill indica (es. `curl …`, `python …`) con lo \
-strumento `run_in_sandbox`, che li lancia nel computer contenuto, e usa l'output per rispondere.\n\
-FILE GENERATI: se una skill o un comando produce file (xlsx, pdf, csv, immagini, …), SALVALI nella \
-cartella d'ambiente `$OUTPUT_DIR` (es. `... --output \"$OUTPUT_DIR/report.xlsx\"`): i file lì \
-diventano automaticamente artifact scaricabili dall'utente.{methodology}\n{lines}"
+            "{system}\n\nINSTALLED SKILLS — when the request matches the description of one \
+of these, PREFER it over the browser: call `use_skill` with its id to receive the complete \
+instructions (SKILL.md). Then RUN the commands the skill indicates (e.g. `curl …`, `python …`) with the \
+`run_in_sandbox` tool, which launches them in the contained computer, and use the output to reply.\n\
+GENERATED FILES: if a skill or a command produces files (xlsx, pdf, csv, images, …), SAVE them in the \
+environment folder `$OUTPUT_DIR` (e.g. `... --output \"$OUTPUT_DIR/report.xlsx\"`): files there \
+automatically become artifacts downloadable by the user.{methodology}\n{lines}"
         )
     };
     // Inline choice prompts (Claude-Code style): when the answer is a pick among a few
     // discrete options, the model emits a CHOICES marker that the UI renders as clickable
     // single/multi-select buttons, instead of listing the options in prose.
     let system = format!(
-        "{system}\n\nSCELTE: quando chiedi all'utente di scegliere tra OPZIONI discrete \
-(circa 2-6 alternative), NON elencarle a parole — emetti su una riga a sé il marker \
-`‹‹CHOICES››{{\"question\":\"la domanda\",\"multi\":false,\"options\":[\"Opzione A\",\"Opzione B\"]}}‹‹/CHOICES››` \
-(JSON valido; \"multi\":true se può sceglierne più d'una). L'utente vedrà bottoni cliccabili e la \
-sua scelta tornerà come messaggio. Usalo SOLO per scelte chiuse, non per domande aperte."
+        "{system}\n\nCHOICES: when you ask the user to choose among discrete OPTIONS \
+(roughly 2-6 alternatives), do NOT list them in prose — emit on its own line the marker \
+`‹‹CHOICES››{{\"question\":\"the question\",\"multi\":false,\"options\":[\"Option A\",\"Option B\"]}}‹‹/CHOICES››` \
+(valid JSON; \"multi\":true if more than one can be chosen). The user will see clickable buttons and their \
+choice will come back as a message. Use it ONLY for closed choices, not for open questions."
     );
     // Authorized write destinations: when present, the model can deliver
     // generated files to user-granted folders via `save_artifact`.
@@ -8759,9 +8759,9 @@ sua scelta tornerà come messaggio. Usalo SOLO per scelte chiuse, non per domand
             .collect::<Vec<_>>()
             .join(", ");
         format!(
-            "{system}\n\nCARTELLE DESTINAZIONE: puoi consegnare i file generati in queste cartelle \
-AUTORIZZATE dall'utente con lo strumento `save_artifact`: {labels}. Quando l'utente chiede di \
-salvare/esportare un file in una cartella, chiama save_artifact(file, destination)."
+            "{system}\n\nDESTINATION FOLDERS: you can deliver generated files to these folders \
+AUTHORIZED by the user with the `save_artifact` tool: {labels}. When the user asks to \
+save/export a file to a folder, call save_artifact(file, destination)."
         )
     };
     // Memory scope. Perimeter "contact_only" (the default for channel contacts) is a
@@ -8791,7 +8791,7 @@ salvare/esportare un file in una cartella, chiama save_artifact(file, destinatio
         if episodes.is_empty() {
             system
         } else {
-            let mut block = String::from("STORIA CON QUESTO CONTATTO (unica memoria disponibile):");
+            let mut block = String::from("HISTORY WITH THIS CONTACT (the only memory available):");
             let mut used = 0usize;
             for text in episodes.iter().rev().take(40).rev() {
                 if used + text.len() > CHAT_MEMORY_BUDGET_CHARS {
@@ -8841,13 +8841,13 @@ salvare/esportare un file in una cartella, chiama save_artifact(file, destinatio
             let ws = gateway_memory_workspace_id();
             if ws.as_str() != PERSONAL_WORKSPACE && ws.as_str() != THREADS_WORKSPACE {
                 format!(
-                    "{system}\n\nSe ARTICOLI o PROPONI l'OBIETTIVO o la direzione di QUESTO progetto \
-(es. l'utente chiede \"proponi un obiettivo\", oppure stai definendo dove deve arrivare il \
-progetto), emetti su una riga a sé il marker \
-‹‹GOAL_PROPOSE››{{\"objectives\":[\"obiettivo 1\",\"obiettivo 2\"]}}‹‹/GOAL_PROPOSE›› con 1-3 \
-obiettivi BREVI e rivolti in AVANTI (la direzione/il traguardo, NON decisioni già prese). \
-L'utente vedrà una scheda per salvarli. Usalo SOLO per veri obiettivi del progetto, mai per \
-risposte normali."
+                    "{system}\n\nIf you ARTICULATE or PROPOSE the OBJECTIVE or direction of THIS project \
+(e.g. the user asks \"propose an objective\", or you are defining where the \
+project should go), emit on its own line the marker \
+‹‹GOAL_PROPOSE››{{\"objectives\":[\"objective 1\",\"objective 2\"]}}‹‹/GOAL_PROPOSE›› with 1-3 \
+SHORT objectives looking FORWARD (the direction/the goal, NOT decisions already taken). \
+The user will see a card to save them. Use it ONLY for real project objectives, never for \
+normal answers."
                 )
             } else {
                 system
@@ -8867,94 +8867,94 @@ risposte normali."
         }
     };
     let system = format!(
-        "{system}\n\nMEMORIA: hai una memoria a lungo termine dell'utente. Se ti serve un dettaglio \
-personale o di progetto che potresti aver già appreso (un nome, una preferenza, un dato, una \
-decisione passata e il suo perché), OPPURE se l'utente chiede cosa è stato discusso o deciso in \
-conversazioni PRECEDENTI, e l'informazione NON è già nel profilo qui sopra, chiama SEMPRE lo \
-strumento recall_memory PRIMA di dire che non lo sai o non lo ricordi. \
-RECALL-PRIMA-DI-CHIEDERE: quando l'utente fa riferimento a un suo POSSESSO, una PERSONA o un \
-CONTESTO che dà per già noto (tipicamente con un possessivo: «la mia moto», «il mio capo», «casa \
-mia», «mio fratello», «il mio gestionale»…) e per agire ti serve un dettaglio su di esso che NON è \
-già nel profilo qui sopra, NON chiederlo d'istinto all'utente: chiama PRIMA recall_memory e USA ciò \
-che trovi; poi chiedi SOLTANTO i dettagli che dopo il recall restano davvero mancanti. \
-Es.: «mi cerchi un tappo serbatoio per la mia moto» → recall_memory(«moto dell'utente, marca \
-modello anno») → se trovi «Moto Guzzi V7 Stone 850 2021» procedi con quello e chiedi l'anno solo se \
-non risulta in memoria. Riguarda fatti DUREVOLI plausibilmente già appresi, non informazioni \
-effimere o appena emerse nella conversazione. \
-DECISIONI: PRIMA di modificare codice/documenti di un progetto, chiama recall_memory per ricordare \
-perché le cose sono come sono (NON ri-scandagliare tutto da zero). DOPO una scelta non banale — in \
-QUALSIASI dominio: codice, un documento (es. un preventivo cliente), dati, configurazioni — chiama \
-record_decision con cosa hai deciso, il PERCHÉ, le alternative scartate e gli oggetti toccati, così \
-il razionale resta e non va ricostruito. \
-PIANO (plan-mode): per un compito a PIÙ PASSI non banale (sviluppo, refactor, ricerca articolata, \
-azioni con effetti) PRIMA proponi il piano e FERMATI — NON iniziare a eseguire in questo turno. Emetti \
-su una riga a sé `‹‹PLAN_PROPOSE››{{\"summary\":\"obiettivo in breve\",\"steps\":[\"passo 1\",\"passo 2\"]}}‹‹/PLAN_PROPOSE››` \
-(JSON valido). L'utente vedrà i pulsanti Accetta/Modifica. ESEGUI il piano SOLO nel turno SUCCESSIVO, \
-dopo che l'utente l'ha approvato (es. «Approvo il piano…»); se chiede modifiche, rivedi e ri-proponi. \
-Una volta in esecuzione, usa update_plan per aggiornare lo stato degli step (doing→done), mostrato nel \
-pannello \"Piano\". Il piano (PLAN_PROPOSE o update_plan) è GIÀ mostrato all'utente come SCHEDA: NON \
-ripeterlo anche nel testo della risposta — niente elenco o tabella degli step a parole (al massimo una \
-riga di contesto). Per richieste a un solo passo NON serve né piano né proposta."
+        "{system}\n\nMEMORY: you have a long-term memory of the user. If you need a personal \
+or project detail you may have already learned (a name, a preference, a fact, a \
+past decision and its why), OR if the user asks what was discussed or decided in \
+PREVIOUS conversations, and the information is NOT already in the profile above, ALWAYS call the \
+recall_memory tool BEFORE saying you don't know or don't remember. \
+RECALL-BEFORE-ASKING: when the user refers to a POSSESSION, a PERSON or a \
+CONTEXT they take as already known (typically with a possessive: «my motorbike», «my boss», «my \
+house», «my brother», «my management software»…) and to act you need a detail about it that is NOT \
+already in the profile above, do NOT instinctively ask the user: call recall_memory FIRST and USE what \
+you find; then ask ONLY for the details that are truly still missing after the recall. \
+E.g.: «find me a fuel cap for my motorbike» → recall_memory(«user's motorbike, make \
+model year») → if you find «Moto Guzzi V7 Stone 850 2021» proceed with that and ask for the year only if \
+it's not in memory. This concerns DURABLE facts plausibly already learned, not \
+ephemeral information or things that just came up in the conversation. \
+DECISIONS: BEFORE modifying a project's code/documents, call recall_memory to remember \
+why things are the way they are (do NOT re-scan everything from scratch). AFTER a non-trivial choice — in \
+ANY domain: code, a document (e.g. a customer quote), data, configurations — call \
+record_decision with what you decided, the WHY, the rejected alternatives and the objects touched, so \
+the rationale stays and doesn't have to be reconstructed. \
+PLAN (plan-mode): for a non-trivial MULTI-STEP task (development, refactor, involved research, \
+actions with effects) FIRST propose the plan and STOP — do NOT start executing in this turn. Emit \
+on its own line `‹‹PLAN_PROPOSE››{{\"summary\":\"objective in brief\",\"steps\":[\"step 1\",\"step 2\"]}}‹‹/PLAN_PROPOSE››` \
+(valid JSON). The user will see the Accept/Edit buttons. EXECUTE the plan ONLY in the NEXT turn, \
+after the user has approved it (e.g. «I approve the plan…»); if they ask for changes, revise and re-propose. \
+Once executing, use update_plan to update the step status (doing→done), shown in the \
+\"Plan\" panel. The plan (PLAN_PROPOSE or update_plan) is ALREADY shown to the user as a CARD: do NOT \
+repeat it in the reply text too — no list or table of the steps in prose (at most one \
+line of context). For single-step requests neither a plan nor a proposal is needed."
     );
     let system = format!(
-        "{system}\n\nFRESCHEZZA / VERIFICA: la tua conoscenza interna può essere datata. Per QUALSIASI \
-domanda la cui risposta dipende da informazioni che cambiano nel tempo o che richiedono accuratezza \
-aggiornata — notizie e attualità, stato/condizioni/salute di persone, risultati o punteggi, prezzi, \
-orari, classifiche; ma ANCHE software (librerie, framework, API, SDK, strumenti: versioni, sintassi, \
-opzioni, best practice, stato dell'arte attuale) — DEVI verificare sul web col browser, preferendo la \
-documentazione UFFICIALE o fonti recenti, PRIMA di rispondere, invece di rispondere a memoria. NON \
-citare MAI una fonte (sito/testata/doc) che non hai effettivamente aperto in QUESTO turno: niente fonti, \
-versioni o date inventate. Se non puoi verificare, dillo apertamente invece di indovinare. Le domande \
-atemporali (concetti, logica, codice generico) puoi rispondere direttamente."
+        "{system}\n\nFRESHNESS / VERIFICATION: your internal knowledge may be dated. For ANY \
+question whose answer depends on information that changes over time or that requires up-to-date \
+accuracy — news and current events, the state/condition/health of people, results or scores, prices, \
+schedules, rankings; but ALSO software (libraries, frameworks, APIs, SDKs, tools: versions, syntax, \
+options, best practices, current state of the art) — you MUST verify on the web with the browser, preferring the \
+OFFICIAL documentation or recent sources, BEFORE answering, instead of answering from memory. NEVER \
+cite a source (site/publication/doc) you haven't actually opened in THIS turn: no invented sources, \
+versions or dates. If you can't verify, say so openly instead of guessing. Timeless \
+questions (concepts, logic, generic code) you can answer directly."
     );
     let system = format!(
-        "{system}\n\nESECUZIONE / VERIFICA: quando produci CODICE o un calcolo e hai lo strumento di \
-esecuzione (run_in_sandbox), NON assumere che funzioni — VERIFICA ESEGUENDO: lancia build/test/lint o \
-esegui il codice, leggi l'output REALE e itera sui fallimenti finché passa, PRIMA di dire che è fatto. \
-Fidati del compilatore e dei test, non della tua stima."
+        "{system}\n\nEXECUTION / VERIFICATION: when you produce CODE or a calculation and you have the \
+execution tool (run_in_sandbox), do NOT assume it works — VERIFY BY EXECUTING: run build/test/lint or \
+run the code, read the REAL output and iterate on the failures until it passes, BEFORE saying it's done. \
+Trust the compiler and the tests, not your estimate."
     );
     // Granular browser operating guide (OpenClaw-SKILL-style). Always present:
     // the main agent drives the browser via the granular micro-tools (there is no
     // legacy browse_web handoff anymore).
     let system = format!(
-        "{system}\n\nBROWSER (strumenti granulari): per i compiti sul web pilota TU il browser, \
-una micro-azione alla volta, con browser_navigate / browser_snapshot / browser_act / \
-browser_screenshot (NON esiste più browse_web).\n\
-- FLUSSO: browser_navigate(url) → leggi lo snapshot → browser_act UNA azione → ri-leggi lo \
-snapshot (browser_act ti restituisce già quello aggiornato) → prossima azione. Mai due azioni \
-senza rileggere la pagina.\n\
-- CAMPI: compila UN campo alla volta. Per i campi con autocompletamento usa kind='type' (la \
-selezione del suggerimento è automatica): scrivi il valore e attendi lo snapshot, non forzare il clic \
-sul suggerimento.\n\
-- DATE/FINESTRE: se l'utente dà un intervallo (es. 7–13), imposta il limite inferiore e poi pagina \
-tra i risultati; non scartare l'intervallo.\n\
-- RISULTATI: una pagina con righe di risultati È un successo: ESTRAI le righe (operatore, orari, \
-durata, cambi, prezzo). NON dire \"nessun risultato\" se ci sono righe visibili.\n\
-- SCREENSHOT: usa browser_screenshot SOLO se il testo dello snapshot non basta (layout/mappa/\
-immagine).\n\
-- SICUREZZA: MAI acquisti, login, prenotazioni o pagamenti. Se servono, FERMATI e proponi \
-all'utente cosa fare (non cliccare \"Acquista\"/\"Accedi\"/\"Prenota\").\n\
-- STOP: appena hai dati sufficienti, SMETTI di usare il browser e scrivi la risposta finale \
-all'utente (tabella per riga + eventuale footer Fonti)."
+        "{system}\n\nBROWSER (granular tools): for web tasks YOU drive the browser, \
+one micro-action at a time, with browser_navigate / browser_snapshot / browser_act / \
+browser_screenshot (browse_web no longer exists).\n\
+- FLOW: browser_navigate(url) → read the snapshot → browser_act ONE action → re-read the \
+snapshot (browser_act already returns the updated one) → next action. Never two actions \
+without re-reading the page.\n\
+- FIELDS: fill ONE field at a time. For fields with autocomplete use kind='type' (the \
+suggestion selection is automatic): write the value and wait for the snapshot, don't force the click \
+on the suggestion.\n\
+- DATES/WINDOWS: if the user gives a range (e.g. 7–13), set the lower bound and then page \
+through the results; don't discard the range.\n\
+- RESULTS: a page with rows of results IS a success: EXTRACT the rows (operator, times, \
+duration, changes, price). Do NOT say \"no results\" if there are visible rows.\n\
+- SCREENSHOT: use browser_screenshot ONLY if the snapshot text isn't enough (layout/map/\
+image).\n\
+- SECURITY: NEVER purchases, logins, bookings or payments. If they're needed, STOP and propose \
+to the user what to do (don't click \"Buy\"/\"Sign in\"/\"Book\").\n\
+- STOP: as soon as you have enough data, STOP using the browser and write the final reply \
+to the user (one table per row + an optional Sources footer)."
     );
     // Composer interaction mode (agent = default). plan/ask/debug refine behavior;
     // "ask" also drops the toolset below (pure conversation).
     let mode = request.mode.as_deref().unwrap_or("agent").to_string();
     let system = match mode.as_str() {
         "plan" => format!(
-            "{system}\n\nMODALITÀ PIANO (scelta dall'utente): per QUALSIASI richiesta non banale \
-proponi PRIMA un piano con `‹‹PLAN_PROPOSE››…‹‹/PLAN_PROPOSE››` e FERMATI; esegui solo dopo l'approvazione."
+            "{system}\n\nPLAN MODE (chosen by the user): for ANY non-trivial request \
+FIRST propose a plan with `‹‹PLAN_PROPOSE››…‹‹/PLAN_PROPOSE››` and STOP; execute only after approval."
         ),
         "ask" => format!(
-            "{system}\n\nMODALITÀ CHIEDI (scelta dall'utente): rispondi conversando dalla tua \
-conoscenza e dalla memoria. NON usare strumenti e NON compiere azioni esterne (niente browser, file, \
-invii, ricerche). Se per rispondere servisse uno strumento, dillo e suggerisci di passare alla \
-modalità Agente."
+            "{system}\n\nASK MODE (chosen by the user): answer by conversing from your \
+knowledge and memory. Do NOT use tools and do NOT perform external actions (no browser, files, \
+sends, searches). If answering would require a tool, say so and suggest switching to \
+Agent mode."
         ),
         "debug" => format!(
-            "{system}\n\nMODALITÀ DEBUG (scelta dall'utente): debugging SISTEMATICO — riproduci il \
-problema, isola la causa, forma un'ipotesi, verificala con un esperimento minimo, poi correggi e \
-RI-VERIFICA eseguendo. Una causa alla volta, niente tentativi alla cieca."
+            "{system}\n\nDEBUG MODE (chosen by the user): SYSTEMATIC debugging — reproduce the \
+problem, isolate the cause, form a hypothesis, verify it with a minimal experiment, then fix and \
+RE-VERIFY by executing. One cause at a time, no blind attempts."
         ),
         _ => system,
     };
@@ -9141,16 +9141,16 @@ RI-VERIFICA eseguendo. Una causa alla volta, niente tentativi alla cieca."
         let manifest = working
             .iter()
             .map(|a| {
-                let kind = if a.images.is_empty() { "testo" } else { "immagini/scansione" };
+                let kind = if a.images.is_empty() { "text" } else { "images/scan" };
                 format!("- {} ({kind})", a.display_name)
             })
             .collect::<Vec<_>>()
             .join("\n");
         model_text.push_str(&format!(
-            "\n\n[File allegati a questa conversazione]\n{manifest}\n\
-Usa il loro contenuto qui sotto per rispondere. Se l'utente cita un file NON in \
-questo elenco, chiedi di allegarlo (non cercarlo nella sandbox o nelle cartelle).\n\
---- Contenuto degli allegati ---"
+            "\n\n[Files attached to this conversation]\n{manifest}\n\
+Use their content below to answer. If the user cites a file NOT in \
+this list, ask them to attach it (don't look for it in the sandbox or folders).\n\
+--- Attachment content ---"
         ));
         let mut text_budget = ATTACHMENT_TEXT_BUDGET_CHARS;
         for a in &working {
@@ -9403,7 +9403,7 @@ questo elenco, chiedi di allegarlo (non cercarlo nella sandbox o nelle cartelle)
                             if transient && attempt < 2 {
                                 attempt += 1;
                                 let _ = emit_stream_event(&tx, GenerateStreamEvent::Delta {
-                                    text: format!("‹‹ACT››⏳ Il modello non risponde ({code}), riprovo ({attempt}/2)…‹‹/ACT››"),
+                                    text: format!("‹‹ACT››⏳ The model isn't responding ({code}), retrying ({attempt}/2)…‹‹/ACT››"),
                                 })
                                 .await;
                                 tokio::time::sleep(std::time::Duration::from_millis(800 * u64::from(attempt))).await;
@@ -9418,7 +9418,7 @@ questo elenco, chiedi di allegarlo (non cercarlo nella sandbox o nelle cartelle)
                                     if fb_model != model {
                                         fallback_tried = true;
                                         let _ = emit_stream_event(&tx, GenerateStreamEvent::Delta {
-                                            text: format!("‹‹ACT››↩ «{model}» non autenticato (401): ripiego su «{fb_model}»…‹‹/ACT››"),
+                                            text: format!("‹‹ACT››↩ «{model}» not authenticated (401): falling back to «{fb_model}»…‹‹/ACT››"),
                                         })
                                         .await;
                                         model = fb_model;
@@ -9444,19 +9444,19 @@ questo elenco, chiedi di allegarlo (non cercarlo nella sandbox o nelle cartelle)
                             let hint = if code.as_u16() == 401 {
                                 if model.contains(":cloud") {
                                     format!(
-                                        " Il modello «{model}» è un modello CLOUD di Ollama che \
-richiede autenticazione: esegui `ollama signin` (o aggiungi la chiave del provider in Impostazioni → \
-Modello & Runtime), oppure seleziona un modello LOCALE."
+                                        " The model «{model}» is a CLOUD Ollama model that \
+requires authentication: run `ollama signin` (or add the provider key in Settings → \
+Model & Runtime), or select a LOCAL model."
                                     )
                                 } else {
-                                    " Sembra un problema di autenticazione del provider: \
-controlla/aggiorna la chiave in Impostazioni → Modello & Runtime.".to_string()
+                                    " It looks like a provider authentication problem: \
+check/update the key in Settings → Model & Runtime.".to_string()
                                 }
                             } else {
                                 String::new()
                             };
                             let _ = emit_stream_event(&tx, GenerateStreamEvent::Delta {
-                                text: format!("Il modello ha risposto con un errore ({code}). Riprova tra poco; se persiste, controlla il provider in Impostazioni.{hint}"),
+                                text: format!("The model responded with an error ({code}). Try again shortly; if it persists, check the provider in Settings.{hint}"),
                             })
                             .await;
                             break None;
@@ -9466,7 +9466,7 @@ controlla/aggiorna la chiave in Impostazioni → Modello & Runtime.".to_string()
                             if transient && attempt < 2 {
                                 attempt += 1;
                                 let _ = emit_stream_event(&tx, GenerateStreamEvent::Delta {
-                                    text: format!("‹‹ACT››⏳ Rete verso il modello instabile, riprovo ({attempt}/2)…‹‹/ACT››"),
+                                    text: format!("‹‹ACT››⏳ Network to the model unstable, retrying ({attempt}/2)…‹‹/ACT››"),
                                 })
                                 .await;
                                 tokio::time::sleep(std::time::Duration::from_millis(800 * u64::from(attempt))).await;
@@ -9480,7 +9480,7 @@ controlla/aggiorna la chiave in Impostazioni → Modello & Runtime.".to_string()
                                     if fb_model != model {
                                         fallback_tried = true;
                                         let _ = emit_stream_event(&tx, GenerateStreamEvent::Delta {
-                                            text: format!("‹‹ACT››↩ «{model}» non risponde (timeout): ripiego su «{fb_model}»…‹‹/ACT››"),
+                                            text: format!("‹‹ACT››↩ «{model}» isn't responding (timeout): falling back to «{fb_model}»…‹‹/ACT››"),
                                         })
                                         .await;
                                         model = fb_model;
@@ -9501,7 +9501,7 @@ controlla/aggiorna la chiave in Impostazioni → Modello & Runtime.".to_string()
                                 }
                             }
                             let _ = emit_stream_event(&tx, GenerateStreamEvent::Delta {
-                                text: "Il modello non ha risposto (timeout/rete). Riprova tra poco.".to_string(),
+                                text: "The model didn't respond (timeout/network). Try again shortly.".to_string(),
                             })
                             .await;
                             break None;
@@ -9533,7 +9533,7 @@ controlla/aggiorna la chiave in Impostazioni → Modello & Runtime.".to_string()
                         &tx,
                         GenerateStreamEvent::Delta {
                             text: format!(
-                                "Il modello ha interrotto la risposta ({error}). Riprova tra poco."
+                                "The model interrupted the response ({error}). Try again shortly."
                             ),
                         },
                     )
@@ -9606,7 +9606,7 @@ controlla/aggiorna la chiave in Impostazioni → Modello & Runtime.".to_string()
                     repeat_count += 1;
                     if repeat_count >= 2 {
                         let _ = emit_stream_event(&tx, GenerateStreamEvent::Delta {
-                            text: "‹‹ACT››⏹️ Stesse azioni ripetute: mi fermo e sintetizzo‹‹/ACT››".to_string(),
+                            text: "‹‹ACT››⏹️ Same actions repeated: stopping and summarizing‹‹/ACT››".to_string(),
                         })
                         .await;
                         break;
@@ -9645,7 +9645,7 @@ controlla/aggiorna la chiave in Impostazioni → Modello & Runtime.".to_string()
                             tool_trace.push(line);
                         } else if composio_writes.contains(name) {
                             // A write on a connected service (Composio/MCP).
-                            tool_trace.push(format!("azione su servizio collegato: {name}"));
+                            tool_trace.push(format!("action on connected service: {name}"));
                         }
                     }
 
@@ -9668,8 +9668,8 @@ controlla/aggiorna la chiave in Impostazioni → Modello & Runtime.".to_string()
                     {
                         // Defensive: these aren't offered in read-only mode, but if the
                         // model calls one anyway, refuse instead of executing.
-                        "Azione non disponibile dal canale: le operazioni con effetti \
-richiedono la tua conferma nell'app. Proponila e fermati."
+                        "Action not available from the channel: operations with effects \
+require your confirmation in the app. Propose it and stop."
                             .to_string()
                     } else if matches!(
                         name,
@@ -9760,7 +9760,7 @@ richiedono la tua conferma nell'app. Proponila e fermati."
                                         let _ = emit_stream_event(
                                             &tx,
                                             GenerateStreamEvent::Delta {
-                                                text: "‹‹ACT››🔧 Browser bloccato: riavvio il computer contenuto…‹‹/ACT››".to_string(),
+                                                text: "‹‹ACT››🔧 Browser stuck: restarting the contained computer…‹‹/ACT››".to_string(),
                                             },
                                         )
                                         .await;
@@ -9783,7 +9783,7 @@ richiedono la tua conferma nell'app. Proponila e fermati."
                                                 let _ = emit_stream_event(
                                                     &tx,
                                                     GenerateStreamEvent::Delta {
-                                                        text: "‹‹ACT››🔧 Browser non raggiungibile: riavvio e riprovo…‹‹/ACT››".to_string(),
+                                                        text: "‹‹ACT››🔧 Browser unreachable: restarting and retrying…‹‹/ACT››".to_string(),
                                                     },
                                                 )
                                                 .await;
@@ -9804,10 +9804,10 @@ richiedono la tua conferma nell'app. Proponila e fermati."
                         let outcome: Result<String, String> = match browser_session.take() {
                             None => {
                                 push_browser_step(
-                                    "browser: sessione non disponibile".to_string(),
+                                    "browser: session unavailable".to_string(),
                                     "error",
                                 );
-                                Err("Browser non disponibile: impossibile avviare la sessione."
+                                Err("Browser unavailable: could not start the session."
                                     .to_string())
                             }
                             Some(client) => match name {
@@ -9830,12 +9830,12 @@ richiedono la tua conferma nell'app. Proponila e fermati."
                                     .to_string();
                                 if url.trim().is_empty() {
                                     browser_session = Some(client);
-                                    Err("URL mancante per browser_navigate.".to_string())
+                                    Err("Missing URL for browser_navigate.".to_string())
                                 } else {
                                     let _ = emit_stream_event(
                                         &tx,
                                         GenerateStreamEvent::Delta {
-                                            text: format!("‹‹ACT››🌐 Apro {url}‹‹/ACT››"),
+                                            text: format!("‹‹ACT››🌐 Opening {url}‹‹/ACT››"),
                                         },
                                     )
                                     .await;
@@ -9876,7 +9876,7 @@ richiedono la tua conferma nell'app. Proponila e fermati."
                                             client_now = c2;
                                             snap
                                         } else {
-                                            Err("sessione persa dopo navigazione".to_string())
+                                            Err("session lost after navigation".to_string())
                                         }
                                     } else {
                                         Err(nav_err.clone().unwrap_or_default())
@@ -9892,29 +9892,29 @@ richiedono la tua conferma nell'app. Proponila e fermati."
                                     match (nav_err, snap_result) {
                                         (Some(error), _) => {
                                             push_browser_step(
-                                                format!("naviga {url}"),
+                                                format!("navigate {url}"),
                                                 "error",
                                             );
-                                            Err(format!("Navigazione fallita: {error}"))
+                                            Err(format!("Navigation failed: {error}"))
                                         }
                                         (None, Ok(value)) => {
                                             let snap = browser_snapshot_text(&value);
                                             if !snap.is_empty() {
                                                 last_snapshot = snap.clone();
                                             }
-                                            push_browser_step(format!("naviga {url}"), "done");
+                                            push_browser_step(format!("navigate {url}"), "done");
                                             let page_url = value
                                                 .get("url")
                                                 .and_then(|u| u.as_str())
                                                 .unwrap_or(url.as_str());
                                             Ok(format!(
-                                                "Pagina aperta ({page_url}). Snapshot:\n{snap}"
+                                                "Page opened ({page_url}). Snapshot:\n{snap}"
                                             ))
                                         }
                                         (None, Err(error)) => {
-                                            push_browser_step(format!("naviga {url}"), "error");
+                                            push_browser_step(format!("navigate {url}"), "error");
                                             Err(format!(
-                                                "Pagina aperta ma snapshot non riuscito: {error}"
+                                                "Page opened but snapshot failed: {error}"
                                             ))
                                         }
                                     }
@@ -9929,7 +9929,7 @@ richiedono la tua conferma nell'app. Proponila e fermati."
                                 let _ = emit_stream_event(
                                     &tx,
                                     GenerateStreamEvent::Delta {
-                                        text: "‹‹ACT››👁️ Rileggo la pagina‹‹/ACT››".to_string(),
+                                        text: "‹‹ACT››👁️ Re-reading the page‹‹/ACT››".to_string(),
                                     },
                                 )
                                 .await;
@@ -9949,11 +9949,11 @@ richiedono la tua conferma nell'app. Proponila e fermati."
                                             last_snapshot = snap.clone();
                                         }
                                         push_browser_step("snapshot".to_string(), "done");
-                                        Ok(format!("Snapshot della pagina:\n{snap}"))
+                                        Ok(format!("Page snapshot:\n{snap}"))
                                     }
                                     Err(error) => {
                                         push_browser_step("snapshot".to_string(), "error");
-                                        Err(format!("Snapshot non riuscito: {error}"))
+                                        Err(format!("Snapshot failed: {error}"))
                                     }
                                 }
                             }
@@ -9985,7 +9985,7 @@ richiedono la tua conferma nell'app. Proponila e fermati."
                                             && browser_safety::is_committing_action(&action)
                                         {
                                             Some(
-                                                "azione che conferma/invia non consentita dal canale"
+                                                "action that confirms/submits is not allowed from the channel"
                                                     .to_string(),
                                             )
                                         } else {
@@ -9997,25 +9997,25 @@ richiedono la tua conferma nell'app. Proponila e fermati."
                                     browser_session = Some(client);
                                     push_browser_step(
                                         format!(
-                                            "azione bloccata: {}",
+                                            "action blocked: {}",
                                             args.get("kind").and_then(|k| k.as_str()).unwrap_or("?")
                                         ),
                                         "error",
                                     );
                                     Err(format!(
-                                        "🚫 azione bloccata, serve conferma utente: {reason}. \
-Non ho eseguito nulla: proponi all'utente cosa fare e attendi."
+                                        "🚫 action blocked, user confirmation needed: {reason}. \
+I did nothing: propose to the user what to do and wait."
                                     ))
                                 } else {
                                     let kind = args
                                         .get("kind")
                                         .and_then(|k| k.as_str())
-                                        .unwrap_or("azione")
+                                        .unwrap_or("action")
                                         .to_string();
                                     let _ = emit_stream_event(
                                         &tx,
                                         GenerateStreamEvent::Delta {
-                                            text: format!("‹‹ACT››✋ {kind} sulla pagina‹‹/ACT››"),
+                                            text: format!("‹‹ACT››✋ {kind} on the page‹‹/ACT››"),
                                         },
                                     )
                                     .await;
@@ -10037,23 +10037,23 @@ Non ho eseguito nulla: proponi all'utente cosa fare e attendi."
                                             }
                                             push_browser_step(format!("{kind}"), "done");
                                             let mut out = if snap.is_empty() {
-                                                "Azione eseguita.".to_string()
+                                                "Action performed.".to_string()
                                             } else {
-                                                format!("Azione eseguita. Snapshot aggiornato:\n{snap}")
+                                                format!("Action performed. Updated snapshot:\n{snap}")
                                             };
                                             if no_change {
                                                 out.push_str(
-                                                    "\n[nota: la pagina NON è cambiata rispetto a prima — \
-non ripetere la stessa azione; prova un altro elemento, scrolla, oppure attendi (kind=wait).]",
+                                                    "\n[note: the page did NOT change from before — \
+don't repeat the same action; try a different element, scroll, or wait (kind=wait).]",
                                                 );
                                             }
                                             if let Some(committed) = value.get("committedOption") {
                                                 out.push_str(&format!(
-                                                    "\n[selezione automatica: {committed}]"
+                                                    "\n[automatic selection: {committed}]"
                                                 ));
                                             }
                                             if let Some(sugg) = value.get("suggestions") {
-                                                out.push_str(&format!("\n[suggerimenti: {sugg}]"));
+                                                out.push_str(&format!("\n[suggestions: {sugg}]"));
                                             }
                                             // Guardrail (advisory, Layer C.3): if the model just
                                             // typed/filled a date that is in the PAST, nudge it to
@@ -10103,18 +10103,18 @@ non ripetere la stessa azione; prova un altro elemento, scrolla, oppure attendi 
                                                         .map(browser_snapshot_text)
                                                         .unwrap_or_default();
                                                     if snap.is_empty() {
-                                                        Err(format!("Azione non riuscita: {error}"))
+                                                        Err(format!("Action failed: {error}"))
                                                     } else {
                                                         last_snapshot = snap.clone();
                                                         Ok(format!(
-                                                            "⚠ Il riferimento era scaduto (la pagina \
-è cambiata). Ho ripreso uno snapshot fresco — riprova l'azione con i NUOVI [ref=...]:\n{snap}"
+                                                            "⚠ The reference had expired (the page \
+changed). I took a fresh snapshot — retry the action with the NEW [ref=...]:\n{snap}"
                                                         ))
                                                     }
                                                 }
                                                 (_, restored) => {
                                                     browser_session = restored;
-                                                    Err(format!("Azione non riuscita: {error}"))
+                                                    Err(format!("Action failed: {error}"))
                                                 }
                                             }
                                         }
@@ -10138,7 +10138,7 @@ non ripetere la stessa azione; prova un altro elemento, scrolla, oppure attendi 
                                 let _ = emit_stream_event(
                                     &tx,
                                     GenerateStreamEvent::Delta {
-                                        text: "‹‹ACT››📸 Catturo uno screenshot‹‹/ACT››".to_string(),
+                                        text: "‹‹ACT››📸 Capturing a screenshot‹‹/ACT››".to_string(),
                                     },
                                 )
                                 .await;
@@ -10173,8 +10173,8 @@ non ripetere la stessa azione; prova un altro elemento, scrolla, oppure attendi 
                                             .and_then(|m| m.as_array())
                                             .map(|entries| {
                                                 let mut text = String::from(
-                                                    "\nElementi numerati nello screenshot \
-(numero = elemento):",
+                                                    "\nNumbered elements in the screenshot \
+(number = element):",
                                                 );
                                                 for entry in entries {
                                                     let mark = entry
@@ -10212,30 +10212,30 @@ non ripetere la stessa azione; prova un altro elemento, scrolla, oppure attendi 
                                                 pending_browser_image = Some(dataurl);
                                                 push_browser_step("screenshot".to_string(), "done");
                                                 Ok(format!(
-                                                    "Screenshot catturato (vedi immagine allegata \
-sotto).{legend}"
+                                                    "Screenshot captured (see the image attached \
+below).{legend}"
                                                 ))
                                             }
                                             Ok(bytes) => {
                                                 push_browser_step("screenshot".to_string(), "done");
                                                 Ok(format!(
-                                                    "Screenshot catturato ma troppo grande per \
-l'anteprima ({} byte). Procedi con lo snapshot testuale.",
+                                                    "Screenshot captured but too large for \
+the preview ({} bytes). Proceed with the text snapshot.",
                                                     bytes.len()
                                                 ))
                                             }
                                             Err(error) => {
                                                 push_browser_step("screenshot".to_string(), "error");
                                                 Ok(format!(
-                                                    "Screenshot non leggibile dal disco: {error}. \
-Usa lo snapshot testuale."
+                                                    "Screenshot not readable from disk: {error}. \
+Use the text snapshot."
                                                 ))
                                             }
                                         }
                                     }
                                     Err(error) => {
                                         push_browser_step("screenshot".to_string(), "error");
-                                        Err(format!("Screenshot non riuscito: {error}"))
+                                        Err(format!("Screenshot failed: {error}"))
                                     }
                                 }
                             }
@@ -10243,7 +10243,7 @@ Usa lo snapshot testuale."
                                 let _ = emit_stream_event(
                                     &tx,
                                     GenerateStreamEvent::Delta {
-                                        text: "‹‹ACT››🗂️ Elenco schede‹‹/ACT››".to_string(),
+                                        text: "‹‹ACT››🗂️ Listing tabs‹‹/ACT››".to_string(),
                                     },
                                 )
                                 .await;
@@ -10293,19 +10293,19 @@ Usa lo snapshot testuale."
                                             }
                                             lines.push(line);
                                         }
-                                        push_browser_step("schede".to_string(), "done");
+                                        push_browser_step("tabs".to_string(), "done");
                                         if lines.is_empty() {
-                                            Ok("Nessuna scheda aperta.".to_string())
+                                            Ok("No tabs open.".to_string())
                                         } else {
                                             Ok(format!(
-                                                "Schede aperte:\n{}",
+                                                "Open tabs:\n{}",
                                                 lines.join("\n")
                                             ))
                                         }
                                     }
                                     Err(error) => {
-                                        push_browser_step("schede".to_string(), "error");
-                                        Err(format!("Elenco schede non riuscito: {error}"))
+                                        push_browser_step("tabs".to_string(), "error");
+                                        Err(format!("Listing tabs failed: {error}"))
                                     }
                                 }
                             }
@@ -10325,8 +10325,8 @@ Usa lo snapshot testuale."
                                     &tx,
                                     GenerateStreamEvent::Delta {
                                         text: format!(
-                                            "‹‹ACT››💬 Dialogo: {}‹‹/ACT››",
-                                            if accept { "confermo" } else { "annullo" }
+                                            "‹‹ACT››💬 Dialog: {}‹‹/ACT››",
+                                            if accept { "confirming" } else { "cancelling" }
                                         ),
                                     },
                                 )
@@ -10351,21 +10351,21 @@ Usa lo snapshot testuale."
                                             .get("message")
                                             .and_then(|m| m.as_str())
                                             .unwrap_or("");
-                                        push_browser_step("dialogo".to_string(), "done");
+                                        push_browser_step("dialog".to_string(), "done");
                                         Ok(format!(
-                                            "Dialogo {} (messaggio: \"{msg}\"). Rileggi la pagina con browser_snapshot.",
-                                            if accept { "confermato" } else { "annullato" }
+                                            "Dialog {} (message: \"{msg}\"). Re-read the page with browser_snapshot.",
+                                            if accept { "confirmed" } else { "cancelled" }
                                         ))
                                     }
                                     Err(error) => {
-                                        push_browser_step("dialogo".to_string(), "error");
+                                        push_browser_step("dialog".to_string(), "error");
                                         Err(format!(
-                                            "Nessun dialogo da gestire o errore: {error}"
+                                            "No dialog to handle or error: {error}"
                                         ))
                                     }
                                 }
                             }
-                                _ => Err(format!("Strumento browser sconosciuto: {name}")),
+                                _ => Err(format!("Unknown browser tool: {name}")),
                             },
                         };
                         match outcome {
@@ -10379,12 +10379,12 @@ Usa lo snapshot testuale."
                             .and_then(|a| a.get("query").and_then(|v| v.as_str()).map(String::from))
                             .unwrap_or_default();
                         if query.trim().is_empty() {
-                            "Query vuota.".to_string()
+                            "Empty query.".to_string()
                         } else {
                             let _ = emit_stream_event(
                                 &tx,
                                 GenerateStreamEvent::Delta {
-                                    text: format!("‹‹ACT››🔎 Cerco su GitHub: «{query}»‹‹/ACT››"),
+                                    text: format!("‹‹ACT››🔎 Searching GitHub: «{query}»‹‹/ACT››"),
                                 },
                             )
                             .await;
@@ -10415,18 +10415,18 @@ Usa lo snapshot testuale."
                         let _ = emit_stream_event(
                             &tx,
                             GenerateStreamEvent::Delta {
-                                text: format!("‹‹ACT››📖 Uso la skill «{readable}»‹‹/ACT››"),
+                                text: format!("‹‹ACT››📖 Using the skill «{readable}»‹‹/ACT››"),
                             },
                         )
                         .await;
                         let id_for_load = id.clone();
                         match tokio::task::spawn_blocking(move || load_skill_body(&id_for_load)).await {
                             Ok(Some(body)) => format!(
-                                "Istruzioni della skill «{id}» (SKILL.md) — SEGUILE con gli strumenti \
-disponibili (per dati dal web usa il browser: browser_navigate sull'URL indicato):\n\n{}",
+                                "Instructions for the skill «{id}» (SKILL.md) — FOLLOW THEM with the \
+available tools (for data from the web use the browser: browser_navigate on the indicated URL):\n\n{}",
                                 body.chars().take(8000).collect::<String>()
                             ),
-                            _ => format!("Skill «{id}» non trovata o non leggibile."),
+                            _ => format!("Skill «{id}» not found or not readable."),
                         }
                     } else if name == "run_in_sandbox" {
                         // Execute a skill command in the contained computer (auto-start
@@ -10443,7 +10443,7 @@ disponibili (per dati dal web usa il browser: browser_navigate sull'URL indicato
                             .and_then(|v| v.as_str())
                             .map(String::from);
                         if command.trim().is_empty() {
-                            "Comando vuoto.".to_string()
+                            "Empty command.".to_string()
                         } else {
                             let scan = skill_security::scan_blobs(&[(
                                 "command".to_string(),
@@ -10451,8 +10451,8 @@ disponibili (per dati dal web usa il browser: browser_navigate sull'URL indicato
                             )]);
                             if scan.blocked {
                                 format!(
-                                    "Comando NON eseguito: bloccato dallo scan di sicurezza \
-(rischio {}/100). Riformula senza operazioni pericolose.",
+                                    "Command NOT executed: blocked by the security scan \
+(risk {}/100). Reformulate it without dangerous operations.",
                                     scan.risk_score
                                 )
                             } else {
@@ -10460,7 +10460,7 @@ disponibili (per dati dal web usa il browser: browser_navigate sull'URL indicato
                                     &tx,
                                     GenerateStreamEvent::Delta {
                                         text: format!(
-                                            "‹‹ACT››🖥️ Eseguo: {}‹‹/ACT››",
+                                            "‹‹ACT››🖥️ Running: {}‹‹/ACT››",
                                             command.chars().take(160).collect::<String>()
                                         ),
                                     },
@@ -10476,7 +10476,7 @@ disponibili (per dati dal web usa il browser: browser_navigate sull'URL indicato
                                     let _ = emit_stream_event(
                                         &tx,
                                         GenerateStreamEvent::Delta {
-                                            text: "‹‹ACT››🐳 Docker non è attivo: avvio Docker Desktop e attendo che sia pronto (~1 min)…‹‹/ACT››".to_string(),
+                                            text: "‹‹ACT››🐳 Docker isn't running: starting Docker Desktop and waiting for it to be ready (~1 min)…‹‹/ACT››".to_string(),
                                         },
                                     )
                                     .await;
@@ -10509,17 +10509,17 @@ disponibili (per dati dal web usa il browser: browser_navigate sull'URL indicato
                                 let (panel_output, mut model_output) = match outcome {
                                     Ok(Ok(out)) => {
                                         if out.trim().is_empty() {
-                                            ("(nessun output)".to_string(), "(nessun output)".to_string())
+                                            ("(no output)".to_string(), "(no output)".to_string())
                                         } else {
-                                            (out.clone(), format!("Output del comando:\n{out}"))
+                                            (out.clone(), format!("Command output:\n{out}"))
                                         }
                                     }
                                     Ok(Err(error)) => {
-                                        let msg = format!("Sandbox non disponibile: {error}");
+                                        let msg = format!("Sandbox unavailable: {error}");
                                         (msg.clone(), msg)
                                     }
                                     Err(error) => {
-                                        let msg = format!("Errore di esecuzione: {error}");
+                                        let msg = format!("Execution error: {error}");
                                         (msg.clone(), msg)
                                     }
                                 };
@@ -10554,9 +10554,9 @@ disponibili (per dati dal web usa il browser: browser_navigate sull'URL indicato
                                     .await;
                                     match delivered_to {
                                         Some(path) => model_output
-                                            .push_str(&format!("\n[file generato e salvato in {path}]")),
+                                            .push_str(&format!("\n[file generated and saved to {path}]")),
                                         None => model_output.push_str(&format!(
-                                            "\n[file generato: {file_name} in $OUTPUT_DIR]"
+                                            "\n[file generated: {file_name} in $OUTPUT_DIR]"
                                         )),
                                     }
                                 }
@@ -10574,7 +10574,7 @@ disponibili (per dati dal web usa il browser: browser_navigate sull'URL indicato
                         let _ = emit_stream_event(
                             &tx,
                             GenerateStreamEvent::Delta {
-                                text: format!("‹‹ACT››📝 Creo il file {fname}‹‹/ACT››"),
+                                text: format!("‹‹ACT››📝 Creating the file {fname}‹‹/ACT››"),
                             },
                         )
                         .await;
@@ -10588,14 +10588,14 @@ disponibili (per dati dal web usa il browser: browser_navigate sull'URL indicato
                             if is_pdf {
                                 let title = fname_w.trim_end_matches(".pdf").trim_end_matches(".PDF");
                                 let bytes = pdf_render::markdown_to_pdf(title, &content)
-                                    .map_err(|e| format!("Render PDF non riuscito: {e}"))?;
+                                    .map_err(|e| format!("PDF render failed: {e}"))?;
                                 write_artifact_bytes(&slug_w, &fname_w, &bytes)
                             } else {
                                 write_text_artifact(&slug_w, &fname_w, &content)
                             }
                         })
                         .await
-                        .unwrap_or_else(|e| Err(format!("Errore: {e}")));
+                        .unwrap_or_else(|e| Err(format!("Error: {e}")));
                         match result {
                             Ok((size, updated)) => {
                                 let marker = serde_json::json!({
@@ -10616,9 +10616,9 @@ disponibili (per dati dal web usa il browser: browser_navigate sull'URL indicato
                                 )
                                 .await;
                                 if updated {
-                                    format!("Artifact «{fname}» aggiornato (nuova versione).")
+                                    format!("Artifact «{fname}» updated (new version).")
                                 } else {
-                                    format!("Artifact «{fname}» creato.")
+                                    format!("Artifact «{fname}» created.")
                                 }
                             }
                             Err(error) => error,
@@ -10638,7 +10638,7 @@ disponibili (per dati dal web usa il browser: browser_navigate sull'URL indicato
                         let _ = emit_stream_event(
                             &tx,
                             GenerateStreamEvent::Delta {
-                                text: format!("‹‹ACT››💾 Salvo {file} in «{dest_name}»‹‹/ACT››"),
+                                text: format!("‹‹ACT››💾 Saving {file} to «{dest_name}»‹‹/ACT››"),
                             },
                         )
                         .await;
@@ -10646,7 +10646,7 @@ disponibili (per dati dal web usa il browser: browser_navigate sull'URL indicato
                             save_artifact_to_destination(&thread_slug, &file, &dest_name)
                         })
                         .await
-                        .unwrap_or_else(|e| format!("Errore di salvataggio: {e}"))
+                        .unwrap_or_else(|e| format!("Save error: {e}"))
                     } else if name == "recall_memory" {
                         // PERIMETER (anti-exfiltration): a `contact_only` turn (a non-self
                         // contact on a channel) must NOT reach personal/Secret memory or the
@@ -10657,8 +10657,8 @@ disponibili (per dati dal web usa il browser: browser_navigate sull'URL indicato
                         // book — perimeter-blind recall has no way to strip other people out, so
                         // fail-closed is to block it entirely.
                         if contact_only || !can_see_contacts {
-                            "Memoria personale non accessibile in una conversazione con questo \
-contatto: usa solo i messaggi di questa chat. NON rivelare dati personali dell'utente o di terzi."
+                            "Personal memory not accessible in a conversation with this \
+contact: use only the messages from this chat. Do NOT reveal personal data of the user or third parties."
                                 .to_string()
                         } else {
                             let query = serde_json::from_str::<serde_json::Value>(args_raw)
@@ -10669,7 +10669,7 @@ contatto: usa solo i messaggi di questa chat. NON rivelare dati personali dell'u
                                 &tx,
                                 GenerateStreamEvent::Delta {
                                     text: format!(
-                                        "‹‹ACT››🧠 Cerco in memoria: {}‹‹/ACT››",
+                                        "‹‹ACT››🧠 Searching memory: {}‹‹/ACT››",
                                         if query.is_empty() { "(query)" } else { query.as_str() }
                                     ),
                                 },
@@ -10678,7 +10678,7 @@ contatto: usa solo i messaggi di questa chat. NON rivelare dati personali dell'u
                             let st = state_owned.clone();
                             tokio::task::spawn_blocking(move || recall_memory(&st, &query))
                                 .await
-                                .unwrap_or_else(|e| format!("Errore di esecuzione: {e}"))
+                                .unwrap_or_else(|e| format!("Execution error: {e}"))
                         }
                     } else if name == "query_code_graph" {
                         let symbol = serde_json::from_str::<serde_json::Value>(args_raw)
@@ -10688,14 +10688,14 @@ contatto: usa solo i messaggi di questa chat. NON rivelare dati personali dell'u
                         let _ = emit_stream_event(
                             &tx,
                             GenerateStreamEvent::Delta {
-                                text: format!("‹‹ACT››🗺️ Esploro la mappa del codice: {symbol}‹‹/ACT››"),
+                                text: format!("‹‹ACT››🗺️ Exploring the code map: {symbol}‹‹/ACT››"),
                             },
                         )
                         .await;
                         let st = state_owned.clone();
                         tokio::task::spawn_blocking(move || query_code_graph(&st, &symbol))
                             .await
-                            .unwrap_or_else(|e| format!("Errore di esecuzione: {e}"))
+                            .unwrap_or_else(|e| format!("Execution error: {e}"))
                     } else if name == "query_git_history" {
                         let query = serde_json::from_str::<serde_json::Value>(args_raw)
                             .ok()
@@ -10704,13 +10704,13 @@ contatto: usa solo i messaggi di questa chat. NON rivelare dati personali dell'u
                         let _ = emit_stream_event(
                             &tx,
                             GenerateStreamEvent::Delta {
-                                text: format!("‹‹ACT››🕰️ Consulto la storia git: {query}‹‹/ACT››"),
+                                text: format!("‹‹ACT››🕰️ Checking git history: {query}‹‹/ACT››"),
                             },
                         )
                         .await;
                         tokio::task::spawn_blocking(move || query_git_history(&query))
                             .await
-                            .unwrap_or_else(|e| format!("Errore di esecuzione: {e}"))
+                            .unwrap_or_else(|e| format!("Execution error: {e}"))
                     } else if name == "resolve_datetime" {
                         // Layer C: the orchestrator passes a STRUCTURED intent it
                         // distilled from the user's phrasing (any language); jiff
@@ -10734,22 +10734,22 @@ contatto: usa solo i messaggi di questa chat. NON rivelare dati personali dell'u
                                 let _ = emit_stream_event(
                                     &tx,
                                     GenerateStreamEvent::Delta {
-                                        text: format!("‹‹ACT››🗓 Data risolta: {}‹‹/ACT››", res.human),
+                                        text: format!("‹‹ACT››🗓 Date resolved: {}‹‹/ACT››", res.human),
                                     },
                                 )
                                 .await;
                                 let window = match &res.end {
                                     Some(end) => format!(
-                                        " La finestra di tempo arriva fino alle {:02}:{:02}.",
+                                        " The time window runs until {:02}:{:02}.",
                                         end.hour(),
                                         end.minute()
                                     ),
                                     None => String::new(),
                                 };
                                 format!(
-                                    "Data/ora risolta: {human}. Usa ESATTAMENTE «{iso}» come valore \
-(es. da scrivere nel form o passare a un altro strumento): NON ricalcolarla.{window} \
-(Adesso {now}.)",
+                                    "Date/time resolved: {human}. Use EXACTLY «{iso}» as the value \
+(e.g. to write in the form or pass to another tool): do NOT recompute it.{window} \
+(Now {now}.)",
                                     human = res.human,
                                     iso = res.iso,
                                     window = window,
@@ -10757,9 +10757,9 @@ contatto: usa solo i messaggi di questa chat. NON rivelare dati personali dell'u
                                 )
                             }
                             Err(e) => format!(
-                                "⚠️ Non ho potuto risolvere la data: {e}. (Adesso {now}.) \
-Correggi i parametri (kind/offset_days/weekday/date/time) e riprova; non procedere con \
-una data incerta.",
+                                "⚠️ I couldn't resolve the date: {e}. (Now {now}.) \
+Fix the parameters (kind/offset_days/weekday/date/time) and try again; do not proceed with \
+an uncertain date.",
                                 now = now_block(),
                             ),
                         }
@@ -10769,28 +10769,28 @@ una data incerta.",
                         let _ = emit_stream_event(
                             &tx,
                             GenerateStreamEvent::Delta {
-                                text: "‹‹ACT››🧠 Registro la decisione in memoria‹‹/ACT››".to_string(),
+                                text: "‹‹ACT››🧠 Recording the decision in memory‹‹/ACT››".to_string(),
                             },
                         )
                         .await;
                         let st = state_owned.clone();
                         tokio::task::spawn_blocking(move || record_decision(&st, &args_val))
                             .await
-                            .unwrap_or_else(|e| format!("Errore di esecuzione: {e}"))
+                            .unwrap_or_else(|e| format!("Execution error: {e}"))
                     } else if name == "forget_memory" {
                         let args_val: serde_json::Value =
                             serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
                         let _ = emit_stream_event(
                             &tx,
                             GenerateStreamEvent::Delta {
-                                text: "‹‹ACT››🗑️ Dimentico dalla memoria‹‹/ACT››".to_string(),
+                                text: "‹‹ACT››🗑️ Forgetting from memory‹‹/ACT››".to_string(),
                             },
                         )
                         .await;
                         let st = state_owned.clone();
                         tokio::task::spawn_blocking(move || forget_memory(&st, &args_val))
                             .await
-                            .unwrap_or_else(|e| format!("Errore di esecuzione: {e}"))
+                            .unwrap_or_else(|e| format!("Execution error: {e}"))
                     } else if name == "update_plan" {
                         let args_val: serde_json::Value =
                             serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
@@ -10801,7 +10801,7 @@ una data incerta.",
                             .unwrap_or_default();
                         let markdown = build_plan_markdown(&steps);
                         if markdown.is_empty() {
-                            "Piano vuoto: fornisci almeno uno step con titolo.".to_string()
+                            "Empty plan: provide at least one step with a title.".to_string()
                         } else {
                             // Persistent marker (pushed to accumulated → survives the
                             // authoritative Done): the UI parses ‹‹PLAN›› and renders it
@@ -10817,13 +10817,13 @@ una data incerta.",
                                 .iter()
                                 .filter(|s| s.get("status").and_then(|v| v.as_str()) == Some("done"))
                                 .count();
-                            format!("Piano aggiornato: {done}/{} step completati. Mostrato nel pannello Piano.", steps.len())
+                            format!("Plan updated: {done}/{} steps completed. Shown in the Plan panel.", steps.len())
                         }
                     } else if name == "create_automation" {
                         let _ = emit_stream_event(
                             &tx,
                             GenerateStreamEvent::Delta {
-                                text: "‹‹ACT››⚡ Creo un'automazione‹‹/ACT››".to_string(),
+                                text: "‹‹ACT››⚡ Creating an automation‹‹/ACT››".to_string(),
                             },
                         )
                         .await;
@@ -10846,8 +10846,8 @@ una data incerta.",
                             &tx,
                             GenerateStreamEvent::Delta {
                                 text: format!(
-                                    "‹‹ACT››🧭 Cerco una capacità: {}‹‹/ACT››",
-                                    if intent.is_empty() { "(intento)" } else { intent.as_str() }
+                                    "‹‹ACT››🧭 Searching for a capability: {}‹‹/ACT››",
+                                    if intent.is_empty() { "(intent)" } else { intent.as_str() }
                                 ),
                             },
                         )
@@ -10857,7 +10857,7 @@ una data incerta.",
                         for entry in bm25_rank(&capability_corpus, &intent, 6) {
                             if entry.is_skill {
                                 lines.push(format!(
-                                    "- skill «{}»: {} → caricala con use_skill(\"{}\")",
+                                    "- skill «{}»: {} → load it with use_skill(\"{}\")",
                                     entry.key, entry.desc, entry.key
                                 ));
                             } else if let Some(schema) = &entry.schema {
@@ -10900,13 +10900,13 @@ una data incerta.",
                             }
                         }
                         if lines.is_empty() {
-                            "Nessuna capacità corrisponde. Riformula con cosa vuoi fare (es. \
-\"navigare il web\", \"cercare su GitHub\", \"leggere file dell'utente\", \"inviare un'email\")."
+                            "No capability matches. Rephrase with what you want to do (e.g. \
+\"browse the web\", \"search GitHub\", \"read the user's files\", \"send an email\")."
                                 .to_string()
                         } else {
                             format!(
-                                "Capacità trovate (i tool sono ora RICHIAMABILI; le skill si \
-caricano con use_skill):\n{}",
+                                "Capabilities found (the tools are now CALLABLE; skills are \
+loaded with use_skill):\n{}",
                                 lines.join("\n")
                             )
                         }
@@ -10931,13 +10931,13 @@ caricano con use_skill):\n{}",
                             .map(|s| s.trim().to_string())
                             .filter(|s| !s.is_empty());
                         if goal.is_empty() || every.is_empty() {
-                            "Per pianificare servono 'goal' (cosa fare) e 'every' (ogni quanto: \
+                            "Scheduling requires 'goal' (what to do) and 'every' (how often: \
 \"every 1d\", \"daily@08:00\", \"weekly@mon@09:30\").".to_string()
                         } else {
                             let _ = emit_stream_event(
                                 &tx,
                                 GenerateStreamEvent::Delta {
-                                    text: format!("‹‹ACT››⏰ Pianifico: {goal} ({every})‹‹/ACT››"),
+                                    text: format!("‹‹ACT››⏰ Scheduling: {goal} ({every})‹‹/ACT››"),
                                 },
                             )
                             .await;
@@ -10957,7 +10957,7 @@ caricano con use_skill):\n{}",
                                 create_automation_from_chat(&st, &auto_args)
                             })
                             .await
-                            .unwrap_or_else(|e| format!("Errore di pianificazione: {e}"))
+                            .unwrap_or_else(|e| format!("Scheduling error: {e}"))
                         }
                     } else if name == "read_file" {
                         let args_val: serde_json::Value =
@@ -10970,7 +10970,7 @@ caricano con use_skill):\n{}",
                         let _ = emit_stream_event(
                             &tx,
                             GenerateStreamEvent::Delta {
-                                text: format!("‹‹ACT››📄 Leggo {path}‹‹/ACT››"),
+                                text: format!("‹‹ACT››📄 Reading {path}‹‹/ACT››"),
                             },
                         )
                         .await;
@@ -10980,7 +10980,7 @@ caricano con use_skill):\n{}",
                         let mut out =
                             tokio::task::spawn_blocking(move || read_project_file(&st, tid.as_deref(), &path))
                                 .await
-                                .unwrap_or_else(|e| format!("Errore: {e}"));
+                                .unwrap_or_else(|e| format!("Error: {e}"));
                         // Per-file recall: surface past DECISIONS about this file so the
                         // agent remembers WHY it's like this instead of re-deriving it.
                         let st2 = state_owned.clone();
@@ -11020,7 +11020,7 @@ caricano con use_skill):\n{}",
                             write_project_file(&st, tid.as_deref(), &path, &content)
                         })
                         .await
-                        .unwrap_or_else(|e| format!("Errore: {e}"))
+                        .unwrap_or_else(|e| format!("Error: {e}"))
                     } else if name == "edit_file" {
                         let args_val: serde_json::Value =
                             serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
@@ -11052,12 +11052,12 @@ caricano con use_skill):\n{}",
                             edit_project_file(&st, tid.as_deref(), &path, &old, &new)
                         })
                         .await
-                        .unwrap_or_else(|e| format!("Errore: {e}"))
+                        .unwrap_or_else(|e| format!("Error: {e}"))
                     } else if name == "list_files" {
                         let _ = emit_stream_event(
                             &tx,
                             GenerateStreamEvent::Delta {
-                                text: "‹‹ACT››📂 Esploro il progetto‹‹/ACT››".to_string(),
+                                text: "‹‹ACT››📂 Exploring the project‹‹/ACT››".to_string(),
                             },
                         )
                         .await;
@@ -11065,7 +11065,7 @@ caricano con use_skill):\n{}",
                         let tid = thread_id.clone();
                         tokio::task::spawn_blocking(move || list_project_files(&st, tid.as_deref()))
                             .await
-                            .unwrap_or_else(|e| format!("Errore: {e}"))
+                            .unwrap_or_else(|e| format!("Error: {e}"))
                     } else if name == "list_directory" || name == "read_text_file" {
                         let is_read = name == "read_text_file";
                         let args_val: serde_json::Value =
@@ -11078,10 +11078,10 @@ caricano con use_skill):\n{}",
                             fs_resolve_authorized(&st, tid.as_deref(), &pr)
                         })
                         .await
-                        .unwrap_or_else(|_| Err(FsAuthIssue::Invalid("errore interno".to_string())));
+                        .unwrap_or_else(|_| Err(FsAuthIssue::Invalid("internal error".to_string())));
                         match resolved {
                             Ok(path) => {
-                                let icon = if is_read { "📄 Leggo" } else { "📂 Elenco" };
+                                let icon = if is_read { "📄 Reading" } else { "📂 Listing" };
                                 let _ = emit_stream_event(
                                     &tx,
                                     GenerateStreamEvent::Delta {
@@ -11097,7 +11097,7 @@ caricano con use_skill):\n{}",
                                     }
                                 })
                                 .await
-                                .unwrap_or_else(|e| format!("Errore: {e}"))
+                                .unwrap_or_else(|e| format!("Error: {e}"))
                             }
                             Err(FsAuthIssue::Invalid(msg)) => msg,
                             Err(FsAuthIssue::NeedsAuth(path)) => {
@@ -11108,15 +11108,15 @@ caricano con use_skill):\n{}",
                                 })
                                 .to_string();
                                 let card = format!(
-                                    "\n\nPer accedere a questa cartella mi serve la tua autorizzazione.\n\
+                                    "\n\nTo access this folder I need your authorization.\n\
 ‹‹FS_AUTHORIZE››{marker}‹‹/FS_AUTHORIZE››\n"
                                 );
                                 accumulated.push_str(&card);
                                 let _ = emit_stream_event(&tx, GenerateStreamEvent::Delta { text: card })
                                     .await;
                                 pending_confirm = true;
-                                "IN ATTESA DI AUTORIZZAZIONE: ho mostrato all'utente una scheda con il \
-pulsante per autorizzare l'accesso alla cartella. NON dire che hai letto/elencato."
+                                "AWAITING AUTHORIZATION: I showed the user a card with the \
+button to authorize access to the folder. Do NOT say you have read/listed it."
                                     .to_string()
                             }
                         }
@@ -11132,7 +11132,7 @@ pulsante per autorizzare l'accesso alla cartella. NON dire che hai letto/elencat
                             &tx,
                             GenerateStreamEvent::Delta {
                                 text: format!(
-                                    "‹‹ACT››🛠️ Eseguo nel progetto: {}‹‹/ACT››",
+                                    "‹‹ACT››🛠️ Running in the project: {}‹‹/ACT››",
                                     command.chars().take(120).collect::<String>()
                                 ),
                             },
@@ -11142,7 +11142,7 @@ pulsante per autorizzare l'accesso alla cartella. NON dire che hai letto/elencat
                     } else if name == "list_addons" {
                         tokio::task::spawn_blocking(process_skills::addons_list_text)
                             .await
-                            .unwrap_or_else(|e| format!("Errore: {e}"))
+                            .unwrap_or_else(|e| format!("Error: {e}"))
                     } else if name == "show_addon" {
                         let args_val: serde_json::Value =
                             serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
@@ -11153,7 +11153,7 @@ pulsante per autorizzare l'accesso alla cartella. NON dire che hai letto/elencat
                             .to_string();
                         tokio::task::spawn_blocking(move || process_skills::addon_show_text(&addon_id))
                             .await
-                            .unwrap_or_else(|e| format!("Errore: {e}"))
+                            .unwrap_or_else(|e| format!("Error: {e}"))
                     } else if name == "customize_addon" {
                         let args_val: serde_json::Value =
                             serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
@@ -11169,7 +11169,7 @@ pulsante per autorizzare l'accesso alla cartella. NON dire che hai letto/elencat
                         let _ = emit_stream_event(
                             &tx,
                             GenerateStreamEvent::Delta {
-                                text: format!("‹‹ACT››🧩 Personalizzo addon {addon_id}‹‹/ACT››"),
+                                text: format!("‹‹ACT››🧩 Customizing addon {addon_id}‹‹/ACT››"),
                             },
                         )
                         .await;
@@ -11177,7 +11177,7 @@ pulsante per autorizzare l'accesso alla cartella. NON dire che hai letto/elencat
                             process_skills::addon_customize_text(&addon_id, &changes)
                         })
                         .await
-                        .unwrap_or_else(|e| format!("Errore: {e}"))
+                        .unwrap_or_else(|e| format!("Error: {e}"))
                     } else if name == "create_skill" {
                         let args_val: serde_json::Value =
                             serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
@@ -11196,7 +11196,7 @@ pulsante per autorizzare l'accesso alla cartella. NON dire che hai letto/elencat
                         let _ = emit_stream_event(
                             &tx,
                             GenerateStreamEvent::Delta {
-                                text: format!("‹‹ACT››🧩 Creo la skill {skill_name}‹‹/ACT››"),
+                                text: format!("‹‹ACT››🧩 Creating the skill {skill_name}‹‹/ACT››"),
                             },
                         )
                         .await;
@@ -11204,7 +11204,7 @@ pulsante per autorizzare l'accesso alla cartella. NON dire che hai letto/elencat
                             create_skill(&skill_name, &skill_desc, &skill_instr)
                         })
                         .await
-                        .unwrap_or_else(|e| format!("Errore: {e}"))
+                        .unwrap_or_else(|e| format!("Error: {e}"))
                     } else if name == "suggest_capabilities" {
                         let args_val: serde_json::Value =
                             serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
@@ -11216,7 +11216,7 @@ pulsante per autorizzare l'accesso alla cartella. NON dire che hai letto/elencat
                         let _ = emit_stream_event(
                             &tx,
                             GenerateStreamEvent::Delta {
-                                text: format!("‹‹ACT››🧭 Cerco connettori per: {need}‹‹/ACT››"),
+                                text: format!("‹‹ACT››🧭 Searching connectors for: {need}‹‹/ACT››"),
                             },
                         )
                         .await;
@@ -11229,7 +11229,7 @@ pulsante per autorizzare l'accesso alla cartella. NON dire che hai letto/elencat
                                 // here — the user must connect, then re-ask.
                                 let marker = card.to_string();
                                 let card_text = format!(
-                                    "\n\nEcco cosa posso collegare per questo. Scegli qui sotto.\n\
+                                    "\n\nHere's what I can connect for this. Choose below.\n\
 ‹‹CONNECT_SUGGEST››{marker}‹‹/CONNECT_SUGGEST››\n"
                                 );
                                 accumulated.push_str(&card_text);
@@ -11239,8 +11239,8 @@ pulsante per autorizzare l'accesso alla cartella. NON dire che hai letto/elencat
                                 )
                                 .await;
                                 pending_confirm = true;
-                                "IN ATTESA: ho mostrato all'utente delle schede cliccabili per \
-collegare i connettori suggeriti (skill/MCP/Composio). NON dire che hai già collegato qualcosa."
+                                "AWAITING: I showed the user clickable cards to \
+connect the suggested connectors (skill/MCP/Composio). Do NOT say you have already connected anything."
                                     .to_string()
                             }
                             None => suggestions.model_text,
@@ -11249,7 +11249,7 @@ collegare i connettori suggeriti (skill/MCP/Composio). NON dire che hai già col
                         let st = state_owned.clone();
                         tokio::task::spawn_blocking(move || list_scheduled_tasks(&st))
                             .await
-                            .unwrap_or_else(|e| format!("Errore: {e}"))
+                            .unwrap_or_else(|e| format!("Error: {e}"))
                     } else if name == "cancel_scheduled_task" {
                         let args_val: serde_json::Value =
                             serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
@@ -11262,44 +11262,44 @@ collegare i connettori suggeriti (skill/MCP/Composio). NON dire che hai già col
                         let _ = emit_stream_event(
                             &tx,
                             GenerateStreamEvent::Delta {
-                                text: "‹‹ACT››🗑️ Annullo task pianificato‹‹/ACT››".to_string(),
+                                text: "‹‹ACT››🗑️ Cancelling scheduled task‹‹/ACT››".to_string(),
                             },
                         )
                         .await;
                         let st = state_owned.clone();
                         tokio::task::spawn_blocking(move || cancel_scheduled_task(&st, &task_id))
                             .await
-                            .unwrap_or_else(|e| format!("Errore: {e}"))
+                            .unwrap_or_else(|e| format!("Error: {e}"))
                     } else if !can_see_calendar && !name.is_empty() && tool_touches_calendar(name) {
                         // PERIMETER (anti-exfiltration): the can_see_calendar axis is enforced
                         // HARD here, independent of memory_scope — a "personal"-scope contact that
                         // is NOT contact_only still can't pull the user's calendar. All builtins
                         // are matched in earlier arms, so this only catches calendar connectors.
-                        "Il calendario dell'utente non è accessibile in questa conversazione. \
-Non rivelare impegni, appuntamenti o eventi."
+                        "The user's calendar is not accessible in this conversation. \
+Do not reveal commitments, appointments or events."
                             .to_string()
                     } else if !can_see_contacts && !name.is_empty() && tool_touches_contacts(name) {
                         // PERIMETER (anti-exfiltration): the can_see_contacts axis, enforced HARD
                         // here too — block the user's address book (Google Contacts / People etc.)
                         // even on a non-contact_only turn.
-                        "La rubrica dell'utente non è accessibile in questa conversazione. \
-Non rivelare altri contatti, persone o relazioni dell'utente."
+                        "The user's address book is not accessible in this conversation. \
+Do not reveal other contacts, people or relationships of the user."
                             .to_string()
                     } else if contact_only && !name.is_empty() {
                         // PERIMETER (anti-exfiltration): a `contact_only` turn must not reach the
                         // user's connected services. All builtins are matched in earlier arms, so
                         // any tool reaching here is a connected Composio/MCP tool — refuse it so a
                         // contact can't make the assistant read Gmail/Calendar/etc. and leak them.
-                        "Strumenti dei servizi collegati non disponibili in una conversazione con \
-questo contatto. Rispondi solo con ciò che è in questa chat; non rivelare dati personali \
-dell'utente o di terzi."
+                        "Connected-service tools not available in a conversation with \
+this contact. Answer only with what's in this chat; do not reveal personal data \
+of the user or third parties."
                             .to_string()
                     } else if read_only && !name.is_empty() && composio_writes.contains(name) {
                         // Channel (read-only) turn: never run a write tool, never even
                         // surface a confirm card (no UI on the channel). Phase 2 routes
                         // these to the in-app approval center.
-                        "Azione non disponibile dal canale: le operazioni con effetti \
-richiedono la tua conferma nell'app. Proponila e fermati."
+                        "Action not available from the channel: operations with effects \
+require your confirmation in the app. Propose it and stop."
                             .to_string()
                     } else if let Some((mcp_provider, mcp_tool)) = parse_mcp_chat_name(name) {
                         // Connected MCP server tool. Writes (per the cached ActionClass,
@@ -11314,7 +11314,7 @@ richiedono la tua conferma nell'app. Proponila e fermati."
                             let marker = serde_json::json!({ "tool": name, "arguments": args_val })
                                 .to_string();
                             let card = format!(
-                                "\n\nServe la tua conferma per l'azione qui sotto.\n\
+                                "\n\nI need your confirmation for the action below.\n\
 ‹‹MCP_CONFIRM››{marker}‹‹/MCP_CONFIRM››\n"
                             );
                             accumulated.push_str(&card);
@@ -11326,14 +11326,14 @@ richiedono la tua conferma nell'app. Proponila e fermati."
                                 deliver_remote_approval(&state_owned, name, &args_val, &mcp_tool)
                                     .await;
                             pending_confirm = true;
-                            "IN ATTESA DI CONFERMA UTENTE: l'azione è stata proposta tramite una \
-card di conferma nell'interfaccia. NON dire che è stata eseguita."
+                            "AWAITING USER CONFIRMATION: the action was proposed via a \
+confirmation card in the interface. Do NOT say it was executed."
                                 .to_string()
                         } else {
                             let _ = emit_stream_event(
                                 &tx,
                                 GenerateStreamEvent::Delta {
-                                    text: format!("‹‹ACT››🔌 Uso {mcp_tool}‹‹/ACT››"),
+                                    text: format!("‹‹ACT››🔌 Using {mcp_tool}‹‹/ACT››"),
                                 },
                             )
                             .await;
@@ -11362,18 +11362,18 @@ card di conferma nell'interfaccia. NON dire che è stata eseguita."
                                     let hint = mcp_error_hint(&error.to_string())
                                         .map(|h| format!(" {h}"))
                                         .unwrap_or_default();
-                                    format!("Errore strumento MCP: {error}.{hint}")
+                                    format!("MCP tool error: {error}.{hint}")
                                 }
                                 Ok(Err(_join)) => {
                                     run_err = Some("other");
-                                    "Errore: esecuzione MCP interrotta.".to_string()
+                                    "Error: MCP execution interrupted.".to_string()
                                 }
                                 Err(_elapsed) => {
                                     run_err = Some("unavailable");
                                     format!(
-                                        "Lo strumento MCP non ha risposto entro {}s (timeout): il server \
-potrebbe essere bloccato o offline. Di' all'utente di verificarlo/riconnetterlo da Impostazioni → \
-Connettori → MCP; NON dichiarare che è fatto.",
+                                        "The MCP tool didn't respond within {}s (timeout): the server \
+may be stuck or offline. Tell the user to check/reconnect it from Settings → \
+Connectors → MCP; do NOT claim it's done.",
                                         mcp_call_timeout().as_secs()
                                     )
                                 }
@@ -11405,7 +11405,7 @@ Connettori → MCP; NON dichiarare che è fatto.",
                             let marker = serde_json::json!({ "tool": name, "arguments": args_val })
                                 .to_string();
                             let card = format!(
-                                "\n\nServe la tua conferma per l'azione qui sotto.\n\
+                                "\n\nI need your confirmation for the action below.\n\
 ‹‹COMPOSIO_CONFIRM››{marker}‹‹/COMPOSIO_CONFIRM››\n"
                             );
                             accumulated.push_str(&card);
@@ -11421,14 +11421,14 @@ Connettori → MCP; NON dichiarare che è fatto.",
                             )
                             .await;
                             pending_confirm = true;
-                            "IN ATTESA DI CONFERMA UTENTE: l'azione è stata proposta tramite una \
-card di conferma nell'interfaccia. NON dire che è stata eseguita."
+                            "AWAITING USER CONFIRMATION: the action was proposed via a \
+confirmation card in the interface. Do NOT say it was executed."
                                 .to_string()
                         } else {
                             let _ = emit_stream_event(
                                 &tx,
                                 GenerateStreamEvent::Delta {
-                                    text: format!("‹‹ACT››🔧 Uso {}‹‹/ACT››", humanize_composio_tool(name)),
+                                    text: format!("‹‹ACT››🔧 Using {}‹‹/ACT››", humanize_composio_tool(name)),
                                 },
                             )
                             .await;
@@ -11455,8 +11455,8 @@ card di conferma nell'interfaccia. NON dire che è stata eseguita."
                                             .map(|h| format!(" {h}"))
                                             .unwrap_or_default();
                                         format!(
-                                            "Lo strumento {name} NON ha eseguito l'azione: {error}.{hint} \
-Dillo all'utente in modo chiaro; NON dichiarare che è fatto."
+                                            "The tool {name} did NOT perform the action: {error}.{hint} \
+Tell the user clearly; do NOT claim it's done."
                                         )
                                     }
                                     None => {
@@ -11471,11 +11471,11 @@ Dillo all'utente in modo chiaro; NON dichiarare che è fatto."
                                     let hint = connector_error_hint(&error.message)
                                         .map(|h| format!(" {h}"))
                                         .unwrap_or_default();
-                                    format!("Errore dello strumento {name}: {}.{hint}", error.message)
+                                    format!("Error from the tool {name}: {}.{hint}", error.message)
                                 }
                                 Err(error) => {
                                     run_err = Some("other");
-                                    format!("Errore di esecuzione dello strumento: {error}")
+                                    format!("Tool execution error: {error}")
                                 }
                             };
                             record_connector_run(
@@ -11490,7 +11490,7 @@ Dillo all'utente in modo chiaro; NON dichiarare che è fatto."
                             composio_result
                         }
                     } else {
-                        format!("Strumento non disponibile: {name}")
+                        format!("Tool not available: {name}")
                     };
 
                     // Collect source URLs from browser results so the final
@@ -11518,7 +11518,7 @@ Dillo all'utente in modo chiaro; NON dichiarare che è fatto."
                     messages.push(serde_json::json!({
                         "role": "user",
                         "content": [
-                            { "type": "text", "text": "Screenshot della pagina corrente:" },
+                            { "type": "text", "text": "Screenshot of the current page:" },
                             { "type": "image_url", "image_url": { "url": dataurl } }
                         ],
                     }));
@@ -11602,11 +11602,11 @@ Dillo all'utente in modo chiaro; NON dichiarare che è fatto."
             // GENERIC across domains (coding, documents, web), not travel-specific.
             messages.push(serde_json::json!({
                 "role": "user",
-                "content": "Non sono più disponibili strumenti. Scrivi ORA la RISPOSTA FINALE per \
-l'utente, sintetizzando ciò che hai fatto e trovato nei passi precedenti: per un compito di coding \
-di' cosa hai creato/modificato e come si usa/esegue; per una ricerca riporta i risultati con i \
-dettagli. Sii completo e concreto. Se qualcosa non è riuscito, dillo chiaramente e proponi come \
-procedere."
+                "content": "No more tools are available. Write the FINAL ANSWER NOW for \
+the user, synthesizing what you did and found in the previous steps: for a coding task \
+say what you created/modified and how it's used/run; for a search report the results with \
+details. Be complete and concrete. If something failed, say so clearly and propose how \
+to proceed."
             }));
             // Use the SAME provider-aware path as the main loop (Ollama native /api/chat
             // vs OpenAI /v1) and stream the synthesis live. Previously this posted an
@@ -11648,8 +11648,8 @@ procedere."
             } else if !accumulated.trim().is_empty() {
                 accumulated.clone()
             } else {
-                "Ho completato i passi ma non sono riuscito a produrre una risposta finale. \
-Dimmi se vuoi che riprovi o riformuli."
+                "I completed the steps but couldn't produce a final answer. \
+Tell me if you want me to retry or rephrase."
                     .to_string()
             };
             if let Some(fonti) = fonti_section(&browse_sources, &final_text) {
@@ -11781,7 +11781,7 @@ fn load_user_prefs() -> UserPrefs {
 }
 
 fn save_user_prefs(prefs: &UserPrefs) -> Result<(), String> {
-    let path = user_timezone_path().ok_or_else(|| "data dir non disponibile".to_string())?;
+    let path = user_timezone_path().ok_or_else(|| "data dir unavailable".to_string())?;
     let json = serde_json::to_string_pretty(prefs).map_err(|e| e.to_string())?;
     fs::write(path, json).map_err(|e| e.to_string())
 }
@@ -11874,8 +11874,8 @@ fn past_date_hint(typed: &str) -> Option<String> {
         if let Some(d) = parsed {
             if d < today {
                 return Some(format!(
-                    "\n[⚠️ attenzione: «{tok}» sembra una data PASSATA (oggi è {today}). Se intendevi \
-una data futura, NON inviare: chiama resolve_datetime per ricavare la data giusta e reinseriscila.]"
+                    "\n[⚠️ warning: «{tok}» looks like a PAST date (today is {today}). If you meant \
+a future date, do NOT submit: call resolve_datetime to get the right date and re-enter it.]"
                 ));
             }
         }
@@ -11922,7 +11922,7 @@ async fn set_user_timezone(
             return Err(GatewayError {
                 status: StatusCode::BAD_REQUEST,
                 code: "invalid_timezone",
-                message: format!("Fuso orario IANA non valido: «{name}»"),
+                message: format!("Invalid IANA timezone: «{name}»"),
             });
         }
     }
@@ -12211,7 +12211,7 @@ async fn set_approval_routing(
         return Err(GatewayError {
             status: StatusCode::BAD_REQUEST,
             code: "invalid_approval_channel",
-            message: "Canale di approvazione non valido (in_app | telegram | whatsapp).".to_string(),
+            message: "Invalid approval channel (in_app | telegram | whatsapp).".to_string(),
         });
     }
     let target = request.target.map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
@@ -12220,7 +12220,7 @@ async fn set_approval_routing(
         return Err(GatewayError {
             status: StatusCode::BAD_REQUEST,
             code: "approval_target_required",
-            message: "Per Telegram/WhatsApp serve il tuo numero/chat (solo da lì potrai autorizzare).".to_string(),
+            message: "For Telegram/WhatsApp your number/chat is required (only from there can you authorize).".to_string(),
         });
     }
     let mut prefs = load_user_prefs();
@@ -12477,30 +12477,30 @@ async fn plugin_toggle(
 pub(crate) fn weekday_it(w: jiff::civil::Weekday) -> &'static str {
     use jiff::civil::Weekday::*;
     match w {
-        Monday => "lunedì",
-        Tuesday => "martedì",
-        Wednesday => "mercoledì",
-        Thursday => "giovedì",
-        Friday => "venerdì",
-        Saturday => "sabato",
-        Sunday => "domenica",
+        Monday => "Monday",
+        Tuesday => "Tuesday",
+        Wednesday => "Wednesday",
+        Thursday => "Thursday",
+        Friday => "Friday",
+        Saturday => "Saturday",
+        Sunday => "Sunday",
     }
 }
 
 fn month_it(m: i8) -> &'static str {
     match m {
-        1 => "gennaio",
-        2 => "febbraio",
-        3 => "marzo",
-        4 => "aprile",
-        5 => "maggio",
-        6 => "giugno",
-        7 => "luglio",
-        8 => "agosto",
-        9 => "settembre",
-        10 => "ottobre",
-        11 => "novembre",
-        _ => "dicembre",
+        1 => "January",
+        2 => "February",
+        3 => "March",
+        4 => "April",
+        5 => "May",
+        6 => "June",
+        7 => "July",
+        8 => "August",
+        9 => "September",
+        10 => "October",
+        11 => "November",
+        _ => "December",
     }
 }
 
@@ -12520,7 +12520,7 @@ fn now_block() -> String {
     let z = now_local();
     let tz = effective_user_tz_name();
     format!(
-        "oggi è {wd} {day} {month} {year}, sono le {h:02}:{m:02} (fuso {tz}, UTC{off})",
+        "today is {wd} {day} {month} {year}, it's {h:02}:{m:02} ({tz} timezone, UTC{off})",
         wd = weekday_it(z.weekday()),
         day = z.day(),
         month = month_it(z.month()),
@@ -12542,7 +12542,7 @@ fn browse_web_lock() -> &'static tokio::sync::Mutex<()> {
 /// Placeholder substituted for an old browser-snapshot tool result so the model
 /// still sees the call happened but the giant snapshot text is dropped.
 const PRUNED_SNAPSHOT_STUB: &str =
-    "[snapshot precedente rimosso — richiama browser_snapshot se serve]";
+    "[previous snapshot removed — call browser_snapshot again if needed]";
 
 /// Context hygiene for the 32-round browser loop. Each browser snapshot/act tool
 /// result and each screenshot image is large; at 32 rounds they would overflow
@@ -12866,7 +12866,7 @@ fn strip_image_url_parts(message: &mut serde_json::Value) {
     if had_image {
         parts.push(serde_json::json!({
             "type": "text",
-            "text": "[immagine precedente rimossa — cattura un nuovo screenshot se serve]"
+            "text": "[previous image removed — capture a new screenshot if needed]"
         }));
     }
 }
@@ -13022,7 +13022,7 @@ fn spawn_contained_computer_idle_reaper(state: AppState) {
             let _ = tokio::task::spawn_blocking(|| {
                 if sandbox::container_up() && sandbox::recycle_container() {
                     eprintln!(
-                        "contained-computer: idle oltre la soglia, riciclato ({} rimosso, si ricrea al prossimo uso)",
+                        "contained-computer: idle past the threshold, recycled ({} removed, recreated on next use)",
                         sandbox::CONTAINER
                     );
                 }
@@ -13202,7 +13202,7 @@ async fn save_artifact_content(
         return Err(GatewayError {
             status: StatusCode::FORBIDDEN,
             code: "bad_artifact_path",
-            message: "Percorso non valido.".to_string(),
+            message: "Invalid path.".to_string(),
         });
     }
     match write_text_artifact(&request.thread, &request.name, &request.content) {
@@ -13261,7 +13261,7 @@ async fn download_artifact(Query(reference): Query<ArtifactRef>) -> Result<Respo
         return Err(GatewayError {
             status: StatusCode::FORBIDDEN,
             code: "bad_artifact_path",
-            message: "Percorso non valido.".to_string(),
+            message: "Invalid path.".to_string(),
         });
     }
     let dir = sandbox::artifacts_dir().join(&reference.thread);
@@ -13273,7 +13273,7 @@ async fn download_artifact(Query(reference): Query<ArtifactRef>) -> Result<Respo
         return Err(GatewayError {
             status: StatusCode::FORBIDDEN,
             code: "artifact_outside_dir",
-            message: "Percorso fuori dalla cartella artifact.".to_string(),
+            message: "Path outside the artifact folder.".to_string(),
         });
     }
     let bytes = tokio::task::spawn_blocking(move || std::fs::read(&path))
@@ -13319,7 +13319,7 @@ async fn artifact_pdf_pages(
         return Err(GatewayError {
             status: StatusCode::FORBIDDEN,
             code: "bad_artifact_path",
-            message: "Percorso non valido.".to_string(),
+            message: "Invalid path.".to_string(),
         });
     }
     let dir = sandbox::artifacts_dir().join(&reference.thread);
@@ -13331,7 +13331,7 @@ async fn artifact_pdf_pages(
         return Err(GatewayError {
             status: StatusCode::FORBIDDEN,
             code: "artifact_outside_dir",
-            message: "Percorso fuori dalla cartella artifact.".to_string(),
+            message: "Path outside the artifact folder.".to_string(),
         });
     }
     let pages = tokio::task::spawn_blocking(move || attachments::render_pdf_to_images(&path))
@@ -13369,7 +13369,7 @@ fn load_artifact_destinations() -> Vec<ArtifactDestination> {
 }
 
 fn write_artifact_destinations(list: &[ArtifactDestination]) -> Result<(), String> {
-    let path = artifact_destinations_path().ok_or_else(|| "data dir non disponibile".to_string())?;
+    let path = artifact_destinations_path().ok_or_else(|| "data dir unavailable".to_string())?;
     let json = serde_json::to_string_pretty(list).map_err(|e| e.to_string())?;
     fs::write(path, json).map_err(|e| e.to_string())
 }
@@ -13443,7 +13443,7 @@ fn load_channel_settings() -> ChannelSettings {
 }
 
 fn save_channel_settings(settings: &ChannelSettings) -> Result<(), String> {
-    let path = channel_settings_path().ok_or_else(|| "data dir non disponibile".to_string())?;
+    let path = channel_settings_path().ok_or_else(|| "data dir unavailable".to_string())?;
     let json = serde_json::to_string_pretty(settings).map_err(|e| e.to_string())?;
     fs::write(path, json).map_err(|e| e.to_string())
 }
@@ -13603,9 +13603,9 @@ fn reconnect_channels_on_startup() {
                     if let Ok(mut guard) = whatsapp_child().lock() {
                         *guard = Some(child);
                     }
-                    eprintln!("channel/whatsapp: auto-reconnect all'avvio (sessione presente)");
+                    eprintln!("channel/whatsapp: auto-reconnect at startup (session present)");
                 }
-                Err(error) => eprintln!("channel/whatsapp: auto-reconnect fallito: {error}"),
+                Err(error) => eprintln!("channel/whatsapp: auto-reconnect failed: {error}"),
             }
         }
     }
@@ -13632,9 +13632,9 @@ fn reconnect_channels_on_startup() {
                     if let Ok(mut guard) = telegram_child().lock() {
                         *guard = Some(child);
                     }
-                    eprintln!("channel/telegram: auto-reconnect all'avvio (token presente)");
+                    eprintln!("channel/telegram: auto-reconnect at startup (token present)");
                 }
-                Err(error) => eprintln!("channel/telegram: auto-reconnect fallito: {error}"),
+                Err(error) => eprintln!("channel/telegram: auto-reconnect failed: {error}"),
             }
         }
     }
@@ -13649,7 +13649,7 @@ async fn whatsapp_connect(
     let bin = whatsapp_bin().ok_or_else(|| GatewayError {
         status: StatusCode::SERVICE_UNAVAILABLE,
         code: "whatsapp_bin_missing",
-        message: "Bridge non compilato: esegui `cargo build --release` in runtimes/channel-whatsapp."
+        message: "Bridge not compiled: run `cargo build --release` in runtimes/channel-whatsapp."
             .to_string(),
     })?;
     let mut command = std::process::Command::new(bin);
@@ -13815,14 +13815,14 @@ async fn telegram_connect(
             .ok_or_else(|| GatewayError {
                 status: StatusCode::BAD_REQUEST,
                 code: "telegram_token_missing",
-                message: "Inserisci il bot token di @BotFather.".to_string(),
+                message: "Enter the bot token from @BotFather.".to_string(),
             })?,
     };
 
     let bin = telegram_bin().ok_or_else(|| GatewayError {
         status: StatusCode::SERVICE_UNAVAILABLE,
         code: "telegram_bin_missing",
-        message: "Bridge non compilato: esegui `cargo build --release` in runtimes/channel-telegram."
+        message: "Bridge not compiled: run `cargo build --release` in runtimes/channel-telegram."
             .to_string(),
     })?;
     let mut command = std::process::Command::new(bin);
@@ -13878,11 +13878,11 @@ async fn channel_send(
         .json(&serde_json::json!({ "recipient": recipient, "text": text }))
         .send()
         .await
-        .map_err(|error| format!("sidecar non raggiungibile: {error}"))?;
+        .map_err(|error| format!("sidecar unreachable: {error}"))?;
     if response.status().is_success() {
         Ok(())
     } else {
-        Err(format!("sidecar /send ha risposto {}", response.status()))
+        Err(format!("sidecar /send responded {}", response.status()))
     }
 }
 
@@ -13902,11 +13902,11 @@ async fn channel_set_presence(
         .json(&serde_json::json!({ "recipient": recipient, "state": presence }))
         .send()
         .await
-        .map_err(|error| format!("sidecar non raggiungibile: {error}"))?;
+        .map_err(|error| format!("sidecar unreachable: {error}"))?;
     if response.status().is_success() {
         Ok(())
     } else {
-        Err(format!("sidecar /chatstate ha risposto {}", response.status()))
+        Err(format!("sidecar /chatstate responded {}", response.status()))
     }
 }
 
@@ -14015,8 +14015,8 @@ async fn telegram_callback(
         execute_pending_approval(&state, code).await
     } else {
         match take_pending_approval(code) {
-            Some(_) => format!("❌ Annullato ({code})."),
-            None => format!("Codice {code} non valido o scaduto."),
+            Some(_) => format!("❌ Cancelled ({code})."),
+            None => format!("Code {code} not valid or expired."),
         }
     };
     let _ = channel_send(&state, TELEGRAM_HTTP_PORT, target.trim(), &reply).await;
@@ -14054,8 +14054,8 @@ async fn handle_channel_inbound(
                     execute_pending_approval(state, &code).await
                 } else {
                     match take_pending_approval(&code) {
-                        Some(_) => format!("❌ Annullato ({code})."),
-                        None => format!("Codice {code} non valido o scaduto."),
+                        Some(_) => format!("❌ Cancelled ({code})."),
+                        None => format!("Code {code} not valid or expired."),
                     }
                 };
                 let _ = channel_send(state, port, &message.sender, &reply).await;
@@ -14320,7 +14320,7 @@ async fn handle_channel_inbound(
                         // (remote card) as a send_message to this contact; nothing goes to the
                         // contact until the user approves. No-op delivery if no approval channel.
                         let preview: String = reply.chars().take(160).collect();
-                        let lbl = format!("Risposta a {name} su {label}: «{preview}»");
+                        let lbl = format!("Reply to {name} on {label}: «{preview}»");
                         let args = serde_json::json!({
                             "channel": channel, "to": reply_to, "text": reply
                         });
@@ -14328,23 +14328,23 @@ async fn handle_channel_inbound(
                             deliver_remote_approval(&st, "send_message", &args, &lbl).await;
                         let _ = channel_set_presence(&st, port, &reply_to, "paused").await;
                         if delivered {
-                            eprintln!("channel/{channel}: bozza inviata per approvazione (contatto {reply_to})");
+                            eprintln!("channel/{channel}: draft sent for approval (contact {reply_to})");
                         } else {
-                            eprintln!("channel/{channel}: approve mode senza canale di approvazione — bozza solo in-app (thread)");
+                            eprintln!("channel/{channel}: approve mode without approval channel — draft only in-app (thread)");
                         }
                     }
                     Some(reply) => match channel_send(&st, port, &reply_to, &reply).await {
                         Ok(()) => {
-                            eprintln!("channel/{channel}: auto-reply inviata a {reply_to}")
+                            eprintln!("channel/{channel}: auto-reply sent to {reply_to}")
                         }
                         Err(error) => eprintln!(
-                            "channel/{channel}: auto-reply FALLITA verso {reply_to}: {error}"
+                            "channel/{channel}: auto-reply FAILED to {reply_to}: {error}"
                         ),
                     },
                     None => {
                         let _ = channel_set_presence(&st, port, &reply_to, "paused").await;
                         eprintln!(
-                            "channel/{channel}: nessuna risposta generata per {reply_to}"
+                            "channel/{channel}: no reply generated for {reply_to}"
                         );
                     }
                 }
@@ -14502,7 +14502,7 @@ fn backfill_mentions(state: &AppState) {
         link_memory_mentions(&facade, &user, &workspace, &items);
         linked_scopes += 1;
     }
-    eprintln!("mentions-backfill: completato su {linked_scopes} scope");
+    eprintln!("mentions-backfill: completed on {linked_scopes} scopes");
     if let Ok(store) = lock_store(state) {
         let _ = store.set_flag("mentions_backfill_v1", "1");
     }
@@ -14633,7 +14633,7 @@ fn unify_owner_identity(state: &AppState) {
             loser.metadata = serde_json::json!({ "merged_into": self_ref.to_string() });
         }
         let _ = facade.upsert_entity(&loser);
-        let _ = facade.tombstone_entity(&loser.reference, &user, &workspace, "fuso nel self (owner)");
+        let _ = facade.tombstone_entity(&loser.reference, &user, &workspace, "merged into self (owner)");
         merged += 1;
     }
     // The self-contact pointed at one of the merged entities — re-point it to the
@@ -14644,7 +14644,7 @@ fn unify_owner_identity(state: &AppState) {
         }
         let _ = store.set_flag("owner_identity_unified_v1", "1");
     }
-    eprintln!("owner-unify: {merged} identità del proprietario fuse in person:self");
+    eprintln!("owner-unify: {merged} owner identities merged into person:self");
 }
 
 /// Startup graph regeneration (the completeness INVARIANT): on EVERY launch,
@@ -14665,7 +14665,7 @@ fn sweep_graph_on_startup(state: &AppState) {
     for id in workspaces {
         regenerate_graph_links(state, &MemoryWorkspaceId::new(id));
     }
-    eprintln!("graph-regen: rigenerazione all'avvio completata");
+    eprintln!("graph-regen: startup regeneration completed");
 }
 
 /// One-shot migration: seed the curated `contacts` table from existing `person`
@@ -14928,7 +14928,7 @@ answer text.";
         "max_tokens": 2000,
         "messages": [
             { "role": "system", "content": system },
-            { "role": "user", "content": format!("Messaggio da {sender_name}:\n{content}") },
+            { "role": "user", "content": format!("Message from {sender_name}:\n{content}") },
         ],
     });
     let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
@@ -14940,7 +14940,7 @@ answer text.";
         match channel_reply_once(state, &endpoint, api_key.as_deref(), &payload).await {
             Ok(reply) => return Some(reply),
             Err(reason) => {
-                eprintln!("channel/whatsapp: reply tentativo {attempt}/2 fallito: {reason}");
+                eprintln!("channel/whatsapp: reply attempt {attempt}/2 failed: {reason}");
                 if attempt < 2 {
                     tokio::time::sleep(std::time::Duration::from_secs(2)).await;
                 }
@@ -14969,7 +14969,7 @@ async fn channel_reply_once(
         if error.is_timeout() {
             "timeout (120s)".to_string()
         } else {
-            format!("rete: {error}")
+            format!("network: {error}")
         }
     })?;
     let status = response.status();
@@ -14979,7 +14979,7 @@ async fn channel_reply_once(
     let body = response
         .json::<serde_json::Value>()
         .await
-        .map_err(|error| format!("body non JSON: {error}"))?;
+        .map_err(|error| format!("body not JSON: {error}"))?;
     let choice = body.get("choices").and_then(|c| c.get(0));
     let reply = choice
         .and_then(|c| c.get("message"))
@@ -14993,7 +14993,7 @@ async fn channel_reply_once(
             .and_then(|c| c.get("finish_reason"))
             .and_then(|f| f.as_str())
             .unwrap_or("?");
-        return Err(format!("content vuoto (finish_reason={finish})"));
+        return Err(format!("empty content (finish_reason={finish})"));
     }
     Ok(reply)
 }
@@ -15031,7 +15031,7 @@ async fn add_artifact_destination(
         return Err(GatewayError {
             status: StatusCode::BAD_REQUEST,
             code: "dest_not_found",
-            message: "La cartella indicata non esiste.".to_string(),
+            message: "The specified folder does not exist.".to_string(),
         });
     }
     let mut list = load_artifact_destinations();
@@ -15168,7 +15168,7 @@ async fn delete_artifact_file(Query(reference): Query<ArtifactRef>) -> Result<Js
         return Err(GatewayError {
             status: StatusCode::FORBIDDEN,
             code: "bad_artifact_path",
-            message: "Percorso non valido.".to_string(),
+            message: "Invalid path.".to_string(),
         });
     }
     let dir = sandbox::artifacts_dir().join(&reference.thread);
@@ -15212,11 +15212,11 @@ fn write_text_artifact(thread_slug: &str, name: &str, content: &str) -> Result<(
 /// path). Used for binary artifacts like rendered PDFs.
 fn write_artifact_bytes(thread_slug: &str, name: &str, bytes: &[u8]) -> Result<(u64, bool), String> {
     if name.is_empty() || name.contains('/') || name.contains('\\') || name.contains("..") {
-        return Err("Nome file non valido.".to_string());
+        return Err("Invalid file name.".to_string());
     }
     let managed_dir = sandbox::artifacts_dir().join(thread_slug);
     if let Err(error) = fs::create_dir_all(&managed_dir) {
-        return Err(format!("Impossibile creare la cartella artifact: {error}"));
+        return Err(format!("Could not create the artifact folder: {error}"));
     }
     let managed_path = managed_dir.join(name);
     // Versioning: archive the previous content before overwriting, so the panel
@@ -15231,7 +15231,7 @@ fn write_artifact_bytes(thread_slug: &str, name: &str, bytes: &[u8]) -> Result<(
         let _ = fs::copy(&managed_path, versions_dir.join(index.to_string()));
     }
     if let Err(error) = fs::write(&managed_path, bytes) {
-        return Err(format!("Scrittura artifact non riuscita: {error}"));
+        return Err(format!("Artifact write failed: {error}"));
     }
     if let Some(folder) = active_workspace_folder() {
         let _ = fs::copy(&managed_path, std::path::Path::new(&folder).join(name));
@@ -15244,7 +15244,7 @@ fn write_artifact_bytes(thread_slug: &str, name: &str, bytes: &[u8]) -> Result<(
 /// is one the user granted. Returns a user-facing result line for the model.
 fn save_artifact_to_destination(thread_slug: &str, file: &str, dest_name: &str) -> String {
     if file.is_empty() || file.contains('/') || file.contains('\\') || file.contains("..") {
-        return "Nome file non valido.".to_string();
+        return "Invalid file name.".to_string();
     }
     let Some(dest) = resolve_destination(dest_name) else {
         let available = load_artifact_destinations()
@@ -15253,23 +15253,23 @@ fn save_artifact_to_destination(thread_slug: &str, file: &str, dest_name: &str) 
             .collect::<Vec<_>>()
             .join(", ");
         return format!(
-            "Destinazione «{dest_name}» non autorizzata. Disponibili: {}.",
-            if available.is_empty() { "nessuna".to_string() } else { available }
+            "Destination «{dest_name}» not authorized. Available: {}.",
+            if available.is_empty() { "none".to_string() } else { available }
         );
     };
     let src_dir = sandbox::artifacts_dir().join(thread_slug);
     let src = src_dir.join(file);
     if !path_within(&src_dir, &src) || !src.is_file() {
-        return format!("File «{file}» non trovato tra gli artifact.");
+        return format!("File «{file}» not found among the artifacts.");
     }
     let dest_dir = PathBuf::from(&dest.path);
     if !dest_dir.is_dir() {
-        return format!("La cartella di destinazione «{}» non esiste più.", dest.label);
+        return format!("The destination folder «{}» no longer exists.", dest.label);
     }
     let target = dest_dir.join(file);
     match fs::copy(&src, &target) {
-        Ok(_) => format!("✅ Salvato in {}", target.display()),
-        Err(error) => format!("Salvataggio non riuscito: {error}"),
+        Ok(_) => format!("✅ Saved to {}", target.display()),
+        Err(error) => format!("Save failed: {error}"),
     }
 }
 
@@ -15352,7 +15352,7 @@ fn fonti_section(sources: &[String], answer: &str) -> Option<String> {
         return None;
     }
     let lower = answer.to_lowercase();
-    if lower.contains("**fonti") || lower.contains("fonti controllate") {
+    if lower.contains("**sources") || lower.contains("checked sources") {
         return None;
     }
     let list = sources
@@ -15361,7 +15361,7 @@ fn fonti_section(sources: &[String], answer: &str) -> Option<String> {
         .map(|url| format!("- {url}"))
         .collect::<Vec<_>>()
         .join("\n");
-    Some(format!("\n\n**Fonti**\n{list}"))
+    Some(format!("\n\n**Sources**\n{list}"))
 }
 
 /// A live chat stream, kept in a server-side registry so a client that reloads
@@ -15449,7 +15449,7 @@ async fn resume_stream(Path(request_id): Path<String>) -> Result<Response, Gatew
         None => Err(GatewayError {
             status: StatusCode::NOT_FOUND,
             code: "stream_not_found",
-            message: "Nessuno stream attivo per questa richiesta.".to_string(),
+            message: "No active stream for this request.".to_string(),
         }),
     }
 }
@@ -15600,7 +15600,7 @@ async fn cancel_task(
                         &user,
                         &workspace,
                         local_first_task_runtime::TaskStatus::Cancelled,
-                        Some("annullato dall'utente"),
+                        Some("cancelled by the user"),
                     )
                     .map_err(GatewayError::task)?;
             }
@@ -15721,7 +15721,7 @@ fn sync_computer_session_after_approval(
     session.progress_current = session.progress_current.max(1);
     session.updated_at = now;
     if approval_state == ApprovalState::Rejected {
-        session.last_error = Some("Approval rifiutata dall'utente.".to_string());
+        session.last_error = Some("Approval rejected by the user.".to_string());
     }
     computer_store
         .upsert_session(&session)
@@ -15736,8 +15736,8 @@ fn sync_computer_session_after_approval(
             SurfaceKind::Logs,
             "computer_approval_approved",
             "done",
-            "Approval confermata",
-            "Il task locale e' stato messo in coda.",
+            "Approval confirmed",
+            "The local task has been queued.",
             false,
         )?,
         ApprovalState::Rejected => append_computer_event(
@@ -15748,8 +15748,8 @@ fn sync_computer_session_after_approval(
             SurfaceKind::Logs,
             "computer_approval_rejected",
             "done",
-            "Approval rifiutata",
-            "Il task locale e' stato annullato prima dell'esecuzione.",
+            "Approval rejected",
+            "The local task was cancelled before execution.",
             false,
         )?,
         ApprovalState::None | ApprovalState::WaitingUser => {}
@@ -15871,7 +15871,7 @@ fn run_next_task_once(
         return Ok(TaskRunBatchResponse {
             status: "idle".to_string(),
             completed: 0,
-            stopped_reason: Some("Nessun task approvato in coda.".to_string()),
+            stopped_reason: Some("No approved task in queue.".to_string()),
             results: vec![],
         });
     };
@@ -15896,7 +15896,7 @@ fn run_next_task_once(
                 results: vec![TaskRunStepResponse {
                     status: "waiting_resource".to_string(),
                     task_id: Some(task_id),
-                    message: "Risorse locali non ancora disponibili.".to_string(),
+                    message: "Local resources not yet available.".to_string(),
                 }],
             });
         }
@@ -15904,11 +15904,11 @@ fn run_next_task_once(
             return Ok(TaskRunBatchResponse {
                 status: "skipped".to_string(),
                 completed: 0,
-                stopped_reason: Some("Task gia' in esecuzione da un altro worker.".to_string()),
+                stopped_reason: Some("Task already running on another worker.".to_string()),
                 results: vec![TaskRunStepResponse {
                     status: "skipped".to_string(),
                     task_id: Some(task_id),
-                    message: "Lease gia' attivo.".to_string(),
+                    message: "Lease already active.".to_string(),
                 }],
             });
         }
@@ -15919,8 +15919,8 @@ fn run_next_task_once(
         &task,
         "execution_started",
         SurfaceKind::Logs,
-        "Task avviato",
-        "Esecuzione locale approvata e presa in carico dal worker.",
+        "Task started",
+        "Local execution approved and taken over by the worker.",
         serde_json::json!({
             "kind": "execution_started",
             "worker_id": worker_id,
@@ -16051,7 +16051,7 @@ fn run_next_task_once(
         let reason = outcome
             .blocked_reason
             .as_deref()
-            .unwrap_or("Il piano operativo non ha soddisfatto i criteri di successo.");
+            .unwrap_or("The operational plan did not meet the success criteria.");
         mark_task_waiting_external(state, &mut task, reason)?;
         sync_session_for_task_run(
             state,
@@ -16325,7 +16325,7 @@ fn acquire_task_for_execution(
             .get_task(&task.task_id, user, workspace)
             .map_err(GatewayError::task)?
             .and_then(|task| task.blocked_reason)
-            .unwrap_or_else(|| "Risorse locali non disponibili.".to_string());
+            .unwrap_or_else(|| "Local resources not available.".to_string());
         return Ok(TaskAcquireResult::WaitingResource(blocked_reason));
     }
     if !lease_manager
@@ -16589,8 +16589,8 @@ fn sync_session_for_task_run(
             surface_for_task(task),
             "computer_task_running",
             "running",
-            "Esecuzione locale avviata",
-            "Il task approvato e' in esecuzione read-only.",
+            "Local execution started",
+            "The approved task is running read-only.",
             false,
         )?,
         SessionStatus::Completed => append_computer_event(
@@ -16601,8 +16601,8 @@ fn sync_session_for_task_run(
             surface_for_task(task),
             "computer_task_completed",
             "done",
-            "Task completato",
-            "Risultato sintetico disponibile in chat.",
+            "Task completed",
+            "Summary result available in chat.",
             false,
         )?,
         SessionStatus::Failed => append_computer_event_with_payload(
@@ -16613,9 +16613,9 @@ fn sync_session_for_task_run(
             surface_for_task(task),
             "computer_task_failed",
             "failed",
-            "Task non completato",
-            last_error.as_deref().unwrap_or("Errore locale redatto."),
-            serde_json::json!({ "error": last_error.clone().unwrap_or_else(|| "Errore locale redatto.".to_string()) }),
+            "Task not completed",
+            last_error.as_deref().unwrap_or("Local error redacted."),
+            serde_json::json!({ "error": last_error.clone().unwrap_or_else(|| "Local error redacted.".to_string()) }),
             false,
             vec![],
         )?,
@@ -16627,13 +16627,13 @@ fn sync_session_for_task_run(
             surface_for_task(task),
             "computer_task_waiting_approval",
             "waiting_user",
-            "Approval richiesta",
+            "Approval required",
             last_error
                 .as_deref()
-                .unwrap_or("Serve una conferma per continuare."),
+                .unwrap_or("A confirmation is needed to continue."),
             serde_json::json!({
                 "approval_required": true,
-                "reason": last_error.clone().unwrap_or_else(|| "Serve una conferma per continuare.".to_string()),
+                "reason": last_error.clone().unwrap_or_else(|| "A confirmation is needed to continue.".to_string()),
             }),
             true,
             vec![],
@@ -16884,7 +16884,7 @@ fn execute_proactive_prompt_task(
     };
     let Some(thread_id) = thread_id else {
         return Err(LocalTaskExecutionError {
-            message: "impossibile creare il thread pianificato".to_string(),
+            message: "could not create the scheduled thread".to_string(),
         });
     };
 
@@ -16916,7 +16916,7 @@ fn execute_proactive_prompt_task(
     };
     let answer = tokio::runtime::Handle::current()
         .block_on(run_agent_turn(state, &thread_id, &goal, policy))
-        .unwrap_or_else(|| "Nessuna risposta generata per il task pianificato.".to_string());
+        .unwrap_or_else(|| "No reply generated for the scheduled task.".to_string());
 
     if let Ok(store) = lock_store(state) {
         // The goal documents what the scheduled task was asked — keep it as a user bubble.
@@ -16935,7 +16935,7 @@ fn execute_proactive_prompt_task(
         completed: true,
         blocked_reason: None,
         pending_approval: None,
-        summary: "Task pianificato eseguito.".to_string(),
+        summary: "Scheduled task executed.".to_string(),
         checkpoint_payload: serde_json::json!({
             "kind": "proactive_prompt",
             "goal": goal,
@@ -16945,8 +16945,8 @@ fn execute_proactive_prompt_task(
         chat_message: answer,
         surface: SurfaceKind::Logs,
         event_kind: "proactive_prompt_completed".to_string(),
-        event_title: "Task pianificato completato".to_string(),
-        event_subtitle: "Esecuzione proattiva schedulata.".to_string(),
+        event_title: "Scheduled task completed".to_string(),
+        event_subtitle: "Scheduled proactive execution.".to_string(),
         event_payload: serde_json::json!({ "goal": goal }),
         artifacts: vec![],
     })
@@ -16959,12 +16959,12 @@ fn execute_capability_browser_task(
     let payload: CapabilityTaskPayload =
         serde_json::from_value(task.input_json.clone()).map_err(|error| {
             LocalTaskExecutionError {
-                message: format!("Payload capability browser non valido: {error}"),
+                message: format!("Invalid browser capability payload: {error}"),
             }
         })?;
     let method = browser_method_for_capability_tool(&payload.call.tool_name).ok_or_else(|| {
         LocalTaskExecutionError {
-            message: format!("Tool browser non supportato: {}", payload.call.tool_name),
+            message: format!("Unsupported browser tool: {}", payload.call.tool_name),
         }
     })?;
 
@@ -16973,9 +16973,9 @@ fn execute_capability_browser_task(
         task,
         "capability_browser_executor_started",
         SurfaceKind::Browser,
-        "Executor browser",
+        "Browser executor",
         &format!(
-            "Eseguo capability `{}` tramite BrowserTaskExecutor.",
+            "Running capability `{}` via BrowserTaskExecutor.",
             payload.call.tool_name
         ),
         serde_json::json!({
@@ -17105,7 +17105,7 @@ fn call_shared_browser_sidecar(
         let client = client_guard
             .as_ref()
             .ok_or_else(|| LocalTaskExecutionError {
-                message: "Browser capability non inizializzato.".to_string(),
+                message: "Browser capability not initialized.".to_string(),
             })?;
         client.call_response(method, params)
     };
@@ -17235,7 +17235,7 @@ fn execute_capability_generic(
     let payload: CapabilityTaskPayload =
         serde_json::from_value(task.input_json.clone()).map_err(|error| {
             LocalTaskExecutionError {
-                message: format!("Payload capability non valido: {error}"),
+                message: format!("Invalid capability payload: {error}"),
             }
         })?;
     let call = payload.call;
@@ -17252,7 +17252,7 @@ fn execute_capability_generic(
             })?
             .map(|config| config.provider_kind)
             .ok_or_else(|| LocalTaskExecutionError {
-                message: format!("provider non configurato: {}", provider_id.as_str()),
+                message: format!("provider not configured: {}", provider_id.as_str()),
             })?;
         let connection = registry
             .connection_configs(&user, &workspace)
@@ -17285,7 +17285,7 @@ fn execute_capability_generic(
     let result = match kind {
         CapabilityProviderKind::Mcp => {
             let connection = connection.ok_or_else(|| LocalTaskExecutionError {
-                message: format!("nessuna connessione per provider {}", provider_id.as_str()),
+                message: format!("no connection for provider {}", provider_id.as_str()),
             })?;
             let transport = build_mcp_transport(&connection.metadata)
                 .map_err(|message| LocalTaskExecutionError { message })?;
@@ -17303,7 +17303,7 @@ fn execute_capability_generic(
         }
         CapabilityProviderKind::Managed => {
             let connection = connection.ok_or_else(|| LocalTaskExecutionError {
-                message: format!("nessuna connessione per provider {}", provider_id.as_str()),
+                message: format!("no connection for provider {}", provider_id.as_str()),
             })?;
             let base_url = connection
                 .metadata
@@ -17370,7 +17370,7 @@ fn mcp_stdio_config_from_metadata(
         .and_then(Value::as_str)
         .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| LocalTaskExecutionError {
-            message: "metadata MCP senza `command`".to_string(),
+            message: "MCP metadata without `command`".to_string(),
         })?
         .to_string();
     let args = metadata
@@ -17461,7 +17461,7 @@ fn build_mcp_transport(metadata: &Value) -> Result<McpAnyTransport, String> {
             .get("url")
             .and_then(Value::as_str)
             .filter(|u| !u.trim().is_empty())
-            .ok_or_else(|| "metadata MCP http senza `url`".to_string())?
+            .ok_or_else(|| "MCP http metadata without `url`".to_string())?
             .to_string();
         let headers = metadata
             .get("headers")
@@ -17473,12 +17473,12 @@ fn build_mcp_transport(metadata: &Value) -> Result<McpAnyTransport, String> {
             })
             .unwrap_or_default();
         let transport = mcp_http::McpHttpTransport::connect(mcp_http::McpHttpConfig { url, headers })
-            .map_err(|e| format!("avvio MCP http fallito: {e}"))?;
+            .map_err(|e| format!("MCP http start failed: {e}"))?;
         Ok(McpAnyTransport::Http(transport))
     } else {
         let config = mcp_stdio_config_from_metadata(metadata).map_err(|e| e.message)?;
         let transport =
-            McpStdioTransport::spawn(config).map_err(|e| format!("avvio MCP fallito: {e}"))?;
+            McpStdioTransport::spawn(config).map_err(|e| format!("MCP start failed: {e}"))?;
         Ok(McpAnyTransport::Stdio(transport))
     }
 }
@@ -17557,7 +17557,7 @@ fn connect_mcp_blocking(
         return Err(GatewayError {
             status: StatusCode::BAD_REQUEST,
             code: "mcp_connect_invalid",
-            message: "MCP connect richiede un nome e un comando (stdio) o un url (remoto)."
+            message: "MCP connect requires a name and a command (stdio) or a url (remote)."
                 .to_string(),
         });
     }
@@ -17649,10 +17649,10 @@ fn mcp_discover_and_cache_tools(
     // Handshake first; some servers reject tools/list before initialize.
     provider
         .initialize("2024-11-05")
-        .map_err(|error| format!("handshake MCP fallito: {error}"))?;
+        .map_err(|error| format!("MCP handshake failed: {error}"))?;
     let tools = provider
         .list_tools()
-        .map_err(|error| format!("tools/list fallito: {error}"))?;
+        .map_err(|error| format!("tools/list failed: {error}"))?;
     let count = tools.len();
     let registry = lock_capability_registry(state).map_err(|error| error.message.to_string())?;
     for tool in tools {
@@ -17710,13 +17710,13 @@ fn capability_call_completed_outcome(
             "tool": result.tool_name,
         }),
         chat_message: format!(
-            "Eseguito `{}` tramite `{}`.",
+            "Ran `{}` via `{}`.",
             result.tool_name,
             result.provider_id.as_str()
         ),
         surface: SurfaceKind::Logs,
         event_kind: "capability_tool_completed".to_string(),
-        event_title: "Tool eseguito".to_string(),
+        event_title: "Tool executed".to_string(),
         event_subtitle: summary,
         event_payload: serde_json::json!({
             "provider": result.provider_id.as_str(),
@@ -17742,10 +17742,10 @@ fn capability_call_failed_outcome(task: &TaskRecord, reason: &str) -> TaskExecut
             "task_kind": task.kind,
             "reason": reason,
         }),
-        chat_message: format!("Il tool capability non e' riuscito: {reason}"),
+        chat_message: format!("The capability tool failed: {reason}"),
         surface: SurfaceKind::Logs,
         event_kind: "capability_tool_failed".to_string(),
-        event_title: "Tool non riuscito".to_string(),
+        event_title: "Tool failed".to_string(),
         event_subtitle: reason.to_string(),
         event_payload: serde_json::json!({ "task_kind": task.kind }),
         artifacts: vec![],
@@ -17757,7 +17757,7 @@ fn capability_kind_not_wired_outcome(
     kind: CapabilityProviderKind,
 ) -> TaskExecutionOutcome {
     let reason = format!(
-        "Esecuzione capability per provider kind {kind:?} non ancora collegata (MCP e Composio attivi)."
+        "Capability execution for provider kind {kind:?} not yet wired (MCP and Composio active)."
     );
     capability_call_failed_outcome(task, &reason)
 }
@@ -18404,7 +18404,7 @@ fn run_mcp_chat_tool(
             .map_err(|e| format!("connection configs: {e}"))?
             .into_iter()
             .find(|config| &config.provider_id == provider_id)
-            .ok_or_else(|| format!("nessuna connessione per provider {}", provider_id.as_str()))?;
+            .ok_or_else(|| format!("no connection for provider {}", provider_id.as_str()))?;
         let tool_policies = registry
             .cached_tools(provider_id)
             .map_err(|e| format!("cached tools: {e}"))?
@@ -18450,18 +18450,18 @@ fn suggest_capabilities_tool_schema() -> serde_json::Value {
         "type": "function",
         "function": {
             "name": "suggest_capabilities",
-            "description": "Quando l'utente vuole fare qualcosa che potresti NON già poter fare \
-(automazione browser, accesso a un servizio/app, dati, ecc.), cerca tra i connettori disponibili — \
-server MCP (registry ufficiale), Skill (marketplace) e Composio (1000+ servizi cloud) — e proponi \
-cosa COLLEGARE. Usa una query breve sull'intento (es. 'browser automation', 'google calendar', \
-'excel', 'github'). Restituisce suggerimenti da presentare all'utente con come collegarli.",
+            "description": "When the user wants to do something you might NOT already be able to do \
+(browser automation, access to a service/app, data, etc.), search the available connectors — \
+MCP servers (official registry), Skills (marketplace) and Composio (1000+ cloud services) — and propose \
+what to CONNECT. Use a short query on the intent (e.g. 'browser automation', 'google calendar', \
+'excel', 'github'). Returns suggestions to present to the user along with how to connect them.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "need": {
                         "type": "string",
-                        "description": "Cosa vuole fare l'utente, in poche parole/keyword (es. \
-'automatizzare il browser', 'inviare email', 'leggere file excel')."
+                        "description": "What the user wants to do, in a few words/keywords (e.g. \
+'automate the browser', 'send email', 'read excel files')."
                     }
                 },
                 "required": ["need"]
@@ -18488,7 +18488,7 @@ async fn suggest_capabilities(state: &AppState, need: &str) -> CapabilitySuggest
     let need = need.trim();
     if need.is_empty() {
         return CapabilitySuggestions {
-            model_text: "Specifica cosa vuoi fare, così cerco i connettori adatti.".to_string(),
+            model_text: "Specify what you want to do, so I can search for the right connectors.".to_string(),
             card: None,
         };
     }
@@ -18534,14 +18534,14 @@ async fn suggest_capabilities(state: &AppState, need: &str) -> CapabilitySuggest
         .await
         .unwrap_or_default();
 
-    let mut out = format!("Connettori suggeriti per: \"{need}\"\n");
+    let mut out = format!("Suggested connectors for: \"{need}\"\n");
     // Structured items for the clickable in-chat card (parallel to the text below).
     let mut items: Vec<serde_json::Value> = Vec::new();
     let installable: Vec<_> = mcp.iter().filter(|s| s.installable).take(4).collect();
     if !installable.is_empty() {
-        out.push_str("\nSERVER MCP (Impostazioni → Catalogo MCP):\n");
+        out.push_str("\nMCP SERVERS (Settings → MCP Catalog):\n");
         for s in installable {
-            let badge = if s.official { " [ufficiale]" } else { "" };
+            let badge = if s.official { " [official]" } else { "" };
             out.push_str(&format!(
                 "- {}{} — {} (publisher: {})\n",
                 s.name,
@@ -18563,7 +18563,7 @@ async fn suggest_capabilities(state: &AppState, need: &str) -> CapabilitySuggest
         }
     }
     if !skills.is_empty() {
-        out.push_str("\nSKILL (Impostazioni → Skill → marketplace):\n");
+        out.push_str("\nSKILLS (Settings → Skills → marketplace):\n");
         for s in &skills {
             out.push_str(&format!(
                 "- {} — {}\n",
@@ -18579,7 +18579,7 @@ async fn suggest_capabilities(state: &AppState, need: &str) -> CapabilitySuggest
         }
     }
     if !composio.is_empty() {
-        out.push_str("\nSERVIZI CLOUD via Composio (Impostazioni → Connettori → Composio):\n");
+        out.push_str("\nCLOUD SERVICES via Composio (Settings → Connectors → Composio):\n");
         for t in &composio {
             out.push_str(&format!("- {} ({})\n", t.name, t.slug));
             items.push(serde_json::json!({
@@ -18592,13 +18592,13 @@ async fn suggest_capabilities(state: &AppState, need: &str) -> CapabilitySuggest
     }
     if items.is_empty() {
         out.push_str(
-            "\nNessun connettore trovato. Prova parole chiave diverse, o aggiungi un server MCP manualmente.",
+            "\nNo connectors found. Try different keywords, or add an MCP server manually.",
         );
         return CapabilitySuggestions { model_text: out, card: None };
     }
     out.push_str(
-        "\nPresenta queste opzioni all'utente spiegando brevemente cosa fa ciascuna e come \
-collegarla (i percorsi tra parentesi). NON dichiarare di averle già collegate.",
+        "\nPresent these options to the user, briefly explaining what each one does and how \
+to connect it (the paths in parentheses). Do NOT claim you have already connected them.",
     );
     let card = serde_json::json!({ "need": need, "items": items });
     CapabilitySuggestions { model_text: out, card: Some(card) }
@@ -18674,16 +18674,16 @@ async fn execute_pending_approval(state: &AppState, code: &str) -> String {
                 }
             })
             .await
-            .unwrap_or_else(|_| Err("esecuzione interrotta".to_string()));
+            .unwrap_or_else(|_| Err("execution interrupted".to_string()));
             match result {
                 Ok(value) => match composio_execution_error(&value) {
-                    None => format!("✅ Fatto ({code})."),
-                    Some(err) => format!("⚠️ Non riuscito ({code}): {err}"),
+                    None => format!("✅ Done ({code})."),
+                    Some(err) => format!("⚠️ Failed ({code}): {err}"),
                 },
-                Err(e) => format!("⚠️ Errore ({code}): {e}"),
+                Err(e) => format!("⚠️ Error ({code}): {e}"),
             }
         }
-        None => format!("Codice {code} non valido o scaduto."),
+        None => format!("Code {code} not valid or expired."),
     }
 }
 
@@ -18704,11 +18704,11 @@ async fn channel_send_buttons(
         .json(&serde_json::json!({ "recipient": recipient, "text": text, "buttons": buttons }))
         .send()
         .await
-        .map_err(|error| format!("sidecar non raggiungibile: {error}"))?;
+        .map_err(|error| format!("sidecar unreachable: {error}"))?;
     if response.status().is_success() {
         Ok(())
     } else {
-        Err(format!("sidecar /send ha risposto {}", response.status()))
+        Err(format!("sidecar /send responded {}", response.status()))
     }
 }
 
@@ -18731,11 +18731,11 @@ async fn deliver_remote_approval(
     match channel.as_str() {
         "telegram" => {
             let text = format!(
-                "🔐 Homun chiede la tua conferma:\n{label}\n\n(oppure rispondi: OK {code} / NO {code} — scade tra 10 min)"
+                "🔐 Homun is asking for your confirmation:\n{label}\n\n(or reply: OK {code} / NO {code} — expires in 10 min)"
             );
             let buttons = vec![
-                ["✅ Autorizza".to_string(), format!("approve:{code}")],
-                ["❌ Annulla".to_string(), format!("cancel:{code}")],
+                ["✅ Authorize".to_string(), format!("approve:{code}")],
+                ["❌ Cancel".to_string(), format!("cancel:{code}")],
             ];
             channel_send_buttons(state, TELEGRAM_HTTP_PORT, target.trim(), &text, buttons)
                 .await
@@ -18743,7 +18743,7 @@ async fn deliver_remote_approval(
         }
         "whatsapp" => {
             let text = format!(
-                "🔐 Homun chiede la tua conferma:\n{label}\n\nAutorizza: OK {code}\nAnnulla: NO {code}\n(scade tra 10 minuti)"
+                "🔐 Homun is asking for your confirmation:\n{label}\n\nAuthorize: OK {code}\nCancel: NO {code}\n(expires in 10 minutes)"
             );
             channel_send(state, WHATSAPP_HTTP_PORT, target.trim(), &text).await.is_ok()
         }
@@ -18773,13 +18773,13 @@ fn send_message_tool_schema() -> serde_json::Value {
         "type": "function",
         "function": {
             "name": "send_message",
-            "description": "Invia un messaggio su un canale collegato dell'utente (WhatsApp o Telegram). Usalo per \"manda/scrivi/inoltra/girami un messaggio\". Il destinatario DEVE essere un numero o un ID di chat esplicito (per «a me» chiedi il numero se non lo conosci, NON inventarlo). L'invio richiede la conferma dell'utente prima di partire.",
+            "description": "Send a message on a connected channel of the user (WhatsApp or Telegram). Use it for \"send/write/forward me a message\". The recipient MUST be an explicit number or chat ID (for «to me» ask for the number if you don't know it, do NOT make it up). Sending requires the user's confirmation before it goes out.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "channel": { "type": "string", "enum": ["whatsapp", "telegram"], "description": "Canale su cui inviare" },
-                    "to": { "type": "string", "description": "Destinatario: numero (es. 39333…) o ID di chat. NON un nome generico." },
-                    "text": { "type": "string", "description": "Testo del messaggio" }
+                    "channel": { "type": "string", "enum": ["whatsapp", "telegram"], "description": "Channel to send on" },
+                    "to": { "type": "string", "description": "Recipient: number (e.g. 39333…) or chat ID. NOT a generic name." },
+                    "text": { "type": "string", "description": "Message text" }
                 },
                 "required": ["channel", "to", "text"]
             }
@@ -18806,7 +18806,7 @@ fn execute_send_message(
     if to.is_empty() || text.is_empty() {
         return Ok(serde_json::json!({
             "successful": false,
-            "error": "Servono il destinatario (to) e il testo (text)."
+            "error": "The recipient (to) and the text (text) are required."
         }));
     }
     let looks_like_id =
@@ -18814,7 +18814,7 @@ fn execute_send_message(
     if !looks_like_id {
         return Ok(serde_json::json!({
             "successful": false,
-            "error": format!("Destinatario «{to}» ambiguo: passa un numero o un ID di chat, non solo il nome.")
+            "error": format!("Recipient «{to}» is ambiguous: pass a number or a chat ID, not just the name.")
         }));
     }
     let port = if channel == "telegram" {
@@ -18829,7 +18829,7 @@ fn execute_send_message(
         .block_on(async move { channel_send(&st, port, &recipient, &body).await });
     match sent {
         Ok(()) => Ok(serde_json::json!({ "successful": true, "data": { "channel": channel, "to": to } })),
-        Err(e) => Ok(serde_json::json!({ "successful": false, "error": format!("Invio non riuscito: {e}") })),
+        Err(e) => Ok(serde_json::json!({ "successful": false, "error": format!("Send failed: {e}") })),
     }
 }
 
@@ -18923,21 +18923,21 @@ fn classify_connector_error(error: &str) -> Option<ConnectorErrorKind> {
 fn connector_error_hint(error: &str) -> Option<&'static str> {
     match classify_connector_error(error)? {
         ConnectorErrorKind::Auth => Some(
-            "La connessione è SCADUTA o non autorizzata: di' all'utente di RICOLLEGARE il servizio \
-ed emetti su una riga a sé il marker ‹‹COMPOSIO_RECONNECT››<slug>‹‹/COMPOSIO_RECONNECT›› con lo slug \
-del toolkit. NON ritentare la chiamata.",
+            "The connection has EXPIRED or is not authorized: tell the user to RECONNECT the service \
+and emit on its own line the marker ‹‹COMPOSIO_RECONNECT››<slug>‹‹/COMPOSIO_RECONNECT›› with the toolkit \
+slug. Do NOT retry the call.",
         ),
         ConnectorErrorKind::RateLimit => Some(
-            "Limite di frequenza raggiunto (rate limit): dillo all'utente e proponi di riprovare tra \
-qualche minuto. NON ritentare subito.",
+            "Rate limit reached: tell the user and suggest trying again in \
+a few minutes. Do NOT retry immediately.",
         ),
         ConnectorErrorKind::Forbidden => Some(
-            "Permesso negato (scope insufficiente): l'account collegato non ha i permessi richiesti; \
-suggerisci di ricollegare il servizio concedendo gli scope necessari.",
+            "Permission denied (insufficient scope): the connected account lacks the required permissions; \
+suggest reconnecting the service granting the necessary scopes.",
         ),
         ConnectorErrorKind::Unavailable => Some(
-            "Il servizio non è al momento raggiungibile: dillo all'utente e proponi di riprovare più \
-tardi. NON ritentare subito in loop.",
+            "The service is currently unreachable: tell the user and suggest trying again \
+later. Do NOT retry immediately in a loop.",
         ),
     }
 }
@@ -18981,16 +18981,16 @@ fn record_connector_run(
 fn mcp_error_hint(error: &str) -> Option<&'static str> {
     match classify_connector_error(error)? {
         ConnectorErrorKind::Auth | ConnectorErrorKind::Forbidden => Some(
-            "Il server MCP ha rifiutato le credenziali (scadute o senza permessi): di' all'utente di \
-RICONNETTERE il server da Impostazioni → Connettori → MCP (aggiornando token/permessi). NON ritentare.",
+            "The MCP server rejected the credentials (expired or without permissions): tell the user to \
+RECONNECT the server from Settings → Connectors → MCP (updating token/permissions). Do NOT retry.",
         ),
         ConnectorErrorKind::RateLimit => Some(
-            "Limite di frequenza del server MCP: dillo all'utente e proponi di riprovare tra qualche \
-minuto. NON ritentare subito.",
+            "MCP server rate limit: tell the user and suggest trying again in a few \
+minutes. Do NOT retry immediately.",
         ),
         ConnectorErrorKind::Unavailable => Some(
-            "Il server MCP non è raggiungibile (spento o disconnesso): di' all'utente di verificarlo / \
-riconnetterlo da Impostazioni → Connettori → MCP. NON ritentare in loop.",
+            "The MCP server is unreachable (off or disconnected): tell the user to check it / \
+reconnect it from Settings → Connectors → MCP. Do NOT retry in a loop.",
         ),
     }
 }
@@ -19008,7 +19008,7 @@ fn composio_execution_error(output: &serde_json::Value) -> Option<String> {
                     .filter(|v| !v.is_null())
                     .map(|v| v.to_string())
             })
-            .unwrap_or_else(|| "il servizio ha rifiutato l'azione".to_string());
+            .unwrap_or_else(|| "the service rejected the action".to_string());
         return Some(message.chars().take(400).collect());
     }
     None
@@ -19045,7 +19045,7 @@ fn composio_tool_allowed(slug: &str) -> bool {
 }
 
 fn write_composio_tool_allow(set: std::collections::BTreeSet<String>) -> Result<(), String> {
-    let path = composio_tool_allow_path().ok_or_else(|| "data dir non disponibile".to_string())?;
+    let path = composio_tool_allow_path().ok_or_else(|| "data dir unavailable".to_string())?;
     let value = ComposioToolAllow { always: set.into_iter().collect() };
     let json = serde_json::to_string_pretty(&value).map_err(|e| e.to_string())?;
     fs::write(path, json).map_err(|e| e.to_string())
@@ -19077,7 +19077,7 @@ fn load_thread_folders() -> std::collections::BTreeMap<String, String> {
 }
 
 fn write_thread_folders(map: &std::collections::BTreeMap<String, String>) -> Result<(), String> {
-    let path = thread_folders_path().ok_or_else(|| "data dir non disponibile".to_string())?;
+    let path = thread_folders_path().ok_or_else(|| "data dir unavailable".to_string())?;
     let json = serde_json::to_string_pretty(map).map_err(|e| e.to_string())?;
     fs::write(path, json).map_err(|e| e.to_string())
 }
@@ -19190,7 +19190,7 @@ async fn set_thread_folder(
                 return Err(GatewayError {
                     status: StatusCode::BAD_REQUEST,
                     code: "folder_not_found",
-                    message: "La cartella indicata non esiste.".to_string(),
+                    message: "The specified folder does not exist.".to_string(),
                 });
             }
             map.insert(thread_id.clone(), path.to_string());
@@ -19253,7 +19253,7 @@ async fn read_thread_file(
     let folder = effective_thread_folder(&thread_id).ok_or_else(|| GatewayError {
         status: StatusCode::BAD_REQUEST,
         code: "no_folder",
-        message: "Nessuna cartella collegata.".to_string(),
+        message: "No folder linked.".to_string(),
     })?;
     let root = PathBuf::from(folder);
     let candidate = root.join(&query.path);
@@ -19261,7 +19261,7 @@ async fn read_thread_file(
         return Err(GatewayError {
             status: StatusCode::FORBIDDEN,
             code: "path_outside_folder",
-            message: "Percorso fuori dalla cartella collegata.".to_string(),
+            message: "Path outside the linked folder.".to_string(),
         });
     }
     let rel = query.path.clone();
@@ -19350,7 +19350,7 @@ fn rewrite_confirm_to_done(text: &str, tool: &str) -> String {
         return text.to_string();
     };
     let close = open + close_rel + COMPOSIO_CONFIRM_CLOSE.len();
-    let head_end = text[..open].rfind("Serve la tua conferma").unwrap_or(open);
+    let head_end = text[..open].rfind("I need your confirmation").unwrap_or(open);
     let mut out = text[..head_end].trim_end().to_string();
     let tail = text[close..].trim();
     if !tail.is_empty() {
@@ -19405,7 +19405,7 @@ async fn composio_execute(
     if let Some(error) = composio_execution_error(&output) {
         return Ok(Json(ComposioExecuteResponse {
             ok: false,
-            summary: format!("Azione NON riuscita: {error}"),
+            summary: format!("Action FAILED: {error}"),
         }));
     }
 
@@ -19541,7 +19541,7 @@ async fn mcp_disconnect(
                 return Err(GatewayError {
                     status: StatusCode::BAD_REQUEST,
                     code: "mcp_not_mcp",
-                    message: "Il provider indicato non è un server MCP.".to_string(),
+                    message: "The indicated provider is not an MCP server.".to_string(),
                 });
             }
             None => return Ok(0),
@@ -19574,7 +19574,7 @@ fn rewrite_fs_authorize_to_done(text: &str, path: &str) -> String {
         return text.to_string();
     };
     let close = open + close_rel + FS_AUTHORIZE_CLOSE.len();
-    let head_end = text[..open].rfind("Per accedere a questa cartella").unwrap_or(open);
+    let head_end = text[..open].rfind("To access this folder").unwrap_or(open);
     let mut out = text[..head_end].trim_end().to_string();
     let tail = text[close..].trim();
     if !tail.is_empty() {
@@ -19586,7 +19586,7 @@ fn rewrite_fs_authorize_to_done(text: &str, path: &str) -> String {
     if !out.is_empty() {
         out.push_str("\n\n");
     }
-    out.push_str(&format!("✓ Accesso concesso a {path}"));
+    out.push_str(&format!("✓ Access granted to {path}"));
     out
 }
 
@@ -19613,7 +19613,7 @@ async fn fs_authorize(
         return Err(GatewayError {
             status: StatusCode::BAD_REQUEST,
             code: "fs_bad_path",
-            message: "Percorso non valido.".to_string(),
+            message: "Invalid path.".to_string(),
         });
     };
     let op = request.op.clone();
@@ -19744,7 +19744,7 @@ fn rewrite_mcp_confirm_to_done(text: &str, tool: &str) -> String {
         return text.to_string();
     };
     let close = open + close_rel + MCP_CONFIRM_CLOSE.len();
-    let head_end = text[..open].rfind("Serve la tua conferma").unwrap_or(open);
+    let head_end = text[..open].rfind("I need your confirmation").unwrap_or(open);
     let mut out = text[..head_end].trim_end().to_string();
     let tail = text[close..].trim();
     if !tail.is_empty() {
@@ -19756,7 +19756,7 @@ fn rewrite_mcp_confirm_to_done(text: &str, tool: &str) -> String {
     if !out.is_empty() {
         out.push_str("\n\n");
     }
-    out.push_str(&format!("✓ Strumento MCP eseguito: {tool}"));
+    out.push_str(&format!("✓ MCP tool executed: {tool}"));
     out
 }
 
@@ -19789,7 +19789,7 @@ async fn mcp_execute(
         return Err(GatewayError {
             status: StatusCode::BAD_REQUEST,
             code: "mcp_bad_tool",
-            message: format!("Nome strumento MCP non valido: {}", request.tool),
+            message: format!("Invalid MCP tool name: {}", request.tool),
         });
     };
     let args = if request.arguments.is_null() {
@@ -19814,7 +19814,7 @@ async fn mcp_execute(
             return Ok(Json(McpExecuteResponse {
                 ok: false,
                 summary: format!(
-                    "Timeout: lo strumento MCP non ha risposto entro {}s.",
+                    "Timeout: the MCP tool didn't respond within {}s.",
                     mcp_call_timeout().as_secs()
                 ),
             }));
@@ -19835,7 +19835,7 @@ async fn mcp_execute(
         }
         Err(error) => Ok(Json(McpExecuteResponse {
             ok: false,
-            summary: format!("Azione NON riuscita: {error}"),
+            summary: format!("Action FAILED: {error}"),
         })),
     }
 }
@@ -20315,12 +20315,12 @@ fn task_execution_outcome_from_executor_result(
                 },
             }),
             chat_message: format!(
-                "Il task `{}` richiede una nuova approval prima di continuare: {}",
+                "The task `{}` requires a new approval before continuing: {}",
                 task.kind, explanation
             ),
             surface: SurfaceKind::Logs,
             event_kind: "computer_executor_waiting_approval".to_string(),
-            event_title: "Approval richiesta".to_string(),
+            event_title: "Approval required".to_string(),
             event_subtitle: explanation,
             event_payload: serde_json::json!({
                 "executor_id": executor_id,
@@ -20350,10 +20350,10 @@ fn task_execution_outcome_from_executor_result(
                         "blocked_reason": reason,
                     },
                 }),
-                chat_message: format!("Il task `{}` e' bloccato: {}", task.kind, reason),
+                chat_message: format!("The task `{}` is blocked: {}", task.kind, reason),
                 surface: SurfaceKind::Logs,
                 event_kind: "computer_executor_blocked".to_string(),
-                event_title: "Task bloccato".to_string(),
+                event_title: "Task blocked".to_string(),
                 event_subtitle: reason,
                 event_payload: serde_json::json!({
                     "executor_id": executor_id,
@@ -20375,7 +20375,7 @@ fn completed_executor_outcome(
         completed: true,
         blocked_reason: None,
         pending_approval: None,
-        summary: format!("Executor `{executor_id}` completato."),
+        summary: format!("Executor `{executor_id}` completed."),
         checkpoint_payload: serde_json::json!({
             "kind": "executor_completed",
             "executor_id": executor_id,
@@ -20388,11 +20388,11 @@ fn completed_executor_outcome(
             "tool": tool_name,
             "output": redact_json_for_task_output(&output),
         }),
-        chat_message: format!("Task `{}` completato tramite `{tool_name}`.", task.kind),
+        chat_message: format!("Task `{}` completed via `{tool_name}`.", task.kind),
         surface: SurfaceKind::Browser,
         event_kind: "computer_executor_completed".to_string(),
-        event_title: "Executor completato".to_string(),
-        event_subtitle: format!("{} ha prodotto output strutturato.", tool_name),
+        event_title: "Executor completed".to_string(),
+        event_subtitle: format!("{} produced structured output.", tool_name),
         event_payload: serde_json::json!({
             "executor_id": executor_id,
             "tool": tool_name,
@@ -20408,7 +20408,7 @@ fn spawn_browser_sidecar_for_task(
     let browser_dir = browser_automation_dir();
     if !browser_dir.exists() {
         return Err(LocalTaskExecutionError {
-            message: format!("Runtime browser non trovato: {}", browser_dir.display()),
+            message: format!("Browser runtime not found: {}", browser_dir.display()),
         });
     }
     BrowserSidecarSession::spawn_with_options(
@@ -20420,7 +20420,7 @@ fn spawn_browser_sidecar_for_task(
         },
     )
     .map_err(|error| LocalTaskExecutionError {
-        message: format!("Browser sidecar non avviato: {error}"),
+        message: format!("Browser sidecar not started: {error}"),
     })
 }
 
@@ -20435,7 +20435,7 @@ fn spawn_browser_sidecar_for_chat(
     let browser_dir = browser_automation_dir();
     if !browser_dir.exists() {
         return Err(LocalTaskExecutionError {
-            message: format!("Runtime browser non trovato: {}", browser_dir.display()),
+            message: format!("Browser runtime not found: {}", browser_dir.display()),
         });
     }
     BrowserSidecarSession::spawn_with_options(
@@ -20447,7 +20447,7 @@ fn spawn_browser_sidecar_for_chat(
         },
     )
     .map_err(|error| LocalTaskExecutionError {
-        message: format!("Browser sidecar non avviato: {error}"),
+        message: format!("Browser sidecar not started: {error}"),
     })
 }
 
@@ -20499,14 +20499,14 @@ fn execute_local_read_only_task(
             completed: true,
             blocked_reason: None,
             pending_approval: None,
-            summary: format!("Calcolo completato: {answer}"),
+            summary: format!("Calculation completed: {answer}"),
             checkpoint_payload: serde_json::json!({ "kind": "calculation", "answer": answer }),
             checkpoint_redacted: serde_json::json!({ "kind": "calculation", "answer": answer }),
-            chat_message: format!("Il risultato e' **{answer}**."),
+            chat_message: format!("The result is **{answer}**."),
             surface: SurfaceKind::Logs,
             event_kind: "computer_calculation_completed".to_string(),
-            event_title: "Calcolo locale completato".to_string(),
-            event_subtitle: "Risultato calcolato senza strumenti esterni.".to_string(),
+            event_title: "Local calculation completed".to_string(),
+            event_subtitle: "Result calculated without external tools.".to_string(),
             event_payload: serde_json::json!({ "answer": answer }),
             artifacts: vec![],
         });
@@ -20515,14 +20515,14 @@ fn execute_local_read_only_task(
         completed: true,
         blocked_reason: None,
         pending_approval: None,
-        summary: "Task locale letto e completato senza azioni esterne.".to_string(),
+        summary: "Local task read and completed without external actions.".to_string(),
         checkpoint_payload: serde_json::json!({ "kind": "local_read_only", "goal": task.goal }),
         checkpoint_redacted: serde_json::json!({ "kind": "local_read_only", "goal": task.goal }),
-        chat_message: "Ho registrato il task locale. Non servivano azioni esterne per questo primo passaggio read-only.".to_string(),
+        chat_message: "I logged the local task. No external actions were needed for this first read-only pass.".to_string(),
         surface: SurfaceKind::Logs,
         event_kind: "computer_local_task_completed".to_string(),
-        event_title: "Task locale completato".to_string(),
-        event_subtitle: "Nessuna azione esterna necessaria.".to_string(),
+        event_title: "Local task completed".to_string(),
+        event_subtitle: "No external action needed.".to_string(),
         event_payload: serde_json::json!({ "goal": task.goal }),
         artifacts: vec![],
     })
@@ -20540,24 +20540,24 @@ fn execute_shell_read_only_task(
         run_read_only_command("date", &["+%Y-%m-%d %H:%M:%S %Z"])
     } else {
         Err(LocalTaskExecutionError {
-            message: "Il task shell non contiene un comando read-only consentito.".to_string(),
+            message: "The shell task does not contain an allowed read-only command.".to_string(),
         })
     }?;
     Ok(TaskExecutionOutcome {
         completed: true,
         blocked_reason: None,
         pending_approval: None,
-        summary: "Comando shell read-only completato.".to_string(),
+        summary: "Read-only shell command completed.".to_string(),
         checkpoint_payload: serde_json::json!({ "kind": "shell_read_only", "command": "date", "output": output }),
         checkpoint_redacted: serde_json::json!({ "kind": "shell_read_only", "command": "date", "output": output }),
         chat_message: format!(
-            "Ho eseguito un controllo locale read-only:\n\n```text\n{}\n```",
+            "I ran a local read-only check:\n\n```text\n{}\n```",
             output.trim()
         ),
         surface: SurfaceKind::Shell,
         event_kind: "computer_terminal_output".to_string(),
-        event_title: "Output terminale".to_string(),
-        event_subtitle: "Comando read-only completato.".to_string(),
+        event_title: "Terminal output".to_string(),
+        event_subtitle: "Read-only command completed.".to_string(),
         event_payload: serde_json::json!({ "command": "date", "output": output }),
         artifacts: vec![],
     })
@@ -20569,7 +20569,7 @@ fn run_read_only_command(command: &str, args: &[&str]) -> Result<String, LocalTa
             .args(args)
             .output()
             .map_err(|error| LocalTaskExecutionError {
-                message: format!("Comando read-only non avviato: {error}"),
+                message: format!("Read-only command not started: {error}"),
             })?;
     if !output.status.success() {
         return Err(LocalTaskExecutionError {
@@ -21160,7 +21160,7 @@ fn load_skills_disabled() -> std::collections::BTreeSet<String> {
 }
 
 fn save_skills_disabled(disabled: &std::collections::BTreeSet<String>) -> Result<(), String> {
-    let path = skills_state_path().ok_or_else(|| "data dir non disponibile".to_string())?;
+    let path = skills_state_path().ok_or_else(|| "data dir unavailable".to_string())?;
     let state = SkillsState { disabled: disabled.iter().cloned().collect() };
     let json = serde_json::to_string_pretty(&state).map_err(|e| e.to_string())?;
     fs::write(path, json).map_err(|e| e.to_string())
@@ -21197,7 +21197,7 @@ fn load_skills_origins() -> std::collections::BTreeMap<String, String> {
 fn save_skills_origins(
     origins: &std::collections::BTreeMap<String, String>,
 ) -> Result<(), String> {
-    let path = skills_origins_path().ok_or_else(|| "data dir non disponibile".to_string())?;
+    let path = skills_origins_path().ok_or_else(|| "data dir unavailable".to_string())?;
     let json = serde_json::to_string_pretty(origins).map_err(|e| e.to_string())?;
     fs::write(path, json).map_err(|e| e.to_string())
 }
@@ -21257,7 +21257,7 @@ async fn skill_detail(
         None => Err(GatewayError {
             status: StatusCode::NOT_FOUND,
             code: "skill_not_found",
-            message: format!("skill {id} non trovata"),
+            message: format!("skill {id} not found"),
         }),
     }
 }
@@ -21343,7 +21343,7 @@ async fn skill_catalog(
     let path = skills_catalog_path().ok_or_else(|| GatewayError {
         status: StatusCode::INTERNAL_SERVER_ERROR,
         code: "data_dir_unavailable",
-        message: "data dir non disponibile".to_string(),
+        message: "data dir unavailable".to_string(),
     })?;
     let fresh = skills_catalog::load_cache(&path).is_some_and(|c| skills_catalog::cache_is_fresh(&c));
     if !fresh {
@@ -21365,7 +21365,7 @@ async fn skill_catalog_refresh(
     let path = skills_catalog_path().ok_or_else(|| GatewayError {
         status: StatusCode::INTERNAL_SERVER_ERROR,
         code: "data_dir_unavailable",
-        message: "data dir non disponibile".to_string(),
+        message: "data dir unavailable".to_string(),
     })?;
     skills_catalog::refresh_cache(&state.http, &path)
         .await
@@ -21398,7 +21398,7 @@ async fn install_catalog_skill(
         return Err(GatewayError {
             status: StatusCode::BAD_REQUEST,
             code: "invalid_slug",
-            message: format!("slug non valido: «{slug}»"),
+            message: format!("invalid slug: «{slug}»"),
         });
     }
     let root = skills_dir().map_err(|e| GatewayError {
@@ -21411,7 +21411,7 @@ async fn install_catalog_skill(
         return Err(GatewayError {
             status: StatusCode::CONFLICT,
             code: "skill_exists",
-            message: format!("skill «{slug}» già installata"),
+            message: format!("skill «{slug}» already installed"),
         });
     }
     let zip = skills_catalog::download_zip(&state.http, &slug)
@@ -21631,7 +21631,7 @@ async fn github_tree(
     let tree = body
         .get("tree")
         .and_then(serde_json::Value::as_array)
-        .ok_or_else(|| github_err("github_no_tree", "albero del repo mancante"))?;
+        .ok_or_else(|| github_err("github_no_tree", "repo tree missing"))?;
     Ok(tree
         .iter()
         .filter_map(|node| {
@@ -21692,7 +21692,7 @@ async fn registry_skills(
         return Err(GatewayError {
             status: StatusCode::BAD_REQUEST,
             code: "invalid_repo",
-            message: format!("repo non valido: «{repo}» (atteso owner/nome)"),
+            message: format!("invalid repo: «{repo}» (expected owner/name)"),
         });
     }
     let branch = github_default_branch(&state.http, &repo).await?;
@@ -21745,14 +21745,14 @@ async fn install_registry_skill(
         return Err(GatewayError {
             status: StatusCode::BAD_REQUEST,
             code: "invalid_repo",
-            message: format!("repo non valido: «{}»", request.repo),
+            message: format!("invalid repo: «{}»", request.repo),
         });
     }
     if request.path.contains("..") {
         return Err(GatewayError {
             status: StatusCode::BAD_REQUEST,
             code: "invalid_path",
-            message: "path skill non valido".to_string(),
+            message: "invalid skill path".to_string(),
         });
     }
     let folder = request.path.trim_matches('/').to_string();
@@ -21761,7 +21761,7 @@ async fn install_registry_skill(
         return Err(GatewayError {
             status: StatusCode::BAD_REQUEST,
             code: "invalid_skill_id",
-            message: format!("id skill non valido: «{id}»"),
+            message: format!("invalid skill id: «{id}»"),
         });
     }
 
@@ -21775,7 +21775,7 @@ async fn install_registry_skill(
         return Err(GatewayError {
             status: StatusCode::CONFLICT,
             code: "skill_exists",
-            message: format!("skill «{id}» già presente — rimuovila prima di reinstallarla"),
+            message: format!("skill «{id}» already present — remove it before reinstalling"),
         });
     }
 
@@ -21793,14 +21793,14 @@ async fn install_registry_skill(
         return Err(GatewayError {
             status: StatusCode::NOT_FOUND,
             code: "skill_manifest_missing",
-            message: "nessun SKILL.md nel path indicato".to_string(),
+            message: "no SKILL.md at the indicated path".to_string(),
         });
     }
     if blobs.len() > SKILL_INSTALL_MAX_FILES {
         return Err(GatewayError {
             status: StatusCode::BAD_REQUEST,
             code: "skill_too_many_files",
-            message: format!("la skill ha {} file (max {SKILL_INSTALL_MAX_FILES})", blobs.len()),
+            message: format!("the skill has {} files (max {SKILL_INSTALL_MAX_FILES})", blobs.len()),
         });
     }
 
@@ -21832,7 +21832,7 @@ async fn install_registry_skill(
             return Err(GatewayError {
                 status: StatusCode::BAD_REQUEST,
                 code: "skill_too_large",
-                message: "skill troppo grande".to_string(),
+                message: "skill too large".to_string(),
             });
         }
         let out = staging.join(rel);
@@ -21917,7 +21917,7 @@ fn resolve_role_for_task(goal: &str, role: &str) -> Option<ResolvedRole> {
             .enumerate()
             .map(|(i, (pid, mid, tier, strengths, _, _))| {
                 let desc = if strengths.trim().is_empty() {
-                    "(nessuna descrizione)"
+                    "(no description)"
                 } else {
                     strengths.as_str()
                 };
@@ -22499,7 +22499,7 @@ async fn remove_provider(
         return Err(GatewayError {
             status: StatusCode::NOT_FOUND,
             code: "provider_not_found",
-            message: format!("provider {id} non configurato"),
+            message: format!("provider {id} not configured"),
         });
     }
     delete_provider_api_key(&id);
@@ -22515,7 +22515,7 @@ async fn activate_provider(
         return Err(GatewayError {
             status: StatusCode::NOT_FOUND,
             code: "provider_not_found",
-            message: format!("provider {id} non configurato"),
+            message: format!("provider {id} not configured"),
         });
     }
     registry.active_provider_id = Some(id);
@@ -22533,7 +22533,7 @@ async fn refresh_provider_models(
     let entry = registry.get(&id).cloned().ok_or_else(|| GatewayError {
         status: StatusCode::NOT_FOUND,
         code: "provider_not_found",
-        message: format!("provider {id} non configurato"),
+        message: format!("provider {id} not configured"),
     })?;
 
     let url = entry.models_endpoint();
@@ -22555,13 +22555,13 @@ async fn refresh_provider_models(
     let response = request.send().await.map_err(|error| GatewayError {
         status: StatusCode::BAD_GATEWAY,
         code: "provider_models_unreachable",
-        message: format!("modelli non raggiungibili: {error}"),
+        message: format!("models unreachable: {error}"),
     })?;
     if !response.status().is_success() {
         return Err(GatewayError {
             status: StatusCode::BAD_GATEWAY,
             code: "provider_models_http_error",
-            message: format!("HTTP {} dal provider", response.status().as_u16()),
+            message: format!("HTTP {} from the provider", response.status().as_u16()),
         });
     }
     let body = response
@@ -22674,7 +22674,7 @@ async fn set_model_profile(
         return Err(GatewayError {
             status: StatusCode::NOT_FOUND,
             code: "model_not_found",
-            message: format!("modello {} non trovato in {}", request.model, request.provider_id),
+            message: format!("model {} not found in {}", request.model, request.provider_id),
         });
     }
     save_provider_registry(&registry).map_err(provider_registry_persist_error)?;
@@ -22693,7 +22693,7 @@ async fn generate_provider_profiles(
     let provider = registry.get(&id).ok_or_else(|| GatewayError {
         status: StatusCode::NOT_FOUND,
         code: "provider_not_found",
-        message: format!("provider {id} non configurato"),
+        message: format!("provider {id} not configured"),
     })?;
     // Only fill the inferred placeholders (no profile, or source == "inferred").
     let to_describe: Vec<String> = provider
@@ -22747,7 +22747,7 @@ async fn generate_provider_profiles(
     .map_err(|error| GatewayError {
         status: StatusCode::BAD_GATEWAY,
         code: "profile_generation_failed",
-        message: format!("generazione profili fallita: {error:?}"),
+        message: format!("profile generation failed: {error:?}"),
     })?;
     if !response.valid {
         return Err(GatewayError {
@@ -22892,7 +22892,7 @@ async fn set_role(
                 return Err(GatewayError {
                     status: StatusCode::NOT_FOUND,
                     code: "provider_not_found",
-                    message: format!("provider {pid} non configurato"),
+                    message: format!("provider {pid} not configured"),
                 });
             }
             registry.roles.insert(
@@ -23188,8 +23188,8 @@ async fn memory_items(
         }
     };
     // Whole memory across scopes, so the explorer can filter by project / build a timeline.
-    push_scope(&MemoryWorkspaceId::new(PERSONAL_WORKSPACE), "personal", "Personale");
-    push_scope(&MemoryWorkspaceId::new(THREADS_WORKSPACE), "thread", "Conversazioni");
+    push_scope(&MemoryWorkspaceId::new(PERSONAL_WORKSPACE), "personal", "Personal");
+    push_scope(&MemoryWorkspaceId::new(THREADS_WORKSPACE), "thread", "Conversations");
     for workspace in load_workspaces_file().workspaces {
         if workspace.id == PERSONAL_WORKSPACE || workspace.id == THREADS_WORKSPACE {
             continue;
@@ -23209,8 +23209,8 @@ async fn memory_items(
             }));
         }
     };
-    add_scope(PERSONAL_WORKSPACE, "Personale", "personal", false);
-    add_scope(THREADS_WORKSPACE, "Conversazioni", "thread", false);
+    add_scope(PERSONAL_WORKSPACE, "Personal", "personal", false);
+    add_scope(THREADS_WORKSPACE, "Conversations", "thread", false);
     for it in &out {
         add_scope(&it.workspace_id, &it.workspace_label, &it.scope, false);
     }
@@ -23312,7 +23312,7 @@ async fn memory_graphify_import(
     let raw = std::fs::read_to_string(&path).map_err(|e| GatewayError {
         status: StatusCode::BAD_REQUEST,
         code: "graphify_no_file",
-        message: format!("graph.json non trovato in {}: {e}", req.dir),
+        message: format!("graph.json not found in {}: {e}", req.dir),
     })?;
     let graph: serde_json::Value = serde_json::from_str(&raw).map_err(|e| GatewayError {
         status: StatusCode::BAD_REQUEST,
@@ -23395,7 +23395,7 @@ fn import_graphify_value(
             user_id: user.clone(),
             workspace_id: ws.clone(),
             source_ref: src.clone(),
-            relation_type: link.get("relation").and_then(|v| v.as_str()).unwrap_or("collega").to_string(),
+            relation_type: link.get("relation").and_then(|v| v.as_str()).unwrap_or("connects").to_string(),
             target_ref: tgt.clone(),
             confidence: 0.9,
             privacy_domain: PrivacyDomain::new("personal"),
@@ -23604,7 +23604,7 @@ fn build_project_graph(state: &AppState, workspace_id: &str, folder: &str, subpa
         }
     }
     if let Err(err) = crate::sandbox::run_graphify(&root, &out) {
-        eprintln!("project-graph: build fallito per {workspace_id}: {err}");
+        eprintln!("project-graph: build failed for {workspace_id}: {err}");
         return;
     }
     let Ok(raw) = std::fs::read_to_string(&graph_path) else { return };
@@ -23802,7 +23802,7 @@ async fn memory_goals_add(
         return Err(GatewayError {
             status: StatusCode::BAD_REQUEST,
             code: "empty_goal",
-            message: "obiettivo vuoto".to_string(),
+            message: "empty objective".to_string(),
         });
     }
     let user = gateway_memory_user_id();
@@ -23870,7 +23870,7 @@ async fn memory_goals_suggest(
         .into_iter()
         .find(|w| w.id.as_str() == ws.as_str())
         .map(|w| w.name)
-        .unwrap_or_else(|| "(senza nome)".to_string());
+        .unwrap_or_else(|| "(unnamed)".to_string());
     // Collect context as OWNED strings, then DROP the facade before the await (the lock
     // guard isn't Send across an await point).
     let (decisions, existing): (Vec<String>, Vec<String>) = {
@@ -23896,9 +23896,9 @@ async fn memory_goals_suggest(
         (dec, goals)
     };
     let context = format!(
-        "PROGETTO: {name}\n\nDECISIONI PRESE FINORA:\n- {}\n\nOBIETTIVI GIÀ DEFINITI (non ripeterli):\n- {}",
-        if decisions.is_empty() { "(nessuna)".to_string() } else { decisions.join("\n- ") },
-        if existing.is_empty() { "(nessuno)".to_string() } else { existing.join("\n- ") },
+        "PROJECT: {name}\n\nDECISIONS MADE SO FAR:\n- {}\n\nOBJECTIVES ALREADY DEFINED (don't repeat them):\n- {}",
+        if decisions.is_empty() { "(none)".to_string() } else { decisions.join("\n- ") },
+        if existing.is_empty() { "(none)".to_string() } else { existing.join("\n- ") },
     );
     let system = "You are a product strategist. Given a project's context (name, decisions made), \
 propose 1 to 3 HIGH-LEVEL OBJECTIVES: the NORTH STAR — WHERE the project must arrive, or HOW a key \
@@ -23950,16 +23950,16 @@ async fn memory_graph(
         tokio::spawn(async move { backfill_embeddings(&st, &scope_user, &scope_ws, 80).await; });
     }
 
-    // Root label per scope: the personal graph is "Personale", not "Progetto".
+    // Root label per scope: the personal graph is "Personal", not "Project".
     let project_label = match ws.as_str() {
-        PERSONAL_WORKSPACE => "Personale".to_string(),
-        THREADS_WORKSPACE => "Conversazioni".to_string(),
+        PERSONAL_WORKSPACE => "Personal".to_string(),
+        THREADS_WORKSPACE => "Conversations".to_string(),
         other => load_workspaces_file()
             .workspaces
             .iter()
             .find(|w| w.id == other)
             .map(|w| w.name.clone())
-            .unwrap_or_else(|| "Progetto".to_string()),
+            .unwrap_or_else(|| "Project".to_string()),
     };
 
     let mut nodes: Vec<GraphNode> = Vec::new();
@@ -24027,7 +24027,7 @@ async fn memory_graph(
                 if let Some(decision) = memory.metadata.get("decision") {
                     if let Some(rationale) = decision.get("rationale").and_then(|r| r.as_str()) {
                         if !rationale.is_empty() && !detail.contains(rationale) {
-                            detail.push_str(&format!("\n\nPerché: {rationale}"));
+                            detail.push_str(&format!("\n\nWhy: {rationale}"));
                         }
                     }
                     if let Some(alts) = decision.get("alternatives").and_then(|a| a.as_array()) {
@@ -24046,7 +24046,7 @@ async fn memory_graph(
                     }
                 }
                 graph_push_node(&mut nodes, &mut seen, &node_id, "decision", label, detail, "");
-                edges.push(GraphEdge { source: project_id.clone(), target: node_id.clone(), label: "decisione".to_string() });
+                edges.push(GraphEdge { source: project_id.clone(), target: node_id.clone(), label: "decision".to_string() });
                 // Files / artifacts the decision affects.
                 if let Some(affected) = memory.metadata.get("affects_labels").and_then(|a| a.as_array()) {
                     for item in affected {
@@ -24057,7 +24057,7 @@ async fn memory_graph(
                         let file_id = format!("file::{name}");
                         let kind = if name.contains('.') { "file" } else { "entity" };
                         graph_push_node(&mut nodes, &mut seen, &file_id, kind, name.to_string(), String::new(), "file");
-                        edges.push(GraphEdge { source: node_id.clone(), target: file_id, label: "tocca".to_string() });
+                        edges.push(GraphEdge { source: node_id.clone(), target: file_id, label: "touches".to_string() });
                     }
                 }
             } else if kind == "fact" || kind == "preference" {
@@ -24284,9 +24284,9 @@ async fn memory_wiki_save(
     tokio::spawn(async move {
         learn_from_exchange(
             &st,
-            "Correzione manuale della wiki delle decisioni del progetto",
+            "Manual correction of the project decisions wiki",
             &body,
-            "L'utente ha corretto a mano la wiki Decisioni",
+            "The user manually corrected the Decisions wiki",
             None,
             None,
             None,
@@ -24568,7 +24568,7 @@ fn contact_handles_by_ref(state: &AppState, reference: &str) -> Result<Vec<Strin
     let id = parse_contact_ref(reference).ok_or_else(|| GatewayError {
         status: StatusCode::NOT_FOUND,
         code: "contact_not_found",
-        message: "contatto non trovato".to_string(),
+        message: "contact not found".to_string(),
     })?;
     let store = lock_store(state)?;
     store.contact_handles(id).map_err(|error| GatewayError {
@@ -24617,7 +24617,7 @@ async fn contact_update(
     let id = parse_contact_ref(&request.reference).ok_or_else(|| GatewayError {
         status: StatusCode::NOT_FOUND,
         code: "contact_not_found",
-        message: "contatto non trovato".to_string(),
+        message: "contact not found".to_string(),
     })?;
     let store = lock_store(&state)?;
     store
@@ -24663,7 +24663,7 @@ async fn contact_update(
         .ok_or_else(|| GatewayError {
             status: StatusCode::NOT_FOUND,
             code: "contact_not_found",
-            message: "contatto non trovato".to_string(),
+            message: "contact not found".to_string(),
         })?;
     Ok(Json(contact_view_from_stored(&store, &contact, 0)))
 }
@@ -24684,13 +24684,13 @@ async fn contacts_merge(
         return Err(GatewayError {
             status: StatusCode::BAD_REQUEST,
             code: "contact_merge_self",
-            message: "impossibile unire un contatto con se stesso".to_string(),
+            message: "cannot merge a contact with itself".to_string(),
         });
     }
     let not_found = || GatewayError {
         status: StatusCode::NOT_FOUND,
         code: "contact_not_found",
-        message: "contatto non trovato".to_string(),
+        message: "contact not found".to_string(),
     };
     let from_id = parse_contact_ref(&request.from).ok_or_else(not_found)?;
     let into_id = parse_contact_ref(&request.into).ok_or_else(not_found)?;
@@ -24760,7 +24760,7 @@ async fn contact_create(
         return Err(GatewayError {
             status: StatusCode::BAD_REQUEST,
             code: "contact_name_required",
-            message: "nome richiesto".to_string(),
+            message: "name required".to_string(),
         });
     }
     let store = lock_store(&state)?;
@@ -24779,7 +24779,7 @@ async fn contact_create(
     let contact = store.contact_by_id(id).ok().flatten().ok_or_else(|| GatewayError {
         status: StatusCode::INTERNAL_SERVER_ERROR,
         code: "contact_create",
-        message: "contatto non creato".to_string(),
+        message: "contact not created".to_string(),
     })?;
     Ok(Json(contact_view_from_stored(&store, &contact, 0)))
 }
@@ -24801,7 +24801,7 @@ fn contact_after_identity_change(
     let id = parse_contact_ref(reference).ok_or_else(|| GatewayError {
         status: StatusCode::NOT_FOUND,
         code: "contact_not_found",
-        message: "contatto non trovato".to_string(),
+        message: "contact not found".to_string(),
     })?;
     let store = lock_store(state)?;
     apply(&store, id).map_err(|error| GatewayError {
@@ -24812,7 +24812,7 @@ fn contact_after_identity_change(
     let contact = store.contact_by_id(id).ok().flatten().ok_or_else(|| GatewayError {
         status: StatusCode::NOT_FOUND,
         code: "contact_not_found",
-        message: "contatto non trovato".to_string(),
+        message: "contact not found".to_string(),
     })?;
     Ok(Json(contact_view_from_stored(&store, &contact, 0)))
 }
@@ -24843,7 +24843,7 @@ async fn contact_delete(
     let id = parse_contact_ref(&request.reference).ok_or_else(|| GatewayError {
         status: StatusCode::NOT_FOUND,
         code: "contact_not_found",
-        message: "contatto non trovato".to_string(),
+        message: "contact not found".to_string(),
     })?;
     let store = lock_store(&state)?;
     store.delete_contact(id).map_err(|error| GatewayError {
@@ -24875,7 +24875,7 @@ async fn contact_perimeter_get(
     let id = parse_contact_ref(&request.reference).ok_or_else(|| GatewayError {
         status: StatusCode::NOT_FOUND,
         code: "contact_not_found",
-        message: "contatto non trovato".to_string(),
+        message: "contact not found".to_string(),
     })?;
     let store = lock_store(&state)?;
     let p = store.perimeter_or_default(id);
@@ -24903,7 +24903,7 @@ async fn contact_perimeter_set(
     let id = parse_contact_ref(&request.reference).ok_or_else(|| GatewayError {
         status: StatusCode::NOT_FOUND,
         code: "contact_not_found",
-        message: "contatto non trovato".to_string(),
+        message: "contact not found".to_string(),
     })?;
     let scope = match request.perimeter.memory_scope.as_str() {
         "personal" => "personal",
@@ -24981,7 +24981,7 @@ async fn profile_create(
         return Err(GatewayError {
             status: StatusCode::BAD_REQUEST,
             code: "profile_name_required",
-            message: "nome richiesto".to_string(),
+            message: "name required".to_string(),
         });
     }
     let store = lock_store(&state)?;
@@ -24995,7 +24995,7 @@ async fn profile_create(
     let profile = store.profile_by_id(id).ok().flatten().ok_or_else(|| GatewayError {
         status: StatusCode::INTERNAL_SERVER_ERROR,
         code: "profile_create",
-        message: "profilo non creato".to_string(),
+        message: "profile not created".to_string(),
     })?;
     Ok(Json(profile_view(profile)))
 }
@@ -25035,7 +25035,7 @@ async fn profile_update(
         .ok_or_else(|| GatewayError {
             status: StatusCode::NOT_FOUND,
             code: "profile_not_found",
-            message: "profilo non trovato".to_string(),
+            message: "profile not found".to_string(),
         })?;
     Ok(Json(profile_view(profile)))
 }
@@ -25077,7 +25077,7 @@ async fn contact_assign_profile(
     let id = parse_contact_ref(&request.reference).ok_or_else(|| GatewayError {
         status: StatusCode::NOT_FOUND,
         code: "contact_not_found",
-        message: "contatto non trovato".to_string(),
+        message: "contact not found".to_string(),
     })?;
     let store = lock_store(&state)?;
     let result = match request.channel.as_deref().filter(|c| !c.trim().is_empty()) {
@@ -25092,7 +25092,7 @@ async fn contact_assign_profile(
     let contact = store.contact_by_id(id).ok().flatten().ok_or_else(|| GatewayError {
         status: StatusCode::NOT_FOUND,
         code: "contact_not_found",
-        message: "contatto non trovato".to_string(),
+        message: "contact not found".to_string(),
     })?;
     Ok(Json(contact_view_from_stored(&store, &contact, 0)))
 }
@@ -25115,7 +25115,7 @@ async fn contact_relationships(
     let id = parse_contact_ref(&request.reference).ok_or_else(|| GatewayError {
         status: StatusCode::NOT_FOUND,
         code: "contact_not_found",
-        message: "contatto non trovato".to_string(),
+        message: "contact not found".to_string(),
     })?;
     let store = lock_store(&state)?;
     let relations = store.relationships_for(id).map_err(|error| GatewayError {
@@ -25151,7 +25151,7 @@ async fn contact_relationship_add(
     let not_found = || GatewayError {
         status: StatusCode::NOT_FOUND,
         code: "contact_not_found",
-        message: "contatto non trovato".to_string(),
+        message: "contact not found".to_string(),
     };
     let from = parse_contact_ref(&request.reference).ok_or_else(not_found)?;
     let to = parse_contact_ref(&request.other_reference).ok_or_else(not_found)?;
@@ -25160,7 +25160,7 @@ async fn contact_relationship_add(
         return Err(GatewayError {
             status: StatusCode::BAD_REQUEST,
             code: "relationship_invalid",
-            message: "relazione non valida".to_string(),
+            message: "invalid relationship".to_string(),
         });
     }
     let store = lock_store(&state)?;
@@ -25298,7 +25298,7 @@ language of the messages. If nothing important, {\"facts\":[]}.";
         "response_format": { "type": "json_object" },
         "messages": [
             { "role": "system", "content": system },
-            { "role": "user", "content": format!("Oggi è {today}. Persona: {name}\n\nMessaggi datati:\n{joined}") },
+            { "role": "user", "content": format!("Today is {today}. Person: {name}\n\nDated messages:\n{joined}") },
         ],
     });
     let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
@@ -25493,7 +25493,7 @@ async fn contact_profile(
     let id = parse_contact_ref(&request.reference).ok_or_else(|| GatewayError {
         status: StatusCode::NOT_FOUND,
         code: "contact_not_found",
-        message: "contatto non trovato".to_string(),
+        message: "contact not found".to_string(),
     })?;
     let (handles, contact) = {
         let store = lock_store(&state)?;
@@ -25522,14 +25522,14 @@ async fn contact_profile_refresh(
     let id = parse_contact_ref(&request.reference).ok_or_else(|| GatewayError {
         status: StatusCode::NOT_FOUND,
         code: "contact_not_found",
-        message: "contatto non trovato".to_string(),
+        message: "contact not found".to_string(),
     })?;
     let (name, handles, contact) = {
         let store = lock_store(&state)?;
         let contact = store.contact_by_id(id).ok().flatten().ok_or_else(|| GatewayError {
             status: StatusCode::NOT_FOUND,
             code: "contact_not_found",
-            message: "contatto non trovato".to_string(),
+            message: "contact not found".to_string(),
         })?;
         let handles = store.contact_handles(id).unwrap_or_default();
         (contact.name.clone(), handles, contact)
@@ -25666,7 +25666,7 @@ async fn memory_decide(
                 return Err(GatewayError {
                     status: StatusCode::BAD_REQUEST,
                     code: "memory_empty_text",
-                    message: "testo vuoto".to_string(),
+                    message: "empty text".to_string(),
                 });
             }
             let patch = MemoryUpdatePatch { text: Some(text), ..Default::default() };
@@ -25678,7 +25678,7 @@ async fn memory_decide(
             return Err(GatewayError {
                 status: StatusCode::BAD_REQUEST,
                 code: "memory_bad_action",
-                message: "azione non valida (confirm|reject|delete)".to_string(),
+                message: "invalid action (confirm|reject|delete)".to_string(),
             });
         }
     }
@@ -25782,7 +25782,7 @@ fn humanize_task_kind(kind: &str) -> String {
             .unwrap_or_default()
     };
     match kind {
-        "proactive_prompt" => "Automazione".to_string(),
+        "proactive_prompt" => "Automation".to_string(),
         other if other.starts_with("capability.") => {
             let rest = other.trim_start_matches("capability.");
             let mut parts = rest.splitn(2, '.');
@@ -25795,7 +25795,7 @@ fn humanize_task_kind(kind: &str) -> String {
             }
         }
         other if other.starts_with("subagent.") => {
-            format!("Sub-agente: {}", other.trim_start_matches("subagent."))
+            format!("Sub-agent: {}", other.trim_start_matches("subagent."))
         }
         other => cap(&other.replace('_', " ")),
     }
@@ -25907,8 +25907,8 @@ fn ensure_computer_session_for_task(
         SurfaceKind::Logs,
         "computer_session_started",
         "done",
-        "Task locale creato",
-        "Sessione Computer locale associata alla chat.",
+        "Local task created",
+        "Local Computer session associated with the chat.",
         false,
     )?;
     if requires_approval {
@@ -25920,8 +25920,8 @@ fn ensure_computer_session_for_task(
             SurfaceKind::Logs,
             "computer_approval_required",
             "waiting",
-            "Approval richiesta",
-            "Conferma il piano prima di eseguire azioni locali.",
+            "Approval required",
+            "Confirm the plan before running local actions.",
             true,
         )?;
     }
@@ -26551,7 +26551,7 @@ struct BrowserTarget {
 /// the model understands what the goal needs and decides where to go.
 fn browser_targets_for_goal(goal: &str) -> Vec<BrowserTarget> {
     vec![BrowserTarget {
-        label: "Ricerca web".to_string(),
+        label: "Web search".to_string(),
         url: browser_url_for_goal(goal),
     }]
 }
@@ -26644,7 +26644,7 @@ fn task_goal_summary(goal: &str) -> String {
         .join(" ");
     let compact = compact_thread_title(&redacted);
     if compact.is_empty() {
-        "Task locale dalla chat".to_string()
+        "Local task from chat".to_string()
     } else {
         compact
     }
@@ -26745,7 +26745,7 @@ fn seed_default_capabilities(
     registry.upsert_provider_config(&CapabilityProviderConfig::new(
         browser_provider.clone(),
         CapabilityProviderKind::Browser,
-        "Il mio browser".to_string(),
+        "My browser".to_string(),
         true,
     ))?;
     registry.upsert_provider_grant(
@@ -26764,7 +26764,7 @@ fn seed_default_capabilities(
             browser_provider.clone(),
             gateway_capability_user_id(),
             gateway_capability_workspace_id(),
-            "Il mio browser",
+            "My browser",
             "local-browser-profile",
         )
         .with_privacy_domains(vec!["browser".to_string()])
@@ -26779,32 +26779,32 @@ fn seed_default_capabilities(
         (
             "browser.health",
             ActionClass::Read,
-            "Stato del browser locale",
+            "Local browser status",
         ),
         (
             "browser.tabs",
             ActionClass::Read,
-            "Elenco tab browser locali",
+            "List of local browser tabs",
         ),
         (
             "browser.snapshot",
             ActionClass::Read,
-            "Snapshot redatto della pagina corrente",
+            "Redacted snapshot of the current page",
         ),
         (
             "browser.navigate",
             ActionClass::WriteWithConfirmation,
-            "Navigazione browser con conferma",
+            "Browser navigation with confirmation",
         ),
         (
             "browser.act",
             ActionClass::WriteWithConfirmation,
-            "Azione controllata su pagina web",
+            "Controlled action on a web page",
         ),
         (
             "browser.screenshot",
             ActionClass::WriteWithConfirmation,
-            "Screenshot locale redatto",
+            "Redacted local screenshot",
         ),
     ] {
         registry.upsert_cached_tool(&CachedCapabilityTool::new(
@@ -27482,14 +27482,14 @@ async fn create_workspace(
         return Err(GatewayError {
             status: StatusCode::BAD_REQUEST,
             code: "workspace_folder_required",
-            message: "Scegli una cartella per il progetto.".to_string(),
+            message: "Choose a folder for the project.".to_string(),
         });
     };
     if !PathBuf::from(folder).is_dir() {
         return Err(GatewayError {
             status: StatusCode::BAD_REQUEST,
             code: "workspace_folder_not_found",
-            message: "La cartella del progetto non esiste.".to_string(),
+            message: "The project folder does not exist.".to_string(),
         });
     }
     let mut file = load_workspaces_file();
@@ -27525,7 +27525,7 @@ async fn set_workspace_folder(
         return Err(GatewayError {
             status: StatusCode::BAD_REQUEST,
             code: "workspace_folder_not_found",
-            message: "La cartella non esiste.".to_string(),
+            message: "The folder does not exist.".to_string(),
         });
     }
     let mut file = load_workspaces_file();
@@ -27563,7 +27563,7 @@ async fn rename_workspace(
         return Err(GatewayError {
             status: StatusCode::BAD_REQUEST,
             code: "workspace_name_required",
-            message: "Il nome non può essere vuoto.".to_string(),
+            message: "The name cannot be empty.".to_string(),
         });
     }
     let mut file = load_workspaces_file();
@@ -27596,7 +27596,7 @@ async fn delete_workspace(
         return Err(GatewayError {
             status: StatusCode::BAD_REQUEST,
             code: "workspace_base_protected",
-            message: "Lo spazio predefinito non può essere eliminato.".to_string(),
+            message: "The default space cannot be deleted.".to_string(),
         });
     }
     let mut file = load_workspaces_file();
@@ -28014,7 +28014,7 @@ mod tests {
         // Both formatters produce a hint for a classified error and none otherwise,
         // with the connector-appropriate reconnect path.
         assert!(connector_error_hint("401").unwrap().contains("COMPOSIO_RECONNECT"));
-        assert!(mcp_error_hint("401").unwrap().contains("Impostazioni"));
+        assert!(mcp_error_hint("401").unwrap().contains("Settings"));
         assert!(connector_error_hint("ok, all good").is_none());
         assert!(mcp_error_hint("ok, all good").is_none());
     }
@@ -28039,9 +28039,9 @@ mod tests {
     #[test]
     fn fonti_section_skips_when_already_cited() {
         let sources = vec!["https://example.com".to_string()];
-        assert!(fonti_section(&sources, "Risposta\n\n**Fonti**\n- x").is_none());
-        assert!(fonti_section(&[], "Risposta").is_none());
-        assert!(fonti_section(&sources, "Risposta").is_some());
+        assert!(fonti_section(&sources, "Answer\n\n**Sources**\n- x").is_none());
+        assert!(fonti_section(&[], "Answer").is_none());
+        assert!(fonti_section(&sources, "Answer").is_some());
     }
 
     #[test]
@@ -28056,9 +28056,9 @@ mod tests {
         let personal = vec!["Preferisce risposte concise in italiano".to_string()];
         let project = vec!["Repo principale: /Clients/Acme/app".to_string()];
         let block = format_memory_block(&personal, &project, 1500).expect("block");
-        assert!(block.contains("Personale:"));
+        assert!(block.contains("Personal:"));
         assert!(block.contains("risposte concise"));
-        assert!(block.contains("Progetto:"));
+        assert!(block.contains("Project:"));
         assert!(block.contains("/Clients/Acme/app"));
     }
 
@@ -28069,7 +28069,7 @@ mod tests {
             .collect();
         let block = format_memory_block(&many, &[], 300).expect("block");
         assert!(block.len() < 600, "block should be bounded, got {}", block.len());
-        assert!(block.contains("altro disponibile in memoria"));
+        assert!(block.contains("more available in memory"));
     }
 
     #[test]
@@ -28163,8 +28163,8 @@ mod tests {
             }
         });
         let out = crate::format_recall_entry("Applicato sconto 10% ad ACME", &meta);
-        assert!(out.contains("perché: ACME è un cliente storico"), "rationale mancante: {out}");
-        assert!(out.contains("alternative scartate"), "alternative mancanti: {out}");
+        assert!(out.contains("why: ACME è un cliente storico"), "rationale mancante: {out}");
+        assert!(out.contains("rejected alternatives"), "alternative mancanti: {out}");
         assert!(out.contains("sconto 5%") && out.contains("troppo basso"));
         // Non-decision memory → summary returned unchanged.
         assert_eq!(crate::format_recall_entry("ciao", &serde_json::json!({})), "ciao");
@@ -28335,10 +28335,10 @@ data: [DONE]\n";
         assert!(!is_internal_task_kind("proactive_prompt"));
         assert!(!is_internal_task_kind("browser_task"));
         // Human labels.
-        assert_eq!(humanize_task_kind("proactive_prompt"), "Automazione");
+        assert_eq!(humanize_task_kind("proactive_prompt"), "Automation");
         assert_eq!(humanize_task_kind("capability.browser.snapshot"), "Browser: snapshot");
         assert_eq!(humanize_task_kind("capability.github.find_repos"), "Github: find repos");
-        assert_eq!(humanize_task_kind("subagent.code_reviewer"), "Sub-agente: code_reviewer");
+        assert_eq!(humanize_task_kind("subagent.code_reviewer"), "Sub-agent: code_reviewer");
     }
 
     #[test]
@@ -28709,7 +28709,7 @@ data: [DONE]\n";
         ] {
             let targets = browser_targets_for_goal(goal);
             assert_eq!(targets.len(), 1, "goal: {goal}");
-            assert_eq!(targets[0].label, "Ricerca web", "goal: {goal}");
+            assert_eq!(targets[0].label, "Web search", "goal: {goal}");
             assert!(
                 targets[0].url.starts_with("https://duckduckgo.com/?q="),
                 "goal: {goal}"
@@ -28862,14 +28862,14 @@ data: [DONE]\n";
 
     #[test]
     fn fs_authorize_rewrite_drops_card_marker() {
-        let text = "Per accedere a questa cartella mi serve la tua autorizzazione.\n\
+        let text = "To access this folder I need your authorization.\n\
 ‹‹FS_AUTHORIZE››{\"path\":\"/Users/fabio/Projects\",\"op\":\"list\"}‹‹/FS_AUTHORIZE››\n";
         let out = crate::rewrite_fs_authorize_to_done(text, "/Users/fabio/Projects");
         assert!(!out.contains("FS_AUTHORIZE"), "marker removed");
-        assert!(!out.contains("mi serve la tua autorizzazione"), "prompt line removed");
-        assert!(out.contains("✓ Accesso concesso a /Users/fabio/Projects"));
+        assert!(!out.contains("I need your authorization"), "prompt line removed");
+        assert!(out.contains("✓ Access granted to /Users/fabio/Projects"));
         // No-op when the marker is absent (idempotent on already-rewritten text).
-        assert_eq!(crate::rewrite_fs_authorize_to_done("ciao", "/x"), "ciao");
+        assert_eq!(crate::rewrite_fs_authorize_to_done("hi", "/x"), "hi");
     }
 
     #[test]
@@ -29078,11 +29078,11 @@ data: [DONE]\n";
 
     #[test]
     fn rewrite_confirm_marker_to_done() {
-        let original = "Ok.\n\nServe la tua conferma per l'azione qui sotto.\n‹‹COMPOSIO_CONFIRM››{\"tool\":\"GMAIL_SEND_EMAIL\",\"arguments\":{}}‹‹/COMPOSIO_CONFIRM››\n";
+        let original = "Ok.\n\nI need your confirmation for the action below.\n‹‹COMPOSIO_CONFIRM››{\"tool\":\"GMAIL_SEND_EMAIL\",\"arguments\":{}}‹‹/COMPOSIO_CONFIRM››\n";
         let done = rewrite_confirm_to_done(original, "GMAIL_SEND_EMAIL");
         assert!(done.contains("‹‹COMPOSIO_DONE››GMAIL_SEND_EMAIL‹‹/COMPOSIO_DONE››"));
         assert!(!done.contains("COMPOSIO_CONFIRM"));
-        assert!(!done.contains("Serve la tua conferma"));
+        assert!(!done.contains("I need your confirmation"));
         assert!(done.starts_with("Ok."));
         // Idempotent when there is no confirm marker.
         assert_eq!(rewrite_confirm_to_done("plain", "X"), "plain");
