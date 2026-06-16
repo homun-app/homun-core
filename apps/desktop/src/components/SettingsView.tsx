@@ -453,7 +453,7 @@ function ApprovalRoutingRow() {
       setTarget(r.target ?? "");
       setNote("Salvato.");
     } catch (error) {
-      setNote((error as Error).message || "Non salvato.");
+      setNote((error as Error).message || "Not saved.");
     } finally {
       setBusy(false);
     }
@@ -494,7 +494,7 @@ function ApprovalRoutingRow() {
             <div className="td">
               {channel === "telegram"
                 ? "L'id della chat (numerico) da cui autorizzerai — non è il numero di telefono."
-                : "Il numero (con prefisso) da cui autorizzerai."}
+                : "The number (with country code) you will authorize from."}
             </div>
           </div>
           <div className="approval-target-field">
@@ -598,11 +598,11 @@ function AccountPane({
       <div className="set-rows">
         <div className="set-trow">
           <div>
-            <div className="tt">Computer locale</div>
+            <div className="tt">Local computer</div>
             <div className="td">
               {computer?.enabled
-                ? "Browser reale contenuto · vista live noVNC"
-                : "Avvia il computer contenuto per browsing reale e non invasivo."}
+                ? "Real contained browser · live noVNC view"
+                : "Start the contained computer for real, non-invasive browsing."}
             </div>
           </div>
           <span className={`set-badge ${computer?.enabled ? "green" : "muted"}`}>
@@ -611,7 +611,7 @@ function AccountPane({
         </div>
       </div>
 
-      <div className="set-section-label">Data e ora</div>
+      <div className="set-section-label">Date and time</div>
       <div className="set-rows">
         <TimezoneRow />
       </div>
@@ -620,7 +620,7 @@ function AccountPane({
         applicato anche al browser contenuto, così le ricerche con date prendono il giorno giusto.
       </p>
 
-      <div className="set-section-label">Lingua</div>
+      <div className="set-section-label">Language</div>
       <div className="set-rows">
         <LanguageRow />
       </div>
@@ -838,17 +838,17 @@ function GeneralPane() {
   const { t } = useTranslation();
   return (
     <>
-      <div className="set-section-label">Conversazione</div>
+      <div className="set-section-label">Conversation</div>
       <div className="set-rows">
         <ToggleRow
           title={t("settings.streamingResponses")}
-          description="Mostra la risposta token-per-token mentre il modello genera."
+          description="Show the response token-by-token as the model generates."
           settingKey="general.streamResponses"
           fallback={true}
         />
         <ToggleRow
           title={t("settings.activitySound")}
-          description="Riproduci un breve suono quando un task del computer locale finisce."
+          description="Play a short sound when a local computer task finishes."
           settingKey="general.soundOnComplete"
           fallback={false}
         />
@@ -1312,11 +1312,11 @@ function RuntimePane({
                             }
                             return result;
                           },
-                          "Provider aggiunto.",
+                          "Provider added.",
                         )
                       }
                     >
-                      {busy === "add" ? "Salvataggio…" : "Aggiungi provider"}
+                      {busy === "add" ? "Saving…" : "Add provider"}
                     </button>
                   </>
                 )}
@@ -1342,10 +1342,10 @@ function RuntimePane({
                       void run(id, () => coreBridge.removeProvider(id));
                     }}
                     onRefreshModels={() =>
-                      run(modalProvider.id, () => coreBridge.refreshProviderModels(modalProvider.id), "Catalogo aggiornato.")
+                      run(modalProvider.id, () => coreBridge.refreshProviderModels(modalProvider.id), "Catalog updated.")
                     }
                     onGenerateProfiles={() =>
-                      run(modalProvider.id, () => coreBridge.generateProviderProfiles(modalProvider.id), "Profili generati.")
+                      run(modalProvider.id, () => coreBridge.generateProviderProfiles(modalProvider.id), "Profiles generated.")
                     }
                     onSaveConnection={() =>
                       run(
@@ -1358,7 +1358,7 @@ function RuntimePane({
                             base_url: (editBaseUrl || modalProvider.base_url).trim(),
                             ...(editKey.trim() ? { api_key: editKey.trim() } : {}),
                           }),
-                        "Provider salvato.",
+                        "Provider saved.",
                       )
                     }
                     onSetModel={(modelId) =>
@@ -1381,7 +1381,7 @@ function RuntimePane({
                             model: modelId,
                             ...patch,
                           }),
-                        "Modello aggiornato.",
+                        "Model updated.",
                       )
                     }
                   />
@@ -1707,13 +1707,13 @@ function PrivacyPane() {
         />
         <ToggleRow
           title={t("settings.managedCloud")}
-          description="Connettori cloud (Composio/Zapier) restano disabilitati finché non scegli un provider."
+          description="Cloud connectors (Composio/Zapier) stay disabled until you pick a provider."
           settingKey="privacy.managedCloud"
           fallback={false}
         />
         <ToggleRow
           title={t("settings.approvalGate")}
-          description="Le azioni write e approved-automation richiedono una conferma esplicita."
+          description="Write actions and approved automations require explicit confirmation."
           settingKey="privacy.approvalGate"
           fallback={true}
         />
@@ -2078,7 +2078,7 @@ function ComposioDetail({
                 ? connectedCount > 0
                   ? `Connesso · ${connectedCount} ${connectedCount === 1 ? "servizio collegato" : "servizi collegati"}`
                   : "Connesso · nessun servizio ancora collegato"
-                : "Hub di toolkit cloud (Gmail, GitHub, Slack…) con OAuth gestito."}
+                : "Cloud toolkit hub (Gmail, GitHub, Slack…) with managed OAuth."}
             </p>
           </div>
           {connected && !showForm && (
@@ -2091,7 +2091,7 @@ function ComposioDetail({
             </button>
           )}
           <span className={`set-badge ${connected ? "green" : "muted"}`}>
-            {connected ? "Connesso" : "Non connesso"}
+            {connected ? "Connected" : "Not connected"}
           </span>
         </div>
       </div>
@@ -2121,7 +2121,7 @@ function ComposioDetail({
               disabled={busy || !apiKey.trim()}
               onClick={() => void submitKey()}
             >
-              {busy ? "Collegamento…" : connected ? "Aggiorna chiave" : "Collega Composio"}
+              {busy ? "Connecting…" : connected ? "Update key" : "Connect Composio"}
             </button>
             {connected && editingKey && !kitsError && (
               <button
@@ -2591,10 +2591,10 @@ function ConnectModal({
           <>
             <div className="cmp-modal-note">
               {isOAuthManaged
-                ? "Apriremo una finestra del browser: autorizzi l'accesso lì e l'app rileva la connessione automaticamente. I permessi degli agenti restano governati dai gate di approvazione."
+                ? "We will open a browser window: authorize access there and the app detects the connection automatically. Agent permissions remain governed by approval gates."
                 : renderFields.length > 0
                   ? `${kit.name} richiede le credenziali qui sotto (dal pannello sviluppatore del servizio). Sono salvate cifrate sul dispositivo e usate solo verso Composio.`
-                  : "Apriremo una finestra del browser per autorizzare l'accesso."}
+                  : "We will open a browser window to authorize access."}
             </div>
 
             {/* Both managed + custom available → let the user pick. */}
@@ -2875,7 +2875,7 @@ function McpCatalogDetail({
   return (
     <>
       <div className="mdl-detail-head">
-        <h3 className="mdl-detail-title">Catalogo MCP</h3>
+        <h3 className="mdl-detail-title">MCP catalog</h3>
         <p className="mdl-detail-sub">
           Dal registry ufficiale Model Context Protocol — sempre aggiornato. I server eseguono
           codice sul tuo computer: connetti solo publisher di cui ti fidi.
@@ -3266,7 +3266,7 @@ function SkillsPane() {
           <>
             <button type="button" className="skl-back" onClick={() => setGroup("")}>
               <ChevronLeft size={15} />
-              {group === "homuncoder" ? "HomunCoder" : "Skill personali"}
+              {group === "homuncoder" ? "HomunCoder" : "Personal skills"}
             </button>
             {group === "homuncoder" && (
               <div className="skl-group-switch-row">
@@ -3396,7 +3396,7 @@ function MarketplaceView({
           <div className="conn-detail-titletext">
             <h3 className="mdl-detail-title">Catalogo skill</h3>
             <p className="mdl-detail-sub">
-              {data ? `${data.total} skill nel registro.` : "Sfoglia e installa dal registro."}{" "}
+              {data ? `${data.total} skills in the registry.` : "Browse and install from the registry."}{" "}
               Sono codice: installa solo ciò di cui ti fidi.
             </p>
           </div>
@@ -3544,7 +3544,7 @@ function CatalogPreviewModal({
           <div className="conn-detail-titletext">
             <h3 className="mdl-detail-title">{preview?.name ?? slug}</h3>
             <p className="mdl-detail-sub">
-              {preview ? `${preview.files.length} file` : "Carico l'anteprima…"}
+              {preview ? `${preview.files.length} file` : "Loading preview…"}
             </p>
           </div>
           <button className="mdl-icon-btn" type="button" aria-label="Chiudi" onClick={onClose}>
@@ -3597,7 +3597,7 @@ function CatalogPreviewModal({
           disabled={installed || installing || !preview}
           onClick={() => preview && onInstall(preview.name)}
         >
-          {installed ? "Già installata" : installing ? "Installo…" : "Installa"}
+          {installed ? "Already installed" : installing ? "Installing…" : "Install"}
         </button>
       </div>
     </div>
@@ -3728,7 +3728,7 @@ function SkillSecuritySection({ report }: { report: SkillSecurityReport }) {
   const { t } = useTranslation();
   const level = report.blocked ? "high" : report.risk_score > 0 ? "warn" : "clean";
   const label =
-    level === "high" ? "Rischio alto" : level === "warn" ? "Da rivedere" : "Pulita";
+    level === "high" ? "High risk" : level === "warn" ? "Needs review" : "Clean";
   return (
     <div className={`skl-sec ${level}`}>
       <div className="skl-sec-head">
@@ -3792,12 +3792,12 @@ function ComputerPane({ computer }: { computer: ContainedComputerLive | null }) 
   const dockerLabel = !docker
     ? "Verifica…"
     : !docker.installed
-      ? "Non installato"
+      ? "Not installed"
       : !docker.running
         ? "Installato, non in esecuzione"
         : docker.container_up
           ? "Attivo · container su"
-          : "In esecuzione · container spento";
+          : "Running · container off";
   const dockerOk = Boolean(docker?.running && docker.container_up);
 
   const liveUrl = enabled ? computer?.novnc_url : null;
@@ -3881,13 +3881,13 @@ function ComputerPane({ computer }: { computer: ContainedComputerLive | null }) 
                 );
                 await refresh();
               } catch {
-                setClosedNote("Chiusura non riuscita.");
+                setClosedNote("Close failed.");
               } finally {
                 setClosing(false);
               }
             }}
           >
-            {closing ? "Chiusura…" : "Chiudi tutti i browser"}
+            {closing ? "Closing…" : "Close all browsers"}
           </button>
         </div>
       </div>
@@ -4339,7 +4339,7 @@ function ChannelsPane() {
             <div className="td">
               {settings?.enabled
                 ? "I messaggi in arrivo vengono elaborati."
-                : "Interruttore generale: tutti i messaggi in arrivo sono ignorati."}
+                : "Master switch: all incoming messages are ignored."}
             </div>
           </div>
           <Toggle
