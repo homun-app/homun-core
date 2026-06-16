@@ -20,12 +20,22 @@ services:
       HOMUN_DESKTOP_GATEWAY_TOKEN: "${HOMUN_DESKTOP_GATEWAY_TOKEN:?set a strong token in .env}"
       # Inference: point at cloud APIs or an Ollama URL (provider config is all env).
       # e.g. HOMUN_EMBED_BASE: "http://ollama:11434"
+      # --- Contained computer (browser/sandbox) — optional; also uncomment the
+      #     docker.sock mount below. The gateway runs the CC as a sibling on this
+      #     network and reaches it by name. ---
+      # HOMUN_CC_NETWORK: "homun-net"
+      # HOMUN_CC_VALIDATE_HOST: "homun-cc"
+      # HOMUN_CONTAINED_COMPUTER_CDP: "http://homun-cc:9222"
+      # HOMUN_CONTAINED_COMPUTER_NOVNC: "http://homun-cc:6080/vnc.html"
+      # HOMUN_WHISPER_URL: "http://homun-cc:9100"
     ports:
       - "18765:18765"
+    networks:
+      - homun-net
     volumes:
       - homun-data:/data
-      # Optional: enable the "contained computer" (browser/sandbox) by giving the
-      # gateway access to the host Docker. Privileged — only on a box you own.
+      # Optional: enable the "contained computer" by giving the gateway the host
+      # Docker. Privileged — only on a box you own. See docs/self-host.md.
       # - /var/run/docker.sock:/var/run/docker.sock
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:18765/api/health"]
@@ -33,6 +43,10 @@ services:
       timeout: 5s
       retries: 3
       start_period: 20s
+
+networks:
+  homun-net:
+    name: homun-net
 
 volumes:
   homun-data:
