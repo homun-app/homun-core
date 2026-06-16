@@ -66,11 +66,13 @@ source repo stays **private** — only the binaries are public.
 
 Two one-time prerequisites:
 
-1. **Create a public repo `homun-app/homun-releases`** (empty is fine). This is the update
-   feed `apps/desktop/package.json` → `build.publish` points at, and what electron-updater
-   queries at runtime (no token embedded in the app).
+1. **Create a public repo `homun-app/homun-releases` — initialized, NOT empty.** This is the
+   update feed `apps/desktop/package.json` → `build.publish` points at, and what
+   electron-updater queries at runtime (no token embedded in the app). It **must have a default
+   branch**: an empty repo can't anchor a release tag, so publishing fails with
+   `422 Repository is empty` and the release stays "untagged". Create it with `--add-readme`:
    ```bash
-   gh repo create homun-app/homun-releases --public -d "Homun desktop release binaries"
+   gh repo create homun-app/homun-releases --public --add-readme -d "Homun desktop release binaries"
    ```
 2. **Add a `RELEASES_TOKEN` secret** on `homun-core` — a PAT that can write releases to
    `homun-releases` (the default `GITHUB_TOKEN` can't reach another repo). Fine-grained PAT
