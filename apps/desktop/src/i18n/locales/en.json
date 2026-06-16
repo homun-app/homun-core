@@ -977,5 +977,12 @@
     "readyEyebrow": "Setup complete",
     "readyDesc": "Docker and the contained browser start automatically. Whisper starts on first voice dictation. The rest I learn by chatting with you.",
     "start": "Start using Homun"
+  },
+  "login": {
+    "subtitle": "Enter your access token to continue.",
+    "placeholder": "Access token",
+    "invalid": "Invalid access token.",
+    "checking": "Checking…",
+    "unlock": "Unlock"
   }
 }

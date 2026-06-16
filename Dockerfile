@@ -25,12 +25,10 @@ RUN npm ci
 COPY apps/desktop/ ./
 # Empty gateway URL => the SPA calls the API at its own origin (relative paths),
 # so the same image works behind any domain without a rebuild. The bearer token
-# is injected at build time (it ends up in the bundle — protect the deployment
-# with the PaaS front gate / a private network; see docs/self-host.md).
+# is NOT baked into the bundle: the web build prompts for it at the login gate
+# (validated, then stored in localStorage). See docs/self-host.md.
 ARG VITE_HOMUN_DESKTOP_GATEWAY_URL=""
-ARG VITE_HOMUN_DESKTOP_GATEWAY_TOKEN=""
-ENV VITE_HOMUN_DESKTOP_GATEWAY_URL=$VITE_HOMUN_DESKTOP_GATEWAY_URL \
-    VITE_HOMUN_DESKTOP_GATEWAY_TOKEN=$VITE_HOMUN_DESKTOP_GATEWAY_TOKEN
+ENV VITE_HOMUN_DESKTOP_GATEWAY_URL=$VITE_HOMUN_DESKTOP_GATEWAY_URL
 RUN npm run build
 
 # --- Runtime ---

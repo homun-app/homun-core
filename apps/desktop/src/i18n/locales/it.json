@@ -977,5 +977,12 @@
     "readyEyebrow": "Configurazione completata",
     "readyDesc": "Docker e il browser contenuto si avviano automaticamente. Whisper si avvia al primo dettato vocale. Il resto lo imparo conversando con te.",
     "start": "Inizia a usare Homun"
+  },
+  "login": {
+    "subtitle": "Inserisci il token di accesso per continuare.",
+    "placeholder": "Token di accesso",
+    "invalid": "Token di accesso non valido.",
+    "checking": "Verifica…",
+    "unlock": "Sblocca"
   }
 }

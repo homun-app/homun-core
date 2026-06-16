@@ -55,14 +55,16 @@ All of them do the same three things: **build the Dockerfile**, **set the env va
 
 ## Access / auth (read this)
 
-The bearer token is **baked into the web bundle** at build time
-(`VITE_HOMUN_DESKTOP_GATEWAY_TOKEN`), so anyone who can load the page can call the
-API. For a single-user self-host that's fine **only behind a front gate**:
+The web build ships a **login gate**: the bearer token is **not** baked into the bundle.
+On first load you enter the `HOMUN_DESKTOP_GATEWAY_TOKEN` value; it's validated against
+the gateway and stored in your browser (localStorage), so the JS bundle stays token-free.
+
+Still recommended for a single-user host — add a **first layer** in front:
 
 - Put the app on a **private network** (Tailscale / WireGuard), or
 - Add **basic auth / an OAuth proxy** at the PaaS reverse proxy (Traefik/Caddy/nginx).
 
-A proper in-app login (token not embedded) is a planned follow-up.
+The login token is then the second layer.
 
 ## Inference
 

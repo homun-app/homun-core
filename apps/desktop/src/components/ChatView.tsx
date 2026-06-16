@@ -94,7 +94,7 @@ import {
   createUnavailableComputerSession,
   mapCoreComputerSession,
 } from "../lib/localComputerViewModel";
-import { fileLocalPathFromBridge } from "../lib/gatewayConfig";
+import { fileLocalPathFromBridge, IS_DESKTOP } from "../lib/gatewayConfig";
 import { copyText } from "../lib/clipboard";
 import { connectComposioToolkit } from "../lib/composioConnect";
 import { MarkdownEditor } from "./MarkdownEditor";
@@ -7439,22 +7439,25 @@ function Composer({
           )}
         </div>
         <div className="composer-actions">
-          <button
-            className={`icon-button${recording ? " recording" : ""}`}
-            type="button"
-            aria-label={recording ? t("chat.stopDictation") : t("chat.voiceDictation")}
-            title={recording ? t("chat.stopAndTranscribe") : t("chat.voiceDictationMultilingual")}
-            disabled={transcribing}
-            onClick={() => (recording ? stopDictation() : void startDictation())}
-          >
-            {transcribing ? (
-              <Loader2 size={17} className="composer-spin" />
-            ) : recording ? (
-              <span className="composer-stop-square" aria-hidden="true" />
-            ) : (
-              <Mic size={17} />
-            )}
-          </button>
+          {/* Voice dictation needs the local microphone + whisper bridge — desktop only. */}
+          {IS_DESKTOP && (
+            <button
+              className={`icon-button${recording ? " recording" : ""}`}
+              type="button"
+              aria-label={recording ? t("chat.stopDictation") : t("chat.voiceDictation")}
+              title={recording ? t("chat.stopAndTranscribe") : t("chat.voiceDictationMultilingual")}
+              disabled={transcribing}
+              onClick={() => (recording ? stopDictation() : void startDictation())}
+            >
+              {transcribing ? (
+                <Loader2 size={17} className="composer-spin" />
+              ) : recording ? (
+                <span className="composer-stop-square" aria-hidden="true" />
+              ) : (
+                <Mic size={17} />
+              )}
+            </button>
+          )}
           {error && <span className="composer-error">{error}</span>}
           {composerAttachmentError && (
             <span className="composer-error">{composerAttachmentError}</span>

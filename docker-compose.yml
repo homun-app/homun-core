@@ -7,11 +7,9 @@ services:
     build:
       context: .
       args:
-        # Empty URL => SPA calls the API at its own origin. Set the token to the
-        # same value as HOMUN_DESKTOP_GATEWAY_TOKEN below (it is baked into the
-        # web bundle — keep the deployment behind a front gate / private network).
+        # Empty URL => the SPA calls the API at its own origin. The token is NOT
+        # baked in — the web login prompts for it (you enter HOMUN_DESKTOP_GATEWAY_TOKEN).
         VITE_HOMUN_DESKTOP_GATEWAY_URL: ""
-        VITE_HOMUN_DESKTOP_GATEWAY_TOKEN: "${HOMUN_DESKTOP_GATEWAY_TOKEN:?set a strong token in .env}"
     # image: ghcr.io/homun-app/homun:latest   # or pull a prebuilt image instead of building
     restart: unless-stopped
     environment:
