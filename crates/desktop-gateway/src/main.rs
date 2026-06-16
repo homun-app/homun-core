@@ -492,6 +492,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         harden_data_at_rest(&dir);
     }
     init_active_workspace_from_disk();
+    seed_default_skills();
     gc_stale_tasks(&state);
     backfill_contacts(&state);
     backfill_mentions(&state);
@@ -21157,6 +21158,96 @@ fn skills_dir() -> Result<PathBuf, std::io::Error> {
     let dir = skills::skills_root(&gateway_data_dir()?);
     fs::create_dir_all(&dir)?;
     Ok(dir)
+}
+
+/// Bundled default-skills dir (the HomunCoder methodology), staged into the app /
+/// container at build time. Env override, else repo-relative for dev — mirrors
+/// `up_script()` so development keeps working without the env var set.
+fn default_skills_dir() -> Option<PathBuf> {
+    if let Ok(p) = std::env::var("HOMUN_DEFAULT_SKILLS_DIR") {
+        let path = PathBuf::from(p);
+        if path.is_dir() {
+            return Some(path);
+        }
+    }
+    for base in ["resources/default-skills", "../resources/default-skills"] {
+        let path = PathBuf::from(base);
+        if path.is_dir() {
+            return Some(path);
+        }
+    }
+    None
+}
+
+/// Recursively copy `src` into `dst` (text skill trees only — no symlink graphs).
+fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
+    fs::create_dir_all(dst)?;
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let from = entry.path();
+        let to = dst.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_dir_recursive(&from, &to)?;
+        } else {
+            fs::copy(&from, &to)?;
+        }
+    }
+    Ok(())
+}
+
+/// Seeds the bundled default skills (HomunCoder methodology) into the user's skills
+/// dir so a fresh install ships the methodology by default. Non-destructive: only
+/// copies a skill whose id is ABSENT (never clobbers a user-edited one), and runs
+/// once — a `.defaults-seeded` marker means later user deletions stick. The bundled
+/// `homuncoder-skills.txt` is unioned into the dest manifest so the seeded skills are
+/// grouped under "HomunCoder" and scoped to project chats.
+fn seed_default_skills() {
+    let Ok(dest) = skills_dir() else { return };
+    let marker = dest.join(".defaults-seeded");
+    if marker.exists() {
+        return;
+    }
+    let Some(src) = default_skills_dir() else { return };
+
+    let mut copied = 0usize;
+    if let Ok(entries) = fs::read_dir(&src) {
+        for entry in entries.flatten() {
+            let from = entry.path();
+            if !from.is_dir() || !from.join("SKILL.md").is_file() {
+                continue;
+            }
+            let target = dest.join(entry.file_name());
+            if target.exists() {
+                continue; // keep the user's copy
+            }
+            if copy_dir_recursive(&from, &target).is_ok() {
+                copied += 1;
+            }
+        }
+    }
+
+    // Union the bundled HomunCoder manifest into the dest manifest (dedup).
+    let manifest = "homuncoder-skills.txt";
+    let mut ids: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for base in [dest.join(manifest), src.join(manifest)] {
+        if let Ok(raw) = fs::read_to_string(&base) {
+            for line in raw.lines() {
+                let id = line.trim();
+                if !id.is_empty() {
+                    ids.insert(id.to_string());
+                }
+            }
+        }
+    }
+    if !ids.is_empty() {
+        let body = ids.into_iter().collect::<Vec<_>>().join("\n");
+        let _ = fs::write(dest.join(manifest), format!("{body}\n"));
+    }
+
+    let _ = fs::write(&marker, "1");
+    if copied > 0 {
+        eprintln!("[homun] seeded {copied} default skill(s) into {}", dest.display());
+    }
 }
 
 fn skills_state_path() -> Option<PathBuf> {

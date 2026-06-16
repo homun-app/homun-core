@@ -247,6 +247,14 @@ function spawnGateway() {
     if (fs.existsSync(ccUp)) env.HOMUN_CONTAINED_COMPUTER_UP = ccUp;
   }
 
+  // Point the gateway at the bundled default skills (HomunCoder methodology) so
+  // it can seed them into the data dir on first run. Same dev/packaged story as
+  // above; an explicit env override wins.
+  if (!env.HOMUN_DEFAULT_SKILLS_DIR) {
+    const skillsDir = path.join(RESOURCES_ROOT, "default-skills");
+    if (fs.existsSync(skillsDir)) env.HOMUN_DEFAULT_SKILLS_DIR = skillsDir;
+  }
+
   if (gatewayBin) {
     gatewayProcess = spawn(gatewayBin, [], {
       cwd: REPO_ROOT,

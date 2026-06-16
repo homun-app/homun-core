@@ -56,6 +56,19 @@ if (!existsSync(ccSource)) {
 cpSync(ccSource, ccTarget, { recursive: true });
 chmodSync(join(ccTarget, "up.sh"), 0o755);
 
+// Stage the bundled default skills (HomunCoder methodology) so a fresh install
+// ships them. The gateway seeds them into ~/.homun/skills on first run, pointed
+// here via HOMUN_DEFAULT_SKILLS_DIR (see main.cjs). Snapshot lives in the repo
+// (resources/default-skills); re-vendor with scripts/vendor-default-skills.sh.
+const skillsSource = join(repoRoot, "resources", "default-skills");
+const skillsTarget = join(resourcesDir, "default-skills");
+if (existsSync(skillsSource)) {
+  cpSync(skillsSource, skillsTarget, { recursive: true });
+}
+
 console.log(`Prepared Electron resources at ${resourcesDir}`);
 console.log(`Gateway: ${relative(repoRoot, gatewayTarget)}`);
 console.log(`Contained computer: ${relative(repoRoot, ccTarget)}`);
+if (existsSync(skillsTarget)) {
+  console.log(`Default skills: ${relative(repoRoot, skillsTarget)}`);
+}
