@@ -424,7 +424,26 @@
     "whatYouNeed": "Cosa ti serve:",
     "capabilities": "Capacità",
     "active2": "Attivo",
-    "disabled": "Disattivato"
+    "disabled": "Disattivato",
+    "removeAccount": "Rimuovi account",
+    "customColor": "Scegli un colore personalizzato",
+    "streamingResponses": "Risposte in streaming",
+    "activitySound": "Suono a fine attività",
+    "custom": "Personalizzato",
+    "describeNoProfile": "Un modello descrive i modelli senza profilo",
+    "localFirstDefault": "Local-first per default",
+    "managedCloud": "Managed cloud",
+    "approvalGate": "Gate di approvazione",
+    "searchToolkits": "Cerca toolkit…",
+    "clickToCopy": "Clic per copiare",
+    "disconnectMcp": "Disconnetti questo server MCP",
+    "searchMcpCatalog": "Cerca (es. playwright, filesystem, fetch, github)…",
+    "showDetailsConnect": "Mostra dettagli e connetti",
+    "searchSkills": "Cerca skill…",
+    "preview": "Anteprima",
+    "source": "Sorgente",
+    "scopePersonal": "Personale (vale ovunque)",
+    "scopeProject": "Progetto attivo"
   },
   "error": {
     "model": {

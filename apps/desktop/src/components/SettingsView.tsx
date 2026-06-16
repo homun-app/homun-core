@@ -569,7 +569,7 @@ function AccountPane({
             className="set-input set-row-input"
             value={name}
             onChange={(event) => setName(event.target.value)}
-            placeholder="Il tuo nome"
+            placeholder={t("settings.yourName")}
           />
         </div>
         <div className="set-trow">
@@ -775,7 +775,7 @@ function AppearancePane() {
                 type="button"
                 className="appearance-accent-del"
                 aria-label={`Rimuovi colore ${hex.toUpperCase()}`}
-                title="Rimuovi"
+                title={t("common.remove")}
                 onClick={() => removeCustom(hex)}
               >
                 <X size={11} />
@@ -788,7 +788,7 @@ function AppearancePane() {
             through colours no longer spams the list. */}
         <label
           className="appearance-accent appearance-accent-add"
-          title="Scegli un colore personalizzato"
+          title={t("settings.customColor")}
         >
           <span
             className="appearance-accent-chip appearance-accent-chip-add"
@@ -802,7 +802,7 @@ function AppearancePane() {
           <input
             type="color"
             className="appearance-accent-add-input"
-            aria-label="Scegli un colore personalizzato"
+            aria-label={t("settings.customColor")}
             value={draft ?? (isPreset(norm) || !customs.includes(norm) ? DEFAULT_ACCENT : norm)}
             onChange={(e) => setDraft(normalizeHex(e.target.value))}
           />
@@ -841,13 +841,13 @@ function GeneralPane() {
       <div className="set-section-label">Conversazione</div>
       <div className="set-rows">
         <ToggleRow
-          title="Risposte in streaming"
+          title={t("settings.streamingResponses")}
           description="Mostra la risposta token-per-token mentre il modello genera."
           settingKey="general.streamResponses"
           fallback={true}
         />
         <ToggleRow
-          title="Suono a fine attività"
+          title={t("settings.activitySound")}
           description="Riproduci un breve suono quando un task del computer locale finisce."
           settingKey="general.soundOnComplete"
           fallback={false}
@@ -889,7 +889,7 @@ const PROVIDER_PRESETS: Array<{
     kind: "openai_compat",
     hint: "Modelli :cloud — chiave da ollama.com/settings/keys",
   },
-  { id: "custom", label: "Personalizzato", baseUrl: "", kind: "openai_compat" },
+  { id: "custom", label: "Custom", baseUrl: "", kind: "openai_compat" },
 ];
 
 /// LLM concurrency control: how many inference requests the ResourceGovernor lets
@@ -1239,7 +1239,7 @@ function RuntimePane({
             <div className="set-modal-overlay" role="dialog" aria-modal="true">
               <div className="set-modal-scrim" onClick={closeModal} />
               <div className="set-modal">
-                <button className="set-modal-close" type="button" aria-label="Chiudi" onClick={closeModal}>
+                <button className="set-modal-close" type="button" aria-label={t("common.close")} onClick={closeModal}>
                   <X size={16} />
                 </button>
 
@@ -1557,7 +1557,7 @@ function ProviderDetailView({
               className="set-btn"
               type="button"
               disabled={acting}
-              title="Un modello descrive i modelli senza profilo"
+              title={t("settings.describeNoProfile")}
               onClick={onGenerateProfiles}
             >
               <Sparkles size={14} /> Genera profili
@@ -1700,19 +1700,19 @@ function PrivacyPane() {
       <div className="set-section-label">Privacy</div>
       <div className="set-rows">
         <ToggleRow
-          title="Local-first per default"
+          title={t("settings.localFirstDefault")}
           description="Memoria, task e audit restano sul dispositivo salvo opt-in esplicito."
           settingKey="privacy.localFirst"
           fallback={true}
         />
         <ToggleRow
-          title="Managed cloud"
+          title={t("settings.managedCloud")}
           description="Connettori cloud (Composio/Zapier) restano disabilitati finché non scegli un provider."
           settingKey="privacy.managedCloud"
           fallback={false}
         />
         <ToggleRow
-          title="Gate di approvazione"
+          title={t("settings.approvalGate")}
           description="Le azioni write e approved-automation richiedono una conferma esplicita."
           settingKey="privacy.approvalGate"
           fallback={true}
@@ -1953,6 +1953,7 @@ function ConnectorActivityDetail() {
 // Connected accounts list with status + remove — surfaces ACTIVE/EXPIRED and lets the
 // user prune stale OAuth connections (roadmap #6).
 function ComposioConnectionsList() {
+  const { t } = useTranslation();
   type Conn = Awaited<ReturnType<typeof coreBridge.composioConnections>>[number];
   const [conns, setConns] = useState<Conn[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -1980,7 +1981,7 @@ function ComposioConnectionsList() {
           <button
             type="button"
             className="mdl-icon-btn"
-            title="Rimuovi account"
+            title={t("settings.removeAccount")}
             disabled={busy === c.id}
             onClick={() => {
               setBusy(c.id);
@@ -2270,6 +2271,7 @@ function ComposioToolkitBrowser({
   onNote: (note: string | null) => void;
   onConnectedCount: (n: number) => void;
 }) {
+  const { t } = useTranslation();
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("all");
   // toolkit slug → best connection state. A toolkit can have several connected
@@ -2384,7 +2386,7 @@ function ComposioToolkitBrowser({
         <Search size={15} />
         <input
           className="conn-search-input"
-          placeholder="Cerca toolkit…"
+          placeholder={t("settings.searchToolkits")}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
@@ -2481,6 +2483,7 @@ function ConnectModal({
   onClose: () => void;
   onConnect: (input?: ComposioLinkInput) => void;
 }) {
+  const { t } = useTranslation();
   const [imgOk, setImgOk] = useState(Boolean(kit.logo));
   const [auth, setAuth] = useState<ComposioToolkitAuth | null>(null);
   const [loading, setLoading] = useState(true);
@@ -2641,7 +2644,7 @@ function ConnectModal({
                       "https://backend.composio.dev/api/v3.1/toolkits/auth/callback",
                     )
                   }
-                  title="Clic per copiare"
+                  title={t("settings.clickToCopy")}
                 >
                   https://backend.composio.dev/api/v3.1/toolkits/auth/callback
                 </code>
@@ -2770,6 +2773,7 @@ function McpServerDetail({
   onNote: (note: string | null) => void;
   onDisconnected: () => void;
 }) {
+  const { t } = useTranslation();
   const tools = (snap?.tools ?? []).filter((tool) => tool.provider_id === providerId);
   const [busy, setBusy] = useState(false);
   const disconnect = async () => {
@@ -2806,7 +2810,7 @@ function McpServerDetail({
             type="button"
             disabled={busy}
             onClick={() => void disconnect()}
-            title="Disconnetti questo server MCP"
+            title={t("settings.disconnectMcp")}
             style={{ marginLeft: "auto" }}
           >
             <Trash2 size={14} />
@@ -2845,6 +2849,7 @@ function McpCatalogDetail({
   onNote: (note: string | null) => void;
   onConnected: (providerId: string) => void;
 }) {
+  const { t } = useTranslation();
   const [query, setQuery] = useState("");
   const [servers, setServers] = useState<McpRegistryServer[]>([]);
   const [loading, setLoading] = useState(false);
@@ -2886,7 +2891,7 @@ function McpCatalogDetail({
       >
         <input
           className="set-input"
-          placeholder="Cerca (es. playwright, filesystem, fetch, github)…"
+          placeholder={t("settings.searchMcpCatalog")}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
@@ -3018,7 +3023,7 @@ function McpCatalogCard({
             className="set-btn"
             type="button"
             onClick={onToggle}
-            title="Mostra dettagli e connetti"
+            title={t("settings.showDetailsConnect")}
           >
             <span>{expanded ? "Nascondi" : "Dettagli"}</span>
           </button>
@@ -3336,6 +3341,7 @@ function MarketplaceView({
   installedIds: string[];
   onInstalled: (resp: SkillsResponse, installedId: string) => void;
 }) {
+  const { t } = useTranslation();
   const [data, setData] = useState<SkillCatalogResponse | null>(null);
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<string | null>(null);
@@ -3401,7 +3407,7 @@ function MarketplaceView({
         <Search size={15} />
         <input
           className="conn-search-input"
-          placeholder="Cerca skill…"
+          placeholder={t("settings.searchSkills")}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
@@ -3508,6 +3514,7 @@ function CatalogPreviewModal({
   onClose: () => void;
   onInstall: (name: string) => void;
 }) {
+  const { t } = useTranslation();
   const [preview, setPreview] = useState<CatalogPreview | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [raw, setRaw] = useState(false);
@@ -3558,7 +3565,7 @@ function CatalogPreviewModal({
                   type="button"
                   className={`mdl-icon-btn ${!raw ? "active" : ""}`}
                   onClick={() => setRaw(false)}
-                  aria-label="Anteprima"
+                  aria-label={t("settings.preview")}
                 >
                   <Eye size={15} />
                 </button>
@@ -3566,7 +3573,7 @@ function CatalogPreviewModal({
                   type="button"
                   className={`mdl-icon-btn ${raw ? "active" : ""}`}
                   onClick={() => setRaw(true)}
-                  aria-label="Sorgente"
+                  aria-label={t("settings.source")}
                 >
                   <Code2 size={15} />
                 </button>
@@ -3659,7 +3666,7 @@ function SkillDetailView({
               type="button"
               className={`mdl-icon-btn ${!raw ? "active" : ""}`}
               onClick={() => setRaw(false)}
-              title="Anteprima"
+              title={t("settings.preview")}
               aria-label="Anteprima"
             >
               <Eye size={15} />
@@ -3668,7 +3675,7 @@ function SkillDetailView({
               type="button"
               className={`mdl-icon-btn ${raw ? "active" : ""}`}
               onClick={() => setRaw(true)}
-              title="Sorgente"
+              title={t("settings.source")}
               aria-label="Sorgente"
             >
               <Code2 size={15} />
@@ -3940,7 +3947,7 @@ function DestinationsCard() {
           <span className="set-card-name">Dove l'assistente può salvare i file</span>
           <button className="set-btn" type="button" disabled={busy} onClick={() => void add()}>
             <Plus size={14} />
-            <span style={{ marginLeft: 6 }}>Aggiungi</span>
+            <span style={{ marginLeft: 6 }}>{t("common.add")}</span>
           </button>
         </div>
         <div className="set-card-divider" />
@@ -4607,6 +4614,7 @@ type MemoryItem = {
 };
 
 function MemoryItemsList() {
+  const { t } = useTranslation();
   const [items, setItems] = useState<MemoryItem[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState<{ ref: string; text: string } | null>(null);
@@ -4640,8 +4648,8 @@ function MemoryItemsList() {
   if (!items) return null;
 
   const groups = [
-    { key: "personal", label: "Personale (vale ovunque)" },
-    { key: "project", label: "Progetto attivo" },
+    { key: "personal", label: t("settings.scopePersonal") },
+    { key: "project", label: t("settings.scopeProject") },
   ];
 
   return (

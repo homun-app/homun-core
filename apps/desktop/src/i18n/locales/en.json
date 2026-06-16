@@ -424,7 +424,26 @@
     "whatYouNeed": "What you need:",
     "capabilities": "Capabilities",
     "active2": "Active",
-    "disabled": "Disabled"
+    "disabled": "Disabled",
+    "removeAccount": "Remove account",
+    "customColor": "Pick a custom color",
+    "streamingResponses": "Streaming responses",
+    "activitySound": "Sound on activity completion",
+    "custom": "Custom",
+    "describeNoProfile": "A model describes models without a profile",
+    "localFirstDefault": "Local-first by default",
+    "managedCloud": "Managed cloud",
+    "approvalGate": "Approval gate",
+    "searchToolkits": "Search toolkits…",
+    "clickToCopy": "Click to copy",
+    "disconnectMcp": "Disconnect this MCP server",
+    "searchMcpCatalog": "Search (e.g. playwright, filesystem, fetch, github)…",
+    "showDetailsConnect": "Show details and connect",
+    "searchSkills": "Search skills…",
+    "preview": "Preview",
+    "source": "Source",
+    "scopePersonal": "Personal (applies everywhere)",
+    "scopeProject": "Active project"
   },
   "error": {
     "model": {
