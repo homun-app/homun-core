@@ -112,16 +112,16 @@ export function ProattivitaView({ onOpenChat }: ProattivitaViewProps) {
     <section className="proattiva-view">
       <header className="learning-header">
         <div>
-          <p className="eyebrow">{t("proattivita.eyebrow")}</p>
-          <h2>{t("proattivita.title")}</h2>
+          <p className="eyebrow">{t("proattivita:eyebrow")}</p>
+          <h2>{t("proattivita:title")}</h2>
           <p className="lead-copy">
-            {t("proattivita.lead")}
+            {t("proattivita:lead")}
           </p>
         </div>
         <div className="learning-summary">
           <span>
             <strong>{total}</strong>
-            {t("proattivita.pending")}
+            {t("proattivita:pending")}
           </span>
         </div>
       </header>
@@ -130,9 +130,9 @@ export function ProattivitaView({ onOpenChat }: ProattivitaViewProps) {
         <div className="proattiva-filters">
           {(
             [
-              ["all", t("proattivita.filterAll")],
+              ["all", t("proattivita:filterAll")],
               ["personal", t("sidebar.personal")],
-              ["projects", t("proattivita.filterProjects")],
+              ["projects", t("proattivita:filterProjects")],
             ] as [ScopeFilter, string][]
           ).map(([key, label]) => (
             <button
@@ -147,16 +147,16 @@ export function ProattivitaView({ onOpenChat }: ProattivitaViewProps) {
         </div>
         <button type="button" className="proattiva-refresh" onClick={() => void load()}>
           <RefreshCw size={14} aria-hidden="true" />
-          {t("proattivita.refresh")}
+          {t("proattivita:refresh")}
         </button>
       </div>
 
       {loading ? (
-        <p className="proattiva-empty">{t("proattivita.loading")}</p>
+        <p className="proattiva-empty">{t("proattivita:loading")}</p>
       ) : groups.length === 0 ? (
         <div className="proattiva-empty">
           <Lightbulb size={20} aria-hidden="true" />
-          <p>{t("proattivita.emptyHint")}</p>
+          <p>{t("proattivita:emptyHint")}</p>
         </div>
       ) : (
         groups.map(([scope, cards]) => {
@@ -174,7 +174,7 @@ export function ProattivitaView({ onOpenChat }: ProattivitaViewProps) {
                 )}
                 <span className="proattiva-group-name">{scopeName(scope)}</span>
                 <span className="proattiva-group-count">
-                  · {cards.length} {cards.length === 1 ? t("proattivita.suggestion") : t("proattivita.suggestions")}
+                  · {cards.length} {cards.length === 1 ? t("proattivita:suggestion") : t("proattivita:suggestions")}
                 </span>
               </div>
 
@@ -201,28 +201,28 @@ export function ProattivitaView({ onOpenChat }: ProattivitaViewProps) {
                       onClick={() => void open(s)}
                     >
                       <ArrowRight size={14} aria-hidden="true" />
-                      {t("proattivita.openChat")}
+                      {t("proattivita:openChat")}
                     </button>
                     <div className="proattiva-btn-row">
                       <button
                         type="button"
                         className="proattiva-btn"
-                        title={t("proattivita.doneTitle")}
+                        title={t("proattivita:doneTitle")}
                         disabled={busyId === s.id}
                         onClick={() => void act(s, "accepted", "liked")}
                       >
                         <Check size={14} aria-hidden="true" />
-                        {t("proattivita.done")}
+                        {t("proattivita:done")}
                       </button>
                       <button
                         type="button"
                         className="proattiva-btn proattiva-btn-muted"
-                        title={t("proattivita.notUsefulTitle")}
+                        title={t("proattivita:notUsefulTitle")}
                         disabled={busyId === s.id}
                         onClick={() => void act(s, "dismissed", "disliked")}
                       >
                         <X size={14} aria-hidden="true" />
-                        {t("proattivita.notUseful")}
+                        {t("proattivita:notUseful")}
                       </button>
                     </div>
                   </div>
@@ -232,13 +232,13 @@ export function ProattivitaView({ onOpenChat }: ProattivitaViewProps) {
               {hidden > 0 && (
                 <button type="button" className="proattiva-more" onClick={() => toggleScope(scope)}>
                   <ChevronRight size={13} aria-hidden="true" />+{hidden}{" "}
-                  {hidden === 1 ? t("proattivita.other") : t("proattivita.others")} {t("proattivita.in")} {scopeName(scope)}
+                  {hidden === 1 ? t("proattivita:other") : t("proattivita:others")} {t("proattivita:in")} {scopeName(scope)}
                 </button>
               )}
               {isOpen && cards.length > 1 && (
                 <button type="button" className="proattiva-more" onClick={() => toggleScope(scope)}>
                   <ChevronDown size={13} aria-hidden="true" />
-                  {t("proattivita.collapse")}
+                  {t("proattivita:collapse")}
                 </button>
               )}
             </div>
