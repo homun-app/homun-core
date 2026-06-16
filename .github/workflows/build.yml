@@ -26,10 +26,6 @@ jobs:
   build:
     name: Build (${{ matrix.platform }})
     runs-on: ${{ matrix.os }}
-    env:
-      # Resolves to the string 'true' only once the macOS signing cert secret is
-      # configured. Until then the mac build runs unsigned instead of failing.
-      HAS_APPLE_CERT: ${{ secrets.MAC_CSC_LINK != '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -69,8 +65,26 @@ jobs:
         working-directory: apps/desktop
         run: npm run package:prepare
 
+      # Gate signing on a run-step output, not a job-level `env` expression:
+      # `${{ secrets.X != '' }}` in job env is unreliable for step `if` and was
+      # evaluating false even with the secret set (v0.1.0 shipped unsigned). In a
+      # run step the secret is reliably available as an env var.
+      - name: Detect macOS signing creds
+        id: signing
+        if: matrix.platform == 'mac'
+        env:
+          MAC_CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+        run: |
+          if [ -n "$MAC_CSC_LINK" ]; then
+            echo "has_cert=true" >> "$GITHUB_OUTPUT"
+            echo "Developer ID cert present (${#MAC_CSC_LINK} chars) -> signed + notarized build"
+          else
+            echo "has_cert=false" >> "$GITHUB_OUTPUT"
+            echo "No MAC_CSC_LINK secret -> unsigned build"
+          fi
+
       - name: Build installer (macOS · signed + notarized)
-        if: matrix.platform == 'mac' && env.HAS_APPLE_CERT == 'true'
+        if: matrix.platform == 'mac' && steps.signing.outputs.has_cert == 'true'
         working-directory: apps/desktop
         run: npx electron-builder --mac --publish never -c.mac.notarize=true
         env:
@@ -81,7 +95,7 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
 
       - name: Build installer (macOS · unsigned — Apple cert not configured)
-        if: matrix.platform == 'mac' && env.HAS_APPLE_CERT != 'true'
+        if: matrix.platform == 'mac' && steps.signing.outputs.has_cert != 'true'
         working-directory: apps/desktop
         run: npx electron-builder --mac --publish never -c.mac.identity=null
         env:

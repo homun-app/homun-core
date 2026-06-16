@@ -16,7 +16,7 @@ Le capability seguenti sono implementate e in uso (dettaglio vivo in `docs/roadm
 - Skill: scanner skill locali + catalogo OpenClaw installabile + sandbox.
 - Addon ecosystem (ADR 0011) con toggle abilita/disabilita.
 - Proattivita': motore supervisore + card suggerimento.
-- Multilingua: inglese default + italiano, system prompt EN con `Reply in {language}`, plugin self-contained con namespace i18next (ADR 0014).
+- Multilingua: inglese default + italiano, system prompt EN con `Reply in {language}`, plugin self-contained con namespace i18next (ADR 0014). Migrazione UI a `react-i18next` **completa** (en/it in sync, 0 italiano residuo nel frontend; prompt/messaggi backend in inglese; resta solo l'italiano di parsing input). Detector `scripts/find_italian.py` come gate CI.
 - Concorrenza LLM dinamica: limite per provider (locale 1, cloud 4), N worker indipendenti, cambio chat in background.
 - Durabilita' task: heartbeat watchdog (lease renewal + double-execution guard), retention dati (cascade purge + VACUUM), export dati utente (ADR 0015).
 - Artifacts: workspace file + create/edit/versioning.
@@ -1248,6 +1248,15 @@ homun/
 - n8n MCP: https://docs.n8n.io/advanced-ai/mcp/
 
 ## Prossima Azione Consigliata
+
+> **Aggiornamento 2026-06-16** (stato vivo: `docs/state-of-project-2026-06-16.md`).
+> Gateway Rust autonomo, streaming, thread persistenti, schermate React collegate,
+> heartbeat/lease watchdog, retention + export, onboarding wizard e migrazione i18n
+> multilingua sono **fatti**. L'**unico blocker hard verso la prima release** e' ora
+> **firma + notarization macOS** (electron-builder gia' configurato; mancano code-signing
+> Developer ID + notarytool + smoke Gatekeeper; richiede account Apple Developer). In
+> parallelo, non bloccanti: verifica live della consegna proattiva e intervista onboarding
+> multi-turno. Il testo storico sotto resta come contesto.
 
 Completare il gateway Rust autonomo gia' estratto e collegare progressivamente le schermate React agli endpoint locali:
 
