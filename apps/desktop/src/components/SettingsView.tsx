@@ -1123,8 +1123,8 @@ function RuntimePane({
         <>
           <div className="set-section-label">Model per task</div>
           <p className="mdl-detail-sub" style={{ paddingLeft: "var(--s3)" }}>
-            Il router sceglie automaticamente il modello migliore tra quelli idonei; puoi
-            forzarne uno.
+            The router automatically picks the best model among the eligible ones; you can
+            force a specific one.
           </p>
           {roles.length === 0 ? (
             <p className="set-hint">Add un provider e aggiorna i suoi modelli.</p>
@@ -1166,13 +1166,13 @@ function RuntimePane({
         <>
           <div className="set-section-label">Routing decisions</div>
           <p className="mdl-detail-sub" style={{ paddingLeft: "var(--s3)" }}>
-            Quando arriva un compito, Homun stima complessità, lunghezza del contesto e
-            necessità di tool, poi sceglie il modello col miglior rapporto qualità/latenza.
-            Qui vedi perché il router ha scelto un modello per ogni task (ultime{" "}
+            When a task arrives, Homun estimates complexity, context length and tool needs,
+            then picks the model with the best quality/latency ratio. Here you see why the
+            router picked a model for each task (last{" "}
             {decisions.length}).
           </p>
           {decisions.length === 0 ? (
-            <p className="set-hint">Nessuna decisione ancora. Esegui un task per popolarle.</p>
+            <p className="set-hint">No decisions yet. Run a task to populate them.</p>
           ) : (
             decisions.map((d, i) => (
               <div className="mdl-row" key={i}>
@@ -1202,7 +1202,7 @@ function RuntimePane({
       {sub === "providers" && (
         <>
           <div className="set-section-label">
-            Provider attivi <span style={{ textTransform: "none", letterSpacing: 0 }}>({providers.length})</span>
+            Active providers <span style={{ textTransform: "none", letterSpacing: 0 }}>({providers.length})</span>
           </div>
           <div className="set-cards-grid cols-4">
             {providers.map((provider) => {

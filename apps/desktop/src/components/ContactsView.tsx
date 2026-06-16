@@ -284,7 +284,7 @@ export function ContactsView() {
       )}
 
       <div className="set-section-label contacts-count">
-        {filtered.length} {filtered.length === 1 ? "contatto" : "contatti"}
+        {filtered.length} {filtered.length === 1 ? "contact" : "contacts"}
       </div>
 
       <div className="contacts-grid-wrap">

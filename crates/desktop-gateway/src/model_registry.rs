@@ -388,23 +388,23 @@ pub struct RoleInfo {
 pub const ROLES: &[RoleInfo] = &[
     RoleInfo {
         key: "orchestrator",
-        label: "Gestione generale",
-        description: "Comprensione richieste, creazione e pianificazione dei task, sintesi.",
+        label: "General management",
+        description: "Understanding requests, creating and planning tasks, synthesis.",
     },
     RoleInfo {
         key: "coding",
         label: "Coding",
-        description: "Analisi e modifica del codice nelle chat di progetto: serve un modello forte su codice, tool-use e contesto ampio. Se non impostato, usa il modello di Gestione generale.",
+        description: "Analyzing and modifying code in project chats: needs a strong model for code, tool-use and wide context. If not set, uses the General management model.",
     },
     RoleInfo {
         key: "browser",
-        label: "Modello del browser",
-        description: "Pianificatore del loop osserva-agisci sul web: è il consumatore più pesante (una chiamata per ogni micro-azione). Spesso conviene un modello veloce qui e uno più capace per chat e sintesi.",
+        label: "Browser model",
+        description: "Planner for the observe-act web loop: it is the heaviest consumer (one call per micro-action). A fast model here and a more capable one for chat and synthesis is often a good tradeoff.",
     },
     RoleInfo {
         key: "memory",
-        label: "Memoria",
-        description: "Estrazione di fatti/preferenze dalle conversazioni: meglio un modello veloce ed economico.",
+        label: "Memory",
+        description: "Extracting facts/preferences from conversations: a fast and cheap model is best.",
     },
 ];
 
