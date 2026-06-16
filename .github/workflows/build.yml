@@ -39,10 +39,10 @@ jobs:
           - os: ubuntu-22.04 # older glibc -> broader Linux compatibility
             platform: linux
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 20
           cache: npm
@@ -143,7 +143,7 @@ jobs:
       # Keep a copy of the raw installers as workflow artifacts too — useful for
       # inspecting dispatch (non-tag) runs that don't publish a release.
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: homun-${{ matrix.platform }}
           path: |
