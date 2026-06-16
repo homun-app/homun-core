@@ -665,6 +665,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/system/browser/close-all", post(close_all_browsers))
         .route("/api/memory/dashboard", get(memory_dashboard))
         .route("/api/memory/export", get(memory_export))
+        .route("/api/export", get(export_user_data))
         .route("/api/memory/items", get(memory_items))
         .route("/api/memory/graph", get(memory_graph))
         .route("/api/memory/graphify/import", post(memory_graphify_import))
@@ -22850,6 +22851,124 @@ async fn memory_export(
         "schema": "local-first-export/v1",
         "dashboard": dashboard,
         "memories": items,
+    })))
+}
+
+/// GET /api/export — full user data export (GDPR-style data portability).
+/// Serializes memories, chat threads + messages, contacts, and profiles into a
+/// single JSON document. Complements /api/memory/export (which is memory-only)
+/// and the workspace cascade-purge (which deletes).
+async fn export_user_data(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    // ── Memories (reuse the existing memory_export logic) ──
+    let memories = {
+        let facade = lock_memory_facade(&state)?;
+        let user = gateway_memory_user_id();
+        let workspace = gateway_memory_workspace_id();
+        let items: Vec<serde_json::Value> = facade
+            .list_memories_for_ui(&user, &workspace)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|m| !matches!(m.status, MemoryStatus::Deleted | MemoryStatus::Rejected))
+            .map(|m| {
+                serde_json::json!({
+                    "reference": m.reference.to_string(),
+                    "memory_type": format!("{:?}", m.memory_type).to_lowercase(),
+                    "text": m.text,
+                    "status": format!("{:?}", m.status).to_lowercase(),
+                    "sensitivity": format!("{:?}", m.sensitivity).to_lowercase(),
+                    "confidence": m.confidence,
+                    "created_at": m.created_at,
+                })
+            })
+            .collect();
+        items
+    };
+
+    // ── Chat threads + messages ──
+    let (threads, messages) = {
+        let store = state.chat_store.lock().map_err(|e| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "store_lock",
+            message: e.to_string(),
+        })?;
+        let file = load_workspaces_file();
+        let mut all_threads = Vec::new();
+        let mut all_messages = Vec::new();
+        for ws in &file.workspaces {
+            let snapshot = store.threads(&ws.id).unwrap_or_else(|_| ChatThreadSnapshot {
+                active_thread_id: String::new(),
+                threads: Vec::new(),
+            });
+            for thread in &snapshot.threads {
+                let msgs = store.messages(&thread.thread_id).unwrap_or_else(|_| ChatMessagesSnapshot {
+                    thread_id: thread.thread_id.clone(),
+                    messages: Vec::new(),
+                });
+                all_threads.push(serde_json::json!({
+                    "thread_id": thread.thread_id,
+                    "workspace_id": ws.id,
+                    "title": thread.title,
+                    "status": thread.status,
+                    "message_count": msgs.messages.len(),
+                }));
+                for msg in &msgs.messages {
+                    all_messages.push(serde_json::json!({
+                        "thread_id": thread.thread_id,
+                        "role": msg.role,
+                        "text": msg.text,
+                        "timestamp": msg.timestamp,
+                    }));
+                }
+            }
+        }
+        (all_threads, all_messages)
+    };
+
+    // ── Contacts + profiles ──
+    let (contacts, profiles) = {
+        let store = state.chat_store.lock().map_err(|e| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "store_lock",
+            message: e.to_string(),
+        })?;
+        let contacts_list = store.list_contacts().unwrap_or_default();
+        let profiles_list = store.list_profiles().unwrap_or_default();
+        let contacts_json: Vec<serde_json::Value> = contacts_list
+            .iter()
+            .map(|c| {
+                serde_json::json!({
+                    "id": c.id,
+                    "name": c.name,
+                    "contact_type": c.contact_type,
+                    "is_self": c.is_self,
+                })
+            })
+            .collect();
+        let profiles_json: Vec<serde_json::Value> = profiles_list
+            .iter()
+            .map(|p| {
+                serde_json::json!({
+                    "id": p.id,
+                    "name": p.name,
+                    "tone_of_voice": p.tone_of_voice,
+                })
+            })
+            .collect();
+        (contacts_json, profiles_json)
+    };
+
+    Ok(Json(serde_json::json!({
+        "schema": "local-first-export/v2",
+        "exported_at": OffsetDateTime::now_utc().to_string(),
+        "memories": memories,
+        "chat": {
+            "threads": threads,
+            "messages": messages,
+        },
+        "contacts": contacts,
+        "profiles": profiles,
     })))
 }
 
