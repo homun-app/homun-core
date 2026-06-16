@@ -1841,6 +1841,7 @@ fn strip_json_fences(text: &str) -> &str {
 }
 
 /// Normalize a memory's text for cheap dedup against what's already stored.
+/// Normalizes text for exact-duplicate comparison (used by tests + dedup paths).
 fn normalize_for_dedup(text: &str) -> String {
     text.trim().to_lowercase().split_whitespace().collect::<Vec<_>>().join(" ")
 }
@@ -11861,10 +11862,6 @@ fn now_local() -> jiff::Zoned {
 /// Today's date (ISO `YYYY-MM-DD`) in the USER's timezone — never UTC, so it is
 /// correct across the day boundary (the old UTC version returned "yesterday"
 /// between local midnight and the UTC offset).
-fn today_iso() -> String {
-    now_local().date().to_string()
-}
-
 /// Advisory guardrail: if `typed` contains a calendar date (ISO `YYYY-MM-DD` or
 /// `DD/MM/YYYY`/`DD-MM-YYYY`) that is strictly before today (user tz), return a
 /// hint nudging the model to re-resolve via resolve_datetime. Returns None when
@@ -25354,31 +25351,6 @@ fn parse_memory_date(stamp: &str) -> Option<String> {
 
 /// A contact's episodes paired with their ISO date, oldest first — so the
 /// extractor can ground each fact in the period it refers to.
-fn contact_episodes_dated(
-    facade: &MemoryFacade,
-    user: &MemoryUserId,
-    entity: &MemoryEntity,
-) -> Vec<(String, String)> {
-    let threads = MemoryWorkspaceId::new(THREADS_WORKSPACE);
-    let handle_list = contact_handles(entity);
-    let handles: std::collections::HashSet<&str> = handle_list.iter().map(|s| s.as_str()).collect();
-    let mut out: Vec<(String, String)> = facade
-        .list_memories_for_ui(user, &threads)
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|m| {
-            m.metadata
-                .get("thread_id")
-                .and_then(|v| v.as_str())
-                .map(|t| handles.contains(t))
-                .unwrap_or(false)
-        })
-        .map(|m| (parse_memory_date(&m.created_at).unwrap_or_default(), m.text))
-        .collect();
-    out.sort_by(|a, b| a.0.cmp(&b.0));
-    out
-}
-
 /// Distil important facts about a contact from their (dated) conversation
 /// history — not a transcript — each classified by temporality and the period it
 /// refers to. Reuses the memory extractor model; message text is untrusted data.
