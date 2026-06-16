@@ -603,6 +603,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "/api/prefs/language",
             get(get_user_language).post(set_user_language),
         )
+        .route("/api/setup/status", get(get_setup_status))
+        .route("/api/setup/validate-llm", post(validate_llm_config))
+        .route("/api/setup/complete", post(complete_setup))
         .route(
             "/api/prefs/approval-routing",
             get(get_approval_routing).post(set_approval_routing),
@@ -11741,6 +11744,10 @@ struct UserPrefs {
     /// Drives the "Reply in {language}" instruction injected into every system prompt.
     #[serde(default)]
     language: Option<String>,
+    /// Whether the onboarding wizard has been completed. False/absent → show wizard
+    /// on next launch when no provider is configured.
+    #[serde(default)]
+    setup_complete: Option<bool>,
     /// Where confirmation requests are delivered so they can be authorized remotely:
     /// "in_app" (default) | "telegram" | "whatsapp". When a channel, also routes the
     /// approval to `approval_target` (the USER's own number/chat — only it can approve).
@@ -12020,6 +12027,162 @@ async fn set_user_language(
             .map(|(c, n)| (c.to_string(), n.to_string()))
             .collect(),
     }))
+}
+
+// ── Onboarding setup wizard ─────────────────────────────────────────────────
+
+/// The setup status returned by GET /api/setup/status — drives whether the UI
+/// shows the onboarding wizard. `needs_setup` = !setup_complete AND no provider.
+#[derive(Debug, Serialize)]
+struct SetupStatus {
+    needs_setup: bool,
+    setup_complete: bool,
+    docker_installed: bool,
+    docker_running: bool,
+    has_provider: bool,
+    provider_kind: Option<String>,
+}
+
+async fn get_setup_status() -> Json<SetupStatus> {
+    let prefs = load_user_prefs();
+    let setup_complete = prefs.setup_complete.unwrap_or(false);
+    let registry = load_provider_registry();
+    let has_provider = registry
+        .active()
+        .or_else(|| registry.providers.first())
+        .is_some();
+    let provider_kind = registry
+        .resolve_role("orchestrator")
+        .map(|r| format!("{:?}", r.kind).to_lowercase())
+        .or_else(|| registry.active().map(|p| format!("{:?}", p.kind).to_lowercase()));
+    let (docker_installed, docker_running) = tokio::task::spawn_blocking(|| {
+        let installed = run_cli("docker", &["--version"]).is_some();
+        let running =
+            installed && run_cli("docker", &["info", "--format", "{{.ServerVersion}}"]).is_some();
+        (installed, running)
+    })
+    .await
+    .unwrap_or((false, false));
+    Json(SetupStatus {
+        needs_setup: !setup_complete && !has_provider,
+        setup_complete,
+        docker_installed,
+        docker_running,
+        has_provider,
+        provider_kind,
+    })
+}
+
+/// Request body for POST /api/setup/validate-llm — tests an LLM configuration
+/// without saving it. Returns the detected models on success.
+#[derive(Debug, Deserialize)]
+struct ValidateLlmRequest {
+    kind: String,      // "openai_compat" | "anthropic" | "ollama"
+    base_url: String,  // e.g. "https://api.openai.com/v1" or "http://localhost:11434"
+    api_key: Option<String>,
+}
+
+/// Validates an LLM provider configuration by making a real API call (GET /models
+/// or equivalent). Does NOT save — the wizard saves via the normal provider CRUD
+/// after validation succeeds.
+async fn validate_llm_config(
+    Json(request): Json<ValidateLlmRequest>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .map_err(|e| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "validate_http_client",
+            message: e.to_string(),
+        })?;
+    let (url, mut headers) = match request.kind.as_str() {
+        "ollama" => (format!("{}/api/tags", request.base_url.trim_end_matches('/')), vec![]),
+        "anthropic" => (
+            format!("{}/v1/models", request.base_url.trim_end_matches('/')),
+            vec![(
+                "x-api-key".to_string(),
+                request.api_key.clone().unwrap_or_default(),
+            )],
+        ),
+        _ => (
+            // openai_compat
+            format!("{}/models", request.base_url.trim_end_matches('/')),
+            request
+                .api_key
+                .as_ref()
+                .map(|key| ("Authorization", format!("Bearer {key}")))
+                .into_iter()
+                .map(|(k, v)| (k.to_string(), v))
+                .collect(),
+        ),
+    };
+    // Anthropic also needs the anthropic-version header.
+    if request.kind == "anthropic" {
+        headers.push(("anthropic-version".to_string(), "2023-06-01".to_string()));
+    }
+    let mut req = client.get(&url);
+    for (key, value) in &headers {
+        req = req.header(key, value);
+    }
+    let response = req.send().await.map_err(|e| GatewayError {
+        status: StatusCode::BAD_GATEWAY,
+        code: "validate_connection_failed",
+        message: format!("Could not reach the provider: {e}"),
+    })?;
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        let hint = match status.as_u16() {
+            401 => " — check your API key.",
+            403 => " — the API key does not have permission.",
+            404 => " — check the base URL.",
+            _ => "",
+        };
+        return Err(GatewayError {
+            status: StatusCode::BAD_GATEWAY,
+            code: "validate_provider_error",
+            message: format!("Provider returned {status}{hint}: {}", body.chars().take(200).collect::<String>()),
+        });
+    }
+    let body: serde_json::Value = response.json().await.map_err(|e| GatewayError {
+        status: StatusCode::BAD_GATEWAY,
+        code: "validate_parse_failed",
+        message: format!("Could not parse provider response: {e}"),
+    })?;
+    // Extract model names from the response (format varies by provider).
+    let models: Vec<String> = body
+        .get("models")
+        .and_then(|m| m.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|m| {
+                    m.get("id")
+                        .or_else(|| m.get("name"))
+                        .or_else(|| m.get("model"))
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string())
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    Ok(Json(serde_json::json!({
+        "valid": true,
+        "models": models,
+        "models_count": models.len(),
+    })))
+}
+
+/// POST /api/setup/complete — marks the onboarding wizard as done.
+async fn complete_setup() -> Result<Json<serde_json::Value>, GatewayError> {
+    let mut prefs = load_user_prefs();
+    prefs.setup_complete = Some(true);
+    save_user_prefs(&prefs).map_err(|message| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "setup_save",
+        message,
+    })?;
+    Ok(Json(serde_json::json!({ "setup_complete": true })))
 }
 
 async fn get_approval_routing() -> Json<ApprovalRoutingView> {

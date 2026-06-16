@@ -455,5 +455,29 @@
   "app": {
     "mainWorkspace": "Main workspace",
     "explainablePlans": "Explainable plans"
+  },
+  "onboarding": {
+    "title": "Welcome to Homun",
+    "eyebrow": "Setup wizard",
+    "docker": "Docker",
+    "dockerRunning": "Docker is running.",
+    "dockerStarting": "Starting Docker Desktop...",
+    "dockerMissing": "Docker is not installed. Install it from",
+    "continue": "Continue",
+    "llmTitle": "Connect your AI model",
+    "llmEyebrow": "Step 2 of 2",
+    "cloudOption": "Cloud API",
+    "cloudDesc": "OpenAI, Anthropic, or any OpenAI-compatible provider",
+    "ollamaOption": "Local (Ollama)",
+    "ollamaDesc": "Run models on your machine. Private and free.",
+    "baseUrl": "Endpoint URL",
+    "apiKey": "API key",
+    "validating": "Validating...",
+    "validateAndContinue": "Validate and continue",
+    "modelsFound": "Connected. {{count}} models available.",
+    "ready": "You are ready!",
+    "readyEyebrow": "Setup complete",
+    "readyDesc": "Docker and the contained browser start automatically. Whisper starts on first voice dictation. The rest I learn by chatting with you.",
+    "start": "Start using Homun"
   }
 }

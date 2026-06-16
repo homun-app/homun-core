@@ -10555,6 +10555,116 @@ body.resizing-drawer {
   top: var(--s2);
   right: var(--s2);
 }
+
+/* ── Onboarding wizard ───────────────────────────────────────────────────── */
+.onboarding-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(8px);
+}
+.onboarding-card {
+  background: var(--surface);
+  border: 1px solid var(--surface-border);
+  border-radius: 16px;
+  padding: var(--s6);
+  max-width: 480px;
+  width: 90vw;
+  max-height: 85vh;
+  overflow-y: auto;
+  box-shadow: 0 16px 64px rgba(0, 0, 0, 0.3);
+}
+.onboarding-card .eyebrow {
+  color: var(--muted);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: var(--s1);
+}
+.onboarding-card h2 {
+  margin-bottom: var(--s4);
+}
+.onboarding-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s4);
+}
+.onb-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+}
+.onb-label {
+  display: flex;
+  align-items: center;
+  gap: var(--s1);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+.onb-hint,
+.onb-ok,
+.onb-waiting,
+.onb-error {
+  font-size: var(--text-sm);
+  display: flex;
+  align-items: center;
+  gap: var(--s1);
+}
+.onb-ok {
+  color: var(--green, #22c55e);
+}
+.onb-waiting {
+  color: var(--muted);
+}
+.onb-error {
+  color: var(--red, #ef4444);
+}
+.onb-lead {
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+.onb-choices {
+  display: flex;
+  gap: var(--s2);
+}
+.onb-choice {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: var(--s3);
+  border: 1px solid var(--surface-border);
+  border-radius: 10px;
+  background: var(--surface-hover);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.15s;
+}
+.onb-choice:hover {
+  border-color: var(--brand);
+}
+.onb-choice.active {
+  border-color: var(--brand);
+  background: color-mix(in srgb, var(--brand) 8%, var(--surface));
+}
+.onb-choice small {
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+.onb-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--s2);
+  margin-top: var(--s2);
+}
+.spin {
+  animation: spin 1s linear infinite;
+}
 .set-computer-live-empty {
   height: 200px;
   display: flex;

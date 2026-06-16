@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import i18n from "./i18n";
 import { useTranslation } from "react-i18next";
 import { AutomationsView } from "./components/AutomationsView";
+import { OnboardingWizard } from "./components/OnboardingWizard";
 import { ChatView } from "./components/ChatView";
 import { ContainedComputerView } from "./components/ContainedComputerView";
 import { LearningView } from "./components/LearningView";
@@ -426,6 +427,8 @@ export default function App() {
   const { t } = useTranslation();
   const [activeView, setActiveView] = useState<ViewId>("chat");
   const [previousView, setPreviousView] = useState<ViewId>("chat");
+  // Onboarding wizard: shown on first launch when no provider is configured.
+  const [showOnboarding, setShowOnboarding] = useState(false);
   // Addon/plugin enabled-state (ADR 0011 §10-A): drives which registry plugins
   // contribute a nav entry + panel. Default-on until the backend answers.
   const [pluginStates, setPluginStates] = useState<PluginState[]>([]);
@@ -578,6 +581,19 @@ export default function App() {
   useEffect(() => {
     const unsubscribe = subscribeAppEvents((event) => appEventHandlerRef.current(event));
     return unsubscribe;
+  }, []);
+
+  // Onboarding check: if setup isn't complete and no provider is configured,
+  // show the wizard overlay on first launch.
+  useEffect(() => {
+    void (async () => {
+      try {
+        const status = await coreBridge.setupStatus();
+        if (status.needs_setup) setShowOnboarding(true);
+      } catch {
+        /* gateway not ready — will retry on next interaction */
+      }
+    })();
   }, []);
 
   async function handleCreateChatThread() {
@@ -1077,7 +1093,11 @@ export default function App() {
   }, []);
 
   return (
-    <Shell
+    <>
+      {showOnboarding && (
+        <OnboardingWizard onComplete={() => setShowOnboarding(false)} />
+      )}
+      <Shell
       activeView={activeView}
       activeThreadId={activeThread.threadId}
       busyThreadIds={busyThreadIds}
@@ -1184,6 +1204,7 @@ export default function App() {
         )}
       </main>
     </Shell>
+    </>
   );
 }
 

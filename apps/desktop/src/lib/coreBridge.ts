@@ -608,6 +608,43 @@ async function electronSetLanguage(language: string | null): Promise<LanguageInf
   return gatewayPostJson<LanguageInfo>("/api/prefs/language", { language });
 }
 
+// ── Onboarding setup wizard ──────────────────────────────────────────────
+
+export interface SetupStatus {
+  needs_setup: boolean;
+  setup_complete: boolean;
+  docker_installed: boolean;
+  docker_running: boolean;
+  has_provider: boolean;
+  provider_kind: string | null;
+}
+
+export interface LlmValidationResult {
+  valid: boolean;
+  models: string[];
+  models_count: number;
+}
+
+async function electronSetupStatus(): Promise<SetupStatus> {
+  return gatewayGetJson<SetupStatus>("/api/setup/status");
+}
+
+async function electronValidateLlm(
+  kind: string,
+  baseUrl: string,
+  apiKey: string | null,
+): Promise<LlmValidationResult> {
+  return gatewayPostJson<LlmValidationResult>("/api/setup/validate-llm", {
+    kind,
+    base_url: baseUrl,
+    api_key: apiKey,
+  });
+}
+
+async function electronCompleteSetup(): Promise<{ setup_complete: boolean }> {
+  return gatewayPostJson<{ setup_complete: boolean }>("/api/setup/complete", {});
+}
+
 export interface ApprovalRouting {
   /** "in_app" | "telegram" | "whatsapp". */
   channel: string;
@@ -1758,6 +1795,10 @@ export const coreBridge = {
   setTimezone: (timezone: string | null) => electronSetTimezone(timezone),
   language: () => electronLanguage(),
   setLanguage: (language: string | null) => electronSetLanguage(language),
+  setupStatus: () => electronSetupStatus(),
+  validateLlm: (kind: string, baseUrl: string, apiKey: string | null) =>
+    electronValidateLlm(kind, baseUrl, apiKey),
+  completeSetup: () => electronCompleteSetup(),
   approvalRouting: () => electronApprovalRouting(),
   setApprovalRouting: (channel: string, target: string | null) =>
     electronSetApprovalRouting(channel, target),
