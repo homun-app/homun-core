@@ -25,12 +25,10 @@ RUN npm ci
 COPY apps/desktop/ ./
 # Empty gateway URL => the SPA calls the API at its own origin (relative paths),
 # so the same image works behind any domain without a rebuild. The bearer token
-# is injected at build time (it ends up in the bundle — protect the deployment
-# with the PaaS front gate / a private network; see docs/self-host.md).
+# is NOT baked into the bundle: the web build prompts for it at the login gate
+# (validated, then stored in localStorage). See docs/self-host.md.
 ARG VITE_HOMUN_DESKTOP_GATEWAY_URL=""
-ARG VITE_HOMUN_DESKTOP_GATEWAY_TOKEN=""
-ENV VITE_HOMUN_DESKTOP_GATEWAY_URL=$VITE_HOMUN_DESKTOP_GATEWAY_URL \
-    VITE_HOMUN_DESKTOP_GATEWAY_TOKEN=$VITE_HOMUN_DESKTOP_GATEWAY_TOKEN
+ENV VITE_HOMUN_DESKTOP_GATEWAY_URL=$VITE_HOMUN_DESKTOP_GATEWAY_URL
 RUN npm run build
 
 # --- Runtime ---
@@ -40,16 +38,21 @@ FROM debian:bookworm-slim
 # drive sibling containers via a mounted /var/run/docker.sock. Harmless if no
 # socket is mounted — the feature simply stays off (the gateway detects Docker).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      ca-certificates curl docker.io \
+      ca-certificates curl bash docker.io \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=gateway /usr/local/bin/homun-gateway /usr/local/bin/homun-gateway
 COPY --from=web /app/desktop/dist /app/web
+# The "contained computer" build context, so the gateway can build+run it on the
+# host daemon (via a mounted /var/run/docker.sock). Enabled only when the socket
+# is present; see docs/self-host.md.
+COPY runtimes/contained-computer /app/contained-computer
 
 ENV HOMUN_DESKTOP_GATEWAY_HOST=0.0.0.0 \
     HOMUN_DESKTOP_GATEWAY_PORT=18765 \
     HOMUN_WEB_DIR=/app/web \
-    HOMUN_DATA_DIR=/data
+    HOMUN_DATA_DIR=/data \
+    HOMUN_CONTAINED_COMPUTER_UP=/app/contained-computer/up.sh
 EXPOSE 18765
 VOLUME ["/data"]
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \

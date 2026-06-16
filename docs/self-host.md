@@ -55,14 +55,16 @@ All of them do the same three things: **build the Dockerfile**, **set the env va
 
 ## Access / auth (read this)
 
-The bearer token is **baked into the web bundle** at build time
-(`VITE_HOMUN_DESKTOP_GATEWAY_TOKEN`), so anyone who can load the page can call the
-API. For a single-user self-host that's fine **only behind a front gate**:
+The web build ships a **login gate**: the bearer token is **not** baked into the bundle.
+On first load you enter the `HOMUN_DESKTOP_GATEWAY_TOKEN` value; it's validated against
+the gateway and stored in your browser (localStorage), so the JS bundle stays token-free.
+
+Still recommended for a single-user host — add a **first layer** in front:
 
 - Put the app on a **private network** (Tailscale / WireGuard), or
 - Add **basic auth / an OAuth proxy** at the PaaS reverse proxy (Traefik/Caddy/nginx).
 
-A proper in-app login (token not embedded) is a planned follow-up.
+The login token is then the second layer.
 
 ## Inference
 
@@ -72,22 +74,36 @@ the lighter choice; Ollama needs real RAM/GPU.
 
 ## The "contained computer" (browser / sandbox) — optional, needs Docker
 
-The agent's contained browser/shell drives **sibling Docker containers**. To enable it,
-give the container the host Docker socket (uncomment in `docker-compose.yml`):
+The agent's browser/shell runs as a **sibling Docker container**. The image bundles its
+build context (`/app/contained-computer`, `HOMUN_CONTAINED_COMPUTER_UP`), so the gateway
+builds + runs it on the host daemon via a mounted socket — nothing to pre-provision.
 
-```yaml
-volumes:
-  - /var/run/docker.sock:/var/run/docker.sock
-```
+To enable it (in `docker-compose.yml`, or the equivalent on your PaaS):
 
-The image already includes the `docker` CLI. This is **privileged** (the container can
-control the host's Docker) — only on a box you own. Without the socket the gateway
-detects Docker is absent and the feature stays off; everything else works.
+1. Mount the host Docker socket (privileged — the container can control the host's Docker;
+   only on a box you own):
+   ```yaml
+   volumes:
+     - /var/run/docker.sock:/var/run/docker.sock
+   ```
+2. Uncomment the contained-computer env block so the gateway runs the sibling on the shared
+   `homun-net` network and reaches it **by name**:
+   ```yaml
+   HOMUN_CC_NETWORK: "homun-net"
+   HOMUN_CC_VALIDATE_HOST: "homun-cc"
+   HOMUN_CONTAINED_COMPUTER_CDP: "http://homun-cc:9222"
+   HOMUN_CONTAINED_COMPUTER_NOVNC: "http://homun-cc:6080/vnc.html"
+   HOMUN_WHISPER_URL: "http://homun-cc:9100"
+   ```
 
-> Note: end-to-end "contained computer" on a server also needs the
-> `runtimes/contained-computer` image reachable by the host (build/push it, or let the
-> gateway build it from a mounted context). That wiring is a follow-up — the foundation
-> here makes it *possible* (socket + CLI in place).
+Without the socket the gateway detects Docker is absent and the feature stays off; the rest
+of the app works.
+
+> **Remaining piece — the live view.** With the above, the agent can fully **drive** the
+> browser (CDP is reached internally over `homun-net`). But the in-chat **live noVNC view**
+> points at `homun-cc:6080`, which is internal — a remote browser can't load it yet. To
+> *watch* the session on the web you must expose noVNC (a second subdomain, or a reverse-proxy
+> route, to `homun-cc:6080`). That UX wiring is the open follow-up.
 
 ## Resource sizing
 
