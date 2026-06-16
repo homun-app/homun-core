@@ -1,0 +1,40 @@
+# Portable self-host for Homun. Works as-is with `docker compose up`, and is the
+# same contract every self-hosted PaaS consumes (Coolify/Dokku/CapRover/Kamal
+# can import this or just build the Dockerfile). See docs/self-host.md.
+
+services:
+  homun:
+    build:
+      context: .
+      args:
+        # Empty URL => SPA calls the API at its own origin. Set the token to the
+        # same value as HOMUN_DESKTOP_GATEWAY_TOKEN below (it is baked into the
+        # web bundle — keep the deployment behind a front gate / private network).
+        VITE_HOMUN_DESKTOP_GATEWAY_URL: ""
+        VITE_HOMUN_DESKTOP_GATEWAY_TOKEN: "${HOMUN_DESKTOP_GATEWAY_TOKEN:?set a strong token in .env}"
+    # image: ghcr.io/homun-app/homun:latest   # or pull a prebuilt image instead of building
+    restart: unless-stopped
+    environment:
+      HOMUN_DESKTOP_GATEWAY_HOST: "0.0.0.0"
+      HOMUN_DESKTOP_GATEWAY_PORT: "18765"
+      HOMUN_WEB_DIR: "/app/web"
+      HOMUN_DATA_DIR: "/data"
+      HOMUN_DESKTOP_GATEWAY_TOKEN: "${HOMUN_DESKTOP_GATEWAY_TOKEN:?set a strong token in .env}"
+      # Inference: point at cloud APIs or an Ollama URL (provider config is all env).
+      # e.g. HOMUN_EMBED_BASE: "http://ollama:11434"
+    ports:
+      - "18765:18765"
+    volumes:
+      - homun-data:/data
+      # Optional: enable the "contained computer" (browser/sandbox) by giving the
+      # gateway access to the host Docker. Privileged — only on a box you own.
+      # - /var/run/docker.sock:/var/run/docker.sock
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:18765/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  homun-data:
