@@ -30,16 +30,61 @@ export const DESKTOP_GATEWAY_URL = normalizeGatewayUrl(
     "http://127.0.0.1:18765",
 );
 
-const gatewayToken =
-  viteEnv?.VITE_HOMUN_DESKTOP_GATEWAY_TOKEN ??
-  desktopConfig?.gatewayToken;
+/** Running inside the Electron shell (vs a browser / self-hosted web build). */
+export const IS_DESKTOP = !!desktopConfig;
+
+const TOKEN_STORAGE_KEY = "lfpa.gatewayToken";
+const buildTimeToken = viteEnv?.VITE_HOMUN_DESKTOP_GATEWAY_TOKEN;
+
+/** The bearer token for API calls, resolved at call time. Desktop: injected by
+ *  the Electron shell. Web: a build-time token (legacy) or the token the user
+ *  entered at the web login (persisted in localStorage) — so it is NOT baked
+ *  into the bundle for self-hosted deploys. */
+export function currentGatewayToken(): string | undefined {
+  if (desktopConfig?.gatewayToken) return desktopConfig.gatewayToken;
+  if (buildTimeToken) return buildTimeToken;
+  try {
+    return window.localStorage.getItem(TOKEN_STORAGE_KEY) ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function setGatewayToken(token: string): void {
+  try {
+    window.localStorage.setItem(TOKEN_STORAGE_KEY, token.trim());
+  } catch {
+    // localStorage unavailable (SSR/sandboxed) — nothing to persist.
+  }
+}
+
+export function clearGatewayToken(): void {
+  try {
+    window.localStorage.removeItem(TOKEN_STORAGE_KEY);
+  } catch {
+    // ignore
+  }
+}
 
 export function gatewayHeaders(extra: HeadersInit = {}): HeadersInit {
+  const token = currentGatewayToken();
   return {
     "Content-Type": "application/json",
-    ...(gatewayToken ? { Authorization: `Bearer ${gatewayToken}` } : {}),
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
     ...extra,
   };
+}
+
+/** Validates a token against a protected endpoint: 200 = valid, 401 = wrong. */
+export async function verifyGatewayToken(token: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${DESKTOP_GATEWAY_URL}/api/chat/threads`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
 }
 
 /** Opens the native directory picker (Electron). Returns the chosen absolute

@@ -10,6 +10,13 @@ set -euo pipefail
 IMAGE="homun-contained-computer"
 NAME="homun-cc"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Self-host/PaaS: join the gateway's Docker network so the gateway (itself a
+# sibling container) can reach this one by name (e.g. http://homun-cc:9222).
+# Empty on desktop, where the published loopback ports are used instead.
+NETWORK="${HOMUN_CC_NETWORK:-}"
+# Host the validation probes hit: 127.0.0.1 on desktop (published ports); the
+# container name on a shared network (HOMUN_CC_VALIDATE_HOST=homun-cc).
+CC_HOST="${HOMUN_CC_VALIDATE_HOST:-127.0.0.1}"
 
 if ! docker version >/dev/null 2>&1; then
   echo "Docker daemon not reachable — start Docker Desktop, then re-run." >&2
@@ -34,6 +41,7 @@ mkdir -p "${ARTIFACTS_DIR}"
 # the wrong day near the UTC midnight boundary.
 TZ_NAME="${HOMUN_TZ:-UTC}"
 docker run -d --rm --name "${NAME}" \
+  ${NETWORK:+--network "${NETWORK}"} \
   --shm-size=512m \
   --tmpfs /tmp:rw,exec,nosuid,nodev,size=512m,mode=1777 \
   -e TZ="${TZ_NAME}" \
@@ -47,7 +55,7 @@ docker run -d --rm --name "${NAME}" \
 echo "==> validating CDP (real browser reachable)"
 CDP_OK=""
 for _ in $(seq 1 60); do
-  if curl -fsS http://127.0.0.1:9222/json/version >/tmp/cc_cdp.json 2>/dev/null; then CDP_OK=1; break; fi
+  if curl -fsS "http://${CC_HOST}:9222/json/version" >/tmp/cc_cdp.json 2>/dev/null; then CDP_OK=1; break; fi
   sleep 0.5
 done
 if [ -n "${CDP_OK}" ]; then
@@ -57,8 +65,8 @@ else
 fi
 
 echo "==> validating noVNC (live view serveable)"
-if curl -fsS -o /dev/null -w "%{http_code}\n" "http://127.0.0.1:6080/vnc.html" 2>/dev/null | grep -q 200; then
-  echo "    noVNC up at http://127.0.0.1:6080/vnc.html"
+if curl -fsS -o /dev/null -w "%{http_code}\n" "http://${CC_HOST}:6080/vnc.html" 2>/dev/null | grep -q 200; then
+  echo "    noVNC up at http://${CC_HOST}:6080/vnc.html"
 else
   echo "    noVNC NOT reachable" >&2
 fi
