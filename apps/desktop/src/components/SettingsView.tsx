@@ -1139,6 +1139,11 @@ function RuntimePane({
     }
   };
 
+  // Enable/disable a provider for routing. `run` reapplies the snapshot AND
+  // reloads roles, so the routing tab reflects any auto re-resolution.
+  const toggleProviderEnabled = (provider: ProviderView, next: boolean) =>
+    run(`enabled:${provider.id}`, () => coreBridge.setProviderEnabled(provider.id, next));
+
   const openProvider = (provider: ProviderView) => {
     setEditBaseUrl(provider.base_url);
     setEditKey("");
@@ -1265,22 +1270,15 @@ function RuntimePane({
       {sub === "providers" && (
         <>
           <div className="set-section-label">
-            Active providers <span style={{ textTransform: "none", letterSpacing: 0 }}>({providers.length})</span>
+            {t("settings.providers")} <span style={{ textTransform: "none", letterSpacing: 0 }}>({providers.length})</span>
           </div>
           <div className="set-cards-grid cols-4">
-            {providers.map((provider) => {
-              const isActive = provider.id === activeId;
-              return (
-                <button
-                  key={provider.id}
-                  className={`set-prov ${isActive ? "active" : ""}`}
-                  type="button"
-                  onClick={() => openProvider(provider)}
-                >
+            {providers.map((provider) => (
+              <div key={provider.id} className={`set-prov ${provider.enabled ? "on" : "off"}`}>
+                <button className="set-prov-body" type="button" onClick={() => openProvider(provider)}>
                   <div className="set-prov-top">
                     <span className="set-prov-mark">{provider.label.slice(0, 1).toUpperCase()}</span>
                     <span className="set-prov-name">{provider.label}</span>
-                    <span className={`set-prov-dot ${isActive ? "on" : ""}`} title={isActive ? t("settings.active2") : undefined} />
                   </div>
                   <div className="set-prov-meta">
                     {provider.models.length > 0
@@ -1290,11 +1288,20 @@ function RuntimePane({
                     {provider.kind}
                   </div>
                 </button>
-              );
-            })}
+                <div
+                  className="set-prov-switch"
+                  title={provider.enabled ? t("settings.providerEnabled") : t("settings.providerDisabled")}
+                >
+                  <Toggle
+                    on={provider.enabled}
+                    onChange={(next) => toggleProviderEnabled(provider, next)}
+                  />
+                </div>
+              </div>
+            ))}
             <button className="set-add-card" type="button" onClick={openAddProvider}>
               <Plus size={14} />
-              Add provider
+              {t("settings.addProvider")}
             </button>
           </div>
 
@@ -1388,7 +1395,6 @@ function RuntimePane({
                   <ProviderDetailView
                     key={modalProvider.id}
                     provider={modalProvider}
-                    isActive={modalProvider.id === activeId}
                     busy={busy}
                     editBaseUrl={editBaseUrl}
                     setEditBaseUrl={setEditBaseUrl}
@@ -1397,7 +1403,9 @@ function RuntimePane({
                     showKey={showKey}
                     setShowKey={setShowKey}
                     contextWindow={model?.context_window ?? null}
-                    onActivate={() => run(modalProvider.id, () => coreBridge.activateProvider(modalProvider.id))}
+                    onToggleEnabled={(next) =>
+                      run(modalProvider.id, () => coreBridge.setProviderEnabled(modalProvider.id, next))
+                    }
                     onRemove={() => {
                       const id = modalProvider.id;
                       setModal(null);
@@ -1465,7 +1473,6 @@ function RuntimePane({
 
 function ProviderDetailView({
   provider,
-  isActive,
   busy,
   editBaseUrl,
   setEditBaseUrl,
@@ -1474,7 +1481,7 @@ function ProviderDetailView({
   showKey,
   setShowKey,
   contextWindow,
-  onActivate,
+  onToggleEnabled,
   onRemove,
   onRefreshModels,
   onGenerateProfiles,
@@ -1483,7 +1490,6 @@ function ProviderDetailView({
   onSaveModel,
 }: {
   provider: ProviderView;
-  isActive: boolean;
   busy: string | null;
   editBaseUrl: string;
   setEditBaseUrl: (value: string) => void;
@@ -1492,7 +1498,7 @@ function ProviderDetailView({
   showKey: boolean;
   setShowKey: (value: boolean) => void;
   contextWindow: number | null;
-  onActivate: () => void;
+  onToggleEnabled: (next: boolean) => void;
   onRemove: () => void;
   onRefreshModels: () => void;
   onGenerateProfiles: () => void;
@@ -1540,13 +1546,10 @@ function ProviderDetailView({
       <div className="mdl-detail-head">
         <h3>{provider.label}</h3>
         <div className="mdl-detail-actions">
-          {isActive ? (
-            <span className="set-badge green">{t("settings.active2")}</span>
-          ) : (
-            <button className="set-btn" type="button" disabled={acting} onClick={onActivate}>
-              {t("settings.setActive")}
-            </button>
-          )}
+          <label className="mdl-enable">
+            <Toggle on={provider.enabled} onChange={onToggleEnabled} />
+            <span>{provider.enabled ? t("settings.providerEnabled") : t("settings.providerDisabled")}</span>
+          </label>
           <button className="set-btn danger" type="button" disabled={acting} onClick={onRemove}>
             <Trash2 size={14} /> {t("common.remove")}
           </button>
