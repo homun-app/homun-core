@@ -10750,6 +10750,15 @@ body.resizing-drawer {
   border-color: var(--brand);
   color: var(--brand);
 }
+.set-cc-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.set-cc-toggle-msg {
+  max-width: 240px;
+  text-align: right;
+}
 .set-badge-btn:disabled {
   opacity: 0.6;
   cursor: default;

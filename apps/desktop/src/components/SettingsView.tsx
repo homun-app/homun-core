@@ -556,6 +556,54 @@ function ApprovelRoutingRow() {
 
 /* ------------------------------------------------------------------- account */
 
+/** Start/stop the contained "Local computer". Reused by the Account row and the
+ *  dedicated Local computer pane. Reports failures (e.g. Docker unavailable on a
+ *  PaaS deploy without the socket) via onMessage, or inline when omitted. */
+function LocalComputerToggle({
+  enabled,
+  onMessage,
+}: {
+  enabled: boolean;
+  onMessage?: (message: string | null) => void;
+}) {
+  const { t } = useTranslation();
+  const [busy, setBusy] = useState(false);
+  const [localMsg, setLocalMsg] = useState<string | null>(null);
+  const report = (message: string | null) =>
+    onMessage ? onMessage(message) : setLocalMsg(message);
+
+  const toggle = async () => {
+    setBusy(true);
+    report(null);
+    try {
+      if (enabled) {
+        await coreBridge.stopLocalComputer();
+      } else {
+        const result = await coreBridge.startLocalComputer();
+        if (!result.ok) report(result.message ?? t("settings.localComputerDockerOff"));
+      }
+    } catch (error) {
+      report(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <span className="set-cc-toggle">
+      {localMsg && <span className="set-hint set-cc-toggle-msg">{localMsg}</span>}
+      <button
+        type="button"
+        className={`set-badge-btn ${enabled ? "green" : ""}`}
+        disabled={busy}
+        onClick={() => void toggle()}
+      >
+        {busy ? t("settings.starting") : enabled ? t("settings.stop") : t("settings.start")}
+      </button>
+    </span>
+  );
+}
+
 function AccountPane({
   computer,
 }: {
@@ -564,27 +612,7 @@ function AccountPane({
   const { t } = useTranslation();
   const [name, setName] = useSetting("displayName", "");
   const [accountEmail, setAccountEmail] = useSetting<string>("email", "");
-  const [computerBusy, setComputerBusy] = useState(false);
   const [computerMsg, setComputerMsg] = useState<string | null>(null);
-
-  const toggleComputer = async () => {
-    setComputerBusy(true);
-    setComputerMsg(null);
-    try {
-      if (computer?.enabled) {
-        await coreBridge.stopLocalComputer();
-      } else {
-        const result = await coreBridge.startLocalComputer();
-        if (!result.ok) {
-          setComputerMsg(result.message ?? t("settings.localComputerDockerOff"));
-        }
-      }
-    } catch (error) {
-      setComputerMsg(error instanceof Error ? error.message : String(error));
-    } finally {
-      setComputerBusy(false);
-    }
-  };
 
   return (
     <>
@@ -642,18 +670,10 @@ function AccountPane({
                   : "Start the contained computer for real, non-invasive browsing."}
             </div>
           </div>
-          <button
-            type="button"
-            className={`set-badge-btn ${computer?.enabled ? "green" : ""}`}
-            disabled={computerBusy}
-            onClick={() => void toggleComputer()}
-          >
-            {computerBusy
-              ? t("settings.starting")
-              : computer?.enabled
-                ? t("settings.stop")
-                : t("settings.start")}
-          </button>
+          <LocalComputerToggle
+            enabled={Boolean(computer?.enabled)}
+            onMessage={setComputerMsg}
+          />
         </div>
       </div>
 
@@ -3856,9 +3876,7 @@ function ComputerPane({ computer }: { computer: ContainedComputerLive | null }) 
             {t("settings.realContainedBrowser")}
           </div>
         </div>
-        <span className={`set-badge dot ${enabled ? "green" : "muted"}`}>
-          {enabled ? t("settings.on") : t("settings.off")}
-        </span>
+        <LocalComputerToggle enabled={enabled} />
       </div>
 
       {/* Live view container — real noVNC iframe, striped placeholder otherwise (design 531). */}
