@@ -15778,9 +15778,24 @@ fn run_next_task_once(
         }
     };
 
+    // Spawn a background watchdog that renews the lease every 60s while the
+    // executor blocks. This prevents long tasks (proactivity, browser, LLM
+    // streaming) from expiring their 5-minute lease and being re-queued mid-run.
+    // Abort it in EVERY path after execute returns (see the guard below).
+    let watchdog = spawn_lease_watchdog(
+        state.clone(),
+        task.task_id.clone(),
+        user.clone(),
+        workspace.clone(),
+        worker_id.to_string(),
+    );
+
     let outcome = match execute_read_only_task(state, &execution_task) {
         Ok(outcome) => outcome,
         Err(error) => {
+            if let Some(handle) = &watchdog {
+                handle.abort();
+            }
             mark_task_failed(state, &mut task, &error.message)?;
             sync_session_for_task_run(
                 state,
@@ -15801,6 +15816,32 @@ fn run_next_task_once(
             });
         }
     };
+
+    // Stop the watchdog — execution is done, no more heartbeats needed.
+    if let Some(handle) = &watchdog {
+        handle.abort();
+    }
+
+    // Guard: if the lease was stolen during execution (recovery + re-acquire by
+    // another worker), do NOT write the result. The task is now owned by the
+    // other worker; writing here would corrupt its state (double-execution).
+    if !is_lease_still_ours(state, &task, worker_id)? {
+        eprintln!(
+            "lease guard: task {task_id} lease was stolen during execution — discarding result to avoid double-execution"
+        );
+        return Ok(TaskRunBatchResponse {
+            status: "lease_stolen".to_string(),
+            completed: 0,
+            stopped_reason: Some(
+                "Task lease expired and was re-queued by another worker.".to_string(),
+            ),
+            results: vec![TaskRunStepResponse {
+                status: "lease_stolen".to_string(),
+                task_id: Some(task_id),
+                message: "Result discarded: lease stolen during execution.".to_string(),
+            }],
+        });
+    }
 
     {
         let store = lock_task_store(state)?;
@@ -16012,6 +16053,85 @@ enum TaskAcquireResult {
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Spawns a background watchdog that renews the task lease every ~60s while the
+/// executor blocks. Returns a `JoinHandle` that the caller MUST abort after the
+/// execution returns (every path). The watchdog is best-effort: if a heartbeat
+/// fails (LeaseConflict = task stolen by recovery+re-acquire), it logs and stops
+/// renewing — the caller's guard (`is_lease_still_ours`) will detect the theft
+/// and prevent writing a result that belongs to another worker.
+///
+/// SAFETY: the watchdog acquires `task_store`'s mutex on its own (no shared guard).
+/// During `execute_read_only_task` the worker does NOT hold the task_store lock,
+/// so there is no contention/deadlock risk. The heartbeat interval (60s) leaves
+/// a 4-minute safety margin before the 5-minute lease expires.
+fn spawn_lease_watchdog(
+    state: AppState,
+    task_id: TaskId,
+    user_id: UserId,
+    workspace_id: WorkspaceId,
+    worker_id: String,
+) -> Option<tokio::task::JoinHandle<()>> {
+    // run_next_task_once runs inside spawn_blocking; reach into the async runtime
+    // to spawn the watchdog on the tokio reactor.
+    let handle = tokio::runtime::Handle::try_current().ok()?;
+    Some(handle.spawn(async move {
+        let lease = LeaseManager::new(time::Duration::minutes(5));
+        let mut interval = tokio::time::interval(StdDuration::from_secs(60));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            interval.tick().await;
+            let now = OffsetDateTime::now_utc();
+            let keep_going = match lock_task_store(&state) {
+                Ok(store) => {
+                    match lease.heartbeat(&store, &task_id, &user_id, &workspace_id, &worker_id, now) {
+                        Ok(()) => true,
+                        Err(TaskRuntimeError::LeaseConflict(_)) => {
+                            eprintln!(
+                                "lease watchdog: task stolen (LeaseConflict) — stopping renewal; worker {worker_id} result will be discarded"
+                            );
+                            false
+                        }
+                        Err(error) => {
+                            eprintln!(
+                                "lease watchdog: heartbeat error: {error:?} — will retry next tick"
+                            );
+                            true // transient error, keep trying
+                        }
+                    }
+                }
+                Err(error) => {
+                    eprintln!(
+                        "lease watchdog: store lock error: {error:?} — will retry next tick"
+                    );
+                    true // lock contention, keep trying
+                }
+            };
+            if !keep_going {
+                break;
+            }
+        }
+    }))
+}
+
+/// Checks whether the task lease still belongs to this worker. Used AFTER
+/// `execute_read_only_task` returns and BEFORE writing the result: if the lease
+/// was stolen (recovery + re-acquire by another worker), the result must NOT be
+/// written — it would corrupt the task state owned by the other worker.
+fn is_lease_still_ours(
+    state: &AppState,
+    task: &TaskRecord,
+    worker_id: &str,
+) -> Result<bool, GatewayError> {
+    let store = lock_task_store(state)?;
+    let current = store
+        .get_task(&task.task_id, &task.user_id, &task.workspace_id)
+        .map_err(GatewayError::task)?;
+    match current {
+        Some(t) => Ok(t.lease_owner.as_deref() == Some(worker_id)),
+        None => Ok(false),
+    }
+}
+
 fn acquire_task_for_execution(
     state: &AppState,
     task: TaskRecord,
