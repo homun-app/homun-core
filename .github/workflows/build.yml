@@ -1,10 +1,12 @@
 name: Build installers
 
 # Builds native installers for macOS, Windows and Linux.
-# - Triggered on version tags (v*) -> builds + drafts a GitHub Release with the
-#   installers attached.
+# - Triggered on version tags (v*) -> each runner builds + PUBLISHES its installer
+#   and electron-updater metadata (latest*.yml) to a DRAFT release in the public
+#   `homun-releases` repo (electron-builder --publish always). Review the draft
+#   there and publish it; that same release is the auto-update feed.
 # - Triggered manually (workflow_dispatch) -> builds + uploads artifacts only
-#   (no release), handy for verifying the pipeline without cutting a version.
+#   (--publish never), handy for verifying the pipeline without cutting a version.
 #
 # Each runner builds its OWN native gateway binary (cargo --release) and bundles
 # it into the app, so an installer is only valid for the OS/arch that produced it.
@@ -20,12 +22,18 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write # the release job needs this to create a GitHub Release
+  contents: read # publishing goes to homun-releases via RELEASES_TOKEN, not GITHUB_TOKEN
 
 jobs:
   build:
     name: Build (${{ matrix.platform }})
     runs-on: ${{ matrix.os }}
+    env:
+      # Cross-repo publish target for electron-builder + electron-updater: the
+      # PUBLIC `homun-releases` repo (source stays private). A PAT with
+      # contents:write on that repo, stored as the RELEASES_TOKEN secret. The
+      # default GITHUB_TOKEN can't reach another repo, hence a dedicated token.
+      GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
     strategy:
       fail-fast: false
       matrix:
@@ -86,7 +94,7 @@ jobs:
       - name: Build installer (macOS · signed + notarized)
         if: matrix.platform == 'mac' && steps.signing.outputs.has_cert == 'true'
         working-directory: apps/desktop
-        run: npx electron-builder --mac --publish never -c.mac.notarize=true
+        run: npx electron-builder --mac --publish ${{ startsWith(github.ref, 'refs/tags/v') && 'always' || 'never' }} -c.mac.notarize=true
         env:
           CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
@@ -97,20 +105,22 @@ jobs:
       - name: Build installer (macOS · unsigned — Apple cert not configured)
         if: matrix.platform == 'mac' && steps.signing.outputs.has_cert != 'true'
         working-directory: apps/desktop
-        run: npx electron-builder --mac --publish never -c.mac.identity=null
+        run: npx electron-builder --mac --publish ${{ startsWith(github.ref, 'refs/tags/v') && 'always' || 'never' }} -c.mac.identity=null
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
 
       - name: Build installer (Windows · unsigned)
         if: matrix.platform == 'win'
         working-directory: apps/desktop
-        run: npx electron-builder --win --publish never
+        run: npx electron-builder --win --publish ${{ startsWith(github.ref, 'refs/tags/v') && 'always' || 'never' }}
 
       - name: Build installer (Linux)
         if: matrix.platform == 'linux'
         working-directory: apps/desktop
-        run: npx electron-builder --linux --publish never
+        run: npx electron-builder --linux --publish ${{ startsWith(github.ref, 'refs/tags/v') && 'always' || 'never' }}
 
+      # Keep a copy of the raw installers as workflow artifacts too — useful for
+      # inspecting dispatch (non-tag) runs that don't publish a release.
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -122,22 +132,3 @@ jobs:
             apps/desktop/dist-installers/*.AppImage
             apps/desktop/dist-installers/*.deb
           if-no-files-found: error
-
-  release:
-    name: Draft GitHub Release
-    needs: build
-    if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download all installers
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-          merge-multiple: true
-
-      - name: Create draft release
-        uses: softprops/action-gh-release@v2
-        with:
-          draft: true # review the assets, then publish manually
-          generate_release_notes: true
-          files: artifacts/**/*

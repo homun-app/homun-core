@@ -1001,6 +1001,7 @@
     "updateBody": "Pull and deploy the latest image.",
     "update": "Update",
     "updating": "Redeploying…",
-    "updateStarted": "Redeploy started — the app will restart shortly."
+    "updateStarted": "Redeploy started — the app will restart shortly.",
+    "desktopUpdateBody": "Version {{version}} is available — download and restart to install."
   }
 }

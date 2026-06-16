@@ -1001,6 +1001,7 @@
     "updateBody": "Scarica e deploya l'ultima immagine.",
     "update": "Aggiorna",
     "updating": "Redeploy in corso…",
-    "updateStarted": "Redeploy avviato — l'app si riavvierà a breve."
+    "updateStarted": "Redeploy avviato — l'app si riavvierà a breve.",
+    "desktopUpdateBody": "La versione {{version}} è disponibile — scaricala e riavvia per installarla."
   }
 }

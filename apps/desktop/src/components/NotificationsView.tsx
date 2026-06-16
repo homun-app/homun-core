@@ -2,7 +2,11 @@ import { useEffect, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Monitor, Bell, Download } from "lucide-react";
 import { coreBridge, type SystemStatus, type UpdateInfo } from "../lib/coreBridge";
-import { IS_DESKTOP } from "../lib/gatewayConfig";
+import {
+  IS_DESKTOP,
+  checkDesktopUpdate,
+  installDesktopUpdate,
+} from "../lib/gatewayConfig";
 
 /**
  * Notifications inbox (behind the sidebar bell). Surfaces actionable system
@@ -18,6 +22,7 @@ export function NotificationsView() {
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
   const [updating, setUpdating] = useState(false);
   const [updateMsg, setUpdateMsg] = useState<string | null>(null);
+  const [desktopUpdate, setDesktopUpdate] = useState<{ version: string | null } | null>(null);
 
   const refresh = async () => {
     try {
@@ -25,19 +30,42 @@ export function NotificationsView() {
     } catch {
       /* ignore — keep last known */
     }
-    try {
-      setUpdate(await coreBridge.updateInfo());
-    } catch {
-      /* ignore */
+    if (IS_DESKTOP) {
+      // Desktop updates come from electron-updater (the public releases feed),
+      // not the redeploy webhook — ask the Electron shell directly.
+      const result = await checkDesktopUpdate();
+      setDesktopUpdate(result?.available ? { version: result.version } : null);
+    } else {
+      try {
+        setUpdate(await coreBridge.updateInfo());
+      } catch {
+        /* ignore */
+      }
     }
   };
 
+  // Cloud path: ask the orchestrator to redeploy the latest image via webhook.
   const runUpdate = async () => {
     setUpdating(true);
     setUpdateMsg(null);
     try {
       const result = await coreBridge.triggerUpdate();
       setUpdateMsg(result.ok ? t("notifications.updateStarted") : (result.message ?? ""));
+    } catch (error) {
+      setUpdateMsg(error instanceof Error ? error.message : String(error));
+    } finally {
+      setUpdating(false);
+    }
+  };
+
+  // Desktop path: download the pending release in-app and restart into it.
+  const runDesktopUpdate = async () => {
+    setUpdating(true);
+    setUpdateMsg(null);
+    try {
+      const result = await installDesktopUpdate();
+      if (!result.ok) setUpdateMsg(result.error ?? "");
+      // On success the app quits and relaunches — nothing more to render.
     } catch (error) {
       setUpdateMsg(error instanceof Error ? error.message : String(error));
     } finally {
@@ -68,6 +96,32 @@ export function NotificationsView() {
   };
 
   const items: ReactNode[] = [];
+  // Desktop: a newer release is published — download + restart in-app.
+  if (IS_DESKTOP && desktopUpdate) {
+    items.push(
+      <NotifCard
+        key="desktop-update"
+        icon={<Download size={16} />}
+        title={t("notifications.updateTitle")}
+        body={
+          updateMsg ??
+          t("notifications.desktopUpdateBody", {
+            version: desktopUpdate.version ?? "",
+          })
+        }
+        action={
+          <button
+            type="button"
+            className="notif-action"
+            disabled={updating}
+            onClick={() => void runDesktopUpdate()}
+          >
+            {updating ? t("notifications.updating") : t("notifications.update")}
+          </button>
+        }
+      />,
+    );
+  }
   // Cloud: a one-click redeploy to the latest image (the container can't replace
   // itself — it asks the orchestrator via the configured webhook).
   if (!IS_DESKTOP && update?.webhook_configured) {
