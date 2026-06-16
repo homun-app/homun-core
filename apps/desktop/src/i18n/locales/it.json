@@ -922,7 +922,11 @@
     "nothingStoredYet": "I have not stored anything yet. Tell me your preferences or information in chat and I imparerò automaticamente.",
     "toConfirm": "da confermare",
     "forget": "Dimentica",
-    "addonsIntro": "Gli addon estendono Homun con un pannello e un motore propri. Staccandone uno spariscono sia la sua voce di navigazione sia il suo motore."
+    "addonsIntro": "Gli addon estendono Homun con un pannello e un motore propri. Staccandone uno spariscono sia la sua voce di navigazione sia il suo motore.",
+    "start": "Avvia",
+    "stop": "Ferma",
+    "starting": "Avvio…",
+    "localComputerDockerOff": "Il computer contenuto richiede Docker, non disponibile su questo deploy."
   },
   "error": {
     "model": {
@@ -984,5 +988,20 @@
     "invalid": "Token di accesso non valido.",
     "checking": "Verifica…",
     "unlock": "Sblocca"
+  },
+  "notifications": {
+    "title": "Notifiche",
+    "subtitle": "Stato del sistema e aggiornamenti.",
+    "empty": "Tutto in ordine.",
+    "computerOffTitle": "Computer locale spento",
+    "computerOffBody": "Abilita il browser/sandbox contenuto così l'agente può usare un computer reale.",
+    "computerUnavailableTitle": "Computer locale non disponibile",
+    "enable": "Abilita",
+    "updateTitle": "Aggiorna all'ultima versione",
+    "updateBody": "Scarica e deploya l'ultima immagine.",
+    "update": "Aggiorna",
+    "updating": "Redeploy in corso…",
+    "updateStarted": "Redeploy avviato — l'app si riavvierà a breve.",
+    "desktopUpdateBody": "La versione {{version}} è disponibile — scaricala e riavvia per installarla."
   }
 }

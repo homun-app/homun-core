@@ -1,10 +1,12 @@
 name: Build installers
 
 # Builds native installers for macOS, Windows and Linux.
-# - Triggered on version tags (v*) -> builds + drafts a GitHub Release with the
-#   installers attached.
+# - Triggered on version tags (v*) -> each runner builds + PUBLISHES its installer
+#   and electron-updater metadata (latest*.yml) to a DRAFT release in the public
+#   `homun-releases` repo (electron-builder --publish always). Review the draft
+#   there and publish it; that same release is the auto-update feed.
 # - Triggered manually (workflow_dispatch) -> builds + uploads artifacts only
-#   (no release), handy for verifying the pipeline without cutting a version.
+#   (--publish never), handy for verifying the pipeline without cutting a version.
 #
 # Each runner builds its OWN native gateway binary (cargo --release) and bundles
 # it into the app, so an installer is only valid for the OS/arch that produced it.
@@ -20,7 +22,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write # the release job needs this to create a GitHub Release
+  contents: read # publishing goes to homun-releases via RELEASES_TOKEN, not GITHUB_TOKEN
 
 jobs:
   build:
@@ -61,6 +63,16 @@ jobs:
         working-directory: apps/desktop
         run: npm ci
 
+      # On a release tag the git tag is the single source of truth for the
+      # version: stamp it into package.json so the installers AND the latest*.yml
+      # auto-update metadata all match the tag. (electron-builder reads the
+      # version from package.json, never from the tag — without this they drift.)
+      - name: Set version from tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        working-directory: apps/desktop
+        shell: bash
+        run: npm version "${GITHUB_REF_NAME#v}" --no-git-tag-version --allow-same-version
+
       - name: Prepare resources (vite build + gateway release binary)
         working-directory: apps/desktop
         run: npm run package:prepare
@@ -80,20 +92,37 @@ jobs:
             echo "Developer ID cert present (${#MAC_CSC_LINK} chars) -> signed + notarized build"
           else
             echo "has_cert=false" >> "$GITHUB_OUTPUT"
-            echo "No MAC_CSC_LINK secret -> unsigned build"
+            # Never publish an UNSIGNED build to the auto-update feed: on a release
+            # tag, refuse outright (an unsigned update breaks electron-updater's
+            # signature anchor and is a silent-code-execution risk). Unsigned is
+            # only allowed for dispatch test runs, which don't publish anyway.
+            if [ "${GITHUB_REF}" != "${GITHUB_REF#refs/tags/v}" ]; then
+              echo "::error::Refusing to cut an UNSIGNED macOS release. Set MAC_CSC_LINK before tagging."
+              exit 1
+            fi
+            echo "No MAC_CSC_LINK secret -> unsigned build (dispatch only; will not publish)"
           fi
 
       - name: Build installer (macOS · signed + notarized)
         if: matrix.platform == 'mac' && steps.signing.outputs.has_cert == 'true'
         working-directory: apps/desktop
-        run: npx electron-builder --mac --publish never -c.mac.notarize=true
+        run: npx electron-builder --mac --publish ${{ startsWith(github.ref, 'refs/tags/v') && 'always' || 'never' }} -c.mac.notarize=true
         env:
+          # Only the signed+notarized mac build feeds the auto-update channel, so
+          # the publish token lives ONLY on this step (not job-wide, where every
+          # `npm ci` postinstall could read it) and ONLY on tag runs.
+          GH_TOKEN: ${{ startsWith(github.ref, 'refs/tags/v') && secrets.RELEASES_TOKEN || '' }}
           CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
 
+      # Unsigned platforms build as downloadable artifacts only — they NEVER
+      # publish to the auto-update feed (`--publish never`), because shipping an
+      # unsigned binary that the updater would silently execute is a supply-chain
+      # risk. Enable publishing per-platform once it has real code signing
+      # (mac: MAC_CSC_LINK; Windows: a code-signing cert + win.publisherName).
       - name: Build installer (macOS · unsigned — Apple cert not configured)
         if: matrix.platform == 'mac' && steps.signing.outputs.has_cert != 'true'
         working-directory: apps/desktop
@@ -111,6 +140,8 @@ jobs:
         working-directory: apps/desktop
         run: npx electron-builder --linux --publish never
 
+      # Keep a copy of the raw installers as workflow artifacts too — useful for
+      # inspecting dispatch (non-tag) runs that don't publish a release.
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -122,22 +153,3 @@ jobs:
             apps/desktop/dist-installers/*.AppImage
             apps/desktop/dist-installers/*.deb
           if-no-files-found: error
-
-  release:
-    name: Draft GitHub Release
-    needs: build
-    if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download all installers
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-          merge-multiple: true
-
-      - name: Create draft release
-        uses: softprops/action-gh-release@v2
-        with:
-          draft: true # review the assets, then publish manually
-          generate_release_notes: true
-          files: artifacts/**/*

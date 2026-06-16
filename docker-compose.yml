@@ -20,6 +20,9 @@ services:
       HOMUN_DESKTOP_GATEWAY_TOKEN: "${HOMUN_DESKTOP_GATEWAY_TOKEN:?set a strong token in .env}"
       # Inference: point at cloud APIs or an Ollama URL (provider config is all env).
       # e.g. HOMUN_EMBED_BASE: "http://ollama:11434"
+      # One-click "Update" in the app -> POSTs this redeploy webhook so the PaaS
+      # pulls the latest image and recreates the container (e.g. Coolify's deploy webhook).
+      # HOMUN_UPDATE_WEBHOOK: "https://server.example.com/api/v1/deploy?uuid=...&force=false"
       # --- Contained computer (browser/sandbox) — optional; also uncomment the
       #     docker.sock mount below. The gateway runs the CC as a sibling on this
       #     network and reaches it by name. ---
