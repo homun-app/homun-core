@@ -28,6 +28,7 @@ import { settingsGroupLabels, settingsSections } from "../data/mockData";
 import type { ChatThread, NavItem, SettingsSectionId, ViewId } from "../types";
 import { useSetting } from "../lib/settingsStore";
 import { coreBridge, type CoreChatThread, type WorkspaceRecord } from "../lib/coreBridge";
+import { useNotificationCount } from "../lib/useNotificationCount";
 
 // The base personal workspace ("Predefinito"): always present, never a "project".
 const PERSONAL_WORKSPACE_ID = "local-workspace";
@@ -63,6 +64,7 @@ export function NavigationRail({
   onToggleDrawer,
 }: NavigationRailProps) {
   const { t } = useTranslation();
+  const notifCount = useNotificationCount();
   return (
     <aside className="navigation-rail" aria-label={t("sidebar.railAriaLabel")}>
       <nav className="rail-nav">
@@ -104,12 +106,13 @@ export function NavigationRail({
 
       <div className="rail-bottom">
         <button
-          className={`rail-button ${activeView === "notifications" ? "active" : ""}`}
+          className={`rail-button has-badge ${activeView === "notifications" ? "active" : ""}`}
           type="button"
           aria-label={t("sidebar.notifications")}
           onClick={() => onNavigate("notifications")}
         >
           <Bell size={18} />
+          {notifCount > 0 && <span className="nav-badge">{notifCount}</span>}
         </button>
         <button
           className={`rail-button ${activeView === "settings" ? "active" : ""}`}
@@ -578,6 +581,7 @@ export function NavDrawer({
   onUnarchiveChatThread,
 }: NavDrawerProps) {
   const { t } = useTranslation();
+  const notifCount = useNotificationCount();
   const [collapsedSections, setCollapsedSections] = useState({
     archived: false,
   });
@@ -796,13 +800,14 @@ export function NavDrawer({
       <footer className="drawer-footer">
         <div className="drawer-persistent-actions" aria-label={t("sidebar.persistentActions")}>
           <button
-            className="drawer-footer-action"
+            className="drawer-footer-action has-badge"
             type="button"
             aria-label={t("sidebar.notifications")}
             title={t("sidebar.notifications")}
             onClick={() => onNavigate("notifications")}
           >
             <Bell size={16} />
+            {notifCount > 0 && <span className="nav-badge">{notifCount}</span>}
           </button>
           <button
             className="drawer-footer-action drawer-settings-action"

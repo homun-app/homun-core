@@ -8,6 +8,10 @@ interface LocalFirstDesktopConfig {
   /** Desktop auto-update (electron-updater). */
   checkForUpdate?: () => Promise<{ available: boolean; version: string | null; error?: string }>;
   installUpdate?: () => Promise<{ ok: boolean; error?: string }>;
+  /** Subscribe to download progress; returns an unsubscribe fn. */
+  onUpdateProgress?: (
+    cb: (p: { percent: number; transferred: number; total: number }) => void,
+  ) => () => void;
 }
 
 declare global {
@@ -152,5 +156,19 @@ export async function installDesktopUpdate(): Promise<{ ok: boolean; error?: str
     return await install();
   } catch (error) {
     return { ok: false, error: String((error as Error)?.message ?? error) };
+  }
+}
+
+/** Desktop only: subscribe to update download progress. Returns an unsubscribe
+ *  fn (a no-op outside Electron). */
+export function onDesktopUpdateProgress(
+  cb: (p: { percent: number; transferred: number; total: number }) => void,
+): () => void {
+  const sub = desktopConfig?.onUpdateProgress;
+  if (!sub) return () => {};
+  try {
+    return sub(cb);
+  } catch {
+    return () => {};
   }
 }

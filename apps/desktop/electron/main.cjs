@@ -377,14 +377,32 @@ ipcMain.handle("lfpa:update-check", async () => {
   }
 });
 
-ipcMain.handle("lfpa:update-install", async () => {
+ipcMain.handle("lfpa:update-install", async (event) => {
   if (!app.isPackaged) return { ok: false, error: "dev build" };
+  // Stream download progress to the renderer so the UI isn't a frozen button.
+  const onProgress = (p) => {
+    try {
+      event.sender.send("lfpa:update-progress", {
+        percent: Math.round(p?.percent ?? 0),
+        transferred: p?.transferred ?? 0,
+        total: p?.total ?? 0,
+      });
+    } catch {
+      // sender gone (window closed mid-download) — nothing to do.
+    }
+  };
+  autoUpdater.on("download-progress", onProgress);
   try {
     await autoUpdater.downloadUpdate();
+    onProgress({ percent: 100 });
+    // Download done → swap + relaunch. quitAndInstall quits this process, so the
+    // renderer's `installing` state never has to be cleared by us.
     setImmediate(() => autoUpdater.quitAndInstall());
     return { ok: true };
   } catch (error) {
     return { ok: false, error: String(error?.message ?? error) };
+  } finally {
+    autoUpdater.removeListener("download-progress", onProgress);
   }
 });
 

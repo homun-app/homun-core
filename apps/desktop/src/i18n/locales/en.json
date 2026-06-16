@@ -1005,6 +1005,9 @@
     "update": "Update",
     "updating": "Redeploying…",
     "updateStarted": "Redeploy started — the app will restart shortly.",
-    "desktopUpdateBody": "Version {{version}} is available — download and restart to install."
+    "desktopUpdateBody": "Version {{version}} is available — download and restart to install.",
+    "desktopUpdateRestarts": "Downloading — the app restarts on its own when it's done.",
+    "downloading": "Downloading… {{percent}}%",
+    "restarting": "Restarting…"
   }
 }
