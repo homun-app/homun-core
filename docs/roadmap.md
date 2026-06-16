@@ -366,12 +366,33 @@ col pulsante per fare la cosa. Pattern condiviso coi confirm-card Composio/MCP.
 
 ## Blockers
 
-- Packaging produzione: lifecycle gateway packaged equivalente al dev e scelta
-  packager/notarization macOS non ancora chiusi.
+- **Firma + notarization macOS** — unico blocker hard verso la prima release.
+  electron-builder e' configurato (mac dmg/zip arm64 + win nsis + linux AppImage/deb,
+  entitlements) e il gateway viene staged in `.package/resources` (`prepare-package.mjs`
+  + `package:smoke`). **Mancano:** code-signing Developer ID, notarization
+  (`afterSign`/`mac.notarize` + notarytool), e lo smoke di `npm run dist` su build firmata
+  con verifica Gatekeeper. Richiede account Apple Developer.
+  Dettaglio: `docs/state-of-project-2026-06-16.md` §2.1.
 
 ## Next Action (priorita')
 
 Aggiornato 2026-06-08. Ordine consigliato, rivedibile.
+
+**Fatti — sessione 2026-06-13→16 (durabilita', proattivita', onboarding, multilingua):**
+- **Durabilita' (ADR 0015)**: heartbeat/lease watchdog agganciato nel task loop (rinnovo
+  lease + guard double-execution/furto-lease, `desktop-gateway/src/main.rs:16260`) — chiude
+  anche il vecchio blocker #78; retention dati completa (cascade purge on-delete + VACUUM
+  periodico); export dati utente `GET /api/export` (GDPR-style).
+- **Proattivita' — consegna risolta** (`00e4671`): tolto il 45% random, primo check-in
+  +2min, `checkin-now` + pulsante, log sui gate.
+- **Onboarding wizard** (`d0e2347`): setup first-run con check Docker + validazione LLM (il
+  bootstrap statico "primi passi"). L'intervista conversazionale multi-turno resta da
+  approfondire.
+- **Multilingua i18n — COMPLETA** (ADR 0014, PR #72 → `5bdb8b5`): UI migrata a
+  `react-i18next` (en/it 917 chiavi in sync, 0 italiano residuo nel frontend),
+  prompt/tool-descriptions/messaggi backend in inglese, plugin self-contained. Detector
+  `scripts/find_italian.py` (gate CI). Resta solo l'italiano di parsing input
+  (date/conferme/sicurezza), by-design.
 
 **Fatti — sessione 2026-06-09 (memoria unificata + connettori verso la release):**
 - **Memoria unificata (modello ibrido)**: dedup lessicale+**semantico** (embeddings
