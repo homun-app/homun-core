@@ -148,6 +148,25 @@ export function SettingsView({ section, sub, onPluginsChanged }: SettingsViewPro
     };
   }, [section]);
 
+  // Poll the contained-computer live state so the Local computer row reflects
+  // start/stop within a few seconds.
+  useEffect(() => {
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const value = await coreBridge.containedComputerLive();
+        if (!cancelled) setComputer(value);
+      } catch {
+        /* ignore */
+      }
+    };
+    const id = window.setInterval(() => void tick(), 3000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, []);
+
   return (
     <section
       className="settings-view"
@@ -545,6 +564,27 @@ function AccountPane({
   const { t } = useTranslation();
   const [name, setName] = useSetting("displayName", "");
   const [accountEmail, setAccountEmail] = useSetting<string>("email", "");
+  const [computerBusy, setComputerBusy] = useState(false);
+  const [computerMsg, setComputerMsg] = useState<string | null>(null);
+
+  const toggleComputer = async () => {
+    setComputerBusy(true);
+    setComputerMsg(null);
+    try {
+      if (computer?.enabled) {
+        await coreBridge.stopLocalComputer();
+      } else {
+        const result = await coreBridge.startLocalComputer();
+        if (!result.ok) {
+          setComputerMsg(result.message ?? t("settings.localComputerDockerOff"));
+        }
+      }
+    } catch (error) {
+      setComputerMsg(error instanceof Error ? error.message : String(error));
+    } finally {
+      setComputerBusy(false);
+    }
+  };
 
   return (
     <>
@@ -595,14 +635,25 @@ function AccountPane({
           <div>
             <div className="tt">Local computer</div>
             <div className="td">
-              {computer?.enabled
-                ? "Real contained browser · live noVNC view"
-                : "Start the contained computer for real, non-invasive browsing."}
+              {computerMsg
+                ? computerMsg
+                : computer?.enabled
+                  ? "Real contained browser · live noVNC view"
+                  : "Start the contained computer for real, non-invasive browsing."}
             </div>
           </div>
-          <span className={`set-badge ${computer?.enabled ? "green" : "muted"}`}>
-            {computer?.enabled ? t("settings.on") : t("settings.off")}
-          </span>
+          <button
+            type="button"
+            className={`set-badge-btn ${computer?.enabled ? "green" : ""}`}
+            disabled={computerBusy}
+            onClick={() => void toggleComputer()}
+          >
+            {computerBusy
+              ? t("settings.starting")
+              : computer?.enabled
+                ? t("settings.stop")
+                : t("settings.start")}
+          </button>
         </div>
       </div>
 

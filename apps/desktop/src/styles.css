@@ -10731,3 +10731,102 @@ body.resizing-drawer {
   opacity: 0.5;
   cursor: default;
 }
+
+/* Clickable status pill (Local computer start/stop). */
+.set-badge-btn {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  padding: 4px 12px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.set-badge-btn:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+.set-badge-btn.green {
+  border-color: var(--brand);
+  color: var(--brand);
+}
+.set-badge-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* Notifications inbox (behind the sidebar bell). */
+.notif-view {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 32px 24px;
+}
+.notif-head {
+  margin-bottom: 18px;
+}
+.notif-title {
+  margin: 0;
+  font-size: 20px;
+  color: var(--text);
+}
+.notif-sub {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+.notif-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 56px 0;
+  color: var(--muted);
+}
+.notif-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.notif-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  padding: 14px 16px;
+}
+.notif-icon {
+  color: var(--muted);
+  display: flex;
+}
+.notif-text {
+  flex: 1;
+}
+.notif-card-title {
+  font-weight: 600;
+  color: var(--text);
+  font-size: 14px;
+}
+.notif-card-body {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.notif-action {
+  border: 1px solid var(--brand);
+  border-radius: 8px;
+  background: var(--brand);
+  color: #fff;
+  padding: 7px 14px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.notif-action:disabled {
+  opacity: 0.6;
+  cursor: default;
+}

@@ -670,6 +670,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             get(local_computer_artifact_preview),
         )
         .route("/api/local-computer/live", get(contained_computer_live))
+        .route("/api/local-computer/start", post(local_computer_start))
+        .route("/api/local-computer/stop", post(local_computer_stop))
         .route("/api/system/status", get(system_status))
         .route("/api/system/browser/close-all", post(close_all_browsers))
         .route("/api/memory/dashboard", get(memory_dashboard))
@@ -26189,6 +26191,48 @@ struct ContainedComputerLiveResponse {
     terminal_active: bool,
     /// Terminal commands + output for the current chat response (CLI skills).
     terminal: Vec<TerminalEntryView>,
+}
+
+#[derive(Serialize)]
+struct LocalComputerActionResponse {
+    ok: bool,
+    enabled: bool,
+    message: Option<String>,
+}
+
+/// Starts the contained computer on demand. Building/booting the container can
+/// take a while (first run pulls/builds the image), so this is fire-and-forget:
+/// it kicks off `ensure_contained_computer()` on a background thread and returns
+/// immediately; the UI polls `/api/local-computer/live` for `enabled`.
+async fn local_computer_start() -> Json<LocalComputerActionResponse> {
+    if !sandbox::docker_running() {
+        return Json(LocalComputerActionResponse {
+            ok: false,
+            enabled: sandbox::container_up(),
+            message: Some("Docker is not available on this deployment.".to_string()),
+        });
+    }
+    if sandbox::container_up() {
+        return Json(LocalComputerActionResponse { ok: true, enabled: true, message: None });
+    }
+    std::thread::spawn(|| {
+        if let Err(error) = sandbox::ensure_contained_computer() {
+            eprintln!("[local-computer] start failed: {error}");
+        }
+    });
+    Json(LocalComputerActionResponse { ok: true, enabled: false, message: None })
+}
+
+/// Stops and removes the contained computer (`docker rm -f`). Quick.
+async fn local_computer_stop() -> Json<LocalComputerActionResponse> {
+    let ok = tokio::task::spawn_blocking(sandbox::recycle_container)
+        .await
+        .unwrap_or(false);
+    Json(LocalComputerActionResponse {
+        ok,
+        enabled: sandbox::container_up(),
+        message: None,
+    })
 }
 
 /// Reports whether the contained computer's live view is available, where to

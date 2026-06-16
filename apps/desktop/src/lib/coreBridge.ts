@@ -519,6 +519,20 @@ async function electronContainedComputerLive(): Promise<ContainedComputerLive> {
   return gatewayGetJson<ContainedComputerLive>("/api/local-computer/live");
 }
 
+export interface LocalComputerActionResult {
+  ok: boolean;
+  enabled: boolean;
+  message: string | null;
+}
+
+async function electronStartLocalComputer(): Promise<LocalComputerActionResult> {
+  return gatewayPostJson<LocalComputerActionResult>("/api/local-computer/start", {});
+}
+
+async function electronStopLocalComputer(): Promise<LocalComputerActionResult> {
+  return gatewayPostJson<LocalComputerActionResult>("/api/local-computer/stop", {});
+}
+
 export interface SystemStatus {
   docker: { installed: boolean; running: boolean; container_up: boolean };
   contained_enabled: boolean;
@@ -1821,6 +1835,8 @@ export const coreBridge = {
   setRole: (input: { role: string; provider_id?: string; model?: string }) =>
     electronSetRole(input),
   containedComputerLive: () => electronContainedComputerLive(),
+  startLocalComputer: () => electronStartLocalComputer(),
+  stopLocalComputer: () => electronStopLocalComputer(),
   systemStatus: () => electronSystemStatus(),
   closeAllBrowsers: () => electronCloseAllBrowsers(),
   workspaces: () => electronWorkspaces(),

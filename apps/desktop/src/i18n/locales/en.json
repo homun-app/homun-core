@@ -922,7 +922,11 @@
     "nothingStoredYet": "I have not stored anything yet. Tell me your preferences or information in chat and I will learn automatically.",
     "toConfirm": "to confirm",
     "forget": "Forget",
-    "addonsIntro": "Addons extend Homun with their own panel and engine. Detaching one removes both its navigation entry and its engine."
+    "addonsIntro": "Addons extend Homun with their own panel and engine. Detaching one removes both its navigation entry and its engine.",
+    "start": "Start",
+    "stop": "Stop",
+    "starting": "Starting…",
+    "localComputerDockerOff": "The contained computer needs Docker, which isn't available on this deployment."
   },
   "error": {
     "model": {
@@ -984,5 +988,14 @@
     "invalid": "Invalid access token.",
     "checking": "Checking…",
     "unlock": "Unlock"
+  },
+  "notifications": {
+    "title": "Notifications",
+    "subtitle": "System status and updates.",
+    "empty": "You're all caught up.",
+    "computerOffTitle": "Local computer is off",
+    "computerOffBody": "Enable the contained browser/sandbox so the agent can use a real computer.",
+    "computerUnavailableTitle": "Local computer unavailable",
+    "enable": "Enable"
   }
 }
