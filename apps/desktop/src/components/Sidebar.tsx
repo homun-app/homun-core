@@ -103,7 +103,12 @@ export function NavigationRail({
       </nav>
 
       <div className="rail-bottom">
-        <button className="rail-button" type="button" aria-label={t("sidebar.notifications")}>
+        <button
+          className={`rail-button ${activeView === "notifications" ? "active" : ""}`}
+          type="button"
+          aria-label={t("sidebar.notifications")}
+          onClick={() => onNavigate("notifications")}
+        >
           <Bell size={18} />
         </button>
         <button
@@ -790,7 +795,13 @@ export function NavDrawer({
 
       <footer className="drawer-footer">
         <div className="drawer-persistent-actions" aria-label={t("sidebar.persistentActions")}>
-          <button className="drawer-footer-action" type="button" aria-label={t("sidebar.notifications")} title={t("sidebar.notifications")}>
+          <button
+            className="drawer-footer-action"
+            type="button"
+            aria-label={t("sidebar.notifications")}
+            title={t("sidebar.notifications")}
+            onClick={() => onNavigate("notifications")}
+          >
             <Bell size={16} />
           </button>
           <button
@@ -849,7 +860,7 @@ export function SettingsDrawer({
   onSelectSub,
 }: SettingsDrawerProps) {
   const { t } = useTranslation();
-  const [displayName] = useSetting("displayName", "Fabio Cantone");
+  const [displayName] = useSetting("displayName", "");
   const [workspaceName] = useSetting("workspaceName", "Personal");
   const groups: Array<"account" | "capabilities"> = ["account", "capabilities"];
   return (

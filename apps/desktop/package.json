@@ -26,6 +26,7 @@
     "@fontsource/instrument-serif": "^5.2.8",
     "@fontsource/jetbrains-mono": "^5.2.8",
     "diff": "^7.0.0",
+    "electron-updater": "^6.8.9",
     "highlight.js": "^11.11.1",
     "i18next": "^26.3.1",
     "lowlight": "^3.3.0",
@@ -54,6 +55,11 @@
     "productName": "Homun",
     "executableName": "homun",
     "artifactName": "${productName}-${version}-${arch}.${ext}",
+    "publish": {
+      "provider": "github",
+      "owner": "homun-app",
+      "repo": "homun-releases"
+    },
     "directories": {
       "output": "dist-installers",
       "buildResources": "build"

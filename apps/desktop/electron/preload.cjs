@@ -18,4 +18,8 @@ contextBridge.exposeInMainWorld("localFirstDesktop", {
       return "";
     }
   },
+  // Auto-update (desktop only). Check returns {available, version}; install
+  // downloads the new version and restarts.
+  checkForUpdate: () => ipcRenderer.invoke("lfpa:update-check"),
+  installUpdate: () => ipcRenderer.invoke("lfpa:update-install"),
 });

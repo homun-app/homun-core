@@ -5,6 +5,9 @@ interface LocalFirstDesktopConfig {
   revealPath?: (path: string) => Promise<boolean>;
   /** Resolves a File to its absolute on-disk path (Electron webUtils). Sync. */
   getPathForFile?: (file: File) => string;
+  /** Desktop auto-update (electron-updater). */
+  checkForUpdate?: () => Promise<{ available: boolean; version: string | null; error?: string }>;
+  installUpdate?: () => Promise<{ ok: boolean; error?: string }>;
 }
 
 declare global {
@@ -121,5 +124,33 @@ export function fileLocalPathFromBridge(file: File): string {
     return resolve(file) ?? "";
   } catch {
     return "";
+  }
+}
+
+/** Desktop only: asks the Electron shell (electron-updater) whether a newer
+ *  release is published. Returns null outside Electron or on any error, so the
+ *  caller can simply hide the update card. */
+export async function checkDesktopUpdate(): Promise<{
+  available: boolean;
+  version: string | null;
+} | null> {
+  const check = desktopConfig?.checkForUpdate;
+  if (!check) return null;
+  try {
+    const result = await check();
+    return { available: !!result.available, version: result.version ?? null };
+  } catch {
+    return null;
+  }
+}
+
+/** Desktop only: downloads the pending update and restarts into it. */
+export async function installDesktopUpdate(): Promise<{ ok: boolean; error?: string }> {
+  const install = desktopConfig?.installUpdate;
+  if (!install) return { ok: false, error: "unavailable" };
+  try {
+    return await install();
+  } catch (error) {
+    return { ok: false, error: String((error as Error)?.message ?? error) };
   }
 }

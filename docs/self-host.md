@@ -105,6 +105,23 @@ of the app works.
 > *watch* the session on the web you must expose noVNC (a second subdomain, or a reverse-proxy
 > route, to `homun-cc:6080`). That UX wiring is the open follow-up.
 
+## Updates (one-click redeploy)
+
+A container can't replace its own image from the inside — pulling the new image and
+recreating the container is the orchestrator's job. So set `HOMUN_UPDATE_WEBHOOK` to your
+PaaS **redeploy webhook** and the app's **Notifications** view (the sidebar bell) shows a
+one-click **Update** that POSTs it:
+
+- **Coolify**: the resource has a *Webhooks → Deploy* URL (`.../api/v1/deploy?uuid=...`).
+  Paste it into `HOMUN_UPDATE_WEBHOOK`. Clicking Update redeploys (pulls `:latest`).
+- Any PaaS with a deploy webhook works the same way.
+
+The webhook URL stays server-side (the gateway calls it; it never reaches the browser).
+The image auto-rebuilds on GHCR on every `main` push, so "Update" always fetches the newest.
+
+> Desktop builds update via electron-updater instead (in-app download + restart) — that
+> path is separate from this webhook.
+
 ## Resource sizing
 
 Gateway alone is light. With the contained computer (Chromium-in-Docker) budget

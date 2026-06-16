@@ -10,6 +10,7 @@ export type ViewId =
   | "proattivita"
   | "browser"
   | "brain"
+  | "notifications"
   | "settings";
 
 export type SettingsSectionId =

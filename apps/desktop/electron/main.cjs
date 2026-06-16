@@ -1,4 +1,5 @@
 const { app, BrowserWindow, Menu, shell, ipcMain, dialog, nativeImage } = require("electron");
+const { autoUpdater } = require("electron-updater");
 const { spawn, spawnSync, execFileSync } = require("node:child_process");
 const { randomBytes } = require("node:crypto");
 const fs = require("node:fs");
@@ -338,6 +339,35 @@ ipcMain.handle("lfpa:reveal-path", async (_event, targetPath) => {
   if (typeof targetPath !== "string" || !targetPath) return false;
   const error = await shell.openPath(targetPath);
   return error === "";
+});
+
+// Auto-update via electron-updater. The feed is the public `homun-releases` repo
+// (build.publish), so no token is embedded. Manual flow: the Notifications view
+// checks, then downloads + restarts on the user's click. No-op in dev.
+autoUpdater.autoDownload = false;
+autoUpdater.autoInstallOnAppQuit = true;
+
+ipcMain.handle("lfpa:update-check", async () => {
+  if (!app.isPackaged) return { available: false, version: null };
+  try {
+    const result = await autoUpdater.checkForUpdates();
+    const version = result?.updateInfo?.version ?? null;
+    const available = version ? autoUpdater.currentVersion.compare(version) < 0 : false;
+    return { available, version };
+  } catch (error) {
+    return { available: false, version: null, error: String(error?.message ?? error) };
+  }
+});
+
+ipcMain.handle("lfpa:update-install", async () => {
+  if (!app.isPackaged) return { ok: false, error: "dev build" };
+  try {
+    await autoUpdater.downloadUpdate();
+    setImmediate(() => autoUpdater.quitAndInstall());
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: String(error?.message ?? error) };
+  }
 });
 
 app.whenReady().then(async () => {

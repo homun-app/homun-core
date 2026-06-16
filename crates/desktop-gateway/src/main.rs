@@ -670,7 +670,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             get(local_computer_artifact_preview),
         )
         .route("/api/local-computer/live", get(contained_computer_live))
+        .route("/api/local-computer/start", post(local_computer_start))
+        .route("/api/local-computer/stop", post(local_computer_stop))
         .route("/api/system/status", get(system_status))
+        .route("/api/update/info", get(update_info))
+        .route("/api/update/trigger", post(update_trigger))
         .route("/api/system/browser/close-all", post(close_all_browsers))
         .route("/api/memory/dashboard", get(memory_dashboard))
         .route("/api/memory/export", get(memory_export))
@@ -25469,8 +25473,8 @@ fn facts_from_graph(
             }
         })
         .collect();
-    // Read-time dedup: collapse near-duplicate facts (e.g. "si chiama Fabio" /
-    // "si chiama Fabio Cantone (desumibile…)"), keeping the richest (longest) — the
+    // Read-time dedup: collapse near-duplicate facts (e.g. "si chiama Mario" /
+    // "si chiama Mario Rossi (desumibile…)"), keeping the richest (longest) — the
     // store may hold paraphrases until consolidation merges them. Lexical Jaccard
     // OR semantic cosine (embeddings), mirroring the graph projection, so a
     // parenthetical that adds tokens doesn't defeat the merge.
@@ -25486,8 +25490,8 @@ fn facts_from_graph(
         let vector = embeddings.get(&fact.reference).cloned();
         let duplicate = seen.iter().any(|(ex_tokens, ex_vec)| {
             jaccard(&tokens, ex_tokens) >= DEDUP_JACCARD
-                // Containment: a less-complete restatement ("si chiama Fabio" ⊂
-                // "si chiama Fabio Cantone …") — since we keep longest-first, drop it.
+                // Containment: a less-complete restatement ("si chiama Mario" ⊂
+                // "si chiama Mario Rossi …") — since we keep longest-first, drop it.
                 || (tokens.len() >= 2 && tokens.is_subset(ex_tokens))
                 || match (vector.as_ref(), ex_vec.as_ref()) {
                     (Some(a), Some(b)) => cosine(a, b) >= DEDUP_COSINE,
@@ -26189,6 +26193,106 @@ struct ContainedComputerLiveResponse {
     terminal_active: bool,
     /// Terminal commands + output for the current chat response (CLI skills).
     terminal: Vec<TerminalEntryView>,
+}
+
+#[derive(Serialize)]
+struct LocalComputerActionResponse {
+    ok: bool,
+    enabled: bool,
+    message: Option<String>,
+}
+
+/// Starts the contained computer on demand. Building/booting the container can
+/// take a while (first run pulls/builds the image), so this is fire-and-forget:
+/// it kicks off `ensure_contained_computer()` on a background thread and returns
+/// immediately; the UI polls `/api/local-computer/live` for `enabled`.
+async fn local_computer_start() -> Json<LocalComputerActionResponse> {
+    if !sandbox::docker_running() {
+        return Json(LocalComputerActionResponse {
+            ok: false,
+            enabled: sandbox::container_up(),
+            message: Some("Docker is not available on this deployment.".to_string()),
+        });
+    }
+    if sandbox::container_up() {
+        return Json(LocalComputerActionResponse { ok: true, enabled: true, message: None });
+    }
+    std::thread::spawn(|| {
+        if let Err(error) = sandbox::ensure_contained_computer() {
+            eprintln!("[local-computer] start failed: {error}");
+        }
+    });
+    Json(LocalComputerActionResponse { ok: true, enabled: false, message: None })
+}
+
+/// Stops and removes the contained computer (`docker rm -f`). Quick.
+async fn local_computer_stop() -> Json<LocalComputerActionResponse> {
+    let ok = tokio::task::spawn_blocking(sandbox::recycle_container)
+        .await
+        .unwrap_or(false);
+    Json(LocalComputerActionResponse {
+        ok,
+        enabled: sandbox::container_up(),
+        message: None,
+    })
+}
+
+fn update_webhook() -> Option<String> {
+    env::var("HOMUN_UPDATE_WEBHOOK")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+#[derive(Serialize)]
+struct UpdateInfoResponse {
+    /// True on a server deploy where a redeploy webhook (Coolify/PaaS) is set —
+    /// the only way a container can "update itself" is to ask the orchestrator
+    /// to pull the new image and recreate it.
+    webhook_configured: bool,
+}
+
+async fn update_info() -> Json<UpdateInfoResponse> {
+    Json(UpdateInfoResponse {
+        webhook_configured: update_webhook().is_some(),
+    })
+}
+
+#[derive(Serialize)]
+struct UpdateTriggerResponse {
+    ok: bool,
+    message: Option<String>,
+}
+
+/// Fires the configured redeploy webhook (e.g. Coolify) so the PaaS pulls the
+/// latest image and recreates the container. The webhook URL stays server-side
+/// (never shipped to the browser bundle).
+async fn update_trigger(State(state): State<AppState>) -> Json<UpdateTriggerResponse> {
+    let Some(webhook) = update_webhook() else {
+        return Json(UpdateTriggerResponse {
+            ok: false,
+            message: Some("No update webhook configured (set HOMUN_UPDATE_WEBHOOK).".to_string()),
+        });
+    };
+    match state
+        .http
+        .post(&webhook)
+        .timeout(std::time::Duration::from_secs(15))
+        .send()
+        .await
+    {
+        Ok(response) if response.status().is_success() => {
+            Json(UpdateTriggerResponse { ok: true, message: None })
+        }
+        Ok(response) => Json(UpdateTriggerResponse {
+            ok: false,
+            message: Some(format!("Webhook returned HTTP {}", response.status())),
+        }),
+        Err(error) => Json(UpdateTriggerResponse {
+            ok: false,
+            message: Some(format!("Webhook call failed: {error}")),
+        }),
+    }
 }
 
 /// Reports whether the contained computer's live view is available, where to

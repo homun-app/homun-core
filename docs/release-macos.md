@@ -6,10 +6,19 @@ pipeline, the secrets, and how to verify a build passes Gatekeeper.
 ## How releases are built
 
 `.github/workflows/build.yml` ("Build installers"):
-- **Push a `v*` tag** → builds mac (arm64) + win + linux installers, then drafts a GitHub
-  Release with the assets attached (you publish it manually).
+- **Push a `v*` tag** → the tag (minus the `v`) is stamped into `package.json` (single source of
+  truth for the version), then mac (arm64) + win + linux installers are built. **Only the
+  signed + notarized macOS build is published** — with its `latest-mac.yml` auto-update
+  metadata — to a **draft release in the public `homun-releases` repo** (`--publish always`,
+  `GH_TOKEN=RELEASES_TOKEN`). Review that draft and publish it; that release is the auto-update
+  feed (see below). Windows + Linux build as artifacts only (they're unsigned — see "platform
+  scope" below).
 - **Run manually** (Actions tab → *Build installers* → *Run workflow*, i.e. `workflow_dispatch`)
-  → builds + uploads artifacts only (no release). Use this to verify the pipeline before tagging.
+  → builds + uploads artifacts only (`--publish never`, no token issued). Use this to verify the
+  pipeline before tagging.
+
+> **A tag without `MAC_CSC_LINK` fails on purpose.** The signing-detection step `exit 1`s on a
+> `v*` run with no cert, so an *unsigned* macOS build can never reach the public update feed.
 
 Each runner builds its own native gateway (`cargo --release`) and bundles it; an installer is
 only valid for the OS/arch that produced it.
@@ -48,6 +57,57 @@ gh secret set APPLE_TEAM_ID --repo homun-app/homun-core
 ```
 Then re-run: Actions → *Build installers* → *Run workflow* (or push a `v*` tag). The
 *Detect macOS signing creds* step will log `Developer ID cert present (... chars)` when it's set.
+
+## Auto-update (electron-updater) — one-time setup
+
+Desktop builds self-update: the app checks a **public** release feed, and the Notifications
+view (sidebar bell) shows a **download + restart** card when a newer version is published. The
+source repo stays **private** — only the binaries are public.
+
+Two one-time prerequisites:
+
+1. **Create a public repo `homun-app/homun-releases`** (empty is fine). This is the update
+   feed `apps/desktop/package.json` → `build.publish` points at, and what electron-updater
+   queries at runtime (no token embedded in the app).
+   ```bash
+   gh repo create homun-app/homun-releases --public -d "Homun desktop release binaries"
+   ```
+2. **Add a `RELEASES_TOKEN` secret** on `homun-core` — a PAT that can write releases to
+   `homun-releases` (the default `GITHUB_TOKEN` can't reach another repo). Fine-grained PAT
+   scoped to `homun-releases` with **Contents: read/write**, or a classic PAT with `repo`.
+   ```bash
+   gh secret set RELEASES_TOKEN --repo homun-app/homun-core   # paste the PAT
+   ```
+
+After that, every `v*` tag publishes the **signed macOS** installer **and** its `latest-mac.yml`
+to a draft release in `homun-releases`. **Publish that draft** for clients to see the update (a
+draft is invisible to electron-updater). The `.yml` is what makes the update discoverable — a
+hand-made release with only a `.dmg` would never trigger an update.
+
+> Updates only flow **between published releases newer than the running build**. You can't test
+> the in-app card until at least one release is published in `homun-releases` and a client is
+> running an older version. In dev (`app.isPackaged === false`) the check is a deliberate no-op.
+
+### Platform scope (why only macOS auto-updates today)
+
+Auto-update silently downloads and **executes** a binary (`quitAndInstall`), so only a **signed**
+build may feed the channel — an unsigned update breaks electron-updater's signature anchor and is
+a silent-code-execution risk. Currently only macOS is signed (Developer ID + notarized), so it's
+the only platform that publishes. **Windows + Linux build as downloadable artifacts but do not
+publish** (`--publish never`). To turn on a platform later:
+
+- **Windows**: add a code-signing cert (`win.certificateFile`/`certificateSubjectName` or an HSM)
+  + set `win.publisherName`, then flip its step to `--publish` on tag like the mac step.
+- **Linux**: AppImage updates rely on the `latest-linux.yml` `sha512` rather than an OS signature;
+  enable it consciously if you accept that model.
+
+### Versioning (tags drive it)
+
+The git tag **is** the version — CI stamps `package.json` from it (`npm version <tag-minus-v>`).
+electron-updater compares **semver**, so each release must be strictly greater than the last.
+`0.1.1001`, `0.1.1002`, … is valid semver (patch is unbounded — no need to start high for headroom,
+but it works). Keep tag and `package.json` consistent; CI does that for you on tag runs. There's
+no need to commit a version bump by hand before tagging — just `git tag vX.Y.Z && git push --tags`.
 
 ## The bundled gateway is signed automatically
 

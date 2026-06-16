@@ -148,6 +148,25 @@ export function SettingsView({ section, sub, onPluginsChanged }: SettingsViewPro
     };
   }, [section]);
 
+  // Poll the contained-computer live state so the Local computer row reflects
+  // start/stop within a few seconds.
+  useEffect(() => {
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const value = await coreBridge.containedComputerLive();
+        if (!cancelled) setComputer(value);
+      } catch {
+        /* ignore */
+      }
+    };
+    const id = window.setInterval(() => void tick(), 3000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, []);
+
   return (
     <section
       className="settings-view"
@@ -537,14 +556,63 @@ function ApprovelRoutingRow() {
 
 /* ------------------------------------------------------------------- account */
 
+/** Start/stop the contained "Local computer". Reused by the Account row and the
+ *  dedicated Local computer pane. Reports failures (e.g. Docker unavailable on a
+ *  PaaS deploy without the socket) via onMessage, or inline when omitted. */
+function LocalComputerToggle({
+  enabled,
+  onMessage,
+}: {
+  enabled: boolean;
+  onMessage?: (message: string | null) => void;
+}) {
+  const { t } = useTranslation();
+  const [busy, setBusy] = useState(false);
+  const [localMsg, setLocalMsg] = useState<string | null>(null);
+  const report = (message: string | null) =>
+    onMessage ? onMessage(message) : setLocalMsg(message);
+
+  const toggle = async () => {
+    setBusy(true);
+    report(null);
+    try {
+      if (enabled) {
+        await coreBridge.stopLocalComputer();
+      } else {
+        const result = await coreBridge.startLocalComputer();
+        if (!result.ok) report(result.message ?? t("settings.localComputerDockerOff"));
+      }
+    } catch (error) {
+      report(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <span className="set-cc-toggle">
+      {localMsg && <span className="set-hint set-cc-toggle-msg">{localMsg}</span>}
+      <button
+        type="button"
+        className={`set-badge-btn ${enabled ? "green" : ""}`}
+        disabled={busy}
+        onClick={() => void toggle()}
+      >
+        {busy ? t("settings.starting") : enabled ? t("settings.stop") : t("settings.start")}
+      </button>
+    </span>
+  );
+}
+
 function AccountPane({
   computer,
 }: {
   computer: ContainedComputerLive | null;
 }) {
   const { t } = useTranslation();
-  const [name, setName] = useSetting("displayName", "Fabio Cantone");
+  const [name, setName] = useSetting("displayName", "");
   const [accountEmail, setAccountEmail] = useSetting<string>("email", "");
+  const [computerMsg, setComputerMsg] = useState<string | null>(null);
 
   return (
     <>
@@ -595,14 +663,17 @@ function AccountPane({
           <div>
             <div className="tt">Local computer</div>
             <div className="td">
-              {computer?.enabled
-                ? "Real contained browser · live noVNC view"
-                : "Start the contained computer for real, non-invasive browsing."}
+              {computerMsg
+                ? computerMsg
+                : computer?.enabled
+                  ? "Real contained browser · live noVNC view"
+                  : "Start the contained computer for real, non-invasive browsing."}
             </div>
           </div>
-          <span className={`set-badge ${computer?.enabled ? "green" : "muted"}`}>
-            {computer?.enabled ? t("settings.on") : t("settings.off")}
-          </span>
+          <LocalComputerToggle
+            enabled={Boolean(computer?.enabled)}
+            onMessage={setComputerMsg}
+          />
         </div>
       </div>
 
@@ -3805,9 +3876,7 @@ function ComputerPane({ computer }: { computer: ContainedComputerLive | null }) 
             {t("settings.realContainedBrowser")}
           </div>
         </div>
-        <span className={`set-badge dot ${enabled ? "green" : "muted"}`}>
-          {enabled ? t("settings.on") : t("settings.off")}
-        </span>
+        <LocalComputerToggle enabled={enabled} />
       </div>
 
       {/* Live view container — real noVNC iframe, striped placeholder otherwise (design 531). */}
