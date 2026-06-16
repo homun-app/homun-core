@@ -280,6 +280,10 @@ fn infer_context_window(lower: &str) -> Option<u32> {
     }
 }
 
+fn default_true() -> bool {
+    true
+}
+
 /// A configured provider plus its (cached) model catalog. The API key lives in
 /// the encrypted secret store, keyed by `id`, never in this struct.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -289,6 +293,11 @@ pub struct ProviderEntry {
     pub label: String,
     pub kind: ProviderKind,
     pub base_url: String,
+    /// Whether this provider participates in routing. Disabled providers keep
+    /// their config + cached models but are excluded from role resolution and the
+    /// model pickers. Defaults true so existing registries stay enabled.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
     #[serde(default)]
     pub models: Vec<ModelEntry>,
     /// The model selected for this provider (Phase 1 single-model; Phase 2 roles
@@ -306,6 +315,7 @@ impl ProviderEntry {
             label,
             kind,
             base_url: base_url.trim_end_matches('/').to_string(),
+            enabled: true,
             models: Vec::new(),
             active_model: None,
             models_fetched_at: None,
@@ -491,13 +501,30 @@ impl ProviderRegistry {
         self.providers.iter_mut().find(|p| p.id == id)
     }
 
-    /// The currently active provider (explicit `active_provider_id`, else the
-    /// first configured one).
+    /// An ENABLED fallback provider for routing when no role binding applies
+    /// (the legacy `active_provider_id` if it points at an enabled provider, else
+    /// the first enabled one). There is no user-facing "default" anymore — this is
+    /// only the internal last resort so the base assistant still resolves a model.
     pub fn active(&self) -> Option<&ProviderEntry> {
         self.active_provider_id
             .as_deref()
             .and_then(|id| self.get(id))
-            .or_else(|| self.providers.first())
+            .filter(|p| p.enabled)
+            .or_else(|| self.providers.iter().find(|p| p.enabled))
+    }
+
+    /// Enables/disables a provider for routing. Returns false if not found. If the
+    /// legacy active pointer lands on the now-disabled provider, it moves to the
+    /// first enabled one so internal fallbacks stay valid.
+    pub fn set_enabled(&mut self, id: &str, enabled: bool) -> bool {
+        let Some(provider) = self.get_mut(id) else {
+            return false;
+        };
+        provider.enabled = enabled;
+        if !enabled && self.active_provider_id.as_deref() == Some(id) {
+            self.active_provider_id = self.providers.iter().find(|p| p.enabled).map(|p| p.id.clone());
+        }
+        true
     }
 
     /// Inserts or replaces a provider (matched by id), preserving its cached
@@ -542,6 +569,7 @@ impl ProviderRegistry {
             && !pid.is_empty()
             && !model.is_empty()
             && let Some(provider) = self.get(pid)
+            && provider.enabled
         {
             return Some(ResolvedRole {
                 role: role.to_string(),
@@ -565,7 +593,7 @@ impl ProviderRegistry {
     pub fn eligible_models(&self, role: &str) -> Vec<(&ProviderEntry, &ModelEntry)> {
         let req = role_requirements(role);
         let mut out = Vec::new();
-        for provider in &self.providers {
+        for provider in self.providers.iter().filter(|p| p.enabled) {
             for model in &provider.models {
                 if model.modality != req.modality {
                     continue;
@@ -920,6 +948,41 @@ mod tests {
         let resolved = reg.resolve_role("orchestrator").unwrap();
         assert!(resolved.auto);
         assert_eq!(resolved.model, "minimax-m2.7:cloud");
+    }
+
+    #[test]
+    fn disabled_provider_is_excluded_from_routing() {
+        let mut reg = registry_with_two_models(); // provider "ollama" (enabled)
+        let mut cloud = ProviderEntry::new(
+            "cloud".into(),
+            "Cloud".into(),
+            ProviderKind::OpenaiCompat,
+            "https://api.example.com/v1".into(),
+        );
+        cloud.models = vec![ModelEntry::inferred("claude-sonnet-4")]; // text+tools
+        reg.upsert(cloud);
+        assert!(reg.set_enabled("cloud", false));
+
+        // The disabled provider's model is gone from the candidate pool.
+        let ids: Vec<_> = reg
+            .eligible_models("orchestrator")
+            .iter()
+            .map(|(_, m)| m.id.clone())
+            .collect();
+        assert!(!ids.contains(&"claude-sonnet-4".to_string()));
+        assert!(ids.contains(&"minimax-m2.7:cloud".to_string()));
+
+        // A manual binding to the disabled provider falls back to auto (an enabled one).
+        reg.roles.insert(
+            "browser".into(),
+            RoleBinding {
+                provider_id: Some("cloud".into()),
+                model: Some("claude-sonnet-4".into()),
+            },
+        );
+        let resolved = reg.resolve_role("browser").unwrap();
+        assert!(resolved.auto, "binding to a disabled provider must fall back to auto");
+        assert_eq!(resolved.provider_id, "ollama");
     }
 
     #[test]

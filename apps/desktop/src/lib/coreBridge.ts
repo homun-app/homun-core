@@ -1135,6 +1135,7 @@ export interface ProviderView {
   label: string;
   kind: string;
   base_url: string;
+  enabled: boolean;
   has_key: boolean;
   active_model: string | null;
   models: ProviderModelView[];
@@ -1182,6 +1183,16 @@ async function electronActivateProvider(id: string): Promise<ProvidersResponse> 
   return gatewayPostJson<ProvidersResponse>(
     `/api/providers/${encodeURIComponent(id)}/activate`,
     {},
+  );
+}
+
+async function electronSetProviderEnabled(
+  id: string,
+  enabled: boolean,
+): Promise<ProvidersResponse> {
+  return gatewayPostJson<ProvidersResponse>(
+    `/api/providers/${encodeURIComponent(id)}/enabled`,
+    { enabled },
   );
 }
 
@@ -1842,6 +1853,8 @@ export const coreBridge = {
   upsertProvider: (input: UpsertProviderInput) => electronUpsertProvider(input),
   removeProvider: (id: string) => electronRemoveProvider(id),
   activateProvider: (id: string) => electronActivateProvider(id),
+  setProviderEnabled: (id: string, enabled: boolean) =>
+    electronSetProviderEnabled(id, enabled),
   refreshProviderModels: (id: string) => electronRefreshProviderModels(id),
   setModelProfile: (input: SetModelProfileInput) => electronSetModelProfile(input),
   generateProviderProfiles: (id: string) => electronGenerateProviderProfiles(id),

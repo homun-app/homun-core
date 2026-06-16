@@ -636,6 +636,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             post(generate_provider_profiles),
         )
         .route("/api/providers/{id}/activate", post(activate_provider))
+        .route("/api/providers/{id}/enabled", post(set_provider_enabled))
         .route("/api/model-profile", post(set_model_profile))
         .route("/api/roles", get(list_roles).post(set_role))
         .route("/api/routing-decisions", get(list_routing_decisions))
@@ -22483,6 +22484,7 @@ struct ProviderView {
     label: String,
     kind: String,
     base_url: String,
+    enabled: bool,
     has_key: bool,
     active_model: Option<String>,
     models: Vec<ProviderModelView>,
@@ -22501,6 +22503,7 @@ fn provider_view(entry: &ProviderEntry) -> ProviderView {
         label: entry.label.clone(),
         kind: entry.kind.as_str().to_string(),
         base_url: entry.base_url.clone(),
+        enabled: entry.enabled,
         has_key: provider_api_key(&entry.id).is_some(),
         active_model: entry.effective_model(),
         models: entry
@@ -22633,6 +22636,29 @@ async fn activate_provider(
         });
     }
     registry.active_provider_id = Some(id);
+    save_provider_registry(&registry).map_err(provider_registry_persist_error)?;
+    Ok(Json(providers_response(&registry)))
+}
+
+#[derive(Debug, Deserialize)]
+struct SetProviderEnabledRequest {
+    enabled: bool,
+}
+
+/// Enables/disables a provider for routing (no single "default" — each provider
+/// is independently on/off; the role resolver only considers enabled ones).
+async fn set_provider_enabled(
+    Path(id): Path<String>,
+    Json(req): Json<SetProviderEnabledRequest>,
+) -> Result<Json<ProvidersResponse>, GatewayError> {
+    let mut registry = load_provider_registry();
+    if !registry.set_enabled(&id, req.enabled) {
+        return Err(GatewayError {
+            status: StatusCode::NOT_FOUND,
+            code: "provider_not_found",
+            message: format!("provider {id} not configured"),
+        });
+    }
     save_provider_registry(&registry).map_err(provider_registry_persist_error)?;
     Ok(Json(providers_response(&registry)))
 }
