@@ -1,0 +1,19 @@
+# Keep the build context small + reproducible. Build artefacts and local state
+# are rebuilt inside the image; never ship them into the context.
+.git
+target
+**/node_modules
+**/dist
+**/dist-installers
+**/.package
+.venv*
+.playwright-mcp
+output
+reports
+graphify-out
+runtimes/*/data
+**/*.sqlite
+**/*.sqlite-*
+.DS_Store
+*.log
+last_prompt_loop_*.txt
