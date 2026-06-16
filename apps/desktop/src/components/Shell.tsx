@@ -18,7 +18,7 @@ interface ShellProps {
   navItems: NavItem[];
   onArchiveChatThread: (threadId: string) => void;
   onBackFromSettings: () => void;
-  onCreateChatThread: () => void;
+  onCreateteChatThread: () => void;
   onDeleteChatThread: (threadId: string) => void;
   onNavigate: (view: ViewId) => void;
   onSelectThread: (threadId: string) => void;
@@ -43,7 +43,7 @@ export function Shell({
   navItems,
   onArchiveChatThread,
   onBackFromSettings,
-  onCreateChatThread,
+  onCreateteChatThread,
   onDeleteChatThread,
   onNavigate,
   onSelectThread,
@@ -128,7 +128,7 @@ export function Shell({
           chatThreads={chatThreads}
           navItems={navItems}
           onArchiveChatThread={onArchiveChatThread}
-          onCreateChatThread={onCreateChatThread}
+          onCreateteChatThread={onCreateteChatThread}
           onDeleteChatThread={onDeleteChatThread}
           onNavigate={onNavigate}
           onSearchChat={() => setSearchOpen(true)}

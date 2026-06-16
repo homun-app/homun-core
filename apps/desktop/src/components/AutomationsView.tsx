@@ -16,7 +16,7 @@ import {
 import { useTranslation } from "react-i18next";
 import { coreBridge } from "../lib/coreBridge";
 import type {
-  AutomationCreateInput,
+  AutomationCreateteInput,
   AutomationTriggerJson,
   CoreTaskItem,
   EventSources,
@@ -29,7 +29,7 @@ type SelectedSource =
 
 interface AutomationsViewProps {
   automations: ManagedAutomation[];
-  onCreate: (input: AutomationCreateInput) => void;
+  onCreatete: (input: AutomationCreateteInput) => void;
   onToggle: (id: string) => void;
   onDelete: (id: string) => void;
 }
@@ -46,7 +46,7 @@ function formatWhen(ts: number | null): string {
 
 export function AutomationsView({
   automations,
-  onCreate,
+  onCreatete,
   onToggle,
   onDelete,
 }: AutomationsViewProps) {
@@ -195,7 +195,7 @@ export function AutomationsView({
       };
     }
     const finalTitle = title.trim() || prompt.trim().slice(0, 48);
-    onCreate({
+    onCreatete({
       title: finalTitle,
       trigger,
       prompt: prompt.trim(),
@@ -508,10 +508,10 @@ export function AutomationsView({
 
           <div className="auto-editor-actions">
             <button className="auto-btn" onClick={reset}>
-              Annulla
+              Cancel
             </button>
             <button className="auto-btn-accent" onClick={save} disabled={!canSave}>
-              Crea automazione
+              Create automazione
             </button>
           </div>
         </div>
@@ -599,7 +599,7 @@ export function AutomationsView({
               <div className="auto-card-actions">
                 <button
                   className="auto-icon danger"
-                  title="Elimina"
+                  title="Delete"
                   aria-label={t("automations.deleteScheduled")}
                   onClick={() => cancelScheduled(task.task_id)}
                 >

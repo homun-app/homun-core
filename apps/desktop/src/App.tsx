@@ -27,9 +27,9 @@ import {
   coreBridge,
   subscribeAppEvents,
   type AppEvent,
-  type AutomationCreateInput,
+  type AutomationCreateteInput,
   type ManagedAutomation,
-  type CoreApprovalItem,
+  type CoreApprovelItem,
   type CoreChatAttachment,
   type CoreChatMessage,
   type CoreChatThread,
@@ -43,7 +43,7 @@ import {
   type PluginState,
 } from "./lib/coreBridge";
 import type {
-  ApprovalItem,
+  ApprovelItem,
   ChatMessage,
   ChatThread,
   ConnectionItem,
@@ -132,7 +132,7 @@ function mapCoreChatAttachment(attachment: CoreChatAttachment): NonNullable<Chat
 }
 
 function starterMessages(_thread: ChatThread): ChatMessage[] {
-  // Empty: the chat empty-state hero ("Come posso aiutarti?") welcomes the user now,
+  // Empty: the chat empty-state hero ("How can I help you?") welcomes the user now,
   // so we don't seed a canned assistant greeting.
   return [];
 }
@@ -147,9 +147,9 @@ function updateThreadPreview(
   return {
     ...thread,
     title:
-      thread.title === "Nuovo compito" && userTitle ? userTitle : thread.title,
+      thread.title === "New task" && userTitle ? userTitle : thread.title,
     messageCount: messages.length,
-    subtitle: lastMessage?.text.slice(0, 72) || "Chat locale pronta",
+    subtitle: lastMessage?.text.slice(0, 72) || "Local chat ready",
     updatedAt: currentTimestampSeconds(),
   };
 }
@@ -201,7 +201,7 @@ function mapCoreTask(task: CoreTaskItem): TaskItem {
   };
 }
 
-function mapCoreApproval(approval: CoreApprovalItem): ApprovalItem {
+function mapCoreApprovel(approval: CoreApprovelItem): ApprovelItem {
   const isBrowserAction = approval.action === "browser.manual_action";
   const isPromptPlanAction = approval.action === "prompt_plan.approve_step";
   const requestedSession =
@@ -218,7 +218,7 @@ function mapCoreApproval(approval: CoreApprovalItem): ApprovalItem {
         ? i18n.t("approval.confirmPlan")
         : approval.action,
     reason: isBrowserAction
-      ? i18n.t(humanizeBrowserApprovalReasonKey(approval.explanation))
+      ? i18n.t(humanizeBrowserApprovelReasonKey(approval.explanation))
       : isPromptPlanAction
         ? i18n.t("approval.confirmPlanReason")
         : approval.explanation,
@@ -226,7 +226,7 @@ function mapCoreApproval(approval: CoreApprovalItem): ApprovalItem {
     boundary: approval.data_boundary,
     risk: approval.risk_level === "high" ? "high" : "medium",
     requestedBy: `${approval.task_id} ${requestedSession}`.trim(),
-    scopeOptions: filterApprovalScopes(approval.scope_options),
+    scopeOptions: filterApprovelScopes(approval.scope_options),
     browserVisibilityOptions: filterBrowserVisibilityOptions(
       approval.browser_visibility_options,
     ),
@@ -234,7 +234,7 @@ function mapCoreApproval(approval: CoreApprovalItem): ApprovalItem {
   };
 }
 
-function filterApprovalScopes(values?: string[]): Array<"once" | "always"> {
+function filterApprovelScopes(values?: string[]): Array<"once" | "always"> {
   const options = (values ?? []).filter(
     (value): value is "once" | "always" => value === "once" || value === "always",
   );
@@ -257,7 +257,7 @@ function filterBrowserVisibility(value?: string): "auto" | "visible" | "headless
   return "auto";
 }
 
-function humanizeBrowserApprovalReasonKey(reason: string): string {
+function humanizeBrowserApprovelReasonKey(reason: string): string {
   const match = reason.match(/before execution: ([a-z_]+)/i);
   const action = match?.[1] ?? "default";
   if (action === "click" || action === "close" || action === "type") {
@@ -303,7 +303,7 @@ function summarizeSafeValue(value: unknown): string {
     }
     const approval = record.approval as Record<string, unknown> | undefined;
     if (approval?.decision) {
-      return `Approval ${String(approval.decision)} · ${String(
+      return `Approvel ${String(approval.decision)} · ${String(
         approval.action ?? "azione redatta",
       )}`;
     }
@@ -429,14 +429,14 @@ export default function App() {
   const [previousView, setPreviousView] = useState<ViewId>("chat");
   // Onboarding wizard: shown on first launch when no provider is configured.
   const [showOnboarding, setShowOnboarding] = useState(false);
-  // Addon/plugin enabled-state (ADR 0011 §10-A): drives which registry plugins
+  // Addons/plugin enabled-state (ADR 0011 §10-A): drives which registry plugins
   // contribute a nav entry + panel. Default-on until the backend answers.
   const [pluginStates, setPluginStates] = useState<PluginState[]>([]);
   const [settingsSection, setSettingsSection] =
     useState<SettingsSectionId>("account");
   // Active sub-item within a section that has an inline expandable submenu (e.g.
-  // Modello & Runtime → routing|decisions|providers). A single free-form string
-  // keeps this generic for future sections (Connettori, etc.).
+  // Model & Runtime → routing|decisions|providers). A single free-form string
+  // keeps this generic for future sections (Connectors, etc.).
   const [settingsSub, setSettingsSub] = useState<string>("");
   const [chatThreads, setChatThreads] = useState<ChatThread[]>([
     defaultChatThread,
@@ -450,7 +450,7 @@ export default function App() {
     [defaultChatThread.threadId]: chatMessages,
   });
   const [taskItems, setTaskItems] = useState<TaskItem[]>(tasks);
-  const [approvalItems, setApprovalItems] = useState<ApprovalItem[]>(approvals);
+  const [approvalItems, setApprovelItems] = useState<ApprovelItem[]>(approvals);
   const [automationItems, setAutomationItems] = useState<ManagedAutomation[]>([]);
   const [runtimeItems] = useState<RuntimeHealth[]>(runtimeHealth);
   const [memoryDashboard, setMemoryDashboard] =
@@ -461,7 +461,7 @@ export default function App() {
   const [selectedTaskDetail, setSelectedTaskDetail] =
     useState<TaskDetailItem | null>(null);
   const [taskDetailLoading, setTaskDetailLoading] = useState(false);
-  const [approvalBusyId, setApprovalBusyId] = useState<string | null>(null);
+  const [approvalBusyId, setApprovelBusyId] = useState<string | null>(null);
   // The thread currently generating a chat answer (real-time signal from ChatView,
   // sub-polling cadence). Used to mark the thread busy in the sidebar immediately,
   // before the 2.5s taskQueue polling catches up.
@@ -537,7 +537,7 @@ export default function App() {
   }
 
   // Navigate to a thread that may live in ANOTHER workspace (e.g. a channel
-  // thread in Personale): select_thread is workspace-aware and returns that
+  // thread in Personal): select_thread is workspace-aware and returns that
   // workspace's snapshot, so applying it switches context for us.
   async function navigateToThread(threadId: string) {
     try {
@@ -596,7 +596,7 @@ export default function App() {
     })();
   }, []);
 
-  async function handleCreateChatThread() {
+  async function handleCreateteChatThread() {
     try {
       const created = mapCoreChatThread(await coreBridge.createChatThread());
       const messages = await coreBridge.chatMessages(created.threadId);
@@ -822,9 +822,9 @@ export default function App() {
       ...snapshot.recent_failures,
     ].map(mapCoreTask);
     setTaskItems(nextTasks.length ? nextTasks : tasks);
-    setApprovalItems(
+    setApprovelItems(
       snapshot.waiting_approvals.length
-        ? snapshot.waiting_approvals.map(mapCoreApproval)
+        ? snapshot.waiting_approvals.map(mapCoreApprovel)
         : [],
     );
     setResourceUsage(
@@ -853,7 +853,7 @@ export default function App() {
     }
   }
 
-  async function handleCreateAutomation(input: AutomationCreateInput) {
+  async function handleCreateteAutomation(input: AutomationCreateteInput) {
     try {
       await coreBridge.createAutomation(input);
       await loadAutomations();
@@ -933,31 +933,31 @@ export default function App() {
     setSelectedTaskDetail(detail ? mapCoreTaskDetail(detail) : null);
   }
 
-  async function handleApproveApproval(
+  async function handleApproveApprovel(
     approvalId: string,
     options?: {
       scope?: "once" | "always";
       browser_visibility?: "auto" | "visible" | "headless";
     },
   ) {
-    setApprovalBusyId(approvalId);
+    setApprovelBusyId(approvalId);
     try {
-      applyTaskQueueSnapshot(await coreBridge.approveApproval(approvalId, options));
+      applyTaskQueueSnapshot(await coreBridge.approveApprovel(approvalId, options));
       await refreshSelectedTaskDetail(selectedTaskId);
       await refreshRuntimeReadModels(activeThread.taskId);
       await refreshChatReadModels(activeThread.threadId);
     } catch (error) {
       console.warn("approval_approve unavailable", error);
     } finally {
-      setApprovalBusyId(null);
+      setApprovelBusyId(null);
     }
   }
 
-  async function handleRejectApproval(approvalId: string) {
-    setApprovalBusyId(approvalId);
+  async function handleRejectApprovel(approvalId: string) {
+    setApprovelBusyId(approvalId);
     try {
       applyTaskQueueSnapshot(
-        await coreBridge.rejectApproval(
+        await coreBridge.rejectApprovel(
           approvalId,
           "Rejected by the user from the desktop UI.",
         ),
@@ -966,7 +966,7 @@ export default function App() {
     } catch (error) {
       console.warn("approval_reject unavailable", error);
     } finally {
-      setApprovalBusyId(null);
+      setApprovelBusyId(null);
     }
   }
 
@@ -1103,7 +1103,7 @@ export default function App() {
       busyThreadIds={busyThreadIds}
       chatThreads={chatThreads}
       drawerOpen={drawerOpen}
-      onCreateChatThread={handleCreateChatThread}
+      onCreateteChatThread={handleCreateteChatThread}
       onArchiveChatThread={handleArchiveChatThread}
       onBackFromSettings={() => setActiveView(previousView)}
       onDeleteChatThread={handleDeleteChatThread}
@@ -1136,8 +1136,8 @@ export default function App() {
               handleMessagesChange(activeThread.threadId, messages)
             }
             onOpenTasks={() => setActiveView("tasks")}
-            onApproveApproval={handleApproveApproval}
-            onRejectApproval={handleRejectApproval}
+            onApproveApprovel={handleApproveApprovel}
+            onRejectApprovel={handleRejectApprovel}
             onRuntimeChanged={() => refreshRuntimeReadModels(activeThread.taskId)}
             onThreadChanged={() => refreshChatReadModels(activeThread.threadId)}
             onStreamingChange={(busy) =>
@@ -1154,8 +1154,8 @@ export default function App() {
             taskDetailLoading={taskDetailLoading}
             approvalBusyId={approvalBusyId}
             selectedTaskId={selectedTask.id}
-            onApproveApproval={handleApproveApproval}
-            onRejectApproval={handleRejectApproval}
+            onApproveApprovel={handleApproveApprovel}
+            onRejectApprovel={handleRejectApprovel}
             onSelectTask={setSelectedTaskId}
           />
         )}
@@ -1176,7 +1176,7 @@ export default function App() {
         {activeView === "automations" && (
           <AutomationsView
             automations={automationItems}
-            onCreate={handleCreateAutomation}
+            onCreatete={handleCreateteAutomation}
             onToggle={handleToggleAutomation}
             onDelete={handleDeleteAutomation}
           />

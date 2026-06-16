@@ -87,7 +87,7 @@ import {
   type MemoryWikiPage,
   type ProjectSubdir,
   type ProviderModelsGroup,
-  type SkillSummary,
+  type SkillsSummary,
 } from "../lib/coreBridge";
 import {
   createLoadingComputerSession,
@@ -108,13 +108,13 @@ import type {
   ChatThread,
   ComputerSession,
   ComputerSurfaceKind,
-  ApprovalItem,
+  ApprovelItem,
   RuntimeHealth,
   TaskItem,
 } from "../types";
 
 interface ChatViewProps {
-  approvals: ApprovalItem[];
+  approvals: ApprovelItem[];
   approvalBusyId: string | null;
   computerSessionId: string;
   messages: ChatMessage[];
@@ -123,14 +123,14 @@ interface ChatViewProps {
   thread: ChatThread;
   onMessagesChange: (messages: ChatMessage[]) => void;
   onOpenTasks: () => void;
-  onApproveApproval: (
+  onApproveApprovel: (
     approvalId: string,
     options?: {
       scope?: "once" | "always";
       browser_visibility?: "auto" | "visible" | "headless";
     },
   ) => void;
-  onRejectApproval: (approvalId: string) => void;
+  onRejectApprovel: (approvalId: string) => void;
   onRuntimeChanged: () => void | Promise<void>;
   onThreadChanged: () => void | Promise<void>;
   // Fires when this thread starts/stops generating, so the parent can mark the
@@ -175,8 +175,8 @@ export function ChatView({
   thread,
   onMessagesChange,
   onOpenTasks,
-  onApproveApproval,
-  onRejectApproval,
+  onApproveApprovel,
+  onRejectApprovel,
   onRuntimeChanged,
   onThreadChanged,
   onStreamingChange,
@@ -218,13 +218,13 @@ export function ChatView({
   const [showJumpToBottom, setShowJumpToBottom] = useState(false);
   // Workbench (right-side panel, Claude-Code style): `artifactsOpen` is the
   // open/closed flag; `workbenchTab` is the active tab. Phase 1 ships the
-  // "Artefatti" tab; File / Computer / Attività / Piano land in later phases.
+  // "Artefatti" tab; File / Computer / Activity / Piano land in later phases.
   const [artifactsOpen, setArtifactsOpen] = useState(false);
   const [panelMenuOpen, setPanelMenuOpen] = useState(false);
   const [workbenchTab, setWorkbenchTab] = useState<WorkbenchTab>("files");
   const [artifactsInitial, setArtifactsInitial] = useState<string | null>(null);
   // Is this thread a project? Reliable context signal (not keyword-detection) that gates
-  // the "Salva come obiettivo" message action + the Obiettivi tab. `goalSeed` pre-fills
+  // the "Save as goal" message action + the Obiettivi tab. `goalSeed` pre-fills
   // the Obiettivi compose when promoting a chat message to a goal.
   const [threadIsProject, setThreadIsProject] = useState(false);
   const [goalSeed, setGoalSeed] = useState<string | null>(null);
@@ -310,7 +310,7 @@ export function ChatView({
     }
     return out;
   }, [threadMessages]);
-  const activeApprovals = approvals.filter((approval) =>
+  const activeApprovels = approvals.filter((approval) =>
     approval.requestedBy.includes(computerSessionId),
   );
   const visibleComputerSession = useMemo(
@@ -321,7 +321,7 @@ export function ChatView({
     [computerSession],
   );
   const showComputerActivity =
-    activeApprovals.length > 0 ||
+    activeApprovels.length > 0 ||
     planStepRunning ||
     smokeTestRunning ||
     visibleComputerSession.timeline.length > 0 ||
@@ -470,7 +470,7 @@ export function ChatView({
       role: "assistant",
       text: "",
       timestamp: currentTimestampSeconds(),
-      metadata: "Modello locale",
+      metadata: "Model locale",
     };
     let streamedText = "";
     let streamChunks = 0;
@@ -518,7 +518,7 @@ export function ChatView({
         ...promptMessages,
         {
           ...streamingMessage,
-          text: streamedText || "Risposta interrotta.",
+          text: streamedText || "Answer interrupted.",
           metadata: "Interrotta localmente",
         },
       ];
@@ -555,7 +555,7 @@ export function ChatView({
           setStreamStatus({
             requestId,
             phase: "writing",
-            title: "L'assistente sta scrivendo",
+            title: "The assistant is writing",
             detail: "La risposta sta arrivando in streaming.",
           });
         }
@@ -568,7 +568,7 @@ export function ChatView({
       setStreamStatus({
         requestId,
         phase: "thinking",
-        title: "L'assistente sta pensando",
+        title: "The assistant is thinking",
         detail: "Costruisco il contesto locale e avvio la generazione.",
       });
       const result = await coreBridge.submitChatPromptStream(
@@ -693,7 +693,7 @@ export function ChatView({
       role: "assistant",
       text: "",
       timestamp: currentTimestampSeconds(),
-      metadata: "Modello locale",
+      metadata: "Model locale",
     };
     const promptMessages = [...messages, userMessage];
     let streamedText = "";
@@ -787,7 +787,7 @@ export function ChatView({
     options?: {
       model?: string;
       mode?: string;
-      forcedSkillId?: string;
+      forcedSkillsId?: string;
       contextText?: string;
       images?: string[];
     },
@@ -799,8 +799,8 @@ export function ChatView({
 
     // Forcing a skill (🧩 picker) augments the MODEL-facing prompt while the
     // user still sees their clean text. The gateway honors "usa la skill X".
-    const skillPrefix = options?.forcedSkillId
-      ? `Usa la skill \`${options.forcedSkillId}\` per soddisfare questa richiesta.\n\n`
+    const skillPrefix = options?.forcedSkillsId
+      ? `Usa la skill \`${options.forcedSkillsId}\` per soddisfare questa richiesta.\n\n`
       : "";
     // @ file context: the selected files' content is prepended to the hidden
     // prompt; the user keeps seeing their clean message.
@@ -829,7 +829,7 @@ export function ChatView({
     const promptWithReplyContext = [
       skillPrefix,
       contextPrefix,
-      "Rispondi al messaggio citato mantenendo il contesto.",
+      "Reply al messaggio citato mantenendo il contesto.",
       `Messaggio citato (${messageRoleLabel(activeReplyContext.role)}):`,
       activeReplyContext.preview,
       "",
@@ -950,7 +950,7 @@ export function ChatView({
         return { ...prev, [message.id]: { texts, index: texts.length - 1 } };
       });
     } catch (error) {
-      setPromptError(`Rigenerazione non riuscita: ${describeBridgeError(error)}`);
+      setPromptError(`Regeneratezione non riuscita: ${describeBridgeError(error)}`);
     } finally {
       cancelScheduledStreamingFrame();
       unlistenStream?.();
@@ -1039,7 +1039,7 @@ export function ChatView({
     }
   }
 
-  // Resolve once per thread whether it's a project (gates "Salva come obiettivo").
+  // Resolve once per thread whether it's a project (gates "Save as goal").
   useEffect(() => {
     let cancelled = false;
     void coreBridge.projectGoals(thread.threadId).then((d) => {
@@ -1120,26 +1120,26 @@ export function ChatView({
       return;
     }
     const continuationPrompt =
-      "Continua la risposta precedente dal punto in cui si e' interrotta. Non ripetere parti gia' scritte. Mantieni la stessa lingua e lo stesso formato.";
-    void submitPrompt(continuationPrompt, [], [], "Continua");
+      "Continue la risposta precedente dal punto in cui si e' interrotta. Non ripetere parti gia' scritte. Mantieni la stessa lingua e lo stesso formato.";
+    void submitPrompt(continuationPrompt, [], [], "Continue");
   }
 
   async function autoContinueAssistantResponse(
     assistantMessage: ChatMessage,
     baseMessages: ChatMessage[],
   ) {
-    const maxAutoContinuations = 2;
+    const maxAutoContinuetions = 2;
     let currentMessages = baseMessages;
     let currentMessage = assistantMessage;
 
     for (
       let attempt = 0;
-      attempt < maxAutoContinuations && isLikelyIncompleteMessage(currentMessage);
+      attempt < maxAutoContinuetions && isLikelyIncompleteMessage(currentMessage);
       attempt += 1
     ) {
       setAutoContinueMessageId(currentMessage.id);
       try {
-        currentMessages = await streamContinuationIntoMessage(
+        currentMessages = await streamContinuetionIntoMessage(
           currentMessage,
           currentMessages,
           attempt + 1,
@@ -1152,7 +1152,7 @@ export function ChatView({
         }
         currentMessage = updatedMessage;
       } catch (error) {
-        setPromptError(`Continuazione automatica non completata: ${describeBridgeError(error)}`);
+        setPromptError(`Continuezione automatica non completata: ${describeBridgeError(error)}`);
         break;
       } finally {
         setAutoContinueMessageId(null);
@@ -1162,7 +1162,7 @@ export function ChatView({
     return currentMessages;
   }
 
-  async function streamContinuationIntoMessage(
+  async function streamContinuetionIntoMessage(
     message: ChatMessage,
     baseMessages: ChatMessage[],
     attempt: number,
@@ -1264,8 +1264,8 @@ export function ChatView({
   function expandAssistantResponse(messageId: string) {
     askAboutAssistantResponse(
       messageId,
-      "Approfondisci",
-      "Approfondisci la risposta precedente con dettagli utili, senza ripetere l'intera risposta.",
+      "Expand",
+      "Expand la risposta precedente con dettagli utili, senza ripetere l'intera risposta.",
     );
   }
 
@@ -1490,11 +1490,11 @@ export function ChatView({
   // Header status (read-only): the REAL active model; the per-chat picker lives in
   // the composer. Channel threads run the read-only tool policy; in-app chats get
   // the full local toolset.
-  const headerModelLabel = activeModelInfo ? shortModelName(activeModelInfo.model) : "Modello";
+  const headerModelLabel = activeModelInfo ? shortModelName(activeModelInfo.model) : "Model";
   const headerModelMeta = activeModelInfo
     ? `${activeModelInfo.locality} · ${formatContextTokens(activeModelInfo.context_window)}`
     : "attivo";
-  const headerToolPolicy = thread.source ? "Solo lettura (canale)" : "Strumenti locali completi";
+  const headerToolPolicy = thread.source ? "Solo lettura (canale)" : "Tools locali completi";
 
   return (
     <section
@@ -1539,8 +1539,8 @@ export function ChatView({
         <button
           className={`workbench-toggle${artifactsOpen ? " active" : ""}`}
           type="button"
-          title={artifactsOpen ? "Chiudi pannello" : "Pannello"}
-          aria-label={artifactsOpen ? "Chiudi pannello" : "Apri pannello"}
+          title={artifactsOpen ? "Close panel" : "Pannello"}
+          aria-label={artifactsOpen ? "Close panel" : "Apri pannello"}
           aria-expanded={panelMenuOpen}
           onClick={() => {
             // Toggle: open → close the panel; closed → open the view dropdown.
@@ -1651,7 +1651,7 @@ export function ChatView({
                   />
                   <div className="message-edit-actions">
                     <button type="button" onClick={cancelEditMessage}>
-                      Annulla
+                      Cancel
                     </button>
                     <button
                       type="button"
@@ -1659,7 +1659,7 @@ export function ChatView({
                       disabled={!editingText.trim()}
                       onClick={saveEditedMessage}
                     >
-                      Salva e invia
+                      Save e invia
                     </button>
                   </div>
                 </div>
@@ -1707,8 +1707,8 @@ export function ChatView({
                   }
                   canReply={displayMessage.role !== "system" && Boolean(displayMessage.text)}
                   canEdit={displayMessage.role === "user" && Boolean(displayMessage.text)}
-                  canCreateAutomation={assistantTextMessage}
-                  canCreateTask={assistantTextMessage}
+                  canCreateteAutomation={assistantTextMessage}
+                  canCreateteTask={assistantTextMessage}
                   canExpand={assistantTextMessage}
                   canSaveToMemory={assistantOperationalMessage}
                   canSaveAsGoal={assistantOperationalMessage && threadIsProject}
@@ -1719,20 +1719,20 @@ export function ChatView({
                   savedToMemory={Boolean(displayMessage.savedMemoryRef)}
                   onCopy={() => copyMessageText(displayMessage)}
                   onContinue={() => continueAssistantResponse(displayMessage.id)}
-                  onCreateAutomation={() => void createAutomationFromMessage(displayMessage)}
-                  onCreateTask={() => void createTaskFromMessage(displayMessage)}
+                  onCreateteAutomation={() => void createAutomationFromMessage(displayMessage)}
+                  onCreateteTask={() => void createTaskFromMessage(displayMessage)}
                   onExpand={() => expandAssistantResponse(displayMessage.id)}
                   onExplainCode={() =>
                     askAboutAssistantResponse(
                       displayMessage.id,
-                      "Spiega codice",
+                      "Explain code",
                       "Spiega il codice precedente in modo breve e operativo.",
                     )
                   }
                   onExplainDiagram={() =>
                     askAboutAssistantResponse(
                       displayMessage.id,
-                      "Spiega diagramma",
+                      "Explain diagram",
                       "Spiega il diagramma precedente in modo breve e operativo.",
                     )
                   }
@@ -1740,7 +1740,7 @@ export function ChatView({
                   onImproveCode={() =>
                     askAboutAssistantResponse(
                       displayMessage.id,
-                      "Migliora codice",
+                      "Improve code",
                       "Migliora il codice precedente mantenendolo breve e includendo un blocco markdown fenced.",
                     )
                   }
@@ -1750,7 +1750,7 @@ export function ChatView({
                   onReviseDiagram={() =>
                     askAboutAssistantResponse(
                       displayMessage.id,
-                      "Modifica diagramma",
+                      "Edit diagram",
                       "Proponi una versione migliorata del diagramma precedente in un blocco markdown fenced mermaid.",
                     )
                   }
@@ -1872,17 +1872,17 @@ export function ChatView({
             />
           )}
 
-          <InlineApprovalPanel
-            approvals={activeApprovals}
+          <InlineApprovelPanel
+            approvals={activeApprovels}
             busyId={approvalBusyId}
             session={visibleComputerSession}
-            onApprove={onApproveApproval}
-            onReject={onRejectApproval}
+            onApprove={onApproveApprovel}
+            onReject={onRejectApprovel}
           />
 
           {showComputerActivity && (
             <LocalComputerCard
-              approvalsCount={activeApprovals.length}
+              approvalsCount={activeApprovels.length}
               collapsed={computerCardCollapsed}
               smokeTestError={smokeTestError}
               smokeTestRunning={smokeTestRunning}
@@ -2165,8 +2165,8 @@ function formatRuntimeStatus(status: string | undefined) {
 
 function MessageActionBar({
   canContinue,
-  canCreateAutomation,
-  canCreateTask,
+  canCreateteAutomation,
+  canCreateteTask,
   canExpand,
   canRegenerate,
   canReply,
@@ -2183,8 +2183,8 @@ function MessageActionBar({
   onCopy,
   onEdit,
   onContinue,
-  onCreateAutomation,
-  onCreateTask,
+  onCreateteAutomation,
+  onCreateteTask,
   onExpand,
   onExplainCode,
   onExplainDiagram,
@@ -2197,8 +2197,8 @@ function MessageActionBar({
   onSaveAsGoal,
 }: {
   canContinue: boolean;
-  canCreateAutomation: boolean;
-  canCreateTask: boolean;
+  canCreateteAutomation: boolean;
+  canCreateteTask: boolean;
   canExpand: boolean;
   canRegenerate: boolean;
   canReply: boolean;
@@ -2215,8 +2215,8 @@ function MessageActionBar({
   onCopy: () => void;
   onEdit: () => void;
   onContinue: () => void;
-  onCreateAutomation: () => void;
-  onCreateTask: () => void;
+  onCreateteAutomation: () => void;
+  onCreateteTask: () => void;
   onExpand: () => void;
   onExplainCode: () => void;
   onExplainDiagram: () => void;
@@ -2238,8 +2238,8 @@ function MessageActionBar({
     canRegenerate ||
     canSaveToMemory ||
     canSaveAsGoal ||
-    canCreateTask ||
-    canCreateAutomation ||
+    canCreateteTask ||
+    canCreateteAutomation ||
     contentKind === "code" ||
     contentKind === "diagram";
 
@@ -2272,13 +2272,13 @@ function MessageActionBar({
   return (
     <div className="message-action-bar" aria-label="Azioni messaggio">
       {canEdit && (
-        <button type="button" onClick={onEdit} aria-label="Modifica messaggio" title="Modifica">
+        <button type="button" onClick={onEdit} aria-label="Edit messaggio" title="Edit">
           <Pencil size={14} />
           <span>{t("common.edit")}</span>
         </button>
       )}
       {canReply && (
-        <button type="button" onClick={onReply} aria-label="Rispondi al messaggio" title="Rispondi">
+        <button type="button" onClick={onReply} aria-label="Reply al messaggio" title="Reply">
           <Reply size={14} />
           <span>{t("chat.action.reply")}</span>
         </button>
@@ -2360,7 +2360,7 @@ function MessageActionBar({
                   onClick={onSaveToMemory}
                 >
                   <BookMarked size={14} />
-                  <span>{savedToMemory ? "Salvato in memoria" : "Salva in memoria"}</span>
+                  <span>{savedToMemory ? "Saveto in memoria" : "Save in memoria"}</span>
                 </button>
               )}
               {canSaveAsGoal && (
@@ -2369,26 +2369,26 @@ function MessageActionBar({
                   <span>{t("chat.action.saveAsGoal")}</span>
                 </button>
               )}
-              {canCreateTask && (
+              {canCreateteTask && (
                 <button
                   className={linkedTask ? "active" : ""}
                   type="button"
                   role="menuitem"
-                  onClick={onCreateTask}
+                  onClick={onCreateteTask}
                 >
                   <ListTodo size={14} />
-                  <span>{linkedTask ? "Task creato" : "Crea task"}</span>
+                  <span>{linkedTask ? "Task creato" : "Create task"}</span>
                 </button>
               )}
-              {canCreateAutomation && (
+              {canCreateteAutomation && (
                 <button
                   className={linkedAutomation ? "active" : ""}
                   type="button"
                   role="menuitem"
-                  onClick={onCreateAutomation}
+                  onClick={onCreateteAutomation}
                 >
                   <WandSparkles size={14} />
-                  <span>{linkedAutomation ? "Automazione proposta" : "Crea automazione"}</span>
+                  <span>{linkedAutomation ? "Automazione proposta" : "Create automazione"}</span>
                 </button>
               )}
               <div className="message-action-menu-feedback" aria-label="Feedback risposta">
@@ -2533,7 +2533,7 @@ function toMessageAttachment(attachment: ChatAttachmentInput): ChatAttachment {
 }
 
 function isUserVisibleComputerEvent(item: ComputerSession["timeline"][number]) {
-  return item.title !== "Sessione locale pronta" && item.id !== "bridge-unavailable";
+  return item.title !== "Local session ready" && item.id !== "bridge-unavailable";
 }
 
 type OperationalPlanItem = {
@@ -2722,7 +2722,7 @@ const COMPOSIO_RECONNECT_RE = /‹‹COMPOSIO_RECONNECT››([\s\S]*?)‹‹\/C
 // instead of listing them in prose, and the click sends the answer back.
 const CHOICES_RE = /‹‹CHOICES››([\s\S]*?)‹‹\/CHOICES››/;
 // Plan-mode: the model proposes a plan and STOPS; the card gates execution behind
-// Accetta / Modifica (the answer becomes the next user message).
+// Accetta / Edit (the answer becomes the next user message).
 // Tolerant of a MISSING close (`…|$`): some models open the marker but emit their native
 // tool-call end-token instead of `‹‹/…››`, leaving it unterminated. The JSON payload is
 // self-delimiting, so capture-to-end still parses correctly.
@@ -2777,7 +2777,7 @@ interface ChoicePrompt {
 }
 
 /** A plan the model proposes BEFORE executing (plan-mode): the card gates execution
- *  behind Accetta / Modifica. */
+ *  behind Accetta / Edit. */
 interface PlanProposal {
   summary: string;
   steps: string[];
@@ -2914,7 +2914,7 @@ function MessageArtifacts({
 }
 
 /** One artifact card row. For an updated file it loads the "+N −M" diff counts
- *  and shows them on the row (Claude Code's "Modificato file +N −M"). */
+ *  and shows them on the row (Claude Code's "Modified file +N −M"). */
 function ArtifactCardRow({
   artifact,
   expanded,
@@ -2981,7 +2981,7 @@ function ArtifactCardRow({
         <button
           type="button"
           className="artifact-expand"
-          aria-label={expanded ? "Comprimi anteprima" : "Espandi anteprima"}
+          aria-label={expanded ? "Collapse anteprima" : "Espandi anteprima"}
           onClick={onToggle}
         >
           <ChevronRight
@@ -2996,7 +2996,7 @@ function ArtifactCardRow({
 }
 
 /** The Artefatti panel, rendered IDENTICALLY to the chat: the same artifact cards
- *  (icon · name · Modificato · +N −M diff · download · expand → inline preview), just
+ *  (icon · name · Modified · +N −M diff · download · expand → inline preview), just
  *  as a LIST of all the conversation's artifacts. */
 function ArtifactsList({
   artifacts,
@@ -3197,17 +3197,17 @@ type WorkbenchTab = "files" | "artifacts" | "memoria" | "goals" | "activity" | "
 const PANEL_VIEWS: { key: WorkbenchTab; label: string; icon: typeof FileText }[] = [
   { key: "files", label: "File", icon: FolderOpen },
   { key: "artifacts", label: "Artefatti", icon: FileText },
-  { key: "memoria", label: "Memoria", icon: Share2 },
+  { key: "memoria", label: "Memory", icon: Share2 },
   { key: "goals", label: "Obiettivi", icon: Target },
-  { key: "activity", label: "Attività", icon: Clock3 },
+  { key: "activity", label: "Activity", icon: Clock3 },
   { key: "plan", label: "Piano", icon: ListTodo },
 ];
 const PANEL_VIEW_LABEL: Record<WorkbenchTab, string> = {
   files: "File",
   artifacts: "Artefatti",
-  memoria: "Memoria",
+  memoria: "Memory",
   goals: "Obiettivi",
-  activity: "Attività",
+  activity: "Activity",
   plan: "Piano",
 };
 
@@ -3223,7 +3223,7 @@ const GRAPH_KIND_STYLE: Record<string, { fill: string; r: number; label: string 
   decision: { fill: "#0ea5e9", r: 11, label: "Decisione" },
   file: { fill: "#10b981", r: 8, label: "File" },
   alternative: { fill: "#fb7185", r: 7, label: "Alternativa scartata" },
-  fact: { fill: "#f59e0b", r: 8, label: "Fatto" },
+  fact: { fill: "#f59e0b", r: 8, label: "Done" },
   preference: { fill: "#a78bfa", r: 8, label: "Preferenza" },
   wiki: { fill: "#0d9488", r: 10, label: "Pagina wiki" },
   entity: { fill: "#94a3b8", r: 8, label: "Entità" },
@@ -3360,7 +3360,7 @@ function GoalsPanel({
           onClick={() => add(newGoal)}
           disabled={busy || !newGoal.trim()}
         >
-          Aggiungi obiettivo
+          Add obiettivo
         </button>
         <button className="goals-btn" onClick={suggest} disabled={suggesting || busy}>
           <span className="goals-spark" aria-hidden="true">
@@ -3397,7 +3397,7 @@ function GoalsPanel({
                         onClick={() => add(d)}
                         disabled={busy || !d.trim()}
                       >
-                        Aggiungi
+                        Add
                       </button>
                     </div>
                   </div>
@@ -3630,7 +3630,7 @@ export function MemoryGraphPanel({
         <Share2 size={28} />
         <p>Memory unavailable: {error}</p>
         <button type="button" className="ghost-button" onClick={reload}>
-          Riprova
+          Retry
         </button>
       </div>
     );
@@ -3734,10 +3734,10 @@ export function MemoryGraphPanel({
                           .finally(() => setSavingWiki(false));
                       }}
                     >
-                      {savingWiki ? "Salvo…" : "Salva"}
+                      {savingWiki ? "Salvo…" : "Save"}
                     </button>
                     <button type="button" className="ghost-button" onClick={() => setEditingPath(null)}>
-                      Annulla
+                      Cancel
                     </button>
                   </div>
                 </article>
@@ -3752,7 +3752,7 @@ export function MemoryGraphPanel({
                         setEditBody(page.body);
                       }}
                     >
-                      Modifica
+                      Edit
                     </button>
                   </div>
                   <RichMessage text={page.body} />
@@ -3873,11 +3873,11 @@ export function MemoryGraphPanel({
                       .catch(() => {});
                   }}
                 >
-                  Elimina dalla memoria
+                  Delete dalla memoria
                 </button>
               )}
               <button type="button" className="ghost-button" onClick={() => setSelected(null)}>
-                Chiudi
+                Close
               </button>
             </div>
           </div>
@@ -3958,7 +3958,7 @@ function Workbench({
     document.addEventListener("mousemove", onMove);
     document.addEventListener("mouseup", onUp);
   }, []);
-  // Background/scheduled tasks (Attività tab), fetched lazily when the tab opens.
+  // Background/scheduled tasks (Activity tab), fetched lazily when the tab opens.
   const [tasks, setTasks] = useState<CoreTaskQueueSnapshot | null>(null);
   const [tasksLoading, setTasksLoading] = useState(false);
   // Project goals (Obiettivi tab): goals + promotable decisions, resolved from the thread.
@@ -4040,7 +4040,7 @@ function Workbench({
       cancelled = true;
     };
   }, [open, threadId]);
-  // Load the task queue when the Attività tab is shown (and refresh on re-open).
+  // Load the task queue when the Activity tab is shown (and refresh on re-open).
   useEffect(() => {
     if (!open || tab !== "activity") return;
     let cancelled = false;
@@ -4274,7 +4274,7 @@ function Workbench({
                       <span className="wf-name" title={item.goal}>
                         {item.goal || item.kind}
                       </span>
-                      <small>{item.blocked_reason ? "bloccato" : item.status}</small>
+                      <small>{item.blocked_reason ? "blocked" : item.status}</small>
                       <button
                         type="button"
                         className="wf-cancel"
@@ -4486,7 +4486,7 @@ function ArtifactsPanel({
           >
             {expanded ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
           </button>
-          <button type="button" aria-label="Chiudi" onClick={onClose}>
+          <button type="button" aria-label="Close" onClick={onClose}>
             <X size={16} />
           </button>
         </header>
@@ -4604,7 +4604,7 @@ function ArtifactsPanel({
                 />
                 <div className="artifact-edit-actions">
                   <button type="button" onClick={() => setEditing(false)} disabled={saving}>
-                    Annulla
+                    Cancel
                   </button>
                   <button
                     type="button"
@@ -4612,7 +4612,7 @@ function ArtifactsPanel({
                     onClick={() => void saveEdit()}
                     disabled={saving}
                   >
-                    {saving ? "Salvo…" : "Salva versione"}
+                    {saving ? "Salvo…" : "Save versione"}
                   </button>
                 </div>
               </div>
@@ -4659,7 +4659,7 @@ function ArtifactPreviewBody({
         <iframe
           className="artifact-preview-frame"
           src={`${preview.url}#toolbar=0&navpanes=0&view=FitH`}
-          title="Anteprima PDF"
+          title="Preview PDF"
         />
       );
     case "markdown":
@@ -4675,11 +4675,11 @@ function ArtifactPreviewBody({
     case "csv":
       return <ArtifactCsvTable text={preview.text} />;
     case "error":
-      return <p className="artifacts-preview-note">Anteprima non disponibile.</p>;
+      return <p className="artifacts-preview-note">Preview non disponibile.</p>;
     default:
       return (
         <p className="artifacts-preview-note">
-          Anteprima non disponibile per questo tipo. Usa “Scarica”.
+          Preview non disponibile per questo tipo. Usa “Download”.
         </p>
       );
   }
@@ -4725,7 +4725,7 @@ function MessageActivity({ text, live = false }: { text: string; live?: boolean 
   const steps = useMemo(() => parseActivitySteps(text), [text]);
   const [open, setOpen] = useState(false);
   if (steps.length === 0) return null;
-  const countLabel = `Attività · ${steps.length} ${steps.length === 1 ? "passo" : "passi"}`;
+  const countLabel = `Activity · ${steps.length} ${steps.length === 1 ? "passo" : "passi"}`;
   const collapsedLabel = live ? steps[steps.length - 1] : countLabel;
   return (
     <div className={`msg-activity${open ? " open" : ""}${live ? " live" : ""}`}>
@@ -4849,7 +4849,7 @@ function parseComposioConfirm(text: string): {
       /* malformed → just hide it */
     }
   }
-  // Plan proposal (plan-mode): steps + Accetta/Modifica gate.
+  // Plan proposal (plan-mode): steps + Accetta/Edit gate.
   let planPropose: PlanProposal | null = null;
   const ppMatch = text.match(PLAN_PROPOSE_RE);
   if (ppMatch) {
@@ -4997,7 +4997,7 @@ function AssistantMessageBody({
 }
 
 /** Plan-mode card: the model proposed a plan and stopped. Accetta sends the approval
- *  (the agent executes next turn); Modifica reveals a box to request changes. The
+ *  (the agent executes next turn); Edit reveals a box to request changes. The
  *  answer becomes the next user message. */
 /** Inline affordance: the model proposed the project's objective(s) — save them with one
  * click (content-contextual via a model-emitted marker, not keyword parsing). Resolves the
@@ -5043,10 +5043,10 @@ function GoalProposeCard({ objectives, threadId }: { objectives: string[]; threa
             >
               {saved.has(i) ? (
                 <>
-                  <Check size={13} /> Salvato
+                  <Check size={13} /> Saveto
                 </>
               ) : (
-                "Salva"
+                "Save"
               )}
             </button>
           </div>
@@ -5098,14 +5098,14 @@ function PlanProposeCard({
           />
           <div className="plan-card-actions">
             <button type="button" className="plan-btn ghost" onClick={() => setPhase("idle")}>
-              Annulla
+              Cancel
             </button>
             <button
               type="button"
               className="plan-btn primary"
               disabled={!feedback.trim()}
               onClick={() => {
-                setDecision("Modifica richiesta");
+                setDecision("Edit richiesta");
                 setPhase("sent");
                 onAnswer(`Rivedi il piano prima di procedere: ${feedback.trim()}`);
               }}
@@ -5128,7 +5128,7 @@ function PlanProposeCard({
             Accetta ed esegui
           </button>
           <button type="button" className="plan-btn ghost" onClick={() => setPhase("editing")}>
-            Modifica / Ridiscuti
+            Edit / Ridiscuti
           </button>
         </div>
       )}
@@ -5178,7 +5178,7 @@ function PlanProgressCard({ steps }: { steps: PlanStep[] }) {
 }
 
 /** Single/multi-choice question card. Single: each option is a button that sends the
- *  answer on click. Multi: toggle chips + a Conferma button that sends the joined
+ *  answer on click. Multi: toggle chips + a Confirm button that sends the joined
  *  selection. The answer becomes the next user message (like Claude Code's choices). */
 function ChoicesCard({
   prompt,
@@ -5234,7 +5234,7 @@ function ChoicesCard({
           disabled={picked.length === 0}
           onClick={() => send(picked)}
         >
-          Conferma{picked.length > 0 ? ` (${picked.length})` : ""}
+          Confirm{picked.length > 0 ? ` (${picked.length})` : ""}
         </button>
       )}
     </div>
@@ -5284,12 +5284,12 @@ const CONNECT_KIND_META: Record<
   { icon: typeof Plug; label: string; cta: string }
 > = {
   mcp: { icon: Plug, label: "Server MCP", cta: "Connetti" },
-  skill: { icon: Puzzle, label: "Skill", cta: "Installa" },
+  skill: { icon: Puzzle, label: "Skills", cta: "Installa" },
   composio: { icon: Cloud, label: "Servizio cloud", cta: "Collega" },
 };
 
 /** A single connectable suggestion. MCP servers with required params expand an
- *  inline form (mirrors Settings → Catalogo MCP); skills install directly;
+ *  inline form (mirrors Settings → MCP catalog); skills install directly;
  *  Composio opens the OAuth consent in the browser. */
 function ConnectSuggestRow({
   item,
@@ -5368,14 +5368,14 @@ function ConnectSuggestRow({
     }
   };
 
-  const installSkill = async () => {
+  const installSkills = async () => {
     if (!item.slug) return;
     setStatus("running");
     setNote(null);
     try {
       await coreBridge.catalogInstall(item.slug);
       setStatus("done");
-      setNote("Skill installata. Riprova la richiesta.");
+      setNote("Skills installata. Retry la richiesta.");
       await markConnected();
     } catch (error) {
       setStatus("error");
@@ -5400,7 +5400,7 @@ function ConnectSuggestRow({
       await markConnected();
     } else {
       setStatus("error");
-      setNote("Connessione non completata. Riprova, o collega da Impostazioni → Connettori.");
+      setNote("Connessione non completata. Retry, o collega da Impostazioni → Connectors.");
     }
   };
 
@@ -5413,7 +5413,7 @@ function ConnectSuggestRow({
       }
       void connectMcp();
     } else if (item.kind === "skill") {
-      void installSkill();
+      void installSkills();
     } else {
       void linkComposio();
     }
@@ -5648,7 +5648,7 @@ function ComposioReconnectCard({ slug }: { slug: string }) {
       setNote(`${name} ricollegato.`);
     } else {
       setStatus("error");
-      setNote("Riconnessione non completata. Riprova, o usa Impostazioni → Connettori.");
+      setNote("Riconnessione non completata. Retry, o usa Impostazioni → Connectors.");
     }
   };
 
@@ -5796,8 +5796,8 @@ function ComposioConfirmCard({
       setStatus("done");
       setNote(
         scope === "always" && !isMcp
-          ? `Fatto. D'ora in poi «${title}» verrà eseguito senza chiedere.`
-          : "Fatto.",
+          ? `Done. D'ora in poi «${title}» verrà eseguito senza chiedere.`
+          : "Done.",
       );
     } catch (error) {
       setStatus("error");
@@ -5830,7 +5830,7 @@ function ComposioConfirmCard({
     <div className={`cmp-confirm${destructive ? " destructive" : ""}`}>
       <div className="cmp-confirm-head">
         {destructive ? <AlertTriangle size={15} /> : <ShieldCheck size={15} />}
-        <strong>{destructive ? "Conferma: azione che ELIMINA dati" : "Conferma azione"}</strong>
+        <strong>{destructive ? "Confirm: azione che ELIMINA dati" : "Confirm azione"}</strong>
         <span className="cmp-confirm-name">{title}</span>
       </div>
       {destructive && (
@@ -5930,14 +5930,14 @@ function ComposioConfirmCard({
   );
 }
 
-function InlineApprovalPanel({
+function InlineApprovelPanel({
   approvals,
   busyId,
   onApprove,
   onReject,
   session,
 }: {
-  approvals: ApprovalItem[];
+  approvals: ApprovelItem[];
   busyId: string | null;
   onApprove: (
     approvalId: string,
@@ -5975,7 +5975,7 @@ function InlineApprovalPanel({
     : approval.reason;
   const busy = busyId === approval.id;
   return (
-    <article className="inline-approval-panel" aria-label="Conferma richiesta">
+    <article className="inline-approval-panel" aria-label="Confirm richiesta">
       <header>
         <span className={`approval-dot ${approval.risk}`}>
           <AlertCircle size={15} />
@@ -6011,7 +6011,7 @@ function InlineApprovalPanel({
 
       <div className="approval-scope-note">
         <span>Confirmation scope</span>
-        <div className="approval-scope-options" aria-label="Ambito conferma">
+        <div className="approval-scope-options" aria-label="Confirmation scope">
           {scopeOptions.map((option) => (
             <button
               key={option}
@@ -6025,7 +6025,7 @@ function InlineApprovalPanel({
         </div>
         <small>
           {scope === "always"
-            ? "Salva una regola locale per i domini coinvolti in questo task."
+            ? "Save una regola locale per i domini coinvolti in questo task."
             : "Vale solo per questa esecuzione del task."}
         </small>
       </div>
@@ -6056,7 +6056,7 @@ function InlineApprovalPanel({
           type="button"
           onClick={() => onReject(approval.id)}
         >
-          Rifiuta
+          Reject
         </button>
         <button
           className="primary-button"
@@ -6071,7 +6071,7 @@ function InlineApprovalPanel({
             })
           }
         >
-          {busy ? "Continuo..." : "Approva e continua"}
+          {busy ? "Continuo..." : "Approve e continua"}
         </button>
       </footer>
     </article>
@@ -6113,11 +6113,11 @@ function LocalComputerCard({
     session.activeSurface === "browser"
       ? "Browser"
       : session.activeSurface === "shell"
-        ? "Terminale"
+        ? "Terminal"
         : "Computer";
   const activityLabel =
-    planStepRunning || smokeTestRunning ? "in esecuzione" : "pronto";
-  const hasApproval = approvalsCount > 0;
+    planStepRunning || smokeTestRunning ? "running" : "pronto";
+  const hasApprovel = approvalsCount > 0;
   const hasWaitingStep = session.timeline.some((item) => item.status === "waiting");
 
   return (
@@ -6132,7 +6132,7 @@ function LocalComputerCard({
           <strong>Local computer</strong>
           <span className="computer-live-badge">
             <span className="computer-live-dot" aria-hidden="true" />
-            {activityLabel === "in esecuzione" ? "vista live" : surfaceLabel}
+            {activityLabel === "running" ? "vista live" : surfaceLabel}
           </span>
         </button>
         <div className="computer-toolbar-meta">
@@ -6146,13 +6146,13 @@ function LocalComputerCard({
           <span>
             {session.progressCurrent} / {session.progressTotal}
           </span>
-          {hasApproval ? (
+          {hasApprovel ? (
             <button
               className="computer-inline-action attention"
               type="button"
               onClick={onOpenTasks}
             >
-              Conferma richiesta
+              Confirm richiesta
             </button>
           ) : (
             <button
@@ -6164,7 +6164,7 @@ function LocalComputerCard({
               {planStepRunning
                 ? "Esecuzione"
                 : hasWaitingStep
-                  ? "Continua"
+                  ? "Continue"
                   : "Nessuna azione"}
             </button>
           )}
@@ -6247,7 +6247,7 @@ function LocalComputerCard({
                     ? "Esegui piano"
                     : "Piano fermo"}
               </button>
-              {hasApproval && (
+              {hasApprovel && (
                 <button
                   className="smoke-test-button attention"
                   type="button"
@@ -6321,7 +6321,7 @@ function ComputerDetailPanel({
           >
             {fullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
           </button>
-          <button className="icon-button" type="button" aria-label="Chiudi computer" onClick={onClose}>
+          <button className="icon-button" type="button" aria-label="Close computer" onClick={onClose}>
             <X size={18} />
           </button>
         </div>
@@ -6512,7 +6512,7 @@ function Composer({
     options?: {
       model?: string;
       mode?: string;
-      forcedSkillId?: string;
+      forcedSkillsId?: string;
       contextText?: string;
       images?: string[];
     },
@@ -6561,10 +6561,10 @@ function Composer({
       /* models unavailable → selector hidden */
     }
   }
-  const [skills, setSkills] = useState<SkillSummary[]>([]);
-  const [forcedSkill, setForcedSkill] = useState<SkillSummary | null>(null);
-  const [skillMenuOpen, setSkillMenuOpen] = useState(false);
-  const [skillQuery, setSkillQuery] = useState("");
+  const [skills, setSkillss] = useState<SkillsSummary[]>([]);
+  const [forcedSkills, setForcedSkills] = useState<SkillsSummary | null>(null);
+  const [skillMenuOpen, setSkillsMenuOpen] = useState(false);
+  const [skillQuery, setSkillsQuery] = useState("");
   const [improving, setImproving] = useState(false);
   const [improveError, setImproveError] = useState<string | null>(null);
   // Click outside the toolbar closes any open composer menu (⊕ add / folder / skill /
@@ -6576,7 +6576,7 @@ function Composer({
       if (target && target.closest(".composer-toolbar")) return;
       setAddMenuOpen(false);
       setFileMenuOpen(false);
-      setSkillMenuOpen(false);
+      setSkillsMenuOpen(false);
       setModelMenuOpen(false);
     };
     document.addEventListener("mousedown", onDown);
@@ -6629,7 +6629,7 @@ function Composer({
       try {
         const response = await coreBridge.skills();
         if (cancelled) return;
-        setSkills((response.skills ?? []).filter((skill) => skill.enabled));
+        setSkillss((response.skills ?? []).filter((skill) => skill.enabled));
       } catch {
         /* skills unavailable → picker hidden */
       }
@@ -6800,7 +6800,7 @@ function Composer({
     ? linkedFolder.replace(/\/+$/, "").split("/").pop() || linkedFolder
     : null;
 
-  const filteredSkills = skills.filter((skill) => {
+  const filteredSkillss = skills.filter((skill) => {
     const q = skillQuery.trim().toLowerCase();
     if (!q) return true;
     return (
@@ -6856,7 +6856,7 @@ function Composer({
     const effectivePrompt = prompt || "Descrivi questa immagine.";
     // null = Auto (no override → default role); else the composite "<provider>::<model>".
     const modelOverride = selectedModel ?? undefined;
-    const forcedSkillId = forcedSkill?.id;
+    const forcedSkillsId = forcedSkills?.id;
     const contextText = buildContextText();
     setValue("");
     setAttachments([]);
@@ -6867,7 +6867,7 @@ function Composer({
     onSubmit(effectivePrompt, attachmentInputs, {
       model: modelOverride,
       mode: chatMode === "agent" ? undefined : chatMode,
-      forcedSkillId,
+      forcedSkillsId,
       contextText,
       images: images.length > 0 ? images : undefined,
     });
@@ -6990,7 +6990,7 @@ function Composer({
             <strong>Reply to {messageRoleLabel(replyContext.role)}</strong>
             <span>{replyContext.preview}</span>
           </div>
-          <button type="button" aria-label="Rimuovi citazione" onClick={onClearReply}>
+          <button type="button" aria-label="Remove citazione" onClick={onClearReply}>
             <X size={14} />
           </button>
         </div>
@@ -7012,7 +7012,7 @@ function Composer({
               <img src={image.dataUrl} alt={image.name} />
               <button
                 type="button"
-                aria-label={`Rimuovi ${image.name}`}
+                aria-label={`Remove ${image.name}`}
                 onClick={() => removeComposerImage(image.id)}
               >
                 <X size={12} />
@@ -7031,7 +7031,7 @@ function Composer({
               {!attachment.localPath && <small>path non disponibile</small>}
               <button
                 type="button"
-                aria-label={`Rimuovi ${attachment.name}`}
+                aria-label={`Remove ${attachment.name}`}
                 onClick={() => removeAttachment(attachment.id)}
               >
                 <X size={13} />
@@ -7040,11 +7040,11 @@ function Composer({
           ))}
         </div>
       )}
-      {forcedSkill && (
-        <div className="composer-forced-skill" aria-label="Skill forzata per il prossimo messaggio">
+      {forcedSkills && (
+        <div className="composer-forced-skill" aria-label="Skills forzata per il prossimo messaggio">
           <Puzzle size={13} />
-          <span>{forcedSkill.name}</span>
-          <button type="button" aria-label="Rimuovi skill" onClick={() => setForcedSkill(null)}>
+          <span>{forcedSkills.name}</span>
+          <button type="button" aria-label="Remove skill" onClick={() => setForcedSkills(null)}>
             <X size={12} />
           </button>
         </div>
@@ -7057,7 +7057,7 @@ function Composer({
               <span>{file.path.split("/").pop()}</span>
               <button
                 type="button"
-                aria-label={`Rimuovi ${file.path}`}
+                aria-label={`Remove ${file.path}`}
                 onClick={() =>
                   setContextFiles((current) => current.filter((item) => item.path !== file.path))
                 }
@@ -7084,19 +7084,19 @@ function Composer({
           <div className="composer-pop-wrap">
             <button
               className={`composer-add-button${
-                addMenuOpen || contextFiles.length > 0 || linkedFolder || forcedSkill
+                addMenuOpen || contextFiles.length > 0 || linkedFolder || forcedSkills
                   ? " active"
                   : ""
               }`}
               type="button"
               disabled={disabled}
-              aria-label="Aggiungi"
+              aria-label="Add"
               aria-expanded={addMenuOpen}
-              title="Aggiungi: file, cartella, skill, migliora"
+              title="Add: file, cartella, skill, migliora"
               onClick={() => {
                 setAddMenuOpen((open) => !open);
                 setFileMenuOpen(false);
-                setSkillMenuOpen(false);
+                setSkillsMenuOpen(false);
                 setModelMenuOpen(false);
               }}
             >
@@ -7105,7 +7105,7 @@ function Composer({
             {addMenuOpen && (
               <div className="composer-pop composer-add-pop" role="menu">
                 <div className="composer-add-eyebrow">
-                  Aggiungi agenti, contesto, strumenti
+                  Add agenti, contesto, strumenti
                 </div>
                 {CHAT_MODES.filter((m) => !m.projectOnly || linkedFolder != null).map((m) => {
                   const I = m.icon;
@@ -7155,14 +7155,14 @@ function Composer({
                   <button
                     type="button"
                     role="menuitem"
-                    className={forcedSkill ? "active" : ""}
+                    className={forcedSkills ? "active" : ""}
                     onClick={() => {
                       setAddMenuOpen(false);
-                      setSkillMenuOpen(true);
+                      setSkillsMenuOpen(true);
                     }}
                   >
                     <Puzzle size={16} />
-                    <span>{forcedSkill ? `Skill · ${forcedSkill.name}` : "Usa una skill"}</span>
+                    <span>{forcedSkills ? `Skills · ${forcedSkills.name}` : "Usa una skill"}</span>
                   </button>
                 )}
                 <button
@@ -7276,23 +7276,23 @@ function Composer({
                       type="text"
                       placeholder="Cerca skill"
                       value={skillQuery}
-                      onChange={(event) => setSkillQuery(event.target.value)}
+                      onChange={(event) => setSkillsQuery(event.target.value)}
                     />
                   </div>
                   <div className="composer-pop-list">
-                    {filteredSkills.length === 0 ? (
+                    {filteredSkillss.length === 0 ? (
                       <p className="composer-pop-empty">Nessuna skill</p>
                     ) : (
-                      filteredSkills.map((skill) => (
+                      filteredSkillss.map((skill) => (
                         <button
                           key={skill.id}
                           type="button"
                           role="menuitem"
-                          className={forcedSkill?.id === skill.id ? "active" : ""}
+                          className={forcedSkills?.id === skill.id ? "active" : ""}
                           onClick={() => {
-                            setForcedSkill(skill);
-                            setSkillMenuOpen(false);
-                            setSkillQuery("");
+                            setForcedSkills(skill);
+                            setSkillsMenuOpen(false);
+                            setSkillsQuery("");
                             textareaRef.current?.focus();
                           }}
                         >
@@ -7319,7 +7319,7 @@ function Composer({
                     return !open;
                   });
                   setModelQuery("");
-                  setSkillMenuOpen(false);
+                  setSkillsMenuOpen(false);
                 }}
               >
                 <span className="composer-model-chip-dot" aria-hidden="true" />

@@ -54,17 +54,17 @@ import {
   type ProviderView,
   type McpRegistryServer,
   type CatalogPreview,
-  type CatalogSkill,
+  type CatalogSkills,
   type ChannelIdentity,
   type ConnectorToolRun,
-  type SkillCatalogResponse,
+  type SkillsCatalogResponse,
   type RoleView,
   type RoutingDecision,
   type TimezoneInfo,
-  type SkillDetail,
-  type SkillFileNode,
-  type SkillSecurityReport,
-  type SkillsResponse,
+  type SkillsDetail,
+  type SkillsFileNode,
+  type SkillsSecurityReport,
+  type SkillssResponse,
   type SystemStatus,
 } from "../lib/coreBridge";
 import { useSetting } from "../lib/settingsStore";
@@ -82,7 +82,7 @@ import {
   type ThemeName,
 } from "../lib/accent";
 
-// Literal neutrals per surface theme — for the mini-previews in the Aspetto picker
+// Literal neutrals per surface theme — for the mini-previews in the Appearance picker
 // (the live CSS vars only reflect the ACTIVE theme, so previews need the raw values).
 const THEME_SWATCH: Record<ThemeName, { bg: string; panel: string; line: string }> = {
   freddo: { bg: "#fcfcfd", panel: "#f4f5f7", line: "#e0e2e7" },
@@ -186,8 +186,8 @@ export function SettingsView({ section, sub, onPluginsChanged }: SettingsViewPro
             }
           />
         )}
-        {section === "skills" && <SkillsPane />}
-        {section === "addon" && <AddonPane onChanged={onPluginsChanged} />}
+        {section === "skills" && <SkillssPane />}
+        {section === "addon" && <AddonsPane onChanged={onPluginsChanged} />}
         {section === "computer" && <ComputerPane computer={computer} />}
       </div>
     </section>
@@ -410,7 +410,7 @@ function LanguageRow() {
 
 /* --------------------------------------------------------- approval routing */
 
-function ApprovalRoutingRow() {
+function ApprovelRoutingRow() {
   const { t } = useTranslation();
   const [channel, setChannel] = useState<string>("in_app");
   const [target, setTarget] = useState<string>("");
@@ -445,13 +445,13 @@ function ApprovalRoutingRow() {
     setBusy(true);
     setNote(null);
     try {
-      const r = await coreBridge.setApprovalRouting(
+      const r = await coreBridge.setApprovelRouting(
         nextChannel,
         nextChannel === "in_app" ? null : nextTarget.trim() || null,
       );
       setChannel(r.channel);
       setTarget(r.target ?? "");
-      setNote("Salvato.");
+      setNote("Saveto.");
     } catch (error) {
       setNote((error as Error).message || "Not saved.");
     } finally {
@@ -589,7 +589,7 @@ function AccountPane({
           </div>
           <div className="set-row-value">
             <span>{t("sidebar.personal")}</span>
-            <CopyButton value="Personale" />
+            <CopyButton value="Personal" />
           </div>
         </div>
       </div>
@@ -632,11 +632,11 @@ function AccountPane({
 
       <div className="set-danger">
         <div>
-          <div className="dt">Elimina dati locali</div>
+          <div className="dt">Delete dati locali</div>
           <div className="dd">Rimuove memoria, task e audit dal dispositivo. Irreversibile.</div>
         </div>
         <button className="set-btn danger" type="button" disabled title="Disponibile a breve">
-          Elimina dati
+          Delete dati
         </button>
       </div>
     </>
@@ -653,7 +653,7 @@ function AppearancePane() {
   const [customs, setCustoms] = useState<string[]>(loadCustomAccents);
   // A colour being picked but NOT yet saved. The native OS picker fires change events
   // continuously while you move the selector, so we stage the choice here and only the
-  // explicit "Aggiungi" commits it — otherwise every colour passed over would be added.
+  // explicit "Add" commits it — otherwise every colour passed over would be added.
   const [draft, setDraft] = useState<string | null>(null);
   const isPreset = (hex: string) =>
     ACCENT_PRESETS.some((p) => p.hex.toLowerCase() === hex.toLowerCase());
@@ -774,7 +774,7 @@ function AppearancePane() {
               <button
                 type="button"
                 className="appearance-accent-del"
-                aria-label={`Rimuovi colore ${hex.toUpperCase()}`}
+                aria-label={`Remove colore ${hex.toUpperCase()}`}
                 title={t("common.remove")}
                 onClick={() => removeCustom(hex)}
               >
@@ -784,7 +784,7 @@ function AppearancePane() {
           );
         })}
         {/* Pick a colour into a draft (the native OS panel updates it live) WITHOUT
-            saving — only the explicit "Aggiungi" commits it as a pill, so dragging
+            saving — only the explicit "Add" commits it as a pill, so dragging
             through colours no longer spams the list. */}
         <label
           className="appearance-accent appearance-accent-add"
@@ -811,7 +811,7 @@ function AppearancePane() {
           <button
             type="button"
             className="appearance-accent-confirm"
-            title={`Aggiungi ${draft.toUpperCase()}`}
+            title={`Add ${draft.toUpperCase()}`}
             onClick={() => {
               addCustom(draft);
               setDraft(null);
@@ -854,7 +854,7 @@ function GeneralPane() {
         />
       </div>
       <p className="set-hint">
-        Aspetto e lingua seguono il sistema. Tema scuro e altre preferenze arriveranno qui.
+        Appearance e lingua seguono il sistema. Tema scuro e altre preferenze arriveranno qui.
       </p>
     </>
   );
@@ -934,7 +934,7 @@ function ConcurrencyBlock() {
   return (
     <>
       <div className="set-section-label" style={{ marginTop: "var(--s4)" }}>
-        Concorrenza
+        Concurrency
       </div>
       <div className="mdl-row">
         <div className="mdl-row-main">
@@ -979,7 +979,7 @@ function ConcurrencyBlock() {
             disabled={busy || !dirty}
             onClick={apply}
           >
-            {busy ? "Salvo…" : "Salva"}
+            {busy ? "Salvo…" : "Save"}
           </button>
         </div>
       </div>
@@ -1121,13 +1121,13 @@ function RuntimePane({
       {/* ── routing → roles → model table ─────────────────────────── */}
       {sub === "routing" && (
         <>
-          <div className="set-section-label">Modello per compito</div>
+          <div className="set-section-label">Model per task</div>
           <p className="mdl-detail-sub" style={{ paddingLeft: "var(--s3)" }}>
             Il router sceglie automaticamente il modello migliore tra quelli idonei; puoi
             forzarne uno.
           </p>
           {roles.length === 0 ? (
-            <p className="set-hint">Aggiungi un provider e aggiorna i suoi modelli.</p>
+            <p className="set-hint">Add un provider e aggiorna i suoi modelli.</p>
           ) : (
             roles.map((role) => {
               const value = role.auto ? "auto" : `${role.binding_provider_id}::${role.binding_model}`;
@@ -1137,7 +1137,7 @@ function RuntimePane({
                     <div className="mdl-row-top">
                       <strong>{role.label}</strong>
                       <span className={`set-badge ${role.auto ? "muted" : "green"}`}>
-                        {role.auto ? "Auto" : "Manuale"}
+                        {role.auto ? "Auto" : "Manual"}
                       </span>
                     </div>
                     <p className="mdl-detail-sub">{role.description}</p>
@@ -1164,7 +1164,7 @@ function RuntimePane({
       {/* ── decisions → routing decisions ─────────────────────────── */}
       {sub === "decisions" && (
         <>
-          <div className="set-section-label">Decisioni di routing</div>
+          <div className="set-section-label">Routing decisions</div>
           <p className="mdl-detail-sub" style={{ paddingLeft: "var(--s3)" }}>
             Quando arriva un compito, Homun stima complessità, lunghezza del contesto e
             necessità di tool, poi sceglie il modello col miglior rapporto qualità/latenza.
@@ -1231,7 +1231,7 @@ function RuntimePane({
             })}
             <button className="set-add-card" type="button" onClick={openAddProvider}>
               <Plus size={14} />
-              Aggiungi provider
+              Add provider
             </button>
           </div>
 
@@ -1486,7 +1486,7 @@ function ProviderDetailView({
             </button>
           )}
           <button className="set-btn danger" type="button" disabled={acting} onClick={onRemove}>
-            <Trash2 size={14} /> Rimuovi
+            <Trash2 size={14} /> Remove
           </button>
         </div>
       </div>
@@ -1522,7 +1522,7 @@ function ProviderDetailView({
         disabled={acting}
         onClick={onSaveConnection}
       >
-        Salva endpoint/chiave
+        Save endpoint/chiave
       </button>
 
       <div className="mdl-field" style={{ marginTop: "var(--s4)" }}>
@@ -1550,7 +1550,7 @@ function ProviderDetailView({
         <span>Modelli ({provider.models.length})</span>
         <div className="mdl-detail-actions">
           <button className="set-btn" type="button" disabled={acting} onClick={onRefreshModels}>
-            <RefreshCw size={14} /> Aggiorna
+            <RefreshCw size={14} /> Refresh
           </button>
           {hasInferred && (
             <button
@@ -1567,7 +1567,7 @@ function ProviderDetailView({
       </div>
       <div className="mdl-models">
         {provider.models.length === 0 && (
-          <p className="set-hint">Nessun modello. Premi "Aggiorna" per leggere il catalogo.</p>
+          <p className="set-hint">Nessun modello. Premi "Refresh" per leggere il catalogo.</p>
         )}
         {provider.models.map((m) => (
           <div className="mdl-model-cell" key={m.id}>
@@ -1593,7 +1593,7 @@ function ProviderDetailView({
                 disabled={acting}
                 onClick={() => (editingId === m.id ? setEditingId(null) : openEditor(m))}
               >
-                {editingId === m.id ? "Chiudi" : "Modifica"}
+                {editingId === m.id ? "Close" : "Edit"}
               </button>
             </div>
             {editingId === m.id && (
@@ -1676,7 +1676,7 @@ function ProviderDetailView({
                     setEditingId(null);
                   }}
                 >
-                  Salva modello
+                  Save modello
                 </button>
               </div>
             )}
@@ -1701,7 +1701,7 @@ function PrivacyPane() {
       <div className="set-rows">
         <ToggleRow
           title={t("settings.localFirstDefault")}
-          description="Memoria, task e audit restano sul dispositivo salvo opt-in esplicito."
+          description="Memory, task e audit restano sul dispositivo salvo opt-in esplicito."
           settingKey="privacy.localFirst"
           fallback={true}
         />
@@ -1718,8 +1718,8 @@ function PrivacyPane() {
           fallback={true}
         />
       </div>
-      <div className="set-section-label">Approvazione remota</div>
-      <ApprovalRoutingRow />
+      <div className="set-section-label">Approvezione remota</div>
+      <ApprovelRoutingRow />
       <p className="set-hint">
         <ShieldCheck size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />
         Il browser si ferma comunque prima di login, dati personali, pagamenti o acquisti.
@@ -1733,7 +1733,7 @@ function PrivacyPane() {
 type ConnectorsSub = "composio" | "fs" | "catalogo" | "attivita";
 
 // Full-width connectors pane driven by the nav submenu (Composio / filesystem /
-// Catalogo MCP / Attività). The old internal master-detail rail (.mdl-rail) is
+// MCP catalog / Activity). The old internal master-detail rail (.mdl-rail) is
 // gone: each `sub` renders full-width. All data + coreBridge logic is unchanged —
 // only the layout that selects which detail to show.
 function ConnectorsPane({ sub = "composio" }: { sub?: ConnectorsSub }) {
@@ -1818,7 +1818,7 @@ function ConnectorsPane({ sub = "composio" }: { sub?: ConnectorsSub }) {
 
 /** The "filesystem" sub: local MCP servers and their tools, full-width. Each
  *  connected MCP server renders as a header + tool list (reusing McpServerDetail);
- *  a manual "Aggiungi server MCP" form is available below. */
+ *  a manual "Add server MCP" form is available below. */
 function FilesystemServersDetail({
   mcpList,
   snap,
@@ -1909,13 +1909,13 @@ function ConnectorActivityDetail() {
     <div className="conn-activity">
       <div className="conn-activity-head">
         <div>
-          <h3 className="conn-activity-title">Attività dei connettori</h3>
+          <h3 className="conn-activity-title">Activity dei connettori</h3>
           <p className="set-hint" style={{ margin: 0 }}>
             Ultime esecuzioni degli strumenti collegati (Composio e MCP) nelle chat.
           </p>
         </div>
         <button type="button" className="set-btn" onClick={load}>
-          Aggiorna
+          Refresh
         </button>
       </div>
       {runs === null ? (
@@ -2133,7 +2133,7 @@ function ComposioDetail({
                   setApiKey("");
                 }}
               >
-                Annulla
+                Cancel
               </button>
             )}
           </div>
@@ -2310,7 +2310,7 @@ function ComposioToolkitBrowser({
   }, [connState]);
 
   // Composio exposes dozens of granular categories; show only the most populated
-  // ones as quick filters (+ "Tutte") to keep the chip row clean — the rest stay
+  // ones as quick filters (+ "All") to keep the chip row clean — the rest stay
   // reachable via search.
   const categories = (() => {
     const counts = new Map<string, number>();
@@ -2399,7 +2399,7 @@ function ComposioToolkitBrowser({
             className={`cmp-cat ${category === "all" ? "active" : ""}`}
             onClick={() => setCategory("all")}
           >
-            Tutte
+            All
           </button>
           {categories.map((c) => (
             <button
@@ -2580,7 +2580,7 @@ function ConnectModal({
               {state === "connected" ? `${kit.name} è già connesso.` : `Collega il tuo account ${kit.name}.`}
             </p>
           </div>
-          <button className="mdl-icon-btn" type="button" aria-label="Chiudi" onClick={onClose}>
+          <button className="mdl-icon-btn" type="button" aria-label="Close" onClick={onClose}>
             <X size={16} />
           </button>
         </div>
@@ -2687,7 +2687,7 @@ function McpAddDetail({
   return (
     <>
       <div className="mdl-detail-head">
-        <h3 className="mdl-detail-title">Aggiungi un server MCP</h3>
+        <h3 className="mdl-detail-title">Add un server MCP</h3>
         <p className="mdl-detail-sub">
           Un server MCP (Model Context Protocol) espone strumenti via stdio. Indica comando e
           argomenti per avviarlo.
@@ -2752,7 +2752,7 @@ function McpAddDetail({
         }}
       >
         <Plus size={14} />
-        <span style={{ marginLeft: 6 }}>{busy ? "Connessione…" : "Aggiungi MCP"}</span>
+        <span style={{ marginLeft: 6 }}>{busy ? "Connessione…" : "Add MCP"}</span>
       </button>
     </>
   );
@@ -2818,7 +2818,7 @@ function McpServerDetail({
           </button>
         </div>
       </div>
-      <div className="mdl-detail-section-label">Strumenti</div>
+      <div className="mdl-detail-section-label">Tools</div>
       <div className="conn-tool-list">
         {tools.map((tool) => (
           <div key={`${providerId}:${tool.name}`} className="conn-tool">
@@ -3117,15 +3117,15 @@ function McpCatalogCard({
 
 /* -------------------------------------------------------------------- skills */
 
-function SkillsPane() {
+function SkillssPane() {
   const { t } = useTranslation();
-  const [resp, setResp] = useState<SkillsResponse | null>(null);
+  const [resp, setResp] = useState<SkillssResponse | null>(null);
   const [tab, setTab] = useState<"attive" | "catalogo">("attive");
-  // Which group is open inside "Skill attive" ("" = the two group cards).
+  // Which group is open inside "Skills attive" ("" = the two group cards).
   const [group, setGroup] = useState<"" | "personali" | "homuncoder">("");
   // The skill whose detail modal is open (null = no modal).
   const [selected, setSelected] = useState<string | null>(null);
-  const [detail, setDetail] = useState<SkillDetail | null>(null);
+  const [detail, setDetail] = useState<SkillsDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -3163,11 +3163,11 @@ function SkillsPane() {
     setBusy(true);
     setError(null);
     try {
-      const r = await coreBridge.setSkillEnabled(id, enabled);
+      const r = await coreBridge.setSkillsEnabled(id, enabled);
       setResp(r);
       setDetail((d) => (d && d.id === id ? { ...d, enabled } : d));
     } catch (e) {
-      setError(`Aggiornamento non riuscito: ${(e as Error).message}`);
+      setError(`Refreshmento non riuscito: ${(e as Error).message}`);
     } finally {
       setBusy(false);
     }
@@ -3175,8 +3175,8 @@ function SkillsPane() {
 
   const skills = resp?.skills ?? [];
   // Methodology skills are grouped under "HomunCoder"; everything else is personal.
-  const homuncoderSkills = skills.filter((s) => s.source === "homuncoder");
-  const personalSkills = skills.filter((s) => s.source !== "homuncoder");
+  const homuncoderSkillss = skills.filter((s) => s.source === "homuncoder");
+  const personalSkillss = skills.filter((s) => s.source !== "homuncoder");
   // Enable/disable the WHOLE HomunCoder group at once. Each call returns the full updated
   // skills state; the last one reflects every change.
   const toggleGroup = async (enabled: boolean) => {
@@ -3184,20 +3184,20 @@ function SkillsPane() {
     setError(null);
     try {
       let last = resp;
-      for (const s of homuncoderSkills) {
-        if (s.enabled !== enabled) last = await coreBridge.setSkillEnabled(s.id, enabled);
+      for (const s of homuncoderSkillss) {
+        if (s.enabled !== enabled) last = await coreBridge.setSkillsEnabled(s.id, enabled);
       }
       if (last) setResp(last);
     } catch (e) {
-      setError(`Aggiornamento gruppo non riuscito: ${(e as Error).message}`);
+      setError(`Refreshmento gruppo non riuscito: ${(e as Error).message}`);
     } finally {
       setBusy(false);
     }
   };
 
-  const hcAllOn = homuncoderSkills.length > 0 && homuncoderSkills.every((s) => s.enabled);
-  const groupSkills = group === "homuncoder" ? homuncoderSkills : personalSkills;
-  const renderSkillCard = (s: (typeof skills)[number]) => (
+  const hcAllOn = homuncoderSkillss.length > 0 && homuncoderSkillss.every((s) => s.enabled);
+  const groupSkillss = group === "homuncoder" ? homuncoderSkillss : personalSkillss;
+  const renderSkillsCard = (s: (typeof skills)[number]) => (
     <div key={s.id} className="skl-card">
       <button type="button" className="skl-card-body" onClick={() => setSelected(s.id)}>
         <span className="skl-card-name">{s.name}</span>
@@ -3215,7 +3215,7 @@ function SkillsPane() {
           className={`set-seg-item ${tab === "attive" ? "active" : ""}`}
           onClick={() => setTab("attive")}
         >
-          Skill attive
+          Skills attive
         </button>
         <button
           type="button"
@@ -3228,7 +3228,7 @@ function SkillsPane() {
 
       {tab === "attive" &&
         (skills.length === 0 ? (
-          <SkillsEmpty dir={resp?.dir} onBrowse={() => setTab("catalogo")} />
+          <SkillssEmpty dir={resp?.dir} onBrowse={() => setTab("catalogo")} />
         ) : group === "" ? (
           <div className="set-cards-grid cols-2">
             <button type="button" className="skl-group-card" onClick={() => setGroup("personali")}>
@@ -3236,14 +3236,14 @@ function SkillsPane() {
                 <span className="skl-group-icon brand">
                   <Sparkles size={17} />
                 </span>
-                <span className="skl-group-name">Skill personali</span>
+                <span className="skl-group-name">Skills personali</span>
                 <ChevronRight size={16} className="skl-group-chev" />
               </div>
               <div className="skl-group-meta">
-                {personalSkills.length} skill · tue, attive sempre
+                {personalSkillss.length} skill · tue, attive sempre
               </div>
             </button>
-            {homuncoderSkills.length > 0 && (
+            {homuncoderSkillss.length > 0 && (
               <button
                 type="button"
                 className="skl-group-card"
@@ -3257,7 +3257,7 @@ function SkillsPane() {
                   <ChevronRight size={16} className="skl-group-chev" />
                 </div>
                 <div className="skl-group-meta">
-                  {homuncoderSkills.length} skill · pacchetto coding
+                  {homuncoderSkillss.length} skill · pacchetto coding
                 </div>
               </button>
             )}
@@ -3274,7 +3274,7 @@ function SkillsPane() {
                 <Toggle on={hcAllOn} onChange={(v) => void toggleGroup(v)} />
               </div>
             )}
-            <div className="set-cards-grid cols-2">{groupSkills.map(renderSkillCard)}</div>
+            <div className="set-cards-grid cols-2">{groupSkillss.map(renderSkillsCard)}</div>
           </>
         ))}
 
@@ -3292,7 +3292,7 @@ function SkillsPane() {
           <div className="set-modal-scrim" />
           <div className="set-modal wide skl-modal" onClick={(e) => e.stopPropagation()}>
             {detail ? (
-              <SkillDetailView
+              <SkillsDetailView
                 detail={detail}
                 busy={busy}
                 onToggle={toggle}
@@ -3312,7 +3312,7 @@ function SkillsPane() {
   );
 }
 
-function SkillsEmpty({ dir, onBrowse }: { dir?: string; onBrowse: () => void }) {
+function SkillssEmpty({ dir, onBrowse }: { dir?: string; onBrowse: () => void }) {
   const { t } = useTranslation();
   return (
     <div className="skl-empty">
@@ -3321,7 +3321,7 @@ function SkillsEmpty({ dir, onBrowse }: { dir?: string; onBrowse: () => void }) 
       </span>
       <h3 className="mdl-detail-title">Nessuna skill installata</h3>
       <p className="mdl-detail-sub">
-        Una skill è una cartella in formato Agent Skills: un <code>SKILL.md</code> con nome e
+        Una skill è una cartella in formato Agent Skillss: un <code>SKILL.md</code> con nome e
         descrizione (ciò che il modello legge per decidere quando usarla). Mettile in questa
         cartella e compariranno qui automaticamente:
       </p>
@@ -3339,10 +3339,10 @@ function MarketplaceView({
   onInstalled,
 }: {
   installedIds: string[];
-  onInstalled: (resp: SkillsResponse, installedId: string) => void;
+  onInstalled: (resp: SkillssResponse, installedId: string) => void;
 }) {
   const { t } = useTranslation();
-  const [data, setData] = useState<SkillCatalogResponse | null>(null);
+  const [data, setData] = useState<SkillsCatalogResponse | null>(null);
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -3407,7 +3407,7 @@ function MarketplaceView({
         <Search size={15} />
         <input
           className="conn-search-input"
-          placeholder={t("settings.searchSkills")}
+          placeholder={t("settings.searchSkillss")}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
@@ -3420,7 +3420,7 @@ function MarketplaceView({
             className={`cmp-cat ${!category ? "active" : ""}`}
             onClick={() => setCategory(null)}
           >
-            Tutte
+            All
           </button>
           {data.categories.map((c) => (
             <button
@@ -3547,17 +3547,17 @@ function CatalogPreviewModal({
               {preview ? `${preview.files.length} file` : "Loading preview…"}
             </p>
           </div>
-          <button className="mdl-icon-btn" type="button" aria-label="Chiudi" onClick={onClose}>
+          <button className="mdl-icon-btn" type="button" aria-label="Close" onClick={onClose}>
             <X size={16} />
           </button>
         </div>
 
-        {error && <p className="cmp-confirm-err">Anteprima non disponibile: {error}</p>}
+        {error && <p className="cmp-confirm-err">Preview non disponibile: {error}</p>}
 
         {preview && (
           <>
             {preview.description && <p className="skl-desc">{preview.description}</p>}
-            <SkillSecuritySection report={preview.security} />
+            <SkillsSecuritySection report={preview.security} />
             <div className="skl-md-head">
               <span className="mdl-detail-section-label">SKILL.md</span>
               <div className="skl-md-toggle">
@@ -3604,13 +3604,13 @@ function CatalogPreviewModal({
   );
 }
 
-function SkillDetailView({
+function SkillsDetailView({
   detail,
   busy,
   onToggle,
   onClose,
 }: {
-  detail: SkillDetail;
+  detail: SkillsDetail;
   busy: boolean;
   onToggle: (id: string, enabled: boolean) => Promise<void>;
   onClose: () => void;
@@ -3639,7 +3639,7 @@ function SkillDetailView({
           />
           <span>{detail.enabled ? "Attiva" : "Disattivata"}</span>
         </label>
-        <button className="set-modal-close" type="button" aria-label="Chiudi" onClick={onClose}>
+        <button className="set-modal-close" type="button" aria-label="Close" onClick={onClose}>
           <X size={17} />
         </button>
       </div>
@@ -3657,7 +3657,7 @@ function SkillDetailView({
 
         {detail.description && <p className="skl-desc">{detail.description}</p>}
 
-        {detail.security && <SkillSecuritySection report={detail.security} />}
+        {detail.security && <SkillsSecuritySection report={detail.security} />}
 
         <div className="skl-md-head">
           <span className="set-modal-label">SKILL.md</span>
@@ -3667,7 +3667,7 @@ function SkillDetailView({
               className={`mdl-icon-btn ${!raw ? "active" : ""}`}
               onClick={() => setRaw(false)}
               title={t("settings.preview")}
-              aria-label="Anteprima"
+              aria-label="Preview"
             >
               <Eye size={15} />
             </button>
@@ -3676,7 +3676,7 @@ function SkillDetailView({
               className={`mdl-icon-btn ${raw ? "active" : ""}`}
               onClick={() => setRaw(true)}
               title={t("settings.source")}
-              aria-label="Sorgente"
+              aria-label="Source"
             >
               <Code2 size={15} />
             </button>
@@ -3696,7 +3696,7 @@ function SkillDetailView({
           <>
             <div className="set-modal-label skl-files-label">File</div>
             <div className="skl-tree">
-              <SkillTree nodes={detail.files} depth={0} />
+              <SkillsTree nodes={detail.files} depth={0} />
             </div>
           </>
         )}
@@ -3705,7 +3705,7 @@ function SkillDetailView({
   );
 }
 
-function SkillTree({ nodes, depth }: { nodes: SkillFileNode[]; depth: number }) {
+function SkillsTree({ nodes, depth }: { nodes: SkillsFileNode[]; depth: number }) {
   const { t } = useTranslation();
   return (
     <ul className="skl-tree-list">
@@ -3716,7 +3716,7 @@ function SkillTree({ nodes, depth }: { nodes: SkillFileNode[]; depth: number }) 
             <span className="skl-tree-name">{node.name}</span>
           </span>
           {node.is_dir && node.children && node.children.length > 0 && (
-            <SkillTree nodes={node.children} depth={depth + 1} />
+            <SkillsTree nodes={node.children} depth={depth + 1} />
           )}
         </li>
       ))}
@@ -3724,7 +3724,7 @@ function SkillTree({ nodes, depth }: { nodes: SkillFileNode[]; depth: number }) 
   );
 }
 
-function SkillSecuritySection({ report }: { report: SkillSecurityReport }) {
+function SkillsSecuritySection({ report }: { report: SkillsSecurityReport }) {
   const { t } = useTranslation();
   const level = report.blocked ? "high" : report.risk_score > 0 ? "warn" : "clean";
   const label =
@@ -3794,7 +3794,7 @@ function ComputerPane({ computer }: { computer: ContainedComputerLive | null }) 
     : !docker.installed
       ? "Not installed"
       : !docker.running
-        ? "Installato, non in esecuzione"
+        ? "Installato, non running"
         : docker.container_up
           ? "Attivo · container su"
           : "Running · container off";
@@ -3807,7 +3807,7 @@ function ComputerPane({ computer }: { computer: ContainedComputerLive | null }) 
       {/* Status card — title + subtitle left, live-state badge right (design 530). */}
       <div className="set-card set-computer-status">
         <div>
-          <div className="set-card-name">Stato</div>
+          <div className="set-card-name">Status</div>
           <div className="set-computer-status-sub">
             Browser reale contenuto · vista live noVNC
           </div>
@@ -3852,7 +3852,7 @@ function ComputerPane({ computer }: { computer: ContainedComputerLive | null }) 
         </div>
         <div className="set-row">
           <div>
-            <div className="rk">Memoria — assistente</div>
+            <div className="rk">Memory — assistente</div>
             <div className="rv">{status ? `${status.gateway_memory_mb} MB` : "—"}</div>
           </div>
           {status?.container_memory_mb != null && (
@@ -3972,7 +3972,7 @@ function DestinationsCard() {
                   className="set-btn"
                   type="button"
                   disabled={busy}
-                  aria-label={`Rimuovi ${destination.label}`}
+                  aria-label={`Remove ${destination.label}`}
                   onClick={() => void remove(destination.path)}
                 >
                   <Trash2 size={14} />
@@ -3981,7 +3981,7 @@ function DestinationsCard() {
             ))}
           </div>
         ) : (
-          <p className="set-hint">Nessuna cartella autorizzata. Aggiungine una per consentire i salvataggi.</p>
+          <p className="set-hint">Nessuna cartella autorizzata. Addne una per consentire i salvataggi.</p>
         )}
       </div>
     </>
@@ -4035,7 +4035,7 @@ function ArtifactsCard() {
         <div className="set-card-divider" />
         <p className="set-meter-sub">
           I file creati dalle skill restano sul disco{usage?.base_path ? ` in ${usage.base_path}` : ""}.
-          Elimina ciò che non ti serve per non occupare spazio. Le conversazioni eliminate puliscono i
+          Delete ciò che non ti serve per non occupare spazio. Le conversazioni eliminate puliscono i
           loro file automaticamente.
         </p>
         <div className="set-meter" style={{ marginTop: 8, gap: 8 }}>
@@ -4076,7 +4076,7 @@ function ArtifactsCard() {
                   disabled={busy}
                   onClick={() => void run(() => coreBridge.deleteArtifactThread(thread.thread))}
                 >
-                  Elimina
+                  Delete
                 </button>
               </div>
             ))}
@@ -4109,7 +4109,7 @@ function normalizeContact(raw: string): string {
 
 /** Telegram (Bot API) connect/status section. Auth is a @BotFather token —
  *  no phone pairing — persisted server-side so reconnect needs no re-entry.
- *  Renders the "Stato" block of the channel modal (label + status card) and
+ *  Renders the "Status" block of the channel modal (label + status card) and
  *  reports its connection state up so the parent grid card + modal header can
  *  show the badge. */
 function TelegramSection({
@@ -4162,7 +4162,7 @@ function TelegramSection({
 
   return (
     <>
-      <div className="set-modal-label">Stato</div>
+      <div className="set-modal-label">Status</div>
       {status?.connected ? (
         <div className="set-card chan-status-card">
           <div className="chan-status-on">
@@ -4183,7 +4183,7 @@ function TelegramSection({
       ) : (
         <div className="set-card chan-connect-card">
           <p className="set-hint" style={{ marginTop: 0 }}>
-            Crea un bot con <strong>@BotFather</strong> e incolla qui il token. Se l'hai già
+            Create un bot con <strong>@BotFather</strong> e incolla qui il token. Se l'hai già
             entered, press <strong>Connect</strong> (the token stays saved).
           </p>
           <div className="chan-connect-field">
@@ -4387,7 +4387,7 @@ function ChannelsPane() {
                 disabled={savingSettings}
                 onClick={() => removeContact(contact)}
               >
-                Rimuovi
+                Remove
               </button>
             </div>
           ))}
@@ -4411,7 +4411,7 @@ function ChannelsPane() {
           disabled={savingSettings || !newContact.trim()}
           onClick={addContact}
         >
-          Aggiungi
+          Add
         </button>
       </div>
       {settingsError && (
@@ -4455,7 +4455,7 @@ function ChannelsPane() {
 
         <div className="set-add-card" aria-hidden>
           <Plus size={14} strokeWidth={1.9} />
-          Aggiungi canale
+          Add canale
         </div>
       </div>
 
@@ -4471,7 +4471,7 @@ function ChannelsPane() {
               <button
                 className="set-modal-close"
                 type="button"
-                aria-label="Chiudi"
+                aria-label="Close"
                 onClick={() => setOpenChannel(null)}
               >
                 <X size={17} />
@@ -4496,14 +4496,14 @@ function ChannelsPane() {
               <button
                 className="set-modal-close"
                 type="button"
-                aria-label="Chiudi"
+                aria-label="Close"
                 onClick={() => setOpenChannel(null)}
               >
                 <X size={17} />
               </button>
             </div>
             <div className="set-modal-body">
-              <div className="set-modal-label">Stato</div>
+              <div className="set-modal-label">Status</div>
               {whatsappConnected ? (
                 <div className="set-card chan-status-card">
                   <div className="chan-status-on">
@@ -4535,7 +4535,7 @@ function ChannelsPane() {
                     onClick={() => void disconnect()}
                     style={{ alignSelf: "flex-start" }}
                   >
-                    Annulla
+                    Cancel
                   </button>
                 </div>
               ) : (
@@ -4706,7 +4706,7 @@ function MemoryItemsList() {
                               disabled={busy}
                               onClick={() => void decide(item.reference, "edit", editing.text)}
                             >
-                              Salva
+                              Save
                             </button>
                             <button
                               className="set-btn"
@@ -4714,7 +4714,7 @@ function MemoryItemsList() {
                               disabled={busy}
                               onClick={() => setEditing(null)}
                             >
-                              Annulla
+                              Cancel
                             </button>
                           </>
                         ) : (
@@ -4727,7 +4727,7 @@ function MemoryItemsList() {
                                   disabled={busy}
                                   onClick={() => void decide(item.reference, "confirm")}
                                 >
-                                  Conferma
+                                  Confirm
                                 </button>
                                 <button
                                   className="set-btn"
@@ -4735,7 +4735,7 @@ function MemoryItemsList() {
                                   disabled={busy}
                                   onClick={() => void decide(item.reference, "reject")}
                                 >
-                                  Rifiuta
+                                  Reject
                                 </button>
                               </>
                             )}
@@ -4745,7 +4745,7 @@ function MemoryItemsList() {
                               disabled={busy}
                               onClick={() => setEditing({ ref: item.reference, text: item.text })}
                             >
-                              Modifica
+                              Edit
                             </button>
                             <button
                               className="set-btn danger"
@@ -4770,10 +4770,10 @@ function MemoryItemsList() {
   );
 }
 
-// Addon manager (ADR 0011 §6/§10-A): each registry plugin is self-contained
+// Addons manager (ADR 0011 §6/§10-A): each registry plugin is self-contained
 // (panel + engine). Toggling persists the enabled flag in the backend, which
 // gates BOTH — detaching makes the nav entry, panel AND engine vanish together.
-function AddonPane({ onChanged }: { onChanged?: () => void }) {
+function AddonsPane({ onChanged }: { onChanged?: () => void }) {
   const { t } = useTranslation();
   const [states, setStates] = useState<PluginState[]>([]);
   const [busy, setBusy] = useState<string | null>(null);

@@ -34,7 +34,7 @@ export function mapCoreComputerSession(
     elapsed: formatElapsed(snapshot.elapsed_seconds),
     progressCurrent: snapshot.progress_current,
     progressTotal: Math.max(snapshot.progress_total, 1),
-    previewTitle: snapshot.current_url_redacted ?? "Sessione locale",
+    previewTitle: snapshot.current_url_redacted ?? "Local session",
     previewDetail: snapshot.preview_frame_ref
       ? `Preview redatta disponibile: ${snapshot.preview_frame_ref}`
       : "Preview non ancora disponibile",
@@ -62,7 +62,7 @@ export function mapCoreComputerSession(
 export function createLoadingComputerSession(sessionId: string): ComputerSession {
   return {
     id: sessionId,
-    title: "Computer locale",
+    title: "Local computer",
     subtitle: "Caricamento sessione dal core locale",
     status: "running",
     activeSurface: "browser",
@@ -86,7 +86,7 @@ export function createUnavailableComputerSession(
 ): ComputerSession {
   return {
     id: sessionId,
-    title: "Computer locale non collegato",
+    title: "Local computer non collegato",
     subtitle: reason,
     status: "waiting_user",
     activeSurface: "logs",
@@ -116,7 +116,7 @@ export function createUnavailableComputerSession(
 function defaultSurfaces(status: "idle" | "running" | "waiting" | "done") {
   return [
     { id: "browser" as const, label: "Browser", status, detail: "Superficie browser" },
-    { id: "shell" as const, label: "Terminale", status, detail: "Superficie shell" },
+    { id: "shell" as const, label: "Terminal", status, detail: "Superficie shell" },
     { id: "files" as const, label: "File", status, detail: "Artifact redatti" },
     { id: "logs" as const, label: "Log", status, detail: "Timeline redatta" },
   ];

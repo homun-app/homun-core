@@ -23,7 +23,7 @@ const IDLE: ContainedComputerLive = {
 };
 
 // Manus-style: a short card DOCKED above the prompt (same width), shown ONLY
-// while the contained browser is working. Header + live "Avanzamento attività"
+// while the contained browser is working. Header + live "Activity progress"
 // checklist; expand to the live view; fullscreen for the overlay. Hidden idle.
 export function ChatComputerPanel() {
   const [live, setLive] = useState<ContainedComputerLive | null>(null);
@@ -92,7 +92,7 @@ export function ChatComputerPanel() {
         <button
           className="cc-scrim"
           type="button"
-          aria-label="Chiudi"
+          aria-label="Close"
           onClick={() => setView("expanded")}
         />
       )}
@@ -123,8 +123,8 @@ export function ChatComputerPanel() {
             className="cc-icon-btn"
             type="button"
             onClick={() => setView(view === "bar" ? "expanded" : "bar")}
-            title={view === "bar" ? "Mostra il browser" : "Comprimi"}
-            aria-label={view === "bar" ? "Mostra il browser" : "Comprimi"}
+            title={view === "bar" ? "Mostra il browser" : "Collapse"}
+            aria-label={view === "bar" ? "Mostra il browser" : "Collapse"}
           >
             {view === "bar" ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
           </button>
@@ -145,7 +145,7 @@ export function ChatComputerPanel() {
               >
                 <iframe
                   className="cc-thumb-frame"
-                  title="Anteprima computer (live)"
+                  title="Preview computer (live)"
                   src={src}
                   tabIndex={-1}
                 />
@@ -156,7 +156,7 @@ export function ChatComputerPanel() {
             )}
             <div className="cc-plan">
               <div className="cc-plan-head">
-                Avanzamento attività
+                Activity progress
                 {steps.length > 0 && <span className="cc-plan-count">{steps.length}</span>}
               </div>
               <ul className="cc-plan-steps">
@@ -183,7 +183,7 @@ export function ChatComputerPanel() {
           <div className="cc-stage">
             <iframe
               className="cc-frame"
-              title="Computer contenuto (live)"
+              title="Contained computer (live)"
               src={src}
               allow="clipboard-read; clipboard-write"
               tabIndex={-1}
@@ -240,8 +240,8 @@ function TerminalDock({
           className="cc-icon-btn"
           type="button"
           onClick={onToggle}
-          title={expanded ? "Comprimi" : "Mostra il terminale"}
-          aria-label={expanded ? "Comprimi" : "Mostra il terminale"}
+          title={expanded ? "Collapse" : "Mostra il terminale"}
+          aria-label={expanded ? "Collapse" : "Mostra il terminale"}
         >
           {expanded ? <ChevronDown size={15} /> : <ChevronUp size={15} />}
         </button>

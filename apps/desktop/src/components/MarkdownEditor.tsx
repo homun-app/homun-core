@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 
 import { RichMessage } from "./RichMessage";
 
-// A lightweight markdown editor: formatting toolbar + Scrivi/Anteprima toggle. The
+// A lightweight markdown editor: formatting toolbar + Scrivi/Preview toggle. The
 // preview reuses the app's RichMessage renderer, so what you see here is exactly how
 // the markdown renders everywhere else — no extra dependency, consistent output.
 export function MarkdownEditor({
@@ -86,7 +86,7 @@ export function MarkdownEditor({
           className={tab === "preview" ? "active" : ""}
           onClick={() => setTab("preview")}
         >
-          Anteprima
+          Preview
         </button>
       </div>
       {tab === "write" ? (

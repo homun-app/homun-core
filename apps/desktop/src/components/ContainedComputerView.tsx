@@ -81,7 +81,7 @@ export function ContainedComputerView() {
         {novncSrc && (
           <iframe
             className="cc-frame"
-            title="Computer contenuto (noVNC)"
+            title="Contained computer (noVNC)"
             src={novncSrc}
             allow="clipboard-read; clipboard-write"
           />

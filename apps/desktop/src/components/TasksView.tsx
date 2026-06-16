@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type {
-  ApprovalItem,
+  ApprovelItem,
   TaskDetailItem,
   TaskItem,
   TaskResourceUsage,
@@ -17,20 +17,20 @@ import type {
 
 interface TasksViewProps {
   tasks: TaskItem[];
-  approvals: ApprovalItem[];
+  approvals: ApprovelItem[];
   resourceUsage: TaskResourceUsage[];
   selectedTaskDetail: TaskDetailItem | null;
   taskDetailLoading: boolean;
   approvalBusyId: string | null;
   selectedTaskId: string;
-  onApproveApproval: (
+  onApproveApprovel: (
     approvalId: string,
     options?: {
       scope?: "once" | "always";
       browser_visibility?: "auto" | "visible" | "headless";
     },
   ) => void;
-  onRejectApproval: (approvalId: string) => void;
+  onRejectApprovel: (approvalId: string) => void;
   onSelectTask: (taskId: string) => void;
 }
 
@@ -42,8 +42,8 @@ export function TasksView({
   taskDetailLoading,
   approvalBusyId,
   selectedTaskId,
-  onApproveApproval,
-  onRejectApproval,
+  onApproveApprovel,
+  onRejectApprovel,
   onSelectTask,
 }: TasksViewProps) {
   const { t } = useTranslation();
@@ -116,7 +116,7 @@ export function TasksView({
                   className="secondary-button"
                   type="button"
                   disabled={approvalBusyId === approval.id}
-                  onClick={() => onRejectApproval(approval.id)}
+                  onClick={() => onRejectApprovel(approval.id)}
                 >
                   {t("tasksView.reject")}
                 </button>
@@ -124,7 +124,7 @@ export function TasksView({
                   className="primary-button"
                   type="button"
                   disabled={approvalBusyId === approval.id}
-                  onClick={() => onApproveApproval(approval.id)}
+                  onClick={() => onApproveApprovel(approval.id)}
                 >
                   {t("tasksView.approveAndContinue")}
                 </button>
@@ -134,7 +134,7 @@ export function TasksView({
           {!approvals.length && (
             <div className="approval-empty">
               <Check size={17} />
-              <span>{t("tasksView.noApprovals")}</span>
+              <span>{t("tasksView.noApprovels")}</span>
             </div>
           )}
 

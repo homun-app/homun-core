@@ -100,7 +100,7 @@ export interface CoreTaskItem {
   blocked_reason: string | null;
 }
 
-export interface CoreApprovalItem {
+export interface CoreApprovelItem {
   approval_id: string;
   task_id: string;
   action: string;
@@ -113,7 +113,7 @@ export interface CoreApprovalItem {
   default_browser_visibility?: string;
 }
 
-export type ApprovalDecisionOptions = {
+export type ApprovelDecisionOptions = {
   scope?: "once" | "always";
   browser_visibility?: "auto" | "visible" | "headless";
 };
@@ -122,7 +122,7 @@ export interface CoreTaskQueueSnapshot {
   queued: CoreTaskItem[];
   active: CoreTaskItem[];
   blocked: CoreTaskItem[];
-  waiting_approvals: CoreApprovalItem[];
+  waiting_approvals: CoreApprovelItem[];
   recent_failures: CoreTaskItem[];
   resource_usage: Array<{
     resource_class: string;
@@ -369,7 +369,7 @@ export interface ContainedComputerLive {
   active: boolean;
   /** Current activity (goal) when active. */
   activity: string | null;
-  /** Steps executed so far — the live "Avanzamento attività" checklist. */
+  /** Steps executed so far — the live "Activity progress" checklist. */
   steps: BrowserStep[];
   /** True while a CLI skill command is running in the contained computer. */
   terminal_active: boolean;
@@ -645,15 +645,15 @@ async function electronCompleteSetup(): Promise<{ setup_complete: boolean }> {
   return gatewayPostJson<{ setup_complete: boolean }>("/api/setup/complete", {});
 }
 
-export interface ApprovalRouting {
+export interface ApprovelRouting {
   /** "in_app" | "telegram" | "whatsapp". */
   channel: string;
   /** The user's own number/chat id on that channel (only it can authorize remotely). */
   target: string | null;
 }
 
-async function electronApprovalRouting(): Promise<ApprovalRouting> {
-  return gatewayGetJson<ApprovalRouting>("/api/prefs/approval-routing");
+async function electronApprovelRouting(): Promise<ApprovelRouting> {
+  return gatewayGetJson<ApprovelRouting>("/api/prefs/approval-routing");
 }
 
 export interface ChannelIdentity {
@@ -675,11 +675,11 @@ async function electronChannelIdentities(channel: string): Promise<ChannelIdenti
   }
 }
 
-async function electronSetApprovalRouting(
+async function electronSetApprovelRouting(
   channel: string,
   target: string | null,
-): Promise<ApprovalRouting> {
-  return gatewayPostJson<ApprovalRouting>("/api/prefs/approval-routing", { channel, target });
+): Promise<ApprovelRouting> {
+  return gatewayPostJson<ApprovelRouting>("/api/prefs/approval-routing", { channel, target });
 }
 
 async function electronImprovePrompt(prompt: string): Promise<string> {
@@ -840,7 +840,7 @@ export type ManagedAutomation = {
   next_run: number | null;
 };
 
-export type AutomationCreateInput = {
+export type AutomationCreateteInput = {
   title: string;
   trigger: AutomationTriggerJson;
   prompt: string;
@@ -857,8 +857,8 @@ async function electronAutomations(): Promise<ManagedAutomation[]> {
   return body.automations ?? [];
 }
 
-async function electronCreateAutomation(
-  input: AutomationCreateInput,
+async function electronCreateteAutomation(
+  input: AutomationCreateteInput,
 ): Promise<ManagedAutomation> {
   const response = await fetch(`${DESKTOP_GATEWAY_URL}/api/automations`, {
     method: "POST",
@@ -1266,7 +1266,7 @@ async function electronWorkspaces(): Promise<WorkspacesSnapshot> {
   return gatewayGetJson<WorkspacesSnapshot>("/api/workspaces");
 }
 
-async function electronCreateWorkspace(
+async function electronCreateteWorkspace(
   name: string,
   folder: string,
 ): Promise<WorkspacesSnapshot> {
@@ -1643,7 +1643,7 @@ async function electronComposioDisconnect(id: string): Promise<void> {
   }
 }
 
-export interface SkillSummary {
+export interface SkillsSummary {
   id: string;
   name: string;
   description: string;
@@ -1654,19 +1654,19 @@ export interface SkillSummary {
   allowed_tools?: string[];
 }
 
-export interface SkillsResponse {
-  skills: SkillSummary[];
+export interface SkillssResponse {
+  skills: SkillsSummary[];
   dir: string;
 }
 
-export interface SkillFileNode {
+export interface SkillsFileNode {
   name: string;
   path: string;
   is_dir: boolean;
-  children?: SkillFileNode[];
+  children?: SkillsFileNode[];
 }
 
-export interface SkillSecurityWarning {
+export interface SkillsSecurityWarning {
   severity: "critical" | "warning";
   category: string;
   description: string;
@@ -1674,38 +1674,38 @@ export interface SkillSecurityWarning {
   line?: number;
 }
 
-export interface SkillSecurityReport {
+export interface SkillsSecurityReport {
   risk_score: number;
   blocked: boolean;
   scanned_files: number;
-  warnings: SkillSecurityWarning[];
+  warnings: SkillsSecurityWarning[];
 }
 
-export interface SkillDetail extends SkillSummary {
+export interface SkillsDetail extends SkillsSummary {
   body: string;
-  files: SkillFileNode[];
-  security?: SkillSecurityReport;
+  files: SkillsFileNode[];
+  security?: SkillsSecurityReport;
 }
 
-async function electronSkills(): Promise<SkillsResponse> {
-  return gatewayGetJson<SkillsResponse>("/api/skills");
+async function electronSkillss(): Promise<SkillssResponse> {
+  return gatewayGetJson<SkillssResponse>("/api/skills");
 }
 
-async function electronSkillDetail(id: string): Promise<SkillDetail> {
-  return gatewayGetJson<SkillDetail>(`/api/skills/${encodeURIComponent(id)}`);
+async function electronSkillsDetail(id: string): Promise<SkillsDetail> {
+  return gatewayGetJson<SkillsDetail>(`/api/skills/${encodeURIComponent(id)}`);
 }
 
-async function electronSetSkillEnabled(
+async function electronSetSkillsEnabled(
   id: string,
   enabled: boolean,
-): Promise<SkillsResponse> {
-  return gatewayPostJson<SkillsResponse>(
+): Promise<SkillssResponse> {
+  return gatewayPostJson<SkillssResponse>(
     `/api/skills/${encodeURIComponent(id)}/enabled`,
     { enabled },
   );
 }
 
-export interface CatalogSkill {
+export interface CatalogSkills {
   slug: string;
   name: string;
   description: string;
@@ -1719,23 +1719,23 @@ export interface CatalogCategory {
   count: number;
 }
 
-export interface SkillCatalogResponse {
-  skills: CatalogSkill[];
+export interface SkillsCatalogResponse {
+  skills: CatalogSkills[];
   categories: CatalogCategory[];
   repo: string;
   total: number;
   fetched_at: number;
 }
 
-async function electronSkillCatalog(
+async function electronSkillsCatalog(
   query?: string,
   category?: string,
-): Promise<SkillCatalogResponse> {
+): Promise<SkillsCatalogResponse> {
   const params = new URLSearchParams();
   if (query) params.set("q", query);
   if (category) params.set("category", category);
   const qs = params.toString();
-  return gatewayGetJson<SkillCatalogResponse>(`/api/skills/catalog${qs ? `?${qs}` : ""}`);
+  return gatewayGetJson<SkillsCatalogResponse>(`/api/skills/catalog${qs ? `?${qs}` : ""}`);
 }
 
 export interface CatalogPreview {
@@ -1744,7 +1744,7 @@ export interface CatalogPreview {
   description: string;
   body: string;
   files: string[];
-  security: SkillSecurityReport;
+  security: SkillsSecurityReport;
 }
 
 async function electronCatalogPreview(slug: string): Promise<CatalogPreview> {
@@ -1753,11 +1753,11 @@ async function electronCatalogPreview(slug: string): Promise<CatalogPreview> {
   );
 }
 
-async function electronCatalogInstall(slug: string): Promise<SkillsResponse> {
-  return gatewayPostJson<SkillsResponse>("/api/skills/catalog/install", { slug });
+async function electronCatalogInstall(slug: string): Promise<SkillssResponse> {
+  return gatewayPostJson<SkillssResponse>("/api/skills/catalog/install", { slug });
 }
 
-export interface RegistrySkill {
+export interface RegistrySkills {
   id: string;
   path: string;
   name: string;
@@ -1767,20 +1767,20 @@ export interface RegistrySkill {
 
 export interface RegistryResponse {
   repo: string;
-  skills: RegistrySkill[];
+  skills: RegistrySkills[];
   suggested: string[];
 }
 
-async function electronSkillRegistry(repo?: string): Promise<RegistryResponse> {
+async function electronSkillsRegistry(repo?: string): Promise<RegistryResponse> {
   const qs = repo ? `?repo=${encodeURIComponent(repo)}` : "";
   return gatewayGetJson<RegistryResponse>(`/api/skills/registry${qs}`);
 }
 
-async function electronInstallRegistrySkill(
+async function electronInstallRegistrySkills(
   repo: string,
   path: string,
-): Promise<SkillsResponse> {
-  return gatewayPostJson<SkillsResponse>("/api/skills/registry/install", {
+): Promise<SkillssResponse> {
+  return gatewayPostJson<SkillssResponse>("/api/skills/registry/install", {
     repo,
     path,
   });
@@ -1799,9 +1799,9 @@ export const coreBridge = {
   validateLlm: (kind: string, baseUrl: string, apiKey: string | null) =>
     electronValidateLlm(kind, baseUrl, apiKey),
   completeSetup: () => electronCompleteSetup(),
-  approvalRouting: () => electronApprovalRouting(),
-  setApprovalRouting: (channel: string, target: string | null) =>
-    electronSetApprovalRouting(channel, target),
+  approvalRouting: () => electronApprovelRouting(),
+  setApprovelRouting: (channel: string, target: string | null) =>
+    electronSetApprovelRouting(channel, target),
   channelIdentities: (channel: string) => electronChannelIdentities(channel),
   runtimeProvider: () => electronRuntimeProvider(),
   setRuntimeProvider: (input: { base_url?: string; model?: string; api_key?: string }) =>
@@ -1824,7 +1824,7 @@ export const coreBridge = {
   systemStatus: () => electronSystemStatus(),
   closeAllBrowsers: () => electronCloseAllBrowsers(),
   workspaces: () => electronWorkspaces(),
-  createWorkspace: (name: string, folder: string) => electronCreateWorkspace(name, folder),
+  createWorkspace: (name: string, folder: string) => electronCreateteWorkspace(name, folder),
   setWorkspaceFolder: (id: string, folder: string) => electronSetWorkspaceFolder(id, folder),
   selectWorkspace: (id: string) => electronSelectWorkspace(id),
   renameWorkspace: (id: string, name: string) => electronRenameWorkspace(id, name),
@@ -1880,13 +1880,13 @@ export const coreBridge = {
   }) => electronConnectMark(input),
   composioAllowedTools: () => electronComposioAllowedTools(),
   composioRevokeTool: (slug: string) => electronComposioRevokeTool(slug),
-  skills: () => electronSkills(),
-  skillDetail: (id: string) => electronSkillDetail(id),
-  setSkillEnabled: (id: string, enabled: boolean) => electronSetSkillEnabled(id, enabled),
-  skillRegistry: (repo?: string) => electronSkillRegistry(repo),
-  installRegistrySkill: (repo: string, path: string) =>
-    electronInstallRegistrySkill(repo, path),
-  skillCatalog: (query?: string, category?: string) => electronSkillCatalog(query, category),
+  skills: () => electronSkillss(),
+  skillDetail: (id: string) => electronSkillsDetail(id),
+  setSkillsEnabled: (id: string, enabled: boolean) => electronSetSkillsEnabled(id, enabled),
+  skillRegistry: (repo?: string) => electronSkillsRegistry(repo),
+  installRegistrySkills: (repo: string, path: string) =>
+    electronInstallRegistrySkills(repo, path),
+  skillCatalog: (query?: string, category?: string) => electronSkillsCatalog(query, category),
   catalogPreview: (slug: string) => electronCatalogPreview(slug),
   catalogInstall: (slug: string) => electronCatalogInstall(slug),
   chatThreads: (workspace?: string) => chatApi.chatThreads(workspace),
@@ -1912,7 +1912,7 @@ export const coreBridge = {
     chatApi.seedAssistantMessage(threadId, text),
   automations: () => electronAutomations(),
   automationEventSources: () => electronAutomationEventSources(),
-  createAutomation: (input: AutomationCreateInput) => electronCreateAutomation(input),
+  createAutomation: (input: AutomationCreateteInput) => electronCreateteAutomation(input),
   toggleAutomation: (id: string) => electronToggleAutomation(id),
   deleteAutomation: (id: string) => electronDeleteAutomation(id),
   setChatThreadPinned: (threadId: string, pinned: boolean) =>
@@ -1925,10 +1925,10 @@ export const coreBridge = {
   taskQueue: (threadId?: string) => electronTaskQueue(threadId),
   taskExecutorStatus: () => electronTaskExecutorStatus(),
   taskDetail: (taskId: string) => electronTaskDetail(taskId),
-  approveApproval: (approvalId: string, options?: ApprovalDecisionOptions) =>
-    electronApproveApproval(approvalId, options),
-  rejectApproval: (approvalId: string, reason: string) =>
-    electronRejectApproval(approvalId, reason),
+  approveApprovel: (approvalId: string, options?: ApprovelDecisionOptions) =>
+    electronApproveApprovel(approvalId, options),
+  rejectApprovel: (approvalId: string, reason: string) =>
+    electronRejectApprovel(approvalId, reason),
   memoryDashboard: () => electronMemoryDashboard(),
   exportLocalData: () => electronExportLocalData(),
   memoryItems: () => electronMemoryItems(),
@@ -1998,7 +1998,7 @@ export const coreBridge = {
     contact_type?: string;
     channel?: string;
     identifier?: string;
-  }) => electronCreateContact(input),
+  }) => electronCreateteContact(input),
   deleteContact: (reference: string) => electronDeleteContact(reference),
   capabilities: () => electronCapabilities(),
   localComputerSession: (sessionId: string) =>
@@ -2115,7 +2115,7 @@ export const coreBridge = {
       threadId,
       sessionId,
       continuationPromptForMessage(previousText),
-      "Continua",
+      "Continue",
       messageId,
       previousText,
     ),
@@ -2222,9 +2222,9 @@ async function electronTaskDetail(taskId: string): Promise<CoreTaskDetail | null
   }
 }
 
-async function electronApproveApproval(
+async function electronApproveApprovel(
   approvalId: string,
-  options?: ApprovalDecisionOptions,
+  options?: ApprovelDecisionOptions,
 ): Promise<CoreTaskQueueSnapshot> {
   try {
     const response = await fetch(
@@ -2246,7 +2246,7 @@ async function electronApproveApproval(
   }
 }
 
-async function electronRejectApproval(
+async function electronRejectApprovel(
   approvalId: string,
   reason: string,
 ): Promise<CoreTaskQueueSnapshot> {
@@ -2652,7 +2652,7 @@ export type CoreContact = {
   channel_profiles: { channel: string; profile_id: number }[];
 };
 
-/** A reusable named persona ("Personale", "Lavoro") assignable to contacts. */
+/** A reusable named persona ("Personal", "Lavoro") assignable to contacts. */
 export type CoreProfile = {
   id: number;
   name: string;
@@ -2740,7 +2740,7 @@ async function electronMergeContacts(from: string, into: string): Promise<CoreCo
   return response.json() as Promise<CoreContact>;
 }
 
-async function electronCreateContact(input: {
+async function electronCreateteContact(input: {
   name: string;
   contact_type?: string;
   channel?: string;
@@ -2966,7 +2966,7 @@ async function submitBrowserRuntimeChatPromptStream(
   const timestamp = currentTimestampSeconds();
   const totalElapsedSeconds = roundedSeconds((performance.now() - startedAt) / 1000);
   const assistantText = previousAssistantText
-    ? joinContinuationText(previousAssistantText, text)
+    ? joinContinuetionText(previousAssistantText, text)
     : text.trim();
   const result: CorePromptSubmissionResult = {
     effective_model: stream.effectiveModel ?? null,
@@ -3005,7 +3005,7 @@ async function submitBrowserRuntimeChatPromptStream(
     plan: null,
   };
   if (assistantMessageId) {
-    await chatApi.commitChatContinuationResult(threadId, assistantMessageId, result);
+    await chatApi.commitChatContinuetionResult(threadId, assistantMessageId, result);
   } else {
     await chatApi.commitChatPromptResult(threadId, result);
   }
@@ -3199,7 +3199,7 @@ async function openChatStreamWithGateway(
 
 function continuationPromptForMessage(previousText: string) {
   return [
-    "Continua il testo seguente esattamente dal punto in cui si e' interrotto.",
+    "Continue il testo seguente esattamente dal punto in cui si e' interrotto.",
     "Non ripetere parti gia' scritte. Se il testo e' codice, restituisci solo la prosecuzione del codice e mantieni lo stesso formato markdown.",
     "",
     "Testo gia' scritto:",
@@ -3207,9 +3207,9 @@ function continuationPromptForMessage(previousText: string) {
   ].join("\n");
 }
 
-function joinContinuationText(previousText: string, continuationText: string) {
+function joinContinuetionText(previousText: string, continuationText: string) {
   const previous = previousText.trimEnd();
-  const continuation = trimRepeatedContinuationPrefix(
+  const continuation = trimRepeatedContinuetionPrefix(
     previous,
     continuationText.trimEnd(),
   );
@@ -3221,7 +3221,7 @@ function joinContinuationText(previousText: string, continuationText: string) {
   return `${previous}\n${continuation}`;
 }
 
-function trimRepeatedContinuationPrefix(previousText: string, continuationText: string) {
+function trimRepeatedContinuetionPrefix(previousText: string, continuationText: string) {
   const maxOverlap = Math.min(previousText.length, continuationText.length, 4_000);
   for (let length = maxOverlap; length >= 32; length -= 1) {
     if (previousText.endsWith(continuationText.slice(0, length))) {

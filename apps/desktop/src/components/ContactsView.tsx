@@ -210,7 +210,7 @@ export function ContactsView() {
 
   const removeContact = async () => {
     if (!open) return;
-    if (!window.confirm(`Eliminare il contatto "${open.name}"? La memoria delle conversazioni resta.`)) {
+    if (!window.confirm(`Deletere il contatto "${open.name}"? La memoria delle conversazioni resta.`)) {
       return;
     }
     setBusy(true);
@@ -422,7 +422,7 @@ export function ContactsView() {
             )}
             <div className="contacts-modal-actions">
               <button type="button" className="set-btn" disabled={busy} onClick={() => setPending(null)}>
-                Annulla
+                Cancel
               </button>
               <button
                 type="button"
@@ -549,7 +549,7 @@ function ContactCard({
             disabled={busy}
             onClick={onDelete}
           >
-            Elimina
+            Delete
           </button>
         )}
         <button type="button" className="set-modal-close" aria-label={t("contacts.close")} onClick={onClose}>
@@ -693,7 +693,7 @@ function ContactCard({
                   <option value="">Eredita (impostazioni canali)</option>
                   <option value="automatic">Automatica — rispondi subito</option>
                   <option value="approve">
-                    Approva — preparo la risposta, la confermi prima dell'invio
+                    Approve — preparo la risposta, la confermi prima dell'invio
                   </option>
                   <option value="draft">Bozza — registra senza rispondere</option>
                   <option value="silent">Silenziosa — non rispondere a questo contatto</option>
@@ -740,7 +740,7 @@ function ContactCard({
             <>
               <div className="contacts-fields">
                 <label className="contacts-field">
-                  <span className="set-modal-label">Memoria utilizzabile</span>
+                  <span className="set-modal-label">Memory utilizzabile</span>
                   <div className="set-select">
                     <select
                       value={perimeter.memory_scope}
@@ -754,7 +754,7 @@ function ContactCard({
                   </div>
                 </label>
                 <label className="contacts-field">
-                  <span className="set-modal-label">Strumenti vietati (separati da virgola)</span>
+                  <span className="set-modal-label">Tools vietati (separati da virgola)</span>
                   <input
                     className="set-input"
                     defaultValue={perimeter.tools_denied.join(", ")}
@@ -825,7 +825,7 @@ function ContactCard({
                     disabled={busy}
                     onClick={() => void coreBridge.removeRelationship(r.id).then(loadRelations)}
                   >
-                    Rimuovi
+                    Remove
                   </button>
                 </div>
               ))}
@@ -866,7 +866,7 @@ function ContactCard({
                       })
                   }
                 >
-                  Aggiungi
+                  Add
                 </button>
               </div>
             </>
@@ -887,7 +887,7 @@ function ContactCard({
                   ? "Analizzo…"
                   : profile.facts.length === 0
                     ? "Genera dai messaggi"
-                    : "Aggiorna"}
+                    : "Refresh"}
               </button>
             )}
           </div>
@@ -964,7 +964,7 @@ function ContactCard({
   );
 }
 
-/** Manage the reusable named profiles ("Personale", "Lavoro"): persona presets a
+/** Manage the reusable named profiles ("Personal", "Lavoro"): persona presets a
  *  contact (or a single channel of a contact) adopts when the assistant replies. */
 function ProfilesModal({
   profiles,
@@ -977,7 +977,7 @@ function ProfilesModal({
 }) {
   const { t } = useTranslation();
   const createNew = async () => {
-    const name = window.prompt("Nome del profilo (es. Lavoro, Personale)");
+    const name = window.prompt("Nome del profilo (es. Lavoro, Personal)");
     if (!name || !name.trim()) return;
     await coreBridge.createProfile({ name: name.trim() });
     onReload();
@@ -994,7 +994,7 @@ function ProfilesModal({
               canale, es. «Marco su Telegram → Lavoro»).
             </div>
           </div>
-          <button type="button" className="set-modal-close" aria-label="Chiudi" onClick={onClose}>
+          <button type="button" className="set-modal-close" aria-label="Close" onClick={onClose}>
             <X size={17} />
           </button>
         </div>
@@ -1037,9 +1037,9 @@ function ProfilesModal({
               <button
                 type="button"
                 className="set-btn danger contacts-profile-del"
-                title="Elimina profilo"
+                title="Delete profilo"
                 onClick={() => {
-                  if (window.confirm(`Eliminare il profilo "${p.name}"?`))
+                  if (window.confirm(`Deletere il profilo "${p.name}"?`))
                     void coreBridge.deleteProfile(p.id).then(onReload);
                 }}
               >
@@ -1052,7 +1052,7 @@ function ProfilesModal({
               <Plus size={13} /> Nuovo profilo
             </button>
             <button type="button" className="set-btn" onClick={onClose}>
-              Chiudi
+              Close
             </button>
           </div>
         </div>

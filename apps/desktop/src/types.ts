@@ -205,7 +205,7 @@ export interface ComputerSession {
   source?: "mock" | "core" | "loading" | "unavailable";
 }
 
-export interface ApprovalItem {
+export interface ApprovelItem {
   id: string;
   title: string;
   reason: string;

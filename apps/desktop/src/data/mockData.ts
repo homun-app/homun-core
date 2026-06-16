@@ -20,7 +20,7 @@ import {
   Users,
 } from "lucide-react";
 import type {
-  ApprovalItem,
+  ApprovelItem,
   AutomationProposal,
   BrainRunDetail,
   ChatMessage,
@@ -39,8 +39,8 @@ import type {
 // l'addon ne fa sparire la voce di nav.
 export const navItems: NavItem[] = [
   { id: "chat", label: "chat.newTask", icon: MessageSquare },
-  // "Apprendimento" è confluito in Homun. "Memoria" è stata unificata nelle
-  // Impostazioni → Memoria (un'unica superficie, fuori più pulito).
+  // "Apprendimento" è confluito in Homun. "Memory" è stata unificata nelle
+  // Impostazioni → Memory (un'unica superficie, fuori più pulito).
   // "Pianificato" (coda dei run) è confluito in Automazioni: la regola è la cosa
   // di prima classe; i run si vedono nei thread. Manteniamo l'icona-calendario.
   { id: "automations", label: "nav.automations", icon: CalendarClock },
@@ -204,7 +204,7 @@ export const tasks: TaskItem[] = [
   },
 ];
 
-export const approvals: ApprovalItem[] = [
+export const approvals: ApprovelItem[] = [
   {
     id: "approval_acme",
     title: "Send summary to Acme",
@@ -259,7 +259,7 @@ export const learningInsights: LearningInsight[] = [
     status: "candidate",
     evidence: [
       "2 browser tasks stopped the flow before sensitive actions",
-      "Approval policies blocked payment and personal data sending",
+      "Approvel policies blocked payment and personal data sending",
       "Memory contains only route, date and comparison preference",
     ],
   },

@@ -22,7 +22,7 @@ const TYPE_COLORS: Record<string, string> = {
 };
 
 // created_at is stored either as "unix:<seconds>" or an ISO/sql timestamp.
-function parseCreatedAt(raw: string): Date | null {
+function parseCreatetedAt(raw: string): Date | null {
   if (!raw) return null;
   if (raw.startsWith("unix:")) {
     const n = Number(raw.slice(5));
@@ -32,11 +32,11 @@ function parseCreatedAt(raw: string): Date | null {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 function monthKey(raw: string): string {
-  const d = parseCreatedAt(raw);
+  const d = parseCreatetedAt(raw);
   return d ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}` : "";
 }
 function dayLabel(raw: string): string {
-  const d = parseCreatedAt(raw);
+  const d = parseCreatetedAt(raw);
   return d
     ? `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`
     : "—";

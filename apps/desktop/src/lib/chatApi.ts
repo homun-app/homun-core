@@ -41,7 +41,7 @@ let activeThreadId = "thread_active_prompt";
 let localThreads: CoreChatThread[] = [
   {
     thread_id: activeThreadId,
-    title: "Nuovo compito",
+    title: "New task",
     subtitle: "Chat locale",
     status: "active",
     pinned: false,
@@ -60,7 +60,7 @@ const localMessages = new Map<string, CoreChatMessage[]>([
         role: "assistant",
         text: "Sono pronto. Scrivimi pure: rispondo in locale.",
         timestamp: currentTimestampSeconds(),
-        metadata: "Modello locale",
+        metadata: "Model locale",
         metrics: null,
         feedback: null,
         saved_memory_ref: null,
@@ -75,7 +75,7 @@ const localMessages = new Map<string, CoreChatMessage[]>([
 export const chatApi = {
   // `workspace` targets a SPECIFIC project/base instead of the active one. A
   // specific fetch must NOT hydrate the module cache (that mirrors the ACTIVE
-  // workspace) — e.g. loading Personale's threads while a project is active.
+  // workspace) — e.g. loading Personal's threads while a project is active.
   async chatThreads(workspace?: string) {
     const url = workspace
       ? `/api/chat/threads?workspace=${encodeURIComponent(workspace)}`
@@ -361,12 +361,12 @@ export const chatApi = {
     );
   },
 
-  async commitChatContinuationResult(
+  async commitChatContinuetionResult(
     threadId: string,
     messageId: string,
     result: CorePromptSubmissionResult,
   ) {
-    const snapshot = commitLocalContinuationResult(threadId, messageId, result);
+    const snapshot = commitLocalContinuetionResult(threadId, messageId, result);
     try {
       return hydrateMessagesSnapshot(
         await gatewayJson<CoreChatMessagesSnapshot>(
@@ -447,7 +447,7 @@ function createLocalChatThread() {
   const threadId = `thread_${Date.now()}_${Math.random().toString(36).slice(2)}`;
   const thread: CoreChatThread = {
     thread_id: threadId,
-    title: "Nuovo compito",
+    title: "New task",
     subtitle: "Chat locale",
     status: "active",
     pinned: false,
@@ -464,7 +464,7 @@ function createLocalChatThread() {
       role: "assistant",
       text: "Sono pronto. Scrivimi pure: rispondo in locale.",
       timestamp: currentTimestampSeconds(),
-      metadata: "Modello locale",
+      metadata: "Model locale",
       metrics: null,
       feedback: null,
       saved_memory_ref: null,
@@ -517,7 +517,7 @@ function commitLocalPromptResult(
   return chatMessagesSnapshot(threadId);
 }
 
-function commitLocalContinuationResult(
+function commitLocalContinuetionResult(
   threadId: string,
   messageId: string,
   result: CorePromptSubmissionResult,
@@ -759,13 +759,13 @@ function updateThreadAfterMessages(
   localThreads = localThreads.map((thread) => {
     if (thread.thread_id !== threadId) return thread;
     const title =
-      thread.title === "Nuovo compito" && userPrompt?.trim()
+      thread.title === "New task" && userPrompt?.trim()
         ? compactTitle(userPrompt)
         : thread.title;
     return {
       ...thread,
       title,
-      subtitle: "Modello locale",
+      subtitle: "Model locale",
       updated_at: currentTimestampSeconds(),
       message_count: messageCount,
     };

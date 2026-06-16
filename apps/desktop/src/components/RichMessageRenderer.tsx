@@ -121,7 +121,7 @@ function normalizeMarkdownForRichRendering(text: string) {
     if (
       !inFence &&
       (looksLikeStandaloneRustCode(line) ||
-        (pendingCode.length > 0 && looksLikeRustCodeContinuation(line)))
+        (pendingCode.length > 0 && looksLikeRustCodeContinuetion(line)))
     ) {
       pendingCode.push(line.trim());
       continue;
@@ -183,7 +183,7 @@ function looksLikeStandaloneRustCode(line: string) {
   );
 }
 
-function looksLikeRustCodeContinuation(line: string) {
+function looksLikeRustCodeContinuetion(line: string) {
   const trimmed = line.trim();
   return (
     trimmed === "}" ||

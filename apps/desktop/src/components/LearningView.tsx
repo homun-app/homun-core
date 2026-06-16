@@ -34,7 +34,7 @@ export function LearningView({ insights, proposals }: LearningViewProps) {
   const proposalStatusLabel = (status: AutomationProposal["status"]) => {
     if (status === "ready") return t("learningView.proposalStatus.ready");
     if (status === "needs_connector") return t("learningView.proposalStatus.needsConnector");
-    return t("learningView.proposalStatus.needsApproval");
+    return t("learningView.proposalStatus.needsApprovel");
   };
 
   return (

@@ -119,8 +119,8 @@ export function NavigationRail({
   );
 }
 
-/* Projects + Personale sections (M9). Self-contained: fetches the workspace list
-   and the base ("Personale") threads itself; the active project's chats come from
+/* Projects + Personal sections (M9). Self-contained: fetches the workspace list
+   and the base ("Personal") threads itself; the active project's chats come from
    the active-context `activeThreads`. Switching context re-scopes the whole app, so
    those actions reload (consistent with the rest of the workspace flow). */
 interface ProjectsNavProps {
@@ -129,7 +129,7 @@ interface ProjectsNavProps {
   activeThreads: ChatThread[];
   busyThreadIds: Set<string>;
   onSelectThread: (threadId: string) => void;
-  onCreateChatThread: () => void;
+  onCreateteChatThread: () => void;
   onThreadContextMenu: (thread: ChatThread, event: MouseEvent<HTMLButtonElement>) => void;
 }
 
@@ -139,7 +139,7 @@ function ProjectsNav({
   activeThreads,
   busyThreadIds,
   onSelectThread,
-  onCreateChatThread,
+  onCreateteChatThread,
   onThreadContextMenu,
 }: ProjectsNavProps) {
   const { t } = useTranslation();
@@ -152,7 +152,7 @@ function ProjectsNav({
   const [showChannels, setShowChannels] = useState(true);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
-  const [creating, setCreating] = useState(false);
+  const [creating, setCreateting] = useState(false);
   const [newName, setNewName] = useState("");
   const [newFolder, setNewFolder] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -285,7 +285,7 @@ function ProjectsNav({
         window.location.reload();
       } else {
         setBusy(false);
-        setCreating(false);
+        setCreateting(false);
       }
     } catch (e) {
       setError((e as Error).message);
@@ -370,7 +370,7 @@ function ProjectsNav({
                         disabled={busy}
                         onClick={() => void deleteProject(project.id)}
                       >
-                        Elimina
+                        Delete
                       </button>
                       <button
                         className="primary-button"
@@ -378,7 +378,7 @@ function ProjectsNav({
                         disabled={busy || !editName.trim()}
                         onClick={() => void renameProject(project.id)}
                       >
-                        Salva
+                        Save
                       </button>
                     </div>
                   </div>
@@ -399,7 +399,7 @@ function ProjectsNav({
                     <button
                       className="ctx-menu-edit-btn"
                       type="button"
-                      aria-label={`Modifica ${project.name}`}
+                      aria-label={`Edit ${project.name}`}
                       disabled={busy}
                       onClick={() => {
                         setEditingId(project.id);
@@ -419,7 +419,7 @@ function ProjectsNav({
                   setNewName("");
                   setNewFolder(null);
                   setError(null);
-                  setCreating(true);
+                  setCreateting(true);
                 }}
               >
                 <FolderPlus size={14} />
@@ -436,7 +436,7 @@ function ProjectsNav({
           className="drawer-eyebrow-add"
           type="button"
           disabled={busy}
-          onClick={onCreateChatThread}
+          onClick={onCreateteChatThread}
           aria-label={t("sidebar.newChat")}
           title={t("sidebar.newChat")}
         >
@@ -472,7 +472,7 @@ function ProjectsNav({
           className="confirm-modal-backdrop"
           role="presentation"
           onClick={() => {
-            if (!busy) setCreating(false);
+            if (!busy) setCreateting(false);
           }}
         >
           <div
@@ -487,7 +487,7 @@ function ProjectsNav({
                 className="icon-button"
                 type="button"
                 aria-label={t("sidebar.close")}
-                onClick={() => setCreating(false)}
+                onClick={() => setCreateting(false)}
               >
                 <X size={17} />
               </button>
@@ -518,9 +518,9 @@ function ProjectsNav({
                 className="secondary-button"
                 type="button"
                 disabled={busy}
-                onClick={() => setCreating(false)}
+                onClick={() => setCreateting(false)}
               >
-                Annulla
+                Cancel
               </button>
               <button
                 className="primary-button"
@@ -528,7 +528,7 @@ function ProjectsNav({
                 disabled={busy || !newName.trim() || !newFolder}
                 onClick={() => void createProject()}
               >
-                Crea
+                Create
               </button>
             </footer>
           </div>
@@ -545,7 +545,7 @@ interface NavDrawerProps {
   chatThreads: ChatThread[];
   navItems: NavItem[];
   onArchiveChatThread: (threadId: string) => void;
-  onCreateChatThread: () => void;
+  onCreateteChatThread: () => void;
   onDeleteChatThread: (threadId: string) => void;
   onNavigate: (view: ViewId) => void;
   onSearchChat: () => void;
@@ -562,7 +562,7 @@ export function NavDrawer({
   chatThreads,
   navItems,
   onArchiveChatThread,
-  onCreateChatThread,
+  onCreateteChatThread,
   onDeleteChatThread,
   onNavigate,
   onSearchChat,
@@ -648,7 +648,7 @@ export function NavDrawer({
           activeThreads={activeThreads}
           busyThreadIds={busyThreadIds}
           onSelectThread={onSelectThread}
-          onCreateChatThread={onCreateChatThread}
+          onCreateteChatThread={onCreateteChatThread}
           onThreadContextMenu={(thread, event) => {
             event.preventDefault();
             setThreadMenu({ thread, x: event.clientX, y: event.clientY });
@@ -708,7 +708,7 @@ export function NavDrawer({
                 type="button"
                 onClick={() => setDeleteCandidate(null)}
               >
-                Annulla
+                Cancel
               </button>
               <button
                 className="danger-button"
@@ -718,7 +718,7 @@ export function NavDrawer({
                   setDeleteCandidate(null);
                 }}
               >
-                Elimina
+                Delete
               </button>
             </footer>
           </div>
@@ -747,7 +747,7 @@ export function NavDrawer({
                 }
               >
                 {threadMenu.thread.pinned ? <PinOff size={15} /> : <Pin size={15} />}
-                <span>{threadMenu.thread.pinned ? "Rimuovi pin" : "Pin in alto"}</span>
+                <span>{threadMenu.thread.pinned ? "Remove pin" : "Pin in alto"}</span>
               </button>
               <button
                 type="button"
@@ -849,7 +849,7 @@ export function SettingsDrawer({
 }: SettingsDrawerProps) {
   const { t } = useTranslation();
   const [displayName] = useSetting("displayName", "Fabio Cantone");
-  const [workspaceName] = useSetting("workspaceName", "Personale");
+  const [workspaceName] = useSetting("workspaceName", "Personal");
   const groups: Array<"account" | "capabilities"> = ["account", "capabilities"];
   return (
     <aside className="nav-drawer settings-drawer set-nav" aria-label="Impostazioni">
@@ -862,7 +862,7 @@ export function SettingsDrawer({
         <span className="set-nav-avatar" aria-hidden />
         <span className="set-nav-id">
           <span className="n">{displayName || t("sidebar.account")}</span>
-          <span className="w">{workspaceName || "Personale"}</span>
+          <span className="w">{workspaceName || "Personal"}</span>
         </span>
       </div>
 
