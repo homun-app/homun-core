@@ -76,35 +76,35 @@ struct Rule {
 
 fn substring_rules() -> Vec<Rule> {
     vec![
-        Rule { needle: "rm -rf /", severity: Severity::Critical, category: WarningCategory::Destructive, description: "Cancella l'intero filesystem" },
-        Rule { needle: "rm -rf ~", severity: Severity::Critical, category: WarningCategory::Destructive, description: "Cancella la home dell'utente" },
-        Rule { needle: "rm -rf $home", severity: Severity::Critical, category: WarningCategory::Destructive, description: "Cancella la home dell'utente" },
-        Rule { needle: "mkfs.", severity: Severity::Critical, category: WarningCategory::Destructive, description: "Formatta un disco" },
-        Rule { needle: "dd if=/dev/zero", severity: Severity::Critical, category: WarningCategory::Destructive, description: "Sovrascrive un disco con zeri" },
-        Rule { needle: ":(){:|:&};:", severity: Severity::Critical, category: WarningCategory::Destructive, description: "Contiene una fork bomb" },
-        Rule { needle: "> /dev/sda", severity: Severity::Critical, category: WarningCategory::Destructive, description: "Scrive direttamente su un device disco" },
-        Rule { needle: "chmod 777 /", severity: Severity::Critical, category: WarningCategory::PrivilegeEscalation, description: "Rende l'intero filesystem scrivibile da tutti" },
-        Rule { needle: "chmod +s", severity: Severity::Warning, category: WarningCategory::PrivilegeEscalation, description: "Imposta il bit SUID" },
-        Rule { needle: "sudo ", severity: Severity::Warning, category: WarningCategory::PrivilegeEscalation, description: "Usa sudo per privilegi elevati" },
-        Rule { needle: "/etc/shadow", severity: Severity::Warning, category: WarningCategory::SecretAccess, description: "Accede a /etc/shadow" },
-        Rule { needle: "~/.ssh/", severity: Severity::Warning, category: WarningCategory::SecretAccess, description: "Accede alle chiavi SSH" },
-        Rule { needle: "id_rsa", severity: Severity::Warning, category: WarningCategory::SecretAccess, description: "Riferisce una chiave privata SSH" },
-        Rule { needle: ".aws/credentials", severity: Severity::Warning, category: WarningCategory::SecretAccess, description: "Accede alle credenziali AWS" },
-        Rule { needle: "exfiltrate", severity: Severity::Critical, category: WarningCategory::SecretAccess, description: "Riferisce esfiltrazione di dati" },
-        Rule { needle: "steal credentials", severity: Severity::Critical, category: WarningCategory::SecretAccess, description: "Riferisce furto di credenziali" },
-        Rule { needle: "keylogger", severity: Severity::Critical, category: WarningCategory::Other, description: "Riferisce keylogging" },
-        Rule { needle: "ransomware", severity: Severity::Critical, category: WarningCategory::Other, description: "Riferisce ransomware" },
-        Rule { needle: "rootkit", severity: Severity::Critical, category: WarningCategory::Other, description: "Riferisce comportamento rootkit" },
-        Rule { needle: "cryptominer", severity: Severity::Critical, category: WarningCategory::Other, description: "Riferisce mining di criptovalute" },
-        Rule { needle: "ignore previous instructions", severity: Severity::Critical, category: WarningCategory::PromptInjection, description: "Tenta di sovrascrivere le istruzioni di sistema" },
-        Rule { needle: "ignore all instructions", severity: Severity::Critical, category: WarningCategory::PromptInjection, description: "Tenta di sovrascrivere le istruzioni di sistema" },
-        Rule { needle: "ignore prior instructions", severity: Severity::Critical, category: WarningCategory::PromptInjection, description: "Tenta di sovrascrivere le istruzioni di sistema" },
-        Rule { needle: "do not tell the user", severity: Severity::Critical, category: WarningCategory::PromptInjection, description: "Nasconde azioni all'utente" },
-        Rule { needle: "reveal your system prompt", severity: Severity::Warning, category: WarningCategory::PromptInjection, description: "Tenta di estrarre il system prompt" },
-        Rule { needle: "you are now a", severity: Severity::Warning, category: WarningCategory::PromptInjection, description: "Tenta di dirottare il ruolo dell'agente" },
-        Rule { needle: EVAL_NEEDLE, severity: Severity::Warning, category: WarningCategory::Obfuscation, description: "Usa valutazione dinamica di codice" },
-        Rule { needle: "os.system(", severity: Severity::Warning, category: WarningCategory::RemoteExecution, description: "Esegue comandi di shell (os.system)" },
-        Rule { needle: "/dev/tcp/", severity: Severity::Critical, category: WarningCategory::RemoteExecution, description: "Pattern di reverse shell (/dev/tcp)" },
+        Rule { needle: "rm -rf /", severity: Severity::Critical, category: WarningCategory::Destructive, description: "Deletes the entire filesystem" },
+        Rule { needle: "rm -rf ~", severity: Severity::Critical, category: WarningCategory::Destructive, description: "Deletes the user's home directory" },
+        Rule { needle: "rm -rf $home", severity: Severity::Critical, category: WarningCategory::Destructive, description: "Deletes the user's home directory" },
+        Rule { needle: "mkfs.", severity: Severity::Critical, category: WarningCategory::Destructive, description: "Formats a disk" },
+        Rule { needle: "dd if=/dev/zero", severity: Severity::Critical, category: WarningCategory::Destructive, description: "Overwrites a disk with zeros" },
+        Rule { needle: ":(){:|:&};:", severity: Severity::Critical, category: WarningCategory::Destructive, description: "Contains a fork bomb" },
+        Rule { needle: "> /dev/sda", severity: Severity::Critical, category: WarningCategory::Destructive, description: "Writes directly to a disk device" },
+        Rule { needle: "chmod 777 /", severity: Severity::Critical, category: WarningCategory::PrivilegeEscalation, description: "Makes the entire filesystem world-writable" },
+        Rule { needle: "chmod +s", severity: Severity::Warning, category: WarningCategory::PrivilegeEscalation, description: "Sets the SUID bit" },
+        Rule { needle: "sudo ", severity: Severity::Warning, category: WarningCategory::PrivilegeEscalation, description: "Uses sudo for elevated privileges" },
+        Rule { needle: "/etc/shadow", severity: Severity::Warning, category: WarningCategory::SecretAccess, description: "Accesses /etc/shadow" },
+        Rule { needle: "~/.ssh/", severity: Severity::Warning, category: WarningCategory::SecretAccess, description: "Accesses SSH keys" },
+        Rule { needle: "id_rsa", severity: Severity::Warning, category: WarningCategory::SecretAccess, description: "References an SSH private key" },
+        Rule { needle: ".aws/credentials", severity: Severity::Warning, category: WarningCategory::SecretAccess, description: "Accesses AWS credentials" },
+        Rule { needle: "exfiltrate", severity: Severity::Critical, category: WarningCategory::SecretAccess, description: "References data exfiltration" },
+        Rule { needle: "steal credentials", severity: Severity::Critical, category: WarningCategory::SecretAccess, description: "References credential theft" },
+        Rule { needle: "keylogger", severity: Severity::Critical, category: WarningCategory::Other, description: "References keylogging" },
+        Rule { needle: "ransomware", severity: Severity::Critical, category: WarningCategory::Other, description: "References ransomware" },
+        Rule { needle: "rootkit", severity: Severity::Critical, category: WarningCategory::Other, description: "References rootkit behavior" },
+        Rule { needle: "cryptominer", severity: Severity::Critical, category: WarningCategory::Other, description: "References cryptocurrency mining" },
+        Rule { needle: "ignore previous instructions", severity: Severity::Critical, category: WarningCategory::PromptInjection, description: "Attempts to override system instructions" },
+        Rule { needle: "ignore all instructions", severity: Severity::Critical, category: WarningCategory::PromptInjection, description: "Attempts to override system instructions" },
+        Rule { needle: "ignore prior instructions", severity: Severity::Critical, category: WarningCategory::PromptInjection, description: "Attempts to override system instructions" },
+        Rule { needle: "do not tell the user", severity: Severity::Critical, category: WarningCategory::PromptInjection, description: "Hides actions from the user" },
+        Rule { needle: "reveal your system prompt", severity: Severity::Warning, category: WarningCategory::PromptInjection, description: "Attempts to extract the system prompt" },
+        Rule { needle: "you are now a", severity: Severity::Warning, category: WarningCategory::PromptInjection, description: "Attempts to hijack the agent's role" },
+        Rule { needle: EVAL_NEEDLE, severity: Severity::Warning, category: WarningCategory::Obfuscation, description: "Uses dynamic code evaluation" },
+        Rule { needle: "os.system(", severity: Severity::Warning, category: WarningCategory::RemoteExecution, description: "Runs shell commands (os.system)" },
+        Rule { needle: "/dev/tcp/", severity: Severity::Critical, category: WarningCategory::RemoteExecution, description: "Reverse shell pattern (/dev/tcp)" },
     ]
 }
 
@@ -115,15 +115,15 @@ fn combo_warnings(lower: &str) -> Vec<(Severity, WarningCategory, &'static str)>
         .iter()
         .any(|p| lower.contains(p));
     if (lower.contains("curl ") || lower.contains("wget ")) && piped_to_shell {
-        out.push((Severity::Critical, WarningCategory::RemoteExecution, "Scarica ed esegue codice remoto (pipe-to-shell)"));
+        out.push((Severity::Critical, WarningCategory::RemoteExecution, "Downloads and runs remote code (pipe-to-shell)"));
     }
     if lower.contains("base64") && (lower.contains("-d") || lower.contains("--decode")) && piped_to_shell {
-        out.push((Severity::Critical, WarningCategory::Obfuscation, "Esegue comandi offuscati in base64"));
+        out.push((Severity::Critical, WarningCategory::Obfuscation, "Runs base64-obfuscated commands"));
     }
     if (lower.contains("nc ") || lower.contains("ncat ") || lower.contains("netcat "))
         && (lower.contains("-e ") || lower.contains("--exec"))
     {
-        out.push((Severity::Critical, WarningCategory::RemoteExecution, "Pattern di reverse shell (netcat -e)"));
+        out.push((Severity::Critical, WarningCategory::RemoteExecution, "Reverse shell pattern (netcat -e)"));
     }
     out
 }

@@ -16,6 +16,9 @@ Le capability seguenti sono implementate e in uso (dettaglio vivo in `docs/roadm
 - Skill: scanner skill locali + catalogo OpenClaw installabile + sandbox.
 - Addon ecosystem (ADR 0011) con toggle abilita/disabilita.
 - Proattivita': motore supervisore + card suggerimento.
+- Multilingua: inglese default + italiano, system prompt EN con `Reply in {language}`, plugin self-contained con namespace i18next (ADR 0014).
+- Concorrenza LLM dinamica: limite per provider (locale 1, cloud 4), N worker indipendenti, cambio chat in background.
+- Durabilita' task: heartbeat watchdog (lease renewal + double-execution guard), retention dati (cascade purge + VACUUM), export dati utente (ADR 0015).
 - Artifacts: workspace file + create/edit/versioning.
 - Graphify: grafo del progetto/codebase su host.
 - Inferenza: routing provider (Ollama locale, OpenAI-compatible, Anthropic) con registry modelli e routing ruolo -> modello (ADR 0007), local-first con delega cloud opzionale.
@@ -87,6 +90,8 @@ operative complesse.
 - Local Computer Session: la UX di riferimento e' Manus per task operativi visibili, ma adattata al nostro local-first. Non e' solo browser: e' una sessione locale multi-superficie con browser, shell/terminal, file/artifact e log, governata dal Rust Core e mostrata in chat con timeline inline, activity card, preview/thumbnail, progress, approvals e takeover controllato.
 - Chat UI complex rendering: assistant-ui e' riferimento architetturale per thread, composer, attachments, message actions, suggestions, tool activity e external-store runtime. Non adottiamo automaticamente la CLI shadcn/Tailwind; adattiamo i pattern alla nostra UI Electron custom e al Rust gateway locale come owner dello stato.
 - Desktop Chat Gateway: la chat non deve dipendere da bridge nativi per stream lunghi. Il trasporto chat passa a un gateway HTTP Rust locale su `127.0.0.1`, con token locale, CORS stretto, stream NDJSON/SSE o WebSocket e UI via `fetch`/browser APIs. Il gateway diventa il boundary per thread, messaggi, streaming, cancel, metriche, artifact e read model redatti.
+- Multilingua (ADR 0014): l'inglese e' la lingua di default e il substrato neutrale per le istruzioni LLM. Tutti i system prompt e le tool descriptions sono in inglese; l'output segue la lingua dell'utente via `Reply in {language}` dinamico. La UI usa `react-i18next` con EN default + IT. Ogni plugin e' self-contained: porta le proprie traduzioni come namespace i18next dedicato (`registerI18n` nel manifest), cosi' un plugin di terzi non modifica i file dell'host.
+- Concorrenza LLM dinamica: il limite `LlmInference` del ResourceGovernor segue il provider attivo (loopback 1, cloud 4 configurabile). Il gateway spawna N worker indipendenti (default 3); il governor fa il gating reale.
 
 ### Inferenza e routing provider
 
@@ -399,7 +404,7 @@ background_maintenance
 Regole:
 
 - Nessun executor decide autonomamente quando partire.
-- Il runtime LLM rimane a concorrenza bassa o single-flight.
+- Il runtime LLM ha concorrenza dinamica: il limite `LlmInference` segue il provider attivo (locale 1, cloud 4 configurabile), con N worker indipendenti (default 3) che pescano dalla coda. Il ResourceGovernor resta l'unico gate (ADR 0014).
 - Browser automation, shell process, Local Computer Session, Graphify e connettori remoti passano dal Resource Governor.
 - Un task lungo di ore o giorni deve essere ricostruibile da store, checkpoint e audit.
 - I task ad alto rischio entrano in `waiting_user_approval` prima dell'azione reale.
@@ -1256,7 +1261,7 @@ crates/browser-automation/
 crates/task-runtime/
 ```
 
-Inferenza (routing provider Ollama/OpenAI-compat/Anthropic), memoria, subagenti, Durable Task Runtime, Capability Layer, Browser Automation, Process Manager, Secrets/Keychain, Skill/Plugin Registry, Skill Runtime Sandbox, process adapter trusted, WASM adapter non trusted, Assistant Orchestrator Brain e Local Computer Session hanno una base operativa testata. La UI Electron esiste con direzione rail/drawer, chat attiva, activity card e progressive disclosure; lo streaming chat e' fluido in Chromium. Il vecchio core desktop Tauri e' stato rimosso per pulizia: le sue responsabilita' stanno rientrando nel gateway Rust autonomo e nei crate riusabili. Il gateway ora possiede prompt building, streaming/cancel verso il provider/modello configurato, thread e messaggi persistenti. Restano da collegare read model reali per task, memoria, processi, capability e Local Computer al gateway, aggiungere packaging e diagnostica, collegare l'esecuzione effettiva degli step browser/shell ai worker runtime, promuovere il planner prompt-level nell'OrchestratorBrain completo per subagenti/tool complessi, e lasciare l'auto-apprendimento per ultimo quando gli eventi PC reali saranno disponibili.
+Inferenza (routing provider Ollama/OpenAI-compat/Anthropic), memoria, subagenti, Durable Task Runtime, Capability Layer, Browser Automation, Process Manager, Secrets/Keychain, Skill/Plugin Registry, Skill Runtime Sandbox, process adapter trusted, WASM adapter non trusted, Assistant Orchestrator Brain e Local Computer Session hanno una base operativa testata. La UI Electron esiste con direzione rail/drawer, chat attiva, activity card e progressive disclosure; lo streaming chat e' fluido in Chromium. Il vecchio core desktop Tauri e' stato rimosso per pulizia: le sue responsabilita' stanno rientrando nel gateway Rust autonomo e nei crate riusabili. Il gateway ora possiede prompt building, streaming/cancel verso il provider/modello configurato, thread e messaggi persistenti. L'app e' ora multilingua (ADR 0014): inglese di default, italiano e altre lingue selezionabili; system prompt e tool descriptions in inglese con `Reply in {language}` dinamico; UI migrata a `react-i18next`; plugin self-contained con namespace i18next dedicati. La concorrenza LLM e' dinamica (limite per provider, N worker indipendenti); il cambio chat in background funziona con indicatore thread busy. Il Durable Task Runtime ora ha heartbeat watchdog (rinnovo lease ogni 60s + guard contro double-execution, ADR 0015); la retention dati e' completa (cascade purge on-delete + VACUUM periodico); l'export dati utente e' disponibile (`GET /api/export`, GDPR-style). Restano da collegare read model reali per task, memoria, processi, capability e Local Computer al gateway, aggiungere packaging e diagnostica, collegare l'esecuzione effettiva degli step browser/shell ai worker runtime, promuovere il planner prompt-level nell'OrchestratorBrain completo per subagenti/tool complessi, completare l'onboarding first-run, e lasciare l'auto-apprendimento per ultimo quando gli eventi PC reali saranno disponibili.
 
 Nota UI/core: la sessione chat default deve restare neutra (`computer_active_prompt`) e non contenere dati demo di task specifici. Contesto come ricerche treni, prenotazioni o form deve entrare solo quando un prompt/task reale lo genera.
 

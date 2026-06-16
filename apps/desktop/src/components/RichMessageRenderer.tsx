@@ -1,5 +1,6 @@
 import { Check, Copy } from "lucide-react";
 import { Fragment, useEffect, useId, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { jsx, jsxs } from "react/jsx-runtime";
 import ReactMarkdown from "react-markdown";
 import rehypeSanitize from "rehype-sanitize";
@@ -121,7 +122,7 @@ function normalizeMarkdownForRichRendering(text: string) {
     if (
       !inFence &&
       (looksLikeStandaloneRustCode(line) ||
-        (pendingCode.length > 0 && looksLikeRustCodeContinuation(line)))
+        (pendingCode.length > 0 && looksLikeRustCodeContinuetion(line)))
     ) {
       pendingCode.push(line.trim());
       continue;
@@ -183,7 +184,7 @@ function looksLikeStandaloneRustCode(line: string) {
   );
 }
 
-function looksLikeRustCodeContinuation(line: string) {
+function looksLikeRustCodeContinuetion(line: string) {
   const trimmed = line.trim();
   return (
     trimmed === "}" ||
@@ -194,6 +195,7 @@ function looksLikeRustCodeContinuation(line: string) {
 }
 
 function CodeBlock({ code, language }: { code: string; language: string }) {
+  const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
 
   async function copyCode() {
@@ -230,7 +232,7 @@ function CodeBlock({ code, language }: { code: string; language: string }) {
         <span>{language}</span>
         <button type="button" onClick={copyCode}>
           {copied ? <Check size={14} /> : <Copy size={14} />}
-          <span>{copied ? "Copiato" : "Copia"}</span>
+          <span>{copied ? t("common.copied") : t("common.copy")}</span>
         </button>
       </figcaption>
       <pre>
@@ -247,6 +249,7 @@ function MermaidBlock({
   code: string;
   streaming: boolean;
 }) {
+  const { t } = useTranslation();
   const id = useId().replace(/:/g, "");
   const [svg, setSvg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -296,7 +299,7 @@ function MermaidBlock({
       <figure className="rich-code-block rich-mermaid-pending">
         <figcaption>
           <span>mermaid</span>
-          <small>render dopo risposta completa</small>
+          <small>{t("common.renderedAfterFullReply")}</small>
         </figcaption>
         <pre>
           <code>{code}</code>

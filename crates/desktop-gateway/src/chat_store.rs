@@ -368,6 +368,48 @@ impl ChatStore {
         self.threads(&workspace_id)
     }
 
+    /// Cascading purge of ALL chat data for a workspace: threads, messages,
+    /// task-thread links, and the workspace's settings row. Called when a
+    /// project workspace is deleted (`delete_workspace`). Unlike
+    /// `delete_thread`, this does NOT reseed — the workspace is gone for good.
+    /// Returns the number of threads removed.
+    pub fn purge_workspace(&self, workspace_id: &str) -> rusqlite::Result<usize> {
+        let thread_ids: Vec<String> = {
+            let mut stmt = self
+                .conn
+                .prepare("select thread_id from chat_threads where workspace_id = ?1")?;
+            let rows = stmt.query_map(params![workspace_id], |row| row.get::<_, String>(0))?;
+            rows.filter_map(|r| r.ok()).collect()
+        };
+        let count = thread_ids.len();
+        for thread_id in &thread_ids {
+            self.conn.execute(
+                "delete from chat_messages where thread_id = ?1",
+                params![thread_id],
+            )?;
+            self.conn.execute(
+                "delete from task_thread_links where thread_id = ?1",
+                params![thread_id],
+            )?;
+        }
+        self.conn.execute(
+            "delete from chat_threads where workspace_id = ?1",
+            params![workspace_id],
+        )?;
+        self.conn.execute(
+            "delete from chat_settings where key = ?1",
+            params![active_thread_setting_key(workspace_id)],
+        )?;
+        Ok(count)
+    }
+
+    /// Reclaims free space from the SQLite file. Call periodically (boot / 24h),
+    /// NOT on every delete. VACUUM cannot run inside a transaction.
+    pub fn vacuum(&self) -> rusqlite::Result<()> {
+        self.conn.execute_batch("VACUUM")?;
+        Ok(())
+    }
+
     pub fn messages(&self, thread_id: &str) -> rusqlite::Result<ChatMessagesSnapshot> {
         let mut stmt = self.conn.prepare(
             "select id, role, text, timestamp, metadata, metrics_json, feedback,
@@ -1396,7 +1438,7 @@ impl ChatStore {
                 updated_at integer not null
             );
 
-            -- 'Marco su Telegram aziendale → profilo Lavoro': per-channel override.
+            -- 'Marco on company Telegram → Work profile': per-channel override.
             create table if not exists contact_channel_profiles (
                 contact_id integer not null references contacts(id) on delete cascade,
                 channel text not null,
@@ -1404,7 +1446,7 @@ impl ChatStore {
                 primary key(contact_id, channel)
             );
 
-            -- Social graph between curated contacts ('Laura è la moglie di Marco').
+            -- Social graph between curated contacts ('Laura is Marco's wife').
             create table if not exists contact_relationships (
                 id integer primary key autoincrement,
                 from_contact_id integer not null references contacts(id) on delete cascade,
@@ -2164,10 +2206,10 @@ mod tests {
             dedup_key: key.to_string(),
             ..Default::default()
         };
-        let liked = store.insert_suggestion(&mk("proj", "k1", "Utile")).unwrap();
-        let disliked = store.insert_suggestion(&mk("proj", "k2", "Rumore")).unwrap();
-        store.insert_suggestion(&mk("proj", "k3", "Intatta")).unwrap();
-        let personal = store.insert_suggestion(&mk("__personal__", "p1", "Altro scope")).unwrap();
+        let liked = store.insert_suggestion(&mk("proj", "k1", "Useful")).unwrap();
+        let disliked = store.insert_suggestion(&mk("proj", "k2", "Noise")).unwrap();
+        store.insert_suggestion(&mk("proj", "k3", "Untouched")).unwrap();
+        let personal = store.insert_suggestion(&mk("__personal__", "p1", "Other scope")).unwrap();
         store.set_suggestion_status(liked, "accepted", Some("liked"), None).unwrap();
         store.set_suggestion_status(disliked, "dismissed", Some("disliked"), None).unwrap();
         store.set_suggestion_status(personal, "dismissed", Some("disliked"), None).unwrap();
@@ -2175,8 +2217,8 @@ mod tests {
         // Only acted cards of the scope, newest first; the untouched one is excluded.
         let fb = store.recent_feedback("proj", 10).unwrap();
         assert_eq!(fb.len(), 2);
-        assert!(fb.iter().any(|(f, _, t)| f == "liked" && t == "Utile"));
-        assert!(fb.iter().any(|(f, _, t)| f == "disliked" && t == "Rumore"));
+        assert!(fb.iter().any(|(f, _, t)| f == "liked" && t == "Useful"));
+        assert!(fb.iter().any(|(f, _, t)| f == "disliked" && t == "Noise"));
         // Scope isolation: the personal feedback doesn't leak into proj.
         assert_eq!(store.recent_feedback("__personal__", 10).unwrap().len(), 1);
     }
@@ -2189,7 +2231,7 @@ mod tests {
         let user = ChatMessage {
             id: "user_1".to_string(),
             role: "user".to_string(),
-            text: "dimmi una barzelletta".to_string(),
+            text: "tell me a joke".to_string(),
             timestamp: timestamp.clone(),
             metadata: None,
             metrics: None,
@@ -2202,9 +2244,9 @@ mod tests {
         let assistant = ChatMessage {
             id: "assistant_1".to_string(),
             role: "assistant".to_string(),
-            text: "Certo.".to_string(),
+            text: "Sure.".to_string(),
             timestamp,
-            metadata: Some("Modello locale".to_string()),
+            metadata: Some("Local model".to_string()),
             metrics: Some(serde_json::json!({"generation_tokens": 2})),
             feedback: None,
             saved_memory_ref: None,
@@ -2224,7 +2266,7 @@ mod tests {
                 .unwrap()
                 .threads
                 .iter()
-                .any(|item| item.title == "dimmi una barzelletta")
+                .any(|item| item.title == "tell me a joke")
         );
     }
 

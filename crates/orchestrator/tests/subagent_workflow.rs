@@ -134,6 +134,7 @@ fn request() -> OrchestratorRequest {
         conversation_summary: None,
         attachments: vec![],
         budgets: OrchestratorBudgets::default(),
+        language: "en".to_string(),
     }
 }
 

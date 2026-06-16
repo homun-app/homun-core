@@ -1216,6 +1216,52 @@ impl SQLiteMemoryStore {
         Ok(())
     }
 
+    /// Hard purge ALL memory data for a workspace: memories, entities, relations,
+    /// tombstones, embeddings, episodes. Called when a project workspace is deleted.
+    /// This is a REAL delete (not soft/tombstone) — data is gone for good.
+    pub fn purge_workspace(
+        &self,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+    ) -> Result<usize, String> {
+        let (uid, wid) = (user_id.as_str(), workspace_id.as_str());
+        // Count memories before deleting for the return value.
+        let count: u64 = self
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM memories WHERE user_id = ?1 AND workspace_id = ?2",
+                (uid, wid),
+                |row| row.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        for table in [
+            "memories",
+            "entities",
+            "relations",
+            "tombstones",
+            "embeddings",
+            "episodes",
+            "wiki_pages",
+        ] {
+            self.conn
+                .execute(
+                    &format!(
+                        "DELETE FROM {table} WHERE user_id = ?1 AND workspace_id = ?2"
+                    ),
+                    (uid, wid),
+                )
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(count as usize)
+    }
+
+    /// Reclaims free space. Call periodically, NOT on every delete.
+    pub fn vacuum(&self) -> Result<(), String> {
+        self.conn
+            .execute_batch("VACUUM")
+            .map_err(|e| e.to_string())
+    }
+
     fn is_tombstoned(
         &self,
         reference: &MemoryRef,
@@ -1823,11 +1869,11 @@ mod fts_query_tests {
 
     #[test]
     fn or_query_from_natural_language_question() {
-        let q = fts_or_query("Perché abbiamo scelto JSON invece di SQLite?");
-        assert!(q.contains("\"json\""), "manca json: {q}");
-        assert!(q.contains("\"sqlite\""), "manca sqlite: {q}");
-        assert!(q.contains(" OR "), "non è OR: {q}");
-        assert!(!q.contains("\"di\""), "non deve includere token <3: {q}");
+        let q = fts_or_query("Why did we choose JSON instead of SQLite?");
+        assert!(q.contains("\"json\""), "missing json: {q}");
+        assert!(q.contains("\"sqlite\""), "missing sqlite: {q}");
+        assert!(q.contains(" OR "), "not OR: {q}");
+        assert!(!q.contains("\"of\""), "must not include token <3: {q}");
         assert_eq!(fts_or_query("?? !! a b"), "");
     }
 }

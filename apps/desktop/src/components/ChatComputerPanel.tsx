@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   Check,
   ChevronDown,
@@ -23,9 +24,10 @@ const IDLE: ContainedComputerLive = {
 };
 
 // Manus-style: a short card DOCKED above the prompt (same width), shown ONLY
-// while the contained browser is working. Header + live "Avanzamento attività"
+// while the contained browser is working. Header + live "Activity progress"
 // checklist; expand to the live view; fullscreen for the overlay. Hidden idle.
 export function ChatComputerPanel() {
+  const { t } = useTranslation();
   const [live, setLive] = useState<ContainedComputerLive | null>(null);
   // "bar" (collapsed, default) | "expanded" (live inline) | "full" (overlay)
   const [view, setView] = useState<"bar" | "expanded" | "full">("bar");
@@ -81,7 +83,7 @@ export function ChatComputerPanel() {
   // contained display, scaled to fit and proportioned, with no noVNC toolbar.
   const base = live.novnc_url.replace("/vnc.html", "/lfpa-view.html");
   const src = `${base}${base.includes("?") ? "&" : "?"}view_only=1`;
-  const activity = live.activity?.trim() || "sta lavorando…";
+  const activity = live.activity?.trim() || t("chat.working");
   const fullscreen = view === "full";
   const showStage = view === "expanded" || fullscreen;
   const steps = live.steps ?? [];
@@ -92,7 +94,7 @@ export function ChatComputerPanel() {
         <button
           className="cc-scrim"
           type="button"
-          aria-label="Chiudi"
+          aria-label="Close"
           onClick={() => setView("expanded")}
         />
       )}
@@ -113,8 +115,8 @@ export function ChatComputerPanel() {
               className="cc-icon-btn"
               type="button"
               onClick={() => setView(fullscreen ? "expanded" : "full")}
-              title={fullscreen ? "Riduci" : "Schermo intero"}
-              aria-label={fullscreen ? "Riduci" : "Schermo intero"}
+              title={fullscreen ? t("chat.collapse") : t("chat.fullscreen")}
+              aria-label={fullscreen ? t("chat.collapse") : t("chat.fullscreen")}
             >
               {fullscreen ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
             </button>
@@ -123,8 +125,8 @@ export function ChatComputerPanel() {
             className="cc-icon-btn"
             type="button"
             onClick={() => setView(view === "bar" ? "expanded" : "bar")}
-            title={view === "bar" ? "Mostra il browser" : "Comprimi"}
-            aria-label={view === "bar" ? "Mostra il browser" : "Comprimi"}
+            title={view === "bar" ? t("chat.showBrowser") : t("chat.collapse")}
+            aria-label={view === "bar" ? t("chat.showBrowser") : t("chat.collapse")}
           >
             {view === "bar" ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
           </button>
@@ -140,12 +142,12 @@ export function ChatComputerPanel() {
                 className="cc-thumb"
                 type="button"
                 onClick={() => setView("expanded")}
-                title="Espandi il computer"
-                aria-label="Espandi il computer"
+                title={t("chat.expandComputer")}
+                aria-label={t("chat.expandComputer")}
               >
                 <iframe
                   className="cc-thumb-frame"
-                  title="Anteprima computer (live)"
+                  title="Preview computer (live)"
                   src={src}
                   tabIndex={-1}
                 />
@@ -156,7 +158,7 @@ export function ChatComputerPanel() {
             )}
             <div className="cc-plan">
               <div className="cc-plan-head">
-                Avanzamento attività
+                Activity progress
                 {steps.length > 0 && <span className="cc-plan-count">{steps.length}</span>}
               </div>
               <ul className="cc-plan-steps">
@@ -172,7 +174,7 @@ export function ChatComputerPanel() {
                 ))}
                 <li className="cc-step running">
                   <Loader2 size={13} className="spin" />
-                  <span>{steps.length === 0 ? "Avvio…" : "in corso…"}</span>
+                  <span>{steps.length === 0 ? t("chat.starting") : t("chat.inProgress")}</span>
                 </li>
               </ul>
             </div>
@@ -183,7 +185,7 @@ export function ChatComputerPanel() {
           <div className="cc-stage">
             <iframe
               className="cc-frame"
-              title="Computer contenuto (live)"
+              title="Contained computer (live)"
               src={src}
               allow="clipboard-read; clipboard-write"
               tabIndex={-1}
@@ -208,6 +210,7 @@ function TerminalDock({
   expanded: boolean;
   onToggle: () => void;
 }) {
+  const { t } = useTranslation();
   const bodyRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     // Keep the latest line in view as commands/output arrive.
@@ -218,8 +221,8 @@ function TerminalDock({
 
   const last = entries[entries.length - 1];
   const summary = running
-    ? last?.command ?? "esecuzione…"
-    : `${entries.length} ${entries.length === 1 ? "comando" : "comandi"}`;
+    ? last?.command ?? t("chat.executing")
+    : `${entries.length} ${entries.length === 1 ? t("chat.commandCount_one") : t("chat.commandCount_other")}`;
 
   return (
     <div className={`cc-dock ${expanded ? "expanded" : "bar"}`}>
@@ -240,8 +243,8 @@ function TerminalDock({
           className="cc-icon-btn"
           type="button"
           onClick={onToggle}
-          title={expanded ? "Comprimi" : "Mostra il terminale"}
-          aria-label={expanded ? "Comprimi" : "Mostra il terminale"}
+          title={expanded ? t("chat.collapse") : t("chat.showTerminal")}
+          aria-label={expanded ? t("chat.collapse") : t("chat.showTerminal")}
         >
           {expanded ? <ChevronDown size={15} /> : <ChevronUp size={15} />}
         </button>

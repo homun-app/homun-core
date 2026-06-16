@@ -20,7 +20,7 @@ import {
   Users,
 } from "lucide-react";
 import type {
-  ApprovalItem,
+  ApprovelItem,
   AutomationProposal,
   BrainRunDetail,
   ChatMessage,
@@ -38,68 +38,68 @@ import type {
 // dal registro in App.tsx in base allo stato abilitato (ADR 0011 §10-A): staccare
 // l'addon ne fa sparire la voce di nav.
 export const navItems: NavItem[] = [
-  { id: "chat", label: "Nuovo compito", icon: MessageSquare },
-  // "Apprendimento" è confluito in Homun. "Memoria" è stata unificata nelle
-  // Impostazioni → Memoria (un'unica superficie, fuori più pulito).
+  { id: "chat", label: "chat.newTask", icon: MessageSquare },
+  // "Apprendimento" è confluito in Homun. "Memory" è stata unificata nelle
+  // Impostazioni → Memory (un'unica superficie, fuori più pulito).
   // "Pianificato" (coda dei run) è confluito in Automazioni: la regola è la cosa
   // di prima classe; i run si vedono nei thread. Manteniamo l'icona-calendario.
-  { id: "automations", label: "Automazioni", icon: CalendarClock },
+  { id: "automations", label: "nav.automations", icon: CalendarClock },
 ];
 
 export const chatMessages: ChatMessage[] = [
   {
     id: "m1",
     role: "assistant",
-    text: "Sono pronto. Scrivimi pure.",
+    text: "I'm ready. Write to me.",
     timestamp: "ora",
-    metadata: "Modello locale",
+    metadata: "Local model",
   },
 ];
 
 export const computerSession: ComputerSession = {
   id: "computer_active_prompt",
-  title: "Computer locale",
-  subtitle: "Sessione locale pronta per prompt, shell e browser controllato",
+  title: "Local computer",
+  subtitle: "Local session ready for prompt, shell and controlled browser",
   status: "running",
   activeSurface: "logs",
   elapsed: "0s",
   progressCurrent: 0,
   progressTotal: 3,
-  previewTitle: "Sessione locale",
-  previewDetail: "In attesa di prompt utente.",
+  previewTitle: "Local session",
+  previewDetail: "Waiting for user prompt.",
   terminalExcerpt: [],
   surfaces: [
     {
       id: "browser",
       label: "Browser",
       status: "idle",
-      detail: "Pronto per task browser controllati",
+      detail: "Ready for controlled browser tasks",
     },
     {
       id: "shell",
-      label: "Terminale",
+      label: "Terminal",
       status: "idle",
-      detail: "Pronto per verifiche locali",
+      detail: "Ready for local checks",
     },
     {
       id: "files",
       label: "File",
       status: "idle",
-      detail: "Nessun artifact ancora",
+      detail: "No artifacts yet",
     },
     {
       id: "logs",
       label: "Log",
       status: "running",
-      detail: "Eventi prompt redatti",
+      detail: "Redacted prompt events",
     },
   ],
   timeline: [
     {
       id: "ready",
       surface: "logs",
-      title: "Sessione locale pronta",
-      detail: "In attesa di prompt utente",
+      title: "Local session ready",
+      detail: "Waiting for user prompt",
       status: "done",
       timestamp: "ora",
     },
@@ -141,21 +141,21 @@ export const brainRun: BrainRunDetail = {
   steps: [
     {
       id: "context",
-      label: "Carica contesto memoria",
+      label: "Load memory context",
       status: "done",
-      detail: "2 riferimenti redatti",
+      detail: "2 redacted references",
     },
     {
       id: "tasks",
-      label: "Leggi task e messaggi",
+      label: "Read tasks and messages",
       status: "running",
-      detail: "Tool read-only immediato",
+      detail: "Immediate read-only tool",
     },
     {
       id: "review",
       label: "ReviewAgent",
       status: "queued",
-      detail: "Subagent task durevole",
+      detail: "Durable subagent task",
     },
   ],
 };
@@ -163,52 +163,52 @@ export const brainRun: BrainRunDetail = {
 export const tasks: TaskItem[] = [
   {
     id: "task_prompt_session",
-    title: "Prompt locale attivo",
+    title: "Active local prompt",
     kind: "local_prompt",
     status: "running",
     priority: "high",
     resource: "shell_process",
     risk: "low",
-    updated: "1 min fa",
+    updated: "1 min ago",
   },
   {
     id: "task_acme_summary",
-    title: "Riepilogo operativo Acme",
+    title: "Acme operational summary",
     kind: "subagent.ReviewAgent",
     status: "waiting_user_approval",
     priority: "normal",
     resource: "llm_inference",
     risk: "medium",
-    updated: "3 min fa",
-    blockedReason: "Serve conferma prima di inviare il riepilogo nel canale team.",
+    updated: "3 min ago",
+    blockedReason: "Confirmation needed before sending the summary to the team channel.",
   },
   {
     id: "task_memory_index",
-    title: "Aggiorna indice memoria progetto",
+    title: "Update project memory index",
     kind: "memory_indexing",
     status: "queued",
     priority: "background",
     resource: "memory_indexing",
     risk: "low",
-    updated: "8 min fa",
+    updated: "8 min ago",
   },
   {
     id: "task_provider_health",
-    title: "Health check provider di inferenza",
+    title: "Inference provider health check",
     kind: "process.health",
     status: "completed",
     priority: "low",
     resource: "background_maintenance",
     risk: "low",
-    updated: "12 min fa",
+    updated: "12 min ago",
   },
 ];
 
-export const approvals: ApprovalItem[] = [
+export const approvals: ApprovelItem[] = [
   {
     id: "approval_acme",
-    title: "Inviare riepilogo ad Acme",
-    reason: "Azione write_with_confirmation verso connettore di messaggistica.",
+    title: "Send summary to Acme",
+    reason: "write_with_confirmation action toward messaging connector.",
     action: "connector.write_with_confirmation",
     boundary: "team_messaging",
     risk: "medium",
@@ -217,9 +217,9 @@ export const approvals: ApprovalItem[] = [
 ];
 
 export const runtimeHealth: RuntimeHealth[] = [
-  { label: "Modello", status: "ready", detail: "Provider di inferenza configurato" },
-  { label: "Browser", status: "running", detail: "Profilo assistant attivo" },
-  { label: "Task Runtime", status: "running", detail: "3 task in coda" },
+  { label: "Model", status: "ready", detail: "Inference provider configured" },
+  { label: "Browser", status: "running", detail: "Assistant profile active" },
+  { label: "Task Runtime", status: "running", detail: "3 tasks queued" },
 ];
 
 export const memorySummary: MemorySummary = {
@@ -235,47 +235,47 @@ export const memorySummary: MemorySummary = {
 export const learningInsights: LearningInsight[] = [
   {
     id: "morning_project_start",
-    title: "Avvio spesso dal progetto attivo",
+    title: "Often starts from the active project",
     summary:
-      "Quando inizi una sessione di lavoro chiedi prima stato git, task aperti e prossima azione utile.",
+      "When you start a work session you first ask for git status, open tasks and the next useful action.",
     domain: "work",
-    cadence: "Mattina, giorni feriali",
+    cadence: "Morning, weekdays",
     confidence: 0.84,
     status: "confirmed",
     evidence: [
-      "6 sessioni locali con apertura progetto e controllo task",
-      "3 richieste consecutive hanno privilegiato stato, piano e verifica",
-      "Nessun dato raw salvato: solo metadati e riferimenti redatti",
+      "6 local sessions with project opening and task check",
+      "3 consecutive requests prioritized status, plan and verification",
+      "No raw data saved: only metadata and redacted references",
     ],
   },
   {
     id: "travel_compare_before_booking",
-    title: "Vuoi confronto prima di acquistare",
+    title: "Want comparison before purchasing",
     summary:
-      "Sulle ricerche viaggio preferisci vedere opzioni, fonti e tradeoff prima di login, pagamento o prenotazione.",
+      "On travel searches you prefer seeing options, sources and tradeoffs before login, payment or booking.",
     domain: "personal",
-    cadence: "Quando emergono viaggi o prenotazioni",
+    cadence: "When trips or bookings arise",
     confidence: 0.78,
     status: "candidate",
     evidence: [
-      "2 task browser hanno fermato il flusso prima di azioni sensibili",
-      "Le approval policy hanno bloccato pagamento e invio dati personali",
-      "La memoria contiene solo tratta, data e preferenza di confronto",
+      "2 browser tasks stopped the flow before sensitive actions",
+      "Approvel policies blocked payment and personal data sending",
+      "Memory contains only route, date and comparison preference",
     ],
   },
   {
     id: "local_first_defaults",
-    title: "Preferenza local-first forte",
+    title: "Strong local-first preference",
     summary:
-      "Cloud e provider gestiti restano disattivati finche' non concedi un opt-in esplicito per il singolo dominio.",
+      "Cloud and managed providers stay disabled until you grant an explicit opt-in for the specific domain.",
     domain: "privacy",
-    cadence: "Sempre",
+    cadence: "Always",
     confidence: 0.92,
     status: "confirmed",
     evidence: [
-      "Provider di inferenza locale selezionato come default",
-      "Managed cloud marcato come disabilitato in settings",
-      "Le azioni write richiedono conferma utente",
+      "Local inference provider selected as default",
+      "Managed cloud marked as disabled in settings",
+      "Write actions require user confirmation",
     ],
   },
 ];
@@ -283,14 +283,14 @@ export const learningInsights: LearningInsight[] = [
 export const automationProposals: AutomationProposal[] = [
   {
     id: "daily_project_briefing",
-    title: "Briefing mattutino progetto",
+    title: "Morning project briefing",
     summary:
-      "Preparare ogni mattina un riepilogo locale di git, task aperti, note recenti e blocker.",
-    trigger: "Giorni feriali alle 08:45 o quando apri il progetto",
+      "Prepare a local summary of git, open tasks, recent notes and blockers every morning.",
+    trigger: "Weekdays at 08:45 or when you open the project",
     actions: [
-      "Legge repository e task locali",
-      "Richiama memoria lavoro redatta",
-      "Propone la prossima azione senza inviare nulla",
+      "Reads local repository and tasks",
+      "Recalls redacted work memory",
+      "Proposes the next action without sending anything",
     ],
     autonomyLevel: 2,
     risk: "low",
@@ -298,14 +298,14 @@ export const automationProposals: AutomationProposal[] = [
   },
   {
     id: "travel_watchlist",
-    title: "Monitor offerte viaggio",
+    title: "Travel deals monitor",
     summary:
-      "Sorvegliare una tratta e avvisarti quando prezzo, orario o disponibilita' cambiano in modo rilevante.",
-    trigger: "Quando salvi una tratta con data futura",
+      "Watch a route and alert you when price, time or availability change meaningfully.",
+    trigger: "When you save a route with a future date",
     actions: [
-      "Apre il browser locale in background",
-      "Confronta risultati con snapshot precedenti",
-      "Chiede approvazione prima di login o acquisto",
+      "Opens the local browser in background",
+      "Compares results with previous snapshots",
+      "Asks approval before login or purchase",
     ],
     autonomyLevel: 3,
     risk: "medium",
@@ -313,14 +313,14 @@ export const automationProposals: AutomationProposal[] = [
   },
   {
     id: "memory_candidate_review",
-    title: "Review settimanale delle abitudini",
+    title: "Weekly habit review",
     summary:
-      "Mostrare cosa il sistema pensa di aver imparato e permetterti di confermare, correggere o cancellare.",
-    trigger: "Ogni venerdi' pomeriggio",
+      "Show what the system thinks it learned and let you confirm, correct or delete.",
+    trigger: "Every Friday afternoon",
     actions: [
-      "Raggruppa insight candidati per dominio privacy",
-      "Evidenzia prove redatte e livello confidenza",
-      "Applica solo le correzioni confermate",
+      "Groups candidate insights by privacy domain",
+      "Highlights redacted evidence and confidence level",
+      "Applies only confirmed corrections",
     ],
     autonomyLevel: 1,
     risk: "low",
@@ -331,66 +331,66 @@ export const automationProposals: AutomationProposal[] = [
 export const connections: ConnectionItem[] = [
   {
     id: "browser",
-    name: "Il mio browser",
+    name: "My browser",
     type: "native",
     status: "connected",
-    description: "Azioni locali con Playwright/CDP e approval gates.",
+    description: "Local actions with Playwright/CDP and approval gates.",
   },
   {
     id: "github",
     name: "GitHub MCP",
     type: "mcp",
     status: "available",
-    description: "Repository, issue e pull request tramite MCP locale.",
+    description: "Repositories, issues and pull requests via local MCP.",
   },
   {
     id: "calendar",
-    name: "Calendario",
+    name: "Calendar",
     type: "managed",
     status: "disabled",
-    description: "Provider managed opzionale, richiede opt-in cloud.",
+    description: "Optional managed provider, requires cloud opt-in.",
   },
   {
     id: "wiki",
     name: "Obsidian Wiki",
     type: "skill",
     status: "connected",
-    description: "Memoria leggibile e correggibile in Markdown.",
+    description: "Readable and correctable memory in Markdown.",
   },
   {
     id: "gmail",
     name: "Gmail",
     type: "managed",
     status: "disabled",
-    description: "Lettura e bozze email tramite provider opt-in.",
+    description: "Email reading and drafts via opt-in provider.",
   },
   {
     id: "drive",
     name: "Google Drive",
     type: "managed",
     status: "disabled",
-    description: "File cloud solo con confini privacy espliciti.",
+    description: "Cloud files only with explicit privacy boundaries.",
   },
   {
     id: "calendar-local",
-    name: "Calendario locale",
+    name: "Local calendar",
     type: "native",
     status: "available",
-    description: "Eventi e disponibilita' sul dispositivo.",
+    description: "On-device events and availability.",
   },
   {
     id: "browser-skill",
     name: "browser-booking",
     type: "skill",
     status: "available",
-    description: "Workflow riutilizzabile per form e prenotazioni.",
+    description: "Reusable workflow for forms and bookings.",
   },
   {
     id: "memory-skill",
     name: "memory-briefing",
     type: "skill",
     status: "connected",
-    description: "Sintesi locale da memoria e wiki.",
+    description: "Local synthesis from memory and wiki.",
   },
 ];
 
@@ -400,33 +400,33 @@ export const settingsSections: Array<{
   icon: typeof Monitor;
   group: "account" | "capabilities";
 }> = [
-  { id: "account", label: "Account", icon: User, group: "account" },
-  { id: "general", label: "Generale", icon: SlidersHorizontal, group: "account" },
-  { id: "appearance", label: "Aspetto", icon: Palette, group: "account" },
-  { id: "runtime", label: "Modello & Runtime", icon: Cpu, group: "account" },
-  { id: "privacy", label: "Privacy & Autonomia", icon: KeyRound, group: "account" },
-  { id: "memory", label: "Memoria", icon: Brain, group: "account" },
-  { id: "contacts", label: "Contatti", icon: Users, group: "account" },
-  { id: "channels", label: "Canali", icon: MessageSquare, group: "capabilities" },
-  { id: "connections", label: "Connettori", icon: Plug, group: "capabilities" },
-  { id: "skills", label: "Skill", icon: Sparkles, group: "capabilities" },
-  { id: "addon", label: "Addon", icon: Blocks, group: "capabilities" },
-  { id: "computer", label: "Computer locale", icon: MonitorPlay, group: "capabilities" },
+  { id: "account", label: "settings.account", icon: User, group: "account" },
+  { id: "general", label: "settings.general", icon: SlidersHorizontal, group: "account" },
+  { id: "appearance", label: "settings.appearance", icon: Palette, group: "account" },
+  { id: "runtime", label: "settings.runtime", icon: Cpu, group: "account" },
+  { id: "privacy", label: "settings.privacy", icon: KeyRound, group: "account" },
+  { id: "memory", label: "nav.memory", icon: Brain, group: "account" },
+  { id: "contacts", label: "nav.contacts", icon: Users, group: "account" },
+  { id: "channels", label: "settings.channels", icon: MessageSquare, group: "capabilities" },
+  { id: "connections", label: "settings.connectors", icon: Plug, group: "capabilities" },
+  { id: "skills", label: "settings.skills", icon: Sparkles, group: "capabilities" },
+  { id: "addon", label: "settings.addon", icon: Blocks, group: "capabilities" },
+  { id: "computer", label: "Local computer", icon: MonitorPlay, group: "capabilities" },
 ];
 
 export const settingsGroupLabels: Record<"account" | "capabilities", string> = {
-  account: "Account",
-  capabilities: "Capacità",
+  account: "settings.account",
+  capabilities: "settings.capabilities",
 };
 
 export const drawerTasks = [
-  { id: "task_prompt_session", label: "Prompt locale", active: true },
-  { id: "task_acme_summary", label: "Riepilogo operativo Acme", active: false },
-  { id: "task_memory_index", label: "Indice memoria progetto", active: false },
+  { id: "task_prompt_session", label: "Local prompt", active: true },
+  { id: "task_acme_summary", label: "Acme operational summary", active: false },
+  { id: "task_memory_index", label: "Project memory index", active: false },
 ];
 
 export const drawerProjects = [
   "homun",
   "Acme workspace",
-  "Ricerca viaggi",
+  "Travel search",
 ];

@@ -133,13 +133,29 @@ impl<R: JsonRuntime> SubagentRunner<R> {
 }
 
 pub fn generate_json_request_from_task(task: &SubagentTask) -> GenerateJsonRequest {
+    // Base prompt: explicit "prompt" field, else the task goal.
+    let mut prompt = task
+        .input
+        .get("prompt")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or(&task.goal)
+        .to_string();
+    // Language steering: if the orchestrator injected a language, append an
+    // instruction so the subagent's output respects the user's chosen language.
+    // The prompt instructions themselves stay in English (neutral); only the
+    // OUTPUT language is driven by this directive.
+    if let Some(lang) = task
+        .input
+        .get("language")
+        .and_then(serde_json::Value::as_str)
+        .filter(|s| !s.trim().is_empty())
+    {
+        if !prompt.contains("Reply in") {
+            prompt = format!("{prompt}\n\nReply in {lang}.");
+        }
+    }
     GenerateJsonRequest {
-        prompt: task
-            .input
-            .get("prompt")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or(&task.goal)
-            .to_string(),
+        prompt,
         max_tokens: task.budgets.max_tokens,
         temperature: task
             .input

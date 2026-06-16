@@ -1,4 +1,5 @@
 import { useRef, useState, type CSSProperties, type PointerEvent, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import {
   ChatSearchModal,
   NavDrawer,
@@ -10,13 +11,14 @@ import type { ChatThread, NavItem, SettingsSectionId, ViewId } from "../types";
 interface ShellProps {
   activeView: ViewId;
   activeThreadId: string;
+  busyThreadIds: Set<string>;
   chatThreads: ChatThread[];
   drawerOpen: boolean;
   // Composed at runtime in App: static core + enabled addon entries (ADR 0011 §10-A).
   navItems: NavItem[];
   onArchiveChatThread: (threadId: string) => void;
   onBackFromSettings: () => void;
-  onCreateChatThread: () => void;
+  onCreateteChatThread: () => void;
   onDeleteChatThread: (threadId: string) => void;
   onNavigate: (view: ViewId) => void;
   onSelectThread: (threadId: string) => void;
@@ -34,13 +36,14 @@ interface ShellProps {
 export function Shell({
   activeView,
   activeThreadId,
+  busyThreadIds,
   chatThreads,
   children,
   drawerOpen,
   navItems,
   onArchiveChatThread,
   onBackFromSettings,
-  onCreateChatThread,
+  onCreateteChatThread,
   onDeleteChatThread,
   onNavigate,
   onSelectThread,
@@ -52,6 +55,7 @@ export function Shell({
   settingsSection,
   settingsSub,
 }: ShellProps) {
+  const { t } = useTranslation();
   const isSettings = activeView === "settings";
   const [searchOpen, setSearchOpen] = useState(false);
   const shellRef = useRef<HTMLDivElement>(null);
@@ -120,10 +124,11 @@ export function Shell({
         <NavDrawer
           activeView={activeView}
           activeThreadId={activeThreadId}
+          busyThreadIds={busyThreadIds}
           chatThreads={chatThreads}
           navItems={navItems}
           onArchiveChatThread={onArchiveChatThread}
-          onCreateChatThread={onCreateChatThread}
+          onCreateteChatThread={onCreateteChatThread}
           onDeleteChatThread={onDeleteChatThread}
           onNavigate={onNavigate}
           onSearchChat={() => setSearchOpen(true)}
@@ -147,7 +152,7 @@ export function Shell({
           className="drawer-resizer"
           role="separator"
           aria-orientation="vertical"
-          aria-label="Ridimensiona la barra laterale"
+          aria-label={t("shell.resizeSidebarAria")}
           onPointerDown={startResize}
           onDoubleClick={() => {
             setDrawerWidth(DRAWER_DEFAULT_WIDTH);

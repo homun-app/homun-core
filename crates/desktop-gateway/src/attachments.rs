@@ -83,7 +83,7 @@ pub fn ingest_attachments(attachments: &[AttachmentInput]) -> IngestedAttachment
         if let Some(text) = &file.text {
             if !text.trim().is_empty() {
                 out.text
-                    .push_str(&format!("\n\n[Allegato: {}]\n{}", file.display_name, text));
+                    .push_str(&format!("\n\n[Attachment: {}]\n{}", file.display_name, text));
             }
         }
         out.images.extend(file.images);
@@ -98,15 +98,15 @@ struct One {
 
 fn ingest_one(att: &AttachmentInput) -> Result<One, String> {
     if att.local_path.trim().is_empty() {
-        return Err("percorso locale non disponibile".to_string());
+        return Err("local path not available".to_string());
     }
     let path = Path::new(&att.local_path);
-    let meta = std::fs::metadata(path).map_err(|_| "file non trovato".to_string())?;
+    let meta = std::fs::metadata(path).map_err(|_| "file not found".to_string())?;
     if !meta.is_file() {
-        return Err("non è un file".to_string());
+        return Err("not a file".to_string());
     }
     if meta.len() > MAX_ATTACHMENT_BYTES {
-        return Err(format!("troppo grande (max {} MB)", MAX_ATTACHMENT_BYTES / 1024 / 1024));
+        return Err(format!("too large (max {} MB)", MAX_ATTACHMENT_BYTES / 1024 / 1024));
     }
 
     let mime = att.mime_type.to_lowercase();
@@ -118,7 +118,7 @@ fn ingest_one(att: &AttachmentInput) -> Result<One, String> {
 
     if mime.contains("svg") || ext == "svg" {
         // Vision models reject SVG; tell the user instead of silently sending it.
-        return Err("immagine SVG non supportata dai modelli vision; esporta in PNG/JPEG".to_string());
+        return Err("SVG image not supported by vision models; export to PNG/JPEG".to_string());
     }
     if mime.starts_with("image/") || is_image_ext(&ext) {
         return Ok(One { text: None, images: vec![image_data_url(path, &mime, &ext)?] });
@@ -132,7 +132,7 @@ fn ingest_one(att: &AttachmentInput) -> Result<One, String> {
         truncate_chars(&mut text, MAX_TEXT_CHARS);
         return Ok(One { text: Some(text), images: Vec::new() });
     }
-    Err("tipo non ancora supportato per l'analisi (per ora: PDF, immagini, testo/codice)".to_string())
+    Err("type not yet supported for analysis (for now: PDF, images, text/code)".to_string())
 }
 
 /// PDF: prefer the embedded text layer (born-digital docs → cheap, exact). If the
@@ -143,7 +143,7 @@ fn ingest_pdf(path: &Path) -> Result<One, String> {
     let pdfium = bind_pdfium()?;
     let document = pdfium
         .load_pdf_from_file(path, None)
-        .map_err(|e| format!("PDF illeggibile: {e}"))?;
+        .map_err(|e| format!("unreadable PDF: {e}"))?;
 
     let mut text = String::new();
     for page in document.pages().iter() {
@@ -161,15 +161,15 @@ fn ingest_pdf(path: &Path) -> Result<One, String> {
     // Sparse text → treat as a scan and rasterize pages for the vision model.
     let images = render_pdf_pages(&document)?;
     if images.is_empty() {
-        return Err("PDF senza testo estraibile e impossibile da rasterizzare".to_string());
+        return Err("PDF with no extractable text and impossible to rasterize".to_string());
     }
     let note = if document.pages().len() as usize > images.len() {
         format!(
-            "(PDF scansione: prime {} pagine fornite come immagini per l'analisi visiva)",
+            "(scanned PDF: first {} pages provided as images for visual analysis)",
             images.len()
         )
     } else {
-        "(PDF scansione: pagine fornite come immagini per l'analisi visiva)".to_string()
+        "(scanned PDF: pages provided as images for visual analysis)".to_string()
     };
     Ok(One { text: Some(note), images })
 }
@@ -182,7 +182,7 @@ pub fn render_pdf_to_images(path: &Path) -> Result<Vec<String>, String> {
     let pdfium = bind_pdfium()?;
     let document = pdfium
         .load_pdf_from_file(path, None)
-        .map_err(|e| format!("PDF illeggibile: {e}"))?;
+        .map_err(|e| format!("unreadable PDF: {e}"))?;
     render_pdf_pages(&document)
 }
 
@@ -195,14 +195,14 @@ fn render_pdf_pages(document: &PdfDocument) -> Result<Vec<String>, String> {
         }
         let bitmap = page
             .render_with_config(&config)
-            .map_err(|e| format!("render pagina {}: {e}", index + 1))?;
+            .map_err(|e| format!("render page {}: {e}", index + 1))?;
         let dynamic = bitmap.as_image();
         let rgb = dynamic.into_rgb8();
         let (width, height) = (rgb.width(), rgb.height());
         let mut buffer = std::io::Cursor::new(Vec::new());
         image::codecs::jpeg::JpegEncoder::new_with_quality(&mut buffer, 75)
             .write_image(rgb.as_raw(), width, height, image::ExtendedColorType::Rgb8)
-            .map_err(|e| format!("encode pagina {}: {e}", index + 1))?;
+            .map_err(|e| format!("encode page {}: {e}", index + 1))?;
         let b64 = base64::engine::general_purpose::STANDARD.encode(buffer.get_ref());
         urls.push(format!("data:image/jpeg;base64,{b64}"));
     }
@@ -220,8 +220,8 @@ fn bind_pdfium() -> Result<Pdfium, String> {
     }
     .map_err(|e| {
         format!(
-            "motore PDF (pdfium) non disponibile: {e}. Scarica libpdfium e mettilo in \
-~/.homun/pdfium/ (o imposta HOMUN_PDFIUM_LIB)."
+            "PDF engine (pdfium) not available: {e}. Download libpdfium and put it in \
+~/.homun/pdfium/ (or set HOMUN_PDFIUM_LIB)."
         )
     })?;
     Ok(Pdfium::new(bindings))
@@ -257,7 +257,7 @@ fn read_file_capped(path: &Path) -> Result<Vec<u8>, String> {
         .read_to_end(&mut buf)
         .map_err(|e| e.to_string())?;
     if buf.len() as u64 > MAX_ATTACHMENT_BYTES {
-        return Err(format!("troppo grande (max {} MB)", MAX_ATTACHMENT_BYTES / 1024 / 1024));
+        return Err(format!("too large (max {} MB)", MAX_ATTACHMENT_BYTES / 1024 / 1024));
     }
     Ok(buf)
 }
@@ -373,7 +373,7 @@ mod tests {
         };
         let out = ingest_attachments(std::slice::from_ref(&att));
         assert!(out.text.contains("missing.pdf"));
-        assert!(out.text.contains("file non trovato"));
+        assert!(out.text.contains("file not found"));
         assert!(out.images.is_empty());
     }
 
@@ -429,7 +429,7 @@ mod tests {
             size_bytes: 4,
         };
         let out = ingest_attachments(std::slice::from_ref(&att));
-        assert!(out.text.contains("non ancora supportato"));
+        assert!(out.text.contains("not yet supported"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

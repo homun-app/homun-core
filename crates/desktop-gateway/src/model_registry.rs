@@ -144,23 +144,23 @@ fn infer_profile(lower: &str, modality: &str) -> ModelProfile {
         confidence: 80,
     };
     if modality == "embedding" {
-        return curated(ModelTier::Fast, "Embedding per memoria/RAG.");
+        return curated(ModelTier::Fast, "Embeddings for memory/RAG.");
     }
     if modality == "image" {
-        return curated(ModelTier::Balanced, "Generazione di immagini.");
+        return curated(ModelTier::Balanced, "Image generation.");
     }
     // Small/fast tiers FIRST (so "gpt-4o-mini" → fast, not balanced).
     let fast_name_markers = ["mini", "haiku", "flash", "small", "ministral", "gemma", "lite", "nano", "tiny"];
     if fast_name_markers.iter().any(|m| lower.contains(m)) || has_small_param_size(lower) {
         return curated(
             ModelTier::Fast,
-            "Veloce ed economico: estrazione, classificazione, task brevi.",
+            "Fast and cheap: extraction, classification, short tasks.",
         );
     }
     if is_reasoning_model(lower) {
         return curated(
             ModelTier::Reasoning,
-            "Ragionamento profondo: problemi complessi, pianificazione, coding agentico.",
+            "Deep reasoning: complex problems, planning, agentic coding.",
         );
     }
     let balanced_families = [
@@ -170,7 +170,7 @@ fn infer_profile(lower: &str, modality: &str) -> ModelProfile {
     if balanced_families.iter().any(|m| lower.contains(m)) {
         return curated(
             ModelTier::Balanced,
-            "Uso generale forte: comprensione, tool-use, contesto ampio.",
+            "Strong general purpose: comprehension, tool-use, large context.",
         );
     }
     ModelProfile {
@@ -352,6 +352,18 @@ pub struct ProviderRegistry {
     /// best model by capability".
     #[serde(default)]
     pub roles: std::collections::BTreeMap<String, RoleBinding>,
+    /// User override for the LLM concurrency limit (ResourceGovernor LlmInference).
+    /// `None` = infer from locality (loopback 1, cloud 4); `Some(n)` = force n.
+    /// The provider's kind/base_url still drives the inferred fallback when None.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub llm_concurrency_override: Option<u32>,
+}
+
+impl ProviderRegistry {
+    /// Whether the user has forced the LLM concurrency limit (vs. locality inference).
+    pub fn llm_concurrency_override(&self) -> Option<u32> {
+        self.llm_concurrency_override.filter(|&n| n >= 1)
+    }
 }
 
 /// A per-role model binding. Both fields present = manual; otherwise "auto"
@@ -376,23 +388,23 @@ pub struct RoleInfo {
 pub const ROLES: &[RoleInfo] = &[
     RoleInfo {
         key: "orchestrator",
-        label: "Gestione generale",
-        description: "Comprensione richieste, creazione e pianificazione dei task, sintesi.",
+        label: "General management",
+        description: "Understanding requests, creating and planning tasks, synthesis.",
     },
     RoleInfo {
         key: "coding",
         label: "Coding",
-        description: "Analisi e modifica del codice nelle chat di progetto: serve un modello forte su codice, tool-use e contesto ampio. Se non impostato, usa il modello di Gestione generale.",
+        description: "Analyzing and modifying code in project chats: needs a strong model for code, tool-use and wide context. If not set, uses the General management model.",
     },
     RoleInfo {
         key: "browser",
-        label: "Modello del browser",
-        description: "Pianificatore del loop osserva-agisci sul web: è il consumatore più pesante (una chiamata per ogni micro-azione). Spesso conviene un modello veloce qui e uno più capace per chat e sintesi.",
+        label: "Browser model",
+        description: "Planner for the observe-act web loop: it is the heaviest consumer (one call per micro-action). A fast model here and a more capable one for chat and synthesis is often a good tradeoff.",
     },
     RoleInfo {
         key: "memory",
-        label: "Memoria",
-        description: "Estrazione di fatti/preferenze dalle conversazioni: meglio un modello veloce ed economico.",
+        label: "Memory",
+        description: "Extracting facts/preferences from conversations: a fast and cheap model is best.",
     },
 ];
 
