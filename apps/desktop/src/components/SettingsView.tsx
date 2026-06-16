@@ -2637,7 +2637,7 @@ function ConnectModal({
             {!legacy && active?.mode === "OAUTH2" && !active.managed && (
               <p className="cmp-modal-callback">
                 Nell'app OAuth di {kit.name} (pannello sviluppatore) aggiungi questo{" "}
-                <strong>Redirect URI</strong>, altrimenti il consenso fallisce:
+                <strong>Redirect URI</strong>, otherwise consent fails:
                 <code
                   onClick={() =>
                     void navigator.clipboard?.writeText(
@@ -4184,7 +4184,7 @@ function TelegramSection({
         <div className="set-card chan-connect-card">
           <p className="set-hint" style={{ marginTop: 0 }}>
             Crea un bot con <strong>@BotFather</strong> e incolla qui il token. Se l'hai già
-            inserito, premi <strong>Connetti</strong> (il token resta salvato).
+            entered, press <strong>Connect</strong> (the token stays saved).
           </p>
           <div className="chan-connect-field">
             <input
@@ -4525,7 +4525,7 @@ function ChannelsPane() {
                 <div className="set-card chan-connect-card">
                   <p className="set-hint" style={{ marginTop: 0 }}>
                     Sul telefono: WhatsApp ▸ Dispositivi collegati ▸ Collega un dispositivo ▸{" "}
-                    <strong>Collega con numero di telefono</strong>, poi inserisci:
+                    <strong>Link with phone number</strong>, then enter:
                   </p>
                   <div className="chan-pair-code">{status.pair_code}</div>
                   <button
@@ -4541,7 +4541,7 @@ function ChannelsPane() {
               ) : (
                 <div className="set-card chan-connect-card">
                   <p className="set-hint" style={{ marginTop: 0 }}>
-                    Se hai già collegato il dispositivo, premi <strong>Connetti</strong> (riusa la
+                    If you already linked the device, press <strong>Connect</strong> (reuse the
                     sessione salvata). Per il primo collegamento, inserisci il numero in formato
                     internazionale senza «+» (es. 39333…).
                   </p>
@@ -4594,7 +4594,7 @@ function MemoryPane() {
       </p>
       <p className="set-hint">
         I <strong>contatti</strong> (persone, canali, schede) si gestiscono nella sezione
-        <strong>Contatti</strong> qui nelle impostazioni.
+        <strong>Contacts</strong> here in settings.
       </p>
       <MemoryItemsList />
     </>

@@ -3628,7 +3628,7 @@ export function MemoryGraphPanel({
     return (
       <div className="workbench-empty">
         <Share2 size={28} />
-        <p>Memoria non disponibile: {error}</p>
+        <p>Memory unavailable: {error}</p>
         <button type="button" className="ghost-button" onClick={reload}>
           Riprova
         </button>
@@ -4244,7 +4244,7 @@ function Workbench({
           ) : (
             <div className="workbench-empty">
               <FileText size={28} />
-              <p>Nessun artefatto ancora. I file generati o creati dall'assistente compaiono qui.</p>
+              <p>No artifacts yet. Files generated or created by the assistant appear here.</p>
             </div>
           ))}
         {tab === "memoria" && <MemoryGraphPanel threadId={threadId} />}
@@ -4291,7 +4291,7 @@ function Workbench({
             ) : (
               <div className="workbench-empty">
                 <Clock3 size={28} />
-                <p>Nessuna attività in background. I task pianificati e ricorrenti compaiono qui.</p>
+                <p>No background activity. Scheduled and recurring tasks appear here.</p>
               </div>
             )}
           </div>
@@ -4304,7 +4304,7 @@ function Workbench({
           ) : (
             <div className="workbench-empty">
               <ListTodo size={28} />
-              <p>Nessun piano operativo attivo. Quando l'assistente pianifica un compito a più passi, gli step compaiono qui.</p>
+              <p>No active operational plan. When the assistant plans a multi-step task, steps appear here.</p>
             </div>
           ))}
       </div>
@@ -4580,7 +4580,7 @@ function ArtifactsPanel({
                 }
               >
                 <Download size={14} />
-                <span>Scarica</span>
+                <span>{t("chat.action.download")}</span>
               </button>
               <button
                 type="button"
@@ -4961,7 +4961,7 @@ function AssistantMessageBody({
       {doneTool && !streaming && (
         <div className="cmp-confirm done">
           <ShieldCheck size={15} />
-          <span>Azione eseguita: {humanizeToolName(doneTool)}</span>
+          <span>Action completed: {humanizeToolName(doneTool)}</span>
         </div>
       )}
       {action && !streaming && (
@@ -5259,7 +5259,7 @@ function ConnectSuggestCard({
     <div className="cmp-confirm" style={{ gap: 10 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
         <Plug size={15} />
-        <strong>Collega una capacità per «{suggest.need}»</strong>
+        <strong>Connect a capability for "{suggest.need}"</strong>
       </div>
       <p className="set-hint" style={{ fontSize: 12, margin: 0 }}>
         Non ho ancora questo strumento. Scegli cosa collegare qui sotto — lo gestisci
@@ -5574,7 +5574,7 @@ function FsAuthorizeCard({
       <div className="cmp-confirm">
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           <ShieldCheck size={15} />
-          <strong>Accesso concesso a {path}</strong>
+          <strong>Access granted to {path}</strong>
         </div>
         {output && (
           <pre
@@ -5597,7 +5597,7 @@ function FsAuthorizeCard({
     <div className="cmp-confirm">
       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
         <ShieldCheck size={15} />
-        <strong>Dare accesso a questa cartella?</strong>
+        <strong>Grant access to this folder?</strong>
       </div>
       <code style={{ fontSize: 12, wordBreak: "break-all", display: "block", marginTop: 4 }}>
         {path}
@@ -6006,11 +6006,11 @@ function InlineApprovalPanel({
 
       <div className="approval-safety-note">
         <ShieldCheck size={15} />
-        <span>Dati raw non esposti. Nessuna operazione esterna irreversibile senza conferma.</span>
+        <span>Raw data not exposed. No irreversible external action without confirmation.</span>
       </div>
 
       <div className="approval-scope-note">
-        <span>Ambito conferma</span>
+        <span>Confirmation scope</span>
         <div className="approval-scope-options" aria-label="Ambito conferma">
           {scopeOptions.map((option) => (
             <button
@@ -6045,7 +6045,7 @@ function InlineApprovalPanel({
               </button>
             ))}
           </div>
-          <small>Auto usa la scelta del sistema; visibile mostra il computer locale.</small>
+          <small>Auto follows the system choice; visible shows the local computer.</small>
         </div>
       )}
 
@@ -6129,7 +6129,7 @@ function LocalComputerCard({
           onClick={onOpen}
         >
           <Monitor size={15} />
-          <strong>Computer locale</strong>
+          <strong>Local computer</strong>
           <span className="computer-live-badge">
             <span className="computer-live-dot" aria-hidden="true" />
             {activityLabel === "in esecuzione" ? "vista live" : surfaceLabel}
@@ -6221,7 +6221,7 @@ function LocalComputerCard({
               <small>{session.previewDetail}</small>
             </div>
             <div className="computer-card-progress">
-              <span>Apri dettaglio</span>
+              <span>Open details</span>
               <ChevronDown size={16} />
             </div>
           </button>
@@ -6407,7 +6407,7 @@ function ComputerDetailPanel({
                 </span>
               ))
             ) : (
-              <span>Nessun evento redatto disponibile.</span>
+              <span>No redacted events available.</span>
             )}
           </div>
         )}
@@ -6987,7 +6987,7 @@ function Composer({
         <div className="reply-context-card" aria-label="Messaggio citato">
           <Reply size={14} />
           <div>
-            <strong>Rispondi a {messageRoleLabel(replyContext.role)}</strong>
+            <strong>Reply to {messageRoleLabel(replyContext.role)}</strong>
             <span>{replyContext.preview}</span>
           </div>
           <button type="button" aria-label="Rimuovi citazione" onClick={onClearReply}>
@@ -7137,7 +7137,7 @@ function Composer({
                   }}
                 >
                   <Paperclip size={16} />
-                  <span>Allega file</span>
+                  <span>Attach file</span>
                 </button>
                 <button
                   type="button"
@@ -7179,7 +7179,7 @@ function Composer({
                   ) : (
                     <WandSparkles size={16} />
                   )}
-                  <span>Migliora il prompt</span>
+                  <span>Improve prompt</span>
                 </button>
               </div>
             )}

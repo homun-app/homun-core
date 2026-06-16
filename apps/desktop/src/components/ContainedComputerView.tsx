@@ -49,21 +49,21 @@ export function ContainedComputerView() {
       <div className="cc-stage">
         {error && (
           <div className="cc-placeholder">
-            <strong>Gateway non raggiungibile</strong>
-            <small>Avvia l'app/gateway e riprova.</small>
+            <strong>Gateway unreachable</strong>
+            <small>Start the app/gateway and retry.</small>
           </div>
         )}
 
         {!error && live === null && (
           <div className="cc-placeholder">
             <Loader2 size={18} className="spin" />
-            <small>Verifica del computer contenuto…</small>
+            <small>Checking the contained computer…</small>
           </div>
         )}
 
         {!error && live && !novncSrc && (
           <div className="cc-placeholder">
-            <strong>Computer contenuto spento</strong>
+            <strong>Contained computer is off</strong>
             <small>
               Avvialo e abilita la modalità, poi ricarica:
             </small>
