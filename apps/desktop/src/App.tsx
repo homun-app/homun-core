@@ -1170,13 +1170,13 @@ export default function App() {
           <ShallowView
             title="Brain Audit"
             eyebrow={t("app.explainablePlans")}
-            description={`Route, tool caricati, memory refs e step subagent sono persistiti senza raw payload. ${contextBudgetSummary(brainRun.contextBudget)}`}
+            description={`Route, loaded tools, memory refs and subagent steps are persisted without raw payload. ${contextBudgetSummary(brainRun.contextBudget)}`}
             stats={[
               { label: "Route", value: brainRun.route },
-              { label: "Round", value: String(brainRun.plannerRounds) },
-              { label: "Tool", value: String(brainRun.loadedTools) },
+              { label: "Rounds", value: String(brainRun.plannerRounds) },
+              { label: "Tools", value: String(brainRun.loadedTools) },
               {
-                label: "Contesto",
+                label: "Context",
                 value: `${Math.round(contextBudgetCompressionRatio(brainRun.contextBudget) * 100)}%`,
               },
             ]}

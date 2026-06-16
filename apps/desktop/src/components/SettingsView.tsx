@@ -4766,6 +4766,7 @@ function MemoryItemsList() {
 // (panel + engine). Toggling persists the enabled flag in the backend, which
 // gates BOTH — detaching makes the nav entry, panel AND engine vanish together.
 function AddonPane({ onChanged }: { onChanged?: () => void }) {
+  const { t } = useTranslation();
   const [states, setStates] = useState<PluginState[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
 
@@ -4808,12 +4809,12 @@ function AddonPane({ onChanged }: { onChanged?: () => void }) {
               <div className="addon-row-main">
                 <div className="addon-row-title">
                   <p.navIcon size={16} aria-hidden="true" />
-                  <span>{p.name}</span>
+                  <span>{t(p.name)}</span>
                   <span className={`addon-badge ${on ? "on" : "off"}`}>
-                    {on ? "Attivo" : "Disattivato"}
+                    {on ? t("settings.active2") : t("settings.disabled")}
                   </span>
                 </div>
-                <p className="addon-row-desc">{p.description}</p>
+                <p className="addon-row-desc">{t(p.description)}</p>
                 <div className="addon-caps">
                   {p.capabilities.map((c) => (
                     <span key={c} className="addon-cap">

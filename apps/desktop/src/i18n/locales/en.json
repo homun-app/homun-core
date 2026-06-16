@@ -422,7 +422,9 @@
     "openNovnc": "Open noVNC",
     "deleteAll": "Delete all",
     "whatYouNeed": "What you need:",
-    "capabilities": "Capabilities"
+    "capabilities": "Capabilities",
+    "active2": "Active",
+    "disabled": "Disabled"
   },
   "error": {
     "model": {
