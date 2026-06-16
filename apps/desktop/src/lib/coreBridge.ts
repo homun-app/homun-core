@@ -1179,13 +1179,6 @@ async function electronRemoveProvider(id: string): Promise<ProvidersResponse> {
   return gatewayDeleteJson<ProvidersResponse>(`/api/providers/${encodeURIComponent(id)}`);
 }
 
-async function electronActivateProvider(id: string): Promise<ProvidersResponse> {
-  return gatewayPostJson<ProvidersResponse>(
-    `/api/providers/${encodeURIComponent(id)}/activate`,
-    {},
-  );
-}
-
 async function electronSetProviderEnabled(
   id: string,
   enabled: boolean,
@@ -1852,7 +1845,6 @@ export const coreBridge = {
   providers: () => electronProviders(),
   upsertProvider: (input: UpsertProviderInput) => electronUpsertProvider(input),
   removeProvider: (id: string) => electronRemoveProvider(id),
-  activateProvider: (id: string) => electronActivateProvider(id),
   setProviderEnabled: (id: string, enabled: boolean) =>
     electronSetProviderEnabled(id, enabled),
   refreshProviderModels: (id: string) => electronRefreshProviderModels(id),

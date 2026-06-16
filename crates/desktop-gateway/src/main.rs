@@ -74,7 +74,6 @@ use local_first_local_computer_session::{
 };
 use local_first_local_computer_session::{LocalComputerReadModel, LocalComputerSessionStore};
 use local_first_memory::{
-    AutomationCandidateCreateRequest, AutomationCandidateStatus, AutomationRiskLevel,
     DataSensitivity as MemoryDataSensitivity, ExtractedEntity, ExtractedMemory, ExtractedRelation,
     MemoryAccessRequest, MemoryCreateRequest, MemoryDashboard, MemoryEntity,
     MemoryExtraction,
@@ -635,7 +634,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "/api/providers/{id}/generate-profiles",
             post(generate_provider_profiles),
         )
-        .route("/api/providers/{id}/activate", post(activate_provider))
         .route("/api/providers/{id}/enabled", post(set_provider_enabled))
         .route("/api/model-profile", post(set_model_profile))
         .route("/api/roles", get(list_roles).post(set_role))
@@ -22620,22 +22618,6 @@ async fn remove_provider(
         });
     }
     delete_provider_api_key(&id);
-    save_provider_registry(&registry).map_err(provider_registry_persist_error)?;
-    Ok(Json(providers_response(&registry)))
-}
-
-async fn activate_provider(
-    Path(id): Path<String>,
-) -> Result<Json<ProvidersResponse>, GatewayError> {
-    let mut registry = load_provider_registry();
-    if registry.get(&id).is_none() {
-        return Err(GatewayError {
-            status: StatusCode::NOT_FOUND,
-            code: "provider_not_found",
-            message: format!("provider {id} not configured"),
-        });
-    }
-    registry.active_provider_id = Some(id);
     save_provider_registry(&registry).map_err(provider_registry_persist_error)?;
     Ok(Json(providers_response(&registry)))
 }
