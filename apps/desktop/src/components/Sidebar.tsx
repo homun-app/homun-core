@@ -849,7 +849,7 @@ export function SettingsDrawer({
   onSelectSub,
 }: SettingsDrawerProps) {
   const { t } = useTranslation();
-  const [displayName] = useSetting("displayName", "Fabio Cantone");
+  const [displayName] = useSetting("displayName", "");
   const [workspaceName] = useSetting("workspaceName", "Personal");
   const groups: Array<"account" | "capabilities"> = ["account", "capabilities"];
   return (

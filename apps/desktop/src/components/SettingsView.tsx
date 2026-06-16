@@ -543,7 +543,7 @@ function AccountPane({
   computer: ContainedComputerLive | null;
 }) {
   const { t } = useTranslation();
-  const [name, setName] = useSetting("displayName", "Fabio Cantone");
+  const [name, setName] = useSetting("displayName", "");
   const [accountEmail, setAccountEmail] = useSetting<string>("email", "");
 
   return (

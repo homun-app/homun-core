@@ -25469,8 +25469,8 @@ fn facts_from_graph(
             }
         })
         .collect();
-    // Read-time dedup: collapse near-duplicate facts (e.g. "si chiama Fabio" /
-    // "si chiama Fabio Cantone (desumibile…)"), keeping the richest (longest) — the
+    // Read-time dedup: collapse near-duplicate facts (e.g. "si chiama Mario" /
+    // "si chiama Mario Rossi (desumibile…)"), keeping the richest (longest) — the
     // store may hold paraphrases until consolidation merges them. Lexical Jaccard
     // OR semantic cosine (embeddings), mirroring the graph projection, so a
     // parenthetical that adds tokens doesn't defeat the merge.
@@ -25486,8 +25486,8 @@ fn facts_from_graph(
         let vector = embeddings.get(&fact.reference).cloned();
         let duplicate = seen.iter().any(|(ex_tokens, ex_vec)| {
             jaccard(&tokens, ex_tokens) >= DEDUP_JACCARD
-                // Containment: a less-complete restatement ("si chiama Fabio" ⊂
-                // "si chiama Fabio Cantone …") — since we keep longest-first, drop it.
+                // Containment: a less-complete restatement ("si chiama Mario" ⊂
+                // "si chiama Mario Rossi …") — since we keep longest-first, drop it.
                 || (tokens.len() >= 2 && tokens.is_subset(ex_tokens))
                 || match (vector.as_ref(), ex_vec.as_ref()) {
                     (Some(a), Some(b)) => cosine(a, b) >= DEDUP_COSINE,
