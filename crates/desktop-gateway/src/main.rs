@@ -453,9 +453,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let port = env::var("HOMUN_DESKTOP_GATEWAY_PORT")
         .ok()
+        .or_else(|| env::var("PORT").ok()) // PaaS convention
         .and_then(|value| value.parse::<u16>().ok())
         .unwrap_or(18_765);
-    let addr = SocketAddr::from(([127, 0, 0, 1], port));
+    // Desktop binds loopback; server/PaaS deploys set HOMUN_DESKTOP_GATEWAY_HOST=0.0.0.0.
+    let host: std::net::IpAddr = env::var("HOMUN_DESKTOP_GATEWAY_HOST")
+        .ok()
+        .and_then(|value| value.trim().parse().ok())
+        .unwrap_or(std::net::IpAddr::from([127, 0, 0, 1]));
+    let addr = SocketAddr::from((host, port));
     let state = AppState {
         http: reqwest::Client::new(),
         chat_store: Arc::new(Mutex::new(ChatStore::open(gateway_database_path()?)?)),
@@ -752,11 +758,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             state.clone(),
             require_gateway_token,
         ));
-    let app = Router::new()
+    let mut app = Router::new()
         .route("/api/health", get(health))
         .merge(chat_routes)
-        .with_state(state)
-        .layer(cors_layer());
+        .with_state(state);
+    // Server/PaaS mode: serve the built web UI on the same port (one deployable
+    // unit) when HOMUN_WEB_DIR points at the vite build output. Mounted outside
+    // the token layer so the SPA can load; its JS then sends the bearer token for
+    // /api calls. Unknown paths fall back to index.html for client-side routing.
+    if let Ok(web_dir) = env::var("HOMUN_WEB_DIR") {
+        if !web_dir.trim().is_empty() {
+            let index = std::path::Path::new(&web_dir).join("index.html");
+            app = app.fallback_service(
+                tower_http::services::ServeDir::new(&web_dir)
+                    .not_found_service(tower_http::services::ServeFile::new(index)),
+            );
+        }
+    }
+    let app = app.layer(cors_layer());
     // Warm up the contained computer so the live view + browser are ready without
     // waiting for the first skill. Best-effort and non-intrusive: only when Docker
     // is already running (we never force-open Docker Desktop at boot), and off the
@@ -27015,11 +27034,7 @@ fn gateway_database_path() -> Result<PathBuf, std::io::Error> {
         return Ok(path);
     }
 
-    let base = env::var("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| env::temp_dir())
-        .join(".homun");
-    fs::create_dir_all(&base)?;
+    let base = gateway_data_dir()?;
     Ok(base.join("desktop-gateway.sqlite"))
 }
 
@@ -27032,11 +27047,7 @@ fn gateway_task_database_path() -> Result<PathBuf, std::io::Error> {
         return Ok(path);
     }
 
-    let base = env::var("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| env::temp_dir())
-        .join(".homun");
-    fs::create_dir_all(&base)?;
+    let base = gateway_data_dir()?;
     Ok(base.join("task-runtime.sqlite"))
 }
 
@@ -27049,11 +27060,7 @@ fn gateway_local_computer_database_path() -> Result<PathBuf, std::io::Error> {
         return Ok(path);
     }
 
-    let base = env::var("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| env::temp_dir())
-        .join(".homun");
-    fs::create_dir_all(&base)?;
+    let base = gateway_data_dir()?;
     Ok(base.join("local-computer-session.sqlite"))
 }
 
@@ -27066,11 +27073,7 @@ fn gateway_browser_policy_database_path() -> Result<PathBuf, std::io::Error> {
         return Ok(path);
     }
 
-    let base = env::var("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| env::temp_dir())
-        .join(".homun");
-    fs::create_dir_all(&base)?;
+    let base = gateway_data_dir()?;
     Ok(base.join("browser-url-policy.sqlite"))
 }
 
@@ -27083,11 +27086,7 @@ fn gateway_memory_database_path() -> Result<PathBuf, std::io::Error> {
         return Ok(path);
     }
 
-    let base = env::var("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| env::temp_dir())
-        .join(".homun");
-    fs::create_dir_all(&base)?;
+    let base = gateway_data_dir()?;
     Ok(base.join("memory.sqlite"))
 }
 
@@ -27116,11 +27115,7 @@ fn gateway_capability_database_path() -> Result<PathBuf, std::io::Error> {
         return Ok(path);
     }
 
-    let base = env::var("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| env::temp_dir())
-        .join(".homun");
-    fs::create_dir_all(&base)?;
+    let base = gateway_data_dir()?;
     Ok(base.join("capability-registry.sqlite"))
 }
 
@@ -27131,11 +27126,18 @@ fn gateway_token() -> String {
         .to_string()
 }
 
+/// Canonical data directory. All other gateway paths derive from this, so a
+/// single `HOMUN_DATA_DIR` override (12-factor / container deploys with a mounted
+/// volume) redirects every store at once. Falls back to the desktop default
+/// `~/.homun`.
 fn gateway_data_dir() -> Result<PathBuf, std::io::Error> {
-    let base = env::var("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| env::temp_dir())
-        .join(".homun");
+    let base = match env::var("HOMUN_DATA_DIR") {
+        Ok(dir) if !dir.trim().is_empty() => PathBuf::from(dir),
+        _ => env::var("HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| env::temp_dir())
+            .join(".homun"),
+    };
     fs::create_dir_all(&base)?;
     Ok(base)
 }
@@ -27367,11 +27369,7 @@ struct CreateWorkspaceRequest {
 }
 
 fn gateway_workspaces_path() -> Result<PathBuf, std::io::Error> {
-    let base = env::var("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| env::temp_dir())
-        .join(".homun");
-    fs::create_dir_all(&base)?;
+    let base = gateway_data_dir()?;
     Ok(base.join("workspaces.json"))
 }
 
@@ -27423,11 +27421,7 @@ fn init_active_workspace_from_disk() {
 /// file. Connection API keys are encrypted with this; only `secret_ref`s live in
 /// the registry DB (ADR 0009 / memory design: never plaintext in the DB).
 fn gateway_secret_key_seed() -> Result<[u8; 32], std::io::Error> {
-    let base = env::var("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| env::temp_dir())
-        .join(".homun");
-    fs::create_dir_all(&base)?;
+    let base = gateway_data_dir()?;
     let path = base.join("secret-key");
     if let Ok(bytes) = fs::read(&path) {
         if bytes.len() == 32 {
@@ -27446,11 +27440,7 @@ fn gateway_secret_key_seed() -> Result<[u8; 32], std::io::Error> {
 fn open_gateway_secret_store()
 -> Result<EncryptedFileSecretStore<DevelopmentSecretKeyProvider>, std::io::Error> {
     let seed = gateway_secret_key_seed()?;
-    let base = env::var("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| env::temp_dir())
-        .join(".homun");
-    fs::create_dir_all(&base)?;
+    let base = gateway_data_dir()?;
     EncryptedFileSecretStore::open(base.join("secrets.json"), DevelopmentSecretKeyProvider::new(seed))
         .map_err(|error| std::io::Error::other(error.to_string()))
 }
