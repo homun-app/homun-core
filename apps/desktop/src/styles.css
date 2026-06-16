@@ -8164,6 +8164,7 @@ body.resizing-drawer {
 }
 .mdl-detail-head h3 { font-size: 18px; font-weight: 680; margin: 0; }
 .mdl-detail-actions { display: flex; align-items: center; gap: var(--s2); margin-left: auto; }
+.mdl-enable { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--muted); cursor: pointer; }
 .mdl-detail-sub { font-size: 12.5px; color: var(--muted); line-height: 1.45; margin: 0; }
 
 .mdl-field { display: flex; flex-direction: column; gap: 6px; }
@@ -10192,16 +10193,27 @@ body.resizing-drawer {
 
 /* Provider card (Modello & Runtime → Provider). */
 .set-prov {
+  position: relative;
   border: 1px solid var(--line-strong);
   border-radius: 11px;
   background: var(--surface);
+}
+/* Disabled provider: kept but dimmed (excluded from routing). */
+.set-prov.off { opacity: 0.55; }
+.set-prov.off .set-prov-name { color: var(--muted); }
+.set-prov-body {
+  display: block;
+  width: 100%;
   padding: 12px 13px;
+  background: transparent;
+  border: 0;
   cursor: pointer;
   text-align: left;
   font: inherit;
+  color: inherit;
 }
-.set-prov.active { border-width: 2px; border-color: var(--brand); padding: 11px 12px; }
-.set-prov-top { display: flex; align-items: center; gap: 9px; margin-bottom: 8px; }
+.set-prov-switch { position: absolute; top: 11px; right: 12px; }
+.set-prov-top { display: flex; align-items: center; gap: 9px; margin-bottom: 8px; padding-right: 46px; }
 .set-prov-mark {
   width: 24px;
   height: 24px;
