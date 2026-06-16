@@ -11,6 +11,7 @@ import {
   Folder,
   X,
 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { coreBridge } from "../lib/coreBridge";
 import type { ProactivitySuggestion, WorkspaceRecord } from "../lib/coreBridge";
 
@@ -25,6 +26,7 @@ interface ProattivitaViewProps {
 }
 
 export function ProattivitaView({ onOpenChat }: ProattivitaViewProps) {
+  const { t } = useTranslation();
   const [suggestions, setSuggestions] = useState<ProactivitySuggestion[]>([]);
   const [workspaces, setWorkspaces] = useState<WorkspaceRecord[]>([]);
   const [filter, setFilter] = useState<ScopeFilter>("all");
@@ -49,7 +51,7 @@ export function ProattivitaView({ onOpenChat }: ProattivitaViewProps) {
   }, []);
 
   function scopeName(scope: string): string {
-    if (scope === PERSONAL_SCOPE) return "Personale";
+    if (scope === PERSONAL_SCOPE) return t("sidebar.personal");
     return workspaces.find((w) => w.id === scope)?.name ?? scope;
   }
 
@@ -110,17 +112,16 @@ export function ProattivitaView({ onOpenChat }: ProattivitaViewProps) {
     <section className="proattiva-view">
       <header className="learning-header">
         <div>
-          <p className="eyebrow">Il tuo assistente, proattivo</p>
-          <h2>Proattività</h2>
+          <p className="eyebrow">{t("proattivita:eyebrow")}</p>
+          <h2>{t("proattivita:title")}</h2>
           <p className="lead-copy">
-            Cose che ho notato sui tuoi progetti e sul personale. Apri quella che ti serve: creo la
-            chat nello spazio giusto.
+            {t("proattivita:lead")}
           </p>
         </div>
         <div className="learning-summary">
           <span>
             <strong>{total}</strong>
-            in sospeso
+            {t("proattivita:pending")}
           </span>
         </div>
       </header>
@@ -129,9 +130,9 @@ export function ProattivitaView({ onOpenChat }: ProattivitaViewProps) {
         <div className="proattiva-filters">
           {(
             [
-              ["all", "Tutte"],
-              ["personal", "Personale"],
-              ["projects", "Progetti"],
+              ["all", t("proattivita:filterAll")],
+              ["personal", t("sidebar.personal")],
+              ["projects", t("proattivita:filterProjects")],
             ] as [ScopeFilter, string][]
           ).map(([key, label]) => (
             <button
@@ -146,16 +147,16 @@ export function ProattivitaView({ onOpenChat }: ProattivitaViewProps) {
         </div>
         <button type="button" className="proattiva-refresh" onClick={() => void load()}>
           <RefreshCw size={14} aria-hidden="true" />
-          Aggiorna
+          {t("proattivita:refresh")}
         </button>
       </div>
 
       {loading ? (
-        <p className="proattiva-empty">Carico i suggerimenti…</p>
+        <p className="proattiva-empty">{t("proattivita:loading")}</p>
       ) : groups.length === 0 ? (
         <div className="proattiva-empty">
           <Lightbulb size={20} aria-hidden="true" />
-          <p>Nessun suggerimento in sospeso. Quando noto qualcosa di utile, lo trovi qui.</p>
+          <p>{t("proattivita:emptyHint")}</p>
         </div>
       ) : (
         groups.map(([scope, cards]) => {
@@ -173,7 +174,7 @@ export function ProattivitaView({ onOpenChat }: ProattivitaViewProps) {
                 )}
                 <span className="proattiva-group-name">{scopeName(scope)}</span>
                 <span className="proattiva-group-count">
-                  · {cards.length} {cards.length === 1 ? "suggerimento" : "suggerimenti"}
+                  · {cards.length} {cards.length === 1 ? t("proattivita:suggestion") : t("proattivita:suggestions")}
                 </span>
               </div>
 
@@ -200,28 +201,28 @@ export function ProattivitaView({ onOpenChat }: ProattivitaViewProps) {
                       onClick={() => void open(s)}
                     >
                       <ArrowRight size={14} aria-hidden="true" />
-                      Apri chat
+                      {t("proattivita:openChat")}
                     </button>
                     <div className="proattiva-btn-row">
                       <button
                         type="button"
                         className="proattiva-btn"
-                        title="Buona idea, me ne sono già occupato"
+                        title={t("proattivita:doneTitle")}
                         disabled={busyId === s.id}
                         onClick={() => void act(s, "accepted", "liked")}
                       >
                         <Check size={14} aria-hidden="true" />
-                        Fatto
+                        {t("proattivita:done")}
                       </button>
                       <button
                         type="button"
                         className="proattiva-btn proattiva-btn-muted"
-                        title="Non utile: non ripresentare suggerimenti così"
+                        title={t("proattivita:notUsefulTitle")}
                         disabled={busyId === s.id}
                         onClick={() => void act(s, "dismissed", "disliked")}
                       >
                         <X size={14} aria-hidden="true" />
-                        Non utile
+                        {t("proattivita:notUseful")}
                       </button>
                     </div>
                   </div>
@@ -231,13 +232,13 @@ export function ProattivitaView({ onOpenChat }: ProattivitaViewProps) {
               {hidden > 0 && (
                 <button type="button" className="proattiva-more" onClick={() => toggleScope(scope)}>
                   <ChevronRight size={13} aria-hidden="true" />+{hidden}{" "}
-                  {hidden === 1 ? "altra" : "altre"} in {scopeName(scope)}
+                  {hidden === 1 ? t("proattivita:other") : t("proattivita:others")} {t("proattivita:in")} {scopeName(scope)}
                 </button>
               )}
               {isOpen && cards.length > 1 && (
                 <button type="button" className="proattiva-more" onClick={() => toggleScope(scope)}>
                   <ChevronDown size={13} aria-hidden="true" />
-                  Comprimi
+                  {t("proattivita:collapse")}
                 </button>
               )}
             </div>

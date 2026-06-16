@@ -41,8 +41,8 @@ let activeThreadId = "thread_active_prompt";
 let localThreads: CoreChatThread[] = [
   {
     thread_id: activeThreadId,
-    title: "Nuovo compito",
-    subtitle: "Chat locale",
+    title: "New task",
+    subtitle: "Local chat",
     status: "active",
     pinned: false,
     computer_session_id: "computer_active_prompt",
@@ -58,9 +58,9 @@ const localMessages = new Map<string, CoreChatMessage[]>([
       {
         id: "electron_ready",
         role: "assistant",
-        text: "Sono pronto. Scrivimi pure: rispondo in locale.",
+        text: "I'm ready. Just write to me — I reply locally.",
         timestamp: currentTimestampSeconds(),
-        metadata: "Modello locale",
+        metadata: "Local model",
         metrics: null,
         feedback: null,
         saved_memory_ref: null,
@@ -75,7 +75,7 @@ const localMessages = new Map<string, CoreChatMessage[]>([
 export const chatApi = {
   // `workspace` targets a SPECIFIC project/base instead of the active one. A
   // specific fetch must NOT hydrate the module cache (that mirrors the ACTIVE
-  // workspace) — e.g. loading Personale's threads while a project is active.
+  // workspace) — e.g. loading Personal's threads while a project is active.
   async chatThreads(workspace?: string) {
     const url = workspace
       ? `/api/chat/threads?workspace=${encodeURIComponent(workspace)}`
@@ -361,12 +361,12 @@ export const chatApi = {
     );
   },
 
-  async commitChatContinuationResult(
+  async commitChatContinuetionResult(
     threadId: string,
     messageId: string,
     result: CorePromptSubmissionResult,
   ) {
-    const snapshot = commitLocalContinuationResult(threadId, messageId, result);
+    const snapshot = commitLocalContinuetionResult(threadId, messageId, result);
     try {
       return hydrateMessagesSnapshot(
         await gatewayJson<CoreChatMessagesSnapshot>(
@@ -447,8 +447,8 @@ function createLocalChatThread() {
   const threadId = `thread_${Date.now()}_${Math.random().toString(36).slice(2)}`;
   const thread: CoreChatThread = {
     thread_id: threadId,
-    title: "Nuovo compito",
-    subtitle: "Chat locale",
+    title: "New task",
+    subtitle: "Local chat",
     status: "active",
     pinned: false,
     computer_session_id: `computer_${threadId}`,
@@ -462,9 +462,9 @@ function createLocalChatThread() {
     {
       id: `${threadId}_ready`,
       role: "assistant",
-      text: "Sono pronto. Scrivimi pure: rispondo in locale.",
+      text: "I'm ready. Just write to me — I reply locally.",
       timestamp: currentTimestampSeconds(),
-      metadata: "Modello locale",
+      metadata: "Model locale",
       metrics: null,
       feedback: null,
       saved_memory_ref: null,
@@ -517,7 +517,7 @@ function commitLocalPromptResult(
   return chatMessagesSnapshot(threadId);
 }
 
-function commitLocalContinuationResult(
+function commitLocalContinuetionResult(
   threadId: string,
   messageId: string,
   result: CorePromptSubmissionResult,
@@ -540,7 +540,7 @@ async function consumeChatStreamResponse(
       throw new Error(await gatewayErrorMessage(response));
     }
     if (!response.body) {
-      throw new Error("Il gateway chat locale non ha aperto lo stream.");
+      throw new Error("The local chat gateway did not open the stream.");
     }
 
     const reader: ReadableStreamDefaultReader<Uint8Array> =
@@ -563,13 +563,13 @@ async function consumeChatStreamResponse(
         } else if (event.type === "done") {
           result = event.result;
         } else if (event.type === "error") {
-          throw new Error(event.message ?? "Errore gateway chat locale");
+          throw new Error(event.message ?? "Local chat gateway error");
         }
       }
     }
 
     if (!result) {
-      throw new Error("Il gateway chat locale ha chiuso lo stream senza risultato.");
+      throw new Error("The local chat gateway closed the stream with no result.");
     }
     return result;
 }
@@ -636,28 +636,28 @@ async function consumeChatWebSocketStream(
         settle(resolve, event.result);
       } else if (event.type === "error") {
         debug("client_received_error", event.message);
-        fail(new Error(event.message ?? "Errore gateway chat locale"));
+        fail(new Error(event.message ?? "Local chat gateway error"));
       }
     });
     socket.addEventListener("error", () => {
       fail(
         new Error(
           opened
-            ? "Stream WebSocket chat interrotto."
-            : "Gateway chat WebSocket non disponibile.",
+            ? "Chat WebSocket stream interrupted."
+            : "Chat WebSocket gateway unavailable.",
         ),
       );
     });
     socket.addEventListener("close", () => {
       if (!settled) {
-        fail(new Error("Il gateway chat locale ha chiuso il WebSocket senza risultato."));
+        fail(new Error("The local chat gateway closed the WebSocket with no result."));
       }
     });
   });
 }
 
 async function chatStreamWebSocketUrl(): Promise<string> {
-  throw new Error("Gateway chat Rust non ancora estratto come servizio autonomo.");
+  throw new Error("Rust chat gateway not yet extracted as a standalone service.");
 }
 
 function notifyChatStreamDelta(payload: CoreChatStreamDelta) {
@@ -682,7 +682,7 @@ async function gatewayErrorMessage(response: Response) {
   } catch {
     // Fall through to the HTTP status below.
   }
-  return `Gateway chat locale non disponibile: HTTP ${response.status}`;
+  return `Local chat gateway unavailable: HTTP ${response.status}`;
 }
 
 function toGatewayAttachmentInput(attachment: ChatAttachmentInput) {
@@ -759,13 +759,13 @@ function updateThreadAfterMessages(
   localThreads = localThreads.map((thread) => {
     if (thread.thread_id !== threadId) return thread;
     const title =
-      thread.title === "Nuovo compito" && userPrompt?.trim()
+      thread.title === "New task" && userPrompt?.trim()
         ? compactTitle(userPrompt)
         : thread.title;
     return {
       ...thread,
       title,
-      subtitle: "Modello locale",
+      subtitle: "Model locale",
       updated_at: currentTimestampSeconds(),
       message_count: messageCount,
     };

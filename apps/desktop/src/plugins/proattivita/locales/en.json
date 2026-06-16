@@ -1,0 +1,22 @@
+{
+  "title": "Proactivity",
+  "eyebrow": "Your assistant, proactive",
+  "lead": "Things I noticed about your projects and your personal life. Open what you need: I create the chat in the right space.",
+  "pending": "pending",
+  "filterAll": "All",
+  "filterProjects": "Projects",
+  "refresh": "Refresh",
+  "loading": "Loading suggestions…",
+  "emptyHint": "No pending suggestions. When I notice something useful, you will find it here.",
+  "suggestion": "suggestion",
+  "suggestions": "suggestions",
+  "openChat": "Open chat",
+  "done": "Done",
+  "doneTitle": "Good idea, I already took care of it",
+  "notUseful": "Not useful",
+  "notUsefulTitle": "Not useful: do not show suggestions like this again",
+  "other": "other",
+  "others": "others",
+  "in": "in",
+  "collapse": "Collapse"
+}

@@ -32,6 +32,20 @@ impl MemoryFacade {
         }
     }
 
+    /// Hard purge of all memory data for a workspace. Delegates to the store.
+    pub fn purge_workspace(
+        &self,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+    ) -> Result<usize, String> {
+        self.store.purge_workspace(user_id, workspace_id)
+    }
+
+    /// Reclaims free space in the SQLite database file.
+    pub fn vacuum(&self) -> Result<(), String> {
+        self.store.vacuum()
+    }
+
     pub fn record_event(&self, event: &MemoryEvent) -> MemoryResult<()> {
         Ok(self.store.record_event(event)?)
     }

@@ -273,7 +273,7 @@ fn normalize(entry: RawEntry) -> Option<McpRegistryServer> {
             }
             base.installable = true;
         } else {
-            base.note = Some("Nessun pacchetto stdio né endpoint remoto utilizzabile.".to_string());
+            base.note = Some("No usable stdio package or remote endpoint.".to_string());
         }
         return Some(base);
     };
@@ -368,7 +368,7 @@ pub async fn fetch_servers(
     if let Some(q) = search.map(str::trim).filter(|s| !s.is_empty()) {
         req = req.query(&[("search", q)]);
     }
-    let resp = req.send().await.map_err(|e| format!("registry non raggiungibile: {e}"))?;
+    let resp = req.send().await.map_err(|e| format!("registry unreachable: {e}"))?;
     if !resp.status().is_success() {
         return Err(format!("registry HTTP {}", resp.status()));
     }

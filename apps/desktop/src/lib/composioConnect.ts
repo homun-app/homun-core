@@ -1,6 +1,6 @@
 import { coreBridge } from "./coreBridge";
 
-// Shared Composio connect flow (same as Settings → Connettori): kick off the OAuth
+// Shared Composio connect flow (same as Settings → Connectors): kick off the OAuth
 // link (or API-key flow), open the redirect, then POLL connected accounts until the
 // toolkit reports ACTIVE — so the in-chat connect/reconnect cards "detect automatically"
 // instead of dead-ending on "autorizza e riprova".

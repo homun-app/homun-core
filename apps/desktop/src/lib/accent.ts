@@ -6,14 +6,14 @@ export const DEFAULT_ACCENT = "#157a6e"; // teal — Homun brand
 
 export const ACCENT_PRESETS: { name: string; hex: string }[] = [
   { name: "Teal", hex: "#157a6e" },
-  { name: "Indaco", hex: "#4f66e0" },
+  { name: "Indigo", hex: "#4f66e0" },
   { name: "Terracotta", hex: "#c2683c" },
-  { name: "Ambra", hex: "#c9881e" },
-  { name: "Verde", hex: "#25785a" },
-  { name: "Blu", hex: "#2a7fb8" },
-  { name: "Viola", hex: "#7c5cff" },
-  { name: "Rosa", hex: "#e93d82" },
-  { name: "Grafite", hex: "#52525b" },
+  { name: "Amber", hex: "#c9881e" },
+  { name: "Green", hex: "#25785a" },
+  { name: "Blue", hex: "#2a7fb8" },
+  { name: "Violet", hex: "#7c5cff" },
+  { name: "Rose", hex: "#e93d82" },
+  { name: "Graphite", hex: "#52525b" },
 ];
 
 const STORAGE_KEY = "homun.accent";
@@ -135,10 +135,10 @@ export type ThemeName = "freddo" | "avorio" | "neutro" | "sabbia";
 export const DEFAULT_THEME: ThemeName = "freddo";
 
 export const THEME_PRESETS: { name: ThemeName; label: string; hint: string }[] = [
-  { name: "freddo", label: "Freddo", hint: "Grigio freddo" },
-  { name: "avorio", label: "Avorio", hint: "Caldo neutro" },
-  { name: "neutro", label: "Neutro", hint: "Grigi veri" },
-  { name: "sabbia", label: "Sabbia", hint: "Caldo sabbia" },
+  { name: "freddo", label: "Cold", hint: "Cool gray" },
+  { name: "avorio", label: "Ivory", hint: "Warm neutral" },
+  { name: "neutro", label: "Neutral", hint: "True grays" },
+  { name: "sabbia", label: "Sand", hint: "Warm sand" },
 ];
 
 const THEME_KEY = "homun.theme";

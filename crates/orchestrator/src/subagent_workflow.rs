@@ -44,7 +44,8 @@ pub(crate) fn subagent_workflow_spec(
                     "user_message": request.user_message,
                     "attachments": request.attachments,
                     "arguments": step.arguments,
-                }
+                },
+                "language": request.language,
             }),
             contract,
             permission_envelope: PermissionEnvelope {

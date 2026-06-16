@@ -392,7 +392,7 @@ fn compress_chat_history(input: &str, max_chars: usize) -> (String, bool) {
     let summary_seed = lines
         .iter()
         .take(older_count)
-        .find(|line| line.starts_with("Utente:"))
+        .find(|line| line.starts_with("User:"))
         .copied()
         .unwrap_or(lines[0]);
     let summary = format!(

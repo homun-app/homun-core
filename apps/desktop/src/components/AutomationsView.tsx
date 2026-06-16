@@ -13,9 +13,10 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { coreBridge } from "../lib/coreBridge";
 import type {
-  AutomationCreateInput,
+  AutomationCreateteInput,
   AutomationTriggerJson,
   CoreTaskItem,
   EventSources,
@@ -28,14 +29,14 @@ type SelectedSource =
 
 interface AutomationsViewProps {
   automations: ManagedAutomation[];
-  onCreate: (input: AutomationCreateInput) => void;
+  onCreatete: (input: AutomationCreateteInput) => void;
   onToggle: (id: string) => void;
   onDelete: (id: string) => void;
 }
 
 function formatWhen(ts: number | null): string {
   if (!ts) return "—";
-  return new Date(ts * 1000).toLocaleString("it-IT", {
+  return new Date(ts * 1000).toLocaleString(undefined, {
     day: "2-digit",
     month: "short",
     hour: "2-digit",
@@ -45,10 +46,11 @@ function formatWhen(ts: number | null): string {
 
 export function AutomationsView({
   automations,
-  onCreate,
+  onCreatete,
   onToggle,
   onDelete,
 }: AutomationsViewProps) {
+  const { t } = useTranslation();
   const [composing, setComposing] = useState(false);
   const [title, setTitle] = useState("");
   const [prompt, setPrompt] = useState("");
@@ -193,7 +195,7 @@ export function AutomationsView({
       };
     }
     const finalTitle = title.trim() || prompt.trim().slice(0, 48);
-    onCreate({
+    onCreatete({
       title: finalTitle,
       trigger,
       prompt: prompt.trim(),
@@ -246,27 +248,24 @@ export function AutomationsView({
   };
 
   const DAYS: Array<[string, string]> = [
-    ["mon", "Lun"],
-    ["tue", "Mar"],
-    ["wed", "Mer"],
-    ["thu", "Gio"],
-    ["fri", "Ven"],
-    ["sat", "Sab"],
-    ["sun", "Dom"],
+    ["mon", t("days.mon")],
+    ["tue", t("days.tue")],
+    ["wed", t("days.wed")],
+    ["thu", t("days.thu")],
+    ["fri", t("days.fri")],
+    ["sat", t("days.sat")],
+    ["sun", t("days.sun")],
   ];
 
   return (
     <section className="automations-view" aria-labelledby="automations-title">
       <header className="learning-header">
         <div>
-          <p className="eyebrow">Trigger → azione</p>
-          <h2 id="automations-title">Automazioni</h2>
-          <p className="lead-copy">
-            Una regola: quando succede qualcosa — a un orario o a un evento — Homun
-            esegue un'azione con tutti i suoi strumenti (skill, connettori, browser, memoria).
-          </p>
+          <p className="eyebrow">{t("automations.eyebrow")}</p>
+          <h2 id="automations-title">{t("nav.automations")}</h2>
+          <p className="lead-copy">{t("automations.lead")}</p>
         </div>
-        <div className="learning-summary" aria-label="Sintesi automazioni">
+        <div className="learning-summary" aria-label={t("automations.summaryAria")}>
           <span>
             <strong>{automations.length}</strong>
             totali
@@ -280,7 +279,7 @@ export function AutomationsView({
 
       {!composing && (
         <button className="auto-new-btn" onClick={() => setComposing(true)}>
-          <Plus size={16} aria-hidden /> Nuova automazione
+          <Plus size={16} aria-hidden /> {t("automations.newAutomation")}
         </button>
       )}
 
@@ -288,26 +287,26 @@ export function AutomationsView({
         <div className="auto-editor">
           <input
             className="auto-title-input"
-            placeholder="Titolo (opzionale)"
+            placeholder={t("automations.titlePlaceholder")}
             value={title}
             onChange={(e) => setTitle(e.target.value)}
           />
 
           <div className="auto-section-label">
-            <Bolt size={13} aria-hidden /> Quando
+            <Bolt size={13} aria-hidden /> {t("automations.when")}
           </div>
           <div className="auto-seg" role="tablist">
             <button
               className={triggerKind === "schedule" ? "active" : ""}
               onClick={() => setTriggerKind("schedule")}
             >
-              <Clock3 size={14} aria-hidden /> A orario
+              <Clock3 size={14} aria-hidden /> {t("automations.schedule")}
             </button>
             <button
               className={triggerKind === "event" ? "active" : ""}
               onClick={() => setTriggerKind("event")}
             >
-              <MessageSquare size={14} aria-hidden /> A un evento
+              <MessageSquare size={14} aria-hidden /> {t("automations.event")}
             </button>
           </div>
 
@@ -318,13 +317,13 @@ export function AutomationsView({
                   className={scheduleMode === "daily" ? "active" : ""}
                   onClick={() => setScheduleMode("daily")}
                 >
-                  Ogni giorno
+                  {t("automations.everyDay")}
                 </button>
                 <button
                   className={scheduleMode === "days" ? "active" : ""}
                   onClick={() => setScheduleMode("days")}
                 >
-                  Giorni scelti
+                  {t("automations.selectedDays")}
                 </button>
                 <button
                   className={scheduleMode === "interval" ? "active" : ""}
@@ -336,7 +335,7 @@ export function AutomationsView({
 
               {scheduleMode === "interval" ? (
                 <div className="auto-interval">
-                  <span>Ogni</span>
+                  <span>{t("automations.every")}</span>
                   <input
                     type="number"
                     min={1}
@@ -347,8 +346,8 @@ export function AutomationsView({
                     value={intervalUnit}
                     onChange={(e) => setIntervalUnit(e.target.value as "h" | "d")}
                   >
-                    <option value="h">ore</option>
-                    <option value="d">giorni</option>
+                    <option value="h">{t("automations.hours")}</option>
+                    <option value="d">{t("automations.days")}</option>
                   </select>
                 </div>
               ) : (
@@ -368,17 +367,17 @@ export function AutomationsView({
                     </div>
                   )}
                   <div className="auto-times">
-                    {times.map((t, i) => (
+                    {times.map((timeVal, i) => (
                       <span className="auto-time" key={i}>
                         <input
                           type="time"
-                          value={t}
+                          value={timeVal}
                           onChange={(e) => setTimeAt(i, e.target.value)}
                         />
                         {times.length > 1 && (
                           <button
                             className="auto-time-x"
-                            aria-label="Rimuovi orario"
+                            aria-label={t("automations.removeTime")}
                             onClick={() => removeTime(i)}
                           >
                             <X size={13} aria-hidden />
@@ -387,7 +386,7 @@ export function AutomationsView({
                       </span>
                     ))}
                     <button className="auto-time-add" onClick={addTime} type="button">
-                      <Plus size={13} aria-hidden /> orario
+                      <Plus size={13} aria-hidden /> {t("automations.addTime")}
                     </button>
                   </div>
                 </>
@@ -396,7 +395,7 @@ export function AutomationsView({
           ) : (
             <div className="auto-evt">
               <div className="auto-field">
-                <label>Sorgente</label>
+                <label>{t("automations.source")}</label>
                 <div className="auto-src">
                   <button
                     type="button"
@@ -414,7 +413,7 @@ export function AutomationsView({
                           {source.label}
                         </>
                       ) : (
-                        "Scegli una sorgente…"
+                        t("automations.pickSource")
                       )}
                     </span>
                     <ChevronDown size={14} aria-hidden />
@@ -425,14 +424,14 @@ export function AutomationsView({
                         <Search size={14} aria-hidden />
                         <input
                           autoFocus
-                          placeholder="Cerca canali, Composio, MCP…"
+                          placeholder={t("automations.searchSources")}
                           value={srcQuery}
                           onChange={(e) => setSrcQuery(e.target.value)}
                         />
                       </div>
                       <div className="auto-src-list">
                         {sourceGroups.length === 0 && (
-                          <p className="auto-src-empty">Nessuna sorgente</p>
+                          <p className="auto-src-empty">{t("automations.noSources")}</p>
                         )}
                         {sourceGroups.map((g) => (
                           <div key={g.group} className="auto-src-group">
@@ -462,39 +461,35 @@ export function AutomationsView({
 
               {source?.kind === "channel" && (
                 <div className="auto-field">
-                  <label>Da (nome o numero, opzionale)</label>
+                  <label>{t("automations.fromLabel")}</label>
                   <input
                     value={eventFrom}
                     onChange={(e) => setEventFrom(e.target.value)}
-                    placeholder="es. Mario Rossi"
+                    placeholder={t("automations.fromPlaceholder")}
                   />
                 </div>
               )}
               {source?.kind === "connector" && (
                 <div className="auto-field">
-                  <label>Quando deve scattare? (descrivi, opzionale)</label>
+                  <label>{t("automations.whenTriggerLabel")}</label>
                   <input
                     value={connectorArgs}
                     onChange={(e) => setConnectorArgs(e.target.value)}
-                    placeholder="es. nuove email da Mario non lette"
+                    placeholder={t("automations.whenTriggerPlaceholder")}
                   />
-                  <p className="auto-hint">
-                    Descrivilo a parole: ci penso io a tradurlo. Il campo tecnico per evitare
-                    doppioni è impostato in automatico ({connectorKey}). Per setup precisi,
-                    chiedimelo in chat.
-                  </p>
+                  <p className="auto-hint">{t("automations.whenTriggerHint", { connectorKey })}</p>
                 </div>
               )}
             </div>
           )}
 
           <div className="auto-section-label">
-            <Sparkles size={13} aria-hidden /> Allora
+            <Sparkles size={13} aria-hidden /> {t("automations.then")}
           </div>
           <textarea
             className="auto-prompt"
             rows={3}
-            placeholder="Cosa deve fare Homun quando scatta… (sceglie skill, connettori, browser e memoria automaticamente)"
+            placeholder={t("automations.actionPlaceholder")}
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
           />
@@ -504,15 +499,15 @@ export function AutomationsView({
               checked={!autonomous}
               onChange={(e) => setAutonomous(!e.target.checked)}
             />
-            <ShieldCheck size={14} aria-hidden /> Chiedi conferma prima di inviare o pubblicare
+            <ShieldCheck size={14} aria-hidden /> {t("automations.askConfirmation")}
           </label>
 
           <div className="auto-editor-actions">
             <button className="auto-btn" onClick={reset}>
-              Annulla
+              Cancel
             </button>
             <button className="auto-btn-accent" onClick={save} disabled={!canSave}>
-              Crea automazione
+              {t("automations.createAutomation")}
             </button>
           </div>
         </div>
@@ -520,10 +515,7 @@ export function AutomationsView({
 
       <div className="auto-list">
         {automations.length === 0 && !composing && (
-          <p className="auto-empty">
-            Nessuna automazione. Creane una qui sopra, o chiedimelo in chat — es. «ogni
-            venerdì alle 18 mandami il riassunto della settimana».
-          </p>
+          <p className="auto-empty">{t("automations.emptyHint")}</p>
         )}
         {automations.map((a) => (
           <article className={`auto-card${a.enabled ? "" : " disabled"}`} key={a.id}>
@@ -538,7 +530,7 @@ export function AutomationsView({
                   {a.trigger_summary}
                 </span>
                 {a.source !== "manual" && (
-                  <span className="auto-source">{a.source === "chat" ? "da chat" : "suggerita"}</span>
+                  <span className="auto-source">{a.source === "chat" ? t("automations.fromChat") : t("automations.suggested")}</span>
                 )}
               </div>
               <p className="auto-card-title">{a.title}</p>
@@ -546,17 +538,17 @@ export function AutomationsView({
               <div className="auto-card-meta">
                 {a.trigger.type === "schedule" && a.next_run && (
                   <span>
-                    <Clock3 size={12} aria-hidden /> prossima: {formatWhen(a.next_run)}
+                    <Clock3 size={12} aria-hidden /> {t("automations.next")}: {formatWhen(a.next_run)}
                   </span>
                 )}
-                {a.last_fired_at && <span>ultima: {formatWhen(a.last_fired_at)}</span>}
+                {a.last_fired_at && <span>{t("automations.last")}: {formatWhen(a.last_fired_at)}</span>}
                 <span>
                   {a.approval === "confirm" ? (
                     <>
-                      <ShieldCheck size={12} aria-hidden /> con conferma
+                      <ShieldCheck size={12} aria-hidden /> {t("automations.withConfirmation")}
                     </>
                   ) : (
-                    "autonoma"
+                    t("automations.autonomous")
                   )}
                 </span>
               </div>
@@ -564,16 +556,16 @@ export function AutomationsView({
             <div className="auto-card-actions">
               <button
                 className="auto-icon"
-                title={a.enabled ? "Disattiva" : "Attiva"}
-                aria-label={a.enabled ? "Disattiva" : "Attiva"}
+                title={a.enabled ? t("automations.disable") : t("automations.enable")}
+                aria-label={a.enabled ? t("automations.disable") : t("automations.enable")}
                 onClick={() => onToggle(a.id)}
               >
                 <Power size={15} aria-hidden />
               </button>
               <button
                 className="auto-icon danger"
-                title="Elimina"
-                aria-label="Elimina"
+                title={t("common.delete")}
+                aria-label={t("common.delete")}
                 onClick={() => onDelete(a.id)}
               >
                 <Trash2 size={15} aria-hidden />
@@ -584,31 +576,28 @@ export function AutomationsView({
       </div>
 
       {scheduled.length > 0 && (
-        <div className="auto-list" aria-label="Task pianificati">
+        <div className="auto-list" aria-label={t("automations.scheduledTasks")}>
           <div className="auto-section-label" style={{ marginTop: 4 }}>
             Task pianificati ({scheduled.length})
           </div>
-          <p className="auto-empty" style={{ marginTop: 0 }}>
-            Esecuzioni in coda, inclusi i promemoria creati da chat. Cancellane uno
-            qui se non lo vuoi più.
-          </p>
-          {scheduled.map((t) => (
-            <article className="auto-card" key={t.task_id}>
+          <p className="auto-empty" style={{ marginTop: 0 }}>{t("automations.scheduledHint")}</p>
+          {scheduled.map((task) => (
+            <article className="auto-card" key={task.task_id}>
               <div className="auto-card-main">
                 <div className="auto-card-head">
                   <span className="auto-trigger-chip">
                     <Clock3 size={13} aria-hidden />
-                    {t.status === "active" ? "in corso" : "in coda"}
+                    {task.status === "active" ? t("automations.inProgress") : t("automations.inQueue")}
                   </span>
                 </div>
-                <p className="auto-card-prompt">{t.goal}</p>
+                <p className="auto-card-prompt">{task.goal}</p>
               </div>
               <div className="auto-card-actions">
                 <button
                   className="auto-icon danger"
-                  title="Elimina"
-                  aria-label="Elimina task pianificato"
-                  onClick={() => cancelScheduled(t.task_id)}
+                  title="Delete"
+                  aria-label={t("automations.deleteScheduled")}
+                  onClick={() => cancelScheduled(task.task_id)}
                 >
                   <Trash2 size={15} aria-hidden />
                 </button>

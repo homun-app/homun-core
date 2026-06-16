@@ -230,7 +230,7 @@ pub async fn download_zip(http: &reqwest::Client, slug: &str) -> Result<Vec<u8>,
     }
     let bytes = resp.bytes().await.map_err(|e| e.to_string())?;
     if bytes.len() > MAX_ZIP_BYTES {
-        return Err("pacchetto troppo grande".to_string());
+        return Err("package too large".to_string());
     }
     Ok(bytes.to_vec())
 }

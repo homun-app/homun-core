@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import i18n from "./i18n";
+import { useTranslation } from "react-i18next";
 import { AutomationsView } from "./components/AutomationsView";
+import { OnboardingWizard } from "./components/OnboardingWizard";
 import { ChatView } from "./components/ChatView";
 import { ContainedComputerView } from "./components/ContainedComputerView";
 import { LearningView } from "./components/LearningView";
@@ -24,9 +27,9 @@ import {
   coreBridge,
   subscribeAppEvents,
   type AppEvent,
-  type AutomationCreateInput,
+  type AutomationCreateteInput,
   type ManagedAutomation,
-  type CoreApprovalItem,
+  type CoreApprovelItem,
   type CoreChatAttachment,
   type CoreChatMessage,
   type CoreChatThread,
@@ -40,7 +43,7 @@ import {
   type PluginState,
 } from "./lib/coreBridge";
 import type {
-  ApprovalItem,
+  ApprovelItem,
   ChatMessage,
   ChatThread,
   ConnectionItem,
@@ -58,8 +61,8 @@ import type {
 
 const defaultChatThread: ChatThread = {
   threadId: "thread_active_prompt",
-  title: "Nuovo compito",
-  subtitle: "Sessione locale pronta",
+  title: "New task",
+  subtitle: "Local session ready",
   status: "active",
   pinned: false,
   computerSessionId: "computer_active_prompt",
@@ -129,7 +132,7 @@ function mapCoreChatAttachment(attachment: CoreChatAttachment): NonNullable<Chat
 }
 
 function starterMessages(_thread: ChatThread): ChatMessage[] {
-  // Empty: the chat empty-state hero ("Come posso aiutarti?") welcomes the user now,
+  // Empty: the chat empty-state hero ("How can I help you?") welcomes the user now,
   // so we don't seed a canned assistant greeting.
   return [];
 }
@@ -144,9 +147,9 @@ function updateThreadPreview(
   return {
     ...thread,
     title:
-      thread.title === "Nuovo compito" && userTitle ? userTitle : thread.title,
+      thread.title === "New task" && userTitle ? userTitle : thread.title,
     messageCount: messages.length,
-    subtitle: lastMessage?.text.slice(0, 72) || "Chat locale pronta",
+    subtitle: lastMessage?.text.slice(0, 72) || "Local chat ready",
     updatedAt: currentTimestampSeconds(),
   };
 }
@@ -192,11 +195,13 @@ function mapCoreTask(task: CoreTaskItem): TaskItem {
     resource: "task_runtime",
     risk: "low",
     updated: "ora",
-    blockedReason: humanizeTaskBlockedReason(task.blocked_reason),
+    blockedReason: humanizeTaskBlockedReasonKey(task.blocked_reason)
+      ? i18n.t(humanizeTaskBlockedReasonKey(task.blocked_reason)!)
+      : task.blocked_reason ?? undefined,
   };
 }
 
-function mapCoreApproval(approval: CoreApprovalItem): ApprovalItem {
+function mapCoreApprovel(approval: CoreApprovelItem): ApprovelItem {
   const isBrowserAction = approval.action === "browser.manual_action";
   const isPromptPlanAction = approval.action === "prompt_plan.approve_step";
   const requestedSession =
@@ -208,20 +213,20 @@ function mapCoreApproval(approval: CoreApprovalItem): ApprovalItem {
   return {
     id: approval.approval_id,
     title: isBrowserAction
-      ? "Azione browser in attesa"
+      ? i18n.t("approval.browserAction")
       : isPromptPlanAction
-        ? "Conferma piano operativo"
+        ? i18n.t("approval.confirmPlan")
         : approval.action,
     reason: isBrowserAction
-      ? humanizeBrowserApprovalReason(approval.explanation)
+      ? i18n.t(humanizeBrowserApprovelReasonKey(approval.explanation))
       : isPromptPlanAction
-        ? "Il piano contiene uno step che richiede conferma prima di procedere. Non autorizza acquisti, login, invii o pagamenti automatici."
+        ? i18n.t("approval.confirmPlanReason")
         : approval.explanation,
     action: approval.action,
     boundary: approval.data_boundary,
     risk: approval.risk_level === "high" ? "high" : "medium",
     requestedBy: `${approval.task_id} ${requestedSession}`.trim(),
-    scopeOptions: filterApprovalScopes(approval.scope_options),
+    scopeOptions: filterApprovelScopes(approval.scope_options),
     browserVisibilityOptions: filterBrowserVisibilityOptions(
       approval.browser_visibility_options,
     ),
@@ -229,7 +234,7 @@ function mapCoreApproval(approval: CoreApprovalItem): ApprovalItem {
   };
 }
 
-function filterApprovalScopes(values?: string[]): Array<"once" | "always"> {
+function filterApprovelScopes(values?: string[]): Array<"once" | "always"> {
   const options = (values ?? []).filter(
     (value): value is "once" | "always" => value === "once" || value === "always",
   );
@@ -252,60 +257,54 @@ function filterBrowserVisibility(value?: string): "auto" | "visible" | "headless
   return "auto";
 }
 
-function humanizeBrowserApprovalReason(reason: string): string {
+function humanizeBrowserApprovelReasonKey(reason: string): string {
   const match = reason.match(/before execution: ([a-z_]+)/i);
-  const action = match?.[1] ?? "azione";
-  if (action === "click") {
-    return "Il browser vuole fare click su un elemento della pagina. Conferma solo se vuoi proseguire.";
+  const action = match?.[1] ?? "default";
+  if (action === "click" || action === "close" || action === "type") {
+    return `approval.${action}`;
   }
-  if (action === "close") {
-    return "Il browser vuole chiudere una pagina o una finestra. Conferma solo se non serve piu'.";
-  }
-  if (action === "type") {
-    return "Il browser vuole inviare testo come submit. Conferma solo se il contenuto e' corretto.";
-  }
-  return "Il browser richiede una conferma prima di procedere.";
+  return "approval.default";
 }
 
-function humanizeTaskBlockedReason(reason: string | null): string | undefined {
-  if (!reason) return undefined;
+function humanizeTaskBlockedReasonKey(reason: string | null): string | null {
+  if (!reason) return null;
   if (reason === "recovered after desktop restart") {
-    return "Recuperato dopo riavvio: risorse locali rilasciate, task rimesso in coda.";
+    return "task.blocked.recovered";
   }
   if (reason.startsWith("resource ")) {
-    return "In attesa di risorse locali disponibili.";
+    return "task.blocked.resource";
   }
   if (reason.startsWith("approval required:")) {
-    return "In attesa di conferma utente.";
+    return "task.blocked.approval";
   }
-  return reason;
+  return null;
 }
 
 function summarizeSafeValue(value: unknown): string {
   if (value === null || value === undefined) {
-    return "Nessun dato redatto disponibile";
+    return "No redacted data available";
   }
   if (typeof value === "number" || typeof value === "boolean") {
     return String(value);
   }
   if (typeof value === "string") {
     return value.toLowerCase().includes("redacted")
-      ? "Payload redatto"
-      : "Dato redatto disponibile";
+      ? "Redacted payload"
+      : "Redacted data available";
   }
   if (Array.isArray(value)) {
-    return `Lista redatta (${value.length})`;
+    return `Redacted list (${value.length})`;
   }
   if (typeof value === "object") {
     const record = value as Record<string, unknown>;
     const recovery = record.desktop_recovery as Record<string, unknown> | undefined;
     if (recovery?.state === "requeued_after_restart") {
-      return "Recuperato dopo riavvio · risorse rilasciate";
+      return "Recovered after restart · resources released";
     }
     const approval = record.approval as Record<string, unknown> | undefined;
     if (approval?.decision) {
-      return `Approval ${String(approval.decision)} · ${String(
-        approval.action ?? "azione redatta",
+      return `Approvel ${String(approval.decision)} · ${String(
+        approval.action ?? i18n.t("common.redactedAction"),
       )}`;
     }
     const prompt = record.prompt as Record<string, unknown> | undefined;
@@ -320,10 +319,10 @@ function summarizeSafeValue(value: unknown): string {
       .filter((key) => !/raw|payload|input|content|secret/i.test(key))
       .slice(0, 4);
     return visibleKeys.length
-      ? `JSON redatto · ${visibleKeys.join(", ")}`
-      : "JSON redatto disponibile";
+      ? `Redacted JSON · ${visibleKeys.join(", ")}`
+      : "Redacted JSON available";
   }
-  return "Dato redatto disponibile";
+  return "Redacted data available";
 }
 
 function mapCoreTaskDetail(detail: CoreTaskDetail): TaskDetailItem {
@@ -333,7 +332,9 @@ function mapCoreTaskDetail(detail: CoreTaskDetail): TaskDetailItem {
     goal: detail.goal,
     status: mapCoreTaskStatus(detail.status),
     priority: mapCoreTaskPriority(detail.priority),
-    blockedReason: humanizeTaskBlockedReason(detail.blocked_reason),
+    blockedReason: humanizeTaskBlockedReasonKey(detail.blocked_reason)
+      ? i18n.t(humanizeTaskBlockedReasonKey(detail.blocked_reason)!)
+      : detail.blocked_reason ?? undefined,
     checkpointSummary: summarizeSafeValue(detail.latest_checkpoint),
     metadataSummary: summarizeSafeValue(detail.runtime_metadata),
     exposesRawInput: detail.exposes_raw_input,
@@ -397,15 +398,15 @@ function capabilityType(value: string): ConnectionItem["type"] {
 }
 
 function providerDisplayName(providerId: string): string {
-  if (providerId === "browser") return "Il mio browser";
+  if (providerId === "browser") return "My browser";
   return providerId;
 }
 
 function connectionDescription(providerId: string): string {
   if (providerId === "browser") {
-    return "Azioni locali con Playwright/CDP, snapshot redatti e conferme.";
+    return "Local actions with Playwright/CDP, redacted snapshots and confirmations.";
   }
-  return "Connettore locale registrato nel capability registry.";
+  return "Local connector registered in the capability registry.";
 }
 
 function fallbackTaskDetail(task: TaskItem): TaskDetailItem {
@@ -416,23 +417,26 @@ function fallbackTaskDetail(task: TaskItem): TaskDetailItem {
     status: task.status,
     priority: task.priority,
     blockedReason: task.blockedReason,
-    checkpointSummary: "Read model locale non ancora collegato al gateway",
-    metadataSummary: "Apri l'app desktop per il dettaglio core reale",
+    checkpointSummary: "Local read model not yet connected to the gateway",
+    metadataSummary: "Open the desktop app for real core detail",
     exposesRawInput: false,
   };
 }
 
 export default function App() {
+  const { t } = useTranslation();
   const [activeView, setActiveView] = useState<ViewId>("chat");
   const [previousView, setPreviousView] = useState<ViewId>("chat");
-  // Addon/plugin enabled-state (ADR 0011 §10-A): drives which registry plugins
+  // Onboarding wizard: shown on first launch when no provider is configured.
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  // Addons/plugin enabled-state (ADR 0011 §10-A): drives which registry plugins
   // contribute a nav entry + panel. Default-on until the backend answers.
   const [pluginStates, setPluginStates] = useState<PluginState[]>([]);
   const [settingsSection, setSettingsSection] =
     useState<SettingsSectionId>("account");
   // Active sub-item within a section that has an inline expandable submenu (e.g.
-  // Modello & Runtime → routing|decisions|providers). A single free-form string
-  // keeps this generic for future sections (Connettori, etc.).
+  // Model & Runtime → routing|decisions|providers). A single free-form string
+  // keeps this generic for future sections (Connectors, etc.).
   const [settingsSub, setSettingsSub] = useState<string>("");
   const [chatThreads, setChatThreads] = useState<ChatThread[]>([
     defaultChatThread,
@@ -446,7 +450,7 @@ export default function App() {
     [defaultChatThread.threadId]: chatMessages,
   });
   const [taskItems, setTaskItems] = useState<TaskItem[]>(tasks);
-  const [approvalItems, setApprovalItems] = useState<ApprovalItem[]>(approvals);
+  const [approvalItems, setApprovelItems] = useState<ApprovelItem[]>(approvals);
   const [automationItems, setAutomationItems] = useState<ManagedAutomation[]>([]);
   const [runtimeItems] = useState<RuntimeHealth[]>(runtimeHealth);
   const [memoryDashboard, setMemoryDashboard] =
@@ -457,7 +461,11 @@ export default function App() {
   const [selectedTaskDetail, setSelectedTaskDetail] =
     useState<TaskDetailItem | null>(null);
   const [taskDetailLoading, setTaskDetailLoading] = useState(false);
-  const [approvalBusyId, setApprovalBusyId] = useState<string | null>(null);
+  const [approvalBusyId, setApprovelBusyId] = useState<string | null>(null);
+  // The thread currently generating a chat answer (real-time signal from ChatView,
+  // sub-polling cadence). Used to mark the thread busy in the sidebar immediately,
+  // before the 2.5s taskQueue polling catches up.
+  const [streamingThreadId, setStreamingThreadId] = useState<string | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState("task_prompt_session");
   const [drawerOpen, setDrawerOpen] = useState(() => window.innerWidth > 860);
   const activeThread = useMemo(
@@ -467,6 +475,20 @@ export default function App() {
       defaultChatThread,
     [activeThreadId, chatThreads],
   );
+  // Threads "busy": a real-time streaming signal (from ChatView, sub-poll) UNION
+  // the taskQueue snapshot (running/queued tasks linked to a thread). The union
+  // covers both the chat-stream case and the durable-background-task case.
+  const busyThreadIds = useMemo(() => {
+    const ids = new Set<string>();
+    if (streamingThreadId) ids.add(streamingThreadId);
+    for (const thread of chatThreads) {
+      const task = taskItems.find((item) => item.id === thread.taskId);
+      if (task && (task.status === "running" || task.status === "queued")) {
+        ids.add(thread.threadId);
+      }
+    }
+    return ids;
+  }, [streamingThreadId, chatThreads, taskItems]);
   const selectedTask = useMemo(
     () =>
       taskItems.find((task) => task.id === selectedTaskId) ?? {
@@ -515,7 +537,7 @@ export default function App() {
   }
 
   // Navigate to a thread that may live in ANOTHER workspace (e.g. a channel
-  // thread in Personale): select_thread is workspace-aware and returns that
+  // thread in Personal): select_thread is workspace-aware and returns that
   // workspace's snapshot, so applying it switches context for us.
   async function navigateToThread(threadId: string) {
     try {
@@ -561,7 +583,20 @@ export default function App() {
     return unsubscribe;
   }, []);
 
-  async function handleCreateChatThread() {
+  // Onboarding check: if setup isn't complete and no provider is configured,
+  // show the wizard overlay on first launch.
+  useEffect(() => {
+    void (async () => {
+      try {
+        const status = await coreBridge.setupStatus();
+        if (status.needs_setup) setShowOnboarding(true);
+      } catch {
+        /* gateway not ready — will retry on next interaction */
+      }
+    })();
+  }, []);
+
+  async function handleCreateteChatThread() {
     try {
       const created = mapCoreChatThread(await coreBridge.createChatThread());
       const messages = await coreBridge.chatMessages(created.threadId);
@@ -582,7 +617,7 @@ export default function App() {
         threadId: `thread_preview_${Date.now()}`,
         computerSessionId: "computer_active_prompt",
         taskId: "task_prompt_session",
-        subtitle: "Electron con gateway locale in estrazione",
+        subtitle: "Electron with local gateway in extraction",
         updatedAt: "ora",
         messageCount: 1,
       };
@@ -656,7 +691,7 @@ export default function App() {
   );
   const composedNavItems: NavItem[] = [
     ...staticNavItems,
-    ...enabledPlugins.map((p) => ({ id: p.id as ViewId, label: p.navLabel, icon: p.navIcon })),
+    ...enabledPlugins.map((p) => ({ id: p.id as ViewId, label: t(p.navLabel), icon: p.navIcon })),
   ];
   // The host capability surface handed to each plugin panel (ADR 0011 §6).
   const pluginHost: PluginHost = { openChat: handleOpenSuggestion };
@@ -787,9 +822,9 @@ export default function App() {
       ...snapshot.recent_failures,
     ].map(mapCoreTask);
     setTaskItems(nextTasks.length ? nextTasks : tasks);
-    setApprovalItems(
+    setApprovelItems(
       snapshot.waiting_approvals.length
-        ? snapshot.waiting_approvals.map(mapCoreApproval)
+        ? snapshot.waiting_approvals.map(mapCoreApprovel)
         : [],
     );
     setResourceUsage(
@@ -818,7 +853,7 @@ export default function App() {
     }
   }
 
-  async function handleCreateAutomation(input: AutomationCreateInput) {
+  async function handleCreateteAutomation(input: AutomationCreateteInput) {
     try {
       await coreBridge.createAutomation(input);
       await loadAutomations();
@@ -898,40 +933,40 @@ export default function App() {
     setSelectedTaskDetail(detail ? mapCoreTaskDetail(detail) : null);
   }
 
-  async function handleApproveApproval(
+  async function handleApproveApprovel(
     approvalId: string,
     options?: {
       scope?: "once" | "always";
       browser_visibility?: "auto" | "visible" | "headless";
     },
   ) {
-    setApprovalBusyId(approvalId);
+    setApprovelBusyId(approvalId);
     try {
-      applyTaskQueueSnapshot(await coreBridge.approveApproval(approvalId, options));
+      applyTaskQueueSnapshot(await coreBridge.approveApprovel(approvalId, options));
       await refreshSelectedTaskDetail(selectedTaskId);
       await refreshRuntimeReadModels(activeThread.taskId);
       await refreshChatReadModels(activeThread.threadId);
     } catch (error) {
       console.warn("approval_approve unavailable", error);
     } finally {
-      setApprovalBusyId(null);
+      setApprovelBusyId(null);
     }
   }
 
-  async function handleRejectApproval(approvalId: string) {
-    setApprovalBusyId(approvalId);
+  async function handleRejectApprovel(approvalId: string) {
+    setApprovelBusyId(approvalId);
     try {
       applyTaskQueueSnapshot(
-        await coreBridge.rejectApproval(
+        await coreBridge.rejectApprovel(
           approvalId,
-          "Rifiutato dall'utente dalla UI desktop.",
+          "Rejected by the user from the desktop UI.",
         ),
       );
       await refreshSelectedTaskDetail(selectedTaskId);
     } catch (error) {
       console.warn("approval_reject unavailable", error);
     } finally {
-      setApprovalBusyId(null);
+      setApprovelBusyId(null);
     }
   }
 
@@ -1058,12 +1093,17 @@ export default function App() {
   }, []);
 
   return (
-    <Shell
+    <>
+      {showOnboarding && (
+        <OnboardingWizard onComplete={() => setShowOnboarding(false)} />
+      )}
+      <Shell
       activeView={activeView}
       activeThreadId={activeThread.threadId}
+      busyThreadIds={busyThreadIds}
       chatThreads={chatThreads}
       drawerOpen={drawerOpen}
-      onCreateChatThread={handleCreateChatThread}
+      onCreateteChatThread={handleCreateteChatThread}
       onArchiveChatThread={handleArchiveChatThread}
       onBackFromSettings={() => setActiveView(previousView)}
       onDeleteChatThread={handleDeleteChatThread}
@@ -1080,10 +1120,11 @@ export default function App() {
     >
       <main
         className={`workspace ${isSettings ? "settings-workspace" : ""}`}
-        aria-label="Area di lavoro principale"
+        aria-label={t("app.mainWorkspace")}
       >
         {activeView === "chat" && (
           <ChatView
+            key={activeThread.threadId}
             approvals={approvalItems}
             approvalBusyId={approvalBusyId}
             computerSessionId={activeThread.computerSessionId}
@@ -1095,10 +1136,13 @@ export default function App() {
               handleMessagesChange(activeThread.threadId, messages)
             }
             onOpenTasks={() => setActiveView("tasks")}
-            onApproveApproval={handleApproveApproval}
-            onRejectApproval={handleRejectApproval}
+            onApproveApprovel={handleApproveApprovel}
+            onRejectApprovel={handleRejectApprovel}
             onRuntimeChanged={() => refreshRuntimeReadModels(activeThread.taskId)}
             onThreadChanged={() => refreshChatReadModels(activeThread.threadId)}
+            onStreamingChange={(busy) =>
+              setStreamingThreadId(busy ? activeThread.threadId : null)
+            }
           />
         )}
         {activeView === "tasks" && (
@@ -1110,8 +1154,8 @@ export default function App() {
             taskDetailLoading={taskDetailLoading}
             approvalBusyId={approvalBusyId}
             selectedTaskId={selectedTask.id}
-            onApproveApproval={handleApproveApproval}
-            onRejectApproval={handleRejectApproval}
+            onApproveApprovel={handleApproveApprovel}
+            onRejectApprovel={handleRejectApprovel}
             onSelectTask={setSelectedTaskId}
           />
         )}
@@ -1132,7 +1176,7 @@ export default function App() {
         {activeView === "automations" && (
           <AutomationsView
             automations={automationItems}
-            onCreate={handleCreateAutomation}
+            onCreatete={handleCreateteAutomation}
             onToggle={handleToggleAutomation}
             onDelete={handleDeleteAutomation}
           />
@@ -1145,14 +1189,14 @@ export default function App() {
         {activeView === "brain" && (
           <ShallowView
             title="Brain Audit"
-            eyebrow="Piani spiegabili"
-            description={`Route, tool caricati, memory refs e step subagent sono persistiti senza raw payload. ${contextBudgetSummary(brainRun.contextBudget)}`}
+            eyebrow={t("app.explainablePlans")}
+            description={`Route, loaded tools, memory refs and subagent steps are persisted without raw payload. ${contextBudgetSummary(brainRun.contextBudget)}`}
             stats={[
               { label: "Route", value: brainRun.route },
-              { label: "Round", value: String(brainRun.plannerRounds) },
-              { label: "Tool", value: String(brainRun.loadedTools) },
+              { label: "Rounds", value: String(brainRun.plannerRounds) },
+              { label: "Tools", value: String(brainRun.loadedTools) },
               {
-                label: "Contesto",
+                label: "Context",
                 value: `${Math.round(contextBudgetCompressionRatio(brainRun.contextBudget) * 100)}%`,
               },
             ]}
@@ -1160,6 +1204,7 @@ export default function App() {
         )}
       </main>
     </Shell>
+    </>
   );
 }
 
@@ -1191,6 +1236,6 @@ function contextBudgetSummary(
     (total, item) => total + item.estimatedOutputTokens,
     0,
   );
-  if (budget.length === 0) return "Nessuna compressione applicata.";
-  return `${compressed}/${budget.length} contesti compressi, ${inputTokens} -> ${outputTokens} token stimati, ${redacted} redazioni.`;
+  if (budget.length === 0) return "No compression applied.";
+  return `Compressed ${compressed}/${budget.length} contexts, ${inputTokens} -> ${outputTokens} estimated tokens, ${redacted} redactions.`;
 }
