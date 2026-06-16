@@ -43,5 +43,19 @@ if (!existsSync(gatewaySource)) {
 cpSync(gatewaySource, gatewayTarget);
 chmodSync(gatewayTarget, 0o755);
 
+// Stage the contained-computer build context so the packaged app can start the
+// agent's browser/sandbox. up.sh builds the image from THIS directory; the
+// gateway is pointed at the staged up.sh via HOMUN_CONTAINED_COMPUTER_UP (see
+// main.cjs). Without this the "local computer" can't start on an installed
+// desktop app — up_script() only finds repo-relative paths absent from the bundle.
+const ccSource = join(repoRoot, "runtimes", "contained-computer");
+const ccTarget = join(resourcesDir, "contained-computer");
+if (!existsSync(ccSource)) {
+  throw new Error(`Contained-computer context not found: ${ccSource}`);
+}
+cpSync(ccSource, ccTarget, { recursive: true });
+chmodSync(join(ccTarget, "up.sh"), 0o755);
+
 console.log(`Prepared Electron resources at ${resourcesDir}`);
 console.log(`Gateway: ${relative(repoRoot, gatewayTarget)}`);
+console.log(`Contained computer: ${relative(repoRoot, ccTarget)}`);

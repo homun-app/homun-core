@@ -237,6 +237,16 @@ function spawnGateway() {
     HOMUN_WORKSPACE_ROOT: workspaceRoot,
   };
 
+  // Point the gateway at the bundled contained-computer build context so the
+  // "local computer" can start from an installed app (up.sh builds the image
+  // from that dir). In dev this path doesn't exist (RESOURCES_ROOT = repo root)
+  // and the gateway falls back to its repo-relative lookup. An explicit
+  // HOMUN_CONTAINED_COMPUTER_UP in the environment wins (kept by ...process.env).
+  if (!env.HOMUN_CONTAINED_COMPUTER_UP) {
+    const ccUp = path.join(RESOURCES_ROOT, "contained-computer", "up.sh");
+    if (fs.existsSync(ccUp)) env.HOMUN_CONTAINED_COMPUTER_UP = ccUp;
+  }
+
   if (gatewayBin) {
     gatewayProcess = spawn(gatewayBin, [], {
       cwd: REPO_ROOT,
