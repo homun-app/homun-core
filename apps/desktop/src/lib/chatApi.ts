@@ -569,7 +569,7 @@ async function consumeChatStreamResponse(
     }
 
     if (!result) {
-      throw new Error("Il gateway chat locale ha chiuso lo stream senza risultato.");
+      throw new Error("The local chat gateway closed the stream with no result.");
     }
     return result;
 }
@@ -650,7 +650,7 @@ async function consumeChatWebSocketStream(
     });
     socket.addEventListener("close", () => {
       if (!settled) {
-        fail(new Error("Il gateway chat locale ha chiuso il WebSocket senza risultato."));
+        fail(new Error("The local chat gateway closed the WebSocket with no result."));
       }
     });
   });

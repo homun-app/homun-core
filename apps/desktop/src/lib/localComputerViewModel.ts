@@ -37,7 +37,7 @@ export function mapCoreComputerSession(
     previewTitle: snapshot.current_url_redacted ?? "Local session",
     previewDetail: snapshot.preview_frame_ref
       ? `Preview redatta disponibile: ${snapshot.preview_frame_ref}`
-      : "Preview non ancora disponibile",
+      : "Preview not yet available",
     previewArtifactId: previewArtifact?.artifact_id,
     terminalExcerpt: snapshot.terminal_excerpt_redacted,
     operationalPlanMarkdown,

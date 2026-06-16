@@ -210,7 +210,7 @@ export function ContactsView() {
 
   const removeContact = async () => {
     if (!open) return;
-    if (!window.confirm(`Deletere il contatto "${open.name}"? La memoria delle conversazioni resta.`)) {
+    if (!window.confirm(`Delete contact "${open.name}"? Conversation memory stays.`)) {
       return;
     }
     setBusy(true);
@@ -645,7 +645,7 @@ function ContactCard({
                       onAssignProfile(e.target.value ? Number(e.target.value) : null)
                     }
                   >
-                    <option value="">Nessuno (usa i campi qui sotto)</option>
+                    <option value="">None (use the fields below)</option>
                     {profiles.map((p) => (
                       <option key={p.id} value={p.id}>
                         {p.name}
@@ -693,10 +693,10 @@ function ContactCard({
                   <option value="">Eredita (impostazioni canali)</option>
                   <option value="automatic">Automatica — rispondi subito</option>
                   <option value="approve">
-                    Approve — preparo la risposta, la confermi prima dell'invio
+                    Approve — I prepare the reply, you confirm before sending
                   </option>
-                  <option value="draft">Bozza — registra senza rispondere</option>
-                  <option value="silent">Silenziosa — non rispondere a questo contatto</option>
+                  <option value="draft">Draft — log without replying</option>
+                  <option value="silent">Silent — do not reply to this contact</option>
                 </select>
                 <ChevronDown size={12} className="chev" />
               </div>
@@ -912,7 +912,7 @@ function ContactCard({
                     <button
                       type="button"
                       className="contacts-fact-forget"
-                      title="Dimentica questa informazione"
+                      title="Forget this information"
                       aria-label={t("contacts.forget")}
                       onClick={() => void forgetFact(f.reference)}
                     >
@@ -956,7 +956,7 @@ function ContactCard({
             </button>
           </div>
           <p className="set-hint contacts-merge-hint">
-            Suggerimento: puoi anche trascinare una scheda sull'altra per unirle.
+            Tip: you can also drag a card onto another to merge them.
           </p>
         </div>
       </div>
@@ -990,7 +990,7 @@ function ProfilesModal({
           <div>
             <div className="mt">Profili di risposta</div>
             <div className="ms">
-              Persona riutilizzabili: tono e istruzioni che assegni ai contatti (anche per singolo
+              Reusable personas: tone and instructions you assign to contacts (also per
               canale, es. «Marco su Telegram → Lavoro»).
             </div>
           </div>

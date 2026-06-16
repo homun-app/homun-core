@@ -3029,7 +3029,7 @@ async function resumeBrowserRuntimeChatPromptStream(
     { headers: gatewayHeaders() },
   );
   if (!response.ok) {
-    throw new Error(`Stream non più disponibile: HTTP ${response.status}`);
+    throw new Error(`Stream no longer available: HTTP ${response.status}`);
   }
   if (!response.body) {
     throw new Error("The stream to resume has no body.");
@@ -3200,7 +3200,7 @@ async function openChatStreamWithGateway(
 function continuationPromptForMessage(previousText: string) {
   return [
     "Continue il testo seguente esattamente dal punto in cui si e' interrotto.",
-    "Non ripetere parti gia' scritte. Se il testo e' codice, restituisci solo la prosecuzione del codice e mantieni lo stesso formato markdown.",
+    "Do not repeat already written parts. If the text is code, return only the continuation and keep the same markdown format.",
     "",
     "Testo gia' scritto:",
     previousText.trim(),

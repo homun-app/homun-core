@@ -466,8 +466,8 @@ function ApprovelRoutingRow() {
         <div>
           <div className="tt">Dove ricevere le conferme</div>
           <div className="td">
-            Le richieste di autorizzazione (invii, pubblicazioni) arrivano qui — così puoi
-            approvarle anche da remoto. Solo il tuo numero può autorizzare.
+            Authorization requests (sends, publications) arrive here — so you can
+            approve them remotely too. Only your number can authorize.
           </div>
         </div>
         <select
@@ -493,7 +493,7 @@ function ApprovelRoutingRow() {
             </div>
             <div className="td">
               {channel === "telegram"
-                ? "L'id della chat (numerico) da cui autorizzerai — non è il numero di telefono."
+                ? "The chat id (numeric) you will authorize from — it is not the phone number."
                 : "The number (with country code) you will authorize from."}
             </div>
           </div>
@@ -617,7 +617,7 @@ function AccountPane({
       </div>
       <p className="set-hint">
         Il fuso decide come l'assistente interpreta "oggi", "domani" e gli orari — e viene
-        applicato anche al browser contenuto, così le ricerche con date prendono il giorno giusto.
+        also applied to the contained browser, so date-based searches use the right day.
       </p>
 
       <div className="set-section-label">Language</div>
@@ -697,7 +697,7 @@ function AppearancePane() {
     <div className="appearance-pane">
       <div className="appearance-eyebrow">Tema · superficie</div>
       <p className="set-hint">
-        I toni di sfondo dell'interfaccia. L'accento resta quello scelto sotto — le due scelte si
+        The interface background tones. The accent stays the one chosen below — the two choices
         combinano.
       </p>
       <div className="appearance-themes">
@@ -946,7 +946,7 @@ function ConcurrencyBlock() {
             Quante inferenze il runtime lascia girare contemporaneamente. Automatico in base al
             provider (locale 1, cloud 4).
             {view.inferred_local
-              ? " Provider locale rilevato: una concorrenza alta può saturare la memoria."
+              ? " Local provider detected: high concurrency can saturate memory."
               : ""}
           </p>
         </div>
@@ -1281,7 +1281,7 @@ function RuntimePane({
                       <input className="set-input" placeholder="https://api.openai.com/v1" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} />
                     </div>
                     <div className="mdl-field">
-                      <label>API key (opzionale per endpoint locali)</label>
+                      <label>API key (optional for local endpoints)</label>
                       <input className="set-input" type="password" placeholder="sk-…" value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
                     </div>
                     <button
@@ -1506,7 +1506,7 @@ function ProviderDetailView({
           <input
             className="set-input"
             type={showKey ? "text" : "password"}
-            placeholder={provider.has_key ? "•••• (lascia vuoto per non cambiare)" : "sk-…"}
+            placeholder={provider.has_key ? "•••• (leave empty to keep)" : "sk-…"}
             value={editKey}
             onChange={(event) => setEditKey(event.target.value)}
           />
@@ -1722,7 +1722,7 @@ function PrivacyPane() {
       <ApprovelRoutingRow />
       <p className="set-hint">
         <ShieldCheck size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />
-        Il browser si ferma comunque prima di login, dati personali, pagamenti o acquisti.
+        The browser still stops before logins, personal data, payments or purchases.
       </p>
     </>
   );
@@ -1911,7 +1911,7 @@ function ConnectorActivityDetail() {
         <div>
           <h3 className="conn-activity-title">Activity dei connettori</h3>
           <p className="set-hint" style={{ margin: 0 }}>
-            Ultime esecuzioni degli strumenti collegati (Composio e MCP) nelle chat.
+            Latest runs of connected tools (Composio and MCP) in chats.
           </p>
         </div>
         <button type="button" className="set-btn" onClick={load}>
@@ -2077,7 +2077,7 @@ function ComposioDetail({
               {connected
                 ? connectedCount > 0
                   ? `Connesso · ${connectedCount} ${connectedCount === 1 ? "servizio collegato" : "servizi collegati"}`
-                  : "Connesso · nessun servizio ancora collegato"
+                  : "Connected · no service linked yet"
                 : "Cloud toolkit hub (Gmail, GitHub, Slack…) with managed OAuth."}
             </p>
           </div>
@@ -2100,7 +2100,7 @@ function ComposioDetail({
         <div className="mdl-field">
           {kitsError && (
             <p className="set-hint">
-              La connessione esistente non risponde ({kitsError}). Reinserisci una API key valida.
+              The existing connection is not responding ({kitsError}). Re-enter a valid API key.
             </p>
           )}
           <label className="mdl-field-label">Composio API key</label>
@@ -2205,7 +2205,7 @@ function AllowedToolsSection() {
   if (tools.length === 0)
     return (
       <p className="set-hint">
-        Nessuno strumento sempre consentito. Quando approvi un'azione "sempre", comparirà qui.
+        No always-allowed tool. When you approve a "always" action, it will appear here.
       </p>
     );
 
@@ -2593,7 +2593,7 @@ function ConnectModal({
               {isOAuthManaged
                 ? "We will open a browser window: authorize access there and the app detects the connection automatically. Agent permissions remain governed by approval gates."
                 : renderFields.length > 0
-                  ? `${kit.name} richiede le credenziali qui sotto (dal pannello sviluppatore del servizio). Sono salvate cifrate sul dispositivo e usate solo verso Composio.`
+                  ? `${kit.name} requires the credentials below (from the service developer panel). They are encrypted on the device and used only toward Composio.`
                   : "We will open a browser window to authorize access."}
             </div>
 
@@ -2622,7 +2622,7 @@ function ConnectModal({
                 key={f.name}
                 className="set-input"
                 type={f.secret ? "password" : "text"}
-                placeholder={f.label + (f.required ? "" : " (opzionale)")}
+                placeholder={f.label + (f.required ? "" : " (optional)")}
                 value={values[f.name] ?? ""}
                 onChange={(e) => setValues((p) => ({ ...p, [f.name]: e.target.value }))}
                 onKeyDown={(e) => {
@@ -2690,7 +2690,7 @@ function McpAddDetail({
         <h3 className="mdl-detail-title">Add un server MCP</h3>
         <p className="mdl-detail-sub">
           Un server MCP (Model Context Protocol) espone strumenti via stdio. Indica comando e
-          argomenti per avviarlo.
+          arguments to start it.
         </p>
       </div>
       <div className="mdl-field">
@@ -2736,7 +2736,7 @@ function McpAddDetail({
             });
             onNote(
               result.discovery_error
-                ? `Connesso con avviso: ${result.discovery_error}`
+                ? `Connected with warning: ${result.discovery_error}`
                 : `Connesso: ${result.tools_cached} strumenti da ${result.provider_id}.`,
             );
             setName("");
@@ -2877,8 +2877,8 @@ function McpCatalogDetail({
       <div className="mdl-detail-head">
         <h3 className="mdl-detail-title">MCP catalog</h3>
         <p className="mdl-detail-sub">
-          Dal registry ufficiale Model Context Protocol — sempre aggiornato. I server eseguono
-          codice sul tuo computer: connetti solo publisher di cui ti fidi.
+          From the official Model Context Protocol registry — always up to date. Servers run
+          code on your computer: only connect publishers you trust.
         </p>
       </div>
       <form
@@ -2983,7 +2983,7 @@ function McpCatalogCard({
             });
       onNote(
         result.discovery_error
-          ? `Connesso con avviso: ${result.discovery_error}`
+          ? `Connected with warning: ${result.discovery_error}`
           : `Connesso: ${result.tools_cached} strumenti da ${server.name}.`,
       );
       await onChanged();
@@ -3067,13 +3067,13 @@ function McpCatalogCard({
             </code>
           </div>
           <p className="set-hint" style={{ fontSize: 11, opacity: 0.65, margin: 0 }}>
-            Gli strumenti esposti dal server saranno visibili dopo la connessione.
+            The tools exposed by the server will be visible after connection.
           </p>
           {server.inputs.map((input) => (
             <div key={input.key} style={{ display: "flex", flexDirection: "column", gap: 2 }}>
               <label className="mdl-field-label">
                 {input.label}
-                {input.required ? " *" : " (opzionale)"}
+                {input.required ? " *" : " (optional)"}
                 {input.secret && " · segreto"}
               </label>
               <div style={{ display: "flex", gap: 6 }}>
@@ -3321,8 +3321,8 @@ function SkillssEmpty({ dir, onBrowse }: { dir?: string; onBrowse: () => void })
       </span>
       <h3 className="mdl-detail-title">Nessuna skill installata</h3>
       <p className="mdl-detail-sub">
-        Una skill è una cartella in formato Agent Skillss: un <code>SKILL.md</code> con nome e
-        descrizione (ciò che il modello legge per decidere quando usarla). Mettile in questa
+        A skill is a folder in Agent Skills format: a <code>SKILL.md</code> with a name and
+        description (what the model reads to decide when to use it). Put them in this
         cartella e compariranno qui automaticamente:
       </p>
       {dir && <code className="skl-path">{dir}</code>}
@@ -3952,7 +3952,7 @@ function DestinationsCard() {
         </div>
         <div className="set-card-divider" />
         <p className="set-meter-sub">
-          Cartelle autorizzate in cui l'assistente può copiare i file generati (es. ~/Reports), su
+          Authorized folders where the assistant can copy generated files (e.g. ~/Reports), on
           richiesta o in automazione. Può scrivere SOLO qui.
         </p>
         {destinations.length ? (
@@ -4035,7 +4035,7 @@ function ArtifactsCard() {
         <div className="set-card-divider" />
         <p className="set-meter-sub">
           I file creati dalle skill restano sul disco{usage?.base_path ? ` in ${usage.base_path}` : ""}.
-          Delete ciò che non ti serve per non occupare spazio. Le conversazioni eliminate puliscono i
+          Delete what you do not need to save space. Deleted conversations clean up the
           loro file automaticamente.
         </p>
         <div className="set-meter" style={{ marginTop: 8, gap: 8 }}>
@@ -4183,7 +4183,7 @@ function TelegramSection({
       ) : (
         <div className="set-card chan-connect-card">
           <p className="set-hint" style={{ marginTop: 0 }}>
-            Create un bot con <strong>@BotFather</strong> e incolla qui il token. Se l'hai già
+            Create a bot with <strong>@BotFather</strong> and paste the token here. If you already
             entered, press <strong>Connect</strong> (the token stays saved).
           </p>
           <div className="chan-connect-field">
@@ -4373,8 +4373,8 @@ function ChannelsPane() {
       <div className="set-modal-label">Allowlist</div>
       <p className="set-hint" style={{ marginTop: 0 }}>
         Solo questi contatti possono ricevere una risposta automatica (vale per tutti i canali).
-        WhatsApp: numero internazionale senza «+» (es. 39333…) o JID completo (es. 1234@lid).
-        Telegram: id utente numerico (es. 123456789).
+        WhatsApp: international number without "+" (e.g. 39333…) or full JID (e.g. 1234@lid).
+        Telegram: numeric user id (e.g. 123456789).
       </p>
       {settings && settings.allowlist.length > 0 ? (
         <div className="set-card rows chan-allow-rows">
@@ -4543,7 +4543,7 @@ function ChannelsPane() {
                   <p className="set-hint" style={{ marginTop: 0 }}>
                     If you already linked the device, press <strong>Connect</strong> (reuse the
                     sessione salvata). Per il primo collegamento, inserisci il numero in formato
-                    internazionale senza «+» (es. 39333…).
+                    international without "+" (e.g. 39333…).
                   </p>
                   <div className="chan-connect-field">
                     <input
@@ -4587,8 +4587,8 @@ function MemoryPane() {
     <>
       <p className="set-hint" style={{ marginTop: 0 }}>
         Qui vedi e gestisci ciò che l'assistente ha imparato su di te. La memoria
-        <strong> personale</strong> vale in tutti i progetti; quella di
-        <strong> progetto</strong> solo in quello attivo. I dati sensibili (es. dati
+        <strong> personale</strong> applies to all projects; the
+        <strong> progetto</strong> only in the active one. Sensitive data (e.g. data
         personali o documenti) restano <em>da confermare</em> e non vengono usati
         finché non li approvi.
       </p>
@@ -4657,7 +4657,7 @@ function MemoryItemsList() {
       <div className="set-section-label">Cosa ricordo di te</div>
       {items.length === 0 ? (
         <p className="set-hint">
-          Non ho ancora memorizzato nulla. Dimmi in chat le tue preferenze o informazioni e le
+          I have not stored anything yet. Tell me your preferences or information in chat and I
           imparerò automaticamente.
         </p>
       ) : (

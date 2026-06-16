@@ -37,7 +37,7 @@ export function ContainedComputerView() {
           <h2 id="cc-title">Computer</h2>
           <small>
             Browser reale in un computer contenuto, streamato qui — non apre
-            finestre sul desktop (ADR 0010).
+            windows on the desktop (ADR 0010).
           </small>
         </div>
         <span className={`cc-status ${novncSrc ? "on" : "off"}`}>
@@ -69,11 +69,11 @@ export function ContainedComputerView() {
             </small>
             <pre className="cc-cmd">
               cd runtimes/contained-computer &amp;&amp; ./up.sh{"\n"}
-              # avvia il gateway con HOMUN_CONTAINED_COMPUTER=1
+              # start the gateway with HOMUN_CONTAINED_COMPUTER=1
             </pre>
             <small>
-              Il browser reale girerà nel container e comparirà qui, senza mai
-              prendere il controllo del tuo schermo.
+              The real browser runs in the container and appears here, without ever
+              taking over your screen.
             </small>
           </div>
         )}

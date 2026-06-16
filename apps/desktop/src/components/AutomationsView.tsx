@@ -478,7 +478,7 @@ export function AutomationsView({
                     placeholder={t("automations.whenTriggerPlaceholder")}
                   />
                   <p className="auto-hint">
-                    Descrivilo a parole: ci penso io a tradurlo. Il campo tecnico per evitare
+                    Describe it in words: I translate it. The technical field to avoid
                     doppioni è impostato in automatico ({connectorKey}). Per setup precisi,
                     chiedimelo in chat.
                   </p>

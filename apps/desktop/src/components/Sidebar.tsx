@@ -493,7 +493,7 @@ function ProjectsNav({
               </button>
             </header>
             <p className="drawer-modal-hint">
-              Un progetto lavora <strong>dentro una cartella</strong>: i file generati e gli
+              A project works <strong>inside a folder</strong>: generated files and
               artefatti finiscono lì.
             </p>
             <input

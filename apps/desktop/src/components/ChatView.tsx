@@ -462,7 +462,7 @@ export function ChatView({
       requestId,
       phase: "accepted",
       title: "Prompt ricevuto",
-      detail: "Preparo la richiesta per il modello locale.",
+      detail: "Preparing the request for the local model.",
     });
     setOptimisticMessages(promptMessages);
     const streamingMessage: ChatMessage = {
@@ -800,7 +800,7 @@ export function ChatView({
     // Forcing a skill (🧩 picker) augments the MODEL-facing prompt while the
     // user still sees their clean text. The gateway honors "usa la skill X".
     const skillPrefix = options?.forcedSkillsId
-      ? `Usa la skill \`${options.forcedSkillsId}\` per soddisfare questa richiesta.\n\n`
+      ? `Use the skill \`${options.forcedSkillsId}\` to fulfill this request.\n\n`
       : "";
     // @ file context: the selected files' content is prepended to the hidden
     // prompt; the user keeps seeing their clean message.
@@ -829,7 +829,7 @@ export function ChatView({
     const promptWithReplyContext = [
       skillPrefix,
       contextPrefix,
-      "Reply al messaggio citato mantenendo il contesto.",
+      "Reply to the quoted message keeping the context.",
       `Messaggio citato (${messageRoleLabel(activeReplyContext.role)}):`,
       activeReplyContext.preview,
       "",
@@ -913,7 +913,7 @@ export function ChatView({
       requestId,
       phase: "thinking",
       title: "Rigenero la risposta",
-      detail: "Genero una variante alternativa.",
+      detail: "Generating an alternative variant.",
     });
     cancelStreamingRequestRef.current = cancelStreamingRequest;
     unlistenStream = await coreBridge.listenChatStreamDelta((payload) => {
@@ -1120,7 +1120,7 @@ export function ChatView({
       return;
     }
     const continuationPrompt =
-      "Continue la risposta precedente dal punto in cui si e' interrotta. Non ripetere parti gia' scritte. Mantieni la stessa lingua e lo stesso formato.";
+      "Continue the previous response from where it stopped. Do not repeat already written parts. Keep the same language and format.";
     void submitPrompt(continuationPrompt, [], [], "Continue");
   }
 
@@ -1201,7 +1201,7 @@ export function ChatView({
       requestId,
       phase: "thinking",
       title: "Continuo la risposta",
-      detail: `La generazione era arrivata al limite. Proseguo automaticamente (${attempt}).`,
+      detail: `Generation reached the limit. Continuing automatically (${attempt}).`,
     });
     cancelStreamingRequestRef.current = cancelStreamingRequest;
     unlistenStream = await coreBridge.listenChatStreamDelta((payload) => {
@@ -1265,7 +1265,7 @@ export function ChatView({
     askAboutAssistantResponse(
       messageId,
       "Expand",
-      "Expand la risposta precedente con dettagli utili, senza ripetere l'intera risposta.",
+      "Expand the previous response with useful details, without repeating the entire response.",
     );
   }
 
@@ -1751,7 +1751,7 @@ export function ChatView({
                     askAboutAssistantResponse(
                       displayMessage.id,
                       "Edit diagram",
-                      "Proponi una versione migliorata del diagramma precedente in un blocco markdown fenced mermaid.",
+                      "Propose an improved version of the previous diagram in a fenced mermaid markdown block.",
                     )
                   }
                   onSaveToMemory={() => void saveMessageToMemory(displayMessage)}
@@ -1980,11 +1980,11 @@ function AssistantThinkingState({ status }: { status: ChatStreamStatus | null })
 
 function describeBridgeError(error: unknown): string {
   if (!(error instanceof Error)) {
-    return "Gateway locale non raggiungibile in questa visualizzazione.";
+    return "Local gateway unreachable in this view.";
   }
 
   if (error.message.includes("Gateway")) {
-    return "Gateway locale non ancora disponibile: uso il runtime locale diretto quando possibile.";
+    return "Local gateway not yet available: using the direct local runtime when possible.";
   }
 
   return error.message;
@@ -2064,7 +2064,7 @@ function visibleMessageMetadata(metadata: string | undefined) {
   if (!metadata) return undefined;
   const hidden = new Set([
     "Electron core locale",
-    "Inviato al core locale",
+    "Sent to the local core",
     "Non salvato come payload raw",
   ]);
   return hidden.has(metadata) ? undefined : metadata;
@@ -2416,7 +2416,7 @@ function MessageActionBar({
                 >
                   <strong>{t("chat.metrics")}</strong>
                   <span>
-                    Tempo al primo token
+                    Time to first token
                     <b>{formatMetricSeconds(metrics.timeToFirstTokenSeconds)}</b>
                   </span>
                   <span>
@@ -2764,8 +2764,8 @@ const CHAT_MODES: {
   projectOnly?: boolean;
 }[] = [
   { key: "agent", label: "Agente", desc: "Ragiona, usa strumenti e agisce", icon: Bot },
-  { key: "plan", label: "Piano", desc: "Propone un piano e aspetta l'OK prima di agire", icon: ListTodo },
-  { key: "ask", label: "Chiedi", desc: "Risponde e conversa, senza strumenti né azioni", icon: MessageCircle },
+  { key: "plan", label: "Plan", desc: "Proposes a plan and waits for OK before acting", icon: ListTodo },
+  { key: "ask", label: "Ask", desc: "Replies and converses, without tools or actions", icon: MessageCircle },
   { key: "debug", label: "Debug", desc: "Debugging sistematico (progetti di codice)", icon: Bug, projectOnly: true },
 ];
 
@@ -3640,7 +3640,7 @@ export function MemoryGraphPanel({
       <div className="workbench-empty project-map-picker">
         <Share2 size={28} />
         <p>
-          Progetto grande: scegli una cartella da mappare (così la mappa resta leggibile
+          Large project: pick a folder to map (so the map stays readable
           e veloce).
         </p>
         {subdirs.length === 0 ? (
@@ -3664,7 +3664,7 @@ export function MemoryGraphPanel({
         <Share2 size={28} className={buildingGraph ? "spin" : undefined} />
         <p>
           {buildingGraph
-            ? "Sto mappando il progetto… ci vuole un istante la prima volta."
+            ? "Mapping the project… it takes a moment the first time."
             : "Ancora nessuna memoria per questo progetto. Decisioni, file toccati e fatti appariranno qui come grafo navigabile man mano che lavoriamo."}
         </p>
       </div>
@@ -3766,7 +3766,7 @@ export function MemoryGraphPanel({
       <div className="memory-graph-canvas" ref={canvasRef}>
         {graph?.truncated && (
           <div className="memory-graph-truncated">
-            Grafo grande: mostro i {graph.nodes.length.toLocaleString("it-IT")} nodi più
+            Large graph: showing the {graph.nodes.length.toLocaleString("it-IT")} top nodes
             connessi di {(graph.total_nodes ?? graph.nodes.length).toLocaleString("it-IT")}.
             Per il resto, chiedi in chat (le query usano l'intero grafo).
           </div>
@@ -4003,7 +4003,7 @@ function Workbench({
         setFsRoot(result.root);
         setFsCwd(result.path);
         setFsEntries(result.authorized ? result.entries : []);
-        if (!result.authorized) setFsError("Cartella non autorizzata.");
+        if (!result.authorized) setFsError("Folder not authorized.");
       } catch (error) {
         setFsError((error as Error).message);
         setFsEntries([]);
@@ -4231,7 +4231,7 @@ function Workbench({
                   <FolderOpen size={28} />
                   <p>
                     {fsError ??
-                      "Nessun file in questa chat e nessuna cartella di progetto collegata. Allega un file (📎) o collega una cartella al progetto."}
+                      "No files in this chat and no project folder linked. Attach a file (📎) or link a folder to the project."}
                   </p>
                 </div>
               )
@@ -5107,7 +5107,7 @@ function PlanProposeCard({
               onClick={() => {
                 setDecision("Edit richiesta");
                 setPhase("sent");
-                onAnswer(`Rivedi il piano prima di procedere: ${feedback.trim()}`);
+                onAnswer(`Review the plan before proceeding: ${feedback.trim()}`);
               }}
             >
               Invia modifiche
@@ -5122,7 +5122,7 @@ function PlanProposeCard({
             onClick={() => {
               setDecision("Piano accettato");
               setPhase("sent");
-              onAnswer("Approvo il piano: procedi con l'esecuzione.");
+              onAnswer("I approve the plan: proceed with execution.");
             }}
           >
             Accetta ed esegui
@@ -5262,8 +5262,8 @@ function ConnectSuggestCard({
         <strong>Connect a capability for "{suggest.need}"</strong>
       </div>
       <p className="set-hint" style={{ fontSize: 12, margin: 0 }}>
-        Non ho ancora questo strumento. Scegli cosa collegare qui sotto — lo gestisci
-        anche da Impostazioni.
+        I do not have this tool yet. Choose what to connect below — you manage it
+        also from Settings.
       </p>
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {suggest.items.map((item, index) => (
@@ -5357,7 +5357,7 @@ function ConnectSuggestRow({
             });
       setNote(
         result.discovery_error
-          ? `Connesso con avviso: ${result.discovery_error}`
+          ? `Connected with warning: ${result.discovery_error}`
           : `${result.tools_cached} strumenti disponibili.`,
       );
       setStatus("done");
@@ -5386,11 +5386,11 @@ function ConnectSuggestRow({
   const linkComposio = async () => {
     if (!item.slug) return;
     setStatus("running");
-    setNote(`Apro l'autorizzazione di ${item.name}…`);
+    setNote(`Opening authorization for ${item.name}…`);
     const ok = await connectComposioToolkit(item.slug, {
       onStatus: (s) => {
         if (s === "connecting") {
-          setNote(`Autorizza ${item.name} nel browser: rilevo automaticamente quando è fatto…`);
+          setNote(`Authorize ${item.name} in the browser: I detect automatically when it is done…`);
         }
       },
     });
@@ -5469,7 +5469,7 @@ function ConnectSuggestRow({
             <div key={input.key} style={{ display: "flex", flexDirection: "column", gap: 2 }}>
               <label className="mdl-field-label">
                 {input.label}
-                {input.required ? " *" : " (opzionale)"}
+                {input.required ? " *" : " (optional)"}
                 {input.secret && " · segreto"}
               </label>
               <div style={{ display: "flex", gap: 6 }}>
@@ -5603,7 +5603,7 @@ function FsAuthorizeCard({
         {path}
       </code>
       <p className="set-hint" style={{ fontSize: 12 }}>
-        Potrò leggere file e cartelle qui dentro. Lo gestisci anche da Impostazioni → Computer.
+        I will be able to read files and folders inside. You manage it also from Settings → Computer.
       </p>
       {status === "error" && <p className="cmp-confirm-err">Non riuscito: {note}</p>}
       <div className="cmp-confirm-actions">
@@ -5639,7 +5639,7 @@ function ComposioReconnectCard({ slug }: { slug: string }) {
     const ok = await connectComposioToolkit(slug, {
       onStatus: (s) => {
         if (s === "connecting") {
-          setNote(`Autorizza ${name} nel browser: rilevo automaticamente quando è fatto…`);
+          setNote(`Authorize ${name} in the browser: I detect automatically when it is done…`);
         }
       },
     });
@@ -5796,7 +5796,7 @@ function ComposioConfirmCard({
       setStatus("done");
       setNote(
         scope === "always" && !isMcp
-          ? `Done. D'ora in poi «${title}» verrà eseguito senza chiedere.`
+          ? `Done. From now on «${title}» will run without asking.`
           : "Done.",
       );
     } catch (error) {
@@ -5835,7 +5835,7 @@ function ComposioConfirmCard({
       </div>
       {destructive && (
         <p className="cmp-confirm-warn">
-          ⚠ Azione DISTRUTTIVA su {humanizeToolName(action.tool).split(" · ")[1] ?? "un servizio collegato"}: elimina/rimuove dati. Procedi solo se è esattamente ciò che vuoi.
+          ⚠ DESTRUCTIVE action on {humanizeToolName(action.tool).split(" · ")[1] ?? "un servizio collegato"}: deletes/removes data. Proceed only if it is exactly what you want.
         </p>
       )}
       <div className="cmp-confirm-fields">
@@ -5906,7 +5906,7 @@ function ComposioConfirmCard({
           disabled={status === "running"}
           onClick={() => void run("once")}
         >
-          {status === "running" ? "Eseguo…" : "Esegui una volta"}
+          {status === "running" ? "Running…" : "Run once"}
         </button>
         {!isMcp && (
           <button
@@ -5914,7 +5914,7 @@ function ComposioConfirmCard({
             type="button"
             disabled={status === "running"}
             onClick={() => void run("always")}
-            title={`Non chiedere più per ${title}`}
+            title={`Do not ask again for ${title}`}
           >
             Esegui sempre
           </button>
@@ -5922,7 +5922,7 @@ function ComposioConfirmCard({
       </div>
       {!isMcp && (
         <p className="cmp-confirm-note">
-          «Esegui sempre» disattiva la conferma ovunque per questo strumento — anche quella remota
+          "Run always" disables confirmation everywhere for this tool — including remote
           su Telegram/WhatsApp.
         </p>
       )}
@@ -5971,7 +5971,7 @@ function InlineApprovelPanel({
     .filter((item) => item.status === "waiting")
     .slice(0, 4);
   const summary = approval.action.startsWith("prompt_plan")
-    ? "Approvi solo il prossimo passaggio del piano. Login, acquisto, invio e pagamento restano bloccati finche' non dai una conferma esplicita per quella singola azione."
+    ? "You approve only the next step of the plan. Login, purchase, send and payment stay blocked until you give an explicit confirmation for that single action."
     : approval.reason;
   const busy = busyId === approval.id;
   return (
@@ -6019,14 +6019,14 @@ function InlineApprovelPanel({
               type="button"
               onClick={() => setScope(option)}
             >
-              {option === "always" ? "Sempre per questi URL" : "Solo questa volta"}
+              {option === "always" ? "Always for these URLs" : "Just this time"}
             </button>
           ))}
         </div>
         <small>
           {scope === "always"
-            ? "Save una regola locale per i domini coinvolti in questo task."
-            : "Vale solo per questa esecuzione del task."}
+            ? "Save a local rule for the domains involved in this task."
+            : "Applies only to this task execution."}
         </small>
       </div>
 
@@ -6442,10 +6442,10 @@ function ComputerDetailPanel({
 // Quick-action chips that seed the composer. `seed` is what gets typed (a trailing
 // space = "keep typing"); `label` is the shorter pill text; `icon` is teal-tinted.
 const EMPTY_HERO_CHIPS: { label: string; seed: string; icon: typeof Search }[] = [
-  { label: "Pianifica una nuova idea", seed: "Pianifica ", icon: Sparkles },
-  { label: "Cerca qualcosa per me", seed: "Cerca ", icon: Search },
+  { label: "Plan a new idea", seed: "Plan ", icon: Sparkles },
+  { label: "Search something for me", seed: "Search ", icon: Search },
   { label: "Riassumi un documento", seed: "Riassumi un documento", icon: FileText },
-  { label: "Scrivi del codice", seed: "Aiutami a scrivere del codice per ", icon: FileCode },
+  { label: "Write some code", seed: "Help me write some code for ", icon: FileCode },
 ];
 
 // Empty-chat hero (design): the Homun mark (the "U" + dot brandmark) + "Cosa facciamo
@@ -6755,7 +6755,7 @@ function Composer({
         const result = await coreBridge.setThreadFolder(threadId, path);
         setLinkedFolder(result.path);
       } else {
-        setFolderError("Selettore non disponibile: incolla il percorso della cartella qui sotto.");
+        setFolderError("Picker unavailable: paste the folder path below.");
       }
     } catch (error) {
       setFolderError(describeBridgeError(error));
@@ -6843,7 +6843,7 @@ function Composer({
     // Allow images-only messages (vision); supply a sensible default prompt.
     if ((!prompt && composerImages.length === 0) || disabled) return;
     if (attachments.some((attachment) => !attachment.localPath)) {
-      setComposerAttachmentError("Path locale non disponibile in questa shell.");
+      setComposerAttachmentError("Local path not available in this shell.");
       return;
     }
     const attachmentInputs = attachments.map((attachment) => ({
@@ -6853,7 +6853,7 @@ function Composer({
       sizeBytes: attachment.size,
     }));
     const images = composerImages.map((image) => image.dataUrl);
-    const effectivePrompt = prompt || "Descrivi questa immagine.";
+    const effectivePrompt = prompt || "Describe this image.";
     // null = Auto (no override → default role); else the composite "<provider>::<model>".
     const modelOverride = selectedModel ?? undefined;
     const forcedSkillsId = forcedSkills?.id;
@@ -7001,7 +7001,7 @@ function Composer({
         onChange={handleValueChange}
         onKeyDown={handleKeyDown}
         onPaste={handleComposerPaste}
-        placeholder="Invia un messaggio o aggiungi istruzioni al task"
+        placeholder="Send a message or add task instructions"
         ref={textareaRef}
         value={value}
       />
@@ -7149,7 +7149,7 @@ function Composer({
                   }}
                 >
                   <AtSign size={16} />
-                  <span>{linkedFolder ? "Menziona un file" : "Collega una cartella"}</span>
+                  <span>{linkedFolder ? "Mention a file" : "Link a folder"}</span>
                 </button>
                 {skills.length > 0 && (
                   <button
@@ -7162,7 +7162,7 @@ function Composer({
                     }}
                   >
                     <Puzzle size={16} />
-                    <span>{forcedSkills ? `Skills · ${forcedSkills.name}` : "Usa una skill"}</span>
+                    <span>{forcedSkills ? `Skills · ${forcedSkills.name}` : "Use a skill"}</span>
                   </button>
                 )}
                 <button
@@ -7187,10 +7187,10 @@ function Composer({
               <div className="composer-pop composer-skill-pop" role="menu">
                 <div className="composer-pop-link">
                   <p className="composer-pop-link-title">
-                    Collega una cartella a questa conversazione
+                    Link a folder to this conversation
                   </p>
                   <p className="composer-pop-link-hint">
-                    Poi potrai menzionare i suoi file con <strong>@</strong>.
+                    Then you can mention its files with <strong>@</strong>.
                   </p>
                   <button
                     type="button"
