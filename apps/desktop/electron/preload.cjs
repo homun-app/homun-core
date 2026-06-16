@@ -22,4 +22,11 @@ contextBridge.exposeInMainWorld("localFirstDesktop", {
   // downloads the new version and restarts.
   checkForUpdate: () => ipcRenderer.invoke("lfpa:update-check"),
   installUpdate: () => ipcRenderer.invoke("lfpa:update-install"),
+  // Subscribe to download progress ({percent,transferred,total}); returns an
+  // unsubscribe fn.
+  onUpdateProgress: (cb) => {
+    const handler = (_event, data) => cb(data);
+    ipcRenderer.on("lfpa:update-progress", handler);
+    return () => ipcRenderer.removeListener("lfpa:update-progress", handler);
+  },
 });

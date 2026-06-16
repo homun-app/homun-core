@@ -6,6 +6,7 @@ import {
   IS_DESKTOP,
   checkDesktopUpdate,
   installDesktopUpdate,
+  onDesktopUpdateProgress,
 } from "../lib/gatewayConfig";
 
 /**
@@ -22,6 +23,7 @@ export function NotificationsView() {
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
   const [updating, setUpdating] = useState(false);
   const [updateMsg, setUpdateMsg] = useState<string | null>(null);
+  const [progress, setProgress] = useState<number | null>(null);
   const [desktopUpdate, setDesktopUpdate] = useState<{ version: string | null } | null>(null);
 
   const refresh = async () => {
@@ -58,18 +60,27 @@ export function NotificationsView() {
     }
   };
 
-  // Desktop path: download the pending release in-app and restart into it.
+  // Desktop path: download the pending release in-app (with live progress) and
+  // restart into it. The app quits on success, so on the happy path we never
+  // clear `updating` — the running build is replaced.
   const runDesktopUpdate = async () => {
     setUpdating(true);
     setUpdateMsg(null);
+    setProgress(0);
+    const unsubscribe = onDesktopUpdateProgress((p) => setProgress(p.percent));
     try {
       const result = await installDesktopUpdate();
-      if (!result.ok) setUpdateMsg(result.error ?? "");
-      // On success the app quits and relaunches — nothing more to render.
+      if (!result.ok) {
+        setUpdateMsg(result.error ?? "");
+        setUpdating(false);
+        setProgress(null);
+      }
     } catch (error) {
       setUpdateMsg(error instanceof Error ? error.message : String(error));
-    } finally {
       setUpdating(false);
+      setProgress(null);
+    } finally {
+      unsubscribe();
     }
   };
 
@@ -98,17 +109,23 @@ export function NotificationsView() {
   const items: ReactNode[] = [];
   // Desktop: a newer release is published — download + restart in-app.
   if (IS_DESKTOP && desktopUpdate) {
+    const downloading = updating && (progress ?? 0) < 100;
+    const buttonLabel = !updating
+      ? t("notifications.update")
+      : downloading
+        ? t("notifications.downloading", { percent: progress ?? 0 })
+        : t("notifications.restarting");
+    const body = updateMsg
+      ? updateMsg
+      : updating
+        ? t("notifications.desktopUpdateRestarts")
+        : t("notifications.desktopUpdateBody", { version: desktopUpdate.version ?? "" });
     items.push(
       <NotifCard
         key="desktop-update"
         icon={<Download size={16} />}
         title={t("notifications.updateTitle")}
-        body={
-          updateMsg ??
-          t("notifications.desktopUpdateBody", {
-            version: desktopUpdate.version ?? "",
-          })
-        }
+        body={body}
         action={
           <button
             type="button"
@@ -116,7 +133,7 @@ export function NotificationsView() {
             disabled={updating}
             onClick={() => void runDesktopUpdate()}
           >
-            {updating ? t("notifications.updating") : t("notifications.update")}
+            {buttonLabel}
           </button>
         }
       />,

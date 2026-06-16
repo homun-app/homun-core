@@ -4209,6 +4209,25 @@ body.resizing-drawer {
   border-radius: 10px;
 }
 
+/* Notification count badge on the bell (rail + drawer footer). */
+.has-badge { position: relative; }
+.nav-badge {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 4px;
+  box-sizing: border-box;
+  border-radius: 8px;
+  background: var(--brand);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 15px;
+  text-align: center;
+}
+
 /* Sidebar: IDE-style context switcher + primary new-chat + channels group. */
 .ctx-switcher-wrap {
   position: relative;
