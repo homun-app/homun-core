@@ -368,6 +368,48 @@ impl ChatStore {
         self.threads(&workspace_id)
     }
 
+    /// Cascading purge of ALL chat data for a workspace: threads, messages,
+    /// task-thread links, and the workspace's settings row. Called when a
+    /// project workspace is deleted (`delete_workspace`). Unlike
+    /// `delete_thread`, this does NOT reseed — the workspace is gone for good.
+    /// Returns the number of threads removed.
+    pub fn purge_workspace(&self, workspace_id: &str) -> rusqlite::Result<usize> {
+        let thread_ids: Vec<String> = {
+            let mut stmt = self
+                .conn
+                .prepare("select thread_id from chat_threads where workspace_id = ?1")?;
+            let rows = stmt.query_map(params![workspace_id], |row| row.get::<_, String>(0))?;
+            rows.filter_map(|r| r.ok()).collect()
+        };
+        let count = thread_ids.len();
+        for thread_id in &thread_ids {
+            self.conn.execute(
+                "delete from chat_messages where thread_id = ?1",
+                params![thread_id],
+            )?;
+            self.conn.execute(
+                "delete from task_thread_links where thread_id = ?1",
+                params![thread_id],
+            )?;
+        }
+        self.conn.execute(
+            "delete from chat_threads where workspace_id = ?1",
+            params![workspace_id],
+        )?;
+        self.conn.execute(
+            "delete from chat_settings where key = ?1",
+            params![active_thread_setting_key(workspace_id)],
+        )?;
+        Ok(count)
+    }
+
+    /// Reclaims free space from the SQLite file. Call periodically (boot / 24h),
+    /// NOT on every delete. VACUUM cannot run inside a transaction.
+    pub fn vacuum(&self) -> rusqlite::Result<()> {
+        self.conn.execute_batch("VACUUM")?;
+        Ok(())
+    }
+
     pub fn messages(&self, thread_id: &str) -> rusqlite::Result<ChatMessagesSnapshot> {
         let mut stmt = self.conn.prepare(
             "select id, role, text, timestamp, metadata, metrics_json, feedback,

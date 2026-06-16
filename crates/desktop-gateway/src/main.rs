@@ -498,6 +498,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let st = state.clone();
         tokio::task::spawn_blocking(move || sweep_graph_on_startup(&st));
     }
+    // VACUUM all SQLite stores in background to reclaim free space from
+    // deleted workspaces/tasks/memories. Runs at boot (not on every delete)
+    // because VACUUM rewrites the entire file and can be slow on large DBs.
+    {
+        let st = state.clone();
+        tokio::task::spawn_blocking(move || {
+            vacuum_all_stores(&st);
+            eprintln!("startup VACUUM: all stores compacted");
+        });
+    }
     // Homun retired as a proactive surface: its curiosities/onboarding now flow as
     // proactivity cards. Cancel any check-in still scheduled from a previous version
     // so the old "sfilza di domande" push stops (the thread stays as inert data).
@@ -27297,6 +27307,7 @@ async fn rename_workspace(
 /// Deletes a project. The base personal workspace ("Predefinito") is protected.
 /// If the active project is deleted, the active falls back to the base workspace.
 async fn delete_workspace(
+    State(state): State<AppState>,
     Path(workspace_id): Path<String>,
 ) -> Result<Json<WorkspacesResponse>, GatewayError> {
     if workspace_id == base_workspace_id() {
@@ -27325,10 +27336,74 @@ async fn delete_workspace(
         code: "workspaces_write_failed",
         message: error.to_string(),
     })?;
+    // Cascade purge: delete ALL data for this workspace from every store.
+    // This prevents orphaned rows (chat, tasks, memory) that would otherwise
+    // accumulate forever in the SQLite files.
+    purge_workspace_data(&state, &workspace_id);
     Ok(Json(WorkspacesResponse {
         active_workspace_id: file.active.clone(),
         workspaces: file.workspaces,
     }))
+}
+
+/// Cascading purge of all data for a workspace across every store. Best-effort:
+/// logs errors but does not fail the workspace deletion (the workspace entry is
+/// already gone from workspaces.json — orphaned rows are cosmetic, not blocking).
+fn purge_workspace_data(state: &AppState, workspace_id: &str) {
+    // Chat store: threads, messages, links, settings.
+    {
+        let Ok(store) = state.chat_store.lock() else {
+            eprintln!("purge_workspace: chat store lock poisoned for {workspace_id}");
+            return;
+        };
+        match store.purge_workspace(workspace_id) {
+            Ok(count) => eprintln!("purge_workspace: removed {count} chat threads from {workspace_id}"),
+            Err(error) => eprintln!("purge_workspace: chat store error for {workspace_id}: {error}"),
+        }
+    }
+    // Task store: tasks, dependencies, reservations (task-runtime types).
+    {
+        let task_user = UserId::new("local".to_string());
+        let task_workspace = WorkspaceId::new(workspace_id.to_string());
+        if let Ok(store) = lock_task_store(state) {
+            match store.purge_workspace(&task_user, &task_workspace) {
+                Ok(count) => eprintln!("purge_workspace: removed {count} tasks from {workspace_id}"),
+                Err(error) => eprintln!("purge_workspace: task store error for {workspace_id}: {error:?}"),
+            }
+        }
+    }
+    // Memory store: memories, entities, relations, embeddings, episodes, wiki (memory crate types).
+    {
+        let mem_user = MemoryUserId::new("local".to_string());
+        let mem_workspace = MemoryWorkspaceId::new(workspace_id.to_string());
+        if let Ok(facade) = lock_memory_facade(state) {
+            match facade.purge_workspace(&mem_user, &mem_workspace) {
+                Ok(count) => eprintln!("purge_workspace: removed {count} memories from {workspace_id}"),
+                Err(error) => eprintln!("purge_workspace: memory store error for {workspace_id}: {error}"),
+            }
+        }
+    }
+}
+
+/// Runs VACUUM on all SQLite stores to reclaim free space. Called at startup
+/// and periodically (every 24h via the worker loop). Safe but can be slow on
+/// large databases — runs without holding other locks.
+fn vacuum_all_stores(state: &AppState) {
+    if let Ok(store) = state.chat_store.lock() {
+        if let Err(error) = store.vacuum() {
+            eprintln!("VACUUM chat store: {error}");
+        }
+    }
+    if let Ok(store) = lock_task_store(state) {
+        if let Err(error) = store.vacuum() {
+            eprintln!("VACUUM task store: {error:?}");
+        }
+    }
+    if let Ok(facade) = lock_memory_facade(state) {
+        if let Err(error) = facade.vacuum() {
+            eprintln!("VACUUM memory store: {error}");
+        }
+    }
 }
 
 async fn select_workspace(

@@ -186,6 +186,35 @@ impl TaskStore {
         Ok(())
     }
 
+    /// Purge ALL tasks, dependencies and resource reservations for a workspace.
+    /// Called when a project workspace is deleted. Safe: uses the same
+    /// (user_id, workspace_id) composite key the store indexes on.
+    pub fn purge_workspace(
+        &self,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+    ) -> TaskRuntimeResult<usize> {
+        let count = self.connection.execute(
+            "DELETE FROM tasks WHERE user_id = ?1 AND workspace_id = ?2",
+            rusqlite::params![user_id.as_str(), workspace_id.as_str()],
+        )?;
+        self.connection.execute(
+            "DELETE FROM task_dependencies WHERE user_id = ?1 AND workspace_id = ?2",
+            rusqlite::params![user_id.as_str(), workspace_id.as_str()],
+        )?;
+        self.connection.execute(
+            "DELETE FROM resource_reservations WHERE user_id = ?1 AND workspace_id = ?2",
+            rusqlite::params![user_id.as_str(), workspace_id.as_str()],
+        )?;
+        Ok(count)
+    }
+
+    /// Reclaims free space. Call periodically, NOT on every delete.
+    pub fn vacuum(&self) -> TaskRuntimeResult<()> {
+        self.connection.execute_batch("VACUUM")?;
+        Ok(())
+    }
+
     pub fn get_task(
         &self,
         task_id: &TaskId,

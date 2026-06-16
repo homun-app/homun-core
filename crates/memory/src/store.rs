@@ -1216,6 +1216,52 @@ impl SQLiteMemoryStore {
         Ok(())
     }
 
+    /// Hard purge ALL memory data for a workspace: memories, entities, relations,
+    /// tombstones, embeddings, episodes. Called when a project workspace is deleted.
+    /// This is a REAL delete (not soft/tombstone) — data is gone for good.
+    pub fn purge_workspace(
+        &self,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+    ) -> Result<usize, String> {
+        let (uid, wid) = (user_id.as_str(), workspace_id.as_str());
+        // Count memories before deleting for the return value.
+        let count: u64 = self
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM memories WHERE user_id = ?1 AND workspace_id = ?2",
+                (uid, wid),
+                |row| row.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        for table in [
+            "memories",
+            "entities",
+            "relations",
+            "tombstones",
+            "embeddings",
+            "episodes",
+            "wiki_pages",
+        ] {
+            self.conn
+                .execute(
+                    &format!(
+                        "DELETE FROM {table} WHERE user_id = ?1 AND workspace_id = ?2"
+                    ),
+                    (uid, wid),
+                )
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(count as usize)
+    }
+
+    /// Reclaims free space. Call periodically, NOT on every delete.
+    pub fn vacuum(&self) -> Result<(), String> {
+        self.conn
+            .execute_batch("VACUUM")
+            .map_err(|e| e.to_string())
+    }
+
     fn is_tombstoned(
         &self,
         reference: &MemoryRef,
