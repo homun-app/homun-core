@@ -996,6 +996,11 @@
     "computerOffTitle": "Computer locale spento",
     "computerOffBody": "Abilita il browser/sandbox contenuto così l'agente può usare un computer reale.",
     "computerUnavailableTitle": "Computer locale non disponibile",
-    "enable": "Abilita"
+    "enable": "Abilita",
+    "updateTitle": "Aggiorna all'ultima versione",
+    "updateBody": "Scarica e deploya l'ultima immagine.",
+    "update": "Aggiorna",
+    "updating": "Redeploy in corso…",
+    "updateStarted": "Redeploy avviato — l'app si riavvierà a breve."
   }
 }

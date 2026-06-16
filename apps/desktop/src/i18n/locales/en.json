@@ -996,6 +996,11 @@
     "computerOffTitle": "Local computer is off",
     "computerOffBody": "Enable the contained browser/sandbox so the agent can use a real computer.",
     "computerUnavailableTitle": "Local computer unavailable",
-    "enable": "Enable"
+    "enable": "Enable",
+    "updateTitle": "Update to the latest version",
+    "updateBody": "Pull and deploy the latest image.",
+    "update": "Update",
+    "updating": "Redeploying…",
+    "updateStarted": "Redeploy started — the app will restart shortly."
   }
 }

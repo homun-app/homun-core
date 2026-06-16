@@ -533,6 +533,24 @@ async function electronStopLocalComputer(): Promise<LocalComputerActionResult> {
   return gatewayPostJson<LocalComputerActionResult>("/api/local-computer/stop", {});
 }
 
+export interface UpdateInfo {
+  /** Server deploy with a redeploy webhook configured (Coolify/PaaS). */
+  webhook_configured: boolean;
+}
+
+async function electronUpdateInfo(): Promise<UpdateInfo> {
+  return gatewayGetJson<UpdateInfo>("/api/update/info");
+}
+
+export interface UpdateTriggerResult {
+  ok: boolean;
+  message: string | null;
+}
+
+async function electronTriggerUpdate(): Promise<UpdateTriggerResult> {
+  return gatewayPostJson<UpdateTriggerResult>("/api/update/trigger", {});
+}
+
 export interface SystemStatus {
   docker: { installed: boolean; running: boolean; container_up: boolean };
   contained_enabled: boolean;
@@ -1837,6 +1855,8 @@ export const coreBridge = {
   containedComputerLive: () => electronContainedComputerLive(),
   startLocalComputer: () => electronStartLocalComputer(),
   stopLocalComputer: () => electronStopLocalComputer(),
+  updateInfo: () => electronUpdateInfo(),
+  triggerUpdate: () => electronTriggerUpdate(),
   systemStatus: () => electronSystemStatus(),
   closeAllBrowsers: () => electronCloseAllBrowsers(),
   workspaces: () => electronWorkspaces(),

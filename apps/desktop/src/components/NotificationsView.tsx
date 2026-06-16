@@ -1,7 +1,8 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { Monitor, Bell } from "lucide-react";
-import { coreBridge, type SystemStatus } from "../lib/coreBridge";
+import { Monitor, Bell, Download } from "lucide-react";
+import { coreBridge, type SystemStatus, type UpdateInfo } from "../lib/coreBridge";
+import { IS_DESKTOP } from "../lib/gatewayConfig";
 
 /**
  * Notifications inbox (behind the sidebar bell). Surfaces actionable system
@@ -14,12 +15,33 @@ export function NotificationsView() {
   const [status, setStatus] = useState<SystemStatus | null>(null);
   const [enabling, setEnabling] = useState(false);
   const [enableMsg, setEnableMsg] = useState<string | null>(null);
+  const [update, setUpdate] = useState<UpdateInfo | null>(null);
+  const [updating, setUpdating] = useState(false);
+  const [updateMsg, setUpdateMsg] = useState<string | null>(null);
 
   const refresh = async () => {
     try {
       setStatus(await coreBridge.systemStatus());
     } catch {
       /* ignore — keep last known */
+    }
+    try {
+      setUpdate(await coreBridge.updateInfo());
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const runUpdate = async () => {
+    setUpdating(true);
+    setUpdateMsg(null);
+    try {
+      const result = await coreBridge.triggerUpdate();
+      setUpdateMsg(result.ok ? t("notifications.updateStarted") : (result.message ?? ""));
+    } catch (error) {
+      setUpdateMsg(error instanceof Error ? error.message : String(error));
+    } finally {
+      setUpdating(false);
     }
   };
 
@@ -46,6 +68,28 @@ export function NotificationsView() {
   };
 
   const items: ReactNode[] = [];
+  // Cloud: a one-click redeploy to the latest image (the container can't replace
+  // itself — it asks the orchestrator via the configured webhook).
+  if (!IS_DESKTOP && update?.webhook_configured) {
+    items.push(
+      <NotifCard
+        key="update"
+        icon={<Download size={16} />}
+        title={t("notifications.updateTitle")}
+        body={updateMsg ?? t("notifications.updateBody")}
+        action={
+          <button
+            type="button"
+            className="notif-action"
+            disabled={updating}
+            onClick={() => void runUpdate()}
+          >
+            {updating ? t("notifications.updating") : t("notifications.update")}
+          </button>
+        }
+      />,
+    );
+  }
   if (status) {
     if (!status.docker.running) {
       items.push(

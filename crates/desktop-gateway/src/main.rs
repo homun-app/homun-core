@@ -673,6 +673,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/local-computer/start", post(local_computer_start))
         .route("/api/local-computer/stop", post(local_computer_stop))
         .route("/api/system/status", get(system_status))
+        .route("/api/update/info", get(update_info))
+        .route("/api/update/trigger", post(update_trigger))
         .route("/api/system/browser/close-all", post(close_all_browsers))
         .route("/api/memory/dashboard", get(memory_dashboard))
         .route("/api/memory/export", get(memory_export))
@@ -26233,6 +26235,64 @@ async fn local_computer_stop() -> Json<LocalComputerActionResponse> {
         enabled: sandbox::container_up(),
         message: None,
     })
+}
+
+fn update_webhook() -> Option<String> {
+    env::var("HOMUN_UPDATE_WEBHOOK")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+#[derive(Serialize)]
+struct UpdateInfoResponse {
+    /// True on a server deploy where a redeploy webhook (Coolify/PaaS) is set —
+    /// the only way a container can "update itself" is to ask the orchestrator
+    /// to pull the new image and recreate it.
+    webhook_configured: bool,
+}
+
+async fn update_info() -> Json<UpdateInfoResponse> {
+    Json(UpdateInfoResponse {
+        webhook_configured: update_webhook().is_some(),
+    })
+}
+
+#[derive(Serialize)]
+struct UpdateTriggerResponse {
+    ok: bool,
+    message: Option<String>,
+}
+
+/// Fires the configured redeploy webhook (e.g. Coolify) so the PaaS pulls the
+/// latest image and recreates the container. The webhook URL stays server-side
+/// (never shipped to the browser bundle).
+async fn update_trigger(State(state): State<AppState>) -> Json<UpdateTriggerResponse> {
+    let Some(webhook) = update_webhook() else {
+        return Json(UpdateTriggerResponse {
+            ok: false,
+            message: Some("No update webhook configured (set HOMUN_UPDATE_WEBHOOK).".to_string()),
+        });
+    };
+    match state
+        .http
+        .post(&webhook)
+        .timeout(std::time::Duration::from_secs(15))
+        .send()
+        .await
+    {
+        Ok(response) if response.status().is_success() => {
+            Json(UpdateTriggerResponse { ok: true, message: None })
+        }
+        Ok(response) => Json(UpdateTriggerResponse {
+            ok: false,
+            message: Some(format!("Webhook returned HTTP {}", response.status())),
+        }),
+        Err(error) => Json(UpdateTriggerResponse {
+            ok: false,
+            message: Some(format!("Webhook call failed: {error}")),
+        }),
+    }
 }
 
 /// Reports whether the contained computer's live view is available, where to
