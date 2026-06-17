@@ -26425,6 +26425,11 @@ async fn update_trigger(State(state): State<AppState>) -> Json<UpdateTriggerResp
 /// embed it, whether the browser is working RIGHT NOW, and the live step
 /// checklist. Polled by the desktop panel.
 async fn contained_computer_live(State(state): State<AppState>) -> Json<ContainedComputerLiveResponse> {
+    // Watching the live view counts as activity. This endpoint is polled only while a
+    // computer panel / the Local-computer page is open, so touching the idle timer here
+    // keeps the container from being recycled out from under the user mid-view (the
+    // reaper still reclaims it once nothing is viewing it for the idle window).
+    touch_cc_activity();
     let mut novnc_url = resolve_contained_computer_novnc(
         contained_computer_cdp_endpoint().is_some(),
         env::var("HOMUN_CONTAINED_COMPUTER_NOVNC").ok().as_deref(),
