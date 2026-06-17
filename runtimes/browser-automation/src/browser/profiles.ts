@@ -1,7 +1,10 @@
 import { access } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { chromium } from "playwright-core";
+// patchright-core is a drop-in for playwright-core that also patches the CDP
+// `Runtime.enable` leak anti-bot vendors (Cloudflare/DataDome) fingerprint, plus
+// `navigator.webdriver`. The whole runtime uses it for both launcher and types.
+import { chromium } from "patchright-core";
 import { BrowserAutomationError } from "../contracts.js";
 
 const MAC_EXECUTABLES = [
@@ -32,13 +35,24 @@ export async function resolveAssistantProfile(options?: {
 }): Promise<BrowserProfileConfig> {
   return {
     name: "assistant",
-    userDataDir:
-      options?.profileRoot ??
-      process.env.BROWSER_AUTOMATION_PROFILE_ROOT ??
-      path.join(os.tmpdir(), "local-first-browser-automation", `assistant-${process.pid}`),
+    userDataDir: assistantUserDataDir(options?.profileRoot),
     headless: options?.headless ?? true,
     executablePath: await discoverChromiumExecutable(options?.executablePath),
   };
+}
+
+/// Where the assistant profile lives. A STABLE dir persists cookies/sessions
+/// across runs so the assistant looks like a returning (logged-in) user — the
+/// single biggest lever for hitting fewer captchas. Isolated/parallel workers
+/// instead get a per-process dir: concurrent launches on one persistent dir
+/// collide on Chromium's SingletonLock.
+function assistantUserDataDir(profileRoot?: string): string {
+  const root =
+    profileRoot ??
+    process.env.BROWSER_AUTOMATION_PROFILE_ROOT ??
+    path.join(os.tmpdir(), "local-first-browser-automation");
+  const isolated = process.env.BROWSER_AUTOMATION_ISOLATED_CONTEXT === "1";
+  return isolated ? path.join(root, `assistant-${process.pid}`) : path.join(root, "assistant");
 }
 
 export function profileSummaries(params: {

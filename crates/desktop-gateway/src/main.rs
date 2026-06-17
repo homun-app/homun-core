@@ -533,6 +533,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     start_task_executor_worker(state.clone());
     spawn_thread_browser_session_reaper(state.clone());
     spawn_contained_computer_idle_reaper(state.clone());
+    spawn_browser_handoff_reaper(state.clone());
     spawn_connector_event_poller(state.clone());
     start_proactivity_auto_review(state.clone());
     reconnect_channels_on_startup();
@@ -7949,14 +7950,14 @@ fn browser_act_tool_schema() -> serde_json::Value {
         "type": "function",
         "function": {
             "name": "browser_act",
-            "description": "Perform ONE single micro-action on the current page (a click, writing in a field, selecting, pressing a key, etc.) and return the UPDATED snapshot. One action at a time: after each action re-read the snapshot before the next. For fields with autocomplete use kind='type' (the suggestion selection is automatic). Do not use for purchases, logins or payments: stop and propose to the user.",
+            "description": "Perform ONE single micro-action on the current page (a click, writing in a field, selecting, pressing a key, etc.) and return the UPDATED snapshot. One action at a time: after each action re-read the snapshot before the next. For fields with autocomplete use kind='type' (the suggestion selection is automatic). For a 'press and hold' / 'tieni premuto' human-verification challenge use kind='hold' on the button (it keeps the pointer pressed for a few seconds). Do not use for purchases, logins or payments: stop and propose to the user.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "kind": {
                         "type": "string",
-                        "enum": ["click","type","fill","select","select_option","press","press_key","hover","scroll","scrollIntoView","wait"],
-                        "description": "Type of action. 'type' writes with possible autocomplete; 'fill' sets the value directly; 'wait' waits."
+                        "enum": ["click","type","fill","select","select_option","press","press_key","hover","hold","scroll","scrollIntoView","wait"],
+                        "description": "Type of action. 'type' writes with possible autocomplete; 'fill' sets the value directly; 'hold' presses and holds the target (for 'press and hold' challenges); 'wait' waits."
                     },
                     "ref": {
                         "type": "string",
@@ -7967,6 +7968,7 @@ fn browser_act_tool_schema() -> serde_json::Value {
                     "values": { "type": "array", "items": { "type": "string" }, "description": "Multiple values for a multi-select." },
                     "submit": { "type": "boolean", "description": "If true, submit the form after writing (equivalent to pressing Enter)." },
                     "key": { "type": "string", "description": "Key to press (kind='press'/'press_key'), e.g. 'Enter', 'ArrowDown'." },
+                    "durationMs": { "type": "number", "description": "How long to keep the pointer pressed for kind='hold' (ms). Default ~3000; raise if the challenge needs a longer hold." },
                     "target": { "type": "string", "description": "id of the tab to operate on; default: the current tab." }
                 },
                 "required": ["kind"]
@@ -13097,6 +13099,68 @@ fn spawn_contained_computer_idle_reaper(state: AppState) {
                 }
             })
             .await;
+        }
+    });
+}
+
+/// How long a browser task may sit parked waiting for a human to clear a manual
+/// challenge (e.g. a captcha) before it gives up. Without a cap, a task launched
+/// while the user is away from the screen would wait for the approval forever.
+/// Default 180s; override with `HOMUN_BROWSER_HANDOFF_TIMEOUT_SECS` (min 30).
+fn browser_handoff_timeout_secs() -> i64 {
+    env::var("HOMUN_BROWSER_HANDOFF_TIMEOUT_SECS")
+        .ok()
+        .and_then(|v| v.trim().parse::<i64>().ok())
+        .filter(|&v| v >= 30)
+        .unwrap_or(180)
+}
+
+/// Background reaper: every 60s, fail browser tasks parked in WaitingUserApproval
+/// for a `browser.manual_action` (a captcha / "press and hold" / login wall the
+/// agent couldn't auto-solve) longer than `browser_handoff_timeout_secs()`. The
+/// interactive chat doesn't need this — its turn ends — but an autonomous task
+/// ("do X" while the user is away) would otherwise hang on the approval forever.
+fn spawn_browser_handoff_reaper(state: AppState) {
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+            let cutoff = OffsetDateTime::now_utc() - Duration::seconds(browser_handoff_timeout_secs());
+            let Ok(store) = lock_task_store(&state) else {
+                continue;
+            };
+            let Ok(scopes) = store.task_owner_scopes() else {
+                continue;
+            };
+            for (user, workspace) in &scopes {
+                let Ok(tasks) = store.list_tasks(user, workspace) else {
+                    continue;
+                };
+                for task in tasks {
+                    let waiting_handoff = task.status == TaskStatus::WaitingUserApproval
+                        && task
+                            .blocked_reason
+                            .as_deref()
+                            .is_some_and(|reason| reason.contains("browser.manual_action"));
+                    if waiting_handoff && task.updated_at < cutoff {
+                        // Cancel (terminal, no retry — it would just hit the same
+                        // challenge again) with a reason the task/session UI shows.
+                        let _ = store.update_task_status(
+                            &task.task_id,
+                            user,
+                            workspace,
+                            TaskStatus::Cancelled,
+                            Some(
+                                "browser handoff timed out: nobody cleared the manual challenge (e.g. captcha) in time",
+                            ),
+                        );
+                        eprintln!(
+                            "browser-handoff: task {:?} gave up — no human cleared the manual challenge within {}s",
+                            task.task_id,
+                            browser_handoff_timeout_secs()
+                        );
+                    }
+                }
+            }
         }
     });
 }
@@ -26730,6 +26794,16 @@ fn browser_sidecar_env_with_headless(headless: String) -> Vec<(String, String)> 
             artifact_root.display().to_string(),
         ),
     ];
+    // Persist the assistant browser profile under the data dir (not tmp): cookies
+    // and sessions survive across runs, so the assistant looks like a returning,
+    // logged-in user and trips far fewer captchas. The runtime appends the profile
+    // subdir (stable for the shared session, per-process when isolated).
+    if let Ok(dir) = gateway_data_dir() {
+        env.push((
+            "BROWSER_AUTOMATION_PROFILE_ROOT".to_string(),
+            dir.join("browser-automation").display().to_string(),
+        ));
+    }
     if let Some(endpoint) = contained_computer_cdp_endpoint() {
         env.push((
             "BROWSER_AUTOMATION_USER_CDP_ENDPOINT".to_string(),

@@ -1,8 +1,10 @@
 import { mkdir, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import type { Browser, BrowserContext, Dialog, Locator, Page } from "playwright-core";
-import { chromium } from "playwright-core";
+// patchright-core (stealth drop-in for playwright-core) for both the launcher and
+// the types, so the launcher-returned objects and our annotations stay consistent.
+import type { Browser, BrowserContext, Dialog, Locator, Page } from "patchright-core";
+import { chromium } from "patchright-core";
 import { BrowserAutomationError } from "../contracts.js";
 import { executeAction, requireRef, type BrowserActRequest, type BrowserActionResult } from "./actions.js";
 import { BrowserArtifactRoot } from "./artifacts.js";
@@ -568,6 +570,14 @@ export class BrowserSessionManager {
       headless: this.profile.headless,
       executablePath: this.profile.executablePath,
       acceptDownloads: true,
+      // Anti-detection: drop the "controlled by automated software" banner and the
+      // AutomationControlled blink feature (which sets navigator.webdriver), and
+      // present a host-consistent locale/timezone (a mismatch is itself a tell).
+      // patchright (the chromium import) patches the deeper CDP Runtime.enable leak.
+      ignoreDefaultArgs: ["--enable-automation"],
+      args: ["--disable-blink-features=AutomationControlled"],
+      locale: hostLocale(),
+      timezoneId: hostTimezone(),
     });
     this.activeProfile = "assistant";
     return { status: "started", profile: this.profile.name };
@@ -620,6 +630,25 @@ async function artifactMetadata(kind: ArtifactMetadata["kind"], outputPath: stri
   return { kind, path: outputPath, bytes: file.size };
 }
 
+// Host locale/timezone for the browser context, so the page's reported locale and
+// clock match the machine it actually runs on (a mismatch is a bot tell). Undefined
+// falls back to the browser default.
+function hostLocale(): string | undefined {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().locale || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function hostTimezone(): string | undefined {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function shouldSnapshotAfterAction(action: BrowserActRequest): boolean {
   if (
     ("snapshotAfter" in action && action.snapshotAfter === true) ||
@@ -638,6 +667,7 @@ function shouldSnapshotAfterAction(action: BrowserActRequest): boolean {
     "select",
     "select_option",
     "hover",
+    "hold",
     "scrollIntoView",
     "scroll_into_view",
     "scroll",
@@ -649,7 +679,7 @@ function shouldSnapshotAfterAction(action: BrowserActRequest): boolean {
 }
 
 function snapshotDelayForAction(action: BrowserActRequest): number {
-  if (action.kind === "click" || action.kind === "clickCoords") {
+  if (action.kind === "click" || action.kind === "clickCoords" || action.kind === "hold") {
     return 1_000;
   }
   if (action.kind === "type") {
@@ -675,7 +705,13 @@ function snapshotDelayForAction(action: BrowserActRequest): number {
 
 async function waitForPageToSettle(page: Page, action: BrowserActRequest): Promise<void> {
   await page.waitForTimeout(snapshotDelayForAction(action));
-  if (action.kind !== "click" && action.kind !== "clickCoords" && action.kind !== "press" && action.kind !== "press_key") {
+  if (
+    action.kind !== "click" &&
+    action.kind !== "clickCoords" &&
+    action.kind !== "press" &&
+    action.kind !== "press_key" &&
+    action.kind !== "hold"
+  ) {
     return;
   }
 
