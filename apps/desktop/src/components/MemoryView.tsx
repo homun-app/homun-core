@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Brain, Check, ChevronDown, Download, Search, Sparkles, Trash2, X } from "lucide-react";
+import { Brain, Check, ChevronDown, Download, MoreHorizontal, Search, Sparkles, Trash2, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import {
@@ -76,6 +76,8 @@ export function MemoryView({ embedded = false }: { embedded?: boolean } = {}) {
   // Memory at-a-glance counts + export (moved here from the old "Dati" section).
   const [dashboard, setDashboard] = useState<CoreMemoryDashboard | null>(null);
   const [exporting, setExporting] = useState(false);
+  // Consolidate/Export live in a corner overflow menu (mirrors the chat panel menu).
+  const [actionsOpen, setActionsOpen] = useState(false);
 
   const reload = () => {
     coreBridge
@@ -110,6 +112,19 @@ export function MemoryView({ embedded = false }: { embedded?: boolean } = {}) {
       })
       .catch(() => {})
       .finally(() => setExporting(false));
+  };
+
+  const consolidate = () => {
+    setConsolidating(true);
+    setReport(null);
+    coreBridge
+      .consolidateMemory(workspaceFilter === "all" ? undefined : workspaceFilter)
+      .then((r) => {
+        setReport(t("memoryView.consolidateReport", { merged: r.merged, dropped: r.dropped }));
+        reload();
+      })
+      .catch(() => setReport(t("memoryView.consolidateFailed")))
+      .finally(() => setConsolidating(false));
   };
   useEffect(() => {
     reload();
@@ -167,13 +182,67 @@ export function MemoryView({ embedded = false }: { embedded?: boolean } = {}) {
   return (
     <div className="memview">
       <header className="memview-head">
-        {!embedded && (
-          <div className="memview-title">
-            <Brain size={20} /> {t("nav.memory")}
+        <div className="memview-head-top">
+          {!embedded && (
+            <div className="memview-title">
+              <Brain size={20} /> {t("nav.memory")}
+            </div>
+          )}
+          <div className="memview-menu-wrap">
+            <button
+              type="button"
+              className="memview-menu-toggle"
+              aria-haspopup="menu"
+              aria-expanded={actionsOpen}
+              aria-label={t("memoryView.actions")}
+              title={t("memoryView.actions")}
+              onClick={() => setActionsOpen((v) => !v)}
+            >
+              <MoreHorizontal size={18} />
+            </button>
+            {actionsOpen && (
+              <>
+                <div
+                  className="panel-menu-backdrop"
+                  role="presentation"
+                  onClick={() => setActionsOpen(false)}
+                />
+                <div className="panel-menu memview-menu" role="menu">
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="panel-menu-item"
+                    disabled={consolidating}
+                    onClick={() => {
+                      setActionsOpen(false);
+                      consolidate();
+                    }}
+                  >
+                    <Sparkles size={16} />
+                    <span>
+                      {consolidating ? t("memoryView.consolidating") : t("memoryView.consolidate")}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="panel-menu-item"
+                    disabled={exporting}
+                    onClick={() => {
+                      setActionsOpen(false);
+                      exportMemory();
+                    }}
+                  >
+                    <Download size={16} />
+                    <span>{exporting ? t("memoryView.exporting") : t("memoryView.export")}</span>
+                  </button>
+                </div>
+              </>
+            )}
           </div>
-        )}
+        </div>
         <div className="memview-filters">
-          <label className="set-select memview-select">
+          <label className="set-select memview-select memview-select--project">
             <select
               value={workspaceFilter}
               onChange={(e) => {
@@ -190,7 +259,7 @@ export function MemoryView({ embedded = false }: { embedded?: boolean } = {}) {
             </select>
             <ChevronDown size={12} className="chev" />
           </label>
-          <label className="set-select memview-select">
+          <label className="set-select memview-select memview-select--type">
             <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
               <option value="all">{t("memoryView.allTypes")}</option>
               {Object.entries(TYPE_LABELS).map(([k, v]) => (
@@ -201,51 +270,16 @@ export function MemoryView({ embedded = false }: { embedded?: boolean } = {}) {
             </select>
             <ChevronDown size={12} className="chev" />
           </label>
-          <label className="memview-search">
-            <Search size={14} />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder={t("memoryView.searchPlaceholder")}
-            />
-          </label>
-          <button
-            type="button"
-            className="set-btn memview-consolidate"
-            disabled={consolidating}
-            title={
-              workspaceFilter === "all"
-                ? t("memoryView.consolidateAllTitle")
-                : t("memoryView.consolidateProjectTitle")
-            }
-            onClick={() => {
-              setConsolidating(true);
-              setReport(null);
-              coreBridge
-                .consolidateMemory(workspaceFilter === "all" ? undefined : workspaceFilter)
-                .then((r) => {
-                  setReport(t("memoryView.consolidateReport", { merged: r.merged, dropped: r.dropped }));
-                  reload();
-                })
-                .catch(() => setReport(t("memoryView.consolidateFailed")))
-                .finally(() => setConsolidating(false));
-            }}
-          >
-            <Sparkles size={13} />
-            {consolidating ? t("memoryView.consolidating") : t("memoryView.consolidate")}
-          </button>
-          {report && <span className="memview-report">{report}</span>}
-          <button
-            type="button"
-            className="set-btn"
-            disabled={exporting}
-            title={t("memoryView.exportTitle")}
-            onClick={exportMemory}
-          >
-            <Download size={13} />
-            {exporting ? t("memoryView.exporting") : t("memoryView.export")}
-          </button>
         </div>
+        <label className="memview-search">
+          <Search size={14} />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder={t("memoryView.searchPlaceholder")}
+          />
+        </label>
+        {report && <p className="memview-report">{report}</p>}
       </header>
 
       {dashboard && (

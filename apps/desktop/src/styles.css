@@ -1131,8 +1131,8 @@ body.resizing-drawer {
 }
 
 .search-modal-backdrop {
-  align-items: flex-start;
-  padding-top: 36px;
+  align-items: center;
+  padding: 24px;
 }
 
 .confirm-modal-backdrop {
@@ -4732,12 +4732,19 @@ body.resizing-drawer {
   height: 100%;
   min-height: 0;
 }
+/* Header is a vertical stack: title+menu row, then the project/type filter row,
+   then search alone on its own full-width row. */
 .memview-head {
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: 10px;
   padding: 0 0 4px;
-  flex-wrap: wrap;
+}
+/* Title left, overflow menu pinned to the corner (mirrors the chat panel menu). */
+.memview-head-top {
+  display: flex;
+  align-items: center;
+  min-height: 28px;
 }
 .memview-title {
   display: inline-flex;
@@ -4747,21 +4754,38 @@ body.resizing-drawer {
   font-weight: 600;
   color: var(--brand-strong);
 }
+.memview-menu-wrap {
+  position: relative;
+  display: inline-flex;
+  margin-left: auto;
+}
+.memview-menu-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  border-radius: 8px;
+  cursor: pointer;
+}
+.memview-menu-toggle:hover { color: var(--text); background: var(--surface-hover); }
+.memview-menu-toggle[aria-expanded="true"] { color: var(--text); border-color: var(--brand-soft); }
+/* Two-item menu sizes to content rather than the panel-menu default width. */
+.panel-menu.memview-menu { width: 184px; }
+/* Project filter is wider than Type because workspace names can be long. */
 .memview-filters {
   display: flex;
   align-items: center;
   gap: 10px;
-  flex-wrap: wrap;
-  flex: 1;
-  min-width: 0;
 }
-/* Filters keep the real <select> (all onChange logic intact) inside the shared
-   .set-select wrapper, sized to content rather than the wrapper's default 100%. */
-.memview-select { width: auto; }
+.memview-select { min-width: 0; }
+.memview-select--project { flex: 2; }
+.memview-select--type { flex: 1; }
 .memview-search {
-  flex: 1;
-  min-width: 160px;
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 9px;
   border: 1px solid var(--line-strong);
@@ -4783,16 +4807,8 @@ body.resizing-drawer {
   min-width: 0;
 }
 .memview-search input::placeholder { color: var(--faint); }
-/* Consolida = teal opt-in accent on the shared .set-btn tile. */
-.memview-filters .set-btn { gap: 6px; font-size: 12.5px; }
-.memview-filters .set-btn svg { flex: none; }
-.memview-consolidate {
-  border-color: var(--brand-soft);
-  background: var(--brand-soft);
-  color: var(--brand-strong);
-}
-.memview-consolidate:hover { border-color: var(--brand); background: var(--brand-soft); }
-.memview-report { font-size: 12px; color: var(--brand-strong); }
+/* Consolidate report line (shown after a consolidation run). */
+.memview-report { margin: 0; font-size: 12px; color: var(--brand-strong); }
 
 /* Stats strip: builds on .set-stats; just space it from the toolbar. */
 .memview-stats { margin: 14px 0; flex-wrap: wrap; }
@@ -10220,6 +10236,11 @@ body.resizing-drawer {
 /* Disabled provider: kept but dimmed (excluded from routing). */
 .set-prov.off { opacity: 0.55; }
 .set-prov.off .set-prov-name { color: var(--muted); }
+/* Not-yet-configured provider: greyed placeholder; click to configure. */
+.set-prov.ghost { opacity: 0.5; border-style: dashed; transition: opacity 0.12s ease, border-color 0.12s ease; }
+.set-prov.ghost .set-prov-name { color: var(--muted); }
+.set-prov.ghost .set-prov-mark { color: var(--faint); }
+.set-prov.ghost:hover { opacity: 0.85; border-color: var(--brand-soft); }
 .set-prov-body {
   display: block;
   width: 100%;
@@ -10234,19 +10255,19 @@ body.resizing-drawer {
 .set-prov-switch { position: absolute; top: 11px; right: 12px; }
 .set-prov-top { display: flex; align-items: center; gap: 9px; margin-bottom: 8px; padding-right: 46px; }
 .set-prov-mark {
-  width: 24px;
-  height: 24px;
-  border-radius: 7px;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
   background: var(--surface-muted);
   border: 1px solid var(--line);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  color: var(--muted);
+  color: var(--text);
   flex: none;
 }
+.set-prov-logo { display: inline-flex; align-items: center; justify-content: center; flex: none; }
+.set-prov-logo svg { width: 100%; height: 100%; display: block; }
 .set-prov-name { font-size: 13.5px; font-weight: 600; }
 .set-prov-meta { font-size: 11.5px; color: var(--faint); }
 
@@ -10298,7 +10319,7 @@ body.resizing-drawer {
   flex: none;
 }
 .set-contact.is-me .set-contact-avatar { background: var(--surface); border-color: var(--brand-soft); color: var(--brand-strong); }
-.set-contact-body { flex: 1; min-width: 0; }
+.set-contact-body { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .set-contact-name { font-size: 13.5px; font-weight: 600; }
 .set-contact.is-me .set-contact-name { color: var(--brand-strong); }
 .set-contact-sub { font-size: 11.5px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
