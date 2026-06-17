@@ -1131,8 +1131,8 @@ body.resizing-drawer {
 }
 
 .search-modal-backdrop {
-  align-items: flex-start;
-  padding-top: 36px;
+  align-items: center;
+  padding: 24px;
 }
 
 .confirm-modal-backdrop {
