@@ -638,6 +638,7 @@ function shouldSnapshotAfterAction(action: BrowserActRequest): boolean {
     "select",
     "select_option",
     "hover",
+    "hold",
     "scrollIntoView",
     "scroll_into_view",
     "scroll",
@@ -649,7 +650,7 @@ function shouldSnapshotAfterAction(action: BrowserActRequest): boolean {
 }
 
 function snapshotDelayForAction(action: BrowserActRequest): number {
-  if (action.kind === "click" || action.kind === "clickCoords") {
+  if (action.kind === "click" || action.kind === "clickCoords" || action.kind === "hold") {
     return 1_000;
   }
   if (action.kind === "type") {
@@ -675,7 +676,13 @@ function snapshotDelayForAction(action: BrowserActRequest): number {
 
 async function waitForPageToSettle(page: Page, action: BrowserActRequest): Promise<void> {
   await page.waitForTimeout(snapshotDelayForAction(action));
-  if (action.kind !== "click" && action.kind !== "clickCoords" && action.kind !== "press" && action.kind !== "press_key") {
+  if (
+    action.kind !== "click" &&
+    action.kind !== "clickCoords" &&
+    action.kind !== "press" &&
+    action.kind !== "press_key" &&
+    action.kind !== "hold"
+  ) {
     return;
   }
 

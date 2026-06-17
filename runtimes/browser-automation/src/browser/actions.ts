@@ -15,6 +15,8 @@ const MAX_WAIT_TIME_MS = 30_000;
 const MAX_CLICK_DELAY_MS = 5_000;
 const MAX_BATCH_ACTIONS = 100;
 const MAX_BATCH_DEPTH = 3;
+const DEFAULT_HOLD_MS = 3_000;
+const MAX_HOLD_MS = 20_000;
 
 export type BrowserActionResult = {
   ok: true;
@@ -127,6 +129,16 @@ type BrowserActRequestInner =
       targetId: string;
       ref?: string;
       selector?: string;
+      timeoutMs?: number;
+    }
+  | {
+      kind: "hold";
+      targetId: string;
+      ref?: string;
+      selector?: string;
+      // How long to keep the pointer pressed (ms). Press-and-hold human
+      // challenges ("tieni premuto") need a sustained press; default ~3s.
+      durationMs?: number;
       timeoutMs?: number;
     }
   | {
@@ -321,6 +333,33 @@ async function executeActionUnchecked(
       });
       return { ok: true, url: page.url() };
     }
+    case "hold": {
+      // Press-and-hold ("tieni premuto") human challenge: move the real pointer
+      // onto the element, press, keep it down for a sustained (slightly jittered)
+      // duration, then release. Uses page.mouse so the down/up are genuine pointer
+      // events held over time — locator.click() only taps and never satisfies these.
+      const locator = requireRefOrSelector(page, refs, action.ref, action.selector, "hold");
+      const timeout = actionTimeout(action.timeoutMs);
+      await locator.scrollIntoViewIfNeeded({ timeout }).catch(() => undefined);
+      const box = await locator.boundingBox({ timeout });
+      if (!box) {
+        throw new BrowserAutomationError({
+          code: "BROWSER_HOLD_NO_TARGET",
+          message: "hold target has no visible bounding box",
+          retryable: true,
+        });
+      }
+      const x = box.x + box.width / 2;
+      const y = box.y + box.height / 2;
+      await page.mouse.move(x, y);
+      await page.mouse.down();
+      try {
+        await page.waitForTimeout(holdDuration(action.durationMs));
+      } finally {
+        await page.mouse.up();
+      }
+      return { ok: true, url: page.url() };
+    }
     case "scrollIntoView": {
       await requireRefOrSelector(page, refs, action.ref, action.selector, "scrollIntoView").scrollIntoViewIfNeeded({
         timeout: actionTimeout(action.timeoutMs),
@@ -510,6 +549,13 @@ function waitDelay(value: number): number {
 function nonNegativeDelay(value: number | undefined, max = 5_000): number {
   const normalized = Number.isFinite(value) ? Math.floor(value ?? 0) : 0;
   return Math.max(0, Math.min(normalized, max));
+}
+
+function holdDuration(value: number | undefined): number {
+  const base = Number.isFinite(value) ? Math.floor(value ?? DEFAULT_HOLD_MS) : DEFAULT_HOLD_MS;
+  const bounded = Math.max(500, Math.min(base, MAX_HOLD_MS));
+  // Small jitter so the hold isn't suspiciously exact (human presses vary).
+  return bounded + Math.floor(Math.random() * 400);
 }
 
 function normalizeActionError(error: unknown, kind: string): BrowserAutomationError {

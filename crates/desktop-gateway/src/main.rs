@@ -7949,14 +7949,14 @@ fn browser_act_tool_schema() -> serde_json::Value {
         "type": "function",
         "function": {
             "name": "browser_act",
-            "description": "Perform ONE single micro-action on the current page (a click, writing in a field, selecting, pressing a key, etc.) and return the UPDATED snapshot. One action at a time: after each action re-read the snapshot before the next. For fields with autocomplete use kind='type' (the suggestion selection is automatic). Do not use for purchases, logins or payments: stop and propose to the user.",
+            "description": "Perform ONE single micro-action on the current page (a click, writing in a field, selecting, pressing a key, etc.) and return the UPDATED snapshot. One action at a time: after each action re-read the snapshot before the next. For fields with autocomplete use kind='type' (the suggestion selection is automatic). For a 'press and hold' / 'tieni premuto' human-verification challenge use kind='hold' on the button (it keeps the pointer pressed for a few seconds). Do not use for purchases, logins or payments: stop and propose to the user.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "kind": {
                         "type": "string",
-                        "enum": ["click","type","fill","select","select_option","press","press_key","hover","scroll","scrollIntoView","wait"],
-                        "description": "Type of action. 'type' writes with possible autocomplete; 'fill' sets the value directly; 'wait' waits."
+                        "enum": ["click","type","fill","select","select_option","press","press_key","hover","hold","scroll","scrollIntoView","wait"],
+                        "description": "Type of action. 'type' writes with possible autocomplete; 'fill' sets the value directly; 'hold' presses and holds the target (for 'press and hold' challenges); 'wait' waits."
                     },
                     "ref": {
                         "type": "string",
@@ -7967,6 +7967,7 @@ fn browser_act_tool_schema() -> serde_json::Value {
                     "values": { "type": "array", "items": { "type": "string" }, "description": "Multiple values for a multi-select." },
                     "submit": { "type": "boolean", "description": "If true, submit the form after writing (equivalent to pressing Enter)." },
                     "key": { "type": "string", "description": "Key to press (kind='press'/'press_key'), e.g. 'Enter', 'ArrowDown'." },
+                    "durationMs": { "type": "number", "description": "How long to keep the pointer pressed for kind='hold' (ms). Default ~3000; raise if the challenge needs a longer hold." },
                     "target": { "type": "string", "description": "id of the tab to operate on; default: the current tab." }
                 },
                 "required": ["kind"]

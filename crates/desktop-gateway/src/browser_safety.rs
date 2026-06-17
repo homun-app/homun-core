@@ -53,7 +53,11 @@ pub fn high_risk_reason(action: &Value, snapshot: &str) -> Option<String> {
                 .to_string(),
         );
     }
-    if !is_committing_action(action) {
+    // `hold` is not a blanket commit (so a press-and-hold human-verification
+    // challenge runs unattended, incl. from a channel), but it must still face the
+    // purchase/login label check below — a "hold to pay/confirm order" control is
+    // as committing as a click on it.
+    if !is_committing_action(action) && kind != "hold" {
         return None;
     }
     let label = action
@@ -92,7 +96,7 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    const SNAP: &str = "- textbox \"Da\" [ref=e1]\n- button \"Acquista ora\" [ref=e9]\n- button \"Cerca\" [ref=e7]";
+    const SNAP: &str = "- textbox \"Da\" [ref=e1]\n- button \"Acquista ora\" [ref=e9]\n- button \"Cerca\" [ref=e7]\n- button \"Tieni premuto per confermare di essere umano\" [ref=e3]";
 
     #[test]
     fn blocks_evaluate() {
@@ -118,5 +122,22 @@ mod tests {
     fn committing_detects_enter_press() {
         assert!(is_committing_action(&json!({"kind":"press","key":"Enter"})));
         assert!(!is_committing_action(&json!({"kind":"type","ref":"e1","text":"x"})));
+    }
+
+    #[test]
+    fn hold_is_not_a_blanket_commit() {
+        // A press-and-hold human challenge must run unattended (incl. from a
+        // channel), so it must NOT count as a committing action.
+        assert!(!is_committing_action(&json!({"kind":"hold","ref":"e3"})));
+    }
+
+    #[test]
+    fn allows_hold_on_human_challenge() {
+        assert!(high_risk_reason(&json!({"kind":"hold","ref":"e3"}), SNAP).is_none());
+    }
+
+    #[test]
+    fn blocks_hold_on_purchase_label() {
+        assert!(high_risk_reason(&json!({"kind":"hold","ref":"e9"}), SNAP).is_some());
     }
 }
