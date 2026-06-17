@@ -270,6 +270,16 @@ function spawnGateway() {
     if (fs.existsSync(waBin)) env.HOMUN_WHATSAPP_BIN = waBin;
   }
 
+  // Point the gateway at the bundled browser-automation sidecar (Node/Playwright)
+  // that drives the contained-computer browser over CDP. Without this the gateway
+  // only finds the repo-relative runtimes/ path (absent from the bundle) and the
+  // browser is "unreachable" from an installed app — `npm run start` (tsx) is
+  // resolved via the reconstructed PATH above. An explicit env override wins.
+  if (!env.HOMUN_BROWSER_AUTOMATION_DIR) {
+    const baDir = path.join(RESOURCES_ROOT, "browser-automation");
+    if (fs.existsSync(baDir)) env.HOMUN_BROWSER_AUTOMATION_DIR = baDir;
+  }
+
   if (gatewayBin) {
     gatewayProcess = spawn(gatewayBin, [], {
       cwd: REPO_ROOT,

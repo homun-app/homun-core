@@ -32,6 +32,10 @@ if (!skipBuild) {
   for (const bridge of ["channel-telegram", "channel-whatsapp"]) {
     run("cargo", ["build", "--release"], join(repoRoot, "runtimes", bridge));
   }
+  // The browser-automation sidecar (Node/Playwright) runs from source via
+  // `npm run start` (tsx src/server.ts). Install its deps per-platform so the
+  // bundled node_modules (esbuild/tsx native bits) match the target OS.
+  run("npm", ["ci"], join(repoRoot, "runtimes", "browser-automation"));
 }
 
 rmSync(resourcesDir, { recursive: true, force: true });
@@ -89,6 +93,27 @@ for (const bridge of ["channel-telegram", "channel-whatsapp"]) {
   stagedBridges.push(relative(repoRoot, bridgeTarget));
 }
 
+// Stage the browser-automation sidecar (Node/Playwright) that drives the
+// contained-computer browser over CDP. The gateway runs `npm run start`
+// (tsx src/server.ts) in this dir, pointed here via HOMUN_BROWSER_AUTOMATION_DIR
+// (see main.cjs). Without it the gateway only finds the repo-relative path
+// (absent from the bundle) and the browser is "unreachable" from an installed app.
+const baSource = join(repoRoot, "runtimes", "browser-automation");
+const baTarget = join(resourcesDir, "browser-automation");
+for (const entry of ["package.json", "src", "node_modules"]) {
+  const from = join(baSource, entry);
+  if (!existsSync(from)) {
+    throw new Error(
+      `Browser-automation entry not found: ${from} (run \`npm ci\` in runtimes/browser-automation)`,
+    );
+  }
+  cpSync(from, join(baTarget, entry), { recursive: true });
+}
+for (const entry of ["tsconfig.json", "package-lock.json"]) {
+  const from = join(baSource, entry);
+  if (existsSync(from)) cpSync(from, join(baTarget, entry));
+}
+
 console.log(`Prepared Electron resources at ${resourcesDir}`);
 console.log(`Gateway: ${relative(repoRoot, gatewayTarget)}`);
 console.log(`Contained computer: ${relative(repoRoot, ccTarget)}`);
@@ -98,3 +123,4 @@ if (existsSync(skillsTarget)) {
 for (const bridge of stagedBridges) {
   console.log(`Channel bridge: ${bridge}`);
 }
+console.log(`Browser automation: ${relative(repoRoot, baTarget)}`);
