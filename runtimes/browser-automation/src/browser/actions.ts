@@ -1,4 +1,4 @@
-import type { Locator, Page } from "playwright-core";
+import type { Locator, Page } from "patchright-core";
 import { BrowserAutomationError } from "../contracts.js";
 
 type SnapshotAfterAction = {

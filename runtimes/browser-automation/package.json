@@ -9,7 +9,7 @@
     "start": "node node_modules/tsx/dist/cli.mjs src/server.ts"
   },
   "dependencies": {
-    "playwright-core": "1.60.0"
+    "patchright-core": "1.60.2"
   },
   "devDependencies": {
     "@types/node": "25.0.0",

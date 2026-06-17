@@ -26794,6 +26794,16 @@ fn browser_sidecar_env_with_headless(headless: String) -> Vec<(String, String)> 
             artifact_root.display().to_string(),
         ),
     ];
+    // Persist the assistant browser profile under the data dir (not tmp): cookies
+    // and sessions survive across runs, so the assistant looks like a returning,
+    // logged-in user and trips far fewer captchas. The runtime appends the profile
+    // subdir (stable for the shared session, per-process when isolated).
+    if let Ok(dir) = gateway_data_dir() {
+        env.push((
+            "BROWSER_AUTOMATION_PROFILE_ROOT".to_string(),
+            dir.join("browser-automation").display().to_string(),
+        ));
+    }
     if let Some(endpoint) = contained_computer_cdp_endpoint() {
         env.push((
             "BROWSER_AUTOMATION_USER_CDP_ENDPOINT".to_string(),
