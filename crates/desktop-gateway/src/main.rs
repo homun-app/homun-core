@@ -7428,6 +7428,22 @@ fn is_ollama_base(base_url: &str) -> bool {
     b.contains("ollama.com") || b.contains(":11434")
 }
 
+/// True for z.ai (the GLM provider). z.ai serves GLM models that DEFAULT to
+/// "thinking" mode — see `build_chat_payload` for why we disable it.
+fn is_zai_base(base_url: &str) -> bool {
+    base_url.to_ascii_lowercase().contains("z.ai")
+}
+
+/// z.ai GLM "thinking" mode is OFF by default: with it on, GLM streams the whole
+/// response as `reasoning_content` and often ends (`finish_reason:stop`) with an
+/// EMPTY `content`, which OpenAI-compat clients can't read — the agent loop then
+/// dead-ends on the canned fallback. Set HOMUN_ZAI_THINKING=1 to re-enable it.
+fn zai_thinking_enabled() -> bool {
+    env::var("HOMUN_ZAI_THINKING")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+}
+
 /// The chat completions endpoint for a provider: Ollama → native `/api/chat`
 /// (strip a trailing `/v1`); everyone else → OpenAI-compat `/chat/completions`.
 fn chat_endpoint(base_url: &str) -> String {
@@ -7673,6 +7689,15 @@ fn build_chat_payload(
             "max_tokens": 6000,
             "stream": true,
         });
+        // z.ai GLM defaults to "thinking" mode, which streams the answer as
+        // `reasoning_content` and frequently emits an EMPTY `content` (finish_reason
+        // `stop` with no answer text) — the stream reassembly reads `content`/
+        // `tool_calls` only, so the turn dead-ends on the canned fallback. Disabling
+        // it makes GLM emit normal content + structured tool_calls like every other
+        // provider (verified against api.z.ai). Opt back in with HOMUN_ZAI_THINKING=1.
+        if is_zai_base(base_url) && !zai_thinking_enabled() {
+            payload["thinking"] = serde_json::json!({ "type": "disabled" });
+        }
         if !is_final_round {
             payload["tools"] = serde_json::Value::Array(tools.to_vec());
             payload["tool_choice"] = serde_json::Value::String("auto".to_string());
