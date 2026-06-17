@@ -11,6 +11,54 @@ use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+/// Heuristic for MCP tools that DON'T declare `readOnlyHint`: decide read vs write
+/// from the tool name. The action verb is conventionally the FIRST token
+/// (`get_order`, `create_user`, `searchProducts`), so the leading verb decides —
+/// this avoids misreading noun homographs like `order`/`post`/`draft` (e.g.
+/// `get_order` is a read OF an order, not an order action). If the first token
+/// isn't a known verb, fall back to: a read verb present and no write verb.
+/// Tokenizes snake/kebab/camelCase. Kept in sync with the Composio verb lists.
+fn name_is_read_only(name: &str) -> bool {
+    const READ_VERBS: &[&str] = &[
+        "search", "get", "list", "fetch", "find", "retrieve", "view", "read", "query",
+        "lookup", "describe", "count", "check", "export", "browse", "scan", "poll",
+    ];
+    const WRITE_VERBS: &[&str] = &[
+        "create", "update", "delete", "send", "add", "insert", "modify", "edit", "remove",
+        "set", "write", "upload", "import", "enable", "disable", "revoke", "grant", "cancel",
+        "rename", "publish", "reply", "forward", "archive", "move", "trash", "mark", "clear",
+        "patch", "run", "execute", "trigger", "approve", "submit", "pay", "buy",
+    ];
+    let mut tokens: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    for ch in name.chars() {
+        if ch == '_' || ch == '-' || ch == ' ' || ch == '.' {
+            if !cur.is_empty() {
+                tokens.push(std::mem::take(&mut cur));
+            }
+        } else if ch.is_uppercase() && !cur.is_empty() {
+            tokens.push(std::mem::take(&mut cur));
+            cur.push(ch.to_ascii_lowercase());
+        } else {
+            cur.extend(ch.to_lowercase());
+        }
+    }
+    if !cur.is_empty() {
+        tokens.push(cur);
+    }
+    if let Some(first) = tokens.first().map(String::as_str) {
+        if READ_VERBS.contains(&first) {
+            return true;
+        }
+        if WRITE_VERBS.contains(&first) {
+            return false;
+        }
+    }
+    let has_read = tokens.iter().any(|t| READ_VERBS.contains(&t.as_str()));
+    let has_write = tokens.iter().any(|t| WRITE_VERBS.contains(&t.as_str()));
+    has_read && !has_write
+}
+
 pub trait McpTransport {
     fn request(
         &self,
@@ -342,16 +390,20 @@ impl<T: McpTransport> McpCapabilityProvider<T> {
             .iter()
             .find(|policy| policy.tool_name == name);
         // Classify read vs write. An explicit per-tool policy wins. Otherwise we
-        // honor the MCP `annotations.readOnlyHint`: true → Read (safe to auto-run),
-        // anything else (false or ABSENT) → WriteWithConfirmation, so an unannotated
-        // side-effecting tool is never silently auto-executed.
+        // honor the MCP `annotations.readOnlyHint`: true → Read, false → write. Most
+        // servers OMIT the hint, though — and defaulting those to write made plain
+        // reads (e.g. `search_products`) demand confirmation. So when the hint is
+        // ABSENT, fall back to a verb heuristic on the tool name (search/get/list/…
+        // → Read); only genuinely write-looking or ambiguous names stay confirmed.
         let read_only_hint = tool
             .get("annotations")
             .and_then(|a| a.get("readOnlyHint"))
             .and_then(|v| v.as_bool());
         let inferred_action = match read_only_hint {
             Some(true) => ActionClass::Read,
-            _ => ActionClass::WriteWithConfirmation,
+            Some(false) => ActionClass::WriteWithConfirmation,
+            None if name_is_read_only(name) => ActionClass::Read,
+            None => ActionClass::WriteWithConfirmation,
         };
         Ok(CapabilityTool {
             name: name.to_string(),
@@ -374,5 +426,29 @@ impl<T: McpTransport> McpCapabilityProvider<T> {
                 .cloned()
                 .unwrap_or_else(|| serde_json::json!({"type": "object"})),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::name_is_read_only;
+
+    #[test]
+    fn reads_are_read_only() {
+        // Incl. noun homographs after a read verb (order/post/draft are nouns here).
+        for name in [
+            "search_products", "get_order", "list_items", "fetch_prices", "searchProducts",
+            "get_post", "list_drafts",
+        ] {
+            assert!(name_is_read_only(name), "{name} should be read-only");
+        }
+    }
+
+    #[test]
+    fn writes_and_ambiguous_are_not() {
+        // Leading write verb, or no read verb at all → stays confirmed.
+        for name in ["create_item", "delete_order", "send_message", "post_message", "process_order"] {
+            assert!(!name_is_read_only(name), "{name} should NOT be read-only");
+        }
     }
 }

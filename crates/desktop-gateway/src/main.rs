@@ -9124,6 +9124,17 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
                 .unwrap_or(false)
         });
     base_tools.push(find_capability_tool_schema());
+    // MCP servers are installed deliberately and are few, so their tools go STRAIGHT
+    // into the live tool set (not deferred behind find_capability) when the count is
+    // small — the model uses them naturally instead of having to "discover" them via
+    // a keyword search it rarely thinks to run. Past the cap they fall back to
+    // find_capability like the large Composio catalog.
+    const MCP_ALWAYS_LOAD_MAX: usize = 24;
+    if !mcp_catalog.schemas.is_empty() && mcp_catalog.schemas.len() <= MCP_ALWAYS_LOAD_MAX {
+        for schema in &mcp_catalog.schemas {
+            base_tools.push(schema.clone());
+        }
+    }
     // Unified capability corpus for `find_capability`: deferred native tools + installed
     // skills + connected connector tools, all in one BM25-searchable list. One discovery
     // path instead of three (find_capability subsumes find_connected_tools).
