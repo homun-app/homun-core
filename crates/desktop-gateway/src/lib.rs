@@ -277,6 +277,7 @@ fn render_runtime_prompt(prompt: &str, compressed_context: &str) -> String {
         "Keep your first answer compact: 1-4 short paragraphs or an essential code block.",
         "If you include code, always use fenced markdown blocks with a language.",
         "Use the recent context to resolve references like 'the other one', 'continue', 'the one from before' or 'explain it better'.",
+        "Grounding: do NOT state checkable or time-sensitive facts (current events, news, sports results/standings, who won or qualified, schedules, dates, prices, live status) from memory — verify them with a tool (browser / web search / sandbox) before answering. If you cannot verify, say so plainly and do not invent. If the user disputes a fact you gave, verify it before answering again — never double down on an unverified claim. Stable, well-known facts you may answer directly.",
         "",
         &context_block,
         &format!("User: {prompt}"),
