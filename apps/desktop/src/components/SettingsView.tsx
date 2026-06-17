@@ -70,6 +70,7 @@ import {
   type SystemStatus,
 } from "../lib/coreBridge";
 import { useSetting } from "../lib/settingsStore";
+import { ProviderLogo, providerLogoKey } from "./providerLogos";
 import {
   notificationPermission,
   requestNotificationPermission,
@@ -1262,7 +1263,13 @@ function RuntimePane({
     setModal(provider.id);
   };
 
-  const openAddProvider = () => {
+  // Open the add/configure modal pre-filled from a catalog preset (clicking a
+  // greyed, not-yet-configured provider tile).
+  const openAddPreset = (p: (typeof PROVIDER_PRESETS)[number]) => {
+    setPresetId(p.id);
+    setLabel(p.label);
+    setBaseUrl(p.baseUrl);
+    setApiKey("");
     setEditKey("");
     setShowKey(false);
     setNote(null);
@@ -1293,6 +1300,53 @@ function RuntimePane({
       ))}
     </>
   );
+
+  // Every provider shown at once: the whole catalog plus any custom endpoints the
+  // user added. A configured provider (matched to a preset by base URL, or a
+  // bespoke endpoint) is coloured and toggleable; the rest are greyed placeholders
+  // that open the configure flow pre-filled. No "add" button — the catalog is the
+  // entry point, with a "Custom" tile for arbitrary endpoints.
+  const normUrl = (u: string) => u.trim().replace(/\/+$/, "").toLowerCase();
+  const providerCards: Array<{
+    key: string;
+    label: string;
+    logoKey: string | null;
+    metaText: string;
+    configured: boolean;
+    view?: ProviderView;
+    preset?: (typeof PROVIDER_PRESETS)[number];
+  }> = [];
+  const matched = new Set<string>();
+  const metaFor = (p: ProviderView) =>
+    `${p.models.length > 0 ? t("settings.modelCount", { count: p.models.length }) : t("settings.noModel")} · ${p.kind}`;
+  for (const p of PROVIDER_PRESETS) {
+    const view =
+      p.baseUrl !== ""
+        ? providers.find((v) => !matched.has(v.id) && normUrl(v.base_url) === normUrl(p.baseUrl))
+        : undefined;
+    if (view) matched.add(view.id);
+    providerCards.push({
+      key: p.id,
+      label: view?.label || p.label,
+      logoKey: providerLogoKey(p.id),
+      metaText: view ? metaFor(view) : t("settings.providerNotConfigured"),
+      configured: Boolean(view),
+      view,
+      preset: p,
+    });
+  }
+  // Configured endpoints that don't map to any catalog preset (bespoke base URLs).
+  for (const p of providers) {
+    if (matched.has(p.id)) continue;
+    providerCards.push({
+      key: p.id,
+      label: p.label,
+      logoKey: providerLogoKey(p.id),
+      metaText: metaFor(p),
+      configured: true,
+      view: p,
+    });
+  }
 
   return (
     <div className="mdl-pane">
@@ -1383,36 +1437,39 @@ function RuntimePane({
             {t("settings.providers")} <span style={{ textTransform: "none", letterSpacing: 0 }}>({providers.length})</span>
           </div>
           <div className="set-cards-grid cols-4">
-            {providers.map((provider) => (
-              <div key={provider.id} className={`set-prov ${provider.enabled ? "on" : "off"}`}>
-                <button className="set-prov-body" type="button" onClick={() => openProvider(provider)}>
-                  <div className="set-prov-top">
-                    <span className="set-prov-mark">{provider.label.slice(0, 1).toUpperCase()}</span>
-                    <span className="set-prov-name">{provider.label}</span>
-                  </div>
-                  <div className="set-prov-meta">
-                    {provider.models.length > 0
-                      ? t("settings.modelCount", { count: provider.models.length })
-                      : t("settings.noModel")}
-                    {" · "}
-                    {provider.kind}
-                  </div>
-                </button>
-                <div
-                  className="set-prov-switch"
-                  title={provider.enabled ? t("settings.providerEnabled") : t("settings.providerDisabled")}
+            {providerCards.map((card) => (
+              <div
+                key={card.key}
+                className={`set-prov ${card.configured ? (card.view!.enabled ? "on" : "off") : "ghost"}`}
+              >
+                <button
+                  className="set-prov-body"
+                  type="button"
+                  onClick={() =>
+                    card.configured ? openProvider(card.view!) : openAddPreset(card.preset!)
+                  }
                 >
-                  <Toggle
-                    on={provider.enabled}
-                    onChange={(next) => toggleProviderEnabled(provider, next)}
-                  />
-                </div>
+                  <div className="set-prov-top">
+                    <span className="set-prov-mark">
+                      <ProviderLogo logoKey={card.logoKey} />
+                    </span>
+                    <span className="set-prov-name">{card.label}</span>
+                  </div>
+                  <div className="set-prov-meta">{card.metaText}</div>
+                </button>
+                {card.configured && (
+                  <div
+                    className="set-prov-switch"
+                    title={card.view!.enabled ? t("settings.providerEnabled") : t("settings.providerDisabled")}
+                  >
+                    <Toggle
+                      on={card.view!.enabled}
+                      onChange={(next) => toggleProviderEnabled(card.view!, next)}
+                    />
+                  </div>
+                )}
               </div>
             ))}
-            <button className="set-add-card" type="button" onClick={openAddProvider}>
-              <Plus size={14} />
-              {t("settings.addProvider")}
-            </button>
           </div>
 
           {modal && (

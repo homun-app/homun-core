@@ -649,6 +649,8 @@
     "providers": "Provider",
     "providerEnabled": "Abilitato",
     "providerDisabled": "Disabilitato",
+    "providerNotConfigured": "Non configurato",
+    "providerConfigure": "Configura",
     "type": "Tipo",
     "endpoint": "Endpoint (base URL)",
     "channels": "Canali",

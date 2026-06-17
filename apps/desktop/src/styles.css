@@ -10220,6 +10220,11 @@ body.resizing-drawer {
 /* Disabled provider: kept but dimmed (excluded from routing). */
 .set-prov.off { opacity: 0.55; }
 .set-prov.off .set-prov-name { color: var(--muted); }
+/* Not-yet-configured provider: greyed placeholder; click to configure. */
+.set-prov.ghost { opacity: 0.5; border-style: dashed; transition: opacity 0.12s ease, border-color 0.12s ease; }
+.set-prov.ghost .set-prov-name { color: var(--muted); }
+.set-prov.ghost .set-prov-mark { color: var(--faint); }
+.set-prov.ghost:hover { opacity: 0.85; border-color: var(--brand-soft); }
 .set-prov-body {
   display: block;
   width: 100%;
@@ -10234,19 +10239,19 @@ body.resizing-drawer {
 .set-prov-switch { position: absolute; top: 11px; right: 12px; }
 .set-prov-top { display: flex; align-items: center; gap: 9px; margin-bottom: 8px; padding-right: 46px; }
 .set-prov-mark {
-  width: 24px;
-  height: 24px;
-  border-radius: 7px;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
   background: var(--surface-muted);
   border: 1px solid var(--line);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  color: var(--muted);
+  color: var(--text);
   flex: none;
 }
+.set-prov-logo { display: inline-flex; align-items: center; justify-content: center; flex: none; }
+.set-prov-logo svg { width: 100%; height: 100%; display: block; }
 .set-prov-name { font-size: 13.5px; font-weight: 600; }
 .set-prov-meta { font-size: 11.5px; color: var(--faint); }
 
