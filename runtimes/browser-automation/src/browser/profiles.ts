@@ -1,10 +1,7 @@
 import { access } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-// patchright-core is a drop-in for playwright-core that also patches the CDP
-// `Runtime.enable` leak anti-bot vendors (Cloudflare/DataDome) fingerprint, plus
-// `navigator.webdriver`. The whole runtime uses it for both launcher and types.
-import { chromium } from "patchright-core";
+import { chromium } from "playwright-core";
 import { BrowserAutomationError } from "../contracts.js";
 
 const MAC_EXECUTABLES = [
