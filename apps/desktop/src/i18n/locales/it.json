@@ -262,6 +262,7 @@
     "export": "Esporta",
     "exporting": "Esporto…",
     "exportTitle": "Scarica memorie, entità e relazioni in un file JSON",
+    "actions": "Azioni",
     "memories": "memorie",
     "entities": "entità",
     "relations": "relazioni",

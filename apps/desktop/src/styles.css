@@ -4732,12 +4732,19 @@ body.resizing-drawer {
   height: 100%;
   min-height: 0;
 }
+/* Header is a vertical stack: title+menu row, then the project/type filter row,
+   then search alone on its own full-width row. */
 .memview-head {
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: 10px;
   padding: 0 0 4px;
-  flex-wrap: wrap;
+}
+/* Title left, overflow menu pinned to the corner (mirrors the chat panel menu). */
+.memview-head-top {
+  display: flex;
+  align-items: center;
+  min-height: 28px;
 }
 .memview-title {
   display: inline-flex;
@@ -4747,21 +4754,38 @@ body.resizing-drawer {
   font-weight: 600;
   color: var(--brand-strong);
 }
+.memview-menu-wrap {
+  position: relative;
+  display: inline-flex;
+  margin-left: auto;
+}
+.memview-menu-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  border-radius: 8px;
+  cursor: pointer;
+}
+.memview-menu-toggle:hover { color: var(--text); background: var(--surface-hover); }
+.memview-menu-toggle[aria-expanded="true"] { color: var(--text); border-color: var(--brand-soft); }
+/* Two-item menu sizes to content rather than the panel-menu default width. */
+.panel-menu.memview-menu { width: 184px; }
+/* Project filter is wider than Type because workspace names can be long. */
 .memview-filters {
   display: flex;
   align-items: center;
   gap: 10px;
-  flex-wrap: wrap;
-  flex: 1;
-  min-width: 0;
 }
-/* Filters keep the real <select> (all onChange logic intact) inside the shared
-   .set-select wrapper, sized to content rather than the wrapper's default 100%. */
-.memview-select { width: auto; }
+.memview-select { min-width: 0; }
+.memview-select--project { flex: 2; }
+.memview-select--type { flex: 1; }
 .memview-search {
-  flex: 1;
-  min-width: 160px;
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 9px;
   border: 1px solid var(--line-strong);
@@ -4783,16 +4807,8 @@ body.resizing-drawer {
   min-width: 0;
 }
 .memview-search input::placeholder { color: var(--faint); }
-/* Consolida = teal opt-in accent on the shared .set-btn tile. */
-.memview-filters .set-btn { gap: 6px; font-size: 12.5px; }
-.memview-filters .set-btn svg { flex: none; }
-.memview-consolidate {
-  border-color: var(--brand-soft);
-  background: var(--brand-soft);
-  color: var(--brand-strong);
-}
-.memview-consolidate:hover { border-color: var(--brand); background: var(--brand-soft); }
-.memview-report { font-size: 12px; color: var(--brand-strong); }
+/* Consolidate report line (shown after a consolidation run). */
+.memview-report { margin: 0; font-size: 12px; color: var(--brand-strong); }
 
 /* Stats strip: builds on .set-stats; just space it from the toolbar. */
 .memview-stats { margin: 14px 0; flex-wrap: wrap; }
