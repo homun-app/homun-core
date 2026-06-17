@@ -30,6 +30,13 @@ env_logger = "0.11"
 axum = "0.7"
 reqwest = { version = "0.12", default-features = false, features = ["json"] }
 
+# Compile SQLite from source (bundled) so the bridge links on Windows too. It's
+# pulled transitively (wa-rs -> diesel -> libsqlite3-sys); without `bundled` the
+# MSVC linker can't find a system `sqlite3.lib` and fails with LNK1181. Declaring
+# it here as a direct dep enables `bundled` for the transitive copy via cargo
+# feature unification. macOS/Linux build the vendored sources fine too.
+libsqlite3-sys = { version = "0.37", features = ["bundled"] }
+
 # umask(0077) at startup: the WhatsApp session DB is born owner-only (0600).
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
