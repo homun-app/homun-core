@@ -26,7 +26,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { QRCodeSVG } from "qrcode.react";
 import { pluginRegistry } from "../plugins/registry";
@@ -70,6 +70,7 @@ import {
   type SystemStatus,
 } from "../lib/coreBridge";
 import { useSetting } from "../lib/settingsStore";
+import { ProviderLogo, providerLogoKey } from "./providerLogos";
 import {
   notificationPermission,
   requestNotificationPermission,
@@ -616,6 +617,34 @@ function AccountPane({
   const [name, setName] = useSetting("displayName", "");
   const [accountEmail, setAccountEmail] = useSetting<string>("email", "");
   const [computerMsg, setComputerMsg] = useState<string | null>(null);
+  const [profileImage, setProfileImage] = useSetting<string>("profileImage", "");
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const onProfileImageSelected = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = ""; // allow re-picking the same file
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        // Resize + center cover-crop to a small square so localStorage stays light.
+        const size = 160;
+        const canvas = document.createElement("canvas");
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
+        const scale = Math.max(size / img.width, size / img.height);
+        const w = img.width * scale;
+        const h = img.height * scale;
+        ctx.drawImage(img, (size - w) / 2, (size - h) / 2, w, h);
+        setProfileImage(canvas.toDataURL("image/jpeg", 0.85));
+      };
+      img.src = reader.result as string;
+    };
+    reader.readAsDataURL(file);
+  };
 
   return (
     <>
@@ -625,7 +654,37 @@ function AccountPane({
           <div>
             <div className="tt">{t("settings.profileImage")}</div>
           </div>
-          <span className="set-profile-avatar" aria-hidden />
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {profileImage && (
+              <button type="button" className="set-btn" onClick={() => setProfileImage("")}>
+                Remove
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              aria-label={t("settings.profileImage")}
+              style={{ padding: 0, border: "none", background: "none", cursor: "pointer" }}
+            >
+              {profileImage ? (
+                <img
+                  src={profileImage}
+                  alt=""
+                  className="set-profile-avatar"
+                  style={{ objectFit: "cover" }}
+                />
+              ) : (
+                <span className="set-profile-avatar" />
+              )}
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              style={{ display: "none" }}
+              onChange={onProfileImageSelected}
+            />
+          </div>
         </div>
         <div className="set-trow">
           <div>
@@ -1204,7 +1263,13 @@ function RuntimePane({
     setModal(provider.id);
   };
 
-  const openAddProvider = () => {
+  // Open the add/configure modal pre-filled from a catalog preset (clicking a
+  // greyed, not-yet-configured provider tile).
+  const openAddPreset = (p: (typeof PROVIDER_PRESETS)[number]) => {
+    setPresetId(p.id);
+    setLabel(p.label);
+    setBaseUrl(p.baseUrl);
+    setApiKey("");
     setEditKey("");
     setShowKey(false);
     setNote(null);
@@ -1235,6 +1300,53 @@ function RuntimePane({
       ))}
     </>
   );
+
+  // Every provider shown at once: the whole catalog plus any custom endpoints the
+  // user added. A configured provider (matched to a preset by base URL, or a
+  // bespoke endpoint) is coloured and toggleable; the rest are greyed placeholders
+  // that open the configure flow pre-filled. No "add" button — the catalog is the
+  // entry point, with a "Custom" tile for arbitrary endpoints.
+  const normUrl = (u: string) => u.trim().replace(/\/+$/, "").toLowerCase();
+  const providerCards: Array<{
+    key: string;
+    label: string;
+    logoKey: string | null;
+    metaText: string;
+    configured: boolean;
+    view?: ProviderView;
+    preset?: (typeof PROVIDER_PRESETS)[number];
+  }> = [];
+  const matched = new Set<string>();
+  const metaFor = (p: ProviderView) =>
+    `${p.models.length > 0 ? t("settings.modelCount", { count: p.models.length }) : t("settings.noModel")} · ${p.kind}`;
+  for (const p of PROVIDER_PRESETS) {
+    const view =
+      p.baseUrl !== ""
+        ? providers.find((v) => !matched.has(v.id) && normUrl(v.base_url) === normUrl(p.baseUrl))
+        : undefined;
+    if (view) matched.add(view.id);
+    providerCards.push({
+      key: p.id,
+      label: view?.label || p.label,
+      logoKey: providerLogoKey(p.id),
+      metaText: view ? metaFor(view) : t("settings.providerNotConfigured"),
+      configured: Boolean(view),
+      view,
+      preset: p,
+    });
+  }
+  // Configured endpoints that don't map to any catalog preset (bespoke base URLs).
+  for (const p of providers) {
+    if (matched.has(p.id)) continue;
+    providerCards.push({
+      key: p.id,
+      label: p.label,
+      logoKey: providerLogoKey(p.id),
+      metaText: metaFor(p),
+      configured: true,
+      view: p,
+    });
+  }
 
   return (
     <div className="mdl-pane">
@@ -1325,36 +1437,39 @@ function RuntimePane({
             {t("settings.providers")} <span style={{ textTransform: "none", letterSpacing: 0 }}>({providers.length})</span>
           </div>
           <div className="set-cards-grid cols-4">
-            {providers.map((provider) => (
-              <div key={provider.id} className={`set-prov ${provider.enabled ? "on" : "off"}`}>
-                <button className="set-prov-body" type="button" onClick={() => openProvider(provider)}>
-                  <div className="set-prov-top">
-                    <span className="set-prov-mark">{provider.label.slice(0, 1).toUpperCase()}</span>
-                    <span className="set-prov-name">{provider.label}</span>
-                  </div>
-                  <div className="set-prov-meta">
-                    {provider.models.length > 0
-                      ? t("settings.modelCount", { count: provider.models.length })
-                      : t("settings.noModel")}
-                    {" · "}
-                    {provider.kind}
-                  </div>
-                </button>
-                <div
-                  className="set-prov-switch"
-                  title={provider.enabled ? t("settings.providerEnabled") : t("settings.providerDisabled")}
+            {providerCards.map((card) => (
+              <div
+                key={card.key}
+                className={`set-prov ${card.configured ? (card.view!.enabled ? "on" : "off") : "ghost"}`}
+              >
+                <button
+                  className="set-prov-body"
+                  type="button"
+                  onClick={() =>
+                    card.configured ? openProvider(card.view!) : openAddPreset(card.preset!)
+                  }
                 >
-                  <Toggle
-                    on={provider.enabled}
-                    onChange={(next) => toggleProviderEnabled(provider, next)}
-                  />
-                </div>
+                  <div className="set-prov-top">
+                    <span className="set-prov-mark">
+                      <ProviderLogo logoKey={card.logoKey} />
+                    </span>
+                    <span className="set-prov-name">{card.label}</span>
+                  </div>
+                  <div className="set-prov-meta">{card.metaText}</div>
+                </button>
+                {card.configured && (
+                  <div
+                    className="set-prov-switch"
+                    title={card.view!.enabled ? t("settings.providerEnabled") : t("settings.providerDisabled")}
+                  >
+                    <Toggle
+                      on={card.view!.enabled}
+                      onChange={(next) => toggleProviderEnabled(card.view!, next)}
+                    />
+                  </div>
+                )}
               </div>
             ))}
-            <button className="set-add-card" type="button" onClick={openAddProvider}>
-              <Plus size={14} />
-              {t("settings.addProvider")}
-            </button>
           </div>
 
           {modal && (
@@ -2831,6 +2946,20 @@ function ConnectModal({
   );
 }
 
+/** Tokenize a command-args string like a shell: respects double/single quotes so a
+ *  value with spaces stays one argument (e.g. `--header "X-API-Key: abc def"` →
+ *  ["--header", "X-API-Key: abc def"]). A naive whitespace split would mangle it,
+ *  which silently breaks configs like `npx -y mcp-remote <url> --header "..."`. */
+function tokenizeArgs(input: string): string[] {
+  const out: string[] = [];
+  const re = /"([^"]*)"|'([^']*)'|(\S+)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(input)) !== null) {
+    out.push(m[1] ?? m[2] ?? m[3] ?? "");
+  }
+  return out;
+}
+
 function McpAddDetail({
   onChanged,
   onNote,
@@ -2860,7 +2989,7 @@ function McpAddDetail({
           : {
               name: name.trim(),
               command: command.trim(),
-              args: args.trim() ? args.trim().split(/\s+/) : [],
+              args: tokenizeArgs(args),
             },
       );
       onNote(
