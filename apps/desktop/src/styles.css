@@ -10247,10 +10247,7 @@ body.resizing-drawer {
   color: var(--muted);
   flex: none;
 }
-.set-prov.active .set-prov-mark { background: var(--brand-soft); border-color: var(--brand-soft); color: var(--brand-strong); }
 .set-prov-name { font-size: 13.5px; font-weight: 600; }
-.set-prov-dot { margin-left: auto; width: 7px; height: 7px; border-radius: 50%; background: var(--line-strong); flex: none; }
-.set-prov-dot.on { background: var(--green); }
 .set-prov-meta { font-size: 11.5px; color: var(--faint); }
 
 /* Dashed "add" tile shared by provider / channel grids. */

@@ -1059,7 +1059,6 @@ function RuntimePane({
 }) {
   const { t } = useTranslation();
   const [providers, setProviders] = useState<ProviderView[]>([]);
-  const [activeId, setActiveId] = useState<string | null>(null);
   const [roles, setRoles] = useState<RoleView[]>([]);
   const [decisions, setDecisions] = useState<RoutingDecision[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
@@ -1078,7 +1077,6 @@ function RuntimePane({
 
   const apply = (snapshot: { providers: ProviderView[]; active_provider_id: string | null }) => {
     setProviders(snapshot.providers);
-    setActiveId(snapshot.active_provider_id);
   };
 
   const reloadRoles = async () => {
