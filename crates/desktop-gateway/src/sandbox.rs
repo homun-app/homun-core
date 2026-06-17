@@ -32,6 +32,23 @@ pub fn artifacts_dir() -> PathBuf {
         .join("artifacts")
 }
 
+/// Host directory holding the contained computer's browser profile (bind-mounted at
+/// `/data/profile`). Persisting it across container recycles keeps cookies/logins, so
+/// the browser looks like a returning user and hits far fewer captchas. Overridable
+/// via `HOMUN_CC_PROFILE_DIR`.
+pub fn cc_profile_dir() -> PathBuf {
+    if let Ok(dir) = std::env::var("HOMUN_CC_PROFILE_DIR") {
+        if !dir.trim().is_empty() {
+            return PathBuf::from(dir);
+        }
+    }
+    std::env::var("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| std::env::temp_dir())
+        .join(".homun")
+        .join("cc-profile")
+}
+
 /// The per-conversation output directory INSIDE the container.
 pub fn container_output_dir(thread: &str) -> String {
     format!("/home/agent/output/{thread}")
@@ -323,6 +340,7 @@ pub fn ensure_contained_computer() -> Result<(), String> {
         let _ = Command::new("bash")
             .arg(&script)
             .env("HOMUN_ARTIFACTS_DIR", artifacts_dir())
+            .env("HOMUN_CC_PROFILE_DIR", cc_profile_dir())
             // Layer D: the container defaults to UTC (debian-slim ships no
             // /etc/localtime). Pass the user's effective IANA zone so `date`,
             // Python AND Chromium's clock inside the container match the user —

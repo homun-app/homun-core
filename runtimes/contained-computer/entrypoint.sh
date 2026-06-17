@@ -40,6 +40,10 @@ websockify --web=/usr/share/novnc "${NOVNC_PORT}" "localhost:${VNC_PORT}" >/dev/
 #    to the container's eth0, NOT its loopback, so the host can't reach CDP
 #    directly. We therefore run Chromium's CDP on loopback and bridge it to the
 #    container's external IP with socat (step 5), which the published port hits.
+# The profile is now persistent (bind-mounted), so a container killed hard (docker
+# rm -f on recycle) can leave a stale SingletonLock that makes Chromium abort on the
+# next start. Clear the lock files before launching — the process owning them is gone.
+rm -f "${PROFILE_DIR}/SingletonLock" "${PROFILE_DIR}/SingletonSocket" "${PROFILE_DIR}/SingletonCookie" 2>/dev/null || true
 log "launching headed Chromium with CDP on 127.0.0.1:${CDP_PORT}"
 chromium \
   --no-sandbox \

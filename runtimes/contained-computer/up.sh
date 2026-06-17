@@ -32,6 +32,11 @@ docker rm -f "${NAME}" >/dev/null 2>&1 || true
 # so skill artifacts (xlsx/pdf/…) persist on disk and are listed/downloadable.
 ARTIFACTS_DIR="${HOMUN_ARTIFACTS_DIR:-$HOME/.homun/artifacts}"
 mkdir -p "${ARTIFACTS_DIR}"
+# Browser profile dir, bind-mounted at /data/profile (Chromium's --user-data-dir):
+# persists cookies/logins across container recycles, so the browser looks like a
+# returning user and trips far fewer captchas. /data is chowned to agent in the image.
+CC_PROFILE_DIR="${HOMUN_CC_PROFILE_DIR:-$HOME/.homun/cc-profile}"
+mkdir -p "${CC_PROFILE_DIR}"
 # Publish to loopback only. --shm-size avoids Chromium crashes on small /dev/shm.
 # Port 9100→9000: on-device Whisper STT server. Named volume persists the model
 # download (~/.cache) across the --rm container lifecycle.
@@ -50,6 +55,7 @@ docker run -d --rm --name "${NAME}" \
   -p 127.0.0.1:9100:9000 \
   -v homun-whisper-cache:/home/agent/.cache \
   -v "${ARTIFACTS_DIR}":/home/agent/output \
+  -v "${CC_PROFILE_DIR}":/data/profile \
   "${IMAGE}"
 
 echo "==> validating CDP (real browser reachable)"
