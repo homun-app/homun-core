@@ -1505,29 +1505,9 @@ export function ChatView({
     >
       <header className="task-topbar">
         <div className="task-title-area">
-          <button
-            className="task-title-button"
-            type="button"
-            onClick={() => setModelOpen((value) => !value)}
-          >
+          <div className="task-title-button" style={{ cursor: "default" }}>
             <span id="chat-title">{thread.title}</span>
-            <ChevronDown size={15} />
-          </button>
-          {modelOpen && (
-            <div className="floating-menu model-menu" role="menu">
-              <div className="model-menu-row" title={activeModelInfo?.model ?? undefined}>
-                <Sparkles size={15} />
-                <span className="model-menu-name">{headerModelLabel}</span>
-                <span>{headerModelMeta}</span>
-              </div>
-              <div className="model-menu-row">
-                <HardDrive size={15} />
-                <span className="model-menu-name">{t("chat.tools")}</span>
-                <span>{headerToolPolicy}</span>
-              </div>
-              <p className="model-menu-hint">{t("chat.changeModelHint")}</p>
-            </div>
-          )}
+          </div>
         </div>
 
       </header>

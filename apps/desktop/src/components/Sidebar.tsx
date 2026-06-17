@@ -935,23 +935,11 @@ export function SettingsDrawer({
       </nav>
 
       <span className="set-nav-spacer" />
-      <button className="set-nav-item" type="button" onClick={onBack}>
-        <Info size={16} />
-        <span>{t("common.information")}</span>
-      </button>
 
       {/* Persistent footer — mirrors the main drawer's [bell + gear], but in Settings
           the gear becomes a back-to-app arrow (you're already in Settings). */}
       <footer className="drawer-footer">
         <div className="drawer-persistent-actions" aria-label={t("sidebar.persistentActions")}>
-          <button
-            className="drawer-footer-action"
-            type="button"
-            aria-label={t("sidebar.notifications")}
-            title={t("sidebar.notifications")}
-          >
-            <Bell size={16} />
-          </button>
           <button
             className="drawer-footer-action"
             type="button"
