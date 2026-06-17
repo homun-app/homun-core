@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { QRCodeSVG } from "qrcode.react";
 import { pluginRegistry } from "../plugins/registry";
 import type { PluginState } from "../lib/coreBridge";
 import { ContactsView } from "./ContactsView";
@@ -4636,6 +4637,34 @@ function ChannelsPane() {
                     onClick={() => void disconnect()}
                   >
                     {t("settings.disconnect")}
+                  </button>
+                </div>
+              ) : status?.qr ? (
+                <div className="set-card chan-connect-card">
+                  <p className="set-hint" style={{ marginTop: 0 }}>
+                    Scan with WhatsApp on your phone:{" "}
+                    <strong>Settings → Linked devices → Link a device</strong>.
+                  </p>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "center",
+                      alignSelf: "center",
+                      padding: 16,
+                      background: "#fff",
+                      borderRadius: 10,
+                    }}
+                  >
+                    <QRCodeSVG value={status.qr} size={220} level="M" />
+                  </div>
+                  <button
+                    className="set-btn"
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void disconnect()}
+                    style={{ alignSelf: "flex-start" }}
+                  >
+                    {t("common.cancel")}
                   </button>
                 </div>
               ) : status?.pair_code ? (
