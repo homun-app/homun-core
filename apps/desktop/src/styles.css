@@ -10298,7 +10298,7 @@ body.resizing-drawer {
   flex: none;
 }
 .set-contact.is-me .set-contact-avatar { background: var(--surface); border-color: var(--brand-soft); color: var(--brand-strong); }
-.set-contact-body { flex: 1; min-width: 0; }
+.set-contact-body { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .set-contact-name { font-size: 13.5px; font-weight: 600; }
 .set-contact.is-me .set-contact-name { color: var(--brand-strong); }
 .set-contact-sub { font-size: 11.5px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
