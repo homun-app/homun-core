@@ -15,6 +15,9 @@ mod skill_security;
 mod process_skills;
 mod mcp_http;
 mod mcp_registry;
+// Reverse proxy for the contained computer's noVNC live view (HTTP assets + WS),
+// so a remote browser on the cloud build can watch the agent's computer.
+mod novnc_proxy;
 mod pdf_render;
 mod sandbox;
 mod task_registry;
@@ -121,8 +124,8 @@ const TASK_EXECUTOR_POLL_INTERVAL_MS: u64 = 1_000;
 const TASK_EXECUTOR_DEFAULT_WORKER_COUNT: usize = 3;
 
 #[derive(Clone)]
-struct AppState {
-    http: reqwest::Client,
+pub(crate) struct AppState {
+    pub(crate) http: reqwest::Client,
     chat_store: Arc<Mutex<ChatStore>>,
     task_store: Arc<Mutex<TaskStore>>,
     computer_store: Arc<Mutex<LocalComputerSessionStore>>,
@@ -139,6 +142,13 @@ struct AppState {
     browser_thread_sessions: Arc<Mutex<std::collections::HashMap<String, ThreadBrowserSession>>>,
     secret_store: Arc<EncryptedFileSecretStore<DevelopmentSecretKeyProvider>>,
     auth_token: Arc<str>,
+    /// Short-lived tickets authorizing the noVNC live-view proxy. The iframe and
+    /// its WebSocket can't carry the Bearer header, so a Bearer-authed endpoint
+    /// mints a ticket the proxy routes accept via query param. ticket -> expiry.
+    pub(crate) novnc_tickets: Arc<Mutex<std::collections::HashMap<String, std::time::Instant>>>,
+    /// The current STABLE live-view ticket, reused across status polls so the embed
+    /// URL (and thus the iframe) doesn't change every poll. Re-minted when expired.
+    pub(crate) novnc_view_ticket: Arc<Mutex<Option<String>>>,
 }
 
 /// A live, reusable browser session bound to a chat thread.
@@ -484,6 +494,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         browser_thread_sessions: Arc::new(Mutex::new(std::collections::HashMap::new())),
         secret_store: Arc::new(open_gateway_secret_store()?),
         auth_token: resolve_gateway_auth_token()?.into(),
+        novnc_tickets: Arc::new(Mutex::new(std::collections::HashMap::new())),
+        novnc_view_ticket: Arc::new(Mutex::new(None)),
     };
     // Fix any pre-existing 0644 data files (created before the umask above was set):
     // the SQLite stores and the WhatsApp session are world-readable on old installs.
@@ -672,6 +684,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/local-computer/live", get(contained_computer_live))
         .route("/api/local-computer/start", post(local_computer_start))
         .route("/api/local-computer/stop", post(local_computer_stop))
+        // Bearer-authed: mint a short-lived ticket for the noVNC live-view proxy
+        // (the iframe + WS that follow can't send the Bearer header).
+        .route("/api/computer/novnc-ticket", post(novnc_proxy::novnc_ticket))
         .route("/api/system/status", get(system_status))
         .route("/api/update/info", get(update_info))
         .route("/api/update/trigger", post(update_trigger))
@@ -764,6 +779,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ));
     let mut app = Router::new()
         .route("/api/health", get(health))
+        // noVNC live-view proxy: OUTSIDE the bearer layer (an iframe/WS can't send
+        // the header) — gated instead by the short-lived ticket. The exact
+        // `/websockify` match wins over the asset catch-all.
+        .route("/api/computer/novnc/websockify", get(novnc_proxy::novnc_ws))
+        .route("/api/computer/novnc/{*path}", get(novnc_proxy::novnc_asset))
         .merge(chat_routes)
         .with_state(state);
     // Server/PaaS mode: serve the built web UI on the same port (one deployable
@@ -26237,9 +26257,21 @@ fn contained_computer_cdp_endpoint() -> Option<String> {
 
 /// The noVNC live-view URL for the contained computer (ADR 0010), or `None` when
 /// contained mode is off. Pure for testability; the in-chat panel embeds this URL.
-fn resolve_contained_computer_novnc(enabled: bool, explicit: Option<&str>) -> Option<String> {
+fn resolve_contained_computer_novnc(
+    enabled: bool,
+    explicit: Option<&str>,
+    server_mode: bool,
+) -> Option<String> {
     if !enabled {
         return None;
+    }
+    // Server build (the gateway serves the SPA): the container's noVNC port is
+    // internal, so route the live view through the gateway's own proxy — a remote
+    // browser loads it from the SAME public origin. A RELATIVE URL resolves against
+    // whatever host/scheme the browser is already on. On desktop the loopback URL
+    // is reachable directly, so keep embedding it (no proxy hop, no ticket).
+    if server_mode {
+        return Some("/api/computer/novnc/vnc.html".to_string());
     }
     Some(
         explicit
@@ -26369,11 +26401,20 @@ async fn update_trigger(State(state): State<AppState>) -> Json<UpdateTriggerResp
 /// Reports whether the contained computer's live view is available, where to
 /// embed it, whether the browser is working RIGHT NOW, and the live step
 /// checklist. Polled by the desktop panel.
-async fn contained_computer_live() -> Json<ContainedComputerLiveResponse> {
-    let novnc_url = resolve_contained_computer_novnc(
+async fn contained_computer_live(State(state): State<AppState>) -> Json<ContainedComputerLiveResponse> {
+    let mut novnc_url = resolve_contained_computer_novnc(
         contained_computer_cdp_endpoint().is_some(),
         env::var("HOMUN_CONTAINED_COMPUTER_NOVNC").ok().as_deref(),
+        env::var("HOMUN_WEB_DIR").map(|v| !v.trim().is_empty()).unwrap_or(false),
     );
+    // A proxied (relative) URL means server mode → bake a stable ticket so the
+    // embed's WebSocket authorizes against the gateway proxy. Desktop uses the
+    // direct loopback URL and needs no ticket.
+    if let Some(url) = novnc_url.as_mut() {
+        if url.starts_with('/') {
+            url.push_str(&format!("?ticket={}", novnc_proxy::current_view_ticket(&state)));
+        }
+    }
     let activity_state = current_browser_activity();
     let terminal = current_sandbox_activity();
     let terminal_active = terminal.iter().any(|entry| entry.running);
@@ -29180,19 +29221,25 @@ data: [DONE]\n";
 
     #[test]
     fn contained_computer_novnc_resolves_when_enabled() {
-        assert_eq!(resolve_contained_computer_novnc(false, None), None);
+        assert_eq!(resolve_contained_computer_novnc(false, None, false), None);
         assert_eq!(
-            resolve_contained_computer_novnc(true, None),
+            resolve_contained_computer_novnc(true, None, false),
             Some("http://127.0.0.1:6080/vnc.html".to_string())
         );
         assert_eq!(
-            resolve_contained_computer_novnc(true, Some("http://10.0.0.5:6080/vnc.html")),
+            resolve_contained_computer_novnc(true, Some("http://10.0.0.5:6080/vnc.html"), false),
             Some("http://10.0.0.5:6080/vnc.html".to_string())
         );
-        // Blank explicit falls back to the default.
+        // Blank explicit falls back to the default (desktop).
         assert_eq!(
-            resolve_contained_computer_novnc(true, Some("  ")),
+            resolve_contained_computer_novnc(true, Some("  "), false),
             Some("http://127.0.0.1:6080/vnc.html".to_string())
+        );
+        // Server mode → the gateway-proxied relative URL, ignoring the internal
+        // explicit endpoint (unreachable from a remote browser).
+        assert_eq!(
+            resolve_contained_computer_novnc(true, Some("http://homun-cc:6080/vnc.html"), true),
+            Some("/api/computer/novnc/vnc.html".to_string())
         );
     }
 

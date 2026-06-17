@@ -4,10 +4,14 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-axum = "0.8"
+axum = { version = "0.8", features = ["ws"] }
 base64 = "0.22"
 bytes = "1"
 futures-util = "0.3"
+# Outbound WebSocket client to proxy the contained computer's noVNC stream
+# (gateway -> homun-cc:6080) through the gateway's own public origin. Plain ws://
+# over the internal/loopback network, so no TLS features are needed here.
+tokio-tungstenite = "0.29"
 local-first-context-compression = { path = "../context-compression" }
 local-first-capabilities = { path = "../capabilities" }
 local-first-browser-automation = { path = "../browser-automation" }

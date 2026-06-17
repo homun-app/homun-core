@@ -99,11 +99,13 @@ To enable it (in `docker-compose.yml`, or the equivalent on your PaaS):
 Without the socket the gateway detects Docker is absent and the feature stays off; the rest
 of the app works.
 
-> **Remaining piece — the live view.** With the above, the agent can fully **drive** the
-> browser (CDP is reached internally over `homun-net`). But the in-chat **live noVNC view**
-> points at `homun-cc:6080`, which is internal — a remote browser can't load it yet. To
-> *watch* the session on the web you must expose noVNC (a second subdomain, or a reverse-proxy
-> route, to `homun-cc:6080`). That UX wiring is the open follow-up.
+> **Live view — works on the web too (no extra config).** The agent drives the browser over
+> CDP internally, AND the in-chat **live noVNC view** is now served through the gateway's own
+> public origin: it reverse-proxies both the noVNC assets and the VNC WebSocket under
+> `/api/computer/novnc/*`, gated by a short-lived ticket (the iframe/WS can't carry the bearer
+> header). So a remote browser watches the session over the SAME TLS domain — no second
+> subdomain, no exposed VNC port. The internal `HOMUN_CONTAINED_COMPUTER_NOVNC` endpoint is
+> used only by the gateway-side proxy, never by the browser.
 
 ## Updates (one-click redeploy)
 

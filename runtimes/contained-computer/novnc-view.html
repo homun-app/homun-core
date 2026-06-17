@@ -32,7 +32,14 @@
     const status = document.getElementById('status');
 
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    const url = `${proto}://${location.host}/websockify`;
+    // WS path relative to where THIS page is served: works both directly on the
+    // container (host:6080/lfpa-view.html → /websockify) and proxied behind the
+    // gateway (/api/computer/novnc/lfpa-view.html → /api/computer/novnc/websockify).
+    // The ticket (present only when proxied) is forwarded so the proxy authorizes us.
+    const dir = location.pathname.replace(/[^/]*$/, '');
+    const ticket = params.get('ticket');
+    const url = `${proto}://${location.host}${dir}websockify`
+      + (ticket ? `?ticket=${encodeURIComponent(ticket)}` : '');
 
     let rfb = null;
     function connect() {
