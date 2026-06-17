@@ -44,6 +44,8 @@ import {
   type ProactivitySuggestion,
   type PluginState,
 } from "./lib/coreBridge";
+import { useSetting } from "./lib/settingsStore";
+import { showSystemNotification, notificationPermission } from "./lib/systemNotifications";
 import type {
   ApprovelItem,
   ChatMessage,
@@ -427,6 +429,8 @@ function fallbackTaskDetail(task: TaskItem): TaskDetailItem {
 
 export default function App() {
   const { t } = useTranslation();
+  // System notifications opt-in (the SettingsView General pane wires permission).
+  const [systemNotifEnabled] = useSetting<boolean>("general.systemNotifications", false);
   const [activeView, setActiveView] = useState<ViewId>("chat");
   const [previousView, setPreviousView] = useState<ViewId>("chat");
   // Onboarding wizard: shown on first launch when no provider is configured.
@@ -575,6 +579,25 @@ export default function App() {
       return;
     }
     if (event.type === "thread.upserted") {
+      // Alert the user when something arrived/finished while the app wasn't in
+      // front (a channel message, or a scheduled task that produced a result).
+      // Skip when focused — the thread list + bell already surface it there.
+      if (
+        systemNotifEnabled &&
+        document.hidden &&
+        notificationPermission() === "granted"
+      ) {
+        const threadId = event.thread_id;
+        showSystemNotification({
+          title: event.title || t("notifications.newActivity"),
+          body:
+            event.channel === "scheduled"
+              ? t("notifications.scheduledReady")
+              : t("notifications.newMessage"),
+          tag: threadId,
+          onClick: () => void navigateToThread(threadId),
+        });
+      }
       void navigateToThread(event.thread_id);
     } else if (event.type === "thread.updated" && event.thread_id === activeThreadId) {
       void refreshChatReadModels(activeThreadId);
