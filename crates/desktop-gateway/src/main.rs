@@ -533,6 +533,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     start_task_executor_worker(state.clone());
     spawn_thread_browser_session_reaper(state.clone());
     spawn_contained_computer_idle_reaper(state.clone());
+    spawn_browser_handoff_reaper(state.clone());
     spawn_connector_event_poller(state.clone());
     start_proactivity_auto_review(state.clone());
     reconnect_channels_on_startup();
@@ -13098,6 +13099,68 @@ fn spawn_contained_computer_idle_reaper(state: AppState) {
                 }
             })
             .await;
+        }
+    });
+}
+
+/// How long a browser task may sit parked waiting for a human to clear a manual
+/// challenge (e.g. a captcha) before it gives up. Without a cap, a task launched
+/// while the user is away from the screen would wait for the approval forever.
+/// Default 180s; override with `HOMUN_BROWSER_HANDOFF_TIMEOUT_SECS` (min 30).
+fn browser_handoff_timeout_secs() -> i64 {
+    env::var("HOMUN_BROWSER_HANDOFF_TIMEOUT_SECS")
+        .ok()
+        .and_then(|v| v.trim().parse::<i64>().ok())
+        .filter(|&v| v >= 30)
+        .unwrap_or(180)
+}
+
+/// Background reaper: every 60s, fail browser tasks parked in WaitingUserApproval
+/// for a `browser.manual_action` (a captcha / "press and hold" / login wall the
+/// agent couldn't auto-solve) longer than `browser_handoff_timeout_secs()`. The
+/// interactive chat doesn't need this — its turn ends — but an autonomous task
+/// ("do X" while the user is away) would otherwise hang on the approval forever.
+fn spawn_browser_handoff_reaper(state: AppState) {
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+            let cutoff = OffsetDateTime::now_utc() - Duration::seconds(browser_handoff_timeout_secs());
+            let Ok(store) = lock_task_store(&state) else {
+                continue;
+            };
+            let Ok(scopes) = store.task_owner_scopes() else {
+                continue;
+            };
+            for (user, workspace) in &scopes {
+                let Ok(tasks) = store.list_tasks(user, workspace) else {
+                    continue;
+                };
+                for task in tasks {
+                    let waiting_handoff = task.status == TaskStatus::WaitingUserApproval
+                        && task
+                            .blocked_reason
+                            .as_deref()
+                            .is_some_and(|reason| reason.contains("browser.manual_action"));
+                    if waiting_handoff && task.updated_at < cutoff {
+                        // Cancel (terminal, no retry — it would just hit the same
+                        // challenge again) with a reason the task/session UI shows.
+                        let _ = store.update_task_status(
+                            &task.task_id,
+                            user,
+                            workspace,
+                            TaskStatus::Cancelled,
+                            Some(
+                                "browser handoff timed out: nobody cleared the manual challenge (e.g. captcha) in time",
+                            ),
+                        );
+                        eprintln!(
+                            "browser-handoff: task {:?} gave up — no human cleared the manual challenge within {}s",
+                            task.task_id,
+                            browser_handoff_timeout_secs()
+                        );
+                    }
+                }
+            }
         }
     });
 }
