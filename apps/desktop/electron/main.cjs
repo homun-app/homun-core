@@ -359,6 +359,18 @@ ipcMain.handle("lfpa:reveal-path", async (_event, targetPath) => {
   return error === "";
 });
 
+// Bring the window to the front when the user clicks a system notification.
+ipcMain.handle("lfpa:focus-window", () => {
+  const win = BrowserWindow.getAllWindows()[0] ?? null;
+  if (win) {
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+  }
+  if (process.platform === "darwin" && app.dock) app.focus({ steal: true });
+  return true;
+});
+
 // Auto-update via electron-updater. The feed is the public `homun-releases` repo
 // (build.publish), so no token is embedded. Manual flow: the Notifications view
 // checks, then downloads + restarts on the user's click. No-op in dev.

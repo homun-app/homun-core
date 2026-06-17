@@ -673,6 +673,11 @@
     "customColor": "Pick a custom color",
     "streamingResponses": "Streaming responses",
     "activitySound": "Sound on activity completion",
+    "systemNotifications": "System notifications",
+    "systemNotificationsDesc": "Alert me via the OS when a message arrives or a scheduled task is ready, even with the app in the background.",
+    "systemNotificationsBlocked": "Blocked — enable Homun under System Settings → Notifications.",
+    "systemNotificationsTest": "Notifications are on — you'll be alerted here.",
+    "test": "Test",
     "custom": "Custom",
     "describeNoProfile": "A model describes models without a profile",
     "localFirstDefault": "Local-first by default",
@@ -1007,6 +1012,9 @@
     "desktopUpdateBody": "Version {{version}} is available — download and restart to install.",
     "desktopUpdateRestarts": "Downloading — the app restarts on its own when it's done.",
     "downloading": "Downloading… {{percent}}%",
-    "restarting": "Restarting…"
+    "restarting": "Restarting…",
+    "newActivity": "New activity",
+    "newMessage": "New message",
+    "scheduledReady": "Scheduled task ready"
   }
 }

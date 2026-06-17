@@ -16,7 +16,8 @@ export type SettingsKey =
   | "privacy.managedCloud"
   | "privacy.approvalGate"
   | "general.streamResponses"
-  | "general.soundOnComplete";
+  | "general.soundOnComplete"
+  | "general.systemNotifications";
 
 export function loadSetting<T>(key: SettingsKey, fallback: T): T {
   try {
