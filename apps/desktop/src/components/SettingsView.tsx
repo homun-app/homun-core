@@ -2889,6 +2889,20 @@ function ConnectModal({
   );
 }
 
+/** Tokenize a command-args string like a shell: respects double/single quotes so a
+ *  value with spaces stays one argument (e.g. `--header "X-API-Key: abc def"` →
+ *  ["--header", "X-API-Key: abc def"]). A naive whitespace split would mangle it,
+ *  which silently breaks configs like `npx -y mcp-remote <url> --header "..."`. */
+function tokenizeArgs(input: string): string[] {
+  const out: string[] = [];
+  const re = /"([^"]*)"|'([^']*)'|(\S+)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(input)) !== null) {
+    out.push(m[1] ?? m[2] ?? m[3] ?? "");
+  }
+  return out;
+}
+
 function McpAddDetail({
   onChanged,
   onNote,
@@ -2918,7 +2932,7 @@ function McpAddDetail({
           : {
               name: name.trim(),
               command: command.trim(),
-              args: args.trim() ? args.trim().split(/\s+/) : [],
+              args: tokenizeArgs(args),
             },
       );
       onNote(
