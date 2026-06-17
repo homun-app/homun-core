@@ -7875,7 +7875,7 @@ fn browser_navigate_tool_schema() -> serde_json::Value {
         "type": "function",
         "function": {
             "name": "browser_navigate",
-            "description": "Open a URL in the real browser and return the SNAPSHOT (accessible text, with the [ref=...] references of interactive elements) of the loaded page. Use it to go to a site (e.g. a train/flight source). After navigation read the snapshot to decide the next action with browser_act.",
+            "description": "Open a URL in the real browser and return the SNAPSHOT (accessible text, with the [ref=...] references of interactive elements) of the loaded page. Use it to go to a site (e.g. a train/flight source). After navigation read the snapshot to decide the next action with browser_act. The browser is a headless Chromium running in a Docker container, driven over CDP — there is NO local browser binary, so never diagnose a failure by checking for a local chromium/firefox install. If the browser reports unavailable/unreachable, it is transient or the contained computer isn't running yet: retry, and if it persists tell the user to start the contained computer (Settings → Local computer) — never claim Chromium is missing or that it's 'a known bug'.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -9851,7 +9851,11 @@ require your confirmation in the app. Propose it and stop."
                                     "browser: session unavailable".to_string(),
                                     "error",
                                 );
-                                Err("Browser unavailable: could not start the session."
+                                Err("Browser unavailable: the contained-computer browser (a headless \
+Chromium in a Docker container, driven over CDP — there is NO local browser binary) did not start. \
+Usually transient, or the contained computer isn't running yet. Do NOT look for a local \
+chromium/firefox install and do NOT conclude Chromium is missing or that it's a known bug. Retry, \
+or tell the user to start the contained computer (Settings → Local computer)."
                                     .to_string())
                             }
                             Some(client) => match name {
