@@ -4365,6 +4365,16 @@ function ChannelsPane() {
     } catch {
       /* leave previous */
     }
+    // Poll Telegram here too so the grid card badge stays current even when the
+    // Telegram modal is closed. Otherwise the badge only updates while the modal
+    // (which mounts the polling TelegramSection) is open → grid shows a stale
+    // "not connected" even though Telegram is connected.
+    try {
+      const tg = await coreBridge.telegramStatus();
+      setTelegramConnected(!!tg?.connected);
+    } catch {
+      /* leave previous */
+    }
   };
   useEffect(() => {
     void refresh();
