@@ -5,6 +5,11 @@ import {
   pickWorkspaceFolder,
   revealWorkspacePath,
 } from "./gatewayConfig";
+import {
+  gatewayGetJson,
+  gatewayPostJson,
+  gatewayDeleteJson,
+} from "./gatewayHttp";
 
 const BROWSER_CHAT_DEFAULT_MAX_TOKENS = 768;
 const BROWSER_CHAT_EXTENDED_MAX_TOKENS = 1_536;
@@ -411,20 +416,6 @@ export interface ComposioConnection {
   status: string;
 }
 
-// Desktop Gateway errors serialize as { error: { code, message } }.
-async function gatewayErrorDetail(response: Response): Promise<string> {
-  try {
-    const payload = (await response.json()) as {
-      error?: { message?: string } | string;
-    };
-    if (typeof payload?.error === "string") return payload.error;
-    if (payload?.error?.message) return payload.error.message;
-  } catch {
-    // fall through to status-code detail
-  }
-  return `HTTP ${response.status}`;
-}
-
 /** A real-time UI event pushed by the gateway over /api/events. */
 export interface AppEvent {
   type: string;
@@ -487,28 +478,6 @@ export function subscribeAppEvents(onEvent: (event: AppEvent) => void): () => vo
     stopped = true;
     controller?.abort();
   };
-}
-
-async function gatewayPostJson<T>(path: string, body: unknown): Promise<T> {
-  const response = await fetch(`${DESKTOP_GATEWAY_URL}${path}`, {
-    method: "POST",
-    headers: { ...gatewayHeaders(), "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!response.ok) {
-    throw new Error(await gatewayErrorDetail(response));
-  }
-  return response.json() as Promise<T>;
-}
-
-async function gatewayGetJson<T>(path: string): Promise<T> {
-  const response = await fetch(`${DESKTOP_GATEWAY_URL}${path}`, {
-    headers: gatewayHeaders(),
-  });
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`);
-  }
-  return response.json() as Promise<T>;
 }
 
 async function electronRuntimeModel(): Promise<ActiveModelInfo> {
@@ -1154,17 +1123,6 @@ export interface UpsertProviderInput {
   base_url: string;
   api_key?: string;
   active_model?: string;
-}
-
-async function gatewayDeleteJson<T>(path: string): Promise<T> {
-  const response = await fetch(`${DESKTOP_GATEWAY_URL}${path}`, {
-    method: "DELETE",
-    headers: gatewayHeaders(),
-  });
-  if (!response.ok) {
-    throw new Error(await gatewayErrorDetail(response));
-  }
-  return response.json() as Promise<T>;
 }
 
 async function electronProviders(): Promise<ProvidersResponse> {
