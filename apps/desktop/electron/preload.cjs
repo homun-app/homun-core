@@ -22,6 +22,8 @@ contextBridge.exposeInMainWorld("localFirstDesktop", {
   // downloads the new version and restarts.
   checkForUpdate: () => ipcRenderer.invoke("lfpa:update-check"),
   installUpdate: () => ipcRenderer.invoke("lfpa:update-install"),
+  // Bring the app window to the front (notification click).
+  focusWindow: () => ipcRenderer.invoke("lfpa:focus-window"),
   // Subscribe to download progress ({percent,transferred,total}); returns an
   // unsubscribe fn.
   onUpdateProgress: (cb) => {

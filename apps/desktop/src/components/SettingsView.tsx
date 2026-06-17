@@ -69,6 +69,11 @@ import {
 } from "../lib/coreBridge";
 import { useSetting } from "../lib/settingsStore";
 import {
+  notificationPermission,
+  requestNotificationPermission,
+  showSystemNotification,
+} from "../lib/systemNotifications";
+import {
   ACCENT_PRESETS,
   DEFAULT_ACCENT,
   loadAccent,
@@ -898,6 +903,56 @@ function AppearancePane() {
 
 /* ------------------------------------------------------------------- general */
 
+// System notifications: a toggle that also requests OS permission on enable, plus
+// a "test" button. The on-state requires BOTH the user opt-in AND granted
+// permission, so a blocked permission can't show a misleading "on".
+function SystemNotificationsRow() {
+  const { t } = useTranslation();
+  const [enabled, setEnabled] = useSetting<boolean>("general.systemNotifications", false);
+  const [perm, setPerm] = useState<NotificationPermission>(notificationPermission());
+
+  const toggle = async (next: boolean) => {
+    if (!next) {
+      setEnabled(false);
+      return;
+    }
+    const granted = await requestNotificationPermission();
+    setPerm(granted);
+    setEnabled(granted === "granted");
+  };
+
+  const on = enabled && perm === "granted";
+  return (
+    <div className="set-trow">
+      <div>
+        <div className="tt">{t("settings.systemNotifications")}</div>
+        <div className="td">
+          {perm === "denied"
+            ? t("settings.systemNotificationsBlocked")
+            : t("settings.systemNotificationsDesc")}
+        </div>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        {on && (
+          <button
+            className="set-btn"
+            type="button"
+            onClick={() =>
+              showSystemNotification({
+                title: "Homun",
+                body: t("settings.systemNotificationsTest"),
+              })
+            }
+          >
+            {t("settings.test")}
+          </button>
+        )}
+        <Toggle on={on} onChange={(next) => void toggle(next)} />
+      </div>
+    </div>
+  );
+}
+
 function GeneralPane() {
   const { t } = useTranslation();
   return (
@@ -916,6 +971,7 @@ function GeneralPane() {
           settingKey="general.soundOnComplete"
           fallback={false}
         />
+        <SystemNotificationsRow />
       </div>
       <p className="set-hint">
         {t("settings.generalHint")}

@@ -12,6 +12,8 @@ interface LocalFirstDesktopConfig {
   onUpdateProgress?: (
     cb: (p: { percent: number; transferred: number; total: number }) => void,
   ) => () => void;
+  /** Bring the desktop window to the front (e.g. on a notification click). */
+  focusWindow?: () => Promise<void>;
 }
 
 declare global {
@@ -156,6 +158,15 @@ export async function installDesktopUpdate(): Promise<{ ok: boolean; error?: str
     return await install();
   } catch (error) {
     return { ok: false, error: String((error as Error)?.message ?? error) };
+  }
+}
+
+/** Brings the desktop window to the front (notification click). No-op on web. */
+export async function focusDesktopWindow(): Promise<void> {
+  try {
+    await desktopConfig?.focusWindow?.();
+  } catch {
+    // best effort
   }
 }
 

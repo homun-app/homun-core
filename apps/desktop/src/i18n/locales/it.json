@@ -673,6 +673,11 @@
     "customColor": "Scegli un colore personalizzato",
     "streamingResponses": "Risposte in streaming",
     "activitySound": "Suono a fine attività",
+    "systemNotifications": "Notifiche di sistema",
+    "systemNotificationsDesc": "Avvisami dal sistema quando arriva un messaggio o un task pianificato è pronto, anche con l'app in background.",
+    "systemNotificationsBlocked": "Bloccate — abilita Homun in Impostazioni di Sistema → Notifiche.",
+    "systemNotificationsTest": "Notifiche attive — verrai avvisato qui.",
+    "test": "Prova",
     "custom": "Personalizzato",
     "describeNoProfile": "Un modello descrive i modelli senza profilo",
     "localFirstDefault": "Local-first per default",
@@ -1007,6 +1012,9 @@
     "desktopUpdateBody": "La versione {{version}} è disponibile — scaricala e riavvia per installarla.",
     "desktopUpdateRestarts": "Download in corso — l'app si riavvia da sola al termine.",
     "downloading": "Scarico… {{percent}}%",
-    "restarting": "Riavvio…"
+    "restarting": "Riavvio…",
+    "newActivity": "Nuova attività",
+    "newMessage": "Nuovo messaggio",
+    "scheduledReady": "Task pianificato pronto"
   }
 }
