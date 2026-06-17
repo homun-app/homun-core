@@ -744,7 +744,6 @@
     "modelCount": "{{count}} modelli",
     "noModel": "nessun modello",
     "addProviderDesc": "Qualsiasi endpoint OpenAI-compatibile, Anthropic o Ollama locale. La chiave è cifrata nel secret store, mai mostrata.",
-    "setActive": "Imposta attivo",
     "keyConfigured": "chiave configurata",
     "noKey": "senza chiave",
     "showHide": "Mostra/nascondi",
