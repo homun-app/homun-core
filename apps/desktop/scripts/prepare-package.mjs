@@ -27,6 +27,11 @@ function run(command, args, cwd) {
 if (!skipBuild) {
   run("npm", ["run", "build"], appRoot);
   run("cargo", ["build", "-p", "local-first-desktop-gateway", "--release"], repoRoot);
+  // Channel bridges are standalone Cargo projects (deliberately NOT in the root
+  // workspace, so the gateway build stays fast), so build each in its own dir.
+  for (const bridge of ["channel-telegram", "channel-whatsapp"]) {
+    run("cargo", ["build", "--release"], join(repoRoot, "runtimes", bridge));
+  }
 }
 
 rmSync(resourcesDir, { recursive: true, force: true });
@@ -66,9 +71,30 @@ if (existsSync(skillsSource)) {
   cpSync(skillsSource, skillsTarget, { recursive: true });
 }
 
+// Stage the channel bridge sidecars next to the gateway so connecting a channel
+// works from an installed app. The gateway is pointed at each staged binary via
+// HOMUN_TELEGRAM_BIN / HOMUN_WHATSAPP_BIN (see main.cjs). Without this, channel
+// connect fails with `telegram_bin_missing` / `whatsapp_bin_missing` because the
+// gateway only finds repo-relative paths absent from the bundle.
+const bridgeExe = process.platform === "win32" ? ".exe" : "";
+const stagedBridges = [];
+for (const bridge of ["channel-telegram", "channel-whatsapp"]) {
+  const bridgeSource = join(repoRoot, "runtimes", bridge, "target", "release", `${bridge}${bridgeExe}`);
+  if (!existsSync(bridgeSource)) {
+    throw new Error(`Channel bridge binary not found: ${bridgeSource}`);
+  }
+  const bridgeTarget = join(resourcesDir, "bin", `${bridge}${bridgeExe}`);
+  cpSync(bridgeSource, bridgeTarget);
+  chmodSync(bridgeTarget, 0o755);
+  stagedBridges.push(relative(repoRoot, bridgeTarget));
+}
+
 console.log(`Prepared Electron resources at ${resourcesDir}`);
 console.log(`Gateway: ${relative(repoRoot, gatewayTarget)}`);
 console.log(`Contained computer: ${relative(repoRoot, ccTarget)}`);
 if (existsSync(skillsTarget)) {
   console.log(`Default skills: ${relative(repoRoot, skillsTarget)}`);
+}
+for (const bridge of stagedBridges) {
+  console.log(`Channel bridge: ${bridge}`);
 }
