@@ -109,6 +109,12 @@ for (const entry of ["package.json", "src", "node_modules"]) {
   }
   cpSync(from, join(baTarget, entry), { recursive: true });
 }
+// node_modules/.bin is a directory of symlinks (e.g. .bin/tsx → ../tsx/dist/cli.mjs),
+// and macOS code signing rejects symlinks in the .app bundle ("invalid destination for
+// symbolic link in bundle"). The sidecar runs tsx via its real path (package.json
+// `start` → `node node_modules/tsx/dist/cli.mjs`), so .bin isn't needed at runtime —
+// drop it. All symlinks live under .bin.
+rmSync(join(baTarget, "node_modules", ".bin"), { recursive: true, force: true });
 for (const entry of ["tsconfig.json", "package-lock.json"]) {
   const from = join(baSource, entry);
   if (existsSync(from)) cpSync(from, join(baTarget, entry));
