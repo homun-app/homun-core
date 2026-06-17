@@ -842,8 +842,7 @@ const SETTINGS_SUBNAV: Partial<
     defaultSub: "composio",
     items: [
       { id: "composio", label: "Composio" },
-      { id: "fs", label: "filesystem" },
-      { id: "catalogo", label: "settings.subnavCatalog" },
+      { id: "mcp", label: "MCP" },
       { id: "attivita", label: "settings.subnavActivity" },
     ],
   },

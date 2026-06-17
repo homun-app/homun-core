@@ -1362,6 +1362,17 @@ async function electronMcpConnect(input: {
   });
 }
 
+export type McpConnectedServer = { provider_id: string; name: string; tools: number };
+
+/** All configured MCP servers (NOT derived from discovered tools), so a server
+ *  that connected with 0 tools / pending auth still shows in the UI. */
+async function electronMcpConnected(): Promise<McpConnectedServer[]> {
+  const payload = await gatewayGetJson<{ servers: McpConnectedServer[] }>(
+    "/api/capabilities/mcp/connected",
+  );
+  return payload.servers ?? [];
+}
+
 async function electronComposioConnect(apiKey: string): Promise<ComposioConnectResult> {
   return gatewayPostJson<ComposioConnectResult>(
     "/api/capabilities/composio/connect",
@@ -1837,6 +1848,7 @@ export const coreBridge = {
     headers?: Record<string, string>;
   }) => electronMcpConnect(input),
   mcpRegistry: (q?: string) => electronMcpRegistry(q),
+  mcpConnected: () => electronMcpConnected(),
   mcpDisconnect: (providerId: string) => electronMcpDisconnect(providerId),
   composioConnect: (apiKey: string) => electronComposioConnect(apiKey),
   composioToolkits: () => electronComposioToolkits(),
