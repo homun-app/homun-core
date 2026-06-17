@@ -14094,18 +14094,24 @@ async fn handle_channel_inbound(
                 || id_matches(message.sender_pn.as_deref()));
         if is_self {
             if let Some((approve, code)) = parse_approval_reply(&message.content) {
-                let reply = if approve {
-                    execute_pending_approval(state, &code).await
-                } else {
-                    match take_pending_approval(&code) {
-                        Some(_) => format!("❌ Cancelled ({code})."),
-                        None => format!("Code {code} not valid or expired."),
-                    }
-                };
-                let _ = channel_send(state, port, &message.sender, &reply).await;
-                return Json(serde_json::json!({
-                    "action": "approval", "code": code, "approved": approve
-                }));
+                // Only a REAL pending code is a control reply. Otherwise this is a
+                // normal message that merely starts with No/Ok/Sì (e.g. "No, that's
+                // wrong…") and must flow to the conversation — not be answered with
+                // "Code … not valid or expired."
+                if pending_approval_exists(&code) {
+                    let reply = if approve {
+                        execute_pending_approval(state, &code).await
+                    } else {
+                        match take_pending_approval(&code) {
+                            Some(_) => format!("❌ Cancelled ({code})."),
+                            None => format!("Code {code} not valid or expired."),
+                        }
+                    };
+                    let _ = channel_send(state, port, &message.sender, &reply).await;
+                    return Json(serde_json::json!({
+                        "action": "approval", "code": code, "approved": approve
+                    }));
+                }
             }
         }
     }
@@ -18702,6 +18708,19 @@ fn take_pending_approval(code: &str) -> Option<(String, serde_json::Value)> {
     let idx = list.iter().position(|p| p.code == code)?;
     let p = list.remove(idx);
     Some((p.tool, p.args))
+}
+
+/// Non-consuming check: is there a live (non-expired) pending approval with this code?
+/// Lets the channel handler treat "OK/NO <word>" as an approval reply ONLY for real
+/// codes, so a normal message that happens to start with No/Ok/Sì (e.g. "No, that's
+/// wrong…") isn't hijacked and answered with "Code … not valid or expired."
+fn pending_approval_exists(code: &str) -> bool {
+    let code = code.trim().to_uppercase();
+    let now = std::time::Instant::now();
+    pending_approvals()
+        .lock()
+        .map(|list| list.iter().any(|p| p.expires_at > now && p.code == code))
+        .unwrap_or(false)
 }
 
 /// Execute a confirmed pending approval (by code) → user-facing reply text. Routes MCP vs
