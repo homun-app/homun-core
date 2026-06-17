@@ -255,6 +255,21 @@ function spawnGateway() {
     if (fs.existsSync(skillsDir)) env.HOMUN_DEFAULT_SKILLS_DIR = skillsDir;
   }
 
+  // Point the gateway at the bundled channel-bridge sidecars (Telegram,
+  // WhatsApp) so connecting a channel works from an installed app. Without this
+  // the gateway only finds repo-relative bridge paths (absent from the bundle)
+  // and channel connect fails with `telegram_bin_missing` / `whatsapp_bin_missing`.
+  // Same dev/packaged story as above; an explicit env override wins.
+  const bridgeExe = process.platform === "win32" ? ".exe" : "";
+  if (!env.HOMUN_TELEGRAM_BIN) {
+    const tgBin = path.join(RESOURCES_ROOT, "bin", `channel-telegram${bridgeExe}`);
+    if (fs.existsSync(tgBin)) env.HOMUN_TELEGRAM_BIN = tgBin;
+  }
+  if (!env.HOMUN_WHATSAPP_BIN) {
+    const waBin = path.join(RESOURCES_ROOT, "bin", `channel-whatsapp${bridgeExe}`);
+    if (fs.existsSync(waBin)) env.HOMUN_WHATSAPP_BIN = waBin;
+  }
+
   if (gatewayBin) {
     gatewayProcess = spawn(gatewayBin, [], {
       cwd: REPO_ROOT,
