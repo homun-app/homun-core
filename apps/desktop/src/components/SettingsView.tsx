@@ -54,6 +54,7 @@ import {
   type ProviderModelView,
   type ProviderView,
   type McpRegistryServer,
+  type McpConnectedServer,
   type CatalogPreview,
   type CatalogSkills,
   type ChannelIdentity,
@@ -197,11 +198,7 @@ export function SettingsView({ section, sub, onPluginsChanged }: SettingsViewPro
         {section === "channels" && <ChannelsPane />}
         {section === "connections" && (
           <ConnectorsPane
-            sub={
-              sub === "fs" || sub === "catalogo" || sub === "attivita"
-                ? sub
-                : "composio"
-            }
+            sub={sub === "mcp" || sub === "attivita" ? sub : "composio"}
           />
         )}
         {section === "skills" && <SkillssPane />}
@@ -1850,7 +1847,7 @@ function PrivacyPane() {
 
 /* ---------------------------------------------------------------- connectors */
 
-type ConnectorsSub = "composio" | "fs" | "catalogo" | "attivita";
+type ConnectorsSub = "composio" | "mcp" | "attivita";
 
 // Full-width connectors pane driven by the nav submenu (Composio / filesystem /
 // MCP catalog / Activity). The old internal master-detail rail (.mdl-rail) is
@@ -1884,19 +1881,6 @@ function ConnectorsPane({ sub = "composio" }: { sub?: ConnectorsSub }) {
   // verified and toolkits are cached → treat it as connected.
   const composioConnected = composioConn?.status.toLowerCase() === "active";
 
-  // Group MCP tools by provider so each server shows as one entry + tool count.
-  const mcpProviders = new Map<string, { name: string; tools: number }>();
-  for (const tool of snap?.tools ?? []) {
-    if (tool.provider_kind !== "mcp") continue;
-    const entry = mcpProviders.get(tool.provider_id) ?? {
-      name: tool.provider_id.replace(/^mcp:/, ""),
-      tools: 0,
-    };
-    entry.tools += 1;
-    mcpProviders.set(tool.provider_id, entry);
-  }
-  const mcpList = [...mcpProviders.entries()];
-
   return (
     <div className="conn-pane">
       {sub === "composio" && (
@@ -1907,23 +1891,7 @@ function ConnectorsPane({ sub = "composio" }: { sub?: ConnectorsSub }) {
         />
       )}
 
-      {sub === "fs" && (
-        <FilesystemServersDetail
-          mcpList={mcpList}
-          snap={snap}
-          onChanged={refresh}
-          onNote={setNote}
-        />
-      )}
-
-      {sub === "catalogo" && (
-        <McpCatalogDetail
-          connectedIds={new Set(mcpList.map(([id]) => id))}
-          onChanged={refresh}
-          onNote={setNote}
-          onConnected={() => void refresh()}
-        />
-      )}
+      {sub === "mcp" && <McpManager onChanged={refresh} onNote={setNote} />}
 
       {sub === "attivita" && <ConnectorActivityDetail />}
 
@@ -1936,59 +1904,128 @@ function ConnectorsPane({ sub = "composio" }: { sub?: ConnectorsSub }) {
   );
 }
 
-/** The "filesystem" sub: local MCP servers and their tools, full-width. Each
- *  connected MCP server renders as a header + tool list (reusing McpServerDetail);
- *  a manual "Add server MCP" form is available below. */
-function FilesystemServersDetail({
-  mcpList,
-  snap,
+/** Unified MCP screen (like Skills): Active | Catalog tabs. "Active" lists ALL
+ *  configured servers from /connected (NOT tool-derived, so a 0-tool / pending-auth
+ *  server still shows), each with its tool count + a disconnect. The Add form
+ *  supports a local command (stdio) OR a remote URL. */
+function McpManager({
   onChanged,
   onNote,
 }: {
-  mcpList: [string, { name: string; tools: number }][];
-  snap: CoreCapabilitySnapshot | null;
   onChanged: () => Promise<void>;
   onNote: (note: string | null) => void;
 }) {
-  const { t } = useTranslation();
+  const [tab, setTab] = useState<"active" | "catalog">("active");
+  const [servers, setServers] = useState<McpConnectedServer[]>([]);
   const [adding, setAdding] = useState(false);
+
+  const reload = async () => {
+    try {
+      setServers(await coreBridge.mcpConnected());
+    } catch {
+      /* keep previous */
+    }
+  };
+  useEffect(() => {
+    void reload();
+  }, []);
+
+  const refreshAll = async () => {
+    await onChanged();
+    await reload();
+  };
+
+  const disconnect = async (id: string) => {
+    onNote(null);
+    try {
+      await coreBridge.mcpDisconnect(id);
+      await refreshAll();
+    } catch (error) {
+      onNote((error as Error).message);
+    }
+  };
+
   return (
     <div className="conn-stack">
-      {mcpList.length === 0 && !adding && (
-        <p className="set-hint">{t("settings.noLocalMcpServer")}</p>
-      )}
-
-      {mcpList.map(([id, info]) => (
-        <McpServerDetail
-          key={id}
-          providerId={id}
-          info={info}
-          snap={snap}
-          onChanged={onChanged}
-          onNote={onNote}
-          onDisconnected={() => void onChanged()}
-        />
-      ))}
-
-      {adding ? (
-        <McpAddDetail
-          onChanged={async () => {
-            await onChanged();
-            setAdding(false);
-          }}
-          onNote={onNote}
-          onConnected={() => void onChanged()}
-        />
-      ) : (
+      <div style={{ display: "flex", gap: 8, marginBottom: "var(--s3)" }}>
         <button
           type="button"
-          className="set-btn"
-          style={{ alignSelf: "flex-start" }}
-          onClick={() => setAdding(true)}
+          className={`set-btn${tab === "active" ? " primary" : ""}`}
+          onClick={() => setTab("active")}
         >
-          <Plus size={14} />
-          <span style={{ marginLeft: 6 }}>{t("settings.addMcpServerManual")}</span>
+          Active
         </button>
+        <button
+          type="button"
+          className={`set-btn${tab === "catalog" ? " primary" : ""}`}
+          onClick={() => setTab("catalog")}
+        >
+          Catalog
+        </button>
+      </div>
+
+      {tab === "active" ? (
+        <>
+          {servers.length === 0 && !adding && (
+            <p className="set-hint">No MCP servers yet. Add one below, or browse the Catalog.</p>
+          )}
+
+          {servers.map((s) => (
+            <div
+              key={s.provider_id}
+              className="set-card"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 12,
+              }}
+            >
+              <div>
+                <strong>{s.name}</strong>
+                <span className="set-hint" style={{ marginLeft: 8 }}>
+                  {s.tools} tool{s.tools === 1 ? "" : "s"}
+                  {s.tools === 0 ? " — none discovered (check the URL or auth)" : ""}
+                </span>
+              </div>
+              <button
+                type="button"
+                className="set-btn danger"
+                onClick={() => void disconnect(s.provider_id)}
+              >
+                Disconnect
+              </button>
+            </div>
+          ))}
+
+          {adding ? (
+            <McpAddDetail
+              onChanged={async () => {
+                await refreshAll();
+                setAdding(false);
+              }}
+              onNote={onNote}
+              onConnected={() => void refreshAll()}
+            />
+          ) : (
+            <button
+              type="button"
+              className="set-btn"
+              style={{ alignSelf: "flex-start" }}
+              onClick={() => setAdding(true)}
+            >
+              <Plus size={14} />
+              <span style={{ marginLeft: 6 }}>Add MCP server</span>
+            </button>
+          )}
+        </>
+      ) : (
+        <McpCatalogDetail
+          connectedIds={new Set(servers.map((s) => s.provider_id))}
+          onChanged={refreshAll}
+          onNote={onNote}
+          onConnected={() => void refreshAll()}
+        />
       )}
     </div>
   );
@@ -2804,19 +2841,70 @@ function McpAddDetail({
   onConnected: (providerId: string) => void;
 }) {
   const { t } = useTranslation();
+  const [mode, setMode] = useState<"command" | "url">("command");
   const [name, setName] = useState("");
   const [command, setCommand] = useState("");
   const [args, setArgs] = useState("");
+  const [url, setUrl] = useState("");
   const [busy, setBusy] = useState(false);
+
+  const ready = !!name.trim() && (mode === "command" ? !!command.trim() : !!url.trim());
+
+  const submit = async () => {
+    setBusy(true);
+    onNote(null);
+    try {
+      const result = await coreBridge.mcpConnect(
+        mode === "url"
+          ? { name: name.trim(), url: url.trim() }
+          : {
+              name: name.trim(),
+              command: command.trim(),
+              args: args.trim() ? args.trim().split(/\s+/) : [],
+            },
+      );
+      onNote(
+        result.discovery_error
+          ? `Connected with warning: ${result.discovery_error}`
+          : t("settings.connectedTools", { count: result.tools_cached, source: result.provider_id }),
+      );
+      setName("");
+      setCommand("");
+      setArgs("");
+      setUrl("");
+      await onChanged();
+      onConnected(result.provider_id);
+    } catch (error) {
+      onNote(t("settings.mcpConnectionFailed", { message: (error as Error).message }));
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
     <>
       <div className="mdl-detail-head">
         <h3 className="mdl-detail-title">{t("settings.addMcpServer")}</h3>
-        <p className="mdl-detail-sub">
-          {t("settings.addMcpServerDesc")}
-        </p>
+        <p className="mdl-detail-sub">{t("settings.addMcpServerDesc")}</p>
       </div>
+
+      <div style={{ display: "flex", gap: 8, marginBottom: "var(--s2)" }}>
+        <button
+          type="button"
+          className={`set-btn${mode === "command" ? " primary" : ""}`}
+          onClick={() => setMode("command")}
+        >
+          Command (local)
+        </button>
+        <button
+          type="button"
+          className={`set-btn${mode === "url" ? " primary" : ""}`}
+          onClick={() => setMode("url")}
+        >
+          URL (remote)
+        </button>
+      </div>
+
       <div className="mdl-field">
         <label className="mdl-field-label">{t("settings.nameLabel")}</label>
         <input
@@ -2826,54 +2914,46 @@ function McpAddDetail({
           onChange={(e) => setName(e.target.value)}
         />
       </div>
-      <div className="mdl-field">
-        <label className="mdl-field-label">{t("settings.commandLabel")}</label>
-        <input
-          className="set-input"
-          placeholder={t("settings.commandPlaceholder")}
-          value={command}
-          onChange={(e) => setCommand(e.target.value)}
-        />
-      </div>
-      <div className="mdl-field">
-        <label className="mdl-field-label">{t("settings.argumentsLabel")}</label>
-        <input
-          className="set-input"
-          placeholder={t("settings.argumentsPlaceholder")}
-          value={args}
-          onChange={(e) => setArgs(e.target.value)}
-        />
-      </div>
+
+      {mode === "command" ? (
+        <>
+          <div className="mdl-field">
+            <label className="mdl-field-label">{t("settings.commandLabel")}</label>
+            <input
+              className="set-input"
+              placeholder={t("settings.commandPlaceholder")}
+              value={command}
+              onChange={(e) => setCommand(e.target.value)}
+            />
+          </div>
+          <div className="mdl-field">
+            <label className="mdl-field-label">{t("settings.argumentsLabel")}</label>
+            <input
+              className="set-input"
+              placeholder={t("settings.argumentsPlaceholder")}
+              value={args}
+              onChange={(e) => setArgs(e.target.value)}
+            />
+          </div>
+        </>
+      ) : (
+        <div className="mdl-field">
+          <label className="mdl-field-label">URL</label>
+          <input
+            className="set-input"
+            placeholder="https://example.com/mcp"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+          />
+        </div>
+      )}
+
       <button
         className="set-btn primary"
         type="button"
         style={{ marginTop: 4, alignSelf: "flex-start" }}
-        disabled={busy || !name.trim() || !command.trim()}
-        onClick={async () => {
-          setBusy(true);
-          onNote(null);
-          try {
-            const result = await coreBridge.mcpConnect({
-              name: name.trim(),
-              command: command.trim(),
-              args: args.trim() ? args.trim().split(/\s+/) : [],
-            });
-            onNote(
-              result.discovery_error
-                ? `Connected with warning: ${result.discovery_error}`
-                : t("settings.connectedTools", { count: result.tools_cached, source: result.provider_id }),
-            );
-            setName("");
-            setCommand("");
-            setArgs("");
-            await onChanged();
-            onConnected(result.provider_id);
-          } catch (error) {
-            onNote(t("settings.mcpConnectionFailed", { message: (error as Error).message }));
-          } finally {
-            setBusy(false);
-          }
-        }}
+        disabled={busy || !ready}
+        onClick={() => void submit()}
       >
         <Plus size={14} />
         <span style={{ marginLeft: 6 }}>{busy ? t("settings.connecting") : t("settings.addMcp")}</span>
