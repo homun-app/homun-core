@@ -26,7 +26,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { QRCodeSVG } from "qrcode.react";
 import { pluginRegistry } from "../plugins/registry";
@@ -616,6 +616,34 @@ function AccountPane({
   const [name, setName] = useSetting("displayName", "");
   const [accountEmail, setAccountEmail] = useSetting<string>("email", "");
   const [computerMsg, setComputerMsg] = useState<string | null>(null);
+  const [profileImage, setProfileImage] = useSetting<string>("profileImage", "");
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const onProfileImageSelected = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = ""; // allow re-picking the same file
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        // Resize + center cover-crop to a small square so localStorage stays light.
+        const size = 160;
+        const canvas = document.createElement("canvas");
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
+        const scale = Math.max(size / img.width, size / img.height);
+        const w = img.width * scale;
+        const h = img.height * scale;
+        ctx.drawImage(img, (size - w) / 2, (size - h) / 2, w, h);
+        setProfileImage(canvas.toDataURL("image/jpeg", 0.85));
+      };
+      img.src = reader.result as string;
+    };
+    reader.readAsDataURL(file);
+  };
 
   return (
     <>
@@ -625,7 +653,37 @@ function AccountPane({
           <div>
             <div className="tt">{t("settings.profileImage")}</div>
           </div>
-          <span className="set-profile-avatar" aria-hidden />
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {profileImage && (
+              <button type="button" className="set-btn" onClick={() => setProfileImage("")}>
+                Remove
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              aria-label={t("settings.profileImage")}
+              style={{ padding: 0, border: "none", background: "none", cursor: "pointer" }}
+            >
+              {profileImage ? (
+                <img
+                  src={profileImage}
+                  alt=""
+                  className="set-profile-avatar"
+                  style={{ objectFit: "cover" }}
+                />
+              ) : (
+                <span className="set-profile-avatar" />
+              )}
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              style={{ display: "none" }}
+              onChange={onProfileImageSelected}
+            />
+          </div>
         </div>
         <div className="set-trow">
           <div>

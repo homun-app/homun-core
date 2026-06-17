@@ -10,6 +10,7 @@ export type SettingsKey =
   | "displayName"
   | "workspaceName"
   | "email"
+  | "profileImage"
   | "theme"
   | "language"
   | "privacy.localFirst"
