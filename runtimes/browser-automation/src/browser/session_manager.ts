@@ -1,10 +1,8 @@
 import { mkdir, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-// patchright-core (stealth drop-in for playwright-core) for both the launcher and
-// the types, so the launcher-returned objects and our annotations stay consistent.
-import type { Browser, BrowserContext, Dialog, Locator, Page } from "patchright-core";
-import { chromium } from "patchright-core";
+import type { Browser, BrowserContext, Dialog, Locator, Page } from "playwright-core";
+import { chromium } from "playwright-core";
 import { BrowserAutomationError } from "../contracts.js";
 import { executeAction, requireRef, type BrowserActRequest, type BrowserActionResult } from "./actions.js";
 import { BrowserArtifactRoot } from "./artifacts.js";
@@ -570,10 +568,10 @@ export class BrowserSessionManager {
       headless: this.profile.headless,
       executablePath: this.profile.executablePath,
       acceptDownloads: true,
-      // Anti-detection: drop the "controlled by automated software" banner and the
-      // AutomationControlled blink feature (which sets navigator.webdriver), and
-      // present a host-consistent locale/timezone (a mismatch is itself a tell).
-      // patchright (the chromium import) patches the deeper CDP Runtime.enable leak.
+      // Anti-detection on this managed-launch path: drop the "controlled by automated
+      // software" banner and the AutomationControlled blink feature (which sets
+      // navigator.webdriver), and present a host-consistent locale/timezone (a
+      // mismatch is itself a tell).
       ignoreDefaultArgs: ["--enable-automation"],
       args: ["--disable-blink-features=AutomationControlled"],
       locale: hostLocale(),
