@@ -8322,6 +8322,76 @@ fn cap_tokenize(s: &str) -> Vec<String> {
         .collect()
 }
 
+/// Best-effort pre-retrieval of connected-service (Composio) tools for the user's
+/// message, run once at turn start so the model already has the relevant tools
+/// without a find_capability hop. Keyword overlap always runs (cheap); when
+/// `HOMUN_COMPOSIO_DENSE` is set it RRF-fuses a dense embedding rank over the top
+/// keyword candidates (catches concepts / cross-language, e.g. an Italian query vs
+/// English tool descriptions). Best-effort throughout: any failure degrades to
+/// keyword-only and never blocks the turn. Returns up to `k` schemas, best first.
+async fn auto_retrieve_composio(
+    http: &reqwest::Client,
+    query: &str,
+    catalog: &[(String, String, serde_json::Value)],
+    k: usize,
+) -> Vec<serde_json::Value> {
+    const RRF_K: f32 = 60.0;
+    if catalog.is_empty() || k == 0 {
+        return Vec::new();
+    }
+    let q_tokens: std::collections::BTreeSet<String> = cap_tokenize(query).into_iter().collect();
+    if q_tokens.is_empty() {
+        return Vec::new();
+    }
+    // Keyword candidates: distinct query tokens present in each entry's haystack.
+    let mut keyword: Vec<(usize, usize)> = catalog
+        .iter()
+        .enumerate()
+        .map(|(i, (_, haystack, _))| {
+            (i, q_tokens.iter().filter(|t| haystack.contains(t.as_str())).count())
+        })
+        .filter(|(_, score)| *score > 0)
+        .collect();
+    keyword.sort_by(|a, b| b.1.cmp(&a.1));
+    keyword.truncate(24);
+    if keyword.is_empty() {
+        return Vec::new();
+    }
+    let keyword_rank: std::collections::HashMap<usize, usize> =
+        keyword.iter().enumerate().map(|(rank, (i, _))| (*i, rank)).collect();
+    // Optional dense re-rank over the top candidates (env-gated to avoid per-turn
+    // embed latency until measured); bounded to a few local embed calls.
+    let dense_rank: std::collections::HashMap<usize, usize> =
+        if std::env::var("HOMUN_COMPOSIO_DENSE").is_ok() {
+            match embed_text(http, query).await {
+                Some(q_vec) => {
+                    let mut scored: Vec<(usize, f32)> = Vec::new();
+                    for (i, _) in keyword.iter().take(8) {
+                        if let Some(v) = embed_text(http, &catalog[*i].1).await {
+                            scored.push((*i, cosine(&q_vec, &v)));
+                        }
+                    }
+                    scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+                    scored.iter().enumerate().map(|(rank, (i, _))| (*i, rank)).collect()
+                }
+                None => std::collections::HashMap::new(),
+            }
+        } else {
+            std::collections::HashMap::new()
+        };
+    // Reciprocal-rank fusion of the keyword + dense rankings.
+    let mut fused: Vec<(usize, f32)> = keyword
+        .iter()
+        .map(|(i, _)| {
+            let kr = keyword_rank.get(i).map(|r| 1.0 / (RRF_K + *r as f32)).unwrap_or(0.0);
+            let dr = dense_rank.get(i).map(|r| 1.0 / (RRF_K + *r as f32)).unwrap_or(0.0);
+            (*i, kr + dr)
+        })
+        .collect();
+    fused.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    fused.into_iter().take(k).map(|(i, _)| catalog[i].2.clone()).collect()
+}
+
 /// Real BM25 ranking — IDF (rare terms weigh more), TF saturation (k1), and length
 /// normalization (b) — over the unified capability corpus. This is the lexical search the
 /// SOTA (Anthropic Tool Search) uses by default; no embeddings needed at this scale. An
@@ -9133,6 +9203,26 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
     if !mcp_catalog.schemas.is_empty() && mcp_catalog.schemas.len() <= MCP_ALWAYS_LOAD_MAX {
         for schema in &mcp_catalog.schemas {
             base_tools.push(schema.clone());
+        }
+    }
+    // Composio is the LARGE catalog (hundreds of tools) → kept behind find_capability,
+    // but pre-retrieve the few relevant to THIS message and load them up front, so the
+    // model uses them without having to think to search. Best-effort; deduped against
+    // what's already loaded (core + always-loaded MCP).
+    if has_composio {
+        let loaded: std::collections::HashSet<String> = base_tools
+            .iter()
+            .filter_map(|s| s.pointer("/function/name").and_then(|v| v.as_str()).map(String::from))
+            .collect();
+        for schema in auto_retrieve_composio(&state.http, &request.prompt, &catalog_index, 4).await {
+            let name = schema
+                .pointer("/function/name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            if !name.is_empty() && !loaded.contains(&name) {
+                base_tools.push(schema);
+            }
         }
     }
     // Unified capability corpus for `find_capability`: deferred native tools + installed
