@@ -472,6 +472,10 @@ export default function App() {
   // sub-polling cadence). Used to mark the thread busy in the sidebar immediately,
   // before the 2.5s taskQueue polling catches up.
   const [streamingThreadId, setStreamingThreadId] = useState<string | null>(null);
+  // Thread ids generating in the BACKGROUND (a chat left mid-answer while another is
+  // on screen). Polled from the gateway's resume registry so the sidebar dots light
+  // up on every working chat, not only the active one.
+  const [backgroundStreamIds, setBackgroundStreamIds] = useState<Set<string>>(new Set());
   const [selectedTaskId, setSelectedTaskId] = useState("task_prompt_session");
   const [drawerOpen, setDrawerOpen] = useState(() => window.innerWidth > 860);
   const activeThread = useMemo(
@@ -485,7 +489,7 @@ export default function App() {
   // the taskQueue snapshot (running/queued tasks linked to a thread). The union
   // covers both the chat-stream case and the durable-background-task case.
   const busyThreadIds = useMemo(() => {
-    const ids = new Set<string>();
+    const ids = new Set<string>(backgroundStreamIds);
     if (streamingThreadId) ids.add(streamingThreadId);
     for (const thread of chatThreads) {
       const task = taskItems.find((item) => item.id === thread.taskId);
@@ -494,7 +498,7 @@ export default function App() {
       }
     }
     return ids;
-  }, [streamingThreadId, chatThreads, taskItems]);
+  }, [streamingThreadId, backgroundStreamIds, chatThreads, taskItems]);
   const selectedTask = useMemo(
     () =>
       taskItems.find((task) => task.id === selectedTaskId) ?? {
@@ -1015,11 +1019,15 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    const pollActiveStreams = () =>
+      void coreBridge.activeStreams().then((ids) => setBackgroundStreamIds(new Set(ids)));
     void loadMemoryAndCapabilities();
     void loadTaskQueue();
     void loadAutomations();
+    pollActiveStreams();
     const interval = window.setInterval(() => {
       void loadTaskQueue();
+      pollActiveStreams();
     }, 4_000);
     return () => window.clearInterval(interval);
   }, []);
