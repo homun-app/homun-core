@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   Bolt,
+  Check,
   ChevronDown,
   Clock3,
   MessageSquare,
+  Pencil,
   Plug,
   Plus,
   Power,
@@ -30,6 +32,7 @@ type SelectedSource =
 interface AutomationsViewProps {
   automations: ManagedAutomation[];
   onCreatete: (input: AutomationCreateteInput) => void;
+  onUpdate: (id: string, input: { title?: string; prompt?: string }) => void;
   onToggle: (id: string) => void;
   onDelete: (id: string) => void;
 }
@@ -47,11 +50,18 @@ function formatWhen(ts: number | null): string {
 export function AutomationsView({
   automations,
   onCreatete,
+  onUpdate,
   onToggle,
   onDelete,
 }: AutomationsViewProps) {
   const { t } = useTranslation();
   const [composing, setComposing] = useState(false);
+  // Inline edit of an existing automation (title + action). Schedule/trigger edits
+  // go through the agent (update_automation) since rebuilding the picker state from a
+  // recurrence string is error-prone.
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editTitle, setEditTitle] = useState("");
+  const [editPrompt, setEditPrompt] = useState("");
   const [title, setTitle] = useState("");
   const [prompt, setPrompt] = useState("");
   const [triggerKind, setTriggerKind] = useState<"schedule" | "event">("schedule");
@@ -533,8 +543,28 @@ export function AutomationsView({
                   <span className="auto-source">{a.source === "chat" ? t("automations.fromChat") : t("automations.suggested")}</span>
                 )}
               </div>
-              <p className="auto-card-title">{a.title}</p>
-              <p className="auto-card-prompt">{a.prompt}</p>
+              {editingId === a.id ? (
+                <div className="auto-card-edit" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  <input
+                    className="set-input"
+                    value={editTitle}
+                    onChange={(e) => setEditTitle(e.target.value)}
+                    aria-label={t("automations.title")}
+                  />
+                  <textarea
+                    className="set-input"
+                    value={editPrompt}
+                    onChange={(e) => setEditPrompt(e.target.value)}
+                    rows={3}
+                    aria-label={t("automations.action")}
+                  />
+                </div>
+              ) : (
+                <>
+                  <p className="auto-card-title">{a.title}</p>
+                  <p className="auto-card-prompt">{a.prompt}</p>
+                </>
+              )}
               <div className="auto-card-meta">
                 {a.trigger.type === "schedule" && a.next_run && (
                   <span>
@@ -554,22 +584,65 @@ export function AutomationsView({
               </div>
             </div>
             <div className="auto-card-actions">
-              <button
-                className="auto-icon"
-                title={a.enabled ? t("automations.disable") : t("automations.enable")}
-                aria-label={a.enabled ? t("automations.disable") : t("automations.enable")}
-                onClick={() => onToggle(a.id)}
-              >
-                <Power size={15} aria-hidden />
-              </button>
-              <button
-                className="auto-icon danger"
-                title={t("common.delete")}
-                aria-label={t("common.delete")}
-                onClick={() => onDelete(a.id)}
-              >
-                <Trash2 size={15} aria-hidden />
-              </button>
+              {editingId === a.id ? (
+                <>
+                  <button
+                    className="auto-icon"
+                    title={t("common.save")}
+                    aria-label={t("common.save")}
+                    onClick={() => {
+                      const title = editTitle.trim();
+                      const prompt = editPrompt.trim();
+                      const changes: { title?: string; prompt?: string } = {};
+                      if (title && title !== a.title) changes.title = title;
+                      if (prompt && prompt !== a.prompt) changes.prompt = prompt;
+                      if (changes.title || changes.prompt) onUpdate(a.id, changes);
+                      setEditingId(null);
+                    }}
+                  >
+                    <Check size={15} aria-hidden />
+                  </button>
+                  <button
+                    className="auto-icon"
+                    title={t("common.cancel")}
+                    aria-label={t("common.cancel")}
+                    onClick={() => setEditingId(null)}
+                  >
+                    <X size={15} aria-hidden />
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    className="auto-icon"
+                    title={t("common.edit")}
+                    aria-label={t("common.edit")}
+                    onClick={() => {
+                      setEditingId(a.id);
+                      setEditTitle(a.title);
+                      setEditPrompt(a.prompt);
+                    }}
+                  >
+                    <Pencil size={15} aria-hidden />
+                  </button>
+                  <button
+                    className="auto-icon"
+                    title={a.enabled ? t("automations.disable") : t("automations.enable")}
+                    aria-label={a.enabled ? t("automations.disable") : t("automations.enable")}
+                    onClick={() => onToggle(a.id)}
+                  >
+                    <Power size={15} aria-hidden />
+                  </button>
+                  <button
+                    className="auto-icon danger"
+                    title={t("common.delete")}
+                    aria-label={t("common.delete")}
+                    onClick={() => onDelete(a.id)}
+                  >
+                    <Trash2 size={15} aria-hidden />
+                  </button>
+                </>
+              )}
             </div>
           </article>
         ))}

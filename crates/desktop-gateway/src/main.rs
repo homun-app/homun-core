@@ -36,6 +36,7 @@ use axum::{
     routing::delete,
     routing::get,
     routing::post,
+    routing::put,
 };
 use base64::Engine as _;
 use chat_store::ChatStore;
@@ -668,7 +669,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/automations/event-sources", get(automation_event_sources))
         .route("/api/automations", get(automations_list).post(automation_create))
         .route("/api/automations/{id}/toggle", post(automation_toggle))
-        .route("/api/automations/{id}", delete(automation_delete))
+        .route("/api/automations/{id}", put(automation_update).delete(automation_delete))
         .route(
             "/api/approvals/{approval_id}/approve",
             post(approve_approval),
@@ -4404,6 +4405,20 @@ struct AutomationCreateRequest {
     source: Option<AutomationSource>,
 }
 
+/// Partial update of an existing automation: any field left out is unchanged.
+/// `enabled` stays owned by the toggle endpoint.
+#[derive(Debug, Deserialize)]
+struct AutomationUpdateRequest {
+    #[serde(default)]
+    title: Option<String>,
+    #[serde(default)]
+    trigger: Option<AutomationTrigger>,
+    #[serde(default)]
+    prompt: Option<String>,
+    #[serde(default)]
+    approval: Option<ApprovalPolicy>,
+}
+
 /// Human label for a recurrence rule (handles the flexible `dow@days@times` form).
 fn humanize_recurrence(rec: &str) -> String {
     fn day_label(d: &str) -> &str {
@@ -4575,6 +4590,109 @@ fn create_automation_tool_schema() -> serde_json::Value {
             }
         }
     })
+}
+
+fn update_automation_tool_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": "update_automation",
+            "description": "Edit an EXISTING automation (a «when → then» rule the user already has): change its title, its action (prompt), or — for a scheduled one — its recurrence. Use it when the user wants to FIX or CHANGE an existing automation, e.g. «in the Mondiali automation drop the browser-is-down part», «move my Friday summary to 9am». Identify it by `id` if you know it, otherwise by `match` (a fragment of its title). Does NOT enable/disable it (that's a separate toggle).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "id": { "type": "string", "description": "The automation id (auto_…), if known." },
+                    "match": { "type": "string", "description": "Alternative to id: a fragment of the automation's TITLE to find it (e.g. \"Mondiali\")." },
+                    "title": { "type": "string", "description": "New title (optional)." },
+                    "prompt": { "type": "string", "description": "New action — what it does when it triggers (optional)." },
+                    "recurrence": { "type": "string", "description": "Scheduled automations only: new recurrence, same formats as create (daily@HH:MM, weekly@fri@HH:MM, every Nh, …)." }
+                },
+                "required": []
+            }
+        }
+    })
+}
+
+/// Edit an existing automation from a chat tool call: resolve it by id or title
+/// fragment, apply the given changes, re-sync the driving recurring task (so a new
+/// prompt/recurrence takes effect next run), and persist. Returns a user-facing line.
+fn update_automation_from_chat(state: &AppState, args_raw: &str) -> String {
+    let args: serde_json::Value = serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
+    let opt = |k: &str| {
+        args.get(k)
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .map(String::from)
+    };
+    let Ok(store) = lock_task_store(state) else {
+        return "The task store is unavailable right now.".to_string();
+    };
+    // Resolve the target automation by id, else by a title fragment.
+    let mut automation = if let Some(id) = opt("id") {
+        match store.get_automation(&id, &gateway_user_id(), &gateway_workspace_id()) {
+            Ok(Some(a)) => a,
+            _ => return format!("I couldn't find an automation with id {id}."),
+        }
+    } else if let Some(needle) = opt("match") {
+        let needle = needle.to_lowercase();
+        let all = store
+            .list_automations(&gateway_user_id(), &gateway_workspace_id())
+            .unwrap_or_default();
+        let mut hits: Vec<Automation> =
+            all.into_iter().filter(|a| a.title.to_lowercase().contains(&needle)).collect();
+        match hits.len() {
+            0 => return format!("No automation whose title contains «{needle}»."),
+            1 => hits.remove(0),
+            _ => {
+                let titles = hits.iter().map(|a| a.title.clone()).collect::<Vec<_>>().join(", ");
+                return format!("Several automations match «{needle}»: {titles}. Say which one (or pass its id).");
+            }
+        }
+    } else {
+        return "To edit an automation, give its `id` or a `match` (a fragment of its title).".to_string();
+    };
+    let mut changed: Vec<&str> = Vec::new();
+    if let Some(title) = opt("title") {
+        automation.title = title;
+        changed.push("title");
+    }
+    if let Some(prompt) = opt("prompt") {
+        automation.prompt = prompt;
+        changed.push("action");
+    }
+    if let Some(recurrence) = opt("recurrence") {
+        match &automation.trigger {
+            AutomationTrigger::Schedule { tz, .. } => {
+                let tz = tz.clone();
+                if local_first_task_runtime::next_occurrence(&recurrence, tz.as_deref(), OffsetDateTime::now_utc()).is_none() {
+                    return format!("The recurrence '{recurrence}' is not valid.");
+                }
+                automation.trigger = AutomationTrigger::Schedule { recurrence, tz };
+                changed.push("schedule");
+            }
+            AutomationTrigger::Event { .. } => {
+                return "This automation is event-based; `recurrence` only applies to scheduled ones.".to_string();
+            }
+        }
+    }
+    if changed.is_empty() {
+        return "Nothing to change — give a new title, prompt, or recurrence.".to_string();
+    }
+    automation.updated_at = OffsetDateTime::now_utc();
+    if let Some(old) = automation.task_id.take() {
+        cancel_automation_task(&store, &old);
+    }
+    if automation.enabled {
+        match materialize_automation_task(&store, &automation) {
+            Ok(tid) => automation.task_id = tid,
+            Err(msg) => return format!("Couldn't reschedule the automation: {msg}"),
+        }
+    }
+    if store.upsert_automation(&automation).is_err() {
+        return "Failed to save the change to the automation.".to_string();
+    }
+    format!("✅ Updated automation «{}» ({}).", automation.title, changed.join(", "))
 }
 
 /// Create a first-class Automation from a chat tool call (source=chat). Builds the trigger,
@@ -5141,6 +5259,54 @@ async fn automation_create(
         .map_err(|msg| GatewayError { status: StatusCode::BAD_REQUEST, code: "bad_recurrence", message: msg })?;
     store.upsert_automation(&automation)
         .map_err(|e| GatewayError { status: StatusCode::INTERNAL_SERVER_ERROR, code: "automation_create", message: e.to_string() })?;
+    Ok(Json(automation_to_json(&automation)))
+}
+
+/// PUT /api/automations/{id} — edit an existing rule (title/trigger/prompt/approval).
+/// Any field omitted is left unchanged. A changed trigger or prompt re-syncs the
+/// driving recurring task (cancel the old one, materialize a fresh one) so the next
+/// run reflects the edit; `enabled` stays owned by the toggle endpoint.
+async fn automation_update(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<AutomationUpdateRequest>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    // Validate a new schedule recurrence up front (fail fast, like create).
+    if let Some(AutomationTrigger::Schedule { recurrence, tz }) = &req.trigger {
+        if local_first_task_runtime::next_occurrence(recurrence, tz.as_deref(), OffsetDateTime::now_utc()).is_none() {
+            return Err(GatewayError { status: StatusCode::BAD_REQUEST, code: "bad_recurrence", message: format!("recurrence '{recurrence}' is not valid") });
+        }
+    }
+    let store = lock_task_store(&state)
+        .map_err(|_| GatewayError { status: StatusCode::SERVICE_UNAVAILABLE, code: "task_store", message: "task store unavailable".into() })?;
+    let mut automation = store
+        .get_automation(&id, &gateway_user_id(), &gateway_workspace_id())
+        .map_err(|e| GatewayError { status: StatusCode::INTERNAL_SERVER_ERROR, code: "automation_get", message: e.to_string() })?
+        .ok_or_else(|| GatewayError { status: StatusCode::NOT_FOUND, code: "automation_missing", message: "automation not found".into() })?;
+    if let Some(title) = req.title {
+        automation.title = title;
+    }
+    if let Some(prompt) = req.prompt {
+        automation.prompt = prompt;
+    }
+    if let Some(trigger) = req.trigger {
+        automation.trigger = trigger;
+    }
+    if let Some(approval) = req.approval {
+        automation.approval = approval;
+    }
+    automation.updated_at = OffsetDateTime::now_utc();
+    // Re-sync the driving task: drop the old occurrence schedule and, for an enabled
+    // schedule automation, materialize a fresh one carrying the new trigger + prompt.
+    if let Some(old) = automation.task_id.take() {
+        cancel_automation_task(&store, &old);
+    }
+    if automation.enabled {
+        automation.task_id = materialize_automation_task(&store, &automation)
+            .map_err(|msg| GatewayError { status: StatusCode::BAD_REQUEST, code: "bad_recurrence", message: msg })?;
+    }
+    store.upsert_automation(&automation)
+        .map_err(|e| GatewayError { status: StatusCode::INTERNAL_SERVER_ERROR, code: "automation_update", message: e.to_string() })?;
     Ok(Json(automation_to_json(&automation)))
 }
 
@@ -8269,6 +8435,7 @@ const CORE_TOOL_NAMES: &[&str] = &[
     // Creating automations is a common, high-value action — keep it directly reachable
     // (not behind find_capability) so "ricordami ogni…" / "quando mi scrive X…" land reliably.
     "create_automation",
+    "update_automation",
     "schedule_task",
     // Sending a channel message is common + safety-gated (confirm card) — keep it core so
     // "manda/girami su WhatsApp" works without a find_capability hop.
@@ -9074,6 +9241,7 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
         base_tools.push(update_plan_tool_schema());
         base_tools.push(schedule_task_tool_schema());
         base_tools.push(create_automation_tool_schema());
+        base_tools.push(update_automation_tool_schema());
         base_tools.push(send_message_tool_schema());
         base_tools.push(list_scheduled_tasks_tool_schema());
         base_tools.push(cancel_scheduled_task_tool_schema());
@@ -10914,6 +11082,15 @@ an uncertain date.",
                         )
                         .await;
                         create_automation_from_chat(&state_owned, args_raw)
+                    } else if name == "update_automation" {
+                        let _ = emit_stream_event(
+                            &tx,
+                            GenerateStreamEvent::Delta {
+                                text: "‹‹ACT››⚡ Updating an automation‹‹/ACT››".to_string(),
+                            },
+                        )
+                        .await;
+                        update_automation_from_chat(&state_owned, args_raw)
                     } else if name == "find_capability" {
                         // Tool Search: discover DEFERRED native tools by intent and activate
                         // them (push into the live tool set) so the model calls them next
