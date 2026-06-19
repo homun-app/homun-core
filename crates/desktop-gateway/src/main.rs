@@ -8187,11 +8187,11 @@ fn run_in_sandbox_tool_schema() -> serde_json::Value {
         "type": "function",
         "function": {
             "name": "run_in_sandbox",
-            "description": "Run a shell command in the contained computer (isolated sandbox: bash, curl, python, git, compilers). Use it to: run commands/scripts, process data, and ABOVE ALL to VERIFY BY EXECUTING — run build/test/lint or execute the code and read the REAL output instead of assuming code or calculations are correct. Returns stdout/stderr. Iterate on failures until the verification passes.",
+            "description": "Run a shell command in the contained computer (isolated sandbox: bash, curl, python, git, compilers). Use it to: run commands/scripts, process data (incl. fetching STRUCTURED data — RSS/JSON APIs — with curl), and ABOVE ALL to VERIFY BY EXECUTING — run build/test/lint or execute the code and read the REAL output instead of assuming code or calculations are correct. Returns stdout/stderr. Iterate on failures until the verification passes. For browsing or SEARCHING rendered websites prefer the browser (browser_navigate) over scraping HTML with curl. (A skill/automation's own instructions win — follow what its SKILL.md / steps say.)",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "command": { "type": "string", "description": "Shell command to run, e.g. \"curl -s wttr.in/Roma?format=3\"" },
+                    "command": { "type": "string", "description": "Shell command to run, e.g. \"curl -s https://example.com/feed.rss\" or \"pytest -q\"" },
                     "skill_id": { "type": "string", "description": "id of the context skill (optional; sets the working dir)" }
                 },
                 "required": ["command"]
@@ -8320,6 +8320,76 @@ fn cap_tokenize(s: &str) -> Vec<String> {
         .filter(|t| t.chars().count() >= 2)
         .map(str::to_string)
         .collect()
+}
+
+/// Best-effort pre-retrieval of connected-service (Composio) tools for the user's
+/// message, run once at turn start so the model already has the relevant tools
+/// without a find_capability hop. Keyword overlap always runs (cheap); when
+/// `HOMUN_COMPOSIO_DENSE` is set it RRF-fuses a dense embedding rank over the top
+/// keyword candidates (catches concepts / cross-language, e.g. an Italian query vs
+/// English tool descriptions). Best-effort throughout: any failure degrades to
+/// keyword-only and never blocks the turn. Returns up to `k` schemas, best first.
+async fn auto_retrieve_composio(
+    http: &reqwest::Client,
+    query: &str,
+    catalog: &[(String, String, serde_json::Value)],
+    k: usize,
+) -> Vec<serde_json::Value> {
+    const RRF_K: f32 = 60.0;
+    if catalog.is_empty() || k == 0 {
+        return Vec::new();
+    }
+    let q_tokens: std::collections::BTreeSet<String> = cap_tokenize(query).into_iter().collect();
+    if q_tokens.is_empty() {
+        return Vec::new();
+    }
+    // Keyword candidates: distinct query tokens present in each entry's haystack.
+    let mut keyword: Vec<(usize, usize)> = catalog
+        .iter()
+        .enumerate()
+        .map(|(i, (_, haystack, _))| {
+            (i, q_tokens.iter().filter(|t| haystack.contains(t.as_str())).count())
+        })
+        .filter(|(_, score)| *score > 0)
+        .collect();
+    keyword.sort_by(|a, b| b.1.cmp(&a.1));
+    keyword.truncate(24);
+    if keyword.is_empty() {
+        return Vec::new();
+    }
+    let keyword_rank: std::collections::HashMap<usize, usize> =
+        keyword.iter().enumerate().map(|(rank, (i, _))| (*i, rank)).collect();
+    // Optional dense re-rank over the top candidates (env-gated to avoid per-turn
+    // embed latency until measured); bounded to a few local embed calls.
+    let dense_rank: std::collections::HashMap<usize, usize> =
+        if std::env::var("HOMUN_COMPOSIO_DENSE").is_ok() {
+            match embed_text(http, query).await {
+                Some(q_vec) => {
+                    let mut scored: Vec<(usize, f32)> = Vec::new();
+                    for (i, _) in keyword.iter().take(8) {
+                        if let Some(v) = embed_text(http, &catalog[*i].1).await {
+                            scored.push((*i, cosine(&q_vec, &v)));
+                        }
+                    }
+                    scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+                    scored.iter().enumerate().map(|(rank, (i, _))| (*i, rank)).collect()
+                }
+                None => std::collections::HashMap::new(),
+            }
+        } else {
+            std::collections::HashMap::new()
+        };
+    // Reciprocal-rank fusion of the keyword + dense rankings.
+    let mut fused: Vec<(usize, f32)> = keyword
+        .iter()
+        .map(|(i, _)| {
+            let kr = keyword_rank.get(i).map(|r| 1.0 / (RRF_K + *r as f32)).unwrap_or(0.0);
+            let dr = dense_rank.get(i).map(|r| 1.0 / (RRF_K + *r as f32)).unwrap_or(0.0);
+            (*i, kr + dr)
+        })
+        .collect();
+    fused.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    fused.into_iter().take(k).map(|(i, _)| catalog[i].2.clone()).collect()
 }
 
 /// Real BM25 ranking — IDF (rare terms weigh more), TF saturation (k1), and length
@@ -9133,6 +9203,26 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
     if !mcp_catalog.schemas.is_empty() && mcp_catalog.schemas.len() <= MCP_ALWAYS_LOAD_MAX {
         for schema in &mcp_catalog.schemas {
             base_tools.push(schema.clone());
+        }
+    }
+    // Composio is the LARGE catalog (hundreds of tools) → kept behind find_capability,
+    // but pre-retrieve the few relevant to THIS message and load them up front, so the
+    // model uses them without having to think to search. Best-effort; deduped against
+    // what's already loaded (core + always-loaded MCP).
+    if has_composio {
+        let loaded: std::collections::HashSet<String> = base_tools
+            .iter()
+            .filter_map(|s| s.pointer("/function/name").and_then(|v| v.as_str()).map(String::from))
+            .collect();
+        for schema in auto_retrieve_composio(&state.http, &request.prompt, &catalog_index, 4).await {
+            let name = schema
+                .pointer("/function/name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            if !name.is_empty() && !loaded.contains(&name) {
+                base_tools.push(schema);
+            }
         }
     }
     // Unified capability corpus for `find_capability`: deferred native tools + installed
@@ -18517,7 +18607,12 @@ fn mcp_chat_tools(state: &AppState, cap: usize) -> McpChatTools {
                 return out;
             }
             let name = mcp_chat_tool_name(&conn.provider_id, &cached.tool.name);
-            if cached.tool.action != ActionClass::Read {
+            // A read-looking name is never gated, even if the tool was cached under
+            // the old "absent readOnlyHint → write" default — so the read-no-confirm
+            // fix applies WITHOUT needing the server's tools re-fetched.
+            if cached.tool.action != ActionClass::Read
+                && !local_first_capabilities::name_is_read_only(&cached.tool.name)
+            {
                 out.writes.insert(name.clone());
             }
             let description = cached.tool.description.chars().take(300).collect::<String>();
@@ -19204,7 +19299,18 @@ fn load_composio_tool_allow() -> std::collections::BTreeSet<String> {
 }
 
 fn composio_tool_allowed(slug: &str) -> bool {
-    load_composio_tool_allow().contains(slug)
+    let set = load_composio_tool_allow();
+    if set.contains(slug) {
+        return true;
+    }
+    // Server-level allow for MCP (policy B): the marker `mcp__<server>__*` waves
+    // through every tool of a server the user trusted "always" once.
+    if let Some(rest) = slug.strip_prefix("mcp__") {
+        if let Some((server, _)) = rest.split_once("__") {
+            return set.contains(&format!("mcp__{server}__*"));
+        }
+    }
+    false
 }
 
 fn write_composio_tool_allow(set: std::collections::BTreeSet<String>) -> Result<(), String> {
@@ -19933,6 +20039,10 @@ struct McpExecuteRequest {
     thread_id: Option<String>,
     #[serde(default)]
     message_id: Option<String>,
+    /// Policy B: "always allow this server" — record a server-level allow so this
+    /// server's writes stop asking for confirmation.
+    #[serde(default)]
+    allow_server: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -19955,6 +20065,18 @@ async fn mcp_execute(
             message: format!("Invalid MCP tool name: {}", request.tool),
         });
     };
+    // Policy B: trust this whole server from now on (skip the confirm card for its
+    // writes). Derive the `mcp__<server>__*` marker from the tool name exactly the
+    // way composio_tool_allowed() reads it, so the two always agree.
+    if request.allow_server {
+        if let Some((server, _)) = request
+            .tool
+            .strip_prefix("mcp__")
+            .and_then(|rest| rest.split_once("__"))
+        {
+            let _ = add_composio_tool_allow(&format!("mcp__{server}__*"));
+        }
+    }
     let args = if request.arguments.is_null() {
         serde_json::json!({})
     } else {

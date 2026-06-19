@@ -1486,15 +1486,18 @@ async function electronConnectMark(input: {
   });
 }
 
-/** Executes an MCP server tool on user confirmation (no "always allow" in v1). */
+/** Executes an MCP server tool on user confirmation. `scope: "always"` records a
+ *  server-level allow (policy B) so this server's writes stop asking. */
 async function electronMcpExecute(
   tool: string,
   args: unknown,
+  scope: "once" | "always",
   ctx?: { threadId?: string; messageId?: string },
 ): Promise<ComposioExecuteResult> {
   return gatewayPostJson<ComposioExecuteResult>("/api/capabilities/mcp/execute", {
     tool,
     arguments: args ?? {},
+    ...(scope === "always" ? { allow_server: true } : {}),
     ...(ctx?.threadId ? { thread_id: ctx.threadId } : {}),
     ...(ctx?.messageId ? { message_id: ctx.messageId } : {}),
   });
@@ -1877,8 +1880,9 @@ export const coreBridge = {
   mcpExecute: (
     tool: string,
     args: unknown,
+    scope: "once" | "always",
     ctx?: { threadId?: string; messageId?: string },
-  ) => electronMcpExecute(tool, args, ctx),
+  ) => electronMcpExecute(tool, args, scope, ctx),
   fsAuthorize: (
     path: string,
     op: string,

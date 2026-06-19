@@ -18,7 +18,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 /// `get_order` is a read OF an order, not an order action). If the first token
 /// isn't a known verb, fall back to: a read verb present and no write verb.
 /// Tokenizes snake/kebab/camelCase. Kept in sync with the Composio verb lists.
-fn name_is_read_only(name: &str) -> bool {
+pub fn name_is_read_only(name: &str) -> bool {
     const READ_VERBS: &[&str] = &[
         "search", "get", "list", "fetch", "find", "retrieve", "view", "read", "query",
         "lookup", "describe", "count", "check", "export", "browse", "scan", "poll",
