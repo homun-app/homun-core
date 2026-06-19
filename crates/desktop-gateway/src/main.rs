@@ -8187,11 +8187,11 @@ fn run_in_sandbox_tool_schema() -> serde_json::Value {
         "type": "function",
         "function": {
             "name": "run_in_sandbox",
-            "description": "Run a shell command in the contained computer (isolated sandbox: bash, curl, python, git, compilers). Use it to: run commands/scripts, process data, and ABOVE ALL to VERIFY BY EXECUTING — run build/test/lint or execute the code and read the REAL output instead of assuming code or calculations are correct. Returns stdout/stderr. Iterate on failures until the verification passes.",
+            "description": "Run a shell command in the contained computer (isolated sandbox: bash, python, git, compilers). Use it to: run commands/scripts, process LOCAL data, and ABOVE ALL to VERIFY BY EXECUTING — run build/test/lint or execute the code and read the REAL output instead of assuming code or calculations are correct. Returns stdout/stderr. Iterate on failures until the verification passes. NOT for the web: to open a site, search, or read web content use the browser (browser_navigate) — never curl/wget a website here (you'd get raw HTML and get blocked).",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "command": { "type": "string", "description": "Shell command to run, e.g. \"curl -s wttr.in/Roma?format=3\"" },
+                    "command": { "type": "string", "description": "Shell command to run, e.g. \"python3 analyze.py\" or \"pytest -q\"" },
                     "skill_id": { "type": "string", "description": "id of the context skill (optional; sets the working dir)" }
                 },
                 "required": ["command"]
@@ -18607,7 +18607,12 @@ fn mcp_chat_tools(state: &AppState, cap: usize) -> McpChatTools {
                 return out;
             }
             let name = mcp_chat_tool_name(&conn.provider_id, &cached.tool.name);
-            if cached.tool.action != ActionClass::Read {
+            // A read-looking name is never gated, even if the tool was cached under
+            // the old "absent readOnlyHint → write" default — so the read-no-confirm
+            // fix applies WITHOUT needing the server's tools re-fetched.
+            if cached.tool.action != ActionClass::Read
+                && !local_first_capabilities::name_is_read_only(&cached.tool.name)
+            {
                 out.writes.insert(name.clone());
             }
             let description = cached.tool.description.chars().take(300).collect::<String>();
