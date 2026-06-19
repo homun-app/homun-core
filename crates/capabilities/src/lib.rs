@@ -28,7 +28,7 @@ pub use error::{CapabilityError, CapabilityResult};
 pub use facade::{CapabilityFacade, ToolAccessPlan};
 pub use mcp::{
     InMemoryMcpTransport, McpCapabilityProvider, McpStdioConfig, McpStdioTransport, McpToolPolicy,
-    McpTransport,
+    McpTransport, name_is_read_only,
 };
 pub use policy::{CapabilityPolicy, PolicyContext, ToolAccessDecision};
 pub use provider::{CapabilityProvider, FakeCapabilityProvider};
