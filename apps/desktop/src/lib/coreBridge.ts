@@ -873,6 +873,25 @@ async function electronCreateteAutomation(
   return (await response.json()) as ManagedAutomation;
 }
 
+async function electronUpdateAutomation(
+  id: string,
+  input: Partial<AutomationCreateteInput>,
+): Promise<ManagedAutomation> {
+  const response = await fetch(
+    `${DESKTOP_GATEWAY_URL}/api/automations/${encodeURIComponent(id)}`,
+    {
+      method: "PUT",
+      headers: { ...gatewayHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    },
+  );
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    throw new Error(`update automation HTTP ${response.status} ${detail}`);
+  }
+  return (await response.json()) as ManagedAutomation;
+}
+
 async function electronToggleAutomation(id: string): Promise<ManagedAutomation> {
   const response = await fetch(
     `${DESKTOP_GATEWAY_URL}/api/automations/${encodeURIComponent(id)}/toggle`,
@@ -1928,6 +1947,8 @@ export const coreBridge = {
   automations: () => electronAutomations(),
   automationEventSources: () => electronAutomationEventSources(),
   createAutomation: (input: AutomationCreateteInput) => electronCreateteAutomation(input),
+  updateAutomation: (id: string, input: Partial<AutomationCreateteInput>) =>
+    electronUpdateAutomation(id, input),
   toggleAutomation: (id: string) => electronToggleAutomation(id),
   deleteAutomation: (id: string) => electronDeleteAutomation(id),
   setChatThreadPinned: (threadId: string, pinned: boolean) =>
