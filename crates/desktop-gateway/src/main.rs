@@ -580,6 +580,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/chat/build_prompt", post(build_prompt))
         .route("/api/chat/generate_stream", post(generate_stream))
         .route("/api/chat/stream_resume/{request_id}", get(resume_stream))
+        .route("/api/chat/active_streams", get(active_streams))
         .route("/api/events", get(app_events))
         .route("/api/chat/improve_prompt", post(improve_prompt))
         .route("/api/chat/transcribe", post(transcribe_audio))
@@ -9545,6 +9546,7 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
         lines: std::sync::Mutex::new(Vec::new()),
         tx: broadcast_tx,
         finished: std::sync::atomic::AtomicBool::new(false),
+        thread_id: request.thread_id.clone(),
     });
     let resume_id = request.request_id.clone();
     if let Ok(mut map) = stream_registry().lock() {
@@ -15791,6 +15793,10 @@ struct StreamEntry {
     /// Live fan-out to currently-attached readers.
     tx: tokio::sync::broadcast::Sender<String>,
     finished: std::sync::atomic::AtomicBool,
+    /// The chat thread this generation belongs to, so the sidebar can show the
+    /// "working" dots on EVERY thread with an in-flight answer (not just the one
+    /// currently on screen). `None` for a first-message thread without an id yet.
+    thread_id: Option<String>,
 }
 
 /// Sink the generation emits to: tees every event to the ORIGINAL live response
@@ -15810,6 +15816,31 @@ fn stream_registry()
 
 fn stream_event_is_terminal(line: &str) -> bool {
     line.contains("\"type\":\"done\"") || line.contains("\"type\":\"error\"")
+}
+
+/// Thread ids that currently have a live (not-yet-finished) in-flight generation.
+/// Lets the sidebar show the "working" dots on EVERY busy thread, including chats
+/// generating in the background while another is on screen. Read-only — finished
+/// entries are evicted by their own grace-window logic, not here.
+fn active_stream_thread_ids() -> Vec<String> {
+    let Ok(map) = stream_registry().lock() else {
+        return Vec::new();
+    };
+    let mut ids: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for entry in map.values() {
+        if entry.finished.load(std::sync::atomic::Ordering::Relaxed) {
+            continue;
+        }
+        if let Some(tid) = &entry.thread_id {
+            ids.insert(tid.clone());
+        }
+    }
+    ids.into_iter().collect()
+}
+
+/// GET /api/chat/active_streams — thread ids with an in-flight chat answer right now.
+async fn active_streams() -> Json<serde_json::Value> {
+    Json(serde_json::json!({ "thread_ids": active_stream_thread_ids() }))
 }
 
 /// Builds an NDJSON response body for a reattaching reader: replays the buffered

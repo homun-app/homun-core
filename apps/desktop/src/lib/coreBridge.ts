@@ -908,6 +908,21 @@ async function electronDeleteAutomation(id: string): Promise<void> {
   }).catch(() => undefined);
 }
 
+/** Thread ids with an in-flight chat answer right now (across ALL threads, not just
+ *  the one on screen) — drives the sidebar "working" dots on every busy chat. */
+async function electronActiveStreams(): Promise<string[]> {
+  try {
+    const r = await fetch(`${DESKTOP_GATEWAY_URL}/api/chat/active_streams`, {
+      headers: gatewayHeaders(),
+    });
+    if (!r.ok) return [];
+    const data = (await r.json()) as { thread_ids?: string[] };
+    return data.thread_ids ?? [];
+  } catch {
+    return [];
+  }
+}
+
 async function electronConsolidateMemory(
   workspace?: string,
 ): Promise<{ merged: number; dropped: number }> {
@@ -1945,6 +1960,7 @@ export const coreBridge = {
   seedAssistantMessage: (threadId: string, text: string) =>
     chatApi.seedAssistantMessage(threadId, text),
   automations: () => electronAutomations(),
+  activeStreams: () => electronActiveStreams(),
   automationEventSources: () => electronAutomationEventSources(),
   createAutomation: (input: AutomationCreateteInput) => electronCreateteAutomation(input),
   updateAutomation: (id: string, input: Partial<AutomationCreateteInput>) =>
