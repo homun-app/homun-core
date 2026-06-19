@@ -887,6 +887,15 @@ export default function App() {
     }
   }
 
+  async function handleUpdateAutomation(id: string, input: { title?: string; prompt?: string }) {
+    try {
+      await coreBridge.updateAutomation(id, input);
+      await loadAutomations();
+    } catch (error) {
+      console.warn("update automation failed", error);
+    }
+  }
+
   async function handleToggleAutomation(id: string) {
     try {
       await coreBridge.toggleAutomation(id);
@@ -1202,6 +1211,7 @@ export default function App() {
           <AutomationsView
             automations={automationItems}
             onCreatete={handleCreateteAutomation}
+            onUpdate={handleUpdateAutomation}
             onToggle={handleToggleAutomation}
             onDelete={handleDeleteAutomation}
           />
