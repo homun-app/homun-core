@@ -19204,7 +19204,18 @@ fn load_composio_tool_allow() -> std::collections::BTreeSet<String> {
 }
 
 fn composio_tool_allowed(slug: &str) -> bool {
-    load_composio_tool_allow().contains(slug)
+    let set = load_composio_tool_allow();
+    if set.contains(slug) {
+        return true;
+    }
+    // Server-level allow for MCP (policy B): the marker `mcp__<server>__*` waves
+    // through every tool of a server the user trusted "always" once.
+    if let Some(rest) = slug.strip_prefix("mcp__") {
+        if let Some((server, _)) = rest.split_once("__") {
+            return set.contains(&format!("mcp__{server}__*"));
+        }
+    }
+    false
 }
 
 fn write_composio_tool_allow(set: std::collections::BTreeSet<String>) -> Result<(), String> {
@@ -19933,6 +19944,10 @@ struct McpExecuteRequest {
     thread_id: Option<String>,
     #[serde(default)]
     message_id: Option<String>,
+    /// Policy B: "always allow this server" — record a server-level allow so this
+    /// server's writes stop asking for confirmation.
+    #[serde(default)]
+    allow_server: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -19955,6 +19970,18 @@ async fn mcp_execute(
             message: format!("Invalid MCP tool name: {}", request.tool),
         });
     };
+    // Policy B: trust this whole server from now on (skip the confirm card for its
+    // writes). Derive the `mcp__<server>__*` marker from the tool name exactly the
+    // way composio_tool_allowed() reads it, so the two always agree.
+    if request.allow_server {
+        if let Some((server, _)) = request
+            .tool
+            .strip_prefix("mcp__")
+            .and_then(|rest| rest.split_once("__"))
+        {
+            let _ = add_composio_tool_allow(&format!("mcp__{server}__*"));
+        }
+    }
     let args = if request.arguments.is_null() {
         serde_json::json!({})
     } else {

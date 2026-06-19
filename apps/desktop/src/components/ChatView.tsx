@@ -5768,7 +5768,7 @@ function ComposioConfirmCard({
     setNote(null);
     try {
       const result = isMcp
-        ? await coreBridge.mcpExecute(action.tool, args, { threadId, messageId })
+        ? await coreBridge.mcpExecute(action.tool, args, scope, { threadId, messageId })
         : await coreBridge.composioExecute(action.tool, args, scope, { threadId, messageId });
       if (!result.ok) {
         // The backend replied but the action failed — never show a green "done".
@@ -5778,9 +5778,11 @@ function ComposioConfirmCard({
       }
       setStatus("done");
       setNote(
-        scope === "always" && !isMcp
-          ? `Done. From now on «${title}» will run without asking.`
-          : "Done.",
+        scope !== "always"
+          ? "Done."
+          : isMcp
+            ? "Fatto. Questo server non chiederà più conferma."
+            : `Done. From now on «${title}» will run without asking.`,
       );
     } catch (error) {
       setStatus("error");
@@ -5893,24 +5895,21 @@ function ComposioConfirmCard({
         >
           {status === "running" ? "Running…" : "Run once"}
         </button>
-        {!isMcp && (
-          <button
-            className="set-btn"
-            type="button"
-            disabled={status === "running"}
-            onClick={() => void run("always")}
-            title={`Do not ask again for ${title}`}
-          >
-            Esegui sempre
-          </button>
-        )}
+        <button
+          className="set-btn"
+          type="button"
+          disabled={status === "running"}
+          onClick={() => void run("always")}
+          title={isMcp ? "Non chiedere più per questo server MCP" : `Do not ask again for ${title}`}
+        >
+          {isMcp ? "Consenti sempre questo server" : "Esegui sempre"}
+        </button>
       </div>
-      {!isMcp && (
-        <p className="cmp-confirm-note">
-          "Run always" disables confirmation everywhere for this tool — including remote
-          su Telegram/WhatsApp.
-        </p>
-      )}
+      <p className="cmp-confirm-note">
+        {isMcp
+          ? '"Consenti sempre" non chiederà più conferma per nessuna azione di questo server MCP — anche da remoto su Telegram/WhatsApp.'
+          : '"Run always" disables confirmation everywhere for this tool — including remote su Telegram/WhatsApp.'}
+      </p>
     </div>
   );
 }
