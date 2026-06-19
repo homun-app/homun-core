@@ -8187,11 +8187,11 @@ fn run_in_sandbox_tool_schema() -> serde_json::Value {
         "type": "function",
         "function": {
             "name": "run_in_sandbox",
-            "description": "Run a shell command in the contained computer (isolated sandbox: bash, python, git, compilers). Use it to: run commands/scripts, process LOCAL data, and ABOVE ALL to VERIFY BY EXECUTING — run build/test/lint or execute the code and read the REAL output instead of assuming code or calculations are correct. Returns stdout/stderr. Iterate on failures until the verification passes. NOT for the web: to open a site, search, or read web content use the browser (browser_navigate) — never curl/wget a website here (you'd get raw HTML and get blocked).",
+            "description": "Run a shell command in the contained computer (isolated sandbox: bash, curl, python, git, compilers). Use it to: run commands/scripts, process data (incl. fetching STRUCTURED data — RSS/JSON APIs — with curl), and ABOVE ALL to VERIFY BY EXECUTING — run build/test/lint or execute the code and read the REAL output instead of assuming code or calculations are correct. Returns stdout/stderr. Iterate on failures until the verification passes. For browsing or SEARCHING rendered websites prefer the browser (browser_navigate) over scraping HTML with curl. (A skill/automation's own instructions win — follow what its SKILL.md / steps say.)",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "command": { "type": "string", "description": "Shell command to run, e.g. \"python3 analyze.py\" or \"pytest -q\"" },
+                    "command": { "type": "string", "description": "Shell command to run, e.g. \"curl -s https://example.com/feed.rss\" or \"pytest -q\"" },
                     "skill_id": { "type": "string", "description": "id of the context skill (optional; sets the working dir)" }
                 },
                 "required": ["command"]
