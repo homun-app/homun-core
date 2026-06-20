@@ -27,26 +27,36 @@ questi dati". Slides / deck / presentation / pitch.
    `heading_font`/`body_font`, and `logo_data_url`→`theme.logo` (pass the data URL
    as-is — the renderer handles it). Empty values → the renderer falls back to a clean
    default palette, but still call it.
-2. **Scope + outline.** Confirm/infer audience, goal, length (default 8–12 slides),
-   language; read any source material (a file, data, or a URL via `browse_web`). Outline
-   one idea per slide, headline titles, few words. Plan which slides carry an image.
-3. **Generate the visuals.** For the cover and 2–4 key slides, call `generate_image`
-   with on-brand prompts (subject + "clean, modern, [accent colour] accents,
-   professional, no text"). Give each a `name` (e.g. `cover`, `s3`); the PNGs land in
-   `$OUTPUT_DIR`. Reference them by filename in the slide's `"image"` (e.g. `"cover.png"`).
+2. **Scope.** Confirm/infer audience, goal, length (default 8–12 slides), language; read
+   any source material (a file, data, or a URL via `browse_web`).
+3. **Design pass (DO THIS — it's what makes the deck good, not generic).** Before any
+   JSON, write a brief slide-by-slide plan: for EACH slide decide the **layout** (don't
+   default everything to `bullets` — use `kpi` for a number, `image_left/right` for a key
+   idea, `two_column` for contrasts, `quote` for a testimonial, `section` to divide), a
+   tight **headline** (≤6 words), the **content** (≤4 bullets, numbers over adjectives),
+   and a one-line **visual concept** for slides that carry an image. Aim for rhythm:
+   cover → varied content (alternate text-heavy and image/KPI slides) → closing. This
+   plan is the difference between a real deck and a wall of bullets.
+4. **Generate the visuals.** For the cover and 2–4 key slides, call `generate_image`
+   with on-brand prompts (your visual concept + "clean, modern, [accent colour] accents,
+   professional, minimal, no text"). Give each a `name` (e.g. `cover`, `s3`); the PNGs
+   land in `$OUTPUT_DIR`. Reference them by filename in the slide's `"image"`.
    If image generation isn't available, omit images — the renderer still produces a
-   strong CSS/brand design (gradients, accent bars, big type). Never fall back to plain text.
-4. **Write `deck.json`** in `$OUTPUT_DIR` (schema below). One idea per slide; vary the
-   layout (`cover`, `image_left`/`image_right`, `kpi`, `two_column`, `quote`, `section`,
-   `bullets`, `closing`). Add `notes` (speaker notes) where useful. A cover and a
-   closing "next steps / the ask" slide are mandatory.
-5. **Render** with `run_in_sandbox`:
+   strong on-brand design (rail, accent-underlined titles, big type). Never plain text.
+5. **Write `deck.json`** in `$OUTPUT_DIR` from your design pass (schema below). Include
+   `organization` (from the brand kit) for the slide footer. Add `notes` (speaker notes)
+   on substantive slides. Cover + closing slides are mandatory.
+6. **Render + VERIFY** with `run_in_sandbox`:
    ```sh
-   cd "$OUTPUT_DIR" && deck-render deck.json --prefix deck
-   chromium --headless --no-sandbox --disable-gpu --print-to-pdf="$OUTPUT_DIR/deck.pdf" "$OUTPUT_DIR/deck.html"
+   cd "$OUTPUT_DIR" && deck-render deck.json --prefix deck \
+     && chromium --headless --no-sandbox --disable-gpu --print-to-pdf="$OUTPUT_DIR/deck.pdf" "$OUTPUT_DIR/deck.html" \
+     && ls -la deck.pptx deck.html deck.pdf
    ```
-   `deck-render` writes `deck.html` + `deck.pptx`; chromium turns the HTML into `deck.pdf`.
-6. **Deliver.** `deck.pptx` (editable), `deck.html` (preview) and `deck.pdf` are
+   Then CHECK the output: `deck.pptx` MUST exist and be non-trivial (tens of KB). If it's
+   missing or `deck-render` printed "python-pptx unavailable" / "command not found", the
+   editable PPTX did NOT render — say so honestly to the user (likely the contained
+   computer needs a restart to pick up the renderer) instead of claiming a .pptx exists.
+7. **Deliver.** `deck.pptx` (editable), `deck.html` (preview) and `deck.pdf` are
    artifacts. Tell the user the .pptx is editable in PowerPoint/Google Slides and the
    .html/.pdf are for quick viewing; offer `save_artifact` to a folder. Summarise the
    structure in 1–2 lines. Never paste the JSON or HTML into chat.
@@ -55,7 +65,7 @@ questi dati". Slides / deck / presentation / pitch.
 
 ```json
 {
-  "title": "Deck title", "subtitle": "subtitle · ORG · date",
+  "title": "Deck title", "subtitle": "subtitle · ORG · date", "organization": "ORG",
   "theme": {"primary":"#2b6cb0","secondary":"#1a202c","accent":"#ed8936",
             "heading_font":"Inter","body_font":"Inter","logo":"<logo_data_url or logo.png>"},
   "slides": [

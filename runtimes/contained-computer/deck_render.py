@@ -132,6 +132,7 @@ def _html_slide(s, base_dir, logo):
             f'<section class="slide cover">{_logo_html(logo)}'
             f"<h1>{title}</h1>"
             f'<div class="sub">{html_escape(s.get("subtitle",""))}</div>'
+            f'<div class="rule"></div>'
             f'<div class="accent-bar"></div></section>'
         )
     if layout == "section":
@@ -187,31 +188,51 @@ def _html_slide(s, base_dir, logo):
 
 
 _HTML_CSS = """
-:root{{--brand:{primary};--brand2:{secondary};--accent:{accent};--ink:#1a202c;--muted:#4a5568;}}
+:root{{--brand:{primary};--brand2:{secondary};--accent:{accent};
+  --ink:#16202b;--muted:#5a6675;--paper:#ffffff;}}
 *{{box-sizing:border-box;margin:0;padding:0}}
-body{{font-family:'{heading}',-apple-system,Segoe UI,Roboto,sans-serif;color:var(--ink)}}
-.slide{{width:100%;min-height:100vh;padding:7vh 8vw;display:flex;flex-direction:column;
-  justify-content:center;position:relative;page-break-after:always;overflow:hidden}}
-.slide h1{{font-size:3.2rem;line-height:1.05}}
-.slide h2{{font-size:2.2rem;color:var(--brand);margin-bottom:.6em}}
-.slide h3{{font-size:1.3rem;color:var(--brand)}}
-.body{{font-family:'{body}',sans-serif}}
-.slide li{{font-size:1.5rem;color:var(--muted);margin:.5rem 0;list-style:none;
-  padding-left:1.4rem;position:relative}}
-.slide li::before{{content:"▸";position:absolute;left:0;color:var(--accent)}}
-.kpi{{font-size:6rem;font-weight:800;color:var(--brand);line-height:1}}
-.accent-bar{{position:absolute;left:0;bottom:0;height:10px;width:100%;background:var(--accent)}}
-.logo{{position:absolute;top:5vh;right:8vw;max-height:42px}}
-.cover,.section{{background:linear-gradient(135deg,var(--brand),var(--brand2));color:#fff}}
-.cover h1,.section h1{{color:#fff}} .cover .sub{{font-size:1.4rem;opacity:.92;margin-top:1rem}}
-.img-led{{display:grid;grid-template-columns:1fr 1fr;gap:4vw;align-items:center}}
-.img-led .led{{width:100%;border-radius:14px;object-fit:cover;max-height:62vh}}
-.img-led .ph{{background:#edf2f7;min-height:40vh}}
-.inline-img{{margin-top:1.2rem;max-height:42vh;border-radius:12px;object-fit:cover}}
-.two-col .cols{{display:grid;grid-template-columns:1fr 1fr;gap:4vw;margin-top:1rem}}
-.kpi-slide .sub{{font-size:1.5rem;color:var(--muted);margin-top:.4rem}}
-.quote-slide blockquote{{font-size:2.4rem;font-weight:600;color:var(--brand);max-width:80%}}
-.quote-slide .sub{{font-size:1.3rem;color:var(--muted);margin-top:1rem}}
+body{{font-family:'{heading}',-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+  color:var(--ink);-webkit-font-smoothing:antialiased}}
+.slide{{width:100%;min-height:100vh;padding:9vh 9vw;display:flex;flex-direction:column;
+  justify-content:center;position:relative;page-break-after:always;overflow:hidden;
+  background:var(--paper)}}
+.slide h1{{font-size:4rem;line-height:1.04;font-weight:800;letter-spacing:-.02em}}
+.slide h2{{font-size:2.7rem;line-height:1.1;font-weight:800;letter-spacing:-.01em;
+  color:var(--ink);margin-bottom:.7em;padding-bottom:.32em;
+  border-bottom:4px solid var(--accent);display:inline-block}}
+.slide h3{{font-size:1.4rem;color:var(--brand);font-weight:700;margin-bottom:.4em}}
+.body{{font-family:'{body}',-apple-system,sans-serif}}
+.slide ul{{margin-top:.4rem}}
+.slide li{{font-size:1.6rem;line-height:1.4;color:var(--muted);margin:.75rem 0;
+  list-style:none;padding-left:1.9rem;position:relative}}
+.slide li::before{{content:"";position:absolute;left:0;top:.55em;width:.72rem;height:.72rem;
+  border-radius:2px;background:var(--accent)}}
+/* left accent rail on every content slide */
+.slide:not(.cover):not(.section)::before{{content:"";position:absolute;left:0;top:0;bottom:0;
+  width:12px;background:var(--brand)}}
+.kpi{{font-size:7rem;font-weight:800;color:var(--brand);line-height:1;letter-spacing:-.03em}}
+.accent-bar{{position:absolute;left:0;bottom:0;height:8px;width:100%;
+  background:linear-gradient(90deg,var(--brand),var(--accent))}}
+.logo{{position:absolute;top:6vh;right:9vw;max-height:46px}}
+.cover,.section{{background:linear-gradient(135deg,var(--brand) 0%,var(--brand2) 100%);color:#fff}}
+.cover::after,.section::after{{content:"";position:absolute;right:-10vw;top:-12vw;width:46vw;
+  height:46vw;border-radius:50%;background:rgba(255,255,255,.06)}}
+.cover h1,.section h1{{color:#fff;max-width:82%;position:relative}}
+.cover .sub{{font-size:1.5rem;opacity:.92;margin-top:1.3rem;font-weight:400;position:relative}}
+.cover .rule{{width:96px;height:6px;background:var(--accent);margin-top:2rem;position:relative}}
+.img-led{{display:grid;grid-template-columns:1fr 1fr;gap:5vw;align-items:center}}
+.img-led .led{{width:100%;border-radius:16px;object-fit:cover;max-height:64vh;
+  box-shadow:0 14px 44px rgba(0,0,0,.16)}}
+.img-led .ph{{background:#eef1f5;min-height:42vh;border-radius:16px}}
+.inline-img{{margin-top:1.4rem;max-height:44vh;border-radius:14px;object-fit:cover;
+  box-shadow:0 10px 30px rgba(0,0,0,.12)}}
+.two-col .cols{{display:grid;grid-template-columns:1fr 1fr;gap:5vw;margin-top:1.2rem}}
+.two-col .col{{border-top:4px solid var(--accent);padding-top:1rem}}
+.kpi-slide .sub{{font-size:1.6rem;color:var(--muted);margin-top:.6rem}}
+.quote-slide blockquote{{font-size:2.8rem;font-weight:700;color:var(--ink);max-width:86%;
+  line-height:1.25}}
+.quote-slide blockquote::first-letter{{color:var(--accent)}}
+.quote-slide .sub{{font-size:1.4rem;color:var(--brand);margin-top:1.4rem;font-weight:600}}
 @media print{{.slide{{min-height:auto;height:100vh}}}}
 """
 
@@ -304,6 +325,26 @@ def render_pptx(deck, base_dir, out_path):
             except Exception:
                 pass
 
+    def accent_rail(slide):
+        """Thin brand rail down the left edge — the signature of a content slide."""
+        rail = slide.shapes.add_shape(1, 0, 0, Inches(0.16), SH)
+        rail.fill.solid()
+        rail.fill.fore_color.rgb = brand
+        rail.line.fill.background()
+        rail.shadow.inherit = False
+
+    def title_underline(slide, left, top, width):
+        rule = slide.shapes.add_shape(1, left, top, width, Pt(4))
+        rule.fill.solid()
+        rule.fill.fore_color.rgb = accent
+        rule.line.fill.background()
+        rule.shadow.inherit = False
+
+    def footer(slide, page, total, org):
+        label = f"{org}  ·  {page}/{total}" if org else f"{page}/{total}"
+        textbox(slide, Inches(0.55), SH - Inches(0.55), Inches(6.0), Inches(0.4),
+                [(label, 10, muted, body_font, False, False)])
+
     def textbox(slide, left, top, width, height, runs, align=PP_ALIGN.LEFT,
                 anchor=MSO_ANCHOR.TOP):
         tb = slide.shapes.add_textbox(left, top, width, height)
@@ -328,37 +369,39 @@ def render_pptx(deck, base_dir, out_path):
         if text:
             slide.notes_slide.notes_text_frame.text = str(text)
 
-    for s in deck.get("slides", []):
+    org = deck.get("organization", "")
+    slides_list = deck.get("slides", [])
+    total = len(slides_list)
+    for idx, s in enumerate(slides_list, 1):
         layout = s.get("layout", "bullets")
         slide = add_slide()
         title = s.get("title", "")
 
         if layout in ("cover", "section"):
             fill_bg(slide, brand)
-            # subtle second-tone band
-            band = slide.shapes.add_shape(1, 0, 0, SW, SH)
-            band.fill.gradient() if False else band.fill.solid()
-            band.fill.fore_color.rgb = brand2
-            band.line.fill.background()
-            band.shadow.inherit = False
-            band.fill.transparency = 0  # solid; layered look kept simple
-            slide.shapes._spTree.remove(band._element)
-            slide.shapes._spTree.insert(2, band._element)
-            fill_bg(slide, brand)  # brand on top of brand2 for a clean base
-            runs = [(title, 40, white, head_font, True, False)]
+            runs = [(title, 46 if layout == "cover" else 40, white, head_font, True, False)]
             if s.get("subtitle"):
                 runs.append((s["subtitle"], 20, white, body_font, False, False))
-            textbox(slide, Inches(0.9), Inches(2.6), Inches(11.5), Inches(2.5), runs,
+            textbox(slide, Inches(0.9), Inches(2.4), Inches(11.5), Inches(2.6), runs,
                     anchor=MSO_ANCHOR.MIDDLE)
+            # accent rule under the title block
+            rule = slide.shapes.add_shape(1, Inches(0.95), Inches(5.0), Inches(1.3), Pt(6))
+            rule.fill.solid()
+            rule.fill.fore_color.rgb = accent
+            rule.line.fill.background()
+            rule.shadow.inherit = False
             accent_bar(slide)
             add_logo(slide)
             notes(slide, s.get("notes"))
             continue
 
-        # content slides: white bg, brand title
+        # content slides: white bg, brand rail, underlined title, footer
         fill_bg(slide, white)
+        accent_rail(slide)
         add_logo(slide)
+        footer(slide, idx, total, org)
         if title:
+            title_underline(slide, Inches(0.9), Inches(1.55), Inches(2.0))
             textbox(slide, Inches(0.9), Inches(0.55), Inches(11.5), Inches(1.1),
                     [(title, 30, brand, head_font, True, False)])
 
