@@ -23,8 +23,22 @@ if ! docker version >/dev/null 2>&1; then
   exit 1
 fi
 
-echo "==> building ${IMAGE}"
-docker build -t "${IMAGE}" "${HERE}"
+# Stamp the image with a hash of its definition (Dockerfile + entrypoint) so the app
+# can tell a stale running container (built from an older version) from a fresh one
+# and rebuild it on update. The gateway passes HOMUN_CC_HASH (its own computed value);
+# a manual run computes the SAME hash (sha256 of the two files, first 16 hex) so both
+# agree and we never recycle needlessly.
+if [ -z "${HOMUN_CC_HASH:-}" ]; then
+  if command -v shasum >/dev/null 2>&1; then
+    HOMUN_CC_HASH="$(cat "${HERE}/Dockerfile" "${HERE}/entrypoint.sh" 2>/dev/null | shasum -a 256 | cut -c1-16)"
+  elif command -v sha256sum >/dev/null 2>&1; then
+    HOMUN_CC_HASH="$(cat "${HERE}/Dockerfile" "${HERE}/entrypoint.sh" 2>/dev/null | sha256sum | cut -c1-16)"
+  else
+    HOMUN_CC_HASH="unknown"
+  fi
+fi
+echo "==> building ${IMAGE} (def hash ${HOMUN_CC_HASH})"
+docker build --label "homun.cc_hash=${HOMUN_CC_HASH}" -t "${IMAGE}" "${HERE}"
 
 echo "==> (re)starting ${NAME}"
 docker rm -f "${NAME}" >/dev/null 2>&1 || true

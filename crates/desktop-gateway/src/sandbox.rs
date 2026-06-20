@@ -328,10 +328,61 @@ fn up_script() -> Option<PathBuf> {
     None
 }
 
-/// Ensures the contained computer is running, bringing it up via `up.sh` if not.
+/// Short content hash of the contained-computer image definition (Dockerfile +
+/// entrypoint), computed with the SAME shell command as up.sh so the gateway- and
+/// manually-stamped `homun.cc_hash` labels always agree. Lets us tell a stale running
+/// container (built from an older app version) from a fresh one.
+fn contained_computer_def_hash() -> Option<String> {
+    let dir = up_script()?.parent()?.to_path_buf();
+    if !dir.join("Dockerfile").is_file() {
+        return None;
+    }
+    let out = Command::new("bash")
+        .arg("-c")
+        .arg(
+            "cat Dockerfile entrypoint.sh 2>/dev/null | \
+             { command -v shasum >/dev/null 2>&1 && shasum -a 256 || sha256sum; } | cut -c1-16",
+        )
+        .current_dir(&dir)
+        .output()
+        .ok()?;
+    let hash = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    (!hash.is_empty()).then_some(hash)
+}
+
+/// The `homun.cc_hash` label the running container was built with (None if missing).
+fn running_image_hash() -> Option<String> {
+    let out = Command::new(docker_bin())
+        .args([
+            "inspect",
+            CONTAINER,
+            "--format",
+            "{{index .Config.Labels \"homun.cc_hash\"}}",
+        ])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let hash = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    (!hash.is_empty() && hash != "<no value>").then_some(hash)
+}
+
+/// True when the running container was built from the CURRENT image definition. If
+/// the current hash can't be computed, assume fresh (keep today's behavior).
+fn container_definition_fresh() -> bool {
+    match contained_computer_def_hash() {
+        Some(want) => running_image_hash().as_deref() == Some(want.as_str()),
+        None => true,
+    }
+}
+
+/// Ensures the contained computer is running AND built from the current definition,
+/// (re)building via `up.sh` when it's down OR stale (e.g. an app update changed the
+/// Dockerfile/entrypoint). up.sh's own `docker rm -f` recycles a stale container.
 pub fn ensure_contained_computer() -> Result<(), String> {
     ensure_docker()?;
-    if container_up() {
+    if container_up() && container_definition_fresh() {
         return Ok(());
     }
     if let Some(script) = up_script() {
@@ -341,6 +392,9 @@ pub fn ensure_contained_computer() -> Result<(), String> {
             .arg(&script)
             .env("HOMUN_ARTIFACTS_DIR", artifacts_dir())
             .env("HOMUN_CC_PROFILE_DIR", cc_profile_dir())
+            // Stamp the built image with the definition hash so a later update can
+            // detect a stale running container and rebuild it.
+            .env("HOMUN_CC_HASH", contained_computer_def_hash().unwrap_or_default())
             // Layer D: the container defaults to UTC (debian-slim ships no
             // /etc/localtime). Pass the user's effective IANA zone so `date`,
             // Python AND Chromium's clock inside the container match the user —
