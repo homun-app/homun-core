@@ -19,9 +19,15 @@ const ARTIFACT_MARKER_RE = /‹‹ARTIFACT››[\s\S]*?‹‹\/ARTIFACT››/g
 const PLAN_MARKER_RE = /‹‹PLAN››[\s\S]*?‹‹\/PLAN››/g;
 // Plain "[file generato: …]" notes the gateway adds for the model are dropped too.
 const ARTIFACT_NOTE_RE = /\n?\[file generato: [^\]]*\]/g;
+// The model sometimes invents a markdown image link for a generated file
+// (e.g. `![cover](cover.png)`) — a bare filename / non-embeddable src that resolves
+// to nothing and renders as a broken-image icon. The real image is surfaced via the
+// ‹‹ARTIFACT›› chip + inline preview, so drop any image whose src isn't a genuine
+// embeddable URL (http/https/data/blob).
+const BROKEN_IMAGE_RE = /!\[[^\]]*\]\(\s*(?!https?:\/\/|data:|blob:)[^)]*\)/g;
 
 export function RichMessage({ text, streaming = false }: RichMessageProps) {
-  const clean =
+  const withoutMarkers =
     text.includes("‹‹COMPOSIO_") ||
     text.includes("‹‹ACT››") ||
     text.includes("‹‹ARTIFACT››") ||
@@ -34,6 +40,9 @@ export function RichMessage({ text, streaming = false }: RichMessageProps) {
           .replace(ARTIFACT_NOTE_RE, "")
           .trim()
       : text;
+  const clean = withoutMarkers.includes("![")
+    ? withoutMarkers.replace(BROKEN_IMAGE_RE, "").trim()
+    : withoutMarkers;
 
   // Render markdown LIVE while streaming (like Claude Code): the renderer is
   // streaming-aware (tolerates an unclosed code fence, defers mermaid until complete),
