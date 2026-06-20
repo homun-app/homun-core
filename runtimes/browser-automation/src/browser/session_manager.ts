@@ -1,4 +1,4 @@
-import { mkdir, stat } from "node:fs/promises";
+import { mkdir, rm, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { Browser, BrowserContext, Dialog, Locator, Page } from "playwright-core";
@@ -564,6 +564,11 @@ export class BrowserSessionManager {
   private async startAssistantProfile(headless: boolean): Promise<{ status: "started"; profile: string }> {
     this.profile = await resolveAssistantProfile({ ...this.options, headless });
     await mkdir(this.profile.userDataDir, { recursive: true });
+    // A hard-killed Chromium leaves stale Singleton* lock files in the profile dir;
+    // the next launchPersistentContext then aborts ("profile already in use"). The
+    // owning process is gone, so clearing them is safe — mirrors what the contained-
+    // computer entrypoint already does inside the container.
+    await clearSingletonLocks(this.profile.userDataDir);
     this.context = await chromium.launchPersistentContext(this.profile.userDataDir, {
       headless: this.profile.headless,
       executablePath: this.profile.executablePath,
@@ -577,6 +582,7 @@ export class BrowserSessionManager {
       locale: hostLocale(),
       timezoneId: hostTimezone(),
     });
+    await applyStealthInit(this.context);
     this.activeProfile = "assistant";
     return { status: "started", profile: this.profile.name };
   }
@@ -618,6 +624,7 @@ export class BrowserSessionManager {
       ? await this.attachedBrowser.newContext({ acceptDownloads: true })
       : (this.attachedBrowser.contexts()[0] ??
         (await this.attachedBrowser.newContext({ acceptDownloads: true })));
+    await applyStealthInit(this.context);
     this.activeProfile = "user";
     return { status: "started", profile: "user" };
   }
@@ -626,6 +633,36 @@ export class BrowserSessionManager {
 async function artifactMetadata(kind: ArtifactMetadata["kind"], outputPath: string): Promise<ArtifactMetadata> {
   const file = await stat(outputPath);
   return { kind, path: outputPath, bytes: file.size };
+}
+
+// Remove stale Chromium singleton lock files from a (persistent) profile dir. The
+// process that held them is gone after a hard kill/crash, so they're safe to clear;
+// leaving them makes launchPersistentContext abort. No-op on a fresh dir.
+async function clearSingletonLocks(userDataDir: string): Promise<void> {
+  await Promise.all(
+    ["SingletonLock", "SingletonSocket", "SingletonCookie"].map((name) =>
+      rm(path.join(userDataDir, name), { force: true }).catch(() => undefined),
+    ),
+  );
+}
+
+// Surgical de-automation: hide the single highest-signal tell — navigator.webdriver
+// — on every document before page scripts run. Deliberately minimal: unlike
+// patchright (reverted because its isolated-context evaluate broke our snapshot /
+// form-fill pipeline), an addInitScript runs in the page's main world and leaves the
+// CDP snapshot path untouched. Best-effort; a failure must never block a session.
+async function applyStealthInit(context: BrowserContext): Promise<void> {
+  try {
+    await context.addInitScript(() => {
+      try {
+        Object.defineProperty(navigator, "webdriver", { get: () => undefined });
+      } catch {
+        /* already shadowed — ignore */
+      }
+    });
+  } catch {
+    /* addInitScript unsupported on this context — ignore */
+  }
 }
 
 // Host locale/timezone for the browser context, so the page's reported locale and
