@@ -16,9 +16,11 @@ business letters, contract drafts, meeting minutes, one-pagers.
 
 ## Process
 
-1. **Scope.** Infer doc type, audience, tone (formal/neutral), language, and length from
-   the request and any source material (read attached files / a URL with `browse_web`).
-   At most one short clarifying question.
+1. **Scope + brand.** Infer doc type, audience, tone (formal/neutral), language, and
+   length from the request and any source material (read attached files / a URL with
+   `browse_web`). Call `get_brand_kit` and apply its colours/fonts/logo to the HTML
+   shell (a branded header bar + the logo) so the document is on-brand. At most one
+   short clarifying question.
 2. **Draft the content** in clean Markdown: a clear title, sensible headings, short
    paragraphs, lists where they help, a table where structure helps. Be concrete and
    complete — a document stands on its own (the reader has no chat context).
