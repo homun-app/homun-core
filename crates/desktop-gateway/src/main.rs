@@ -655,6 +655,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/suggestions/{id}/act", post(suggestion_act))
         .route("/api/proactivity/review-now", post(proactivity_review_now))
         .route("/api/plugins", get(plugins_list))
+        .route("/api/brand-kit", get(brand_kit_get).put(brand_kit_put))
         .route("/api/plugins/{id}/toggle", post(plugin_toggle))
         .route(
             "/api/runtime/provider",
@@ -1140,7 +1141,7 @@ short options\"]}}.";
 /// Internal plugins (ADR 0011 §10-A). The id gates the plugin's UI (nav+panel,
 /// from the frontend registry) AND its engine (here) — detaching makes all three
 /// vanish. The proactivity dashboard is the FIRST addon.
-const KNOWN_PLUGINS: &[&str] = &["proattivita"];
+const KNOWN_PLUGINS: &[&str] = &["proattivita", "presentations"];
 
 /// A2 ENGINE: run one read-only supervisor review for a scope. Assembles the real
 /// context, asks the model for AT MOST ONE grounded card, dedups against the
@@ -14154,6 +14155,72 @@ async fn artifact_pdf_pages(
 struct ArtifactDestination {
     label: String,
     path: String,
+}
+
+/// The user's BRAND KIT — the persistent identity the Presentations plugin (and the
+/// future on-brand deck generator) apply to every deliverable: colours, fonts, logo,
+/// organization name. Stored as one JSON in the data dir.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct BrandKit {
+    #[serde(default)]
+    organization: String,
+    #[serde(default)]
+    primary_color: String,
+    #[serde(default)]
+    secondary_color: String,
+    #[serde(default)]
+    accent_color: String,
+    #[serde(default)]
+    heading_font: String,
+    #[serde(default)]
+    body_font: String,
+    /// Logo as a data URL (base64) so it's self-contained in the JSON; empty if none.
+    #[serde(default)]
+    logo_data_url: String,
+}
+
+impl Default for BrandKit {
+    fn default() -> Self {
+        Self {
+            organization: String::new(),
+            primary_color: "#2b6cb0".to_string(),
+            secondary_color: "#1a202c".to_string(),
+            accent_color: "#ed8936".to_string(),
+            heading_font: "Inter".to_string(),
+            body_font: "Inter".to_string(),
+            logo_data_url: String::new(),
+        }
+    }
+}
+
+fn brand_kit_path() -> Option<PathBuf> {
+    gateway_data_dir().ok().map(|dir| dir.join("brand-kit.json"))
+}
+
+fn load_brand_kit() -> BrandKit {
+    brand_kit_path()
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .and_then(|raw| serde_json::from_str::<BrandKit>(&raw).ok())
+        .unwrap_or_default()
+}
+
+fn save_brand_kit(kit: &BrandKit) -> Result<(), String> {
+    let path = brand_kit_path().ok_or_else(|| "no data dir".to_string())?;
+    let json = serde_json::to_string_pretty(kit).map_err(|e| e.to_string())?;
+    std::fs::write(path, json).map_err(|e| e.to_string())
+}
+
+async fn brand_kit_get() -> Json<BrandKit> {
+    Json(load_brand_kit())
+}
+
+async fn brand_kit_put(Json(kit): Json<BrandKit>) -> Result<Json<BrandKit>, GatewayError> {
+    save_brand_kit(&kit).map_err(|message| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "brand_kit_save",
+        message,
+    })?;
+    Ok(Json(kit))
 }
 
 fn artifact_destinations_path() -> Option<PathBuf> {

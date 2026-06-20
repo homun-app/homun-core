@@ -9714,6 +9714,113 @@ body.resizing-drawer {
 .auto-run-dot.fail {
   background: var(--danger, #cf222e);
 }
+
+/* ── Brand Kit (Presentations plugin) ─────────────────────────────────────── */
+.brandkit {
+  padding: 4px 2px;
+}
+.brandkit-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 12px;
+}
+.brandkit-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+}
+.brandkit-field-wide {
+  grid-column: 1 / -1;
+}
+.brandkit-field > span {
+  color: var(--muted);
+  font-weight: 600;
+}
+.brandkit-field input[type="text"],
+.brandkit-field > input {
+  font: inherit;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+}
+.brandkit-color {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.brandkit-color input[type="color"] {
+  width: 40px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: none;
+}
+.brandkit-color input:not([type="color"]) {
+  flex: 1;
+  font: inherit;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+}
+.brandkit-logo {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.brandkit-logo img {
+  max-height: 48px;
+  max-width: 140px;
+  border-radius: 6px;
+}
+.brandkit-logo-empty {
+  width: 48px;
+  height: 48px;
+  display: grid;
+  place-items: center;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+}
+.brandkit-preview {
+  margin-top: 20px;
+  border-radius: var(--radius-card);
+  padding: 28px 32px;
+  color: #fff;
+  position: relative;
+  overflow: hidden;
+  min-height: 120px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 10px;
+}
+.brandkit-preview-logo {
+  max-height: 36px;
+  max-width: 120px;
+}
+.brandkit-preview-title {
+  font-size: 1.8rem;
+  font-weight: 700;
+}
+.brandkit-preview-accent {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 8px;
+  width: 100%;
+}
+.brandkit-actions {
+  margin-top: 18px;
+  display: flex;
+  justify-content: flex-end;
+}
 .auto-card-actions {
   display: flex;
   gap: 4px;

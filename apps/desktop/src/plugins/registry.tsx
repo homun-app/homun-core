@@ -2,6 +2,7 @@ import type { i18n as I18n } from "i18next";
 import i18next from "i18next";
 import type { ComponentType } from "react";
 import type { LucideIcon } from "lucide-react";
+import { presentationsPlugin } from "./presentations";
 import { proattivitaPlugin } from "./proattivita";
 import type { ProactivitySuggestion } from "../lib/coreBridge";
 
@@ -38,7 +39,7 @@ export interface PluginManifest {
   registerI18n?: (i18n: I18n) => void;
 }
 
-export const pluginRegistry: PluginManifest[] = [proattivitaPlugin];
+export const pluginRegistry: PluginManifest[] = [proattivitaPlugin, presentationsPlugin];
 
 /// Registers all known plugins' i18n namespaces with the host i18next instance.
 /// Call once after `i18n.init()` in the bootstrap. Idempotent per namespace.
