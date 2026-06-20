@@ -419,6 +419,8 @@
     "activeThread": "Thread attivo",
     "responseLikelyInterrupted": "Risposta probabilmente interrotta. Puoi continuare la generazione.",
     "responseVariants": "Varianti risposta",
+    "branchLabelPrompt": "Dai un nome a questo ramo (vuoto per rimuovere):",
+    "branchLabelAria": "Dai un nome al ramo",
     "messageActions": "Azioni messaggio",
     "editMessage": "Edit messaggio",
     "savedToMemory": "Salvato in memoria",

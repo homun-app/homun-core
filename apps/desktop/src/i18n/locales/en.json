@@ -419,6 +419,8 @@
     "activeThread": "Active thread",
     "responseLikelyInterrupted": "Response likely interrupted. You can continue the generation.",
     "responseVariants": "Response variants",
+    "branchLabelPrompt": "Name this branch (empty to clear):",
+    "branchLabelAria": "Name this branch",
     "messageActions": "Message actions",
     "editMessage": "Edit message",
     "savedToMemory": "Saved to memory",

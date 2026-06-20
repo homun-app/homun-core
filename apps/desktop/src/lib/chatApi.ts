@@ -36,6 +36,20 @@ type StreamEvent =
       retryable?: boolean;
     };
 
+// One alternative at a branch point: the sibling node and the leaf to activate to
+// display its branch, plus an optional name (Phase 4).
+export interface CoreBranchOption {
+  child_id: string;
+  leaf_id: string;
+  label: string | null;
+}
+// A node on the active path that has alternative siblings (drives ‹ n/m ›).
+export interface CoreBranchPoint {
+  node_id: string;
+  active_index: number;
+  options: CoreBranchOption[];
+}
+
 const streamListeners = new Set<(payload: CoreChatStreamDelta) => void>();
 let activeThreadId = "thread_active_prompt";
 let localThreads: CoreChatThread[] = [
@@ -289,6 +303,7 @@ export const chatApi = {
   async commitChatPromptResult(
     threadId: string,
     result: CorePromptSubmissionResult,
+    branchFromId?: string | null,
   ) {
     const snapshot = commitLocalPromptResult(threadId, result);
     try {
@@ -300,6 +315,9 @@ export const chatApi = {
             body: JSON.stringify({
               user_message: corePromptMessageToChatMessage(result.user_message),
               assistant_message: corePromptMessageToChatMessage(result.assistant_message),
+              // Edit-as-branch: the gateway commits the new turn as a sibling of
+              // this message, preserving the old branch in the chat tree.
+              branch_from_id: branchFromId ?? null,
             }),
           },
         ),
@@ -307,6 +325,65 @@ export const chatApi = {
     } catch {
       return snapshot;
     }
+  },
+
+  // Regenerated answer → a SIBLING of the previous one under the prompting user
+  // message (persisted branch, navigable with the ‹ n/m › switcher).
+  async commitChatRegeneratedResult(
+    threadId: string,
+    userMessageId: string,
+    result: CorePromptSubmissionResult,
+  ) {
+    const snapshot = commitLocalContinuetionResult(threadId, result.assistant_message.id, result);
+    try {
+      return hydrateMessagesSnapshot(
+        await gatewayJson<CoreChatMessagesSnapshot>(
+          `/api/chat/threads/${encodeURIComponent(threadId)}/messages/commit_regenerated_result`,
+          {
+            method: "POST",
+            body: JSON.stringify({
+              user_message_id: userMessageId,
+              assistant_message: corePromptMessageToChatMessage(result.assistant_message),
+            }),
+          },
+        ),
+      );
+    } catch {
+      return snapshot;
+    }
+  },
+
+  // Branch switcher data: every node on the active path that has alternatives.
+  async chatBranches(threadId: string): Promise<CoreBranchPoint[]> {
+    try {
+      return await gatewayJson<CoreBranchPoint[]>(
+        `/api/chat/threads/${encodeURIComponent(threadId)}/branches`,
+      );
+    } catch {
+      return [];
+    }
+  },
+
+  // Select a branch: point the displayed conversation at a leaf, get the new path.
+  async setActiveLeaf(threadId: string, leafId: string | null) {
+    return hydrateMessagesSnapshot(
+      await gatewayJson<CoreChatMessagesSnapshot>(
+        `/api/chat/threads/${encodeURIComponent(threadId)}/active_leaf`,
+        { method: "POST", body: JSON.stringify({ leaf_id: leafId }) },
+      ),
+    );
+  },
+
+  // Name (or clear) a branch — Phase 4.
+  async setBranchLabel(
+    threadId: string,
+    messageId: string,
+    label: string | null,
+  ): Promise<CoreBranchPoint[]> {
+    return gatewayJson<CoreBranchPoint[]>(
+      `/api/chat/threads/${encodeURIComponent(threadId)}/branch_label`,
+      { method: "POST", body: JSON.stringify({ message_id: messageId, label }) },
+    );
   },
 
   async submitOperationalPrompt(

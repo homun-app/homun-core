@@ -5461,6 +5461,21 @@ body.resizing-drawer {
 .branch-picker button:disabled {
   opacity: 0.35;
 }
+.branch-picker .branch-label {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--surface-hover);
+  color: var(--text);
+  font-size: 11px;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.branch-picker .branch-rename {
+  width: 20px;
+  height: 20px;
+}
 
 /* Inline editing of a user message (edit → re-run). */
 .message-edit {
