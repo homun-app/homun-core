@@ -909,6 +909,28 @@ async function electronDeleteAutomation(id: string): Promise<void> {
   }).catch(() => undefined);
 }
 
+/** One recorded run of an automation — drives the run history + late/failed badge. */
+export type CoreAutomationRun = {
+  ran_at: number;
+  ok: boolean;
+  late: boolean;
+  detail: string | null;
+};
+
+async function electronAutomationRuns(id: string): Promise<CoreAutomationRun[]> {
+  try {
+    const r = await fetch(
+      `${DESKTOP_GATEWAY_URL}/api/automations/${encodeURIComponent(id)}/runs`,
+      { headers: gatewayHeaders() },
+    );
+    if (!r.ok) return [];
+    const body = (await r.json()) as { runs?: CoreAutomationRun[] };
+    return body.runs ?? [];
+  } catch {
+    return [];
+  }
+}
+
 /** Thread ids with an in-flight chat answer right now (across ALL threads, not just
  *  the one on screen) — drives the sidebar "working" dots on every busy chat. */
 async function electronActiveStreams(): Promise<string[]> {
@@ -1968,6 +1990,7 @@ export const coreBridge = {
     electronUpdateAutomation(id, input),
   toggleAutomation: (id: string) => electronToggleAutomation(id),
   deleteAutomation: (id: string) => electronDeleteAutomation(id),
+  automationRuns: (id: string) => electronAutomationRuns(id),
   setChatThreadPinned: (threadId: string, pinned: boolean) =>
     chatApi.setChatThreadPinned(threadId, pinned),
   archiveChatThread: (threadId: string) =>

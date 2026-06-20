@@ -172,6 +172,17 @@ impl Default for RetryPolicy {
     }
 }
 
+/// One recorded execution of an automation — the run history surfaced in the UI so
+/// the user can see WHEN it last fired and whether it succeeded, failed or ran late
+/// (a catch-up after the app was off at the scheduled time).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AutomationRun {
+    pub ran_at: i64,
+    pub ok: bool,
+    pub late: bool,
+    pub detail: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TaskRecord {
     pub task_id: TaskId,

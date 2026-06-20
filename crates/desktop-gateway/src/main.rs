@@ -687,6 +687,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/automations/event-sources", get(automation_event_sources))
         .route("/api/automations", get(automations_list).post(automation_create))
         .route("/api/automations/{id}/toggle", post(automation_toggle))
+        .route("/api/automations/{id}/runs", get(automation_runs))
         .route("/api/automations/{id}", put(automation_update).delete(automation_delete))
         .route(
             "/api/approvals/{approval_id}/approve",
@@ -4625,6 +4626,13 @@ fn materialize_automation_task(
     task.not_before = Some(next);
     task.recurrence = Some(recurrence);
     task.recurrence_tz = tz;
+    // Transient failures (a flaky site, a momentary network blip) shouldn't drop a
+    // run: retry a few times with backoff before the occurrence is considered failed.
+    // next_recurrence carries this policy onto every following occurrence.
+    task.retry_policy = local_first_task_runtime::RetryPolicy {
+        max_attempts: 3,
+        backoff_seconds: 120,
+    };
     store.insert_task(&task).map_err(|e| e.to_string())?;
     Ok(Some(task_id))
 }
@@ -5296,6 +5304,27 @@ async fn automations_list(
         .map_err(|e| GatewayError { status: StatusCode::INTERNAL_SERVER_ERROR, code: "automations_list", message: e.to_string() })?;
     let json: Vec<_> = items.iter().map(automation_to_json).collect();
     Ok(Json(serde_json::json!({ "automations": json })))
+}
+
+/// GET /api/automations/{id}/runs — the automation's recent execution history (when
+/// it fired + whether it succeeded, failed or ran late), newest first.
+async fn automation_runs(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let store = lock_task_store(&state).map_err(|_| GatewayError {
+        status: StatusCode::SERVICE_UNAVAILABLE,
+        code: "task_store",
+        message: "task store unavailable".into(),
+    })?;
+    let runs = store
+        .recent_automation_runs(&id, 20)
+        .map_err(|e| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "automation_runs",
+            message: e.to_string(),
+        })?;
+    Ok(Json(serde_json::json!({ "runs": runs })))
 }
 
 /// POST /api/automations — create an automation (the rule). Phase A persists it;
@@ -16453,20 +16482,26 @@ fn run_next_task_once(
     let execution_task = match task_with_dependency_outputs(state, &task) {
         Ok(task) => task,
         Err(error) => {
-            mark_task_failed(state, &mut task, &error.message)?;
+            handle_failed_task_run(state, &mut task, true, &error.message)?;
+            let retried = matches!(task.status, TaskStatus::Queued);
             sync_session_for_task_run(
                 state,
                 &task,
-                SessionStatus::Failed,
+                if retried {
+                    SessionStatus::Paused
+                } else {
+                    SessionStatus::Failed
+                },
                 1,
                 Some(error.message.clone()),
             )?;
+            let label = if retried { "retry_scheduled" } else { "failed" };
             return Ok(TaskRunBatchResponse {
-                status: "failed".to_string(),
+                status: label.to_string(),
                 completed: 0,
                 stopped_reason: Some(error.message.clone()),
                 results: vec![TaskRunStepResponse {
-                    status: "failed".to_string(),
+                    status: label.to_string(),
                     task_id: Some(task_id),
                     message: error.message,
                 }],
@@ -16492,20 +16527,26 @@ fn run_next_task_once(
             if let Some(handle) = &watchdog {
                 handle.abort();
             }
-            mark_task_failed(state, &mut task, &error.message)?;
+            handle_failed_task_run(state, &mut task, true, &error.message)?;
+            let retried = matches!(task.status, TaskStatus::Queued);
             sync_session_for_task_run(
                 state,
                 &task,
-                SessionStatus::Failed,
+                if retried {
+                    SessionStatus::Paused
+                } else {
+                    SessionStatus::Failed
+                },
                 1,
                 Some(error.message.clone()),
             )?;
+            let label = if retried { "retry_scheduled" } else { "failed" };
             return Ok(TaskRunBatchResponse {
-                status: "failed".to_string(),
+                status: label.to_string(),
                 completed: 0,
                 stopped_reason: Some(error.message.clone()),
                 results: vec![TaskRunStepResponse {
-                    status: "failed".to_string(),
+                    status: label.to_string(),
                     task_id: Some(task_id),
                     message: error.message,
                 }],
@@ -16554,6 +16595,7 @@ fn run_next_task_once(
     append_task_observation_to_session(state, &task, &outcome)?;
     if outcome.completed {
         mark_task_completed(state, &mut task)?;
+        record_automation_run_for_task(state, &task, true, "");
         // Proactivity: a recurring task enqueues its next occurrence on completion.
         if let Some(next) = TaskScheduler::new().next_recurrence(&task, OffsetDateTime::now_utc()) {
             let store = lock_task_store(state)?;
@@ -16573,14 +16615,23 @@ fn run_next_task_once(
         let reason = outcome
             .blocked_reason
             .as_deref()
-            .unwrap_or("The operational plan did not meet the success criteria.");
-        mark_task_waiting_external(state, &mut task, reason)?;
+            .unwrap_or("The operational plan did not meet the success criteria.")
+            .to_string();
+        // Blocked = didn't meet success criteria. Retry while attempts remain, else
+        // mark terminal AND (if recurring) schedule the next occurrence so a single
+        // failure never silently stops the automation; notify + record on terminal.
+        handle_failed_task_run(state, &mut task, false, &reason)?;
+        let retried = matches!(task.status, TaskStatus::Queued);
         sync_session_for_task_run(
             state,
             &task,
             SessionStatus::Paused,
             2,
-            Some(reason.to_string()),
+            Some(if retried {
+                format!("Ritento a breve: {reason}")
+            } else {
+                reason
+            }),
         )?;
     }
     append_task_result_to_chat(state, &task_id, &outcome.chat_message)?;
@@ -16912,6 +16963,123 @@ fn mark_task_waiting_external(
     let store = lock_task_store(state)?;
     store.release_resources(task).map_err(GatewayError::task)?;
     store.insert_task(task).map_err(GatewayError::task)
+}
+
+/// Records this run in the automation's history (no-op for non-automation tasks) and
+/// stamps the automation's `last_fired_at`. Best-effort — never breaks the run.
+fn record_automation_run_for_task(state: &AppState, task: &TaskRecord, ok: bool, detail: &str) {
+    let Some(automation_id) = task
+        .input_json
+        .get("automation_id")
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+    else {
+        return;
+    };
+    let now = OffsetDateTime::now_utc();
+    // "Late" = ran well after its scheduled time — a catch-up after the app was off.
+    let late = task
+        .not_before
+        .map(|nb| (now - nb).whole_seconds() > 120)
+        .unwrap_or(false);
+    let detail_opt = (!detail.is_empty()).then_some(detail);
+    if let Ok(store) = lock_task_store(state) {
+        let _ = store.record_automation_run(&automation_id, now, ok, late, detail_opt);
+        if let Ok(Some(mut automation)) =
+            store.get_automation(&automation_id, &gateway_user_id(), &gateway_workspace_id())
+        {
+            automation.last_fired_at = Some(now);
+            automation.updated_at = now;
+            let _ = store.upsert_automation(&automation);
+        }
+    }
+}
+
+/// Surfaces a proactive card when an automation run fails terminally, so a silently
+/// broken automation doesn't go unnoticed. Deduped per automation (never spams).
+fn notify_automation_failure(state: &AppState, task: &TaskRecord, reason: &str) {
+    let Some(automation_id) = task
+        .input_json
+        .get("automation_id")
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+    else {
+        return;
+    };
+    let (title, scope) = match lock_task_store(state).ok().and_then(|store| {
+        store
+            .get_automation(&automation_id, &gateway_user_id(), &gateway_workspace_id())
+            .ok()
+            .flatten()
+    }) {
+        Some(a) => (
+            format!("L'automazione «{}» è fallita", a.title),
+            a.workspace_id.as_str().to_string(),
+        ),
+        None => (
+            "Un'automazione è fallita".to_string(),
+            "__personal__".to_string(),
+        ),
+    };
+    if let Ok(store) = lock_store(state) {
+        let _ = store.insert_suggestion(&chat_store::SuggestionInput {
+            scope,
+            kind: "automation_failure".to_string(),
+            title,
+            body: reason.chars().take(240).collect(),
+            dedup_key: format!("autofail:{automation_id}"),
+            ..Default::default()
+        });
+    }
+}
+
+/// A task run that did NOT complete: retry the SAME occurrence (escalating backoff)
+/// while attempts remain; otherwise mark it terminal, record + notify, and — for a
+/// recurring task — schedule the NEXT occurrence so one failure never silently stops
+/// the automation. `hard_error` = an execution error (→ Failed) vs a blocked outcome
+/// (→ WaitingExternalEvent). Non-automation tasks default to 1 attempt, so they keep
+/// today's behavior (terminal, no reschedule).
+fn handle_failed_task_run(
+    state: &AppState,
+    task: &mut TaskRecord,
+    hard_error: bool,
+    reason: &str,
+) -> Result<(), GatewayError> {
+    if task.attempt_count + 1 < task.retry_policy.max_attempts {
+        let step = task.retry_policy.backoff_seconds.max(30);
+        let backoff = step * (task.attempt_count as i64 + 1);
+        task.attempt_count += 1;
+        task.status = TaskStatus::Queued;
+        task.blocked_reason = Some(format!(
+            "retry {}/{}: {reason}",
+            task.attempt_count + 1,
+            task.retry_policy.max_attempts
+        ));
+        task.not_before = Some(OffsetDateTime::now_utc() + Duration::seconds(backoff));
+        task.lease_owner = None;
+        task.lease_expires_at = None;
+        task.last_heartbeat_at = None;
+        task.updated_at = OffsetDateTime::now_utc();
+        {
+            let store = lock_task_store(state)?;
+            store.release_resources(task).map_err(GatewayError::task)?;
+            store.insert_task(task).map_err(GatewayError::task)?;
+        }
+        record_automation_run_for_task(state, task, false, &format!("retry: {reason}"));
+        return Ok(());
+    }
+    if hard_error {
+        mark_task_failed(state, task, reason)?;
+    } else {
+        mark_task_waiting_external(state, task, reason)?;
+    }
+    record_automation_run_for_task(state, task, false, reason);
+    notify_automation_failure(state, task, reason);
+    if let Some(next) = TaskScheduler::new().next_recurrence(task, OffsetDateTime::now_utc()) {
+        let store = lock_task_store(state)?;
+        store.insert_task(&next).map_err(GatewayError::task)?;
+    }
+    Ok(())
 }
 
 fn request_task_executor_approval(

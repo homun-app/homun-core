@@ -139,3 +139,46 @@ fn store_lists_tasks_for_user_workspace_in_creation_order() {
         .collect::<Vec<_>>();
     assert_eq!(ids, vec!["task_1", "task_2"]);
 }
+
+#[test]
+fn automation_runs_record_recent_and_retention() {
+    use time::OffsetDateTime;
+    let store = TaskStore::open_in_memory().unwrap();
+    let base = OffsetDateTime::from_unix_timestamp(1_700_000_000).unwrap();
+
+    // Record an ok, a late, and a failed run.
+    store
+        .record_automation_run("auto_x", base, true, false, None)
+        .unwrap();
+    store
+        .record_automation_run("auto_x", base + time::Duration::minutes(1), true, true, None)
+        .unwrap();
+    store
+        .record_automation_run(
+            "auto_x",
+            base + time::Duration::minutes(2),
+            false,
+            false,
+            Some("boom"),
+        )
+        .unwrap();
+
+    let runs = store.recent_automation_runs("auto_x", 10).unwrap();
+    assert_eq!(runs.len(), 3);
+    // Newest first: the failed run.
+    assert!(!runs[0].ok);
+    assert_eq!(runs[0].detail.as_deref(), Some("boom"));
+    assert!(runs[1].late);
+    assert!(runs[2].ok && !runs[2].late);
+
+    // Scope isolation: another automation has its own history.
+    assert!(store.recent_automation_runs("auto_y", 10).unwrap().is_empty());
+
+    // Retention: keep at most 50 per automation.
+    for i in 0..60i64 {
+        store
+            .record_automation_run("auto_z", base + time::Duration::seconds(i), true, false, None)
+            .unwrap();
+    }
+    assert_eq!(store.recent_automation_runs("auto_z", 100).unwrap().len(), 50);
+}
