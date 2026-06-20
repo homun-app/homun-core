@@ -2147,6 +2147,92 @@ fn cosine(a: &[f32], b: &[f32]) -> f32 {
 /// 0.85–0.96, while genuinely distinct decisions on the same topic stay below ~0.80.
 const DEDUP_COSINE: f32 = 0.85;
 
+/// Image-generation provider config: (base_url, model, api_key). Provider-agnostic and
+/// OpenAI-compatible (`{base}/images/generations`), so the SAME path serves LOCAL Ollama
+/// (Flux / Z-Image, via MLX) AND cloud diffusion (Gemini "Nano Banana", OpenAI gpt-image,
+/// fal, …). Defaults to the local Ollama instance; override per provider with
+/// HOMUN_IMAGE_BASE / HOMUN_IMAGE_MODEL / HOMUN_IMAGE_KEY.
+fn image_provider_config() -> (String, String, Option<String>) {
+    let base = std::env::var("HOMUN_IMAGE_BASE")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| {
+            let ollama = std::env::var("HOMUN_EMBED_BASE")
+                .unwrap_or_else(|_| "http://127.0.0.1:11434".to_string());
+            format!("{}/v1", ollama.trim_end_matches('/'))
+        });
+    let model = std::env::var("HOMUN_IMAGE_MODEL")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| "z-image".to_string());
+    let key = std::env::var("HOMUN_IMAGE_KEY")
+        .ok()
+        .filter(|s| !s.trim().is_empty());
+    (base, model, key)
+}
+
+/// Generate a PNG from a text prompt via the configured image provider (local Ollama or
+/// cloud). Returns raw PNG bytes. Best-effort across the two common response shapes
+/// (`data[0].b64_json` and `data[0].url`).
+async fn generate_image_png(
+    http: &reqwest::Client,
+    prompt: &str,
+    size: &str,
+) -> Result<Vec<u8>, String> {
+    let (base, model, key) = image_provider_config();
+    let endpoint = format!("{}/images/generations", base.trim_end_matches('/'));
+    let mut builder = http
+        .post(&endpoint)
+        .timeout(std::time::Duration::from_secs(180))
+        .json(&serde_json::json!({
+            "model": model,
+            "prompt": prompt,
+            "n": 1,
+            "size": size,
+            "response_format": "b64_json",
+        }));
+    if let Some(key) = key.as_ref() {
+        builder = builder.bearer_auth(key);
+    }
+    let resp = builder
+        .send()
+        .await
+        .map_err(|e| format!("image provider unreachable ({endpoint}): {e}"))?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!(
+            "image provider HTTP {status}: {}. Check the image model is available (e.g. `ollama pull {model}`) or set a cloud provider via HOMUN_IMAGE_BASE/MODEL/KEY.",
+            body.chars().take(180).collect::<String>()
+        ));
+    }
+    let json: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("bad image response: {e}"))?;
+    let data = json
+        .get("data")
+        .and_then(|d| d.as_array())
+        .and_then(|a| a.first());
+    if let Some(b64) = data.and_then(|d| d.get("b64_json")).and_then(|v| v.as_str()) {
+        return base64::engine::general_purpose::STANDARD
+            .decode(b64.as_bytes())
+            .map_err(|e| format!("image decode failed: {e}"));
+    }
+    if let Some(url) = data.and_then(|d| d.get("url")).and_then(|v| v.as_str()) {
+        let bytes = http
+            .get(url)
+            .send()
+            .await
+            .map_err(|e| format!("image url fetch failed: {e}"))?
+            .bytes()
+            .await
+            .map_err(|e| format!("image url read failed: {e}"))?;
+        return Ok(bytes.to_vec());
+    }
+    Err("image provider returned no image data".to_string())
+}
+
 /// Embed memories in a scope that don't yet have a vector (lazy backfill). Collects
 /// refs+texts under the lock, embeds OFF the lock (async HTTP), writes back. Bounded
 /// per call so it never stalls a turn.
@@ -8594,6 +8680,28 @@ fn create_artifact_tool_schema() -> serde_json::Value {
     })
 }
 
+/// Tool for the model to GENERATE an image from a prompt (photo, illustration, icon,
+/// slide visual) — saved as a downloadable PNG artifact. Provider-agnostic: local Ollama
+/// by default (Flux / Z-Image), or a cloud model.
+fn generate_image_tool_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": "generate_image",
+            "description": "Generate an image from a text prompt (a photo, illustration, icon, diagram-free visual, slide background, …) and save it as a downloadable PNG artifact. Runs on the configured image provider — a LOCAL model via Ollama by default, or a cloud one. Use it when the user asks to create/generate/draw an image, or when a visual is needed (e.g. a slide cover).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prompt": { "type": "string", "description": "What to depict — be specific about subject, style, composition and colours." },
+                    "name": { "type": "string", "description": "Optional artifact file name WITHOUT extension (e.g. \"cover\"). Defaults to \"image\"." },
+                    "size": { "type": "string", "description": "Optional WxH (default 1024x1024).", "enum": ["1024x1024", "1280x720", "768x1024", "1024x768"] }
+                },
+                "required": ["prompt"]
+            }
+        }
+    })
+}
+
 /// Tool to deliver a generated artifact to a user-authorized destination folder.
 /// The gateway performs the copy host-side, scoped to granted destinations only.
 fn save_artifact_tool_schema(destinations: &[ArtifactDestination]) -> serde_json::Value {
@@ -9512,6 +9620,7 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
     ];
     if !read_only {
         base_tools.push(create_artifact_tool_schema());
+        base_tools.push(generate_image_tool_schema());
         base_tools.push(create_skill_tool_schema());
         base_tools.push(record_decision_tool_schema());
         base_tools.push(forget_memory_tool_schema());
@@ -10202,6 +10311,7 @@ check/update the key in Settings → Model & Runtime.".to_string()
                             name,
                             "run_in_sandbox"
                                 | "create_artifact"
+                                | "generate_image"
                                 | "save_artifact"
                                 | "read_file"
                                 | "write_file"
@@ -11174,6 +11284,76 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                 }
                             }
                             Err(error) => error,
+                        }
+                    } else if name == "generate_image" {
+                        // Generate an image from a prompt (local Ollama or cloud provider)
+                        // and surface it as a PNG artifact, like create_artifact.
+                        let parsed = serde_json::from_str::<serde_json::Value>(args_raw)
+                            .unwrap_or_else(|_| serde_json::json!({}));
+                        let prompt = parsed
+                            .get("prompt")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .trim()
+                            .to_string();
+                        let size = parsed
+                            .get("size")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("1024x1024")
+                            .to_string();
+                        let base_name = parsed
+                            .get("name")
+                            .and_then(|v| v.as_str())
+                            .map(slugify_skill_name)
+                            .filter(|s| !s.is_empty())
+                            .unwrap_or_else(|| "image".to_string());
+                        let fname = format!("{base_name}.png");
+                        if prompt.is_empty() {
+                            "generate_image needs a prompt.".to_string()
+                        } else {
+                            let _ = emit_stream_event(
+                                &tx,
+                                GenerateStreamEvent::Delta {
+                                    text: format!(
+                                        "‹‹ACT››🎨 Generating image: {}‹‹/ACT››",
+                                        prompt.chars().take(60).collect::<String>()
+                                    ),
+                                },
+                            )
+                            .await;
+                            match generate_image_png(&state_owned.http, &prompt, &size).await {
+                                Ok(bytes) => {
+                                    let thread_slug = artifact_thread_slug(thread_id.as_deref());
+                                    let slug_w = thread_slug.clone();
+                                    let fname_w = fname.clone();
+                                    let result = tokio::task::spawn_blocking(move || {
+                                        write_artifact_bytes(&slug_w, &fname_w, &bytes)
+                                    })
+                                    .await
+                                    .unwrap_or_else(|e| Err(format!("Error: {e}")));
+                                    match result {
+                                        Ok((size_b, updated)) => {
+                                            let marker = serde_json::json!({
+                                                "name": fname,
+                                                "thread": thread_slug,
+                                                "size": size_b,
+                                                "updated": updated,
+                                            });
+                                            let artifact_mark =
+                                                format!("‹‹ARTIFACT››{marker}‹‹/ARTIFACT››");
+                                            accumulated.push_str(&artifact_mark);
+                                            let _ = emit_stream_event(
+                                                &tx,
+                                                GenerateStreamEvent::Delta { text: artifact_mark },
+                                            )
+                                            .await;
+                                            format!("Image «{fname}» generated.")
+                                        }
+                                        Err(error) => error,
+                                    }
+                                }
+                                Err(error) => error,
+                            }
                         }
                     } else if name == "save_artifact" {
                         // Deliver a generated artifact to an authorized destination
