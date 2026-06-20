@@ -2218,6 +2218,18 @@ fn image_provider_config() -> (String, String, Option<String>) {
 /// Generate a PNG from a text prompt via the configured image provider (local Ollama or
 /// cloud). Returns raw PNG bytes. Best-effort across the two common response shapes
 /// (`data[0].b64_json` and `data[0].url`).
+/// Per-request timeout for image generation. Default 300s (5 min): a LOCAL diffusion
+/// model on a cold start (model load + first sampling) can easily exceed the old 180s
+/// and get killed mid-generation even though it would have succeeded. Override with
+/// `HOMUN_IMAGE_TIMEOUT_SECS` (e.g. a slow CPU-only box, or a very large model).
+fn image_timeout_secs() -> u64 {
+    std::env::var("HOMUN_IMAGE_TIMEOUT_SECS")
+        .ok()
+        .and_then(|s| s.trim().parse::<u64>().ok())
+        .filter(|&s| s > 0)
+        .unwrap_or(300)
+}
+
 async fn generate_image_png(
     http: &reqwest::Client,
     prompt: &str,
@@ -2227,7 +2239,7 @@ async fn generate_image_png(
     let endpoint = format!("{}/images/generations", base.trim_end_matches('/'));
     let mut builder = http
         .post(&endpoint)
-        .timeout(std::time::Duration::from_secs(180))
+        .timeout(std::time::Duration::from_secs(image_timeout_secs()))
         .json(&serde_json::json!({
             "model": model,
             "prompt": prompt,
@@ -11405,7 +11417,11 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                                 GenerateStreamEvent::Delta { text: artifact_mark },
                                             )
                                             .await;
-                                            format!("Image «{fname}» generated.")
+                                            format!(
+                                                "Image «{fname}» generated and shown to the user \
+                                                 inline. Do NOT embed it as a markdown image link \
+                                                 (![]()); just refer to it in one short sentence."
+                                            )
                                         }
                                         Err(error) => error,
                                     }

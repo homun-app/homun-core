@@ -2972,6 +2972,9 @@ function ArtifactCardRow({
 }) {
   const { t } = useTranslation();
   const [counts, setCounts] = useState<{ added: number; removed: number } | null>(null);
+  // Images render their preview inline by default — a generated picture should be
+  // visible in the chat without the user having to expand the chip.
+  const isImage = ARTIFACT_IMAGE_EXT.includes(artifactExt(artifact.name));
 
   useEffect(() => {
     if (!artifact.updated) return;
@@ -3022,19 +3025,21 @@ function ArtifactCardRow({
         >
           <Download size={14} />
         </button>
-        <button
-          type="button"
-          className="artifact-expand"
-          aria-label={expanded ? t("chat.collapsePreview") : t("chat.expandPreview")}
-          onClick={onToggle}
-        >
-          <ChevronRight
-            size={15}
-            className={expanded ? "artifact-chevron open" : "artifact-chevron"}
-          />
-        </button>
+        {!isImage && (
+          <button
+            type="button"
+            className="artifact-expand"
+            aria-label={expanded ? t("chat.collapsePreview") : t("chat.expandPreview")}
+            onClick={onToggle}
+          >
+            <ChevronRight
+              size={15}
+              className={expanded ? "artifact-chevron open" : "artifact-chevron"}
+            />
+          </button>
+        )}
       </div>
-      {expanded && <InlineArtifactPreview artifact={artifact} />}
+      {(expanded || isImage) && <InlineArtifactPreview artifact={artifact} />}
     </div>
   );
 }
