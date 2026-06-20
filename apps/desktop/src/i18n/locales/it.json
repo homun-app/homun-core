@@ -156,6 +156,8 @@
     "actionPlaceholder": "Cosa deve fare Homun quando scatta… (sceglie skill, connettori, browser e memoria automaticamente)",
     "askConfirmation": "Chiedi conferma prima di inviare o pubblicare",
     "createAutomation": "Crea automazione",
+    "editAutomation": "Modifica automazione",
+    "saveChanges": "Salva modifiche",
     "emptyHint": "Nessuna automazione. Creane una qui sopra, o chiedimelo in chat — es. «ogni venerdì alle 18 mandami il riassunto della settimana».",
     "next": "prossima",
     "last": "ultima",

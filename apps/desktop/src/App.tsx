@@ -891,7 +891,7 @@ export default function App() {
     }
   }
 
-  async function handleUpdateAutomation(id: string, input: { title?: string; prompt?: string }) {
+  async function handleUpdateAutomation(id: string, input: Partial<AutomationCreateteInput>) {
     try {
       await coreBridge.updateAutomation(id, input);
       await loadAutomations();
