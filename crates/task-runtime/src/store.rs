@@ -1,6 +1,6 @@
 use crate::{
-    ApprovalRequest, Automation, ResourceClass, TaskCheckpoint, TaskDependencyOutput, TaskId,
-    TaskRecord, TaskRuntimeError, TaskRuntimeResult, TaskStatus, UserId, WorkspaceId,
+    ApprovalRequest, Automation, AutomationRun, ResourceClass, TaskCheckpoint, TaskDependencyOutput,
+    TaskId, TaskRecord, TaskRuntimeError, TaskRuntimeResult, TaskStatus, UserId, WorkspaceId,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::Value;
@@ -122,6 +122,18 @@ impl TaskStore {
 
             CREATE INDEX IF NOT EXISTS idx_automations_scope
                 ON automations(user_id, workspace_id, enabled);
+
+            CREATE TABLE IF NOT EXISTS automation_runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                automation_id TEXT NOT NULL,
+                ran_at INTEGER NOT NULL,
+                ok INTEGER NOT NULL,
+                late INTEGER NOT NULL DEFAULT 0,
+                detail TEXT
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_automation_runs
+                ON automation_runs(automation_id, ran_at DESC);
 
             INSERT INTO task_runtime_metadata(key, value)
             VALUES ('schema_version', '2')
@@ -405,7 +417,65 @@ impl TaskStore {
             "DELETE FROM automations WHERE id = ?1 AND user_id = ?2 AND workspace_id = ?3",
             params![id, user_id.as_str(), workspace_id.as_str()],
         )?;
+        // The run history is keyed by automation_id (no FK), so clean it up here.
+        self.connection.execute(
+            "DELETE FROM automation_runs WHERE automation_id = ?1",
+            params![id],
+        )?;
         Ok(())
+    }
+
+    /// Append one execution to an automation's run history (when it fired + outcome),
+    /// keeping only the most recent ~50 per automation so it never grows unbounded.
+    pub fn record_automation_run(
+        &self,
+        automation_id: &str,
+        ran_at: OffsetDateTime,
+        ok: bool,
+        late: bool,
+        detail: Option<&str>,
+    ) -> TaskRuntimeResult<()> {
+        self.connection.execute(
+            "INSERT INTO automation_runs (automation_id, ran_at, ok, late, detail)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![automation_id, ran_at.unix_timestamp(), ok as i64, late as i64, detail],
+        )?;
+        self.connection.execute(
+            "DELETE FROM automation_runs
+              WHERE automation_id = ?1 AND id NOT IN (
+                  SELECT id FROM automation_runs
+                   WHERE automation_id = ?1
+                   ORDER BY ran_at DESC, id DESC LIMIT 50
+              )",
+            params![automation_id],
+        )?;
+        Ok(())
+    }
+
+    /// The most recent runs of an automation, newest first.
+    pub fn recent_automation_runs(
+        &self,
+        automation_id: &str,
+        limit: usize,
+    ) -> TaskRuntimeResult<Vec<AutomationRun>> {
+        let mut statement = self.connection.prepare(
+            "SELECT ran_at, ok, late, detail FROM automation_runs
+              WHERE automation_id = ?1
+              ORDER BY ran_at DESC, id DESC LIMIT ?2",
+        )?;
+        let rows = statement.query_map(params![automation_id, limit as i64], |row| {
+            Ok(AutomationRun {
+                ran_at: row.get::<_, i64>(0)?,
+                ok: row.get::<_, i64>(1)? != 0,
+                late: row.get::<_, i64>(2)? != 0,
+                detail: row.get::<_, Option<String>>(3)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
     }
 
     pub fn add_dependency(

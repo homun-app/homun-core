@@ -19,6 +19,7 @@ import { coreBridge } from "../lib/coreBridge";
 import type {
   AutomationCreateteInput,
   AutomationTriggerJson,
+  CoreAutomationRun,
   CoreTaskItem,
   EventSources,
   ManagedAutomation,
@@ -106,6 +107,21 @@ export function AutomationsView({
   const cancelScheduled = (taskId: string) => {
     void coreBridge.cancelTask(taskId).then(() => reloadScheduled());
   };
+
+  // Per-automation run history (when each fired + outcome) → drives the timeline dots
+  // and the last-run badge, so a silently broken or late automation is visible.
+  const [runsById, setRunsById] = useState<Record<string, CoreAutomationRun[]>>({});
+  useEffect(() => {
+    let cancelled = false;
+    void Promise.all(
+      automations.map(async (a) => [a.id, await coreBridge.automationRuns(a.id)] as const),
+    ).then((pairs) => {
+      if (!cancelled) setRunsById(Object.fromEntries(pairs));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [automations]);
 
   const active = automations.filter((a) => a.enabled).length;
 
@@ -656,6 +672,32 @@ export function AutomationsView({
                   )}
                 </span>
               </div>
+              {(runsById[a.id]?.length ?? 0) > 0 && (
+                <div className="auto-runs">
+                  {(() => {
+                    const last = runsById[a.id][0];
+                    const cls = !last.ok ? "fail" : last.late ? "late" : "ok";
+                    const label = !last.ok
+                      ? t("automations.runFailed")
+                      : last.late
+                        ? t("automations.runLate")
+                        : t("automations.runOk");
+                    return <span className={`auto-run-badge ${cls}`}>{label}</span>;
+                  })()}
+                  <span className="auto-run-dots" aria-hidden>
+                    {[...runsById[a.id]]
+                      .slice(0, 8)
+                      .reverse()
+                      .map((r, i) => (
+                        <i
+                          key={i}
+                          className={`auto-run-dot ${!r.ok ? "fail" : r.late ? "late" : "ok"}`}
+                          title={`${formatWhen(r.ran_at)}${r.detail ? " — " + r.detail : ""}`}
+                        />
+                      ))}
+                  </span>
+                </div>
+              )}
             </div>
             <div className="auto-card-actions">
               <button
