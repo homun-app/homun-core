@@ -686,3 +686,60 @@ per-ramo / automazione PR:
 Distinzione chiave: git (dato: commit/branch/tree/worktree) e forge (PR/issue) sono
 due livelli separati; l'albero della **chat** e' una terza cosa ancora (SQLite), da
 non confondere con git.
+
+## Roadmap plugin/utilita' — verso Manus (per PMI)
+
+Obiettivo (utente): avvicinarsi a **Manus** (manus.im) = un'AI agentica che restituisce
+**artifact concreti** (report, foglio, presentazione, tabella, sito, app), non solo
+chat. Use-case PMI documentati di Manus: ricerca→report→**deck**; N PDF→**foglio**
+con pivot/scoring; analisi dati CSV/Excel; report di business; "fa il lavoro davvero"
+(aggiorna ticket, pianifica, invia email).
+
+Homun ha gia' il **substrato**: contained-computer (browser + sandbox codice), **skills**
+(SKILL.md), **artifacts** (Workbench "Artefatti"), canali (WhatsApp/Telegram), memoria,
+MCP/connettori. Il salto = pacchettizzare la **produzione di deliverable** come utilita'
+scopribili.
+
+### Due forme di consegna (chiarezza architetturale)
+- **Skill-deliverable** — invocate dall'agente, producono un artifact nel
+  contained-computer (slide, foglio, doc, sito, grafico, immagine). **NON** richiedono
+  la piattaforma plugin "path B": sono SKILL.md + tool + artifacts. **Spedibili ora.**
+- **Plugin-app di business** — nav + panel + dati + (opz.) engine (fatture, CRM, spese).
+  Usano il contratto plugin (path A oggi: compilato nel registry; path B dopo).
+
+### F0 — Abilitatori (deliverable di prima classe)
+- Tipi artifact + **preview/edit/export** per `.pptx/.xlsx/.docx/.pdf/.html` (il Workbench
+  "Artefatti" esiste gia' → estendere render + editor + export).
+- **Host API piu' ricca** del `PluginHost` (oggi solo `openChat`): memory / connectors /
+  artifacts / chat — coerente con le `capabilities` dichiarate.
+- "Deliverable registry": una skill/plugin registra l'artifact prodotto + il suo editor.
+
+### F1 — Utilita' deliverable (parita' Manus, alto valore) — skill + viewer
+1. **Presentazioni** (priorita'): generatore deck (Marp/reveal.js→HTML o python-pptx→.pptx);
+   flusso "ricerca→report→deck"; export PDF/PPTX.
+2. **Fogli & analisi dati**: CSV/Excel → pulizia, pivot, formule, scoring, grafici
+   (pandas/openpyxl); "N PDF → un foglio".
+3. **Documenti & report**: report/preventivi/proposte PDF/DOCX (markdown→pandoc/weasyprint).
+4. **Grafici & dashboard**: data-viz come artifact (riuso del widget visualize).
+5. **Siti & landing page**: sito statico/landing generato e (poi) deployato.
+6. **Immagini**: generazione immagini (modello/MCP).
+
+### F2 — App di business PMI (plugin path A: dati + panel + engine)
+1. **Fatture & Preventivi** (killer-app PMI): genera, traccia, PDF, invia via canali;
+   (poi) e-fattura/SDI IT.
+2. **CRM leggero**: estende Contatti/perimetri → deal, follow-up via automazioni.
+3. **Spese & prima nota**.
+4. **Campagne & outreach**: email/WhatsApp (canali) + template + sequenze (automazioni).
+5. **Appuntamenti/Prenotazioni**: scheduling (automazioni + calendario).
+6. **Knowledge base / mini-sito**: infra docs gia' presente.
+
+### F3 — Piattaforma (path B) + marketplace
+Caricamento dinamico dei plugin + **enforcement delle capability** (confine di sicurezza)
++ contratto di **engine backend** per plugin + **host API versionata** → plugin terzi /
+enterprise + marketplace.
+
+**Principio**: le utilita' F1 sfruttano contained-computer + skills + artifacts →
+**spedibili senza path B**. Path B abilita marketplace/terze parti, NON e' prerequisito
+per la parita'-Manus. Sequenza consigliata: F0 (abilitatori) → F1.1 Presentazioni
+(prima utilita', valida il pattern skill→artifact→viewer→export) → F1.2/1.3 dati+doc →
+F2.1 Fatture (prima app PMI) → resto.
