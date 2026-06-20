@@ -156,6 +156,8 @@
     "actionPlaceholder": "What Homun should do when it triggers… (it picks skills, connectors, browser and memory automatically)",
     "askConfirmation": "Ask confirmation before sending or publishing",
     "createAutomation": "Create automation",
+    "editAutomation": "Edit automation",
+    "saveChanges": "Save changes",
     "emptyHint": "No automation. Create one above, or ask me in chat — e.g. «every Friday at 6pm send me the week's summary».",
     "next": "next",
     "last": "last",

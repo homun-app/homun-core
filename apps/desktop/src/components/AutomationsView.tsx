@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   Bolt,
-  Check,
   ChevronDown,
   Clock3,
   MessageSquare,
@@ -32,7 +31,7 @@ type SelectedSource =
 interface AutomationsViewProps {
   automations: ManagedAutomation[];
   onCreatete: (input: AutomationCreateteInput) => void;
-  onUpdate: (id: string, input: { title?: string; prompt?: string }) => void;
+  onUpdate: (id: string, input: Partial<AutomationCreateteInput>) => void;
   onToggle: (id: string) => void;
   onDelete: (id: string) => void;
 }
@@ -56,12 +55,12 @@ export function AutomationsView({
 }: AutomationsViewProps) {
   const { t } = useTranslation();
   const [composing, setComposing] = useState(false);
-  // Inline edit of an existing automation (title + action). Schedule/trigger edits
-  // go through the agent (update_automation) since rebuilding the picker state from a
-  // recurrence string is error-prone.
+  // The automation currently loaded into the composer for EDITING (null = creating
+  // a new one). Editing reuses the SAME builder as create — title, prompt, schedule
+  // (days × times) and approval — so the schedule is edited with the pickers, never a
+  // raw recurrence string. `startEdit` parses the existing recurrence back into the
+  // builder state.
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [editTitle, setEditTitle] = useState("");
-  const [editPrompt, setEditPrompt] = useState("");
   const [title, setTitle] = useState("");
   const [prompt, setPrompt] = useState("");
   const [triggerKind, setTriggerKind] = useState<"schedule" | "event">("schedule");
@@ -132,6 +131,94 @@ export function AutomationsView({
     return `dow@${sorted}@${t}`;
   };
 
+  // ── Editing: parse an existing recurrence back into builder state ──────────────
+  const VALID_DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+  const parseTimes = (raw: string): string[] => {
+    const out = raw
+      .split(",")
+      .map((x) => x.trim().match(/^(\d{1,2}):(\d{2})/))
+      .filter((m): m is RegExpMatchArray => m !== null)
+      .map((m) => `${m[1].padStart(2, "0")}:${m[2]}`);
+    return out.length ? out : ["09:00"];
+  };
+  const parseDays = (raw: string): string[] => {
+    const out = raw
+      .split(",")
+      .map((x) => x.trim().toLowerCase().slice(0, 3))
+      .filter((d) => VALID_DAYS.includes(d));
+    return out.length ? out : ["mon"];
+  };
+  // Inverse of composeRecurrence, tolerant of every documented format the runtime
+  // accepts (every Nu | daily@.. | weekly@dow@.. | dow@days@..). Unknown → daily 09:00.
+  const loadRecurrence = (recurrence: string) => {
+    const r = recurrence.trim().toLowerCase();
+    const interval = r.match(/^(?:every\s+)?(\d+)\s*([a-z]+)$/);
+    if (interval && /^[hd]/.test(interval[2])) {
+      setScheduleMode("interval");
+      setIntervalN(Math.max(1, parseInt(interval[1], 10) || 1));
+      setIntervalUnit(interval[2].startsWith("d") ? "d" : "h");
+      return;
+    }
+    let m = r.match(/^daily[@\s]+(.+)$/);
+    if (m) {
+      setScheduleMode("daily");
+      setTimes(parseTimes(m[1]));
+      return;
+    }
+    m = r.match(/^weekly[@\s]+([a-z,]+)[@\s]+(.+)$/);
+    if (m) {
+      setScheduleMode("days");
+      setDays(parseDays(m[1]));
+      setTimes(parseTimes(m[2]));
+      return;
+    }
+    m = r.match(/^dow@([^@]*)@(.+)$/);
+    if (m) {
+      const d = m[1].trim();
+      if (d === "" || d === "*" || d === "all" || d === "daily" || d === "weekdays") {
+        setScheduleMode("daily");
+      } else {
+        setScheduleMode("days");
+        setDays(parseDays(d));
+      }
+      setTimes(parseTimes(m[2]));
+      return;
+    }
+    setScheduleMode("daily");
+    setTimes(["09:00"]);
+  };
+
+  // Load an existing automation into the composer for editing (Save then updates it).
+  const startEdit = (a: ManagedAutomation) => {
+    setEditingId(a.id);
+    setComposing(true);
+    setTitle(a.title);
+    setPrompt(a.prompt);
+    setAutonomous(a.approval === "autonomous");
+    if (a.trigger.type === "schedule") {
+      setTriggerKind("schedule");
+      loadRecurrence(a.trigger.recurrence);
+    } else {
+      setTriggerKind("event");
+      const ev = a.trigger.event;
+      if (ev.kind === "channel_message") {
+        setSource({ kind: "channel", id: ev.channel ?? "", label: ev.channel ?? "Canale" });
+        setEventFrom(ev.from ?? "");
+      } else if (ev.kind === "connector_poll") {
+        setSource({
+          kind: "connector",
+          tool: ev.tool,
+          label: ev.label ?? ev.tool,
+          keyField: ev.key_field ?? "id",
+        });
+        setConnectorKey(ev.key_field ?? "id");
+        setConnectorArgs(
+          ev.args && typeof ev.args === "object" ? JSON.stringify(ev.args) : "",
+        );
+      }
+    }
+  };
+
   const scheduleValid =
     scheduleMode === "interval"
       ? intervalN >= 1
@@ -160,6 +247,7 @@ export function AutomationsView({
     setSrcQuery("");
     setAutonomous(false);
     setComposing(false);
+    setEditingId(null);
   };
 
   // Parse the connector filter: a "key: value" or "key=value" → {key:value}; bare text →
@@ -205,13 +293,14 @@ export function AutomationsView({
       };
     }
     const finalTitle = title.trim() || prompt.trim().slice(0, 48);
-    onCreatete({
-      title: finalTitle,
-      trigger,
-      prompt: prompt.trim(),
-      approval: autonomous ? "autonomous" : "confirm",
-      source: "manual",
-    });
+    const approval = autonomous ? "autonomous" : "confirm";
+    if (editingId) {
+      // Edit: re-sync title, action, schedule/trigger and approval in one PUT. The
+      // gateway cancels the old recurring task and materializes a fresh one.
+      onUpdate(editingId, { title: finalTitle, trigger, prompt: prompt.trim(), approval });
+    } else {
+      onCreatete({ title: finalTitle, trigger, prompt: prompt.trim(), approval, source: "manual" });
+    }
     reset();
   };
 
@@ -295,6 +384,11 @@ export function AutomationsView({
 
       {composing && (
         <div className="auto-editor">
+          {editingId && (
+            <div className="auto-editor-head">
+              <Pencil size={13} aria-hidden /> {t("automations.editAutomation")}
+            </div>
+          )}
           <input
             className="auto-title-input"
             placeholder={t("automations.titlePlaceholder")}
@@ -517,7 +611,7 @@ export function AutomationsView({
               Cancel
             </button>
             <button className="auto-btn-accent" onClick={save} disabled={!canSave}>
-              {t("automations.createAutomation")}
+              {editingId ? t("automations.saveChanges") : t("automations.createAutomation")}
             </button>
           </div>
         </div>
@@ -543,28 +637,8 @@ export function AutomationsView({
                   <span className="auto-source">{a.source === "chat" ? t("automations.fromChat") : t("automations.suggested")}</span>
                 )}
               </div>
-              {editingId === a.id ? (
-                <div className="auto-card-edit" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                  <input
-                    className="set-input"
-                    value={editTitle}
-                    onChange={(e) => setEditTitle(e.target.value)}
-                    aria-label={t("automations.title")}
-                  />
-                  <textarea
-                    className="set-input"
-                    value={editPrompt}
-                    onChange={(e) => setEditPrompt(e.target.value)}
-                    rows={3}
-                    aria-label={t("automations.action")}
-                  />
-                </div>
-              ) : (
-                <>
-                  <p className="auto-card-title">{a.title}</p>
-                  <p className="auto-card-prompt">{a.prompt}</p>
-                </>
-              )}
+              <p className="auto-card-title">{a.title}</p>
+              <p className="auto-card-prompt">{a.prompt}</p>
               <div className="auto-card-meta">
                 {a.trigger.type === "schedule" && a.next_run && (
                   <span>
@@ -584,65 +658,30 @@ export function AutomationsView({
               </div>
             </div>
             <div className="auto-card-actions">
-              {editingId === a.id ? (
-                <>
-                  <button
-                    className="auto-icon"
-                    title={t("common.save")}
-                    aria-label={t("common.save")}
-                    onClick={() => {
-                      const title = editTitle.trim();
-                      const prompt = editPrompt.trim();
-                      const changes: { title?: string; prompt?: string } = {};
-                      if (title && title !== a.title) changes.title = title;
-                      if (prompt && prompt !== a.prompt) changes.prompt = prompt;
-                      if (changes.title || changes.prompt) onUpdate(a.id, changes);
-                      setEditingId(null);
-                    }}
-                  >
-                    <Check size={15} aria-hidden />
-                  </button>
-                  <button
-                    className="auto-icon"
-                    title={t("common.cancel")}
-                    aria-label={t("common.cancel")}
-                    onClick={() => setEditingId(null)}
-                  >
-                    <X size={15} aria-hidden />
-                  </button>
-                </>
-              ) : (
-                <>
-                  <button
-                    className="auto-icon"
-                    title={t("common.edit")}
-                    aria-label={t("common.edit")}
-                    onClick={() => {
-                      setEditingId(a.id);
-                      setEditTitle(a.title);
-                      setEditPrompt(a.prompt);
-                    }}
-                  >
-                    <Pencil size={15} aria-hidden />
-                  </button>
-                  <button
-                    className="auto-icon"
-                    title={a.enabled ? t("automations.disable") : t("automations.enable")}
-                    aria-label={a.enabled ? t("automations.disable") : t("automations.enable")}
-                    onClick={() => onToggle(a.id)}
-                  >
-                    <Power size={15} aria-hidden />
-                  </button>
-                  <button
-                    className="auto-icon danger"
-                    title={t("common.delete")}
-                    aria-label={t("common.delete")}
-                    onClick={() => onDelete(a.id)}
-                  >
-                    <Trash2 size={15} aria-hidden />
-                  </button>
-                </>
-              )}
+              <button
+                className="auto-icon"
+                title={t("common.edit")}
+                aria-label={t("common.edit")}
+                onClick={() => startEdit(a)}
+              >
+                <Pencil size={15} aria-hidden />
+              </button>
+              <button
+                className="auto-icon"
+                title={a.enabled ? t("automations.disable") : t("automations.enable")}
+                aria-label={a.enabled ? t("automations.disable") : t("automations.enable")}
+                onClick={() => onToggle(a.id)}
+              >
+                <Power size={15} aria-hidden />
+              </button>
+              <button
+                className="auto-icon danger"
+                title={t("common.delete")}
+                aria-label={t("common.delete")}
+                onClick={() => onDelete(a.id)}
+              >
+                <Trash2 size={15} aria-hidden />
+              </button>
             </div>
           </article>
         ))}
