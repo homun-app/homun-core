@@ -89,6 +89,13 @@ import {
   THEME_PRESETS,
   type ThemeName,
 } from "../lib/accent";
+import {
+  IS_DESKTOP,
+  getAppVersion,
+  checkDesktopUpdate,
+  installDesktopUpdate,
+  onDesktopUpdateProgress,
+} from "../lib/gatewayConfig";
 
 // Literal neutrals per surface theme — for the mini-previews in the Appearance picker
 // (the live CSS vars only reflect the ACTIVE theme, so previews need the raw values).
@@ -757,6 +764,8 @@ function AccountPane({
 
       <p className="set-hint">{t("settings.everythingLocalHint")}</p>
 
+      <AboutVersionRow />
+
       <div className="set-danger">
         <div>
           <div className="dt">{t("settings.deleteLocalData")}</div>
@@ -765,6 +774,136 @@ function AccountPane({
         <button className="set-btn danger" type="button" disabled title={t("settings.availableSoon")}>
           {t("settings.deleteData")}
         </button>
+      </div>
+    </>
+  );
+}
+
+/* ------------------------------------------------------------- about/version */
+
+// Version card in Settings → Account: shows the running build, lets the user
+// check for an update on demand, and renders the new version's release notes
+// inline (so "what's new" lives in the app, not just on GitHub). Desktop-only —
+// the web build has no packaged version or updater, so it renders nothing.
+function AboutVersionRow() {
+  const { t } = useTranslation();
+  const [version, setVersion] = useState<string | null>(null);
+  const [phase, setPhase] = useState<"idle" | "checking" | "current" | "available" | "error">(
+    "idle",
+  );
+  const [latest, setLatest] = useState<string | null>(null);
+  const [notes, setNotes] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [installing, setInstalling] = useState(false);
+  const [progress, setProgress] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const v = await getAppVersion();
+      if (!cancelled) setVersion(v);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (!IS_DESKTOP) return null;
+
+  const check = async () => {
+    setPhase("checking");
+    setError(null);
+    setNotes(null);
+    const r = await checkDesktopUpdate();
+    if (!r) {
+      setPhase("error");
+      setError(t("settings.updateCheckUnavailable"));
+      return;
+    }
+    if (r.current) setVersion(r.current);
+    setLatest(r.version);
+    setNotes(r.releaseNotes);
+    setPhase(r.available ? "available" : "current");
+  };
+
+  const install = async () => {
+    setInstalling(true);
+    setError(null);
+    setProgress(0);
+    const unsub = onDesktopUpdateProgress((p) => setProgress(p.percent));
+    try {
+      const r = await installDesktopUpdate();
+      if (!r.ok) setError(r.error ?? t("settings.updateFailedGeneric"));
+      // On success the shell restarts into the new build; nothing else to do.
+    } finally {
+      unsub();
+      setInstalling(false);
+    }
+  };
+
+  return (
+    <>
+      <div className="set-section-label">{t("settings.aboutVersion")}</div>
+      <div className="set-rows">
+        <div className="set-trow">
+          <div>
+            <div className="tt">Homun</div>
+            <div className="td">
+              {version
+                ? t("settings.versionLine", { version })
+                : t("settings.versionUnknown")}
+            </div>
+          </div>
+          <button
+            type="button"
+            className="set-btn"
+            onClick={() => void check()}
+            disabled={phase === "checking" || installing}
+          >
+            <RefreshCw size={14} />
+            <span style={{ marginLeft: 6 }}>
+              {phase === "checking"
+                ? t("settings.updateChecking")
+                : t("settings.checkForUpdates")}
+            </span>
+          </button>
+        </div>
+
+        {phase === "current" && (
+          <p className="set-hint">{t("settings.updateUpToDate")}</p>
+        )}
+
+        {phase === "available" && latest && (
+          <div className="set-card" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <div
+              style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}
+            >
+              <strong>{t("settings.updateAvailable", { version: latest })}</strong>
+              <button
+                type="button"
+                className="set-btn primary"
+                onClick={() => void install()}
+                disabled={installing}
+              >
+                <Download size={14} />
+                <span style={{ marginLeft: 6 }}>
+                  {installing
+                    ? t("settings.updateInstalling", { percent: progress })
+                    : t("settings.updateInstall")}
+                </span>
+              </button>
+            </div>
+            {notes && (
+              <div className="set-release-notes">
+                <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>
+                  {notes}
+                </ReactMarkdown>
+              </div>
+            )}
+          </div>
+        )}
+
+        {error && <p className="set-hint set-hint-error">{error}</p>}
       </div>
     </>
   );
