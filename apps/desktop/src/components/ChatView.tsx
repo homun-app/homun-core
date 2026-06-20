@@ -2,7 +2,10 @@ import {
   ArrowUp,
   AlertCircle,
   AtSign,
+  BarChart3,
   BookMarked,
+  ClipboardList,
+  Presentation,
   Check,
   CalendarClock,
   ChevronDown,
@@ -6483,13 +6486,16 @@ function ComputerDetailPanel({
   );
 }
 
-// Quick-action chips that seed the composer. `seed` is what gets typed (a trailing
-// space = "keep typing"); `label` is the shorter pill text; `icon` is teal-tinted.
-const EMPTY_HERO_CHIPS: { label: string; seed: string; icon: typeof Search }[] = [
-  { label: "Plan a new idea", seed: "Plan ", icon: Sparkles },
-  { label: "Search something for me", seed: "Search ", icon: Search },
-  { label: "Summarize a document", seed: "Summarize a document", icon: FileText },
-  { label: "Write some code", seed: "Help me write some code for ", icon: FileCode },
+// Quick-action chips on the empty-chat hero: the DELIVERABLE utilities Homun can create
+// (Manus-style discovery — so the user sees what's possible instead of guessing) + search.
+// `key` drives both the i18n label and the composer seed; the seed is a natural prompt
+// that triggers the matching skill (create-presentations / create-documents / etc.).
+const EMPTY_HERO_CHIPS: { key: string; icon: typeof Search }[] = [
+  { key: "presentation", icon: Presentation },
+  { key: "document", icon: FileText },
+  { key: "research", icon: BarChart3 },
+  { key: "meeting", icon: ClipboardList },
+  { key: "search", icon: Search },
 ];
 
 // Empty-chat hero (design): the Homun mark (the "U" + dot brandmark) + "Cosa facciamo
@@ -6517,13 +6523,13 @@ function ChatEmptyHero({ onPick }: { onPick: (text: string) => void }) {
           const Icon = chip.icon;
           return (
             <button
-              key={chip.label}
+              key={chip.key}
               type="button"
               className="chat-hero-chip"
-              onClick={() => onPick(chip.seed)}
+              onClick={() => onPick(t(`chat.heroChip.${chip.key}.seed`))}
             >
               <Icon size={13} />
-              {chip.label}
+              {t(`chat.heroChip.${chip.key}.label`)}
             </button>
           );
         })}

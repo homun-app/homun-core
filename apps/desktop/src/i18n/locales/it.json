@@ -331,6 +331,13 @@
   "chat": {
     "newTask": "Nuovo compito",
     "emptyHero": "Come posso aiutarti?",
+    "heroChip": {
+      "presentation": { "label": "Crea una presentazione", "seed": "Fammi una presentazione su " },
+      "document": { "label": "Scrivi un documento", "seed": "Scrivimi un documento: " },
+      "research": { "label": "Analisi & report", "seed": "Fai una ricerca e fammi un report su " },
+      "meeting": { "label": "Verbale riunione", "seed": "Fammi il verbale di questa riunione:\n" },
+      "search": { "label": "Cerca qualcosa", "seed": "Cerca " }
+    },
     "composerPlaceholder": "Scrivi un messaggio…",
     "action": {
       "explainCode": "Spiega codice",

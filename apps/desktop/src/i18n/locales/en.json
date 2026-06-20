@@ -331,6 +331,13 @@
   "chat": {
     "newTask": "New task",
     "emptyHero": "How can I help you?",
+    "heroChip": {
+      "presentation": { "label": "Create a presentation", "seed": "Make me a presentation about " },
+      "document": { "label": "Write a document", "seed": "Write me a document: " },
+      "research": { "label": "Research & report", "seed": "Research and write me a report on " },
+      "meeting": { "label": "Meeting minutes", "seed": "Write the minutes of this meeting:\n" },
+      "search": { "label": "Search something", "seed": "Search " }
+    },
     "composerPlaceholder": "Write a message…",
     "action": {
       "explainCode": "Explain code",
