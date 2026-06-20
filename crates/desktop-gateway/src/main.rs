@@ -39,7 +39,7 @@ use axum::{
     routing::put,
 };
 use base64::Engine as _;
-use chat_store::ChatStore;
+use chat_store::{BranchPoint, ChatStore};
 use local_first_browser_automation::{
     BrowserAutomationClient, BrowserAutomationError, BrowserMethod, BrowserResponse,
     BrowserSidecarSession, BrowserSidecarSpawnOptions, BrowserUrlApprovalGrant,
@@ -69,7 +69,8 @@ use local_first_secrets::{
 use local_first_desktop_gateway::{
     BuildPromptRequest, BuildPromptResponse, ChatContextMessage, ChatContextRole,
     ChatGenerateStreamRequest, ChatMessage, ChatMessagesSnapshot, ChatThread, ChatThreadSnapshot,
-    CommitContinuationResultRequest, CommitPromptResultRequest, SetThreadPinnedRequest,
+    CommitContinuationResultRequest, CommitPromptResultRequest, CommitRegeneratedResultRequest,
+    SetActiveLeafRequest, SetBranchLabelRequest, SetThreadPinnedRequest,
     build_chat_runtime_prompt, compact_thread_title,
 };
 use local_first_local_computer_session::{
@@ -568,6 +569,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route(
             "/api/chat/threads/{thread_id}/messages/{message_id}/commit_continuation_result",
             post(commit_continuation_result),
+        )
+        .route(
+            "/api/chat/threads/{thread_id}/messages/commit_regenerated_result",
+            post(commit_regenerated_result),
+        )
+        .route(
+            "/api/chat/threads/{thread_id}/branches",
+            get(chat_branches),
+        )
+        .route(
+            "/api/chat/threads/{thread_id}/active_leaf",
+            post(set_active_leaf),
+        )
+        .route(
+            "/api/chat/threads/{thread_id}/branch_label",
+            post(set_branch_label),
         )
         .route(
             "/api/chat/threads/{thread_id}/messages/{message_id}/create_task",
@@ -1506,6 +1523,7 @@ async fn commit_prompt_result(
             &thread_id,
             &request.user_message,
             &request.assistant_message,
+            request.branch_from_id.as_deref(),
         )
         .map_err(GatewayError::store)?;
     Ok(Json(snapshot))
@@ -1520,6 +1538,62 @@ async fn commit_continuation_result(
         lock_store(&state)?
             .commit_continuation_result(&thread_id, &message_id, &request.assistant_message)
             .map_err(GatewayError::store)?,
+    ))
+}
+
+async fn commit_regenerated_result(
+    State(state): State<AppState>,
+    Path(thread_id): Path<String>,
+    Json(request): Json<CommitRegeneratedResultRequest>,
+) -> Result<Json<ChatMessagesSnapshot>, GatewayError> {
+    Ok(Json(
+        lock_store(&state)?
+            .commit_regenerated_answer(
+                &thread_id,
+                &request.user_message_id,
+                &request.assistant_message,
+            )
+            .map_err(GatewayError::store)?,
+    ))
+}
+
+/// Branch switcher (‹ n/m ›): every branch point on the thread's active path.
+async fn chat_branches(
+    State(state): State<AppState>,
+    Path(thread_id): Path<String>,
+) -> Result<Json<Vec<BranchPoint>>, GatewayError> {
+    Ok(Json(
+        lock_store(&state)?
+            .branch_options(&thread_id)
+            .map_err(GatewayError::store)?,
+    ))
+}
+
+/// Point the displayed conversation at a specific leaf (select a branch).
+async fn set_active_leaf(
+    State(state): State<AppState>,
+    Path(thread_id): Path<String>,
+    Json(request): Json<SetActiveLeafRequest>,
+) -> Result<Json<ChatMessagesSnapshot>, GatewayError> {
+    let store = lock_store(&state)?;
+    store
+        .set_active_leaf(&thread_id, request.leaf_id.as_deref())
+        .map_err(GatewayError::store)?;
+    Ok(Json(store.messages(&thread_id).map_err(GatewayError::store)?))
+}
+
+/// Name (or clear) a branch — Phase 4.
+async fn set_branch_label(
+    State(state): State<AppState>,
+    Path(thread_id): Path<String>,
+    Json(request): Json<SetBranchLabelRequest>,
+) -> Result<Json<Vec<BranchPoint>>, GatewayError> {
+    let store = lock_store(&state)?;
+    store
+        .set_branch_label(&thread_id, &request.message_id, request.label.as_deref())
+        .map_err(GatewayError::store)?;
+    Ok(Json(
+        store.branch_options(&thread_id).map_err(GatewayError::store)?,
     ))
 }
 

@@ -159,11 +159,37 @@ pub struct SetThreadPinnedRequest {
 pub struct CommitPromptResultRequest {
     pub user_message: ChatMessage,
     pub assistant_message: ChatMessage,
+    /// Edit-as-branch: when set, the new turn is committed as a SIBLING of this
+    /// message (the chat tree keeps the old branch). Absent = a plain append.
+    #[serde(default)]
+    pub branch_from_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CommitContinuationResultRequest {
     pub assistant_message: ChatMessage,
+}
+
+/// Commit a regenerated answer as a sibling of the previous one, under the user
+/// message that prompted it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CommitRegeneratedResultRequest {
+    pub user_message_id: String,
+    pub assistant_message: ChatMessage,
+}
+
+/// Point a thread's displayed conversation at a specific leaf (branch switcher).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SetActiveLeafRequest {
+    pub leaf_id: Option<String>,
+}
+
+/// Name (or clear) a branch — Phase 4, for the coding workflow.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SetBranchLabelRequest {
+    pub message_id: String,
+    #[serde(default)]
+    pub label: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
