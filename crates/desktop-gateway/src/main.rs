@@ -22018,10 +22018,33 @@ fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::
 fn seed_default_skills() {
     let Ok(dest) = skills_dir() else { return };
     let marker = dest.join(".defaults-seeded");
-    if marker.exists() {
-        return;
-    }
     let Some(src) = default_skills_dir() else { return };
+
+    // Per-skill seed record (NOT a one-shot boolean): so NEW default skills added in an
+    // app update still install on existing setups, while a default the user DELETED is
+    // not re-seeded back.
+    let seeded_path = dest.join(".seeded-defaults");
+    let mut seeded: std::collections::BTreeSet<String> = fs::read_to_string(&seeded_path)
+        .map(|raw| {
+            raw.lines()
+                .map(str::trim)
+                .filter(|l| !l.is_empty())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default();
+    // Migration from the old one-shot marker: treat defaults already on disk as seeded,
+    // so this first upgrade installs ONLY the genuinely new ones.
+    if seeded.is_empty() && marker.exists() {
+        if let Ok(entries) = fs::read_dir(&src) {
+            for entry in entries.flatten() {
+                let id = entry.file_name().to_string_lossy().to_string();
+                if entry.path().join("SKILL.md").is_file() && dest.join(&id).exists() {
+                    seeded.insert(id);
+                }
+            }
+        }
+    }
 
     let mut copied = 0usize;
     if let Ok(entries) = fs::read_dir(&src) {
@@ -22030,15 +22053,25 @@ fn seed_default_skills() {
             if !from.is_dir() || !from.join("SKILL.md").is_file() {
                 continue;
             }
+            let id = entry.file_name().to_string_lossy().to_string();
             let target = dest.join(entry.file_name());
             if target.exists() {
-                continue; // keep the user's copy
+                seeded.insert(id); // user already has it
+                continue;
+            }
+            if seeded.contains(&id) {
+                continue; // a previously-seeded default the user deleted — respect that
             }
             if copy_dir_recursive(&from, &target).is_ok() {
+                seeded.insert(id);
                 copied += 1;
             }
         }
     }
+    let _ = fs::write(
+        &seeded_path,
+        format!("{}\n", seeded.iter().cloned().collect::<Vec<_>>().join("\n")),
+    );
 
     // Union the bundled HomunCoder manifest into the dest manifest (dedup).
     let manifest = "homuncoder-skills.txt";
