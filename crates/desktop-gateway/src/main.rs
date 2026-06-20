@@ -8361,9 +8361,21 @@ fn chat_context_budget_chars() -> usize {
 /// (large refactor, multi-file scaffold) isn't truncated. Env: `HOMUN_CHAT_MAX_ROUNDS`.
 const MAX_TOOL_ROUNDS: usize = 40;
 
-/// Absolute hard ceiling on rounds in ONE turn — pure anti-runaway, far above any real
-/// task. Bounds the for-loop so a soft budget set higher than the browser one still works.
-const HARD_ROUND_CEILING: usize = 100;
+/// Absolute hard ceiling on rounds in ONE turn — pure anti-runaway backstop. With the
+/// per-step budget (F1) doing the real bounding (reset on each completed plan step), this
+/// only has to sit "far above any real task": a long plan-driven turn (many slides, a deep
+/// web research) can legitimately need hundreds of rounds spread across its steps.
+/// Env-overridable: `HOMUN_CHAT_HARD_CEILING`.
+const HARD_ROUND_CEILING: usize = 600;
+
+/// Hard anti-runaway ceiling for one turn (env-overridable).
+fn hard_round_ceiling() -> usize {
+    env::var("HOMUN_CHAT_HARD_CEILING")
+        .ok()
+        .and_then(|raw| raw.trim().parse::<usize>().ok())
+        .filter(|n| *n > 0)
+        .unwrap_or(HARD_ROUND_CEILING)
+}
 
 /// Soft round budget for a normal (non-browser) turn (env-overridable).
 fn chat_max_rounds() -> usize {
@@ -9586,7 +9598,13 @@ after the user has approved it (e.g. «I approve the plan…»); if they ask for
 Once executing, use update_plan to update the step status (doing→done), shown in the \
 \"Plan\" panel. The plan (PLAN_PROPOSE or update_plan) is ALREADY shown to the user as a CARD: do NOT \
 repeat it in the reply text too — no list or table of the steps in prose (at most one \
-line of context). For single-step requests neither a plan nor a proposal is needed."
+line of context). For single-step requests neither a plan nor a proposal is needed. \
+STEP-AT-A-TIME EXECUTION: work the plan ONE step at a time — do, then VERIFY that step's \
+result (file written, search returned usable results, build/render succeeded), and only \
+THEN mark it `done` with update_plan before starting the next. Your working budget RESETS \
+every time you complete a step, so a long task (e.g. a 10-slide deck, a deep research) can \
+run as long as it KEEPS CLOSING STEPS — never rush or skip verification to save rounds, and \
+never mark a step done before its result actually exists."
     );
     let system = format!(
         "{system}\n\nFRESHNESS / VERIFICATION: your internal knowledge may be dated. For ANY \
@@ -9977,6 +9995,16 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
         let mut last_round_sig = String::new();
         let mut repeat_count: u32 = 0;
         let mut final_done = false;
+        // Long-horizon execution (F1): the round budget is measured from the LAST
+        // verified progress, not from round 0. Every time the model completes a plan
+        // step (a new `done` in update_plan), we move the anchor to the current round
+        // and reset the no-progress guard — so a big plan-driven task (10 slides, a
+        // long web research) keeps going for as long as it KEEPS CLOSING STEPS, while
+        // a turn stuck on one step still trips the per-step budget. `plan_done_count`
+        // tracks the high-water mark of completed steps so we only reset on real
+        // forward progress (never on a plan that goes backwards).
+        let mut progress_anchor_round: usize = 0;
+        let mut plan_done_count: usize = 0;
         // Source URLs visited via browse_web this request, for the "Fonti" footer.
         let mut browse_sources: Vec<String> = Vec::new();
         // Tools offered to the model this run: the base set, plus any tools the
@@ -10035,15 +10063,19 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
         // The outer ceiling is the BROWSER budget; the EFFECTIVE budget is dynamic
         // (the normal 5 rounds until a browser tool is actually used, then the
         // larger browser budget). This keeps non-browser turns identical to today.
-        for round in 0..HARD_ROUND_CEILING {
+        for round in 0..hard_round_ceiling() {
             let max_rounds = if browser_used {
                 chat_browser_max_rounds()
             } else {
                 chat_max_rounds()
             };
             // Hard stop once the effective budget is reached (the forced-synthesis
-            // fallback below still runs because `final_done` is false).
-            if round >= max_rounds {
+            // fallback below still runs because `final_done` is false). The budget is
+            // measured from the last completed plan step (F1): `rounds_since_progress`
+            // resets whenever a step closes, so a long plan-driven task isn't capped
+            // by total rounds — only by getting STUCK on a single step.
+            let rounds_since_progress = round.saturating_sub(progress_anchor_round);
+            if rounds_since_progress >= max_rounds {
                 break;
             }
             // Context hygiene: at up to 32 rounds the accumulated snapshots/images
@@ -11628,6 +11660,17 @@ an uncertain date.",
                                 .iter()
                                 .filter(|s| s.get("status").and_then(|v| v.as_str()) == Some("done"))
                                 .count();
+                            // F1: a newly-completed step is real forward progress →
+                            // re-anchor the round budget here and clear the no-progress
+                            // guard, so the next step starts with a fresh budget. Only
+                            // on an INCREASE (high-water mark) — a plan that re-opens a
+                            // step must not refill the budget.
+                            if done > plan_done_count {
+                                plan_done_count = done;
+                                progress_anchor_round = round;
+                                last_round_sig.clear();
+                                repeat_count = 0;
+                            }
                             format!("Plan updated: {done}/{} steps completed. Shown in the Plan panel.", steps.len())
                         }
                     } else if name == "create_automation" {
