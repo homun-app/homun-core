@@ -5,8 +5,16 @@ interface LocalFirstDesktopConfig {
   revealPath?: (path: string) => Promise<boolean>;
   /** Resolves a File to its absolute on-disk path (Electron webUtils). Sync. */
   getPathForFile?: (file: File) => string;
+  /** Version of this running build (git tag at CI time; dev package.json in dev). */
+  appVersion?: () => Promise<string>;
   /** Desktop auto-update (electron-updater). */
-  checkForUpdate?: () => Promise<{ available: boolean; version: string | null; error?: string }>;
+  checkForUpdate?: () => Promise<{
+    available: boolean;
+    version: string | null;
+    current?: string | null;
+    releaseNotes?: string | null;
+    error?: string;
+  }>;
   installUpdate?: () => Promise<{ ok: boolean; error?: string }>;
   /** Subscribe to download progress; returns an unsubscribe fn. */
   onUpdateProgress?: (
@@ -133,18 +141,37 @@ export function fileLocalPathFromBridge(file: File): string {
   }
 }
 
+/** Version string of the running build (e.g. "0.1.1019"). Returns null outside
+ *  Electron (web build) where there is no packaged version to report. */
+export async function getAppVersion(): Promise<string | null> {
+  const get = desktopConfig?.appVersion;
+  if (!get) return null;
+  try {
+    return (await get()) || null;
+  } catch {
+    return null;
+  }
+}
+
 /** Desktop only: asks the Electron shell (electron-updater) whether a newer
  *  release is published. Returns null outside Electron or on any error, so the
  *  caller can simply hide the update card. */
 export async function checkDesktopUpdate(): Promise<{
   available: boolean;
   version: string | null;
+  current: string | null;
+  releaseNotes: string | null;
 } | null> {
   const check = desktopConfig?.checkForUpdate;
   if (!check) return null;
   try {
     const result = await check();
-    return { available: !!result.available, version: result.version ?? null };
+    return {
+      available: !!result.available,
+      version: result.version ?? null,
+      current: result.current ?? null,
+      releaseNotes: result.releaseNotes ?? null,
+    };
   } catch {
     return null;
   }

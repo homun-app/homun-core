@@ -8048,6 +8048,13 @@ body.resizing-drawer {
 
 /* Empty / hint */
 .set-hint { font-size: 12.5px; color: var(--muted); line-height: 1.5; margin-top: var(--s2); padding-left: var(--s3); }
+.set-hint-error { color: var(--danger, #c53030); }
+/* Release-notes markdown inside the update card (Settings → Account). */
+.set-release-notes { font-size: 12.5px; line-height: 1.5; color: var(--muted); border-top: 1px solid var(--line); padding-top: var(--s3); max-height: 220px; overflow-y: auto; }
+.set-release-notes h1, .set-release-notes h2, .set-release-notes h3 { font-size: 13px; color: var(--ink, inherit); margin: var(--s2) 0 var(--s1); }
+.set-release-notes ul { margin: var(--s1) 0; padding-left: 1.1rem; }
+.set-release-notes p { margin: var(--s1) 0; }
+.set-release-notes code { font-size: 11.5px; }
 
 /* ── Models: master-detail layout ───────────────────────────────────────── */
 .mdl-layout {

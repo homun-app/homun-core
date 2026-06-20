@@ -18,8 +18,11 @@ contextBridge.exposeInMainWorld("localFirstDesktop", {
       return "";
     }
   },
-  // Auto-update (desktop only). Check returns {available, version}; install
-  // downloads the new version and restarts.
+  // Version of this running build (from the git tag at CI time). Shown in
+  // Settings → Account so the user can confirm which build they're on.
+  appVersion: () => ipcRenderer.invoke("lfpa:app-version"),
+  // Auto-update (desktop only). Check returns {available, version, current,
+  // releaseNotes}; install downloads the new version and restarts.
   checkForUpdate: () => ipcRenderer.invoke("lfpa:update-check"),
   installUpdate: () => ipcRenderer.invoke("lfpa:update-install"),
   // Bring the app window to the front (notification click).

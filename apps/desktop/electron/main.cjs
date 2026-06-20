@@ -41,6 +41,20 @@ process.env.HOMUN_DESKTOP_GATEWAY_TOKEN = GATEWAY_TOKEN;
 // (crate/binary "local-first-desktop-gateway", HOMUN_* env) are unchanged.
 app.setName("Homun");
 
+// Public page where each release's notes live (also where electron-updater pulls
+// installers from). Surfaced from the "About" menu and the Settings version card.
+const RELEASES_URL = "https://github.com/homun-app/homun-releases/releases";
+
+// Native "About Homun" panel (⌘-menu → About). Without this, macOS shows a bare
+// panel; here we stamp the real version so the user can always confirm which
+// build they're running — the single source of the "am I on 1019?" truth.
+app.setAboutPanelOptions({
+  applicationName: "Homun",
+  applicationVersion: app.getVersion(),
+  copyright: "© 2026 Homun",
+  website: RELEASES_URL,
+});
+
 // In dev the macOS menu bar shows the bundle name ("Electron") unless we install a
 // custom application menu — its first submenu label follows app.getName() ("Homun").
 // Standard roles are kept so copy/paste/zoom/window shortcuts still work.
@@ -51,6 +65,10 @@ function applyAppMenu() {
       label: app.name,
       submenu: [
         { role: "about" },
+        {
+          label: "Note di rilascio…",
+          click: () => void shell.openExternal(RELEASES_URL),
+        },
         { type: "separator" },
         { role: "services" },
         { type: "separator" },
@@ -402,15 +420,36 @@ ipcMain.handle("lfpa:focus-window", () => {
 autoUpdater.autoDownload = false;
 autoUpdater.autoInstallOnAppQuit = true;
 
+// The version of THIS running build (set from the git tag at CI time). The
+// renderer shows it in Settings → Account so "which build am I on?" is never a
+// guess. Works in dev too (returns the dev package.json version).
+ipcMain.handle("lfpa:app-version", () => app.getVersion());
+
+// electron-updater can return releaseNotes as a string or an array of
+// {version, note}; normalise to a single string the renderer can render.
+function flattenReleaseNotes(notes) {
+  if (!notes) return null;
+  if (typeof notes === "string") return notes;
+  if (Array.isArray(notes)) {
+    return notes
+      .map((n) => (typeof n === "string" ? n : n?.note ?? ""))
+      .filter(Boolean)
+      .join("\n\n");
+  }
+  return null;
+}
+
 ipcMain.handle("lfpa:update-check", async () => {
-  if (!app.isPackaged) return { available: false, version: null };
+  const current = app.getVersion();
+  if (!app.isPackaged) return { available: false, version: null, current };
   try {
     const result = await autoUpdater.checkForUpdates();
     const version = result?.updateInfo?.version ?? null;
     const available = version ? autoUpdater.currentVersion.compare(version) < 0 : false;
-    return { available, version };
+    const releaseNotes = flattenReleaseNotes(result?.updateInfo?.releaseNotes);
+    return { available, version, current, releaseNotes };
   } catch (error) {
-    return { available: false, version: null, error: String(error?.message ?? error) };
+    return { available: false, version: null, current, error: String(error?.message ?? error) };
   }
 });
 
