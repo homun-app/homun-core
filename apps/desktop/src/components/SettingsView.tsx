@@ -1423,22 +1423,33 @@ function RuntimePane({
   const preset = PROVIDER_PRESETS.find((p) => p.id === presetId) ?? PROVIDER_PRESETS[0];
   const modalProvider = modal && modal !== "add" ? providers.find((p) => p.id === modal) : undefined;
 
-  // Options for a model picker: "Auto" + per-provider optgroups (used by roles).
-  const modelOptions = (
-    <>
-      {providers.map((provider) => (
-        <optgroup key={provider.id} label={provider.label}>
-          {provider.models.map((m) => (
-            <option key={`${provider.id}::${m.id}`} value={`${provider.id}::${m.id}`}>
-              {m.id}
-              {m.tier ? ` · ${m.tier}` : ""}
-              {m.vision ? " · vision" : ""}
-            </option>
-          ))}
-        </optgroup>
-      ))}
-    </>
-  );
+  // Per-role options: the image-generation role lists ONLY image-modality models
+  // (a chat model can't draw); every other role excludes image models. Empty
+  // optgroups are dropped so the picker reads cleanly.
+  const modelOptionsForRole = (roleKey: string) => {
+    const wantImage = roleKey === "image_generation";
+    return (
+      <>
+        {providers.map((provider) => {
+          const models = provider.models.filter((m) =>
+            wantImage ? m.modality === "image" : m.modality !== "image",
+          );
+          if (models.length === 0) return null;
+          return (
+            <optgroup key={provider.id} label={provider.label}>
+              {models.map((m) => (
+                <option key={`${provider.id}::${m.id}`} value={`${provider.id}::${m.id}`}>
+                  {m.id}
+                  {m.tier ? ` · ${m.tier}` : ""}
+                  {m.vision ? " · vision" : ""}
+                </option>
+              ))}
+            </optgroup>
+          );
+        })}
+      </>
+    );
+  };
 
   // Every provider shown at once: the whole catalog plus any custom endpoints the
   // user added. A configured provider (matched to a preset by base URL, or a
@@ -1522,7 +1533,7 @@ function RuntimePane({
                     <option value="auto">
                       Auto{role.resolved_model ? ` — ${role.resolved_model}` : ""}
                     </option>
-                    {modelOptions}
+                    {modelOptionsForRole(role.key)}
                   </select>
                 </div>
               );
