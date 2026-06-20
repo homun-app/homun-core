@@ -533,6 +533,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // so the old "sfilza di domande" push stops (the thread stays as inert data).
     cancel_homun_checkins(&state);
     start_task_executor_worker(state.clone());
+    spawn_memory_consolidation_tick(state.clone());
     spawn_thread_browser_session_reaper(state.clone());
     spawn_contained_computer_idle_reaper(state.clone());
     spawn_browser_handoff_reaper(state.clone());
@@ -1263,6 +1264,34 @@ fn start_proactivity_auto_review(state: AppState) {
     });
 }
 
+/// Optional background memory consolidation. OFF by default: consolidation runs an LLM
+/// merge of near-duplicate memories that the user otherwise triggers explicitly, so
+/// auto-running it is OPT-IN via `HOMUN_AUTO_CONSOLIDATE_HOURS` (cadence in hours, 0 =
+/// off). When set, it consolidates the stable personal scope at that cadence — bounded,
+/// best-effort, never at boot.
+fn spawn_memory_consolidation_tick(state: AppState) {
+    let hours: u64 = std::env::var("HOMUN_AUTO_CONSOLIDATE_HOURS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
+    if hours == 0 {
+        return;
+    }
+    eprintln!("memory auto-consolidation: enabled (every {hours}h, personal scope)");
+    tokio::spawn(async move {
+        let period = std::time::Duration::from_secs(hours.max(1) * 3600);
+        loop {
+            tokio::time::sleep(period).await;
+            let user = gateway_memory_user_id();
+            let personal = MemoryWorkspaceId::new(PERSONAL_WORKSPACE);
+            let (merged, dropped) = consolidate_scope(&state, &user, &personal).await;
+            if merged > 0 || dropped > 0 {
+                eprintln!("memory auto-consolidation: merged {merged}, dropped {dropped}");
+            }
+        }
+    });
+}
+
 async fn proactivity_auto_review_tick(state: &AppState) {
     // Addon detached → silent (UI and engine gated by the same flag).
     if !lock_store(state).map(|s| s.plugin_enabled("proattivita")).unwrap_or(true) {
@@ -1649,6 +1678,15 @@ async fn save_chat_message_to_memory(
             message: format!("chat message not found: {message_id}"),
         })?;
     let reference = persist_explicit_memory(&state, &thread_id, &message_id, &message.text)?;
+    // Embed-on-write: vectorize the just-saved memory now (not on a later lazy pass), so
+    // it's immediately semantically recallable in this same conversation.
+    backfill_embeddings(
+        &state,
+        &gateway_memory_user_id(),
+        &gateway_memory_workspace_id(),
+        4,
+    )
+    .await;
     lock_store(&state)?
         .set_message_saved_memory_ref(&thread_id, &message_id, &reference.to_string())
         .map_err(GatewayError::store)?;
@@ -6538,6 +6576,42 @@ do NOT recreate them, EXTEND/reuse the right ones; use query_code_graph for deta
 
 /// system prompt so the model answers "why did we…" from memory WITHOUT having to call
 /// recall_memory itself — and doesn't claim "I have nothing in memory" when it does.
+/// A memory candidate for hybrid ranking: its rank in the lexical (FTS) and/or
+/// semantic (dense) passes, plus importance (0..1) and age. Either rank may be absent
+/// (matched by only one pass).
+struct MemoryCandidate {
+    reference: String,
+    fts_rank: Option<usize>,
+    dense_rank: Option<usize>,
+    importance: f32,
+    age_days: f32,
+}
+
+/// Combined relevance score: RRF-fuse the two retrieval ranks (a memory strong in BOTH
+/// lexical AND semantic is rewarded, unlike a plain concat), then add MILD boosts for
+/// importance and recency so relevance still leads but a crucial/fresh memory edges out
+/// an equally-relevant trivial/stale one. Weights are tuned so importance/recency act as
+/// refinements (~one RRF position), not overrides.
+fn hybrid_memory_score(c: &MemoryCandidate) -> f32 {
+    const K: f32 = 60.0;
+    let rrf = c.fts_rank.map(|r| 1.0 / (K + r as f32)).unwrap_or(0.0)
+        + c.dense_rank.map(|r| 1.0 / (K + r as f32)).unwrap_or(0.0);
+    let importance_boost = 0.012 * c.importance.clamp(0.0, 1.0);
+    let recency_boost = 0.008 * (-(c.age_days.max(0.0) / 30.0)).exp();
+    rrf + importance_boost + recency_boost
+}
+
+/// Age of a memory in days from its `created_at` (`unix:<secs>` or `<secs>`).
+fn memory_age_days(created_at: &str, now_secs: i64) -> f32 {
+    let s = created_at.strip_prefix("unix:").unwrap_or(created_at);
+    let secs: i64 = s
+        .split('.')
+        .next()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(now_secs);
+    ((now_secs - secs).max(0) as f32) / 86_400.0
+}
+
 async fn relevant_memory_for_prompt(state: &AppState, prompt: &str) -> Option<String> {
     let query = prompt.trim();
     if query.chars().count() < 8 {
@@ -6547,81 +6621,110 @@ async fn relevant_memory_for_prompt(state: &AppState, prompt: &str) -> Option<St
     let query_vec = embed_text(&state.http, query).await;
     let facade = lock_memory_facade(state).ok()?;
     let user = gateway_memory_user_id();
-    let active = gateway_memory_workspace_id();
-    let search = |workspace: MemoryWorkspaceId| -> Vec<String> {
-        let access = MemoryAccessRequest {
-            actor_id: "chat_rag".to_string(),
-            user_id: user.clone(),
-            workspace_id: workspace,
-            purpose: "chat_context".to_string(),
-            allowed_domains: vec![
-                PrivacyDomain::new("personal"),
-                PrivacyDomain::new("work"),
-                PrivacyDomain::new("general"),
-            ],
-            max_sensitivity: MemoryDataSensitivity::Private,
-            allow_raw_payload: false,
-            allow_export: true,
-            broad_query: false,
-        };
-        facade
-            .search_memories(MemorySearchRequest {
-                access,
-                query: query.to_string(),
-                statuses: vec![MemoryStatus::Confirmed, MemoryStatus::Candidate],
-                memory_types: vec![
-                    "goal".to_string(),
-                    "decision".to_string(),
-                    "fact".to_string(),
-                    "preference".to_string(),
-                ],
-                limit: 5,
-                offset: 0,
-            })
-            .map(|page| {
-                page.items
-                    .into_iter()
-                    .map(|item| format_recall_entry(&item.summary, &item.metadata))
-                    .collect()
-            })
-            .unwrap_or_default()
-    };
     // PROJECT ISOLATION: recall is scoped to the ACTIVE workspace only. In a project we do
     // NOT cross-search the personal scope — "di cosa abbiamo discusso?" must stay about THIS
-    // project, not surface personal facts/episodes. (Stable personal PREFERENCES still reach
-    // the model via the always-on briefing, gather_profile_memory — that's separate.)
-    let mut lines: Vec<String> = search(active.clone()).into_iter().map(|t| format!("- {t}")).collect();
-    // Semantic recall: nearest memories by embedding — catches paraphrases and OTHER
-    // LANGUAGES the keyword search misses. Best-effort (skipped if no query vector).
+    // project, not personal facts/episodes. (Stable personal PREFERENCES still reach the
+    // model via the always-on briefing, gather_profile_memory — that's separate.)
+    let active = gateway_memory_workspace_id();
+    let now_secs = OffsetDateTime::now_utc().unix_timestamp();
+
+    // All memories in scope, keyed by ref — the source of text/metadata/created_at for
+    // whatever the two passes surface.
+    let records: std::collections::HashMap<String, local_first_memory::MemoryRecord> = facade
+        .list_memories_for_ui(&user, &active)
+        .map(|ms| ms.into_iter().map(|m| (m.reference.to_string(), m)).collect())
+        .unwrap_or_default();
+
+    // Lexical pass (FTS/bm25, policy-filtered) → rank per reference.
+    let access = MemoryAccessRequest {
+        actor_id: "chat_rag".to_string(),
+        user_id: user.clone(),
+        workspace_id: active.clone(),
+        purpose: "chat_context".to_string(),
+        allowed_domains: vec![
+            PrivacyDomain::new("personal"),
+            PrivacyDomain::new("work"),
+            PrivacyDomain::new("general"),
+        ],
+        max_sensitivity: MemoryDataSensitivity::Private,
+        allow_raw_payload: false,
+        allow_export: true,
+        broad_query: false,
+    };
+    let mut fts_rank: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    if let Ok(page) = facade.search_memories(MemorySearchRequest {
+        access,
+        query: query.to_string(),
+        statuses: vec![MemoryStatus::Confirmed, MemoryStatus::Candidate],
+        memory_types: vec![
+            "goal".to_string(),
+            "decision".to_string(),
+            "fact".to_string(),
+            "preference".to_string(),
+        ],
+        limit: 8,
+        offset: 0,
+    }) {
+        for item in page.items {
+            fts_rank
+                .entry(item.reference.to_string())
+                .or_insert(item.rank);
+        }
+    }
+
+    // Semantic pass (dense cosine) → rank per reference. Top-k fallback: take the best
+    // few above a relaxed floor (not a hard 0.6 cutoff) — RRF weights weak ones gently,
+    // so a strong-but-sub-threshold paraphrase still gets a chance instead of vanishing.
+    let mut dense_rank: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
     if let Some(query_vec) = query_vec.as_ref() {
-        let mut scored: Vec<(f32, String)> = Vec::new();
-        let mut consider = |workspace: MemoryWorkspaceId| {
-            let records: std::collections::HashMap<String, (String, serde_json::Value)> = facade
-                .list_memories_for_ui(&user, &workspace)
-                .map(|ms| {
-                    ms.into_iter()
-                        .map(|m| (m.reference.to_string(), (m.text, m.metadata)))
-                        .collect()
-                })
-                .unwrap_or_default();
-            if let Ok(embeddings) = facade.list_embeddings(&user, &workspace) {
-                for (reference, vector) in embeddings {
-                    if cosine(query_vec, &vector) >= 0.6 {
-                        if let Some((text, metadata)) = records.get(&reference.to_string()) {
-                            scored.push((cosine(query_vec, &vector), format_recall_entry(text, metadata)));
-                        }
-                    }
+        let mut scored: Vec<(String, f32)> = Vec::new();
+        if let Ok(embeddings) = facade.list_embeddings(&user, &active) {
+            for (reference, vector) in embeddings {
+                let sim = cosine(query_vec, &vector);
+                if sim >= 0.5 {
+                    scored.push((reference.to_string(), sim));
                 }
             }
+        }
+        scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        for (i, (reference, _)) in scored.into_iter().take(8).enumerate() {
+            dense_rank.entry(reference).or_insert(i + 1);
+        }
+    }
+
+    // Fuse: union of both passes, ranked by RRF + importance + recency.
+    let mut refs: std::collections::HashSet<String> = std::collections::HashSet::new();
+    refs.extend(fts_rank.keys().cloned());
+    refs.extend(dense_rank.keys().cloned());
+    let mut candidates: Vec<(MemoryCandidate, String)> = Vec::new();
+    for reference in refs {
+        let Some(record) = records.get(&reference) else {
+            continue;
         };
-        // Same project isolation as the keyword pass: active scope only.
-        consider(active.clone());
-        scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-        for (_, text) in scored.into_iter().take(5) {
-            let line = format!("- {text}");
-            if !lines.contains(&line) {
-                lines.push(line);
-            }
+        let importance = record
+            .metadata
+            .get("importance")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.5) as f32;
+        let candidate = MemoryCandidate {
+            fts_rank: fts_rank.get(&reference).copied(),
+            dense_rank: dense_rank.get(&reference).copied(),
+            importance,
+            age_days: memory_age_days(&record.created_at, now_secs),
+            reference: reference.clone(),
+        };
+        let line = format!("- {}", format_recall_entry(&record.text, &record.metadata));
+        candidates.push((candidate, line));
+    }
+    candidates.sort_by(|a, b| {
+        hybrid_memory_score(&b.0)
+            .partial_cmp(&hybrid_memory_score(&a.0))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    let mut lines: Vec<String> = Vec::new();
+    for (_, line) in candidates {
+        if !lines.contains(&line) {
+            lines.push(line);
         }
     }
     lines.truncate(10);
@@ -28692,6 +28795,9 @@ mod tests {
     use super::{
         adapt_skill_body,
         active_llm_concurrency,
+        hybrid_memory_score,
+        memory_age_days,
+        MemoryCandidate,
         extract_source_urls,
         fonti_section,
         format_memory_block,
@@ -30179,5 +30285,38 @@ data: [DONE]\n";
     fn task_executor_worker_id_is_stable_per_index() {
         assert_eq!(task_executor_worker_id(0), "desktop-gateway-background-worker-0");
         assert_eq!(task_executor_worker_id(2), "desktop-gateway-background-worker-2");
+    }
+
+    #[test]
+    fn hybrid_memory_ranking_fuses_then_refines_by_importance_and_recency() {
+        let mk = |fts: Option<usize>, dense: Option<usize>, imp: f32, age: f32| MemoryCandidate {
+            reference: String::new(),
+            fts_rank: fts,
+            dense_rank: dense,
+            importance: imp,
+            age_days: age,
+        };
+        // A memory matched by BOTH passes beats one matched by a single pass (RRF, not concat).
+        assert!(
+            hybrid_memory_score(&mk(Some(1), Some(1), 0.5, 1.0))
+                > hybrid_memory_score(&mk(Some(1), None, 0.5, 1.0))
+        );
+        // Equal relevance → higher importance wins (importance was captured but unused before).
+        assert!(
+            hybrid_memory_score(&mk(Some(2), None, 0.9, 10.0))
+                > hybrid_memory_score(&mk(Some(2), None, 0.1, 10.0))
+        );
+        // Equal relevance + importance → fresher wins.
+        assert!(
+            hybrid_memory_score(&mk(Some(2), None, 0.5, 1.0))
+                > hybrid_memory_score(&mk(Some(2), None, 0.5, 400.0))
+        );
+        // Relevance still dominates: a rank-1 both-pass hit beats a rank-3 max-importance one.
+        assert!(
+            hybrid_memory_score(&mk(Some(1), Some(1), 0.2, 30.0))
+                > hybrid_memory_score(&mk(Some(3), None, 1.0, 1.0))
+        );
+        // Age helper: 86_400s == 1 day.
+        assert!((memory_age_days("unix:999913600", 1_000_000_000) - 1.0).abs() < 0.01);
     }
 }
