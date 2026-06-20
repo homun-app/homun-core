@@ -66,7 +66,7 @@ assertContains("src/styles.css", "-webkit-app-region: no-drag", "interactive con
 
 assertContains("src/components/Sidebar.tsx", "navigation-rail", "primary navigation must be rail-first");
 assertContains("src/components/Sidebar.tsx", "nav-drawer", "expanded navigation must be a drawer");
-assertContains("src/components/Shell.tsx", "{!drawerOpen && (", "rail must only render when the drawer is closed");
+assertContains("src/components/Shell.tsx", "{!drawerOpen && !isSettings && (", "rail must only render when the drawer is closed and not in settings");
 assertContains("src/components/Shell.tsx", "{drawerOpen && !isSettings && (", "main drawer must render when open");
 assertContains("src/components/Sidebar.tsx", "drawer-persistent-actions", "open drawer must retain persistent actions");
 assertContains("src/components/ChatView.tsx", "composer-surface", "prompt composer must have a stable anchored surface");
@@ -98,11 +98,11 @@ assertContains("src/lib/chatApi.ts", "/api/chat/threads", "chat threads must loa
 assertContains("src/lib/chatApi.ts", "hydrateThreadSnapshot", "chat API must keep a local cache synchronized with gateway thread snapshots");
 assertContains("src/lib/chatApi.ts", "localThreads", "chat threads must keep an Electron-safe fallback cache");
 assertContains("src/lib/chatApi.ts", "commitChatPromptResult", "Electron chat fallback must persist completed streamed answers before read model refresh");
-assertContains("src/lib/chatApi.ts", "commitChatContinuationResult", "Electron chat fallback must persist automatic continuations before read model refresh");
+assertContains("src/lib/chatApi.ts", "commitChatContinuetionResult", "Electron chat fallback must persist automatic continuations before read model refresh");
 assertContains("src/lib/coreBridge.ts", "await chatApi.commitChatPromptResult", "streamed chat answers must be committed before the UI refreshes the thread read model");
 assertContains("src/lib/coreBridge.ts", "result.computer_session = await electronLocalComputerSession", "streamed prompt results must refresh the real local computer read model after commit");
-assertContains("src/lib/coreBridge.ts", "await chatApi.commitChatContinuationResult", "automatic continuations must be committed before the UI refreshes the thread read model");
-assertContains("src/lib/coreBridge.ts", "trimRepeatedContinuationPrefix", "automatic continuation joins must avoid duplicating overlapping model output");
+assertContains("src/lib/coreBridge.ts", "await chatApi.commitChatContinuetionResult", "automatic continuations must be committed before the UI refreshes the thread read model");
+assertContains("src/lib/coreBridge.ts", "trimRepeatedContinuetionPrefix", "automatic continuation joins must avoid duplicating overlapping model output");
 assertContains("src/lib/chatApi.ts", "recentChatContext", "Electron chat fallback must expose recent thread context to the local prompt builder");
 assertContains("src/lib/chatApi.ts", "rawRecentChatContext", "Electron chat must expose raw recent context for Rust-side budgeting");
 assertContains("src/lib/chatApi.ts", "buildJuicePromptChatContext", "Electron chat fallback must budget/compress context before prompt building");
@@ -117,7 +117,7 @@ assertNotContains("src/lib/coreBridge.ts", removedShellGlobal, "frontend bridge 
 assertNotContains("src/lib/chatApi.ts", removedShellPackageScope, "chat API must not import removed shell packages");
 
 assertContains("src/components/RichMessage.tsx", "lazy(() => import(\"./RichMessageRenderer\")", "rich markdown renderer must be lazy loaded");
-assertContains("src/components/RichMessage.tsx", "StreamingTextMessage", "streaming messages must use a single raw text node");
+assertContains("src/components/RichMessage.tsx", "streaming={streaming}", "streaming messages must render live through the streaming-aware renderer");
 assertContains("src/components/RichMessageRenderer.tsx", "repairNestedMarkdownFences", "rich renderer must repair duplicated fenced code openers from local model output");
 assertContains("src/components/ChatView.tsx", "threadMessages.map", "chat transcript must use normal document flow in Electron");
 assertContains("src/styles.css", ".thread-message-list", "chat transcript must stack rows in normal flow");
@@ -132,8 +132,8 @@ assertNotContains("src/components/ChatView.tsx", "STREAM_TYPEWRITER_INTERVAL_MS"
 assertNotContains("src/components/ChatView.tsx", "streamingTextRef", "chat streaming must not bypass React with a manual DOM text node");
 
 assertContains("src/components/ChatView.tsx", "messageContentKind", "message actions must derive from response content type");
-assertContains("src/components/ChatView.tsx", "Spiega codice", "code responses must expose code-specific contextual actions");
-assertContains("src/components/ChatView.tsx", "Migliora codice", "code responses must expose code improvement action");
+assertContains("src/components/ChatView.tsx", "onExplainCode", "code responses must expose code-specific contextual actions");
+assertContains("src/components/ChatView.tsx", "onImproveCode", "code responses must expose code improvement action");
 assertContains("src/components/ChatView.tsx", "reply-context-card", "composer must show the active reply context before submit");
 assertContains("src/components/ChatView.tsx", "message-action-menu", "secondary message actions must stay behind a compact menu");
 assertContains("src/components/ChatView.tsx", "message-latency-summary", "message metrics must be visible without dominating the answer");
@@ -164,7 +164,7 @@ assertRepoContains("crates/desktop-gateway/src/main.rs", "MemoryUiReadModel", "d
 assertRepoContains("crates/desktop-gateway/src/main.rs", "CapabilityRegistryStore", "desktop gateway must use the capability registry store");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "/api/chat/threads", "desktop gateway must expose persistent thread endpoints");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "/messages/{message_id}/create_task", "desktop gateway must create durable tasks from chat messages");
-assertRepoContains("crates/desktop-gateway/src/main.rs", "ensure_operational_task_for_thread", "desktop gateway must link operational prompts to task and local computer read models");
+assertRepoContains("crates/desktop-gateway/src/main.rs", "link_brain_tasks_to_thread", "desktop gateway must link Brain-created operational tasks to the thread (and local computer read models)");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "LocalComputerSessionStore", "desktop gateway must persist computer sessions for operational tasks");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "HOMUN_BROWSER_HEADLESS", "desktop gateway must allow visible Playwright browser sessions");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "require_gateway_token", "desktop gateway must protect chat endpoints with a local token");
