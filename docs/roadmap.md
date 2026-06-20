@@ -658,3 +658,31 @@ l'**addon dichiara COSA verificare** (il predicato). Coding = primo banco di pro
 riusando il contained-computer come workspace dev (run build/test). Coerente con
 ADR 0011 (il "cosa" sta nell'addon, il "come" nel core) e con lo SOTA (semplicita'
 + verify-by-execution). NON ricostruire un planner barocco.
+
+## Evoluzioni future (esplorate, non ancora in lavorazione)
+
+### Sessioni chat ad albero (branching non distruttivo)
+Oggi l'edit di un messaggio utente **tronca** il thread e perde il ramo a valle
+(`chat_messages` e' lineare). Evoluzione: modello ad **albero** in SQLite —
+`parent_id` sui messaggi + `chat_threads.active_leaf_id`; la conversazione mostrata
+e' il percorso radice->foglia, i **fratelli** sono le alternative (edit utente o
+risposta rigenerata, unificando il meccanismo dei *variant* gia' esistente).
+Migrazione additiva e neutra (backfill lineare). UI: switcher `‹ n/m ›` sui nodi con
+fratelli (riuso del componente variant). **Niente git**: e' un albero in SQLite, non
+versioning di file. Serve sia il consumer ("non perdo la conversazione") sia il
+coding ("esploro implementazioni alternative, confronto, scelgo").
+
+### Integrazione git per il lato coding/enterprise
+Obiettivo: Homun deve anche **sviluppare** (sistema integrato aziendale via plugin).
+Oggi le operazioni git sono **shell-out al CLI `git`** (`Command::new("git")`) — robusto,
+resta il default. Evoluzione **quando** servono operazioni in-process / worktree
+per-ramo / automazione PR:
+- **`gix` (gitoxide)** — git pure-Rust (no dipendenza C, e' quello che usa cargo) per
+  le operazioni in-process e i **worktree per ramo** (un ramo chat-coding = un
+  worktree isolato).
+- **`octocrab`** (o il CLI `gh`, gia' nel flusso) per **PR/issue** (che NON sono git:
+  sono API di forge).
+- **Nomi/label ai rami** e overview, per il workflow dev.
+Distinzione chiave: git (dato: commit/branch/tree/worktree) e forge (PR/issue) sono
+due livelli separati; l'albero della **chat** e' una terza cosa ancora (SQLite), da
+non confondere con git.
