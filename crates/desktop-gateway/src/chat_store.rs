@@ -13,6 +13,24 @@ pub struct ChatStore {
     conn: Connection,
 }
 
+/// A node on the active conversation path that has alternative siblings — drives
+/// the ‹ n/m › branch switcher. `node_id` is the displayed message; `options` are
+/// all of its parent's children (in creation order), each carrying the leaf to
+/// activate to display that branch.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct BranchPoint {
+    pub node_id: String,
+    pub active_index: usize,
+    pub options: Vec<BranchOption>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct BranchOption {
+    pub child_id: String,
+    pub leaf_id: String,
+    pub label: Option<String>,
+}
+
 /// An ingested attachment persisted on a thread (text and/or page images).
 #[derive(Debug, Clone)]
 pub struct StoredAttachment {
@@ -448,12 +466,12 @@ impl ChatStore {
         })
     }
 
-    /// Ids of the conversation to display, as the path root→`active_leaf_id`.
-    /// Falls back to `order` (rowid order — today's linear behavior) whenever the
-    /// tree can't yield a complete path: no leaf recorded, a broken/cyclic chain,
-    /// or a path that doesn't cover every row (which, until branching writes ship,
-    /// means the data is linear anyway). Keeps reads byte-identical for all current
-    /// data while being forward-compatible with branching.
+    /// Ids of the conversation to display, as the path root→`active_leaf_id`. With
+    /// branches this is a SUBSET of the thread's rows (the inactive siblings are
+    /// hidden). Falls back to `order` (rowid order — the historical linear view)
+    /// only when the tree can't yield a path at all: no leaf recorded, or a
+    /// broken/cyclic chain. For a linear thread the walk equals rowid order, so
+    /// reads stay identical to before branching.
     fn displayed_path(
         &self,
         thread_id: &str,
@@ -488,10 +506,10 @@ impl ChatStore {
             }
             chain.reverse();
         }
-        if !chain.is_empty() && chain.len() == order.len() {
-            chain
-        } else {
+        if chain.is_empty() {
             order.to_vec()
+        } else {
+            chain
         }
     }
 
@@ -581,11 +599,198 @@ impl ChatStore {
         thread_id: &str,
         user_message: &ChatMessage,
         assistant_message: &ChatMessage,
+        branch_from_id: Option<&str>,
     ) -> rusqlite::Result<ChatMessagesSnapshot> {
+        // Edit-as-branch: attach the new turn as a SIBLING of `branch_from_id` by
+        // re-rooting the active leaf at that message's parent before inserting. The
+        // old branch stays in the tree, reachable via the sibling switcher. Without
+        // `branch_from_id` this is a plain append onto the current leaf (today's
+        // linear behavior).
+        if let Some(branch_from) = branch_from_id {
+            let parent = self.parent_of(thread_id, branch_from)?;
+            self.set_active_leaf(thread_id, parent.as_deref())?;
+        }
         self.insert_message(thread_id, user_message)?;
         self.insert_message(thread_id, assistant_message)?;
         self.update_thread_after_messages(thread_id, Some(&user_message.text))?;
         self.messages(thread_id)
+    }
+
+    /// Commit a regenerated answer as a SIBLING of the previous one: re-root the
+    /// active leaf at the prompting user message, then hang the new assistant
+    /// message off it. The earlier answer is preserved as an alternative branch.
+    pub fn commit_regenerated_answer(
+        &self,
+        thread_id: &str,
+        user_message_id: &str,
+        assistant_message: &ChatMessage,
+    ) -> rusqlite::Result<ChatMessagesSnapshot> {
+        self.set_active_leaf(thread_id, Some(user_message_id))?;
+        self.insert_message(thread_id, assistant_message)?;
+        self.update_thread_after_messages(thread_id, None)?;
+        self.messages(thread_id)
+    }
+
+    /// Point a thread's displayed path at a specific leaf (the ‹ n/m › switcher).
+    /// `None` clears the pointer (the read path then falls back to rowid order).
+    pub fn set_active_leaf(
+        &self,
+        thread_id: &str,
+        leaf_id: Option<&str>,
+    ) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "update chat_threads set active_leaf_id = ?1 where thread_id = ?2",
+            params![leaf_id, thread_id],
+        )?;
+        Ok(())
+    }
+
+    /// Name (or clear, with `None`) a branch — the label rides on the branch's head
+    /// node and shows in the switcher (Phase 4, for the coding workflow).
+    pub fn set_branch_label(
+        &self,
+        thread_id: &str,
+        message_id: &str,
+        label: Option<&str>,
+    ) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "update chat_messages set branch_label = ?1 where thread_id = ?2 and id = ?3",
+            params![label, thread_id, message_id],
+        )?;
+        Ok(())
+    }
+
+    fn parent_of(&self, thread_id: &str, message_id: &str) -> rusqlite::Result<Option<String>> {
+        Ok(self
+            .conn
+            .query_row(
+                "select parent_id from chat_messages where thread_id = ?1 and id = ?2",
+                params![thread_id, message_id],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()?
+            .flatten())
+    }
+
+    /// Children of a node (or the roots, when `parent` is `None`), in creation order.
+    fn children_of(
+        &self,
+        thread_id: &str,
+        parent: Option<&str>,
+    ) -> rusqlite::Result<Vec<String>> {
+        match parent {
+            Some(parent) => {
+                let mut stmt = self.conn.prepare(
+                    "select id from chat_messages
+                      where thread_id = ?1 and parent_id = ?2
+                      order by rowid asc",
+                )?;
+                stmt.query_map(params![thread_id, parent], |row| row.get(0))?
+                    .collect()
+            }
+            None => {
+                let mut stmt = self.conn.prepare(
+                    "select id from chat_messages
+                      where thread_id = ?1 and parent_id is null
+                      order by rowid asc",
+                )?;
+                stmt.query_map(params![thread_id], |row| row.get(0))?.collect()
+            }
+        }
+    }
+
+    /// Follow the most-recently-created child down from `node` to a leaf — the head
+    /// of a sibling resolves to the tip of its branch, which is what the switcher
+    /// activates when you select it.
+    fn subtree_leaf(&self, thread_id: &str, node: &str) -> rusqlite::Result<String> {
+        let mut cur = node.to_string();
+        let mut guard = 0usize;
+        loop {
+            let child: Option<String> = self
+                .conn
+                .query_row(
+                    "select id from chat_messages
+                      where thread_id = ?1 and parent_id = ?2
+                      order by rowid desc limit 1",
+                    params![thread_id, cur],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            match child {
+                Some(child) => cur = child,
+                None => break,
+            }
+            guard += 1;
+            if guard > 100_000 {
+                break;
+            }
+        }
+        Ok(cur)
+    }
+
+    fn branch_label_of(&self, thread_id: &str, message_id: &str) -> rusqlite::Result<Option<String>> {
+        Ok(self
+            .conn
+            .query_row(
+                "select branch_label from chat_messages where thread_id = ?1 and id = ?2",
+                params![thread_id, message_id],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()?
+            .flatten())
+    }
+
+    /// Ids of the active path root→leaf (lean walk, no row payload).
+    fn active_path_ids(&self, thread_id: &str) -> rusqlite::Result<Vec<String>> {
+        let mut cur: Option<String> = self
+            .conn
+            .query_row(
+                "select active_leaf_id from chat_threads where thread_id = ?1",
+                params![thread_id],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()?
+            .flatten();
+        let mut chain: Vec<String> = Vec::new();
+        let mut seen: HashSet<String> = HashSet::new();
+        while let Some(id) = cur {
+            if !seen.insert(id.clone()) {
+                break;
+            }
+            cur = self.parent_of(thread_id, &id)?;
+            chain.push(id);
+        }
+        chain.reverse();
+        Ok(chain)
+    }
+
+    /// Every branch point on the current active path: the nodes whose parent has
+    /// more than one child, with the options needed to switch between them.
+    pub fn branch_options(&self, thread_id: &str) -> rusqlite::Result<Vec<BranchPoint>> {
+        let path = self.active_path_ids(thread_id)?;
+        let mut out: Vec<BranchPoint> = Vec::new();
+        for node in &path {
+            let parent = self.parent_of(thread_id, node)?;
+            let children = self.children_of(thread_id, parent.as_deref())?;
+            if children.len() < 2 {
+                continue;
+            }
+            let active_index = children.iter().position(|c| c == node).unwrap_or(0);
+            let mut options: Vec<BranchOption> = Vec::with_capacity(children.len());
+            for child in &children {
+                options.push(BranchOption {
+                    leaf_id: self.subtree_leaf(thread_id, child)?,
+                    label: self.branch_label_of(thread_id, child)?,
+                    child_id: child.clone(),
+                });
+            }
+            out.push(BranchPoint {
+                node_id: node.clone(),
+                active_index,
+                options,
+            });
+        }
+        Ok(out)
     }
 
     pub fn commit_continuation_result(
@@ -1605,6 +1810,12 @@ impl ChatStore {
                 on chat_messages(parent_id)",
             [],
         )?;
+        // Phase 4: a branch can be named (e.g. a coding alternative). The label lives
+        // on the sibling's head node and surfaces in the ‹ n/m › switcher.
+        if !self.column_exists("chat_messages", "branch_label")? {
+            self.conn
+                .execute("alter table chat_messages add column branch_label text", [])?;
+        }
         self.backfill_chat_tree()?;
         Ok(())
     }
@@ -2421,7 +2632,7 @@ mod tests {
         };
 
         let messages = store
-            .commit_prompt_result(&thread.thread_id, &user, &assistant)
+            .commit_prompt_result(&thread.thread_id, &user, &assistant, None)
             .unwrap();
         assert_eq!(messages.messages.len(), 3);
         assert_eq!(store.threads("default").unwrap().active_thread_id, thread.thread_id);
@@ -2464,6 +2675,7 @@ mod tests {
                 &tid,
                 &mk_message("user_1", "user"),
                 &mk_message("assistant_1", "assistant"),
+                None,
             )
             .unwrap();
         store
@@ -2590,6 +2802,81 @@ mod tests {
             .map(|m| m.id)
             .collect();
         assert_eq!(ids, vec!["m1".to_string(), "m2".to_string(), "m3".to_string()]);
+    }
+
+    #[test]
+    fn chat_tree_edit_and_regenerate_create_sibling_branches() {
+        let store = ChatStore::in_memory().unwrap();
+        let thread = store.create_thread("default").unwrap();
+        let tid = thread.thread_id.clone();
+        let seed_id = store.messages(&tid).unwrap().messages[0].id.clone();
+        let path = |s: &ChatStore| -> Vec<String> {
+            s.messages(&tid)
+                .unwrap()
+                .messages
+                .into_iter()
+                .map(|m| m.id)
+                .collect()
+        };
+
+        // Original turn.
+        store
+            .commit_prompt_result(
+                &tid,
+                &mk_message("u1", "user"),
+                &mk_message("a1", "assistant"),
+                None,
+            )
+            .unwrap();
+        assert_eq!(path(&store), vec![seed_id.clone(), "u1".into(), "a1".into()]);
+
+        // Edit the user message → a SIBLING turn; the old branch is preserved.
+        store
+            .commit_prompt_result(
+                &tid,
+                &mk_message("u1b", "user"),
+                &mk_message("a1b", "assistant"),
+                Some("u1"),
+            )
+            .unwrap();
+        assert_eq!(path(&store), vec![seed_id.clone(), "u1b".into(), "a1b".into()]);
+
+        // The switcher sees two alternatives at the user node.
+        let points = store.branch_options(&tid).unwrap();
+        assert_eq!(points.len(), 1);
+        assert_eq!(points[0].node_id, "u1b");
+        assert_eq!(points[0].active_index, 1);
+        let children: Vec<&str> = points[0].options.iter().map(|o| o.child_id.as_str()).collect();
+        assert_eq!(children, vec!["u1", "u1b"]);
+        // Selecting the first option activates the ORIGINAL branch's leaf.
+        assert_eq!(points[0].options[0].leaf_id, "a1");
+
+        // Switch back to the original branch (non-destructive: edit branch still there).
+        store
+            .set_active_leaf(&tid, Some(&points[0].options[0].leaf_id))
+            .unwrap();
+        assert_eq!(path(&store), vec![seed_id.clone(), "u1".into(), "a1".into()]);
+
+        // Regenerate the answer under u1 → a sibling answer.
+        store
+            .commit_regenerated_answer(&tid, "u1", &mk_message("a1r", "assistant"))
+            .unwrap();
+        assert_eq!(path(&store), vec![seed_id.clone(), "u1".into(), "a1r".into()]);
+        let points = store.branch_options(&tid).unwrap();
+        // Two branch points now: the user node and the answer node.
+        assert_eq!(points.len(), 2);
+        let answer = points.iter().find(|p| p.node_id == "a1r").unwrap();
+        assert_eq!(answer.active_index, 1);
+        let answer_children: Vec<&str> =
+            answer.options.iter().map(|o| o.child_id.as_str()).collect();
+        assert_eq!(answer_children, vec!["a1", "a1r"]);
+
+        // Phase 4: a named branch surfaces its label in the switcher.
+        store.set_branch_label(&tid, "a1r", Some("variante B")).unwrap();
+        let points = store.branch_options(&tid).unwrap();
+        let answer = points.iter().find(|p| p.node_id == "a1r").unwrap();
+        let labelled = answer.options.iter().find(|o| o.child_id == "a1r").unwrap();
+        assert_eq!(labelled.label.as_deref(), Some("variante B"));
     }
 
     #[test]
