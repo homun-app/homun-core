@@ -7719,6 +7719,88 @@ failed or error-laden tool result is NOT complete. Reply with STRICT JSON only, 
     }
 }
 
+/// F3 context compaction: collapse the messages a just-completed plan step produced into
+/// a single summary note, so a long multi-step turn stays within the context window.
+/// Replaces `messages[*start..]` with one assistant summary message and advances `*start`.
+/// Only acts when the slice is large enough to be worth it. BEST-EFFORT: on any
+/// summarizer failure it leaves `messages` untouched (less compaction, never data loss).
+/// Safe only at a round boundary, where `*start..` spans COMPLETE tool-call/result groups.
+async fn compact_completed_step(
+    http: &reqwest::Client,
+    messages: &mut Vec<serde_json::Value>,
+    start: &mut usize,
+) {
+    if *start >= messages.len() {
+        return;
+    }
+    let slice = &messages[*start..];
+    // Not worth a summarizer round-trip for a tiny step.
+    if slice.len() < 6 {
+        return;
+    }
+    let mut buf = String::new();
+    for m in slice {
+        let role = m.get("role").and_then(|r| r.as_str()).unwrap_or("");
+        if let Some(content) = m.get("content").and_then(|c| c.as_str()) {
+            buf.push_str(role);
+            buf.push_str(": ");
+            buf.push_str(&content.chars().take(1500).collect::<String>());
+            buf.push('\n');
+        }
+    }
+    if buf.trim().is_empty() {
+        return;
+    }
+    let Some((base_url, model, api_key)) = role_openai_config("memory") else {
+        return;
+    };
+    let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
+    let system = "Summarize what the agent accomplished in these completed steps and any FACTS, \
+FINDINGS, file paths, or outputs that LATER steps may need. Be concise (<=150 words), preserve \
+concrete values (names, numbers, URLs, artifact filenames). No preamble, no markdown headings.";
+    let payload = serde_json::json!({
+        "model": model,
+        "temperature": 0,
+        "max_tokens": 320,
+        "messages": [
+            { "role": "system", "content": system },
+            { "role": "user", "content": buf.chars().take(12000).collect::<String>() },
+        ],
+    });
+    let mut builder = http.post(&endpoint).timeout(std::time::Duration::from_secs(45));
+    if let Some(key) = api_key.as_ref() {
+        builder = builder.bearer_auth(key);
+    }
+    let Ok(resp) = builder.json(&payload).send().await else {
+        return;
+    };
+    if !resp.status().is_success() {
+        return;
+    }
+    let Ok(body) = resp.json::<serde_json::Value>().await else {
+        return;
+    };
+    let summary = body
+        .pointer("/choices/0/message/content")
+        .and_then(|c| c.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if summary.is_empty() {
+        return;
+    }
+    // Replace the slice with one compact assistant note (valid OpenAI-compat: an
+    // assistant message with content and no tool_calls). The user-facing answer
+    // (`accumulated`, with its ‹‹PLAN››/‹‹ARTIFACT›› markers) is untouched — this only
+    // shrinks the MODEL's working context.
+    messages.truncate(*start);
+    messages.push(serde_json::json!({
+        "role": "assistant",
+        "content": format!("[Earlier plan steps — context compacted]\n{summary}"),
+    }));
+    *start = messages.len();
+}
+
 /// Whether the active orchestrator provider runs locally (loopback base_url).
 /// Mirrors the locality derivation in `build_router_from` (main.rs ~20438).
 fn orchestrator_is_local() -> bool {
@@ -9702,7 +9784,10 @@ INDEPENDENTLY verified against its evidence before it counts — if it isn't act
 you'll be told and must keep working on it. Your working budget RESETS every time a step is \
 verified complete, so a long task (e.g. a 10-slide deck, a deep research) can run as long as \
 it KEEPS CLOSING STEPS — never rush or skip verification to save rounds, and never mark a \
-step done before its result actually exists."
+step done before its result actually exists. RESUMING: if the conversation ALREADY shows an \
+in-progress plan (some steps done, others not), CONTINUE it — re-emit the plan with update_plan \
+keeping the completed steps as done, and proceed from the first not-done step; do NOT restart \
+from scratch or re-propose."
     );
     let system = format!(
         "{system}\n\nFRESHNESS / VERIFICATION: your internal knowledge may be dated. For ANY \
@@ -10079,6 +10164,28 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
         .rev()
         .find(|m| matches!(m.role, ChatContextRole::Assistant))
         .map(|m| m.text.clone());
+    // F4: resume an interrupted long task. If the prior conversation already has an
+    // in-progress PLAN (some steps done, not all), trust those completed steps so the
+    // turn CONTINUES from where it left off instead of restarting (paired with the
+    // resume nudge in the system prompt). Counts `- [x]` (done) vs `- [` (total) in the
+    // latest ‹‹PLAN›› block of the most recent assistant turn that carries one.
+    let resume_done_seed: usize = request
+        .context
+        .iter()
+        .rev()
+        .find_map(|m| {
+            let t = &m.text;
+            let s = t.rfind("‹‹PLAN››")?;
+            let e = t.rfind("‹‹/PLAN››")?;
+            if e <= s {
+                return None;
+            }
+            let block = &t[s..e];
+            let total = block.matches("- [").count();
+            let done = block.matches("- [x]").count();
+            (total > 0 && done < total).then_some(done)
+        })
+        .unwrap_or(0);
     tokio::spawn(async move {
         let mut accumulated = String::new();
         // Final answer text captured for post-turn memory extraction (M2).
@@ -10102,11 +10209,21 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
         // tracks the high-water mark of VERIFIED completed steps so we only reset on real
         // forward progress (never on a plan that goes backwards).
         let mut progress_anchor_round: usize = 0;
-        let mut verified_done_count: usize = 0;
+        // F4: start from the prior plan's completed-step count (resume), else 0.
+        let mut verified_done_count: usize = resume_done_seed;
         // F2 verification gate: the running evidence (tool name → result snippet) for the
         // CURRENT plan step, fed to the verifier when the model marks the step done, then
         // cleared. A chat model can claim "done" without doing the work; the gate checks.
         let mut step_evidence: Vec<String> = Vec::new();
+        // F3 context compaction: `step_messages_start` is the index in `messages` where the
+        // current step's work begins; once the step is verified, that slice is summarised
+        // into one note so a long multi-step turn stays within the context window.
+        // `pending_compaction` defers the rewrite to the next round's safe boundary (never
+        // mid tool-call/result group, which would break OpenAI-compat pairing).
+        // Set right before the round loop (once the initial context is fully in
+        // `messages`) so compaction never folds the system/user context into a summary.
+        let mut step_messages_start: usize;
+        let mut pending_compaction = false;
         // Source URLs visited via browse_web this request, for the "Fonti" footer.
         let mut browse_sources: Vec<String> = Vec::new();
         // Tools offered to the model this run: the base set, plus any tools the
@@ -10162,6 +10279,9 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
         // CLI commands + output run during THIS response.
         sandbox_clear();
 
+        // F3: the first plan step's work begins after the initial context is in place.
+        step_messages_start = messages.len();
+
         // The outer ceiling is the BROWSER budget; the EFFECTIVE budget is dynamic
         // (the normal 5 rounds until a browser tool is actually used, then the
         // larger browser budget). This keeps non-browser turns identical to today.
@@ -10184,6 +10304,14 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
             // would overflow the window and silently truncate the page. Stub all
             // but the latest browser snapshot + the latest screenshot image.
             prune_browser_history(&mut messages, &browser_tool_call_ids);
+            // F3: a step was verified last round → collapse its messages into a summary
+            // now (safe boundary: all prior tool results are flushed). Keeps a long
+            // multi-step turn from overflowing the context window.
+            if pending_compaction {
+                pending_compaction = false;
+                compact_completed_step(&state_owned.http, &mut messages, &mut step_messages_start)
+                    .await;
+            }
             // On the LAST allowed round, forbid tools so the model MUST synthesize
             // a final answer from what it already gathered — otherwise it can burn
             // every round on tool calls and end with no answer ("limite di passi").
@@ -11798,6 +11926,8 @@ an uncertain date.",
                                     step_evidence.clear();
                                     last_round_sig.clear();
                                     repeat_count = 0;
+                                    // F3: collapse this completed step's messages next round.
+                                    pending_compaction = true;
                                     if verify {
                                         let _ = emit_stream_event(
                                             &tx,
