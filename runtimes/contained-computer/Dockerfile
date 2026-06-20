@@ -56,6 +56,17 @@ RUN python3 -m venv /opt/whisper-venv \
     && /opt/whisper-venv/bin/pip install --no-cache-dir --upgrade pip \
     && /opt/whisper-venv/bin/pip install --no-cache-dir faster-whisper
 
+# Deck renderer: turns a structured deck JSON into an on-brand HTML deck AND a NATIVE,
+# EDITABLE .pptx (python-pptx — real text boxes, not screenshots). Used by the
+# create-presentations skill, which writes deck.json then runs `deck-render deck.json`.
+RUN python3 -m venv /opt/deck-venv \
+    && /opt/deck-venv/bin/pip install --no-cache-dir --upgrade pip \
+    && /opt/deck-venv/bin/pip install --no-cache-dir python-pptx
+COPY deck_render.py /opt/deck/deck_render.py
+RUN printf '#!/bin/sh\nexec /opt/deck-venv/bin/python /opt/deck/deck_render.py "$@"\n' \
+      > /usr/local/bin/deck-render \
+    && chmod +x /usr/local/bin/deck-render
+
 # Non-root runtime user; the container boundary is the sandbox (ADR 0010).
 # `.cache` is pre-created and owned by agent so a named volume mounted there
 # inherits agent ownership on first init (persists the Whisper model download).
