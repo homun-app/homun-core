@@ -47,6 +47,7 @@ import {
   RotateCcw,
   Search,
   Share2,
+  Tag,
   Target,
   CheckSquare,
   ShieldCheck,
@@ -74,6 +75,7 @@ import {
   subscribeAppEvents,
   type ActiveModelInfo,
   type ChatAttachmentInput,
+  type CoreBranchPoint,
   type CoreComputerSessionSnapshot,
   type CorePromptSubmissionResult,
   type CoreTaskQueueSnapshot,
@@ -205,9 +207,11 @@ export function ChatView({
   const [replyContext, setReplyContext] = useState<ReplyContext | null>(null);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState("");
-  const [variants, setVariants] = useState<
-    Record<string, { texts: string[]; index: number }>
-  >({});
+  // Persisted conversation branches (non-destructive edit + regenerate). Each
+  // entry is a node on the active path that has alternative siblings, driving the
+  // ‹ n/m › switcher. Replaces the old ephemeral, reload-lossy "variants".
+  const [branches, setBranches] = useState<CoreBranchPoint[]>([]);
+  const [branchBusy, setBranchBusy] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
   const [activeModelInfo, setActiveModelInfo] = useState<ActiveModelInfo | null>(null);
   const [timelineCollapsed, setTimelineCollapsed] = useState(true);
@@ -427,6 +431,7 @@ export function ChatView({
     images?: string[],
     baseMessages?: ChatMessage[],
     mode?: string,
+    branchFromId?: string,
   ) {
     const text = prompt.trim();
     if (!text) return;
@@ -581,6 +586,7 @@ export function ChatView({
         model,
         images,
         mode,
+        branchFromId,
       );
       if (cancelledStreamIdsRef.current.has(requestId)) {
         return;
@@ -847,23 +853,58 @@ export function ChatView({
     window.setTimeout(() => setCopiedMessageId(null), 1_400);
   }
 
-  // Switch which generated variant of an assistant message is shown (‹ n/m ›).
-  function switchVariant(messageId: string, direction: number) {
-    const variant = variants[messageId];
-    if (!variant) return;
-    const index = Math.max(0, Math.min(variant.texts.length - 1, variant.index + direction));
-    if (index === variant.index) return;
-    setVariants((prev) => ({ ...prev, [messageId]: { ...prev[messageId], index } }));
-    setOptimisticMessages((current) =>
-      (current ?? messages).map((message) =>
-        message.id === messageId ? { ...message, text: variant.texts[index] } : message,
-      ),
-    );
+  // Refresh the persisted branch map for this thread (which nodes have siblings).
+  const refreshBranches = useCallback(async () => {
+    try {
+      const next = await coreBridge.chatBranches(thread.threadId);
+      if (isMountedRef.current) setBranches(next);
+    } catch {
+      /* switcher is best-effort; ignore */
+    }
+  }, [thread.threadId]);
+
+  // Reload whenever the persisted conversation changes (after a send, edit,
+  // regenerate or switch). Optimistic streaming doesn't touch `messages`, so this
+  // doesn't fire mid-stream.
+  useEffect(() => {
+    void refreshBranches();
+  }, [refreshBranches, messages]);
+
+  // Switch the displayed branch at a node: point the thread's active leaf at the
+  // chosen sibling's tip, then resync the (mapped) messages from the gateway.
+  async function switchBranch(point: CoreBranchPoint, direction: number) {
+    if (branchBusy || promptSubmitting || streamingAssistantId) return;
+    const index = point.active_index + direction;
+    if (index < 0 || index >= point.options.length) return;
+    setBranchBusy(true);
+    try {
+      await coreBridge.setActiveLeaf(thread.threadId, point.options[index].leaf_id);
+      setOptimisticMessages(null);
+      await onThreadChanged();
+      await refreshBranches();
+    } catch (error) {
+      setPromptError(describeBridgeError(error));
+    } finally {
+      setBranchBusy(false);
+    }
   }
 
-  // Regenerate an assistant answer as an ALTERNATIVE variant (kept alongside the
-  // previous one with a ‹ n/m › picker), streamed into the same message.
-  function regenerateAsVariant(messageId: string) {
+  // Phase 4: name (or clear) a branch so the switcher labels it — handy for the
+  // coding workflow ("try A" vs "try B"). Minimal inline prompt.
+  async function renameBranch(childId: string, current: string | null) {
+    const input = window.prompt(t("chat.branchLabelPrompt"), current ?? "");
+    if (input === null) return;
+    const label = input.trim();
+    try {
+      setBranches(await coreBridge.setBranchLabel(thread.threadId, childId, label || null));
+    } catch (error) {
+      setPromptError(describeBridgeError(error));
+    }
+  }
+
+  // Regenerate an assistant answer as a persisted SIBLING branch under its user
+  // message — streamed into the same slot, then committed to the chat tree.
+  function regenerateAnswer(messageId: string) {
     if (promptSubmitting || streamingAssistantId) return;
     const assistant = threadMessages.find((message) => message.id === messageId);
     const previousUser = findPreviousUserMessage(threadMessages, messageId);
@@ -871,16 +912,15 @@ export function ChatView({
       setPromptError(t("chat.noPreviousPromptToRegenerate"));
       return;
     }
-    void streamVariantIntoMessage(assistant, previousUser, threadMessages);
+    void streamRegeneratedAnswer(assistant, previousUser, threadMessages);
   }
 
-  async function streamVariantIntoMessage(
+  async function streamRegeneratedAnswer(
     message: ChatMessage,
     userMessage: ChatMessage,
     baseMessages: ChatMessage[],
   ) {
-    const requestId = `chat_stream_variant_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-    const originalText = message.text;
+    const requestId = `chat_stream_regen_${Date.now()}_${Math.random().toString(36).slice(2)}`;
     let streamedText = "";
     let unlistenStream: (() => void) | undefined;
     const flushStreamingMessage = () => {
@@ -902,6 +942,14 @@ export function ChatView({
       unlistenStream?.();
       cancelScheduledStreamingFrame();
     };
+
+    // Context = history up to (and including) the prompting user message, excluding
+    // the answer we're replacing, so the alternative is generated independently.
+    const userIndex = baseMessages.findIndex((item) => item.id === userMessage.id);
+    const context = baseMessages
+      .slice(0, userIndex >= 0 ? userIndex : 0)
+      .filter((item) => item.role === "user" || item.role === "assistant")
+      .map((item) => ({ role: item.role as "user" | "assistant", text: item.text }));
 
     setPromptSubmitting(true);
     setStreamingAssistantId(message.id);
@@ -925,30 +973,23 @@ export function ChatView({
     });
 
     try {
-      const result = await coreBridge.submitChatPromptStream(
+      const result = await coreBridge.regenerateChatPromptStream(
         requestId,
         thread.threadId,
         computerSessionId,
         userMessage.text,
-        [],
-        undefined,
+        userMessage.id,
+        context,
       );
       if (cancelledStreamIdsRef.current.has(requestId)) return;
-      const finalText = result.assistant_message.text || streamedText;
       cancelScheduledStreamingFrame();
-      const nextMessages = baseMessages.map((item) =>
-        item.id === message.id ? { ...item, text: finalText } : item,
-      );
       setComputerSession(mapCoreComputerSession(result.computer_session));
       setComputerCardCollapsed(true);
       setTimelineCollapsed(!result.plan);
-      setOptimisticMessages(nextMessages);
-      onMessagesChange(nextMessages);
-      setVariants((prev) => {
-        const existing = prev[message.id] ?? { texts: [originalText], index: 0 };
-        const texts = [...existing.texts, finalText];
-        return { ...prev, [message.id]: { texts, index: texts.length - 1 } };
-      });
+      // The new answer is now a sibling in the tree; resync the real path + switcher.
+      await refreshAfterChatSubmit();
+      setOptimisticMessages(null);
+      await refreshBranches();
     } catch (error) {
       setPromptError(t("chat.regenerateFailed", { error: describeBridgeError(error) }));
     } finally {
@@ -987,8 +1028,10 @@ export function ChatView({
     setEditingText("");
   }
 
-  // Edit a user message: truncate the thread at that point and re-run from the
-  // edited text (a fresh branch of the conversation).
+  // Edit a user message non-destructively: commit the edited turn as a SIBLING
+  // branch. The original message and its answer stay in the tree, reachable via
+  // the ‹ n/m › switcher — nothing is lost. The gateway resolves the original's
+  // parent from `branchFromId`, so the new turn is a true sibling.
   function saveEditedMessage() {
     const id = editingMessageId;
     const text = editingText.trim();
@@ -1002,8 +1045,10 @@ export function ChatView({
     const original = threadMessages[index];
     setEditingMessageId(null);
     setEditingText("");
+    // Optimistically show the context BEFORE the edited turn; the new turn streams
+    // in and the refetch swaps in the persisted branch. We don't push `base` to the
+    // parent (no onMessagesChange) so the original branch is never dropped.
     setOptimisticMessages(base);
-    onMessagesChange(base);
     void submitPrompt(
       text,
       [],
@@ -1012,6 +1057,8 @@ export function ChatView({
       undefined,
       undefined,
       base,
+      undefined,
+      id,
     );
   }
 
@@ -1726,7 +1773,7 @@ export function ChatView({
                   }
                   onReply={() => replyToMessage(displayMessage)}
                   onEdit={() => startEditMessage(displayMessage)}
-                  onRegenerate={() => regenerateAsVariant(displayMessage.id)}
+                  onRegenerate={() => regenerateAnswer(displayMessage.id)}
                   onReviseDiagram={() =>
                     askAboutAssistantResponse(
                       displayMessage.id,
@@ -1740,34 +1787,45 @@ export function ChatView({
                 </>
               )}
               {!isStreamingMessage &&
-                variants[displayMessage.id] &&
-                variants[displayMessage.id].texts.length > 1 && (
-                  <div className="branch-picker" aria-label={t("chat.responseVariants")}>
-                    <button
-                      type="button"
-                      aria-label={t("chat.prevVariant")}
-                      disabled={variants[displayMessage.id].index === 0}
-                      onClick={() => switchVariant(displayMessage.id, -1)}
-                    >
-                      <ChevronLeft size={14} />
-                    </button>
-                    <span>
-                      {variants[displayMessage.id].index + 1} /{" "}
-                      {variants[displayMessage.id].texts.length}
-                    </span>
-                    <button
-                      type="button"
-                      aria-label={t("chat.nextVariant")}
-                      disabled={
-                        variants[displayMessage.id].index ===
-                        variants[displayMessage.id].texts.length - 1
-                      }
-                      onClick={() => switchVariant(displayMessage.id, 1)}
-                    >
-                      <ChevronRight size={14} />
-                    </button>
-                  </div>
-                )}
+                (() => {
+                  const point = branches.find((b) => b.node_id === displayMessage.id);
+                  if (!point || point.options.length < 2) return null;
+                  const active = point.options[point.active_index];
+                  const label = active?.label ?? null;
+                  return (
+                    <div className="branch-picker" aria-label={t("chat.responseVariants")}>
+                      <button
+                        type="button"
+                        aria-label={t("chat.prevVariant")}
+                        disabled={branchBusy || point.active_index === 0}
+                        onClick={() => void switchBranch(point, -1)}
+                      >
+                        <ChevronLeft size={14} />
+                      </button>
+                      <span>
+                        {point.active_index + 1} / {point.options.length}
+                      </span>
+                      <button
+                        type="button"
+                        aria-label={t("chat.nextVariant")}
+                        disabled={branchBusy || point.active_index === point.options.length - 1}
+                        onClick={() => void switchBranch(point, 1)}
+                      >
+                        <ChevronRight size={14} />
+                      </button>
+                      {label && <span className="branch-label">{label}</span>}
+                      <button
+                        type="button"
+                        className="branch-rename"
+                        aria-label={t("chat.branchLabelAria")}
+                        title={t("chat.branchLabelAria")}
+                        onClick={() => void renameBranch(displayMessage.id, label)}
+                      >
+                        <Tag size={13} />
+                      </button>
+                    </div>
+                  );
+                })()}
               {!isStreamingMessage &&
                 followUpsFor === displayMessage.id &&
                 followUps.length > 0 && (

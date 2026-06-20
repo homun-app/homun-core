@@ -1,4 +1,5 @@
 import { chatApi } from "./chatApi";
+export type { CoreBranchPoint, CoreBranchOption } from "./chatApi";
 import {
   DESKTOP_GATEWAY_URL,
   gatewayHeaders,
@@ -2075,6 +2076,7 @@ export const coreBridge = {
     model?: string,
     images?: string[],
     mode?: string,
+    branchFromId?: string | null,
   ) =>
     submitBrowserRuntimeChatPromptStream(
       requestId,
@@ -2088,7 +2090,41 @@ export const coreBridge = {
       images,
       attachments,
       mode,
+      branchFromId,
     ),
+  // Regenerate an answer as a persisted SIBLING branch under its user message.
+  // `context` is the history up to (and including) that user message, excluding
+  // the answer being replaced.
+  regenerateChatPromptStream: (
+    requestId: string,
+    threadId: string,
+    sessionId: string,
+    userText: string,
+    userMessageId: string,
+    context: Array<{ role: "user" | "assistant"; text: string }>,
+    model?: string,
+  ) =>
+    submitBrowserRuntimeChatPromptStream(
+      requestId,
+      threadId,
+      sessionId,
+      userText,
+      undefined,
+      undefined,
+      undefined,
+      model,
+      undefined,
+      [],
+      undefined,
+      undefined,
+      userMessageId,
+      context,
+    ),
+  chatBranches: (threadId: string) => chatApi.chatBranches(threadId),
+  setActiveLeaf: (threadId: string, leafId: string | null) =>
+    chatApi.setActiveLeaf(threadId, leafId),
+  setBranchLabel: (threadId: string, messageId: string, label: string | null) =>
+    chatApi.setBranchLabel(threadId, messageId, label),
   improvePrompt: (prompt: string) => electronImprovePrompt(prompt),
   chatSuggestions: (prompt: string, answer: string) =>
     electronChatSuggestions(prompt, answer),
@@ -2952,13 +2988,20 @@ async function submitBrowserRuntimeChatPromptStream(
   images?: string[],
   attachments?: ChatAttachmentInput[],
   mode?: string,
+  branchFromId?: string | null,
+  regenerateFromUserId?: string | null,
+  contextOverride?: Array<{ role: "user" | "assistant"; text: string }>,
 ): Promise<CorePromptSubmissionResult> {
   const startedAt = performance.now();
   const maxTokens = browserChatMaxTokens(prompt);
   const promptBuildStartedAt = performance.now();
-  const rawContext = assistantMessageId
-    ? []
-    : chatApi.rawRecentChatContext(threadId, 12);
+  // Regenerate supplies its own context (history up to the prompting user message,
+  // excluding the old answer); continuation needs none; otherwise read the thread.
+  const rawContext = contextOverride
+    ? contextOverride
+    : assistantMessageId
+      ? []
+      : chatApi.rawRecentChatContext(threadId, 12);
   const stream = await openChatStreamWithGateway(
     requestId,
     prompt,
@@ -3056,10 +3099,13 @@ async function submitBrowserRuntimeChatPromptStream(
     computer_session: browserComputerSession(sessionId, totalElapsedSeconds),
     plan: null,
   };
-  if (assistantMessageId) {
+  if (regenerateFromUserId) {
+    // New answer becomes a sibling of the previous one under its user message.
+    await chatApi.commitChatRegeneratedResult(threadId, regenerateFromUserId, result);
+  } else if (assistantMessageId) {
     await chatApi.commitChatContinuetionResult(threadId, assistantMessageId, result);
   } else {
-    await chatApi.commitChatPromptResult(threadId, result);
+    await chatApi.commitChatPromptResult(threadId, result, branchFromId);
   }
   result.computer_session = await electronLocalComputerSession(sessionId);
   return result;
