@@ -32,10 +32,21 @@ docker rm -f "${NAME}" >/dev/null 2>&1 || true
 # so skill artifacts (xlsx/pdf/…) persist on disk and are listed/downloadable.
 ARTIFACTS_DIR="${HOMUN_ARTIFACTS_DIR:-$HOME/.homun/artifacts}"
 mkdir -p "${ARTIFACTS_DIR}"
-# Browser profile dir, bind-mounted at /data/profile (Chromium's --user-data-dir):
-# persists cookies/logins across container recycles, so the browser looks like a
-# returning user and trips far fewer captchas. /data is chowned to agent in the image.
+# Browser profile dir, bind-mounted at /data/profile (Chromium's --user-data-dir).
+# This is the contained-computer's REAL browser profile (openclaw model: drive a
+# genuine headed browser, not a synthetic one). Persisting it keeps cookies/logins
+# across recycles — right for authenticated use, and the stealth comes from being a
+# real headed browser, not from a fingerprint trick.
+#
+# Escape hatch: a persistent profile that an anti-bot vendor flags once stays flagged
+# (the poisoning that blocks anonymous flight/train searches). HOMUN_CC_RESET_PROFILE=1
+# wipes it on the next `up` so a flagged identity can be cleanly recovered without
+# losing the model/artifact volumes.
 CC_PROFILE_DIR="${HOMUN_CC_PROFILE_DIR:-$HOME/.homun/cc-profile}"
+if [ "${HOMUN_CC_RESET_PROFILE:-0}" = "1" ]; then
+  echo "==> HOMUN_CC_RESET_PROFILE=1 -> resetting ${CC_PROFILE_DIR} (fresh, unflagged profile)"
+  rm -rf "${CC_PROFILE_DIR}"
+fi
 mkdir -p "${CC_PROFILE_DIR}"
 # Publish to loopback only. --shm-size avoids Chromium crashes on small /dev/shm.
 # Port 9100→9000: on-device Whisper STT server. Named volume persists the model
