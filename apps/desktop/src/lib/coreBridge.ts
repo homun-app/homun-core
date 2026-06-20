@@ -931,6 +931,31 @@ async function electronAutomationRuns(id: string): Promise<CoreAutomationRun[]> 
   }
 }
 
+/** The user's persistent brand kit — colours, fonts, logo — applied to deliverables. */
+export interface BrandKit {
+  organization: string;
+  primary_color: string;
+  secondary_color: string;
+  accent_color: string;
+  heading_font: string;
+  body_font: string;
+  logo_data_url: string;
+}
+
+async function electronBrandKit(): Promise<BrandKit> {
+  return gatewayGetJson<BrandKit>("/api/brand-kit");
+}
+
+async function electronSaveBrandKit(kit: BrandKit): Promise<BrandKit> {
+  const r = await fetch(`${DESKTOP_GATEWAY_URL}/api/brand-kit`, {
+    method: "PUT",
+    headers: { ...gatewayHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify(kit),
+  });
+  if (!r.ok) throw new Error(`save brand kit HTTP ${r.status}`);
+  return (await r.json()) as BrandKit;
+}
+
 /** Thread ids with an in-flight chat answer right now (across ALL threads, not just
  *  the one on screen) — drives the sidebar "working" dots on every busy chat. */
 async function electronActiveStreams(): Promise<string[]> {
@@ -1991,6 +2016,8 @@ export const coreBridge = {
   toggleAutomation: (id: string) => electronToggleAutomation(id),
   deleteAutomation: (id: string) => electronDeleteAutomation(id),
   automationRuns: (id: string) => electronAutomationRuns(id),
+  brandKit: () => electronBrandKit(),
+  saveBrandKit: (kit: BrandKit) => electronSaveBrandKit(kit),
   setChatThreadPinned: (threadId: string, pinned: boolean) =>
     chatApi.setChatThreadPinned(threadId, pinned),
   archiveChatThread: (threadId: string) =>
