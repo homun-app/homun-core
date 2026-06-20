@@ -416,6 +416,11 @@ pub const ROLES: &[RoleInfo] = &[
         label: "Memory",
         description: "Extracting facts/preferences from conversations: a fast and cheap model is best.",
     },
+    RoleInfo {
+        key: "image_generation",
+        label: "Image generation",
+        description: "Generating images for presentations, documents and chat (e.g. deck covers, illustrations). Pin a local Ollama image model (Z-Image, Flux) or a cloud diffusion model (Nano Banana / gpt-image / fal). If unset, falls back to the local Ollama image default.",
+    },
 ];
 
 /// Hard requirements a model must meet to serve a role (the gate), plus a soft
@@ -471,6 +476,14 @@ pub fn role_requirements(role: &str) -> RoleReq {
             needs_vision: false,
             modality: "text",
             preferred_tier: Some(ModelTier::Fast),
+        },
+        // Image generation: the only hard gate is the "image" modality (no tools,
+        // no vision, no tier preference) — picks an image-capable model.
+        "image_generation" => RoleReq {
+            needs_tools: false,
+            needs_vision: false,
+            modality: "image",
+            preferred_tier: None,
         },
         _ => RoleReq {
             needs_tools: true,
@@ -558,6 +571,18 @@ impl ProviderRegistry {
             self.active_provider_id = self.providers.first().map(|p| p.id.clone());
         }
         removed
+    }
+
+    /// The explicit (provider, model) a role is pinned to — only when BOTH are set
+    /// and the provider exists and is enabled. `None` for auto/unset roles. Lets a
+    /// caller distinguish a deliberate user pin from the capability auto-matcher
+    /// (e.g. image generation must NOT silently fall back to a text model).
+    pub fn manual_binding(&self, role: &str) -> Option<(String, String)> {
+        let binding = self.roles.get(role)?;
+        let pid = binding.provider_id.as_deref().filter(|s| !s.is_empty())?;
+        let model = binding.model.as_deref().filter(|s| !s.is_empty())?;
+        let provider = self.get(pid)?;
+        provider.enabled.then(|| (provider.id.clone(), model.to_string()))
     }
 
     /// Resolves the model for a role: an explicit (valid) manual binding wins,
@@ -917,6 +942,57 @@ mod tests {
             .map(|(_, m)| m.id.clone())
             .collect();
         assert_eq!(emb, vec!["nomic-embed-text".to_string()]);
+    }
+
+    #[test]
+    fn image_generation_role_gates_on_image_modality() {
+        let mut reg = ProviderRegistry::default();
+        let mut p = ProviderEntry::new(
+            "ollama".into(),
+            "Ollama".into(),
+            ProviderKind::Ollama,
+            "http://127.0.0.1:11434/v1".into(),
+        );
+        p.models = vec![
+            ModelEntry::inferred("llama3.1:8b"), // text
+            ModelEntry::inferred("z-image"),     // image
+        ];
+        reg.upsert(p);
+
+        // Only the image model is eligible — a chat model must never be routed here.
+        let imgs: Vec<_> = reg
+            .eligible_models("image_generation")
+            .iter()
+            .map(|(_, m)| m.id.clone())
+            .collect();
+        assert_eq!(imgs, vec!["z-image".to_string()]);
+
+        // Auto-match resolves to the image model.
+        let resolved = reg.resolve_role("image_generation").unwrap();
+        assert_eq!(resolved.model, "z-image");
+        assert!(resolved.auto);
+    }
+
+    #[test]
+    fn manual_binding_reports_only_explicit_enabled_pins() {
+        let mut reg = registry_with_two_models();
+        // Unset role → no manual binding.
+        assert!(reg.manual_binding("image_generation").is_none());
+        // Explicit pin → reported.
+        reg.roles.insert(
+            "image_generation".into(),
+            RoleBinding {
+                provider_id: Some("ollama".into()),
+                model: Some("z-image".into()),
+            },
+        );
+        assert_eq!(
+            reg.manual_binding("image_generation"),
+            Some(("ollama".to_string(), "z-image".to_string()))
+        );
+        // A pin to a DISABLED provider is ignored (don't route to it).
+        reg.set_enabled("ollama", false);
+        assert!(reg.manual_binding("image_generation").is_none());
     }
 
     #[test]

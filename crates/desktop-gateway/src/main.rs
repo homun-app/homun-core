@@ -2148,28 +2148,71 @@ fn cosine(a: &[f32], b: &[f32]) -> f32 {
 /// 0.85–0.96, while genuinely distinct decisions on the same topic stay below ~0.80.
 const DEDUP_COSINE: f32 = 0.85;
 
+/// Local Ollama OpenAI-compat base for image generation (the last-resort default).
+fn default_image_base() -> String {
+    let ollama = std::env::var("HOMUN_EMBED_BASE")
+        .unwrap_or_else(|_| "http://127.0.0.1:11434".to_string());
+    format!("{}/v1", ollama.trim_end_matches('/'))
+}
+
+/// API key from the `HOMUN_IMAGE_KEY` env, if non-empty.
+fn image_env_key() -> Option<String> {
+    std::env::var("HOMUN_IMAGE_KEY")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+}
+
 /// Image-generation provider config: (base_url, model, api_key). Provider-agnostic and
 /// OpenAI-compatible (`{base}/images/generations`), so the SAME path serves LOCAL Ollama
 /// (Flux / Z-Image, via MLX) AND cloud diffusion (Gemini "Nano Banana", OpenAI gpt-image,
-/// fal, …). Defaults to the local Ollama instance; override per provider with
-/// HOMUN_IMAGE_BASE / HOMUN_IMAGE_MODEL / HOMUN_IMAGE_KEY.
+/// fal, …).
+///
+/// Resolution order (WordPress-style: the plugin declares the capability, the core's
+/// "Model per task" config drives it):
+///   1. Manual pin of the `image_generation` role (Settings → Runtime → Model per task).
+///   2. Explicit env override (HOMUN_IMAGE_BASE / _MODEL / _KEY) — operator/deploy.
+///   3. Auto-matched image model from the provider catalog (a real "image"-modality model).
+///   4. Local Ollama `z-image` default.
+///
+/// NB: we never let the role auto-matcher's text-model fallback through for images — a
+/// chat model can't draw — so step 3 is gated on an actual image model being eligible.
 fn image_provider_config() -> (String, String, Option<String>) {
-    let base = std::env::var("HOMUN_IMAGE_BASE")
-        .ok()
-        .filter(|s| !s.trim().is_empty())
-        .unwrap_or_else(|| {
-            let ollama = std::env::var("HOMUN_EMBED_BASE")
-                .unwrap_or_else(|_| "http://127.0.0.1:11434".to_string());
-            format!("{}/v1", ollama.trim_end_matches('/'))
-        });
-    let model = std::env::var("HOMUN_IMAGE_MODEL")
-        .ok()
-        .filter(|s| !s.trim().is_empty())
-        .unwrap_or_else(|| "z-image".to_string());
-    let key = std::env::var("HOMUN_IMAGE_KEY")
+    let registry = load_provider_registry();
+
+    // 1) Manual pin — trusted even if the catalog wasn't refreshed (e.g. a cloud
+    //    image-model id typed by hand).
+    if let Some((provider_id, model)) = registry.manual_binding("image_generation") {
+        if let Some(provider) = registry.get(&provider_id) {
+            let key = provider_api_key(&provider_id).or_else(image_env_key);
+            return (provider.base_url.clone(), model, key);
+        }
+    }
+
+    // 2) Explicit env override.
+    let env_base = std::env::var("HOMUN_IMAGE_BASE")
         .ok()
         .filter(|s| !s.trim().is_empty());
-    (base, model, key)
+    let env_model = std::env::var("HOMUN_IMAGE_MODEL")
+        .ok()
+        .filter(|s| !s.trim().is_empty());
+    if env_base.is_some() || env_model.is_some() {
+        return (
+            env_base.unwrap_or_else(default_image_base),
+            env_model.unwrap_or_else(|| "z-image".to_string()),
+            image_env_key(),
+        );
+    }
+
+    // 3) Auto-matched image model from the catalog (only when one truly exists).
+    if !registry.eligible_models("image_generation").is_empty() {
+        if let Some(resolved) = registry.resolve_role("image_generation") {
+            let key = provider_api_key(&resolved.provider_id).or_else(image_env_key);
+            return (resolved.base_url, resolved.model, key);
+        }
+    }
+
+    // 4) Local Ollama image default.
+    (default_image_base(), "z-image".to_string(), None)
 }
 
 /// Generate a PNG from a text prompt via the configured image provider (local Ollama or
