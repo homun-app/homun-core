@@ -8703,6 +8703,19 @@ fn generate_image_tool_schema() -> serde_json::Value {
     })
 }
 
+/// Read the user's saved BRAND KIT (organization, colours, fonts, logo data URL) so a
+/// deliverable can be produced ON-BRAND.
+fn get_brand_kit_tool_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": "get_brand_kit",
+            "description": "Read the user's saved brand kit — organization name, primary/secondary/accent colours (hex), heading/body fonts, and a logo (data URL, may be empty). Call it BEFORE creating a presentation, document or any branded visual, and apply the returned colours/fonts/logo so the deliverable matches the user's brand.",
+            "parameters": { "type": "object", "properties": {}, "required": [] }
+        }
+    })
+}
+
 /// Tool to deliver a generated artifact to a user-authorized destination folder.
 /// The gateway performs the copy host-side, scoped to granted destinations only.
 fn save_artifact_tool_schema(destinations: &[ArtifactDestination]) -> serde_json::Value {
@@ -9622,6 +9635,7 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
     if !read_only {
         base_tools.push(create_artifact_tool_schema());
         base_tools.push(generate_image_tool_schema());
+        base_tools.push(get_brand_kit_tool_schema());
         base_tools.push(create_skill_tool_schema());
         base_tools.push(record_decision_tool_schema());
         base_tools.push(forget_memory_tool_schema());
@@ -11356,6 +11370,11 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                 Err(error) => error,
                             }
                         }
+                    } else if name == "get_brand_kit" {
+                        // Read-only: hand the saved brand kit to the model so it can
+                        // produce the deliverable on-brand (colours, fonts, logo, org).
+                        serde_json::to_string(&load_brand_kit())
+                            .unwrap_or_else(|_| "{}".to_string())
                     } else if name == "save_artifact" {
                         // Deliver a generated artifact to an authorized destination
                         // (gateway performs the copy host-side, scoped to grants).
