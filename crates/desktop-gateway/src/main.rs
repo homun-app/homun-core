@@ -4230,7 +4230,8 @@ for single-step requests.",
                             "properties": {
                                 "title": { "type": "string", "description": "What the step does (short, imperative)." },
                                 "status": { "type": "string", "enum": ["todo", "doing", "done", "blocked"], "description": "Current status of the step." },
-                                "detail": { "type": "string", "description": "Optional detail." }
+                                "detail": { "type": "string", "description": "Optional detail." },
+                                "done_criterion": { "type": "string", "description": "Optional but RECOMMENDED: the concrete, checkable condition that proves this step is complete (e.g. \"file report.pdf written\", \"search returned >=5 relevant sources\", \"deck rendered to PDF without errors\"). Used to verify completion before advancing." }
                             },
                             "required": ["title", "status"]
                         }
@@ -7624,6 +7625,100 @@ fn chat_openai_stream_config() -> Option<(String, String, Option<String>)> {
     Some((base_url, active_inference_model(), resolve_inference_api_key()))
 }
 
+/// OpenAI-compatible (base_url, model, api_key) for an ARBITRARY role, falling back to
+/// the orchestrator config when the role doesn't resolve. Used by background helpers
+/// (e.g. the F2 step verifier) that want a specific — usually cheaper/faster — role.
+fn role_openai_config(role: &str) -> Option<(String, String, Option<String>)> {
+    if let Some(resolved) = load_provider_registry().resolve_role(role) {
+        let api_key = provider_api_key(&resolved.provider_id).or_else(env_inference_api_key);
+        return Some((resolved.base_url, resolved.model, api_key));
+    }
+    chat_openai_stream_config()
+}
+
+/// F2 step-verification gate toggle (default ON). `HOMUN_VERIFY_STEPS=0` disables it,
+/// reverting to plain F1 (a completed step is trusted without an independent check).
+fn step_verification_enabled() -> bool {
+    !matches!(
+        std::env::var("HOMUN_VERIFY_STEPS").ok().as_deref(),
+        Some("0") | Some("false") | Some("off")
+    )
+}
+
+/// F2 verification gate: an independent LLM-judge deciding whether a plan step is
+/// ACTUALLY complete, from the step title, its done-criterion, and the EVIDENCE (tool
+/// calls + results gathered while the step ran). Cheap, non-streaming, on the fast
+/// `memory` role. FAIL-OPEN: returns `(true, "")` on any infra failure — the gate only
+/// ADDS confidence, it must never become a new way for a real task to stall.
+async fn verify_step_complete(
+    http: &reqwest::Client,
+    step_title: &str,
+    criterion: &str,
+    evidence: &str,
+) -> (bool, String) {
+    let Some((base_url, model, api_key)) = role_openai_config("memory") else {
+        return (true, String::new());
+    };
+    let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
+    let system = "You are a STRICT completion verifier for an autonomous agent. Given a task \
+STEP, its CRITERION, and the EVIDENCE of what the agent actually did, decide if the step is \
+genuinely complete. Be skeptical: a claim with no supporting evidence is NOT complete, and a \
+failed or error-laden tool result is NOT complete. Reply with STRICT JSON only, no prose: \
+{\"complete\": true|false, \"reason\": \"one short sentence\"}.";
+    let user = format!(
+        "STEP: {step_title}\nCRITERION: {}\n\nEVIDENCE (tool calls + results during this step):\n{}",
+        if criterion.trim().is_empty() {
+            "(none given — judge by whether the step's goal is evidently achieved)"
+        } else {
+            criterion
+        },
+        evidence.chars().take(6000).collect::<String>()
+    );
+    let payload = serde_json::json!({
+        "model": model,
+        "temperature": 0,
+        "max_tokens": 200,
+        "messages": [
+            { "role": "system", "content": system },
+            { "role": "user", "content": user },
+        ],
+    });
+    let mut builder = http.post(&endpoint).timeout(std::time::Duration::from_secs(45));
+    if let Some(key) = api_key.as_ref() {
+        builder = builder.bearer_auth(key);
+    }
+    let Ok(resp) = builder.json(&payload).send().await else {
+        return (true, String::new());
+    };
+    if !resp.status().is_success() {
+        return (true, String::new());
+    }
+    let Ok(body) = resp.json::<serde_json::Value>().await else {
+        return (true, String::new());
+    };
+    let content = body
+        .pointer("/choices/0/message/content")
+        .and_then(|c| c.as_str())
+        .unwrap_or("");
+    // Tolerant parse: the model may wrap the JSON in prose or code fences.
+    let json_slice = match (content.find('{'), content.rfind('}')) {
+        (Some(a), Some(b)) if b > a => &content[a..=b],
+        _ => return (true, String::new()),
+    };
+    match serde_json::from_str::<serde_json::Value>(json_slice) {
+        Ok(v) => {
+            let complete = v.get("complete").and_then(|b| b.as_bool()).unwrap_or(true);
+            let reason = v
+                .get("reason")
+                .and_then(|r| r.as_str())
+                .unwrap_or("")
+                .to_string();
+            (complete, reason)
+        }
+        Err(_) => (true, String::new()),
+    }
+}
+
 /// Whether the active orchestrator provider runs locally (loopback base_url).
 /// Mirrors the locality derivation in `build_router_from` (main.rs ~20438).
 fn orchestrator_is_local() -> bool {
@@ -9601,10 +9696,13 @@ repeat it in the reply text too — no list or table of the steps in prose (at m
 line of context). For single-step requests neither a plan nor a proposal is needed. \
 STEP-AT-A-TIME EXECUTION: work the plan ONE step at a time — do, then VERIFY that step's \
 result (file written, search returned usable results, build/render succeeded), and only \
-THEN mark it `done` with update_plan before starting the next. Your working budget RESETS \
-every time you complete a step, so a long task (e.g. a 10-slide deck, a deep research) can \
-run as long as it KEEPS CLOSING STEPS — never rush or skip verification to save rounds, and \
-never mark a step done before its result actually exists."
+THEN mark it `done` with update_plan before starting the next. Give each step a \
+`done_criterion` (the concrete, checkable proof it's finished): a step you mark done is \
+INDEPENDENTLY verified against its evidence before it counts — if it isn't actually complete \
+you'll be told and must keep working on it. Your working budget RESETS every time a step is \
+verified complete, so a long task (e.g. a 10-slide deck, a deep research) can run as long as \
+it KEEPS CLOSING STEPS — never rush or skip verification to save rounds, and never mark a \
+step done before its result actually exists."
     );
     let system = format!(
         "{system}\n\nFRESHNESS / VERIFICATION: your internal knowledge may be dated. For ANY \
@@ -10000,11 +10098,15 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
         // step (a new `done` in update_plan), we move the anchor to the current round
         // and reset the no-progress guard — so a big plan-driven task (10 slides, a
         // long web research) keeps going for as long as it KEEPS CLOSING STEPS, while
-        // a turn stuck on one step still trips the per-step budget. `plan_done_count`
-        // tracks the high-water mark of completed steps so we only reset on real
+        // a turn stuck on one step still trips the per-step budget. `verified_done_count`
+        // tracks the high-water mark of VERIFIED completed steps so we only reset on real
         // forward progress (never on a plan that goes backwards).
         let mut progress_anchor_round: usize = 0;
-        let mut plan_done_count: usize = 0;
+        let mut verified_done_count: usize = 0;
+        // F2 verification gate: the running evidence (tool name → result snippet) for the
+        // CURRENT plan step, fed to the verifier when the model marks the step done, then
+        // cleared. A chat model can claim "done" without doing the work; the gate checks.
+        let mut step_evidence: Vec<String> = Vec::new();
         // Source URLs visited via browse_web this request, for the "Fonti" footer.
         let mut browse_sources: Vec<String> = Vec::new();
         // Tools offered to the model this run: the base set, plus any tools the
@@ -11656,22 +11758,76 @@ an uncertain date.",
                                 GenerateStreamEvent::Delta { text: plan_mark },
                             )
                             .await;
-                            let done = steps
+                            let claimed_done = steps
                                 .iter()
                                 .filter(|s| s.get("status").and_then(|v| v.as_str()) == Some("done"))
                                 .count();
-                            // F1: a newly-completed step is real forward progress →
-                            // re-anchor the round budget here and clear the no-progress
-                            // guard, so the next step starts with a fresh budget. Only
-                            // on an INCREASE (high-water mark) — a plan that re-opens a
-                            // step must not refill the budget.
-                            if done > plan_done_count {
-                                plan_done_count = done;
-                                progress_anchor_round = round;
-                                last_round_sig.clear();
-                                repeat_count = 0;
+                            // F2 gate: each step the model NEWLY claims complete must pass
+                            // an independent verification before it counts as progress (and
+                            // refills the per-step budget, F1). Steps verify in order
+                            // (the model works one at a time), using the evidence gathered
+                            // since the last verified step. A rejected step does NOT advance
+                            // the budget — the model is told to keep working on it.
+                            let verify = step_verification_enabled();
+                            let mut rejection: Option<String> = None;
+                            while verified_done_count < claimed_done {
+                                let idx = verified_done_count;
+                                let Some(step) = steps.get(idx) else { break };
+                                if step.get("status").and_then(|v| v.as_str()) != Some("done") {
+                                    break;
+                                }
+                                let title = step.get("title").and_then(|v| v.as_str()).unwrap_or("");
+                                let criterion = step
+                                    .get("done_criterion")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("");
+                                let (ok, reason) = if verify {
+                                    let evidence = if step_evidence.is_empty() {
+                                        "(no tool activity recorded for this step)".to_string()
+                                    } else {
+                                        step_evidence.join("\n")
+                                    };
+                                    verify_step_complete(&state_owned.http, title, criterion, &evidence)
+                                        .await
+                                } else {
+                                    (true, String::new())
+                                };
+                                if ok {
+                                    verified_done_count += 1;
+                                    progress_anchor_round = round;
+                                    step_evidence.clear();
+                                    last_round_sig.clear();
+                                    repeat_count = 0;
+                                    if verify {
+                                        let _ = emit_stream_event(
+                                            &tx,
+                                            GenerateStreamEvent::Delta {
+                                                text: format!(
+                                                    "‹‹ACT››✓ Step verified: {}‹‹/ACT››",
+                                                    title.chars().take(60).collect::<String>()
+                                                ),
+                                            },
+                                        )
+                                        .await;
+                                    }
+                                } else {
+                                    rejection = Some(format!(
+                                        "Step «{title}» is NOT verified complete: {}. Keep working on it — re-mark it done ONLY once its result actually exists (file written, search returned usable results, render succeeded …).",
+                                        if reason.is_empty() { "the evidence does not show it was finished" } else { &reason }
+                                    ));
+                                    break;
+                                }
                             }
-                            format!("Plan updated: {done}/{} steps completed. Shown in the Plan panel.", steps.len())
+                            match rejection {
+                                Some(msg) => format!(
+                                    "⚠️ {msg} (verified {verified_done_count}/{} steps)",
+                                    steps.len()
+                                ),
+                                None => format!(
+                                    "Plan updated: {verified_done_count}/{} steps verified complete. Shown in the Plan panel.",
+                                    steps.len()
+                                ),
+                            }
                         }
                     } else if name == "create_automation" {
                         let _ = emit_stream_event(
@@ -12364,6 +12520,16 @@ Tell the user clearly; do NOT claim it's done."
                             if !browse_sources.contains(&url) {
                                 browse_sources.push(url);
                             }
+                        }
+                    }
+                    // F2: record this tool's outcome as evidence for the current plan
+                    // step (the verifier's input). Skip the plan tool itself so the
+                    // evidence reflects the actual WORK, not the bookkeeping. Bounded.
+                    if name != "update_plan" {
+                        let snippet: String = result.chars().take(400).collect();
+                        step_evidence.push(format!("{name} → {snippet}"));
+                        if step_evidence.len() > 60 {
+                            step_evidence.remove(0);
                         }
                     }
                     messages.push(serde_json::json!({
