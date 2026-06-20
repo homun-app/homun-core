@@ -38,18 +38,34 @@ export async function resolveAssistantProfile(options?: {
   };
 }
 
-/// Where the assistant profile lives. A STABLE dir persists cookies/sessions
-/// across runs so the assistant looks like a returning (logged-in) user — the
-/// single biggest lever for hitting fewer captchas. Isolated/parallel workers
-/// instead get a per-process dir: concurrent launches on one persistent dir
-/// collide on Chromium's SingletonLock.
-function assistantUserDataDir(profileRoot?: string): string {
-  const root =
-    profileRoot ??
-    process.env.BROWSER_AUTOMATION_PROFILE_ROOT ??
-    path.join(os.tmpdir(), "local-first-browser-automation");
+/// Where the assistant profile lives.
+///
+/// DEFAULT = EPHEMERAL: a per-process dir under the OS temp (auto-reaped), so every
+/// run starts from a clean, unflagged fingerprint. This is deliberate — a reused
+/// profile that an anti-bot vendor (Cloudflare/DataDome) challenges ONCE keeps the
+/// "bot" cookie/fingerprint forever, turning a one-time captcha into a permanent
+/// block. That is exactly the failure mode on heavily-protected anonymous searches
+/// (flights, trains); a fresh profile each run avoids it.
+///
+/// OPT-IN persistence (`BROWSER_AUTOMATION_PERSIST_PROFILE=1`) uses a STABLE dir that
+/// keeps cookies/logins across runs — right for AUTHENTICATED flows, where looking
+/// like a returning logged-in user genuinely helps. Isolated/parallel workers always
+/// get a per-process dir (concurrent launches on one dir collide on SingletonLock).
+export function assistantUserDataDir(profileRoot?: string): string {
   const isolated = process.env.BROWSER_AUTOMATION_ISOLATED_CONTEXT === "1";
-  return isolated ? path.join(root, `assistant-${process.pid}`) : path.join(root, "assistant");
+  const persist = process.env.BROWSER_AUTOMATION_PERSIST_PROFILE === "1";
+  if (persist && !isolated) {
+    const root =
+      profileRoot ??
+      process.env.BROWSER_AUTOMATION_PROFILE_ROOT ??
+      path.join(os.tmpdir(), "local-first-browser-automation");
+    return path.join(root, "assistant");
+  }
+  return path.join(
+    os.tmpdir(),
+    "local-first-browser-automation",
+    `assistant-${process.pid}`,
+  );
 }
 
 export function profileSummaries(params: {

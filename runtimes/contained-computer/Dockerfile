@@ -18,6 +18,10 @@ ENV DEBIAN_FRONTEND=noninteractive \
 # passes most bot-detection, while never opening a window on the host.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       chromium \
+      # Proprietary codecs (H.264/AAC) the free chromium build omits. Their absence
+      # is a fingerprint tell (canPlayType) that separates Chromium from a real
+      # Chrome; installing them closes that gap, multi-arch (incl. arm64).
+      chromium-codecs-ffmpeg-extra \
       xvfb \
       x11-utils \
       x11vnc \

@@ -27209,10 +27209,12 @@ fn browser_sidecar_env_with_headless(headless: String) -> Vec<(String, String)> 
             artifact_root.display().to_string(),
         ),
     ];
-    // Persist the assistant browser profile under the data dir (not tmp): cookies
-    // and sessions survive across runs, so the assistant looks like a returning,
-    // logged-in user and trips far fewer captchas. The runtime appends the profile
-    // subdir (stable for the shared session, per-process when isolated).
+    // Where a PERSISTENT assistant profile would live (under the data dir, not tmp).
+    // Persistence is OPT-IN (BROWSER_AUTOMATION_PERSIST_PROFILE=1): by default the
+    // runtime ignores this and uses an ephemeral per-run profile, so anonymous
+    // searches never inherit a once-flagged "bot" fingerprint (the flights/trains
+    // block). Set it for authenticated flows where a returning logged-in identity
+    // helps. Harmless when unset.
     if let Ok(dir) = gateway_data_dir() {
         env.push((
             "BROWSER_AUTOMATION_PROFILE_ROOT".to_string(),
