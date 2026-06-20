@@ -4,6 +4,7 @@ use local_first_desktop_gateway::{
 };
 use rusqlite::{Connection, OptionalExtension, params};
 use std::{
+    collections::{HashMap, HashSet},
     path::Path,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -411,20 +412,87 @@ impl ChatStore {
     }
 
     pub fn messages(&self, thread_id: &str) -> rusqlite::Result<ChatMessagesSnapshot> {
+        // Load every row once, in rowid order (the historical linear order, which is
+        // also the fallback). We pull `parent_id` too so the displayed conversation
+        // can be resolved as the path root→active_leaf without extra queries.
         let mut stmt = self.conn.prepare(
             "select id, role, text, timestamp, metadata, metrics_json, feedback,
-                    saved_memory_ref, linked_task_id, linked_automation_ref
+                    saved_memory_ref, linked_task_id, linked_automation_ref, parent_id
                from chat_messages
               where thread_id = ?1
               order by rowid asc",
         )?;
-        let messages = stmt
-            .query_map(params![thread_id], message_from_row)?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
+        let mut order: Vec<String> = Vec::new();
+        let mut parents: HashMap<String, Option<String>> = HashMap::new();
+        let mut by_id: HashMap<String, ChatMessage> = HashMap::new();
+        let rows = stmt.query_map(params![thread_id], |row| {
+            let parent: Option<String> = row.get(10)?;
+            Ok((message_from_row(row)?, parent))
+        })?;
+        for row in rows {
+            let (message, parent) = row?;
+            order.push(message.id.clone());
+            parents.insert(message.id.clone(), parent);
+            by_id.insert(message.id.clone(), message);
+        }
+        drop(stmt);
+
+        let ordered_ids = self.displayed_path(thread_id, &order, &parents);
+        let messages = ordered_ids
+            .into_iter()
+            .filter_map(|id| by_id.remove(&id))
+            .collect();
         Ok(ChatMessagesSnapshot {
             thread_id: thread_id.to_string(),
             messages,
         })
+    }
+
+    /// Ids of the conversation to display, as the path root→`active_leaf_id`.
+    /// Falls back to `order` (rowid order — today's linear behavior) whenever the
+    /// tree can't yield a complete path: no leaf recorded, a broken/cyclic chain,
+    /// or a path that doesn't cover every row (which, until branching writes ship,
+    /// means the data is linear anyway). Keeps reads byte-identical for all current
+    /// data while being forward-compatible with branching.
+    fn displayed_path(
+        &self,
+        thread_id: &str,
+        order: &[String],
+        parents: &HashMap<String, Option<String>>,
+    ) -> Vec<String> {
+        let leaf: Option<String> = self
+            .conn
+            .query_row(
+                "select active_leaf_id from chat_threads where thread_id = ?1",
+                params![thread_id],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()
+            .ok()
+            .flatten()
+            .flatten();
+        let mut chain: Vec<String> = Vec::new();
+        if let Some(mut cur) = leaf {
+            let mut seen: HashSet<String> = HashSet::new();
+            loop {
+                // Ancestor not among the thread's rows, or a cycle → give up, fall back.
+                if !parents.contains_key(&cur) || !seen.insert(cur.clone()) {
+                    chain.clear();
+                    break;
+                }
+                chain.push(cur.clone());
+                match parents.get(&cur).cloned().flatten() {
+                    Some(parent) => cur = parent,
+                    None => break,
+                }
+            }
+            chain.reverse();
+        }
+        if !chain.is_empty() && chain.len() == order.len() {
+            chain
+        } else {
+            order.to_vec()
+        }
     }
 
     /// Unix-seconds timestamp of the most recent message in a thread (None when
@@ -1517,6 +1585,79 @@ impl ChatStore {
             self.conn
                 .execute("alter table suggestions add column choices text", [])?;
         }
+        // Chat branching foundation (non-destructive edit/regenerate — roadmap
+        // "Evoluzioni future"). The history becomes a TREE: `chat_messages.parent_id`
+        // points at the message a node hangs off (NULL = a root) and
+        // `chat_threads.active_leaf_id` marks the leaf of the displayed path
+        // (root→leaf). Both additive + nullable; for today's linear threads the
+        // path equals rowid order, so reads stay byte-identical until branching
+        // writes ship.
+        if !self.column_exists("chat_messages", "parent_id")? {
+            self.conn
+                .execute("alter table chat_messages add column parent_id text", [])?;
+        }
+        if !self.column_exists("chat_threads", "active_leaf_id")? {
+            self.conn
+                .execute("alter table chat_threads add column active_leaf_id text", [])?;
+        }
+        self.conn.execute(
+            "create index if not exists idx_chat_messages_parent
+                on chat_messages(parent_id)",
+            [],
+        )?;
+        self.backfill_chat_tree()?;
+        Ok(())
+    }
+
+    /// One-shot backfill of the chat tree on DBs that predate branching: every
+    /// existing thread is linear, so chain each message's `parent_id` to its
+    /// rowid-predecessor and point the thread's `active_leaf_id` at its last
+    /// message. Guarded by a settings flag so it runs exactly once; the per-row
+    /// `… is null` guards make it additionally idempotent and never clobber a
+    /// value a live insert may already have set.
+    fn backfill_chat_tree(&self) -> rusqlite::Result<()> {
+        if self.flag("chat_tree_backfilled")?.as_deref() == Some("1") {
+            return Ok(());
+        }
+        let thread_ids: Vec<String> = {
+            let mut stmt = self
+                .conn
+                .prepare("select distinct thread_id from chat_messages")?;
+            let ids = stmt
+                .query_map([], |row| row.get::<_, String>(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            ids
+        };
+        for thread_id in &thread_ids {
+            let ids: Vec<String> = {
+                let mut stmt = self.conn.prepare(
+                    "select id from chat_messages where thread_id = ?1 order by rowid asc",
+                )?;
+                let ids = stmt
+                    .query_map(params![thread_id], |row| row.get::<_, String>(0))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                ids
+            };
+            let mut prev: Option<String> = None;
+            for id in &ids {
+                if let Some(parent) = &prev {
+                    self.conn.execute(
+                        "update chat_messages set parent_id = ?1
+                          where id = ?2 and thread_id = ?3 and parent_id is null",
+                        params![parent, id, thread_id],
+                    )?;
+                }
+                prev = Some(id.clone());
+            }
+            if let Some(last) = ids.last() {
+                self.conn.execute(
+                    "update chat_threads set active_leaf_id = ?1
+                      where thread_id = ?2 and active_leaf_id is null",
+                    params![last, thread_id],
+                )?;
+            }
+        }
+        self.set_flag("chat_tree_backfilled", "1")?;
         Ok(())
     }
 
@@ -1948,11 +2089,25 @@ impl ChatStore {
     }
 
     fn insert_message(&self, thread_id: &str, message: &ChatMessage) -> rusqlite::Result<()> {
-        self.conn.execute(
+        // Tree linkage: a new message extends the thread's currently-active path,
+        // hanging off its `active_leaf_id` (the message shown as last). For a linear
+        // thread this is simply "the previous message". Branching (a future phase)
+        // will set `parent_id` to a non-leaf node explicitly; here we always follow
+        // the active leaf, so today's behavior is unchanged.
+        let parent_id: Option<String> = self
+            .conn
+            .query_row(
+                "select active_leaf_id from chat_threads where thread_id = ?1",
+                params![thread_id],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()?
+            .flatten();
+        let inserted = self.conn.execute(
             "insert or ignore into chat_messages (
                 id, thread_id, role, text, timestamp, metadata, metrics_json, feedback,
-                saved_memory_ref, linked_task_id, linked_automation_ref
-            ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                saved_memory_ref, linked_task_id, linked_automation_ref, parent_id
+            ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             params![
                 message.id,
                 thread_id,
@@ -1965,8 +2120,18 @@ impl ChatStore {
                 message.saved_memory_ref,
                 message.linked_task_id,
                 message.linked_automation_ref,
+                parent_id,
             ],
         )?;
+        // Advance the active leaf only when a row was actually inserted —
+        // `insert or ignore` is a no-op on a duplicate id and must not move the
+        // pointer (which would corrupt the displayed path).
+        if inserted == 1 {
+            self.conn.execute(
+                "update chat_threads set active_leaf_id = ?1 where thread_id = ?2",
+                params![message.id, thread_id],
+            )?;
+        }
         Ok(())
     }
 
@@ -2268,6 +2433,163 @@ mod tests {
                 .iter()
                 .any(|item| item.title == "tell me a joke")
         );
+    }
+
+    fn mk_message(id: &str, role: &str) -> ChatMessage {
+        ChatMessage {
+            id: id.to_string(),
+            role: role.to_string(),
+            text: format!("{id} text"),
+            timestamp: current_timestamp_seconds(),
+            metadata: None,
+            metrics: None,
+            feedback: None,
+            saved_memory_ref: None,
+            linked_task_id: None,
+            linked_automation_ref: None,
+            attachments: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn chat_tree_links_parents_and_active_leaf() {
+        let store = ChatStore::in_memory().unwrap();
+        let thread = store.create_thread("default").unwrap();
+        let tid = thread.thread_id.clone();
+        // The seed "ready" message is the root of the thread.
+        let seed_id = store.messages(&tid).unwrap().messages[0].id.clone();
+
+        store
+            .commit_prompt_result(
+                &tid,
+                &mk_message("user_1", "user"),
+                &mk_message("assistant_1", "assistant"),
+            )
+            .unwrap();
+        store
+            .append_assistant_message(&tid, &mk_message("assistant_2", "assistant"))
+            .unwrap();
+
+        // Displayed order == the root→leaf path == insertion order (still linear).
+        let ids: Vec<String> = store
+            .messages(&tid)
+            .unwrap()
+            .messages
+            .into_iter()
+            .map(|m| m.id)
+            .collect();
+        assert_eq!(
+            ids,
+            vec![
+                seed_id.clone(),
+                "user_1".to_string(),
+                "assistant_1".to_string(),
+                "assistant_2".to_string(),
+            ]
+        );
+
+        // active_leaf tracks the last inserted message.
+        let leaf: Option<String> = store
+            .conn
+            .query_row(
+                "select active_leaf_id from chat_threads where thread_id = ?1",
+                params![tid],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(leaf.as_deref(), Some("assistant_2"));
+
+        // parent chain is linear: a2→a1→u1→seed→NULL.
+        let parent = |id: &str| -> Option<String> {
+            store
+                .conn
+                .query_row(
+                    "select parent_id from chat_messages where id = ?1",
+                    params![id],
+                    |row| row.get(0),
+                )
+                .unwrap()
+        };
+        assert_eq!(parent("assistant_2").as_deref(), Some("assistant_1"));
+        assert_eq!(parent("assistant_1").as_deref(), Some("user_1"));
+        assert_eq!(parent("user_1").as_deref(), Some(seed_id.as_str()));
+        assert_eq!(parent(&seed_id), None);
+
+        // A duplicate id (insert-or-ignore no-op) must NOT move the active leaf.
+        store
+            .append_assistant_message(&tid, &mk_message("assistant_2", "assistant"))
+            .unwrap();
+        let leaf_after: Option<String> = store
+            .conn
+            .query_row(
+                "select active_leaf_id from chat_threads where thread_id = ?1",
+                params![tid],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(leaf_after.as_deref(), Some("assistant_2"));
+    }
+
+    #[test]
+    fn chat_tree_backfill_linearizes_legacy_rows() {
+        let store = ChatStore::in_memory().unwrap();
+        // Simulate a pre-branching DB: a bare thread + rows with no parent/leaf.
+        store
+            .conn
+            .execute(
+                "insert into chat_threads
+                    (thread_id, title, subtitle, status, computer_session_id, task_id, updated_at)
+                 values ('legacy', 'T', 'S', 'active', 'c', 't', '0')",
+                [],
+            )
+            .unwrap();
+        for id in ["m1", "m2", "m3"] {
+            store
+                .conn
+                .execute(
+                    "insert into chat_messages (id, thread_id, role, text, timestamp)
+                     values (?1, 'legacy', 'user', 'x', '0')",
+                    params![id],
+                )
+                .unwrap();
+        }
+        // Re-arm the one-shot guard and run the backfill.
+        store.set_flag("chat_tree_backfilled", "0").unwrap();
+        store.backfill_chat_tree().unwrap();
+
+        let parent = |id: &str| -> Option<String> {
+            store
+                .conn
+                .query_row(
+                    "select parent_id from chat_messages where id = ?1",
+                    params![id],
+                    |row| row.get(0),
+                )
+                .unwrap()
+        };
+        assert_eq!(parent("m1"), None, "first message is the root");
+        assert_eq!(parent("m2").as_deref(), Some("m1"));
+        assert_eq!(parent("m3").as_deref(), Some("m2"));
+
+        let leaf: Option<String> = store
+            .conn
+            .query_row(
+                "select active_leaf_id from chat_threads where thread_id = 'legacy'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(leaf.as_deref(), Some("m3"));
+
+        // And the rebuilt path renders in linear order.
+        let ids: Vec<String> = store
+            .messages("legacy")
+            .unwrap()
+            .messages
+            .into_iter()
+            .map(|m| m.id)
+            .collect();
+        assert_eq!(ids, vec!["m1".to_string(), "m2".to_string(), "m3".to_string()]);
     }
 
     #[test]
