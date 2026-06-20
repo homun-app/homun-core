@@ -3099,6 +3099,7 @@ async function triggerArtifactDownload(artifact: ParsedArtifact, version?: numbe
 
 type ArtifactPreview =
   | { kind: "image" | "pdf"; url: string; ext: string }
+  | { kind: "html"; url: string; ext: string }
   | { kind: "pdf-images"; pages: string[]; ext: string }
   | { kind: "markdown" | "code" | "csv" | "text"; text: string; ext: string }
   | { kind: "binary" | "error"; ext: string };
@@ -3122,6 +3123,13 @@ async function buildArtifactPreview(
       /* pdfium unavailable → native viewer */
     }
     return { kind: "pdf", url: URL.createObjectURL(blob), ext };
+  }
+  if (ext === "html" || ext === "htm") {
+    // Render the deck/page inline (self-contained HTML — decks inline their images).
+    // Re-blob as text/html so the iframe renders rather than downloads.
+    const html = await blob.text();
+    const url = URL.createObjectURL(new Blob([html], { type: "text/html" }));
+    return { kind: "html", url, ext };
   }
   if (ext === "md" || ext === "markdown") return { kind: "markdown", text: await blob.text(), ext };
   if (ext === "csv") return { kind: "csv", text: await blob.text(), ext };
@@ -4700,6 +4708,18 @@ function ArtifactPreviewBody({
           className="artifact-preview-frame"
           src={`${preview.url}#toolbar=0&navpanes=0&view=FitH`}
           title="Preview PDF"
+        />
+      );
+    case "html":
+      // Inline render of an HTML deck/page (e.g. an on-brand presentation). Sandboxed:
+      // same-origin so a self-contained file (inlined CSS + data-URL images) displays,
+      // scripts/forms/navigation stay blocked.
+      return (
+        <iframe
+          className="artifact-preview-html"
+          src={preview.url}
+          sandbox="allow-same-origin"
+          title="Preview"
         />
       );
     case "markdown":
