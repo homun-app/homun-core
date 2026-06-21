@@ -3,6 +3,7 @@ export type { CoreBranchPoint, CoreBranchOption } from "./chatApi";
 import {
   DESKTOP_GATEWAY_URL,
   gatewayHeaders,
+  keepDesktopAwake,
   pickWorkspaceFolder,
   revealWorkspacePath,
 } from "./gatewayConfig";
@@ -3081,31 +3082,37 @@ async function submitBrowserRuntimeChatPromptStream(
   let metrics: Partial<CoreChatMessageMetrics> = {};
   let firstTokenSeconds: number | undefined;
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split("\n");
-    buffer = lines.pop() ?? "";
-    for (const line of lines) {
-      const event = parseBrowserStreamEvent(line);
-      if (!event) continue;
-      if (event.type === "delta") {
-        if (firstTokenSeconds === undefined) {
-          firstTokenSeconds = roundedSeconds((performance.now() - startedAt) / 1000);
+  // Keep the Mac awake for the whole stream (a long task must survive idle-sleep).
+  keepDesktopAwake(true);
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        const event = parseBrowserStreamEvent(line);
+        if (!event) continue;
+        if (event.type === "delta") {
+          if (firstTokenSeconds === undefined) {
+            firstTokenSeconds = roundedSeconds((performance.now() - startedAt) / 1000);
+          }
+          text += String(event.text ?? "");
+          chatApi.notifyChatStreamDelta({ request_id: requestId, delta: String(event.text ?? "") });
+        } else if (event.type === "done") {
+          // Done carries the AUTHORITATIVE final text (gateway-sanitized, markers/cards
+          // resolved). Use it to replace the raw live-streamed preview, so token
+          // streaming stays a preview and the committed message is the clean version.
+          if (event.text) text = String(event.text);
+          metrics = event.metrics ?? {};
+        } else if (event.type === "error") {
+          throw new Error(String(event.message ?? "Local runtime error"));
         }
-        text += String(event.text ?? "");
-        chatApi.notifyChatStreamDelta({ request_id: requestId, delta: String(event.text ?? "") });
-      } else if (event.type === "done") {
-        // Done carries the AUTHORITATIVE final text (gateway-sanitized, markers/cards
-        // resolved). Use it to replace the raw live-streamed preview, so token
-        // streaming stays a preview and the committed message is the clean version.
-        if (event.text) text = String(event.text);
-        metrics = event.metrics ?? {};
-      } else if (event.type === "error") {
-        throw new Error(String(event.message ?? "Local runtime error"));
       }
     }
+  } finally {
+    keepDesktopAwake(false);
   }
 
   const timestamp = currentTimestampSeconds();

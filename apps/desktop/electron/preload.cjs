@@ -9,6 +9,9 @@ contextBridge.exposeInMainWorld("localFirstDesktop", {
   revealPath: (path) => ipcRenderer.invoke("lfpa:reveal-path", path),
   // Captures the whole app window to a PNG file and reveals it. Returns {ok,path}.
   capturePage: () => ipcRenderer.invoke("lfpa:capture-page"),
+  // Keep the app awake during a long streaming task (ref-counted). on=true at start,
+  // false at end — so a sleeping Mac doesn't suspend the gateway mid-generation.
+  keepAwake: (on) => ipcRenderer.invoke("lfpa:keep-awake", !!on),
   // Resolves a dropped/picked File to its absolute on-disk path. File.path was
   // removed in Electron 32; webUtils.getPathForFile is the supported replacement
   // (synchronous; the File survives the contextBridge boundary). Returns "" for

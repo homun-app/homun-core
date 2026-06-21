@@ -22,11 +22,13 @@ questi dati". Slides / deck / presentation / pitch.
 
 ## Process
 
-1. **Read the brand.** Call `get_brand_kit` FIRST. Map it into the deck `theme`:
-   `primary_color`→`primary`, `secondary_color`→`secondary`, `accent_color`→`accent`,
-   `heading_font`/`body_font`, and `logo_data_url`→`theme.logo` (pass the data URL
-   as-is — the renderer handles it). Empty values → the renderer falls back to a clean
-   default palette, but still call it.
+1. **Read the brand.** Call `get_brand_kit` FIRST. The brand kit is NOT a file on disk —
+   it comes ONLY from this tool. NEVER use `find`/`ls`/shell to search the filesystem for
+   logo/brand/colour files; that just wastes the budget (there is nothing to find). Map
+   the tool's result into the deck `theme`: `primary_color`→`primary`,
+   `secondary_color`→`secondary`, `accent_color`→`accent`, `heading_font`/`body_font`, and
+   `logo_data_url`→`theme.logo` (pass the data URL **as-is** — the renderer embeds it).
+   Empty values → the renderer falls back to a clean default palette, but still call it.
 2. **Scope.** Confirm/infer audience, goal, length (default 8–12 slides), language; read
    any source material (a file, data, or a URL via `browse_web`).
 3. **Design pass (DO THIS — it's what makes the deck good, not generic).** Before any
