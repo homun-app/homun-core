@@ -39,23 +39,56 @@ impl OpenAiCompatProvider {
         format!("{}/chat/completions", self.base_url)
     }
 
-    fn request_body(&self, request: &GenerateJsonRequest) -> Value {
-        let mut body = json!({
-            "model": self.model,
-            "messages": [{ "role": "user", "content": request.prompt }],
-            "temperature": request.temperature,
-            // `json_object` is the universally-supported structured-output hint
-            // (OpenAI, OpenRouter, Ollama local AND cloud). The stricter
-            // `json_schema` response_format is NOT accepted by ollama.com/v1
-            // (it 400s), so we rely on json_object + the schema described in the
-            // prompt; capable models honor it.
-            "response_format": { "type": "json_object" },
-        });
-        if request.max_tokens > 0 {
-            body["max_tokens"] = json!(request.max_tokens);
-        }
-        body
+    fn request_body(&self, request: &GenerateJsonRequest, enforce_schema: bool) -> Value {
+        build_request_body(&self.model, request, enforce_schema)
     }
+
+    /// POST the body to the chat-completions endpoint with the request's
+    /// timeout + auth. Factored out so `generate_json` can retry (strict schema
+    /// → json_object fallback) without duplicating the builder setup.
+    fn send(&self, body: &Value, timeout_seconds: Option<f64>) -> Result<reqwest::blocking::Response, RuntimeClientError> {
+        let mut builder = self.http.post(self.chat_completions_url());
+        if let Some(seconds) = timeout_seconds {
+            if seconds > 0.0 {
+                builder = builder.timeout(std::time::Duration::from_secs_f64(seconds));
+            }
+        }
+        if let Some(api_key) = self.api_key.as_ref() {
+            builder = builder.bearer_auth(api_key);
+        }
+        builder.json(body).send().map_err(RuntimeClientError::Request)
+    }
+}
+
+/// Build the chat-completions request body. When `enforce_schema` is true AND a
+/// `json_schema` is present, emit the strict `response_format: json_schema`
+/// (constrained decoding — the model literally cannot produce out-of-schema
+/// tokens on backends that support it: OpenAI, OpenRouter, recent Ollama). This
+/// is the cross-model "floor" that lets a weak/local model still emit valid
+/// structured output. Otherwise fall back to the universally-supported
+/// `json_object` hint. Free function so it is unit-testable without a provider.
+pub(crate) fn build_request_body(
+    model: &str,
+    request: &GenerateJsonRequest,
+    enforce_schema: bool,
+) -> Value {
+    let response_format = match (enforce_schema, request.json_schema.as_ref()) {
+        (true, Some(schema)) => json!({
+            "type": "json_schema",
+            "json_schema": { "name": "result", "strict": true, "schema": schema },
+        }),
+        _ => json!({ "type": "json_object" }),
+    };
+    let mut body = json!({
+        "model": model,
+        "messages": [{ "role": "user", "content": request.prompt }],
+        "temperature": request.temperature,
+        "response_format": response_format,
+    });
+    if request.max_tokens > 0 {
+        body["max_tokens"] = json!(request.max_tokens);
+    }
+    body
 }
 
 impl InferenceProvider for OpenAiCompatProvider {
@@ -67,19 +100,15 @@ impl InferenceProvider for OpenAiCompatProvider {
         &self,
         request: &GenerateJsonRequest,
     ) -> Result<GenerateJsonResponse, RuntimeClientError> {
-        let mut builder = self.http.post(self.chat_completions_url());
-        if let Some(seconds) = request.request_timeout_seconds {
-            if seconds > 0.0 {
-                builder = builder.timeout(std::time::Duration::from_secs_f64(seconds));
-            }
+        let timeout = request.request_timeout_seconds;
+        // Try strict schema enforcement first; degrade ONCE to json_object if the
+        // endpoint rejects json_schema with a 400 (e.g. ollama.com/v1). This way
+        // we never silently lose enforcement on backends that DO support it.
+        let enforce = request.json_schema.is_some();
+        let mut response = self.send(&self.request_body(request, enforce), timeout)?;
+        if enforce && response.status().as_u16() == 400 {
+            response = self.send(&self.request_body(request, false), timeout)?;
         }
-        if let Some(api_key) = self.api_key.as_ref() {
-            builder = builder.bearer_auth(api_key);
-        }
-        let response = builder
-            .json(&self.request_body(request))
-            .send()
-            .map_err(RuntimeClientError::Request)?;
         if !response.status().is_success() {
             return Err(RuntimeClientError::Status(response.status().as_u16()));
         }
@@ -204,5 +233,42 @@ mod tests {
         let parsed = parse_chat_completion(&body, &request(&["decision"]));
         assert!(parsed.valid, "errors: {:?}", parsed.errors);
         assert_eq!(parsed.json["decision"], "complete");
+    }
+
+    #[test]
+    fn enforces_strict_json_schema_when_present() {
+        // The cross-model "floor": a schema present + enforce → constrained
+        // decoding (strict json_schema), not the loose json_object hint.
+        let mut req = request(&[]);
+        req.json_schema = Some(json!({
+            "type": "object",
+            "properties": { "a": { "type": "string" } },
+            "required": ["a"],
+            "additionalProperties": false
+        }));
+        let body = build_request_body("m", &req, true);
+        assert_eq!(body["response_format"]["type"], "json_schema");
+        assert_eq!(body["response_format"]["json_schema"]["strict"], true);
+        assert_eq!(
+            body["response_format"]["json_schema"]["schema"]["required"][0],
+            "a"
+        );
+    }
+
+    #[test]
+    fn falls_back_to_json_object_on_unsupported_endpoint() {
+        // Same schema, but enforce=false (the 400-retry path): must degrade to
+        // the universally-supported json_object hint, never carry the schema.
+        let mut req = request(&[]);
+        req.json_schema = Some(json!({ "type": "object" }));
+        let body = build_request_body("m", &req, false);
+        assert_eq!(body["response_format"]["type"], "json_object");
+        assert!(body["response_format"].get("json_schema").is_none());
+    }
+
+    #[test]
+    fn uses_json_object_when_no_schema_supplied() {
+        let body = build_request_body("m", &request(&[]), true);
+        assert_eq!(body["response_format"]["type"], "json_object");
     }
 }
