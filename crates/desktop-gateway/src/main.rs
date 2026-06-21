@@ -9064,6 +9064,161 @@ fn create_artifact_tool_schema() -> serde_json::Value {
 /// Tool for the model to GENERATE an image from a prompt (photo, illustration, icon,
 /// slide visual) — saved as a downloadable PNG artifact. Provider-agnostic: local Ollama
 /// by default (Flux / Z-Image), or a cloud model.
+/// One-call deck generation — the MAXIMUM-scaffolding tier (ADR 0016). The model
+/// supplies only a brief; the ENGINE owns the whole pipeline (brand → slide
+/// content via a schema-ENFORCED model call → images → render). This is what makes
+/// a deck reliable even on a weak/local model: the model never orchestrates, it
+/// fills exactly one slot, so it cannot balloon a plan, loop, or skip the stop.
+fn make_deck_tool_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": "make_deck",
+            "description": "Create a COMPLETE on-brand, editable presentation (.pptx + HTML/PDF preview) from a brief in ONE call. The engine does EVERYTHING deterministically — brand, slide content, images, render. Use this for ANY request to make slides / a deck / a presentation. Do NOT plan, do NOT call get_brand_kit/generate_image/render_deck/update_plan, do NOT write files or use the shell. Just call make_deck with the brief; when it returns, the deck is DONE — give the user a one-line summary.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "brief": { "type": "string", "description": "What the deck is about, plus any structure, sections or points the user specified — verbatim." },
+                    "language": { "type": "string", "description": "Deck language code, e.g. 'it' or 'en'. Default: the user's language." },
+                    "slides": { "type": "integer", "description": "Desired number of slides (3-12). Default 6." }
+                },
+                "required": ["brief"]
+            }
+        }
+    })
+}
+
+/// Strict JSON schema for the deck CONTENT the model produces. Deliberately
+/// UNIFORM (cover/section/bullets/closing + a `want_image` flag) so it is valid
+/// under OpenAI strict mode (every property required, additionalProperties:false)
+/// AND constrains a local model via Ollama `format`/grammar. Richer layouts
+/// (kpi/quote/two_column) are a later enrichment — v1 favours cross-model
+/// reliability over variety.
+fn deck_content_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["title", "subtitle", "slides"],
+        "properties": {
+            "title": { "type": "string" },
+            "subtitle": { "type": "string" },
+            "slides": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["layout", "title", "bullets", "notes", "want_image"],
+                    "properties": {
+                        "layout": { "type": "string", "enum": ["cover", "section", "bullets", "closing"] },
+                        "title": { "type": "string" },
+                        "bullets": { "type": "array", "items": { "type": "string" } },
+                        "notes": { "type": "string" },
+                        "want_image": { "type": "boolean" }
+                    }
+                }
+            }
+        }
+    })
+}
+
+/// Produce the deck CONTENT as schema-enforced JSON. Uses the orchestrator-role
+/// endpoint with `response_format: json_schema` (constrained decoding — the
+/// cross-model floor), degrading ONCE to `json_object` on a 400 (e.g.
+/// ollama.com/v1). Mirrors the inference-crate floor; converge later (ADR 0016).
+async fn generate_deck_content(
+    http: &reqwest::Client,
+    brief: &str,
+    brand: &BrandKit,
+    slides: usize,
+    language: &str,
+) -> Result<serde_json::Value, String> {
+    let (base_url, model, api_key) =
+        chat_openai_stream_config().ok_or_else(|| "no inference provider configured".to_string())?;
+    let endpoint = chat_endpoint(&base_url);
+    let lang = if language.trim().is_empty() { "the user's language" } else { language.trim() };
+    let org = if brand.organization.trim().is_empty() {
+        "the organization"
+    } else {
+        brand.organization.trim()
+    };
+    let system = format!(
+        "You are a senior presentation designer. Output ONLY JSON matching the schema. \
+Design a tight, on-brand deck of about {slides} slides in {lang}. Rules: the FIRST slide layout \
+must be \"cover\" and the LAST \"closing\"; use \"section\" only as an occasional divider; every \
+other slide is \"bullets\". Headline titles of at most 6 words. At most 4 bullets per slide, \
+numbers over adjectives, one idea per slide. Write speaker `notes` for the substantive slides. \
+Set want_image=true on the cover and on AT MOST two of the most visual slides (false on the rest). \
+Brand: organization «{org}», accent colour {accent}. Do NOT output colours, fonts, logos or file \
+names — textual content only.",
+        accent = brand.accent_color,
+    );
+    let messages = serde_json::json!([
+        { "role": "system", "content": system },
+        { "role": "user", "content": brief },
+    ]);
+    let attempts = [
+        serde_json::json!({ "type": "json_schema", "json_schema": { "name": "deck", "strict": true, "schema": deck_content_schema() } }),
+        serde_json::json!({ "type": "json_object" }),
+    ];
+    let mut content = String::new();
+    let mut last_err = "deck content request failed".to_string();
+    for (i, rf) in attempts.iter().enumerate() {
+        let body = serde_json::json!({
+            "model": model,
+            "temperature": 0.4,
+            "messages": messages.clone(),
+            "response_format": rf.clone(),
+        });
+        let mut req = http
+            .post(endpoint.as_str())
+            .timeout(std::time::Duration::from_secs(120))
+            .json(&body);
+        if let Some(k) = api_key.as_ref() {
+            req = req.bearer_auth(k);
+        }
+        match req.send().await {
+            Ok(resp) => {
+                let code = resp.status().as_u16();
+                if code == 400 && i == 0 {
+                    continue; // endpoint rejects strict json_schema → retry json_object
+                }
+                if !resp.status().is_success() {
+                    return Err(format!("deck content HTTP {code}"));
+                }
+                let json: serde_json::Value =
+                    resp.json().await.map_err(|e| format!("bad deck content response: {e}"))?;
+                content = json
+                    .get("choices")
+                    .and_then(|c| c.as_array())
+                    .and_then(|a| a.first())
+                    .and_then(|c| c.get("message"))
+                    .and_then(|m| m.get("content"))
+                    .and_then(|c| c.as_str())
+                    .unwrap_or_default()
+                    .trim()
+                    .to_string();
+                break;
+            }
+            Err(e) => last_err = format!("deck content provider unreachable: {e}"),
+        }
+    }
+    if content.is_empty() {
+        return Err(last_err);
+    }
+    let cleaned = content
+        .trim()
+        .trim_start_matches("```json")
+        .trim_start_matches("```")
+        .trim_end_matches("```")
+        .trim();
+    let deck: serde_json::Value =
+        serde_json::from_str(cleaned).map_err(|e| format!("deck content not valid JSON: {e}"))?;
+    if deck.get("slides").and_then(|s| s.as_array()).map(|a| a.is_empty()).unwrap_or(true) {
+        return Err("deck content produced no slides".to_string());
+    }
+    Ok(deck)
+}
+
 fn generate_image_tool_schema() -> serde_json::Value {
     serde_json::json!({
         "type": "function",
@@ -10068,6 +10223,7 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
         base_tools.push(create_artifact_tool_schema());
         base_tools.push(generate_image_tool_schema());
         base_tools.push(render_deck_tool_schema());
+        base_tools.push(make_deck_tool_schema());
         base_tools.push(get_brand_kit_tool_schema());
         base_tools.push(create_skill_tool_schema());
         base_tools.push(record_decision_tool_schema());
@@ -11981,6 +12137,184 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                         "Deck render did NOT produce a .pptx. Renderer output:\n{}",
                                         render_out.chars().take(800).collect::<String>()
                                     )
+                                }
+                            }
+                        }
+                    } else if name == "make_deck" {
+                        // ONE-call deck (max-scaffolding tier, ADR 0016): the model
+                        // passed only a brief; the ENGINE runs the entire pipeline
+                        // (brand → schema-enforced content → images → render). No
+                        // model-driven planning, file I/O or shell → nothing for a
+                        // weak model to get wrong beyond filling the brief slot.
+                        let parsed = serde_json::from_str::<serde_json::Value>(args_raw)
+                            .unwrap_or_else(|_| serde_json::json!({}));
+                        let brief = parsed
+                            .get("brief")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .trim()
+                            .to_string();
+                        let language = parsed
+                            .get("language")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        let slides = parsed
+                            .get("slides")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(6)
+                            .clamp(3, 12) as usize;
+                        if brief.is_empty() {
+                            "make_deck needs a 'brief' describing the presentation.".to_string()
+                        } else {
+                            let thread_slug = artifact_thread_slug(thread_id.as_deref());
+                            let _ = emit_stream_event(
+                                &tx,
+                                GenerateStreamEvent::Delta {
+                                    text: "‹‹ACT››🎬 Building the deck (brand · content · images · render)‹‹/ACT››".to_string(),
+                                },
+                            )
+                            .await;
+                            // 1) brand into the output dir + load colours for prompts.
+                            let slug_b = thread_slug.clone();
+                            let _ = tokio::task::spawn_blocking(move || materialize_brand_kit(&slug_b)).await;
+                            let brand = tokio::task::spawn_blocking(load_brand_kit)
+                                .await
+                                .unwrap_or_default();
+                            // 2) slide content — schema-enforced model call (the floor).
+                            match generate_deck_content(&state_owned.http, &brief, &brand, slides, &language).await {
+                                Err(e) => format!("Could not generate deck content: {e}"),
+                                Ok(mut deck) => {
+                                    // 3) images for want_image slides (cap 3, cover first).
+                                    let accent = brand.accent_color.clone();
+                                    let mut made = 0usize;
+                                    if let Some(arr) =
+                                        deck.get_mut("slides").and_then(|s| s.as_array_mut())
+                                    {
+                                        for (idx, slide) in arr.iter_mut().enumerate() {
+                                            if made >= 3 {
+                                                break;
+                                            }
+                                            if !slide.get("want_image").and_then(|v| v.as_bool()).unwrap_or(false) {
+                                                continue;
+                                            }
+                                            let title = slide
+                                                .get("title")
+                                                .and_then(|v| v.as_str())
+                                                .unwrap_or("")
+                                                .to_string();
+                                            let layout = slide
+                                                .get("layout")
+                                                .and_then(|v| v.as_str())
+                                                .unwrap_or("bullets")
+                                                .to_string();
+                                            let iname = if layout == "cover" {
+                                                "cover".to_string()
+                                            } else {
+                                                format!("s{idx}")
+                                            };
+                                            let prompt = format!(
+                                                "Editorial, modern, professional illustration for a slide titled \"{title}\". \
+Clean minimal composition, {accent} accents, abstract shapes, lots of negative space. \
+Absolutely NO text, NO words, NO letters, NO numbers, NO captions, NO logos."
+                                            );
+                                            let _ = emit_stream_event(
+                                                &tx,
+                                                GenerateStreamEvent::Delta {
+                                                    text: format!(
+                                                        "‹‹ACT››🎨 Image: {}‹‹/ACT››",
+                                                        title.chars().take(40).collect::<String>()
+                                                    ),
+                                                },
+                                            )
+                                            .await;
+                                            if let Ok(bytes) = generate_image_png(&state_owned.http, &prompt, "1280x720").await {
+                                                let fname = format!("{iname}.png");
+                                                let slug_w = thread_slug.clone();
+                                                let fname_w = fname.clone();
+                                                let w = tokio::task::spawn_blocking(move || {
+                                                    write_artifact_bytes(&slug_w, &fname_w, &bytes)
+                                                })
+                                                .await
+                                                .unwrap_or_else(|e| Err(format!("{e}")));
+                                                if w.is_ok() {
+                                                    slide["image"] = serde_json::json!(fname);
+                                                    if layout == "bullets" {
+                                                        slide["layout"] = serde_json::json!("image_right");
+                                                    }
+                                                    made += 1;
+                                                }
+                                            }
+                                        }
+                                    }
+                                    // 4) write deck.json.
+                                    let slide_count = deck
+                                        .get("slides")
+                                        .and_then(|s| s.as_array())
+                                        .map(|a| a.len())
+                                        .unwrap_or(0);
+                                    let deck_bytes = serde_json::to_vec_pretty(&deck).unwrap_or_default();
+                                    let slug_w = thread_slug.clone();
+                                    let write_res = tokio::task::spawn_blocking(move || {
+                                        write_artifact_bytes(&slug_w, "deck.json", &deck_bytes)
+                                    })
+                                    .await
+                                    .unwrap_or_else(|e| Err(format!("join error: {e}")));
+                                    if let Err(e) = write_res {
+                                        format!("Could not write deck.json: {e}")
+                                    } else {
+                                        // 5) render in the sandbox (no model shell).
+                                        let container_out = sandbox::container_output_dir(&thread_slug);
+                                        let cmd = format!(
+                                            "cd '{container_out}' && deck-render deck.json --prefix deck && \
+                                             chromium --headless --no-sandbox --disable-gpu \
+                                             --print-to-pdf=deck.pdf deck.html >/dev/null 2>&1; \
+                                             ls -la deck.pptx deck.html deck.pdf 2>&1"
+                                        );
+                                        sandbox_begin(cmd.clone());
+                                        let render = tokio::task::spawn_blocking(move || {
+                                            sandbox::run_command(&cmd, None)
+                                        })
+                                        .await
+                                        .unwrap_or_else(|e| Err(format!("join error: {e}")));
+                                        let render_out = match render {
+                                            Ok(o) => o,
+                                            Err(e) => e,
+                                        };
+                                        sandbox_end(render_out.clone());
+                                        // 6) emit an artifact marker per produced file.
+                                        let host_dir = sandbox::artifacts_dir().join(&thread_slug);
+                                        let mut produced: Vec<&str> = Vec::new();
+                                        for fname in ["deck.pptx", "deck.html", "deck.pdf"] {
+                                            if let Ok(meta) = std::fs::metadata(host_dir.join(fname)) {
+                                                if meta.len() > 0 {
+                                                    let marker = serde_json::json!({
+                                                        "name": fname, "thread": thread_slug,
+                                                        "size": meta.len(), "updated": false,
+                                                    });
+                                                    let m = format!("‹‹ARTIFACT››{marker}‹‹/ARTIFACT››");
+                                                    accumulated.push_str(&m);
+                                                    let _ = emit_stream_event(
+                                                        &tx,
+                                                        GenerateStreamEvent::Delta { text: m },
+                                                    )
+                                                    .await;
+                                                    produced.push(fname);
+                                                }
+                                            }
+                                        }
+                                        if produced.contains(&"deck.pptx") {
+                                            format!(
+                                                "Deck created: {} ({slide_count} slides, {made} images). The .pptx is editable; .html/.pdf are previews. The deck is DONE — give the user a one-line summary.",
+                                                produced.join(", ")
+                                            )
+                                        } else {
+                                            format!(
+                                                "Deck render did NOT produce a .pptx. Renderer output:\n{}",
+                                                render_out.chars().take(800).collect::<String>()
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
