@@ -402,22 +402,85 @@ ipcMain.handle("lfpa:reveal-path", async (_event, targetPath) => {
   return error === "";
 });
 
-// Capture the whole app window to a PNG and reveal it — so the user can SHOW the
-// actual UI (layout, pagination, a broken state) instead of describing it.
+// Capture the WHOLE page (the full scrollable conversation, not just the visible
+// viewport) to a PNG and reveal it — so the user can SHOW the actual UI/pagination.
+// The chat scrolls inside an inner container, so we temporarily expand the scrollers
+// (height:auto / overflow:visible) and use CDP captureBeyondViewport to grab the full
+// document height, then restore the styles. Falls back to a viewport capture.
 ipcMain.handle("lfpa:capture-page", async () => {
   const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? null;
   if (!win) return { ok: false, error: "no window" };
+  const wc = win.webContents;
+  const dir = path.join(os.homedir(), ".homun", "screenshots");
+  fs.mkdirSync(dir, { recursive: true });
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+  const file = path.join(dir, `homun-${stamp}.png`);
+
+  const expand = `(() => {
+    const start = document.querySelector('.thread-scroll') || document.scrollingElement || document.body;
+    const saved = [];
+    let el = start;
+    while (el) {
+      saved.push([el, el.getAttribute('style')]);
+      el.style.height = 'auto'; el.style.maxHeight = 'none'; el.style.minHeight = '0';
+      el.style.overflow = 'visible'; el.style.flex = 'none';
+      if (el === document.documentElement) break;
+      el = el.parentElement;
+    }
+    window.__capSaved = saved;
+    const de = document.documentElement;
+    return { w: Math.ceil(de.scrollWidth), h: Math.ceil(de.scrollHeight) };
+  })()`;
+  const restore = `(() => {
+    (window.__capSaved || []).forEach(([el, s]) => {
+      if (s === null || s === undefined) el.removeAttribute('style'); else el.setAttribute('style', s);
+    });
+    window.__capSaved = null;
+  })()`;
+
   try {
-    const image = await win.webContents.capturePage();
-    const dir = path.join(os.homedir(), ".homun", "screenshots");
-    fs.mkdirSync(dir, { recursive: true });
-    const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-    const file = path.join(dir, `homun-${stamp}.png`);
-    fs.writeFileSync(file, image.toPNG());
+    const size = await wc.executeJavaScript(expand, true);
+    let detach = false;
+    try {
+      wc.debugger.attach("1.3");
+      detach = true;
+    } catch {
+      /* already attached (e.g. devtools) — sendCommand still works */
+    }
+    // Cap the height to CDP's safe limit so a very long chat doesn't fail outright.
+    const height = Math.min(size?.h ?? 0, 30000) || 1000;
+    const width = size?.w ?? 1280;
+    const shot = await wc.debugger.sendCommand("Page.captureScreenshot", {
+      format: "png",
+      captureBeyondViewport: true,
+      clip: { x: 0, y: 0, width, height, scale: 1 },
+    });
+    if (detach) {
+      try {
+        wc.debugger.detach();
+      } catch {
+        /* ignore */
+      }
+    }
+    await wc.executeJavaScript(restore, true);
+    fs.writeFileSync(file, Buffer.from(shot.data, "base64"));
     shell.showItemInFolder(file);
     return { ok: true, path: file };
   } catch (error) {
-    return { ok: false, error: String(error?.message ?? error) };
+    // Restore + fall back to a plain viewport capture so the user still gets something.
+    try {
+      await wc.executeJavaScript(restore, true);
+    } catch {
+      /* ignore */
+    }
+    try {
+      const image = await wc.capturePage();
+      fs.writeFileSync(file, image.toPNG());
+      shell.showItemInFolder(file);
+      return { ok: true, path: file, partial: true };
+    } catch (fallbackError) {
+      return { ok: false, error: String(fallbackError?.message ?? fallbackError) };
+    }
   }
 });
 
