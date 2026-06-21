@@ -1463,6 +1463,7 @@ body.resizing-drawer {
   text-align: left;
   cursor: pointer;
 }
+.panel-menu-sep { height: 1px; background: var(--line); margin: 5px 6px; }
 .panel-menu-item svg {
   color: var(--muted);
   flex: none;

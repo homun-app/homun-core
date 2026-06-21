@@ -428,6 +428,8 @@
     "changeModelHint": "Cambia il modello per questa chat dal selettore nel composer ↓",
     "panel": "Pannello",
     "openPanel": "Apri pannello",
+    "exportChat": "Esporta chat (copia)",
+    "chatExported": "Copiata ✓",
     "activeThread": "Thread attivo",
     "responseLikelyInterrupted": "Risposta probabilmente interrotta. Puoi continuare la generazione.",
     "responseVariants": "Varianti risposta",

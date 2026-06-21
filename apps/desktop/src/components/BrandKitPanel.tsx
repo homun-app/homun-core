@@ -44,9 +44,41 @@ export function BrandKitPanel() {
 
   const onLogo = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    e.target.value = ""; // allow re-picking the same file
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = () => set("logo_data_url", String(reader.result ?? ""));
+    reader.onload = () => {
+      const src = String(reader.result ?? "");
+      // Rasterise the logo to PNG so it embeds EVERYWHERE — including the editable
+      // .pptx (PowerPoint can't embed SVG; an SVG logo would render in the HTML/PDF
+      // preview but silently drop from the .pptx). Any format in → PNG out.
+      const img = new Image();
+      img.onload = () => {
+        const maxW = 720;
+        let w = img.naturalWidth || 600;
+        let h = img.naturalHeight || 200;
+        if (w > maxW) {
+          h = Math.round((h * maxW) / w);
+          w = maxW;
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          set("logo_data_url", src);
+          return;
+        }
+        ctx.drawImage(img, 0, 0, w, h);
+        try {
+          set("logo_data_url", canvas.toDataURL("image/png"));
+        } catch {
+          set("logo_data_url", src); // tainted canvas → keep the original
+        }
+      };
+      img.onerror = () => set("logo_data_url", src);
+      img.src = src;
+    };
     reader.readAsDataURL(file);
   };
 
