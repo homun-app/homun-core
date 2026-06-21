@@ -4265,7 +4265,13 @@ fn parse_plan_marker(text: &str) -> Vec<serde_json::Value> {
     }
     let mut out = Vec::new();
     for line in text[s..e].lines() {
-        let t = line.trim_start();
+        // Locate the bullet anywhere on the line — the first step is glued to the
+        // opening ‹‹PLAN›› marker (no newline between them), so a `starts_with` check
+        // would silently drop step 1 (and break F4 resume).
+        let Some(bi) = line.find("- [") else {
+            continue;
+        };
+        let t = &line[bi..];
         let status = if t.starts_with("- [x]") {
             "done"
         } else if t.starts_with("- [-]") {
@@ -4323,6 +4329,51 @@ fn plan_next_open(plan: &[serde_json::Value]) -> Option<String> {
         .find(|s| matches!(plan_step_status(s), "todo" | "doing"))
         .map(|s| plan_step_title(s).to_string())
         .filter(|t| !t.is_empty())
+}
+
+/// Merge the model's sent steps into the CANONICAL plan (never replace). Match an
+/// existing step by title (case-insensitive): a canonical `done` is STICKY — re-sending
+/// it as todo/doing can't reopen it (this is what stops the regenerate loop); a NEW
+/// `done` claim is held as `doing` and its index returned (pending F2 verification); a
+/// new title is appended with a stable id. Returns the canonical indices newly claimed.
+fn merge_plan(plan: &mut Vec<serde_json::Value>, sent: &[serde_json::Value]) -> Vec<usize> {
+    let tkey = |t: &str| t.trim().to_lowercase();
+    let mut claims: Vec<usize> = Vec::new();
+    for s in sent {
+        let title = s.get("title").and_then(|v| v.as_str()).unwrap_or("").trim();
+        if title.is_empty() {
+            continue;
+        }
+        let new_status = s.get("status").and_then(|v| v.as_str()).unwrap_or("todo");
+        let detail = s.get("detail").and_then(|v| v.as_str()).unwrap_or("");
+        match plan.iter().position(|p| tkey(plan_step_title(p)) == tkey(title)) {
+            Some(i) => {
+                if plan_step_status(&plan[i]) == "done" {
+                    // sticky: ignore any attempt to re-open a done step
+                } else if new_status == "done" {
+                    plan[i]["status"] = serde_json::json!("doing");
+                    claims.push(i);
+                } else {
+                    plan[i]["status"] = serde_json::json!(new_status);
+                }
+                if !detail.is_empty() {
+                    plan[i]["detail"] = serde_json::json!(detail);
+                }
+            }
+            None => {
+                let id = format!("s{}", plan.len() + 1);
+                let status = if new_status == "done" { "doing" } else { new_status };
+                plan.push(serde_json::json!({
+                    "id": id, "title": title, "status": status, "detail": detail,
+                    "done_criterion": s.get("done_criterion").and_then(|v| v.as_str()).unwrap_or(""),
+                }));
+                if new_status == "done" {
+                    claims.push(plan.len() - 1);
+                }
+            }
+        }
+    }
+    claims
 }
 
 /// Formats the agent's plan steps into the exact Markdown the Workbench "Piano" panel
@@ -11951,48 +12002,10 @@ an uncertain date.",
                             .and_then(|s| s.as_array())
                             .cloned()
                             .unwrap_or_default();
-                        // MERGE the model's steps into the CANONICAL plan (never replace).
-                        // Match an existing step by title: a canonical `done` is sticky
-                        // (anti-reset — re-running the skill can't wipe progress); a NEW
-                        // `done` claim is held as `doing` until F2 verifies it (collected
-                        // in `claims`); a new title is appended with a stable id.
-                        let tkey = |t: &str| t.trim().to_lowercase();
-                        let mut claims: Vec<usize> = Vec::new();
-                        for s in &sent {
-                            let title = s.get("title").and_then(|v| v.as_str()).unwrap_or("").trim();
-                            if title.is_empty() {
-                                continue;
-                            }
-                            let new_status =
-                                s.get("status").and_then(|v| v.as_str()).unwrap_or("todo");
-                            let detail = s.get("detail").and_then(|v| v.as_str()).unwrap_or("");
-                            match plan.iter().position(|p| tkey(plan_step_title(p)) == tkey(title)) {
-                                Some(i) => {
-                                    if plan_step_status(&plan[i]) == "done" {
-                                        // sticky: ignore any attempt to re-open a done step
-                                    } else if new_status == "done" {
-                                        plan[i]["status"] = serde_json::json!("doing");
-                                        claims.push(i);
-                                    } else {
-                                        plan[i]["status"] = serde_json::json!(new_status);
-                                    }
-                                    if !detail.is_empty() {
-                                        plan[i]["detail"] = serde_json::json!(detail);
-                                    }
-                                }
-                                None => {
-                                    let id = format!("s{}", plan.len() + 1);
-                                    let status = if new_status == "done" { "doing" } else { new_status };
-                                    plan.push(serde_json::json!({
-                                        "id": id, "title": title, "status": status, "detail": detail,
-                                        "done_criterion": s.get("done_criterion").and_then(|v| v.as_str()).unwrap_or(""),
-                                    }));
-                                    if new_status == "done" {
-                                        claims.push(plan.len() - 1);
-                                    }
-                                }
-                            }
-                        }
+                        // MERGE the model's steps into the CANONICAL plan (never replace);
+                        // returns the canonical indices newly claimed done (held `doing`
+                        // until F2 verifies). See `merge_plan` for the anti-reset rule.
+                        let claims = merge_plan(&mut plan, &sent);
                         if plan.is_empty() {
                             "Empty plan: provide at least one step with a title.".to_string()
                         } else {
@@ -29687,6 +29700,12 @@ mod tests {
         hybrid_memory_score,
         memory_age_days,
         MemoryCandidate,
+        build_plan_markdown,
+        merge_plan,
+        parse_plan_marker,
+        plan_done_count,
+        plan_next_open,
+        plan_step_status,
         extract_source_urls,
         fonti_section,
         format_memory_block,
@@ -29962,6 +29981,73 @@ mod tests {
         assert!(format_memory_block(&[], &[], 1500).is_none());
         let some = vec!["Preferisce risposte concise".to_string()];
         assert!(format_memory_block(&some, &[], 0).is_none());
+    }
+
+    // ── Canonical plan (the loop fix) ───────────────────────────────────────
+    fn sent_step(title: &str, status: &str) -> serde_json::Value {
+        serde_json::json!({ "title": title, "status": status })
+    }
+
+    #[test]
+    fn merge_plan_creates_then_keeps_stable_ids() {
+        let mut plan = Vec::new();
+        let claims = merge_plan(
+            &mut plan,
+            &[sent_step("Generate images", "doing"), sent_step("Write deck.json", "todo")],
+        );
+        assert!(claims.is_empty());
+        assert_eq!(plan.len(), 2);
+        assert_eq!(plan[0]["id"], "s1");
+        assert_eq!(plan[1]["id"], "s2");
+        assert_eq!(plan_next_open(&plan).as_deref(), Some("Generate images"));
+    }
+
+    #[test]
+    fn merge_plan_done_is_sticky_no_reset_loop() {
+        // Step 1 reaches done…
+        let mut plan = vec![serde_json::json!({
+            "id": "s1", "title": "Generate images", "status": "done", "detail": ""
+        })];
+        // …then the model re-runs the skill and re-sends the WHOLE plan as todo.
+        let claims = merge_plan(
+            &mut plan,
+            &[sent_step("Generate images", "todo"), sent_step("Write deck.json", "todo")],
+        );
+        // The done step is NOT reopened (no regenerate loop); the new step is appended.
+        assert_eq!(plan_step_status(&plan[0]), "done");
+        assert!(claims.is_empty());
+        assert_eq!(plan.len(), 2);
+        // Next action is the genuinely-open step, not the finished one.
+        assert_eq!(plan_next_open(&plan).as_deref(), Some("Write deck.json"));
+        assert_eq!(plan_done_count(&plan), 1);
+    }
+
+    #[test]
+    fn merge_plan_new_done_claim_is_held_doing_for_verification() {
+        let mut plan = vec![serde_json::json!({
+            "id": "s1", "title": "Write deck.json", "status": "doing", "detail": ""
+        })];
+        let claims = merge_plan(&mut plan, &[sent_step("Write deck.json", "done")]);
+        // Claimed done → held `doing` (pending F2), and reported as a claim.
+        assert_eq!(claims, vec![0]);
+        assert_eq!(plan_step_status(&plan[0]), "doing");
+        assert_eq!(plan_done_count(&plan), 0);
+    }
+
+    #[test]
+    fn plan_marker_round_trips() {
+        let plan = vec![
+            serde_json::json!({"id":"s1","title":"Alpha","status":"done","detail":"d1"}),
+            serde_json::json!({"id":"s2","title":"Beta","status":"doing","detail":""}),
+        ];
+        let marker = format!("‹‹PLAN››{}‹‹/PLAN››", build_plan_markdown(&plan));
+        let parsed = parse_plan_marker(&format!("prose {marker} more"));
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(parsed[0]["id"], "s1");
+        assert_eq!(plan_step_status(&parsed[0]), "done");
+        assert_eq!(parsed[1]["title"], "Beta");
+        assert_eq!(plan_step_status(&parsed[1]), "doing");
+        assert_eq!(plan_done_count(&parsed), 1);
     }
 
     #[test]
