@@ -9085,6 +9085,46 @@ fn generate_image_tool_schema() -> serde_json::Value {
 
 /// Read the user's saved BRAND KIT (organization, colours, fonts, logo data URL) so a
 /// deliverable can be produced ON-BRAND.
+fn render_deck_tool_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": "render_deck",
+            "description": "Render a presentation from a STRUCTURED deck (content only) into an EDITABLE PowerPoint (.pptx) plus an HTML/PDF preview, saved as artifacts. This tool does ALL the file writing and rendering deterministically — do NOT use the shell, do NOT write deck.json yourself, do NOT search for files. The brand kit (colours, fonts, logo) is applied AUTOMATICALLY: do NOT include any theme or logo. Reference images you made with generate_image by their file name only (e.g. \"cover.png\").",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": { "type": "string", "description": "Deck title." },
+                    "subtitle": { "type": "string", "description": "Optional subtitle, e.g. 'ORG · date'." },
+                    "slides": {
+                        "type": "array",
+                        "description": "Slides in order; vary the layout. One idea per slide.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "layout": { "type": "string", "enum": ["cover","section","bullets","image_left","image_right","kpi","two_column","quote","closing"], "description": "Slide layout." },
+                                "title": { "type": "string" },
+                                "subtitle": { "type": "string" },
+                                "bullets": { "type": "array", "items": { "type": "string" } },
+                                "body": { "type": "string" },
+                                "image": { "type": "string", "description": "File name of a generated image (e.g. cover.png)." },
+                                "kpi": { "type": "string" },
+                                "kpi_label": { "type": "string" },
+                                "quote": { "type": "string" },
+                                "author": { "type": "string" },
+                                "columns": { "type": "array", "items": { "type": "object" }, "description": "two_column: [{title,bullets[]},{title,bullets[]}]." },
+                                "notes": { "type": "string", "description": "Speaker notes (PPTX)." }
+                            },
+                            "required": ["layout"]
+                        }
+                    }
+                },
+                "required": ["slides"]
+            }
+        }
+    })
+}
+
 fn get_brand_kit_tool_schema() -> serde_json::Value {
     serde_json::json!({
         "type": "function",
@@ -10027,6 +10067,7 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
     if !read_only {
         base_tools.push(create_artifact_tool_schema());
         base_tools.push(generate_image_tool_schema());
+        base_tools.push(render_deck_tool_schema());
         base_tools.push(get_brand_kit_tool_schema());
         base_tools.push(create_skill_tool_schema());
         base_tools.push(record_decision_tool_schema());
@@ -11852,6 +11893,97 @@ available tools (for data from the web use the browser: browser_navigate on the 
                             ));
                         }
                         serde_json::to_string(&kit).unwrap_or_else(|_| "{}".to_string())
+                    } else if name == "render_deck" {
+                        // Deterministic deck render: the model passes ONLY content; the
+                        // gateway writes deck.json + brand files and runs deck-render +
+                        // chromium in the sandbox. Removes ALL model filesystem juggling
+                        // (no shell, no find, no path/dir confusion → no regenerate loop).
+                        let parsed = serde_json::from_str::<serde_json::Value>(args_raw)
+                            .unwrap_or_else(|_| serde_json::json!({}));
+                        let deck = parsed.get("deck").cloned().unwrap_or(parsed);
+                        let has_slides = deck
+                            .get("slides")
+                            .and_then(|s| s.as_array())
+                            .map(|a| !a.is_empty())
+                            .unwrap_or(false);
+                        if !has_slides {
+                            "render_deck needs a non-empty 'slides' array (content only).".to_string()
+                        } else {
+                            let thread_slug = artifact_thread_slug(thread_id.as_deref());
+                            let _ = emit_stream_event(
+                                &tx,
+                                GenerateStreamEvent::Delta {
+                                    text: "‹‹ACT››🎬 Rendering the deck (PPTX + preview)‹‹/ACT››".to_string(),
+                                },
+                            )
+                            .await;
+                            // 1) brand.json + logo.png + deck.json into the output dir
+                            //    (host side = bind-mounted into the sandbox).
+                            let slug_b = thread_slug.clone();
+                            let _ = tokio::task::spawn_blocking(move || materialize_brand_kit(&slug_b)).await;
+                            let deck_bytes = serde_json::to_vec_pretty(&deck).unwrap_or_default();
+                            let slug_w = thread_slug.clone();
+                            let write_res = tokio::task::spawn_blocking(move || {
+                                write_artifact_bytes(&slug_w, "deck.json", &deck_bytes)
+                            })
+                            .await
+                            .unwrap_or_else(|e| Err(format!("join error: {e}")));
+                            if let Err(e) = write_res {
+                                format!("Could not write deck.json: {e}")
+                            } else {
+                                // 2) render in the sandbox (no model shell).
+                                let container_out = sandbox::container_output_dir(&thread_slug);
+                                let cmd = format!(
+                                    "cd '{container_out}' && deck-render deck.json --prefix deck && \
+                                     chromium --headless --no-sandbox --disable-gpu \
+                                     --print-to-pdf=deck.pdf deck.html >/dev/null 2>&1; \
+                                     ls -la deck.pptx deck.html deck.pdf 2>&1"
+                                );
+                                sandbox_begin(cmd.clone());
+                                let render = tokio::task::spawn_blocking(move || {
+                                    sandbox::run_command(&cmd, None)
+                                })
+                                .await
+                                .unwrap_or_else(|e| Err(format!("join error: {e}")));
+                                let render_out = match render {
+                                    Ok(o) => o,
+                                    Err(e) => e,
+                                };
+                                sandbox_end(render_out.clone());
+                                // 3) emit an artifact marker for each file produced.
+                                let host_dir = sandbox::artifacts_dir().join(&thread_slug);
+                                let mut produced: Vec<&str> = Vec::new();
+                                for fname in ["deck.pptx", "deck.html", "deck.pdf"] {
+                                    if let Ok(meta) = std::fs::metadata(host_dir.join(fname)) {
+                                        if meta.len() > 0 {
+                                            let marker = serde_json::json!({
+                                                "name": fname, "thread": thread_slug,
+                                                "size": meta.len(), "updated": false,
+                                            });
+                                            let m = format!("‹‹ARTIFACT››{marker}‹‹/ARTIFACT››");
+                                            accumulated.push_str(&m);
+                                            let _ = emit_stream_event(
+                                                &tx,
+                                                GenerateStreamEvent::Delta { text: m },
+                                            )
+                                            .await;
+                                            produced.push(fname);
+                                        }
+                                    }
+                                }
+                                if produced.contains(&"deck.pptx") {
+                                    format!(
+                                        "Deck rendered: {}. The .pptx is editable; .html/.pdf are previews. The deck is DONE — mark the plan complete and give the user a one-line summary.",
+                                        produced.join(", ")
+                                    )
+                                } else {
+                                    format!(
+                                        "Deck render did NOT produce a .pptx. Renderer output:\n{}",
+                                        render_out.chars().take(800).collect::<String>()
+                                    )
+                                }
+                            }
+                        }
                     } else if name == "save_artifact" {
                         // Deliver a generated artifact to an authorized destination
                         // (gateway performs the copy host-side, scoped to grants).

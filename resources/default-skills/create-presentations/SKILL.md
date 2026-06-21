@@ -24,8 +24,8 @@ questi dati". Slides / deck / presentation / pitch.
 
 0. **Make the plan FIRST (mandatory).** Before anything else, call `update_plan` with ALL
    the steps of this skill — set the first to `doing`, the rest `todo`:
-   `get brand kit` · `generate images (≤4)` · `write deck.json` · `render + verify` ·
-   `deliver`. Do NOT skip this. Then execute the steps ONE AT A TIME, calling `update_plan`
+   `get brand kit` · `generate images (≤4)` · `render deck (render_deck)` · `deliver`.
+   Do NOT skip this. Then execute the steps ONE AT A TIME, calling `update_plan`
    to mark each `done` as you finish it, and do not stop until every step is `done`. (The
    runtime keeps you going only while the plan has open steps — no plan means you'll stop
    after the first action, which is wrong.)
@@ -54,25 +54,19 @@ questi dati". Slides / deck / presentation / pitch.
    NOT re-run this skill, and do NOT redo the design pass — proceed straight to step 5.
    If image generation isn't available, omit images — the renderer still produces a strong
    on-brand design (rail, accent-underlined titles, big type). Never plain text.
-5. **Write `deck.json`** in `$OUTPUT_DIR` from your design pass (schema below). Include
-   `organization` (from the brand kit) for the slide footer. Add `notes` (speaker notes)
-   on substantive slides. Cover + closing slides are mandatory.
-6. **Render + VERIFY** with `run_in_sandbox`:
-   ```sh
-   cd "$OUTPUT_DIR" && deck-render deck.json --prefix deck \
-     && chromium --headless --no-sandbox --disable-gpu --print-to-pdf="$OUTPUT_DIR/deck.pdf" "$OUTPUT_DIR/deck.html" \
-     && ls -la deck.pptx deck.html deck.pdf
-   ```
-   Then CHECK the output: `deck.pptx` MUST exist and be non-trivial (tens of KB). If it's
-   missing or `deck-render` printed "python-pptx unavailable" / "command not found", the
-   editable PPTX did NOT render — say so honestly to the user (likely the contained
-   computer needs a restart to pick up the renderer) instead of claiming a .pptx exists.
-7. **Deliver.** `deck.pptx` (editable), `deck.html` (preview) and `deck.pdf` are
+5. **Render with the `render_deck` TOOL — do NOT use the shell.** Call `render_deck` with
+   your `title`, optional `subtitle`, and the `slides` array (content only — NO theme/logo;
+   reference your generated images by file name like `cover.png`). The tool writes the
+   files, applies the brand, and runs the renderer for you, returning the produced
+   artifacts. Do NOT write deck.json yourself, do NOT `run_in_sandbox`, do NOT `find`/`ls`
+   for files — `render_deck` handles ALL of it. (The images you made with `generate_image`
+   already exist in the output dir; never re-search for or regenerate them.)
+6. **Deliver.** `deck.pptx` (editable), `deck.html` (preview) and `deck.pdf` are
    artifacts. Tell the user the .pptx is editable in PowerPoint/Google Slides and the
    .html/.pdf are for quick viewing; offer `save_artifact` to a folder. Summarise the
    structure in 1–2 lines. Never paste the JSON or HTML into chat.
 
-## deck.json schema
+## render_deck arguments (content only — pass as the tool call)
 
 ```json
 {
