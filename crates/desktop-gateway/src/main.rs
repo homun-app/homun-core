@@ -4252,6 +4252,19 @@ fn plan_status_marker(status: &str) -> char {
     }
 }
 
+/// True if the latest ‹‹PLAN›› block still has a todo (`- [ ]`) or doing (`- [-]`) step —
+/// i.e. the task isn't finished. Used to keep a long task going when a model stops mid-plan.
+fn plan_has_open_steps(text: &str) -> bool {
+    let (Some(s), Some(e)) = (text.rfind("‹‹PLAN››"), text.rfind("‹‹/PLAN››")) else {
+        return false;
+    };
+    if e <= s {
+        return false;
+    }
+    let block = &text[s..e];
+    block.contains("- [ ]") || block.contains("- [-]")
+}
+
 /// Formats the agent's plan steps into the exact Markdown the Workbench "Piano" panel
 /// parses (`- [m] **Title** (\`id\`): detail`).
 fn build_plan_markdown(steps: &[serde_json::Value]) -> String {
@@ -8538,6 +8551,11 @@ fn chat_context_budget_chars() -> usize {
 /// (large refactor, multi-file scaffold) isn't truncated. Env: `HOMUN_CHAT_MAX_ROUNDS`.
 const MAX_TOOL_ROUNDS: usize = 40;
 
+/// Max consecutive "the model stopped but the plan isn't finished" nudges before we let
+/// the turn end. Resets whenever the model makes progress (calls a tool). A safety cap
+/// on top of the per-step round budget so a model that simply won't continue can't loop.
+const MAX_PLAN_NUDGES: u32 = 8;
+
 /// Absolute hard ceiling on rounds in ONE turn — pure anti-runaway backstop. With the
 /// per-step budget (F1) doing the real bounding (reset on each completed plan step), this
 /// only has to sit "far above any real task": a long plan-driven turn (many slides, a deep
@@ -10224,6 +10242,9 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
         // `messages`) so compaction never folds the system/user context into a summary.
         let mut step_messages_start: usize;
         let mut pending_compaction = false;
+        // Plan-completion enforcement: counts consecutive turns where the model STOPPED
+        // (no tool call) while its plan still has open steps. Reset on any tool call.
+        let mut plan_nudges: u32 = 0;
         // Source URLs visited via browse_web this request, for the "Fonti" footer.
         let mut browse_sources: Vec<String> = Vec::new();
         // Tools offered to the model this run: the base set, plus any tools the
@@ -10572,6 +10593,7 @@ check/update the key in Settings → Model & Runtime.".to_string()
                 });
 
             if let Some(calls) = tool_calls {
+                plan_nudges = 0; // the model is acting again → reset the stop-nudge cap
                 // No-progress guard: if this round's tool calls are IDENTICAL to the
                 // previous round's, the agent is stuck repeating itself → stop after a
                 // couple of repeats and let the forced synthesis answer.
@@ -12699,11 +12721,39 @@ Tell the user clearly; do NOT claim it's done."
                 continue;
             }
 
-            // No tool call → this is the final answer. Sanitize any leaked model
+            // No tool call → normally the final answer. Sanitize any leaked model
             // control tokens (e.g. minimax `]<]minimax[>[` / `<tool_call>` text) so
             // the user never sees raw template markup.
             let content =
                 sanitize_model_text(message.get("content").and_then(|c| c.as_str()).unwrap_or(""));
+            // Plan-completion enforcement: some models stop after one step (kimi/others),
+            // leaving a half-built deliverable. If the plan still has open steps and we
+            // have budget, nudge the model to keep going instead of ending the turn.
+            // Bounded by MAX_PLAN_NUDGES (reset on progress) AND the per-step round budget.
+            if !is_final_round
+                && plan_nudges < MAX_PLAN_NUDGES
+                && plan_has_open_steps(&accumulated)
+            {
+                plan_nudges += 1;
+                if !content.trim().is_empty() {
+                    messages.push(serde_json::json!({ "role": "assistant", "content": content }));
+                }
+                messages.push(serde_json::json!({
+                    "role": "user",
+                    "content": "Your plan still has unfinished steps. CONTINUE now: do the \
+                        next step with the right tool, call update_plan as you complete each \
+                        step, and do not stop until every step is done (or state a concrete \
+                        blocker). Do not ask for confirmation, do not summarise yet.",
+                }));
+                let _ = emit_stream_event(
+                    &tx,
+                    GenerateStreamEvent::Delta {
+                        text: "‹‹ACT››▶ Proseguo il piano‹‹/ACT››".to_string(),
+                    },
+                )
+                .await;
+                continue;
+            }
             // The content already streamed LIVE (raw) via collect_openai_stream; here we
             // only accumulate the SANITIZED version, which becomes the authoritative
             // `Done` payload that the frontend uses as the final text (replacing the
