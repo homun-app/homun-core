@@ -22,6 +22,13 @@ questi dati". Slides / deck / presentation / pitch.
 
 ## Process
 
+0. **Make the plan FIRST (mandatory).** Before anything else, call `update_plan` with ALL
+   the steps of this skill — set the first to `doing`, the rest `todo`:
+   `get brand kit` · `generate images (≤4)` · `write deck.json` · `render + verify` ·
+   `deliver`. Do NOT skip this. Then execute the steps ONE AT A TIME, calling `update_plan`
+   to mark each `done` as you finish it, and do not stop until every step is `done`. (The
+   runtime keeps you going only while the plan has open steps — no plan means you'll stop
+   after the first action, which is wrong.)
 1. **Read the brand.** Call `get_brand_kit` FIRST. The brand kit is NOT a file on disk —
    it comes ONLY from this tool. NEVER use `find`/`ls`/shell to search the filesystem for
    logo/brand/colour files; that just wastes the budget (there is nothing to find). Map
