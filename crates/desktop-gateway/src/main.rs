@@ -4252,32 +4252,77 @@ fn plan_status_marker(status: &str) -> char {
     }
 }
 
-/// The title of the first todo (`- [ ]`) or doing (`- [-]`) step in the latest ‹‹PLAN››
-/// block, or None if the plan is complete. Drives a DIRECTIVE continuation nudge (telling
-/// a wandering model the exact next action) instead of a vague "keep going".
-fn next_open_step(text: &str) -> Option<String> {
-    let (s, e) = (text.rfind("‹‹PLAN››")?, text.rfind("‹‹/PLAN››")?);
+/// Parse the latest ‹‹PLAN›› marker back into a canonical plan (id/title/status/detail
+/// objects). The marker is the cross-turn persistence: rebuilding from it on turn start
+/// RESUMES an interrupted task on the SAME authoritative state. A `done` step in the
+/// marker is genuinely done (the canonical marker only shows done once verified).
+fn parse_plan_marker(text: &str) -> Vec<serde_json::Value> {
+    let (Some(s), Some(e)) = (text.rfind("‹‹PLAN››"), text.rfind("‹‹/PLAN››")) else {
+        return Vec::new();
+    };
     if e <= s {
-        return None;
+        return Vec::new();
     }
+    let mut out = Vec::new();
     for line in text[s..e].lines() {
         let t = line.trim_start();
-        if t.starts_with("- [ ]") || t.starts_with("- [-]") {
-            // Title is the **bold** segment of `- [m] **Title** (`id`): detail`.
-            if let Some(a) = t.find("**") {
-                if let Some(b) = t[a + 2..].find("**") {
-                    return Some(t[a + 2..a + 2 + b].trim().to_string());
-                }
-            }
-            return Some(
-                t.trim_start_matches("- [ ]")
-                    .trim_start_matches("- [-]")
-                    .trim()
-                    .to_string(),
-            );
+        let status = if t.starts_with("- [x]") {
+            "done"
+        } else if t.starts_with("- [-]") {
+            "doing"
+        } else if t.starts_with("- [!]") {
+            "blocked"
+        } else if t.starts_with("- [ ]") {
+            "todo"
+        } else {
+            continue;
+        };
+        // `- [m] **Title** (`id`): detail`
+        let title = t
+            .find("**")
+            .and_then(|a| t[a + 2..].find("**").map(|b| t[a + 2..a + 2 + b].trim().to_string()))
+            .unwrap_or_default();
+        if title.is_empty() {
+            continue;
         }
+        let id = t
+            .find("(`")
+            .and_then(|a| t[a + 2..].find("`)").map(|b| t[a + 2..a + 2 + b].to_string()))
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| format!("s{}", out.len() + 1));
+        let detail = t
+            .rsplit("): ")
+            .next()
+            .map(|d| d.trim())
+            .filter(|d| !d.is_empty() && *d != "—")
+            .unwrap_or("")
+            .to_string();
+        out.push(serde_json::json!({
+            "id": id, "title": title, "status": status, "detail": detail
+        }));
     }
-    None
+    out
+}
+
+fn plan_step_status(step: &serde_json::Value) -> &str {
+    step.get("status").and_then(|s| s.as_str()).unwrap_or("todo")
+}
+fn plan_step_title(step: &serde_json::Value) -> &str {
+    step.get("title").and_then(|s| s.as_str()).unwrap_or("")
+}
+
+/// Count of canonically-DONE steps (the single source of truth for progress).
+fn plan_done_count(plan: &[serde_json::Value]) -> usize {
+    plan.iter().filter(|s| plan_step_status(s) == "done").count()
+}
+
+/// Title of the first step that isn't done and isn't blocked — the next action. None
+/// when the plan is complete (all done) or fully blocked. Drives the directive nudge.
+fn plan_next_open(plan: &[serde_json::Value]) -> Option<String> {
+    plan.iter()
+        .find(|s| matches!(plan_step_status(s), "todo" | "doing"))
+        .map(|s| plan_step_title(s).to_string())
+        .filter(|t| !t.is_empty())
 }
 
 /// Formats the agent's plan steps into the exact Markdown the Workbench "Piano" panel
@@ -4296,11 +4341,18 @@ fn build_plan_markdown(steps: &[serde_json::Value]) -> String {
             .map(str::trim)
             .filter(|d| !d.is_empty())
             .unwrap_or("—");
+        // Stable id: the canonical plan carries an `id`; fall back to positional.
+        let id = step
+            .get("id")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(String::from)
+            .unwrap_or_else(|| format!("s{}", index + 1));
         lines.push(format!(
-            "- [{}] **{}** (`s{}`): {}",
+            "- [{}] **{}** (`{}`): {}",
             plan_status_marker(status),
             title,
-            index + 1,
+            id,
             detail
         ));
     }
@@ -10197,28 +10249,16 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
         .rev()
         .find(|m| matches!(m.role, ChatContextRole::Assistant))
         .map(|m| m.text.clone());
-    // F4: resume an interrupted long task. If the prior conversation already has an
-    // in-progress PLAN (some steps done, not all), trust those completed steps so the
-    // turn CONTINUES from where it left off instead of restarting (paired with the
-    // resume nudge in the system prompt). Counts `- [x]` (done) vs `- [` (total) in the
-    // latest ‹‹PLAN›› block of the most recent assistant turn that carries one.
-    let resume_done_seed: usize = request
+    // F4: resume an interrupted long task on the CANONICAL plan. Rebuild the plan object
+    // from the latest ‹‹PLAN›› marker in the prior conversation, so the turn continues on
+    // the same authoritative state (done steps stay done) instead of restarting.
+    let resume_plan: Vec<serde_json::Value> = request
         .context
         .iter()
         .rev()
-        .find_map(|m| {
-            let t = &m.text;
-            let s = t.rfind("‹‹PLAN››")?;
-            let e = t.rfind("‹‹/PLAN››")?;
-            if e <= s {
-                return None;
-            }
-            let block = &t[s..e];
-            let total = block.matches("- [").count();
-            let done = block.matches("- [x]").count();
-            (total > 0 && done < total).then_some(done)
-        })
-        .unwrap_or(0);
+        .find(|m| m.text.contains("‹‹PLAN››"))
+        .map(|m| parse_plan_marker(&m.text))
+        .unwrap_or_default();
     tokio::spawn(async move {
         let mut accumulated = String::new();
         // Final answer text captured for post-turn memory extraction (M2).
@@ -10234,16 +10274,18 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
         let mut repeat_count: u32 = 0;
         let mut final_done = false;
         // Long-horizon execution (F1): the round budget is measured from the LAST
-        // verified progress, not from round 0. Every time the model completes a plan
-        // step (a new `done` in update_plan), we move the anchor to the current round
-        // and reset the no-progress guard — so a big plan-driven task (10 slides, a
-        // long web research) keeps going for as long as it KEEPS CLOSING STEPS, while
-        // a turn stuck on one step still trips the per-step budget. `verified_done_count`
-        // tracks the high-water mark of VERIFIED completed steps so we only reset on real
-        // forward progress (never on a plan that goes backwards).
+        // verified progress, not from round 0. Whenever a canonical plan step becomes
+        // `done` (verified), we move the anchor to the current round and reset the
+        // no-progress guard — so a big plan-driven task (10 slides, a long web research)
+        // keeps going for as long as it KEEPS CLOSING STEPS, while a turn stuck on one
+        // step still trips the per-step budget.
         let mut progress_anchor_round: usize = 0;
-        // F4: start from the prior plan's completed-step count (resume), else 0.
-        let mut verified_done_count: usize = resume_done_seed;
+        // CANONICAL PLAN: the single source of truth for the task's steps + their status,
+        // owned by the runtime (not rebuilt from the model's text each call). update_plan
+        // MERGES into this by id/title and can never reset a done step; F1 budget reset,
+        // F2 verification, F5 next-step and the ‹‹PLAN›› marker all read THIS. Seeded from
+        // the prior conversation (F4 resume). A step is `done` only after F2 verified it.
+        let mut plan: Vec<serde_json::Value> = resume_plan;
         // F2 verification gate: the running evidence (tool name → result snippet) for the
         // CURRENT plan step, fed to the verifier when the model marks the step done, then
         // cleared. A chat model can claim "done" without doing the work; the gate checks.
@@ -11904,67 +11946,85 @@ an uncertain date.",
                     } else if name == "update_plan" {
                         let args_val: serde_json::Value =
                             serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
-                        let steps = args_val
+                        let sent = args_val
                             .get("steps")
                             .and_then(|s| s.as_array())
                             .cloned()
                             .unwrap_or_default();
-                        let markdown = build_plan_markdown(&steps);
-                        if markdown.is_empty() {
+                        // MERGE the model's steps into the CANONICAL plan (never replace).
+                        // Match an existing step by title: a canonical `done` is sticky
+                        // (anti-reset — re-running the skill can't wipe progress); a NEW
+                        // `done` claim is held as `doing` until F2 verifies it (collected
+                        // in `claims`); a new title is appended with a stable id.
+                        let tkey = |t: &str| t.trim().to_lowercase();
+                        let mut claims: Vec<usize> = Vec::new();
+                        for s in &sent {
+                            let title = s.get("title").and_then(|v| v.as_str()).unwrap_or("").trim();
+                            if title.is_empty() {
+                                continue;
+                            }
+                            let new_status =
+                                s.get("status").and_then(|v| v.as_str()).unwrap_or("todo");
+                            let detail = s.get("detail").and_then(|v| v.as_str()).unwrap_or("");
+                            match plan.iter().position(|p| tkey(plan_step_title(p)) == tkey(title)) {
+                                Some(i) => {
+                                    if plan_step_status(&plan[i]) == "done" {
+                                        // sticky: ignore any attempt to re-open a done step
+                                    } else if new_status == "done" {
+                                        plan[i]["status"] = serde_json::json!("doing");
+                                        claims.push(i);
+                                    } else {
+                                        plan[i]["status"] = serde_json::json!(new_status);
+                                    }
+                                    if !detail.is_empty() {
+                                        plan[i]["detail"] = serde_json::json!(detail);
+                                    }
+                                }
+                                None => {
+                                    let id = format!("s{}", plan.len() + 1);
+                                    let status = if new_status == "done" { "doing" } else { new_status };
+                                    plan.push(serde_json::json!({
+                                        "id": id, "title": title, "status": status, "detail": detail,
+                                        "done_criterion": s.get("done_criterion").and_then(|v| v.as_str()).unwrap_or(""),
+                                    }));
+                                    if new_status == "done" {
+                                        claims.push(plan.len() - 1);
+                                    }
+                                }
+                            }
+                        }
+                        if plan.is_empty() {
                             "Empty plan: provide at least one step with a title.".to_string()
                         } else {
-                            // Persistent marker (pushed to accumulated → survives the
-                            // authoritative Done): the UI parses ‹‹PLAN›› and renders it
-                            // in the "Piano" panel.
-                            let plan_mark = format!("‹‹PLAN››{markdown}‹‹/PLAN››");
-                            accumulated.push_str(&plan_mark);
-                            let _ = emit_stream_event(
-                                &tx,
-                                GenerateStreamEvent::Delta { text: plan_mark },
-                            )
-                            .await;
-                            let claimed_done = steps
-                                .iter()
-                                .filter(|s| s.get("status").and_then(|v| v.as_str()) == Some("done"))
-                                .count();
-                            // F2 gate: each step the model NEWLY claims complete must pass
-                            // an independent verification before it counts as progress (and
-                            // refills the per-step budget, F1). Steps verify in order
-                            // (the model works one at a time), using the evidence gathered
-                            // since the last verified step. A rejected step does NOT advance
-                            // the budget — the model is told to keep working on it.
+                            // F2 gate: verify each newly-claimed-done step before it counts
+                            // (using the evidence gathered since the last completed step).
                             let verify = step_verification_enabled();
                             let mut rejection: Option<String> = None;
-                            while verified_done_count < claimed_done {
-                                let idx = verified_done_count;
-                                let Some(step) = steps.get(idx) else { break };
-                                if step.get("status").and_then(|v| v.as_str()) != Some("done") {
-                                    break;
-                                }
-                                let title = step.get("title").and_then(|v| v.as_str()).unwrap_or("");
-                                let criterion = step
+                            for i in claims {
+                                let title = plan_step_title(&plan[i]).to_string();
+                                let criterion = plan[i]
                                     .get("done_criterion")
                                     .and_then(|v| v.as_str())
-                                    .unwrap_or("");
+                                    .unwrap_or("")
+                                    .to_string();
                                 let (ok, reason) = if verify {
                                     let evidence = if step_evidence.is_empty() {
                                         "(no tool activity recorded for this step)".to_string()
                                     } else {
                                         step_evidence.join("\n")
                                     };
-                                    verify_step_complete(&state_owned.http, title, criterion, &evidence)
+                                    verify_step_complete(&state_owned.http, &title, &criterion, &evidence)
                                         .await
                                 } else {
                                     (true, String::new())
                                 };
                                 if ok {
-                                    verified_done_count += 1;
-                                    progress_anchor_round = round;
+                                    plan[i]["status"] = serde_json::json!("done");
+                                    progress_anchor_round = round; // F1: real progress
                                     step_evidence.clear();
                                     last_round_sig.clear();
                                     repeat_count = 0;
-                                    // F3: collapse this completed step's messages next round.
-                                    pending_compaction = true;
+                                    pending_compaction = true; // F3
                                     if verify {
                                         let _ = emit_stream_event(
                                             &tx,
@@ -11979,21 +12039,24 @@ an uncertain date.",
                                     }
                                 } else {
                                     rejection = Some(format!(
-                                        "Step «{title}» is NOT verified complete: {}. Keep working on it — re-mark it done ONLY once its result actually exists (file written, search returned usable results, render succeeded …).",
+                                        "Step «{title}» is NOT verified complete: {}. Keep working on it — re-mark it done ONLY once its result actually exists.",
                                         if reason.is_empty() { "the evidence does not show it was finished" } else { &reason }
                                     ));
                                     break;
                                 }
                             }
+                            // Marker rendered from the CANONICAL plan — the single source of
+                            // truth (verified state), not the model's raw claim. This is what
+                            // the UI shows and what the next turn resumes from.
+                            let plan_mark =
+                                format!("‹‹PLAN››{}‹‹/PLAN››", build_plan_markdown(&plan));
+                            accumulated.push_str(&plan_mark);
+                            let _ = emit_stream_event(&tx, GenerateStreamEvent::Delta { text: plan_mark })
+                                .await;
+                            let done = plan_done_count(&plan);
                             match rejection {
-                                Some(msg) => format!(
-                                    "⚠️ {msg} (verified {verified_done_count}/{} steps)",
-                                    steps.len()
-                                ),
-                                None => format!(
-                                    "Plan updated: {verified_done_count}/{} steps verified complete. Shown in the Plan panel.",
-                                    steps.len()
-                                ),
+                                Some(msg) => format!("⚠️ {msg} (done {done}/{})", plan.len()),
+                                None => format!("Plan updated: {done}/{} steps done.", plan.len()),
                             }
                         }
                     } else if name == "create_automation" {
@@ -12746,7 +12809,7 @@ Tell the user clearly; do NOT claim it's done."
             // have budget, nudge the model to keep going instead of ending the turn.
             // Bounded by MAX_PLAN_NUDGES (reset on progress) AND the per-step round budget.
             if !is_final_round && plan_nudges < MAX_PLAN_NUDGES {
-                if let Some(step) = next_open_step(&accumulated) {
+                if let Some(step) = plan_next_open(&plan) {
                     plan_nudges += 1;
                     if !content.trim().is_empty() {
                         messages
