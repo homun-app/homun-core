@@ -3,6 +3,8 @@ interface LocalFirstDesktopConfig {
   gatewayToken?: string;
   pickFolder?: () => Promise<string | null>;
   revealPath?: (path: string) => Promise<boolean>;
+  /** Captures the whole app window to a PNG and reveals it. */
+  capturePage?: () => Promise<{ ok: boolean; path?: string; error?: string }>;
   /** Resolves a File to its absolute on-disk path (Electron webUtils). Sync. */
   getPathForFile?: (file: File) => string;
   /** Version of this running build (git tag at CI time; dev package.json in dev). */
@@ -148,6 +150,19 @@ export async function getAppVersion(): Promise<string | null> {
   if (!get) return null;
   try {
     return (await get()) || null;
+  } catch {
+    return null;
+  }
+}
+
+/** Captures the whole app window to a PNG and reveals it (desktop only). Returns the
+ *  file path, or null outside Electron / on failure. */
+export async function captureAppScreenshot(): Promise<string | null> {
+  const capture = desktopConfig?.capturePage;
+  if (!capture) return null;
+  try {
+    const result = await capture();
+    return result.ok ? result.path ?? null : null;
   } catch {
     return null;
   }

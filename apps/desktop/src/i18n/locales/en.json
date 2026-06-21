@@ -430,6 +430,7 @@
     "openPanel": "Open panel",
     "exportChat": "Export chat (copy)",
     "chatExported": "Copied ✓",
+    "captureScreenshot": "Capture screenshot",
     "activeThread": "Active thread",
     "responseLikelyInterrupted": "Response likely interrupted. You can continue the generation.",
     "responseVariants": "Response variants",

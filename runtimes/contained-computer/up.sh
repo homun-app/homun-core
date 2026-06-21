@@ -28,17 +28,28 @@ fi
 # and rebuild it on update. The gateway passes HOMUN_CC_HASH (its own computed value);
 # a manual run computes the SAME hash (sha256 of the two files, first 16 hex) so both
 # agree and we never recycle needlessly.
+# Hash ALL files baked into the image (everything COPY'd), not just the Dockerfile —
+# otherwise a renderer change (deck_render.py) wouldn't trigger a rebuild and the
+# container would keep an old copy. MUST stay in sync with the gateway's
+# contained_computer_def_hash().
+HASH_FILES="Dockerfile entrypoint.sh deck_render.py whisper_server.py novnc-view.html"
 if [ -z "${HOMUN_CC_HASH:-}" ]; then
+  HASH_PATHS=""
+  for f in ${HASH_FILES}; do HASH_PATHS="${HASH_PATHS} ${HERE}/${f}"; done
   if command -v shasum >/dev/null 2>&1; then
-    HOMUN_CC_HASH="$(cat "${HERE}/Dockerfile" "${HERE}/entrypoint.sh" 2>/dev/null | shasum -a 256 | cut -c1-16)"
+    HOMUN_CC_HASH="$(cat ${HASH_PATHS} 2>/dev/null | shasum -a 256 | cut -c1-16)"
   elif command -v sha256sum >/dev/null 2>&1; then
-    HOMUN_CC_HASH="$(cat "${HERE}/Dockerfile" "${HERE}/entrypoint.sh" 2>/dev/null | sha256sum | cut -c1-16)"
+    HOMUN_CC_HASH="$(cat ${HASH_PATHS} 2>/dev/null | sha256sum | cut -c1-16)"
   else
     HOMUN_CC_HASH="unknown"
   fi
 fi
-echo "==> building ${IMAGE} (def hash ${HOMUN_CC_HASH})"
-docker build --label "homun.cc_hash=${HOMUN_CC_HASH}" -t "${IMAGE}" "${HERE}"
+# Docker's layer cache is content-correct (a changed COPY'd file rebuilds only its
+# layer), so rebuilds stay fast. Set HOMUN_CC_NO_CACHE=1 to force a clean rebuild.
+NO_CACHE=""
+[ -n "${HOMUN_CC_NO_CACHE:-}" ] && NO_CACHE="--no-cache"
+echo "==> building ${IMAGE} (def hash ${HOMUN_CC_HASH})${NO_CACHE:+ [no-cache]}"
+docker build ${NO_CACHE} --label "homun.cc_hash=${HOMUN_CC_HASH}" -t "${IMAGE}" "${HERE}"
 
 echo "==> (re)starting ${NAME}"
 docker rm -f "${NAME}" >/dev/null 2>&1 || true

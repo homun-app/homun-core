@@ -99,7 +99,7 @@ import {
   createUnavailableComputerSession,
   mapCoreComputerSession,
 } from "../lib/localComputerViewModel";
-import { fileLocalPathFromBridge, IS_DESKTOP } from "../lib/gatewayConfig";
+import { captureAppScreenshot, fileLocalPathFromBridge, IS_DESKTOP } from "../lib/gatewayConfig";
 import { copyText } from "../lib/clipboard";
 import { connectComposioToolkit } from "../lib/composioConnect";
 import { MarkdownEditor } from "./MarkdownEditor";
@@ -886,6 +886,13 @@ export function ChatView({
     }
   }
 
+  // Capture the whole app window to a PNG and reveal it in Finder — the user can then
+  // share the image to show the actual UI / pagination / a broken state.
+  async function captureScreenshot() {
+    setPanelMenuOpen(false);
+    await captureAppScreenshot();
+  }
+
   // Refresh the persisted branch map for this thread (which nodes have siblings).
   const refreshBranches = useCallback(async () => {
     try {
@@ -1648,6 +1655,17 @@ export function ChatView({
                 );
               })}
               <div className="panel-menu-sep" role="separator" />
+              {IS_DESKTOP && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="panel-menu-item"
+                  onClick={() => void captureScreenshot()}
+                >
+                  <FileImage size={16} />
+                  <span>{t("chat.captureScreenshot")}</span>
+                </button>
+              )}
               <button
                 type="button"
                 role="menuitem"
