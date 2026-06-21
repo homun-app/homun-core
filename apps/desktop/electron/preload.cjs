@@ -7,6 +7,8 @@ contextBridge.exposeInMainWorld("localFirstDesktop", {
   pickFolder: () => ipcRenderer.invoke("lfpa:pick-folder"),
   // Reveals a folder/file in the OS file manager (artifacts "Open folder").
   revealPath: (path) => ipcRenderer.invoke("lfpa:reveal-path", path),
+  // Captures the whole app window to a PNG file and reveals it. Returns {ok,path}.
+  capturePage: () => ipcRenderer.invoke("lfpa:capture-page"),
   // Resolves a dropped/picked File to its absolute on-disk path. File.path was
   // removed in Electron 32; webUtils.getPathForFile is the supported replacement
   // (synchronous; the File survives the contextBridge boundary). Returns "" for

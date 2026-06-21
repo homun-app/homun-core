@@ -402,6 +402,25 @@ ipcMain.handle("lfpa:reveal-path", async (_event, targetPath) => {
   return error === "";
 });
 
+// Capture the whole app window to a PNG and reveal it — so the user can SHOW the
+// actual UI (layout, pagination, a broken state) instead of describing it.
+ipcMain.handle("lfpa:capture-page", async () => {
+  const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? null;
+  if (!win) return { ok: false, error: "no window" };
+  try {
+    const image = await win.webContents.capturePage();
+    const dir = path.join(os.homedir(), ".homun", "screenshots");
+    fs.mkdirSync(dir, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+    const file = path.join(dir, `homun-${stamp}.png`);
+    fs.writeFileSync(file, image.toPNG());
+    shell.showItemInFolder(file);
+    return { ok: true, path: file };
+  } catch (error) {
+    return { ok: false, error: String(error?.message ?? error) };
+  }
+});
+
 // Bring the window to the front when the user clicks a system notification.
 ipcMain.handle("lfpa:focus-window", () => {
   const win = BrowserWindow.getAllWindows()[0] ?? null;
