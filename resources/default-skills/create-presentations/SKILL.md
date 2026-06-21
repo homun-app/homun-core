@@ -37,12 +37,14 @@ questi dati". Slides / deck / presentation / pitch.
    and a one-line **visual concept** for slides that carry an image. Aim for rhythm:
    cover → varied content (alternate text-heavy and image/KPI slides) → closing. This
    plan is the difference between a real deck and a wall of bullets.
-4. **Generate the visuals.** For the cover and 2–4 key slides, call `generate_image`
-   with on-brand prompts (your visual concept + "clean, modern, [accent colour] accents,
-   professional, minimal, no text"). Give each a `name` (e.g. `cover`, `s3`); the PNGs
-   land in `$OUTPUT_DIR`. Reference them by filename in the slide's `"image"`.
-   If image generation isn't available, omit images — the renderer still produces a
-   strong on-brand design (rail, accent-underlined titles, big type). Never plain text.
+4. **Generate the visuals — ONCE, then move on.** Generate **AT MOST 4 images total**
+   (the cover + up to 3 key slides), in a SINGLE pass, with on-brand prompts (your visual
+   concept + "clean, modern, [accent colour] accents, professional, minimal, no text").
+   Give each a `name` (e.g. `cover`, `s3`); the PNGs land in `$OUTPUT_DIR`; reference them
+   by filename in the slide's `"image"`. Once the images exist, do NOT generate more, do
+   NOT re-run this skill, and do NOT redo the design pass — proceed straight to step 5.
+   If image generation isn't available, omit images — the renderer still produces a strong
+   on-brand design (rail, accent-underlined titles, big type). Never plain text.
 5. **Write `deck.json`** in `$OUTPUT_DIR` from your design pass (schema below). Include
    `organization` (from the brand kit) for the slide footer. Add `notes` (speaker notes)
    on substantive slides. Cover + closing slides are mandatory.

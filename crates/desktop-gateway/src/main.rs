@@ -4252,17 +4252,32 @@ fn plan_status_marker(status: &str) -> char {
     }
 }
 
-/// True if the latest ‹‹PLAN›› block still has a todo (`- [ ]`) or doing (`- [-]`) step —
-/// i.e. the task isn't finished. Used to keep a long task going when a model stops mid-plan.
-fn plan_has_open_steps(text: &str) -> bool {
-    let (Some(s), Some(e)) = (text.rfind("‹‹PLAN››"), text.rfind("‹‹/PLAN››")) else {
-        return false;
-    };
+/// The title of the first todo (`- [ ]`) or doing (`- [-]`) step in the latest ‹‹PLAN››
+/// block, or None if the plan is complete. Drives a DIRECTIVE continuation nudge (telling
+/// a wandering model the exact next action) instead of a vague "keep going".
+fn next_open_step(text: &str) -> Option<String> {
+    let (s, e) = (text.rfind("‹‹PLAN››")?, text.rfind("‹‹/PLAN››")?);
     if e <= s {
-        return false;
+        return None;
     }
-    let block = &text[s..e];
-    block.contains("- [ ]") || block.contains("- [-]")
+    for line in text[s..e].lines() {
+        let t = line.trim_start();
+        if t.starts_with("- [ ]") || t.starts_with("- [-]") {
+            // Title is the **bold** segment of `- [m] **Title** (`id`): detail`.
+            if let Some(a) = t.find("**") {
+                if let Some(b) = t[a + 2..].find("**") {
+                    return Some(t[a + 2..a + 2 + b].trim().to_string());
+                }
+            }
+            return Some(
+                t.trim_start_matches("- [ ]")
+                    .trim_start_matches("- [-]")
+                    .trim()
+                    .to_string(),
+            );
+        }
+    }
+    None
 }
 
 /// Formats the agent's plan steps into the exact Markdown the Workbench "Piano" panel
@@ -12730,29 +12745,38 @@ Tell the user clearly; do NOT claim it's done."
             // leaving a half-built deliverable. If the plan still has open steps and we
             // have budget, nudge the model to keep going instead of ending the turn.
             // Bounded by MAX_PLAN_NUDGES (reset on progress) AND the per-step round budget.
-            if !is_final_round
-                && plan_nudges < MAX_PLAN_NUDGES
-                && plan_has_open_steps(&accumulated)
-            {
-                plan_nudges += 1;
-                if !content.trim().is_empty() {
-                    messages.push(serde_json::json!({ "role": "assistant", "content": content }));
+            if !is_final_round && plan_nudges < MAX_PLAN_NUDGES {
+                if let Some(step) = next_open_step(&accumulated) {
+                    plan_nudges += 1;
+                    if !content.trim().is_empty() {
+                        messages
+                            .push(serde_json::json!({ "role": "assistant", "content": content }));
+                    }
+                    // DIRECTIVE nudge: name the exact next step and forbid redoing work —
+                    // weak-agentic models otherwise re-run the skill / regenerate images
+                    // on a vague "continue" instead of advancing to the next step.
+                    messages.push(serde_json::json!({
+                        "role": "user",
+                        "content": format!(
+                            "Do NOT stop and do NOT re-run the skill. Your next unfinished plan \
+                             step is: «{step}». Do ONLY that step now, reusing the files you \
+                             already created (do not regenerate existing images). Mark it done \
+                             with update_plan, then continue to the next step until the plan is \
+                             complete. No confirmation, no summary yet."
+                        ),
+                    }));
+                    let _ = emit_stream_event(
+                        &tx,
+                        GenerateStreamEvent::Delta {
+                            text: format!(
+                                "‹‹ACT››▶ Proseguo: {}‹‹/ACT››",
+                                step.chars().take(50).collect::<String>()
+                            ),
+                        },
+                    )
+                    .await;
+                    continue;
                 }
-                messages.push(serde_json::json!({
-                    "role": "user",
-                    "content": "Your plan still has unfinished steps. CONTINUE now: do the \
-                        next step with the right tool, call update_plan as you complete each \
-                        step, and do not stop until every step is done (or state a concrete \
-                        blocker). Do not ask for confirmation, do not summarise yet.",
-                }));
-                let _ = emit_stream_event(
-                    &tx,
-                    GenerateStreamEvent::Delta {
-                        text: "‹‹ACT››▶ Proseguo il piano‹‹/ACT››".to_string(),
-                    },
-                )
-                .await;
-                continue;
             }
             // The content already streamed LIVE (raw) via collect_openai_stream; here we
             // only accumulate the SANITIZED version, which becomes the authoritative
