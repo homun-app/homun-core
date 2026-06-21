@@ -9121,6 +9121,29 @@ fn deck_content_schema() -> serde_json::Value {
     })
 }
 
+/// Pull the deck object out of a model response that may be wrapped or noisy.
+/// Cloud-routed models (e.g. Ollama Cloud) ACCEPT `response_format: json_schema`
+/// but do NOT actually enforce it — they wrap the deck under a key
+/// (`{"presentation": {...}}`) or add extra fields. So we tolerantly find the
+/// object carrying a non-empty `slides` array, at the top level or one level
+/// down. This tolerant parsing — not enforcement — is the TRUE cross-model floor.
+fn extract_deck_object(v: &serde_json::Value) -> Option<serde_json::Value> {
+    let has_slides = |o: &serde_json::Value| {
+        o.get("slides").and_then(|s| s.as_array()).map(|a| !a.is_empty()).unwrap_or(false)
+    };
+    if has_slides(v) {
+        return Some(v.clone());
+    }
+    if let Some(obj) = v.as_object() {
+        for val in obj.values() {
+            if has_slides(val) {
+                return Some(val.clone());
+            }
+        }
+    }
+    None
+}
+
 /// Produce the deck CONTENT as schema-enforced JSON. Uses the orchestrator-role
 /// endpoint with `response_format: json_schema` (constrained decoding — the
 /// cross-model floor), degrading ONCE to `json_object` on a 400 (e.g.
@@ -9149,7 +9172,9 @@ other slide is \"bullets\". Headline titles of at most 6 words. At most 4 bullet
 numbers over adjectives, one idea per slide. Write speaker `notes` for the substantive slides. \
 Set want_image=true on the cover and on AT MOST two of the most visual slides (false on the rest). \
 Brand: organization «{org}», accent colour {accent}. Do NOT output colours, fonts, logos or file \
-names — textual content only.",
+names — textual content only. Return a JSON object with EXACTLY these top-level keys: \"title\" \
+(string), \"subtitle\" (string) and \"slides\" (array of slide objects). Do NOT wrap them under \
+any other key such as \"presentation\" or \"deck\", and add no extra top-level keys.",
         accent = brand.accent_color,
     );
     let messages = serde_json::json!([
@@ -9211,12 +9236,31 @@ names — textual content only.",
         .trim_start_matches("```")
         .trim_end_matches("```")
         .trim();
-    let deck: serde_json::Value =
+    let raw: serde_json::Value =
         serde_json::from_str(cleaned).map_err(|e| format!("deck content not valid JSON: {e}"))?;
-    if deck.get("slides").and_then(|s| s.as_array()).map(|a| a.is_empty()).unwrap_or(true) {
-        return Err("deck content produced no slides".to_string());
-    }
-    Ok(deck)
+    let deck = extract_deck_object(&raw)
+        .ok_or_else(|| "deck content produced no slides".to_string())?;
+    // Rebuild a CLEAN deck with only the keys the renderer needs, deriving a
+    // title when the model omitted one (the cover uses it). Strips any stray
+    // wrapper/extra keys the model added (brand/accent_color/…).
+    let slides = deck.get("slides").cloned().unwrap_or_else(|| serde_json::json!([]));
+    let title = deck
+        .get("title")
+        .and_then(|t| t.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(String::from)
+        .or_else(|| {
+            deck.get("slides")
+                .and_then(|s| s.as_array())
+                .and_then(|a| a.first())
+                .and_then(|s0| s0.get("title"))
+                .and_then(|t| t.as_str())
+                .map(String::from)
+        })
+        .unwrap_or_else(|| brief.chars().take(60).collect::<String>());
+    let subtitle = deck.get("subtitle").and_then(|t| t.as_str()).unwrap_or("").to_string();
+    Ok(serde_json::json!({ "title": title, "subtitle": subtitle, "slides": slides }))
 }
 
 fn generate_image_tool_schema() -> serde_json::Value {
