@@ -288,7 +288,20 @@ def render_pptx(deck, base_dir, out_path):
                 return ""
         return resolve_path(spec, base_dir)
 
-    logo_path = img_path(theme.get("logo", ""))
+    logo_spec = theme.get("logo", "")
+    logo_is_svg = isinstance(logo_spec, str) and (
+        "image/svg" in logo_spec or logo_spec.lower().endswith(".svg")
+    )
+    logo_path = "" if logo_is_svg else img_path(logo_spec)
+    # Observability: report exactly what got embedded so a missing logo/image is
+    # never a silent mystery (the agent + the user see it in the run log).
+    stats = {"logo": False, "img_ok": 0, "img_fail": 0, "notes": []}
+    if logo_spec and logo_is_svg:
+        stats["notes"].append(
+            "logo is SVG — PowerPoint can't embed SVG; provide a PNG/JPG logo for the .pptx"
+        )
+    elif logo_spec and not logo_path:
+        stats["notes"].append("logo could not be resolved (bad path or data URL)")
 
     prs = Presentation()
     prs.slide_width = Inches(13.333)
@@ -322,8 +335,24 @@ def render_pptx(deck, base_dir, out_path):
                 slide.shapes.add_picture(
                     logo_path, SW - Inches(1.9), Inches(0.4), height=Inches(0.5)
                 )
-            except Exception:
-                pass
+                stats["logo"] = True
+            except Exception as exc:
+                stats["notes"].append(f"logo add_picture failed: {exc}")
+
+    def add_image(slide, spec, left, top, **kw):
+        """add_picture with tracking; resolves a path or data URL via img_path."""
+        path = img_path(spec)
+        if not path:
+            if spec:
+                stats["img_fail"] += 1
+                stats["notes"].append(f"image not resolved: {spec[:60]}")
+            return
+        try:
+            slide.shapes.add_picture(path, left, top, **kw)
+            stats["img_ok"] += 1
+        except Exception as exc:
+            stats["img_fail"] += 1
+            stats["notes"].append(f"image add_picture failed ({spec[:40]}): {exc}")
 
     def accent_rail(slide):
         """Thin brand rail down the left edge — the signature of a content slide."""
@@ -418,15 +447,9 @@ def render_pptx(deck, base_dir, out_path):
             textbox(slide, Inches(1.2), Inches(4.9), Inches(10.9), Inches(0.8),
                     [("— " + s.get("author", ""), 18, muted, body_font, False, False)])
         elif layout in ("image_left", "image_right"):
-            img = img_path(s.get("image", ""))
             text_left = Inches(7.0) if layout == "image_left" else Inches(0.9)
             img_left = Inches(0.7) if layout == "image_left" else Inches(7.0)
-            if img:
-                try:
-                    slide.shapes.add_picture(img, img_left, Inches(1.9),
-                                             width=Inches(5.6))
-                except Exception:
-                    pass
+            add_image(slide, s.get("image", ""), img_left, Inches(1.9), width=Inches(5.6))
             runs = [(b, 18, muted, body_font, False, True) for b in s.get("bullets", [])]
             if s.get("body"):
                 runs.append((s["body"], 18, muted, body_font, False, False))
@@ -444,16 +467,11 @@ def render_pptx(deck, base_dir, out_path):
             runs = [(b, 20, muted, body_font, False, True) for b in s.get("bullets", [])]
             if s.get("body"):
                 runs.append((s["body"], 18, muted, body_font, False, False))
-            top = Inches(1.9)
+            has_img = bool(s.get("image"))
+            text_w = Inches(7.4) if has_img else Inches(11.5)
             if runs:
-                textbox(slide, Inches(0.9), top, Inches(11.5), Inches(4.6), runs)
-            img = img_path(s.get("image", ""))
-            if img:
-                try:
-                    slide.shapes.add_picture(img, Inches(8.6), Inches(1.9),
-                                             width=Inches(3.8))
-                except Exception:
-                    pass
+                textbox(slide, Inches(0.9), Inches(1.9), text_w, Inches(4.6), runs)
+            add_image(slide, s.get("image", ""), Inches(8.6), Inches(1.9), width=Inches(3.8))
 
         accent_bar(slide)
         notes(slide, s.get("notes"))
@@ -464,7 +482,7 @@ def render_pptx(deck, base_dir, out_path):
             os.remove(tmp)
         except OSError:
             pass
-    return True
+    return stats
 
 
 # ---------------------------------------------------------------------------- main
@@ -490,10 +508,17 @@ def main():
     print(f"wrote {out_html}")
 
     if not args.no_pptx:
-        if render_pptx(deck, base_dir, out_pptx):
+        result = render_pptx(deck, base_dir, out_pptx)
+        if result:
             print(f"wrote {out_pptx}")
+            print(
+                f"  embedded: logo={'yes' if result['logo'] else 'NO'}, "
+                f"images={result['img_ok']} ok / {result['img_fail']} failed"
+            )
+            for note in result["notes"]:
+                print(f"  ⚠ {note}")
         else:
-            print("pptx skipped (python-pptx unavailable)")
+            print("pptx skipped (python-pptx unavailable — restart the contained computer)")
 
 
 if __name__ == "__main__":

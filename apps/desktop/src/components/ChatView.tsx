@@ -207,6 +207,7 @@ export function ChatView({
   const [streamingAssistantId, setStreamingAssistantId] = useState<string | null>(null);
   const [streamStatus, setStreamStatus] = useState<ChatStreamStatus | null>(null);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
+  const [chatExported, setChatExported] = useState(false);
   const [replyContext, setReplyContext] = useState<ReplyContext | null>(null);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState("");
@@ -854,6 +855,35 @@ export function ChatView({
     if (!ok) return;
     setCopiedMessageId(message.id);
     window.setTimeout(() => setCopiedMessageId(null), 1_400);
+  }
+
+  // Export the whole conversation as Markdown to the clipboard — so the user can
+  // paste the full thread (e.g. to report a usability issue). Control markers
+  // (activity/plan/confirmation) are stripped; generated files become "[file: …]".
+  async function exportChatMarkdown() {
+    const strip = (raw: string) =>
+      raw
+        .replace(/‹‹ARTIFACT››([\s\S]*?)‹‹\/ARTIFACT››/g, (_m, j) => {
+          try {
+            return `\n_[file: ${JSON.parse(j).name}]_`;
+          } catch {
+            return "\n_[file]_";
+          }
+        })
+        .replace(/‹‹(ACT|PLAN|COMPOSIO_[A-Z]+)››[\s\S]*?‹‹\/\1››/g, "")
+        .replace(/‹‹[A-Z_]+››|‹‹\/[A-Z_]+››/g, "")
+        .trim();
+    const lines: string[] = [`# ${thread.title || "Chat"}`, ""];
+    for (const m of threadMessages) {
+      const who = m.role === "user" ? "Utente" : m.role === "assistant" ? "Homun" : m.role;
+      lines.push(`## ${who}`, "", strip(m.text ?? "") || "_(vuoto)_", "");
+    }
+    const ok = await copyText(lines.join("\n"));
+    setPanelMenuOpen(false);
+    if (ok) {
+      setChatExported(true);
+      window.setTimeout(() => setChatExported(false), 1_800);
+    }
   }
 
   // Refresh the persisted branch map for this thread (which nodes have siblings).
@@ -1617,6 +1647,16 @@ export function ChatView({
                   </button>
                 );
               })}
+              <div className="panel-menu-sep" role="separator" />
+              <button
+                type="button"
+                role="menuitem"
+                className="panel-menu-item"
+                onClick={() => void exportChatMarkdown()}
+              >
+                <Download size={16} />
+                <span>{chatExported ? t("chat.chatExported") : t("chat.exportChat")}</span>
+              </button>
             </div>
           </>
         )}
