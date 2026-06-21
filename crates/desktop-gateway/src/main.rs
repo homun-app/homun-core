@@ -22688,29 +22688,48 @@ fn seed_default_skills() {
     // app update still install on existing setups, while a default the user DELETED is
     // not re-seeded back.
     let seeded_path = dest.join(".seeded-defaults");
-    let mut seeded: std::collections::BTreeSet<String> = fs::read_to_string(&seeded_path)
-        .map(|raw| {
-            raw.lines()
-                .map(str::trim)
-                .filter(|l| !l.is_empty())
-                .map(str::to_string)
-                .collect()
-        })
-        .unwrap_or_default();
-    // Migration from the old one-shot marker: treat defaults already on disk as seeded,
-    // so this first upgrade installs ONLY the genuinely new ones.
+    // Per-skill seed record as `id\thash` (hash of the SKILL.md WE last seeded). This
+    // lets us: install genuinely-new defaults, UPDATE a default we shipped a newer
+    // version of WHEN the user hasn't edited it, respect a user EDIT (on-disk differs
+    // from what we seeded), and respect a user DELETION. Old format (bare `id`) parses
+    // with hash = None (handled by the migration branch).
+    let mut seeded: std::collections::BTreeMap<String, Option<String>> =
+        fs::read_to_string(&seeded_path)
+            .map(|raw| {
+                raw.lines()
+                    .map(str::trim)
+                    .filter(|l| !l.is_empty())
+                    .map(|l| match l.split_once('\t') {
+                        Some((id, h)) => (id.to_string(), Some(h.to_string())),
+                        None => (l.to_string(), None),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+    // Migration from the old one-shot marker: treat defaults already on disk as seeded
+    // (hash unknown → the migration branch below backs up before any overwrite).
     if seeded.is_empty() && marker.exists() {
         if let Ok(entries) = fs::read_dir(&src) {
             for entry in entries.flatten() {
                 let id = entry.file_name().to_string_lossy().to_string();
                 if entry.path().join("SKILL.md").is_file() && dest.join(&id).exists() {
-                    seeded.insert(id);
+                    seeded.entry(id).or_insert(None);
                 }
             }
         }
     }
 
+    // Non-cryptographic content hash of a skill's SKILL.md (change detection only).
+    let skill_hash = |dir: &std::path::Path| -> Option<String> {
+        let bytes = fs::read(dir.join("SKILL.md")).ok()?;
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        bytes.hash(&mut h);
+        Some(format!("{:016x}", h.finish()))
+    };
+
     let mut copied = 0usize;
+    let mut updated = 0usize;
     if let Ok(entries) = fs::read_dir(&src) {
         for entry in entries.flatten() {
             let from = entry.path();
@@ -22719,22 +22738,58 @@ fn seed_default_skills() {
             }
             let id = entry.file_name().to_string_lossy().to_string();
             let target = dest.join(entry.file_name());
-            if target.exists() {
-                seeded.insert(id); // user already has it
+            let bundled = skill_hash(&from);
+
+            if !target.exists() {
+                if seeded.contains_key(&id) {
+                    continue; // a previously-seeded default the user deleted — respect it
+                }
+                if copy_dir_recursive(&from, &target).is_ok() {
+                    seeded.insert(id, bundled);
+                    copied += 1;
+                }
                 continue;
             }
-            if seeded.contains(&id) {
-                continue; // a previously-seeded default the user deleted — respect that
-            }
-            if copy_dir_recursive(&from, &target).is_ok() {
-                seeded.insert(id);
-                copied += 1;
+
+            // Target exists: push an updated default only if the user hasn't edited it.
+            let on_disk = skill_hash(&target);
+            let prev = seeded.get(&id).cloned().flatten();
+            let unedited = match (&prev, &on_disk) {
+                (Some(p), Some(d)) => p == d, // matches what we seeded → not user-edited
+                (None, _) => true,            // migration: assume stock (back up first)
+                _ => false,
+            };
+            if unedited && bundled.is_some() && bundled != on_disk {
+                if prev.is_none() {
+                    // Unrecorded baseline — preserve the existing file just in case.
+                    let _ = fs::copy(
+                        target.join("SKILL.md"),
+                        target.join("SKILL.md.bak"),
+                    );
+                }
+                if copy_dir_recursive(&from, &target).is_ok() {
+                    updated += 1;
+                }
+                seeded.insert(id, bundled);
+            } else {
+                seeded.insert(id, prev.or(on_disk)); // up to date or user-edited → leave
             }
         }
     }
+    if copied + updated > 0 {
+        eprintln!("seed_default_skills: {copied} new, {updated} updated");
+    }
     let _ = fs::write(
         &seeded_path,
-        format!("{}\n", seeded.iter().cloned().collect::<Vec<_>>().join("\n")),
+        seeded
+            .iter()
+            .map(|(id, h)| match h {
+                Some(h) => format!("{id}\t{h}"),
+                None => id.clone(),
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+            + "\n",
     );
 
     // Union the bundled HomunCoder manifest into the dest manifest (dedup).
