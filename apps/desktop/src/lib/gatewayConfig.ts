@@ -5,6 +5,8 @@ interface LocalFirstDesktopConfig {
   revealPath?: (path: string) => Promise<boolean>;
   /** Captures the whole app window to a PNG and reveals it. */
   capturePage?: () => Promise<{ ok: boolean; path?: string; error?: string }>;
+  /** Keep the app awake during a long task (ref-counted; on=true start, false end). */
+  keepAwake?: (on: boolean) => Promise<number>;
   /** Resolves a File to its absolute on-disk path (Electron webUtils). Sync. */
   getPathForFile?: (file: File) => string;
   /** Version of this running build (git tag at CI time; dev package.json in dev). */
@@ -152,6 +154,17 @@ export async function getAppVersion(): Promise<string | null> {
     return (await get()) || null;
   } catch {
     return null;
+  }
+}
+
+/** Keep the app awake while a long task streams (no-op on web). Ref-counted in the
+ *  Electron shell, so overlapping streams are handled; ALWAYS pair on=true with a
+ *  later on=false (use try/finally) to avoid pinning the app awake. */
+export function keepDesktopAwake(on: boolean): void {
+  try {
+    void desktopConfig?.keepAwake?.(on);
+  } catch {
+    // best effort
   }
 }
 

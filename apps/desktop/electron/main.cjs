@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, shell, ipcMain, dialog, nativeImage } = require("electron");
+const { app, BrowserWindow, Menu, shell, ipcMain, dialog, nativeImage, powerSaveBlocker } = require("electron");
 const { autoUpdater } = require("electron-updater");
 const { spawn, spawnSync, execFileSync } = require("node:child_process");
 const { randomBytes } = require("node:crypto");
@@ -400,6 +400,27 @@ ipcMain.handle("lfpa:reveal-path", async (_event, targetPath) => {
   if (typeof targetPath !== "string" || !targetPath) return false;
   const error = await shell.openPath(targetPath);
   return error === "";
+});
+
+// Keep the app awake while a long task streams, so a sleeping Mac doesn't suspend the
+// gateway + drop the in-flight generation mid-task. Ref-counted: the renderer calls
+// keep-awake(true) when a generation starts and (false) when it ends (incl. errors).
+let powerBlockId = null;
+let powerBlockCount = 0;
+ipcMain.handle("lfpa:keep-awake", (_event, on) => {
+  if (on) {
+    powerBlockCount += 1;
+    if (powerBlockId === null || !powerSaveBlocker.isStarted(powerBlockId)) {
+      powerBlockId = powerSaveBlocker.start("prevent-app-suspension");
+    }
+  } else {
+    powerBlockCount = Math.max(0, powerBlockCount - 1);
+    if (powerBlockCount === 0 && powerBlockId !== null && powerSaveBlocker.isStarted(powerBlockId)) {
+      powerSaveBlocker.stop(powerBlockId);
+      powerBlockId = null;
+    }
+  }
+  return powerBlockCount;
 });
 
 // Capture the WHOLE page (the full scrollable conversation, not just the visible
