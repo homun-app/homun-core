@@ -31,11 +31,11 @@ questi dati". Slides / deck / presentation / pitch.
    after the first action, which is wrong.)
 1. **Read the brand.** Call `get_brand_kit` FIRST. The brand kit is NOT a file on disk —
    it comes ONLY from this tool. NEVER use `find`/`ls`/shell to search the filesystem for
-   logo/brand/colour files; that just wastes the budget (there is nothing to find). Map
-   the tool's result into the deck `theme`: `primary_color`→`primary`,
-   `secondary_color`→`secondary`, `accent_color`→`accent`, `heading_font`/`body_font`, and
-   `logo_data_url`→`theme.logo` (pass the data URL **as-is** — the renderer embeds it).
-   Empty values → the renderer falls back to a clean default palette, but still call it.
+   logo/brand/colour files. The brand is **applied AUTOMATICALLY**: calling `get_brand_kit`
+   writes `brand.json` + `logo.png` into `$OUTPUT_DIR`, and `deck-render` reads them. So do
+   NOT put `theme` or `logo` in deck.json, and NEVER embed the logo data URL anywhere (it's
+   large and breaks the file write). Just remember the returned colours to steer your
+   `generate_image` prompts on-brand.
 2. **Scope.** Confirm/infer audience, goal, length (default 8–12 slides), language; read
    any source material (a file, data, or a URL via `browse_web`).
 3. **Design pass (DO THIS — it's what makes the deck good, not generic).** Before any
@@ -76,9 +76,9 @@ questi dati". Slides / deck / presentation / pitch.
 
 ```json
 {
-  "title": "Deck title", "subtitle": "subtitle · ORG · date", "organization": "ORG",
-  "theme": {"primary":"#2b6cb0","secondary":"#1a202c","accent":"#ed8936",
-            "heading_font":"Inter","body_font":"Inter","logo":"<logo_data_url or logo.png>"},
+  "title": "Deck title", "subtitle": "subtitle · ORG · date",
+  // OMIT "theme" and "logo" — the renderer applies the brand kit automatically
+  // (brand.json + logo.png are already in the output dir). Include ONLY content:
   "slides": [
     {"layout":"cover","title":"Deck title","subtitle":"subtitle · ORG · date"},
     {"layout":"bullets","title":"Highlights","bullets":["point","point"],"notes":"say this"},

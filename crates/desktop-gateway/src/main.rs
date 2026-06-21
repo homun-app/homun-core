@@ -11822,10 +11822,36 @@ available tools (for data from the web use the browser: browser_navigate on the 
                             }
                         }
                     } else if name == "get_brand_kit" {
-                        // Read-only: hand the saved brand kit to the model so it can
-                        // produce the deliverable on-brand (colours, fonts, logo, org).
-                        serde_json::to_string(&load_brand_kit())
-                            .unwrap_or_else(|_| "{}".to_string())
+                        // Materialize the brand into the thread's output dir (brand.json +
+                        // logo.png) so the renderer applies it and the model needn't embed
+                        // the logo data URL in deck.json. Return colours/fonts (for image
+                        // prompts) but REPLACE the big logo data URL with a note, so the
+                        // model can't paste a 13KB blob into a shell-written deck.json.
+                        let slug = artifact_thread_slug(thread_id.as_deref());
+                        let slug2 = slug.clone();
+                        let _ = tokio::task::spawn_blocking(move || materialize_brand_kit(&slug2))
+                            .await;
+                        let mut kit = serde_json::to_value(load_brand_kit())
+                            .unwrap_or_else(|_| serde_json::json!({}));
+                        if let Some(obj) = kit.as_object_mut() {
+                            let has_logo = obj
+                                .get("logo_data_url")
+                                .and_then(|v| v.as_str())
+                                .map(|s| !s.trim().is_empty())
+                                .unwrap_or(false);
+                            obj.insert(
+                                "logo_data_url".into(),
+                                serde_json::json!(if has_logo {
+                                    "(applied automatically — written to logo.png in the output dir; do NOT embed in deck.json)"
+                                } else {
+                                    ""
+                                }),
+                            );
+                            obj.insert("note".into(), serde_json::json!(
+                                "Brand is applied automatically by deck-render via brand.json + logo.png already written to the output dir. In deck.json include ONLY slide content — OMIT `theme` and `logo` entirely."
+                            ));
+                        }
+                        serde_json::to_string(&kit).unwrap_or_else(|_| "{}".to_string())
                     } else if name == "save_artifact" {
                         // Deliver a generated artifact to an authorized destination
                         // (gateway performs the copy host-side, scoped to grants).
@@ -16676,6 +16702,36 @@ fn write_artifact_bytes(thread_slug: &str, name: &str, bytes: &[u8]) -> Result<(
         let _ = fs::copy(&managed_path, std::path::Path::new(&folder).join(name));
     }
     Ok((bytes.len() as u64, updated))
+}
+
+/// Write the brand kit into a thread's output dir as files the deck renderer reads:
+/// `brand.json` (theme: colours/fonts/org, logo→"logo.png") + `logo.png` (decoded). This
+/// lets the model OMIT the large logo data URL from deck.json — which it can't reliably
+/// emit through a shell — and have `deck-render` apply the brand itself. Best-effort.
+fn materialize_brand_kit(thread_slug: &str) {
+    let kit = load_brand_kit();
+    let has_logo = !kit.logo_data_url.trim().is_empty();
+    let theme = serde_json::json!({
+        "organization": kit.organization,
+        "primary": kit.primary_color,
+        "secondary": kit.secondary_color,
+        "accent": kit.accent_color,
+        "heading_font": kit.heading_font,
+        "body_font": kit.body_font,
+        "logo": if has_logo { "logo.png" } else { "" },
+    });
+    if let Ok(bytes) = serde_json::to_vec_pretty(&theme) {
+        let _ = write_artifact_bytes(thread_slug, "brand.json", &bytes);
+    }
+    if has_logo {
+        if let Some(comma) = kit.logo_data_url.find(',') {
+            if let Ok(bytes) = base64::engine::general_purpose::STANDARD
+                .decode(kit.logo_data_url[comma + 1..].as_bytes())
+            {
+                let _ = write_artifact_bytes(thread_slug, "logo.png", &bytes);
+            }
+        }
+    }
 }
 
 /// Copies an artifact to an AUTHORIZED destination folder (host-side). Enforces:

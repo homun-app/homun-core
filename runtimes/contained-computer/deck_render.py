@@ -499,6 +499,24 @@ def main():
         sys.exit("deck.json has no 'slides'.")
 
     base_dir = os.path.dirname(os.path.abspath(args.deck))
+
+    # Auto-apply the brand from the output dir, if present. The gateway writes
+    # `brand.json` (theme: colours/fonts/org) + `logo.png` next to deck.json when a deck
+    # is generated, so the model can include ONLY slide content in deck.json — it never
+    # has to embed the (large) logo data URL. A `theme` in deck.json still overrides.
+    brand_file = os.path.join(base_dir, "brand.json")
+    if os.path.isfile(brand_file):
+        try:
+            with open(brand_file, "r", encoding="utf-8") as fh:
+                brand = json.load(fh)
+            deck["theme"] = {**brand, **(deck.get("theme") or {})}
+        except Exception:
+            pass
+    theme = deck.get("theme") or {}
+    if not theme.get("logo") and os.path.isfile(os.path.join(base_dir, "logo.png")):
+        theme["logo"] = "logo.png"
+        deck["theme"] = theme
+
     prefix = args.prefix or os.path.splitext(os.path.basename(args.deck))[0]
     out_html = os.path.join(base_dir, f"{prefix}.html")
     out_pptx = os.path.join(base_dir, f"{prefix}.pptx")
