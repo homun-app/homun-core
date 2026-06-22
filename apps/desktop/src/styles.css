@@ -5675,6 +5675,17 @@ body.resizing-drawer {
   white-space: nowrap;
   font-size: 13px;
 }
+/* 💻 local vs ☁️ cloud compute badge in the model picker. */
+.composer-model-loc {
+  margin-left: auto;
+  font-size: 11px;
+  line-height: 1;
+  opacity: 0.85;
+  flex: 0 0 auto;
+}
+.composer-model-loc.local {
+  filter: grayscale(0.1);
+}
 .composer-model-pop .composer-pop-list button small {
   color: var(--muted);
   font-size: 10.5px;
