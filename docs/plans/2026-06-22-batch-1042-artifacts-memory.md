@@ -321,7 +321,7 @@ cablato** nel flusso agente. ADR 0015.
   ignorato**; build gateway e desktop verdi; `git diff --check` pulito.
   **Decisione:** 6.2 chiusa; la UI configurabile dei limiti resta una futura
   micro-slice opzionale, non blocca 6.3.
-- 🟡 **6.3 Scheduler / ricorrenza** + **proactive review** (l'assistente propone schede
+- ✅ **6.3 Scheduler / ricorrenza** + **proactive review** (l'assistente propone schede
   in autonomia governata) verificati end-to-end.
   **Slice 1 FATTA (2026-06-22):** allineato `TaskRuntime` standalone al worker
   gateway sulla ricorrenza. Test red/green:
@@ -330,8 +330,27 @@ cablato** nel flusso agente. ADR 0015.
   `Queued`, `not_before > now`, stessa recurrence). Verifiche: task-runtime
   verde; gateway **162 passati, 1 ignorato**; build gateway e desktop verdi;
   `git diff --check` pulito.
-  **Prossimo slice:** failure/retry recurrence parity tra runtime e gateway.
-- ☐ **6.4** Le azioni proattive scrivono in memoria (loop aperti / decisioni) — lega WS5.
+  **Slice 2 FATTA (2026-06-22):** failure/retry recurrence parity tra runtime e
+  gateway. Test red/green
+  `task_runtime_materializes_next_recurrence_after_terminal_failure` (red:
+  task ricorrente terminale `Failed` senza prossima occorrenza; green:
+  `daily@occ@...` `Queued`, recurrence mantenuta, `not_before > now`). Il retry
+  intermedio resta invariato (`WaitingTime`, nessuna nuova occorrenza).
+  **Slice 3 FATTA (2026-06-22):** gate headless scheduled/proactive prompt:
+  `materialize_automation_task` crea un task `proactive_prompt` visibile e le
+  occorrenze riusano lo stesso thread `channel_scheduled_<root>`. Test:
+  `scheduled_automation_materializes_visible_proactive_task`,
+  `scheduled_occurrences_reuse_one_visible_thread`.
+  **Slice 4 FATTA (2026-06-22):** surface/dedup proactive review coperta da
+  parse/card/choices/dedup fuzzy/read-model tests.
+- ✅ **6.4** Le azioni proattive scrivono in memoria (loop aperti / decisioni) — lega WS5.
+  `suggestion_act` scrive memoria auto-confermata nello scope della card:
+  `accepted|snoozed` → `open_loop`, `dismissed` → `decision`, con metadata
+  card/dedup/action. Test:
+  `proactive_action_memory_writeback_maps_statuses`,
+  `suggestion_lookup_preserves_durable_dedup_key`. Gate finale locale:
+  task-runtime verde; gateway **166 passati, 1 ignorato**; build gateway/desktop
+  verdi; `git diff --check` pulito. **WS6 chiusa localmente.**
 
 ## WS7 — Ecosistema deliverable (Manus)
 

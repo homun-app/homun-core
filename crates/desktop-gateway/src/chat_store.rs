@@ -129,6 +129,7 @@ pub struct SuggestionRow {
     pub choices: Option<String>,
     pub status: String,
     pub feedback: Option<String>,
+    pub dedup_key: String,
     pub created_at: i64,
 }
 
@@ -230,7 +231,8 @@ fn map_suggestion(row: &rusqlite::Row) -> rusqlite::Result<SuggestionRow> {
         choices: row.get(7)?,
         status: row.get(8)?,
         feedback: row.get(9)?,
-        created_at: row.get(10)?,
+        dedup_key: row.get(10)?,
+        created_at: row.get(11)?,
     })
 }
 
@@ -2310,7 +2312,7 @@ impl ChatStore {
         let mut stmt;
         let rows = if let Some(scope) = scope {
             stmt = self.conn.prepare(
-                "select id, scope, kind, title, body, rationale, proposed_action, choices, status, feedback, created_at
+                "select id, scope, kind, title, body, rationale, proposed_action, choices, status, feedback, dedup_key, created_at
                    from suggestions where status = 'pending' and scope = ?1
                    order by id desc limit ?2",
             )?;
@@ -2318,7 +2320,7 @@ impl ChatStore {
                 .collect::<rusqlite::Result<Vec<_>>>()?
         } else {
             stmt = self.conn.prepare(
-                "select id, scope, kind, title, body, rationale, proposed_action, choices, status, feedback, created_at
+                "select id, scope, kind, title, body, rationale, proposed_action, choices, status, feedback, dedup_key, created_at
                    from suggestions where status = 'pending'
                    order by id desc limit ?1",
             )?;
@@ -2326,6 +2328,17 @@ impl ChatStore {
                 .collect::<rusqlite::Result<Vec<_>>>()?
         };
         Ok(rows)
+    }
+
+    pub fn suggestion(&self, id: i64) -> rusqlite::Result<Option<SuggestionRow>> {
+        self.conn
+            .query_row(
+                "select id, scope, kind, title, body, rationale, proposed_action, choices, status, feedback, dedup_key, created_at
+                   from suggestions where id = ?1",
+                params![id],
+                map_suggestion,
+            )
+            .optional()
     }
 
     /// Count of pending suggestions per scope (for the zen "+N" badge).

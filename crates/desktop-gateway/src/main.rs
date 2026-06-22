@@ -14743,14 +14743,111 @@ async fn suggestion_act(
         .feedback
         .as_deref()
         .filter(|f| matches!(*f, "liked" | "disliked"));
+    let row = lock_store(&state).ok().and_then(|s| s.suggestion(id).ok().flatten());
     let ok = lock_store(&state)
         .ok()
-        .and_then(|s| {
-            s.set_suggestion_status(id, status, feedback, req.note.as_deref())
-                .ok()
-        })
+        .and_then(|s| s.set_suggestion_status(id, status, feedback, req.note.as_deref()).ok())
         .is_some();
+    if ok {
+        if let Some(row) = row {
+            write_proactive_action_memory(&state, &row, status, feedback, req.note.as_deref());
+        }
+    }
     Json(serde_json::json!({ "ok": ok }))
+}
+
+fn write_proactive_action_memory(
+    state: &AppState,
+    row: &chat_store::SuggestionRow,
+    status: &str,
+    feedback: Option<&str>,
+    note: Option<&str>,
+) {
+    let lifecycle = MemoryLifecycleRequest {
+        actor_id: "proactivity".to_string(),
+        user_id: gateway_memory_user_id(),
+        workspace_id: MemoryWorkspaceId::new(&row.scope),
+        purpose: "proactive_action_writeback".to_string(),
+    };
+    let Some(request) =
+        proactive_memory_request_for_suggestion_action(row, status, feedback, note, lifecycle)
+    else {
+        return;
+    };
+    let Ok(facade) = lock_memory_facade(state) else {
+        return;
+    };
+    if let Ok(record) = facade.create_memory_candidate(request.clone()) {
+        let _ = facade.confirm_memory(
+            &request.request,
+            &record.reference,
+            "proactive action write-back",
+        );
+    }
+}
+
+fn proactive_memory_request_for_suggestion_action(
+    row: &chat_store::SuggestionRow,
+    status: &str,
+    feedback: Option<&str>,
+    note: Option<&str>,
+    request: MemoryLifecycleRequest,
+) -> Option<MemoryCreateRequest> {
+    let memory_type = match status {
+        "accepted" | "snoozed" => "open_loop",
+        "dismissed" => "decision",
+        _ => return None,
+    };
+    let note = note.map(str::trim).filter(|value| !value.is_empty());
+    let feedback = feedback.map(str::trim).filter(|value| !value.is_empty());
+    let action = row
+        .proposed_action
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let text = match status {
+        "accepted" => {
+            let action_text = action.unwrap_or(row.body.as_str());
+            format!(
+                "Open loop from proactive card accepted: {} — follow through on: {}",
+                row.title, action_text
+            )
+        }
+        "snoozed" => format!(
+            "Open loop from proactive card snoozed: {} — revisit later. {}",
+            row.title, row.body
+        ),
+        "dismissed" => {
+            let reason = note.or(feedback).unwrap_or("no reason recorded");
+            format!("Decision from proactive card: dismissed '{}' — reason: {}", row.title, reason)
+        }
+        _ => return None,
+    };
+    Some(MemoryCreateRequest {
+        request,
+        memory_type: memory_type.to_string(),
+        text: redact_sensitive_text(&text),
+        aliases: vec![row.title.clone(), row.kind.clone(), row.dedup_key.clone()],
+        language_hints: Vec::new(),
+        confidence: 1.0,
+        privacy_domain: PrivacyDomain::new("work"),
+        sensitivity: MemoryDataSensitivity::Internal,
+        evidence_refs: Vec::new(),
+        metadata: serde_json::json!({
+            "source": "proactivity",
+            "suggestion": {
+                "id": row.id,
+                "scope": row.scope.clone(),
+                "kind": row.kind.clone(),
+                "title": row.title.clone(),
+                "status": status,
+                "feedback": feedback,
+                "note": note,
+                "dedup_key": row.dedup_key.clone(),
+                "proposed_action": row.proposed_action.clone(),
+            }
+        }),
+    })
 }
 
 #[derive(Debug, Deserialize)]
@@ -19717,17 +19814,8 @@ fn execute_proactive_prompt_task(
     task: &TaskRecord,
 ) -> Result<TaskExecutionOutcome, LocalTaskExecutionError> {
     let goal = task.goal.clone();
-    let root = task
-        .task_id
-        .as_str()
-        .split("@occ@")
-        .next()
-        .unwrap_or_else(|| task.task_id.as_str())
-        .to_string();
-    let title = {
-        let trimmed: String = goal.chars().take(48).collect();
-        format!("Pianificato · {trimmed}")
-    };
+    let root = scheduled_thread_sender_for_task_id(task.task_id.as_str());
+    let title = scheduled_thread_title(&goal);
 
     // A proactive task gets its own per-schedule "scheduled" thread.
     let thread_id = match lock_store(state) {
@@ -19805,6 +19893,15 @@ fn execute_proactive_prompt_task(
         event_payload: serde_json::json!({ "goal": goal }),
         artifacts: vec![],
     })
+}
+
+fn scheduled_thread_sender_for_task_id(task_id: &str) -> String {
+    task_id.split("@occ@").next().unwrap_or(task_id).to_string()
+}
+
+fn scheduled_thread_title(goal: &str) -> String {
+    let trimmed: String = goal.chars().take(48).collect();
+    format!("Pianificato · {trimmed}")
 }
 
 fn execute_capability_browser_task(
@@ -31473,9 +31570,12 @@ mod tests {
         browser_snapshot_text,
         jail_in_root,
         project_filesystem_mcp_instruction,
+        proactive_memory_request_for_suggestion_action,
         should_try_tool_compatibility_fallback,
         parse_review_suggestion,
         sanitize_dedup_key,
+        scheduled_thread_sender_for_task_id,
+        scheduled_thread_title,
         is_semantic_duplicate,
         suggestion_choices_json,
         legacy_dir_action,
@@ -31483,14 +31583,15 @@ mod tests {
     };
     use crate::browser_safety;
     use local_first_capabilities::{CapabilityCallResult, ProviderId as CapProviderId};
-    use crate::chat_store::ChatStore;
+    use crate::chat_store::{self, ChatStore};
     use local_first_browser_automation::BrowserAutomationError;
     use local_first_local_computer_session::SessionStatus;
     use local_first_browser_automation::BrowserMethod;
     use local_first_task_runtime::{
-        ApprovalRequest, ExecutorResult, ResourceClass, ResourceGovernor, ResourceLimits,
-        ResourceRequirement, TaskId, TaskPriority, TaskQueueSnapshot, TaskRecord, TaskStatus,
-        TaskStore, TaskUiItem, UserId, WorkspaceId,
+        ApprovalPolicy, ApprovalRequest, Automation, AutomationSource, AutomationTrigger,
+        ExecutorResult, ResourceClass, ResourceGovernor, ResourceLimits, ResourceRequirement,
+        TaskId, TaskPriority, TaskQueueSnapshot, TaskRecord, TaskStatus, TaskStore, TaskUiItem,
+        UserId, WorkspaceId,
     };
     use std::collections::HashMap;
 
@@ -31742,6 +31843,96 @@ mod tests {
         assert!(!is_semantic_duplicate("progetto-fermo:idra", "Idra è fermo", &existing));
         // Empty board → nothing matches.
         assert!(!is_semantic_duplicate("curiosità:tappo-moto", "x", &[]));
+    }
+
+    #[test]
+    fn proactive_action_memory_writeback_maps_statuses() {
+        let row = chat_store::SuggestionRow {
+            id: 7,
+            scope: "project-x".to_string(),
+            kind: "follow-up".to_string(),
+            title: "Controlla Idra".to_string(),
+            body: "Idra sembra fermo.".to_string(),
+            rationale: "Nessuna attività recente.".to_string(),
+            proposed_action: Some("Controllare lo stato di Idra".to_string()),
+            choices: None,
+            status: "pending".to_string(),
+            feedback: None,
+            dedup_key: "follow-up:idra".to_string(),
+            created_at: 123,
+        };
+        let lifecycle = local_first_memory::MemoryLifecycleRequest {
+            actor_id: "test".to_string(),
+            user_id: local_first_memory::UserId::new("user"),
+            workspace_id: local_first_memory::WorkspaceId::new("project-x"),
+            purpose: "test".to_string(),
+        };
+
+        let accepted = proactive_memory_request_for_suggestion_action(
+            &row,
+            "accepted",
+            Some("liked"),
+            None,
+            lifecycle.clone(),
+        )
+        .expect("accepted writeback");
+        assert_eq!(accepted.memory_type, "open_loop");
+        assert!(accepted.text.contains("Open loop"));
+        assert!(accepted.text.contains("Controlla Idra"));
+        assert_eq!(accepted.metadata["suggestion"]["dedup_key"], "follow-up:idra");
+
+        let dismissed = proactive_memory_request_for_suggestion_action(
+            &row,
+            "dismissed",
+            Some("disliked"),
+            Some("non prioritario"),
+            lifecycle.clone(),
+        )
+        .expect("dismissed writeback");
+        assert_eq!(dismissed.memory_type, "decision");
+        assert!(dismissed.text.contains("dismissed"));
+        assert!(dismissed.text.contains("non prioritario"));
+
+        let snoozed = proactive_memory_request_for_suggestion_action(
+            &row,
+            "snoozed",
+            None,
+            None,
+            lifecycle.clone(),
+        )
+        .expect("snoozed writeback");
+        assert_eq!(snoozed.memory_type, "open_loop");
+        assert!(snoozed.text.contains("revisit later"));
+
+        assert!(proactive_memory_request_for_suggestion_action(
+            &row,
+            "unknown",
+            None,
+            None,
+            lifecycle,
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn suggestion_lookup_preserves_durable_dedup_key() {
+        let store = ChatStore::in_memory().unwrap();
+        let id = store
+            .insert_suggestion(&chat_store::SuggestionInput {
+                scope: "project-x".to_string(),
+                kind: "follow-up".to_string(),
+                title: "Controlla Idra".to_string(),
+                body: "Idra sembra fermo.".to_string(),
+                rationale: "Nessuna attività recente.".to_string(),
+                proposed_action: Some("Controllare lo stato di Idra".to_string()),
+                choices: None,
+                dedup_key: "follow-up:idra".to_string(),
+            })
+            .unwrap();
+
+        let row = store.suggestion(id).unwrap().expect("suggestion");
+        assert_eq!(row.dedup_key, "follow-up:idra");
+        assert_eq!(row.status, "pending");
     }
 
     #[test]
@@ -33248,6 +33439,74 @@ data: [DONE]\n";
             .unwrap();
 
         assert!(ready.iter().any(|task| task.task_id.as_str() == "blocked"));
+    }
+
+    #[test]
+    fn scheduled_automation_materializes_visible_proactive_task() {
+        let store = TaskStore::open_in_memory().unwrap();
+        let now = time::OffsetDateTime::now_utc();
+        let automation = Automation {
+            id: "auto_sched".to_string(),
+            user_id: super::gateway_user_id(),
+            workspace_id: super::gateway_workspace_id(),
+            title: "Daily check".to_string(),
+            trigger: AutomationTrigger::Schedule {
+                recurrence: "every 1d".to_string(),
+                tz: None,
+            },
+            prompt: "Check the project and report status".to_string(),
+            approval: ApprovalPolicy::Confirm,
+            enabled: true,
+            source: AutomationSource::Manual,
+            task_id: None,
+            created_at: now,
+            updated_at: now,
+            last_fired_at: None,
+            state: None,
+        };
+
+        let task_id = super::materialize_automation_task(&store, &automation)
+            .unwrap()
+            .expect("scheduled automation creates a driving task");
+        let task = store
+            .get_task(
+                &TaskId::new(task_id.clone()),
+                &super::gateway_user_id(),
+                &super::gateway_workspace_id(),
+            )
+            .unwrap()
+            .expect("driving task is persisted");
+
+        assert!(task_id.starts_with("autorun_"));
+        assert_eq!(task.kind, "proactive_prompt");
+        assert_eq!(task.goal, automation.prompt);
+        assert_eq!(task.recurrence.as_deref(), Some("every 1d"));
+        assert!(task.not_before.expect("first run scheduled") > now);
+        assert_eq!(task.input_json["automation_id"], "auto_sched");
+        assert_eq!(task.input_json["approval"], "confirm");
+        assert_eq!(task.retry_policy.max_attempts, 3);
+        assert_eq!(task.retry_policy.backoff_seconds, 120);
+    }
+
+    #[test]
+    fn scheduled_occurrences_reuse_one_visible_thread() {
+        let chat = ChatStore::in_memory().unwrap();
+        let root = scheduled_thread_sender_for_task_id("autorun_abc@occ@123");
+        let next = scheduled_thread_sender_for_task_id("autorun_abc@occ@456");
+        let title = scheduled_thread_title("Check the project and report status");
+
+        assert_eq!(root, "autorun_abc");
+        assert_eq!(next, root);
+        let first = chat
+            .find_or_create_channel_thread(&super::base_workspace_id(), "scheduled", &root, &title)
+            .unwrap();
+        let second = chat
+            .find_or_create_channel_thread(&super::base_workspace_id(), "scheduled", &next, &title)
+            .unwrap();
+
+        assert_eq!(first.thread_id, "channel_scheduled_autorun_abc");
+        assert_eq!(second.thread_id, first.thread_id);
+        assert_eq!(second.source.as_deref(), Some("scheduled"));
     }
 
     #[test]

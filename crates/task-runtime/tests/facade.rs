@@ -328,6 +328,44 @@ fn task_runtime_records_retryable_failure() {
     assert_eq!(reloaded.not_before, Some(now + Duration::seconds(30)));
 }
 
+#[test]
+fn task_runtime_materializes_next_recurrence_after_terminal_failure() {
+    let user = UserId::new("user_1");
+    let workspace = WorkspaceId::new("workspace_1");
+    let store = TaskStore::open_in_memory().unwrap();
+    let now = OffsetDateTime::now_utc();
+    let task = task("daily", &user, &workspace)
+        .with_recurrence("every 1d", None)
+        .with_retry_policy(local_first_task_runtime::RetryPolicy {
+            max_attempts: 1,
+            backoff_seconds: 30,
+        });
+    store.insert_task(&task).unwrap();
+    let executor = FakeTaskExecutor::new(vec![ExecutorResult::RetryableFailure {
+        reason: "network timeout".to_string(),
+    }]);
+    let mut runtime =
+        TaskRuntime::new(store, Box::new(executor), ResourceLimits::new(), "worker_a");
+
+    let summary = runtime.run_ready_once(&user, &workspace, now).unwrap();
+    let failed = runtime
+        .store()
+        .get_task(&TaskId::new("daily"), &user, &workspace)
+        .unwrap()
+        .unwrap();
+    let tasks = runtime.store().list_tasks(&user, &workspace).unwrap();
+    let next = tasks
+        .iter()
+        .find(|task| task.task_id.as_str().starts_with("daily@occ@"))
+        .expect("next recurring occurrence inserted after terminal failure");
+
+    assert_eq!(summary.failed_retryable, 1);
+    assert_eq!(failed.status, TaskStatus::Failed);
+    assert_eq!(next.status, TaskStatus::Queued);
+    assert_eq!(next.recurrence.as_deref(), Some("every 1d"));
+    assert!(next.not_before.expect("next occurrence time") > now);
+}
+
 fn task(id: &str, user: &UserId, workspace: &WorkspaceId) -> TaskRecord {
     TaskRecord::new(
         id,

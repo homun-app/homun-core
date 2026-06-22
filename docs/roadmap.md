@@ -2,39 +2,38 @@
 
 ## Obiettivo attivo
 
-WS6.3 Scheduler / ricorrenza + proactive review: rendere affidabile il ciclo
-ricorrente end-to-end, dal runtime task fino alla consegna delle schede/proposte
-proattive.
+WS7.1 deliverable Manus-style: portare documenti/ricerca/meeting al livello del
+deck affidabile, con workflow dichiarativi `make_*` guidati dal runtime e output
+schema-enforced.
 
 ## Fase corrente
 
-WS6.2 Resource Governor è chiusa localmente: i task in `WaitingResource` vengono
-reidratati quando torna capacità, la task queue espone pressione risorse, e il
-gate cross-connection con due worker/store separati è verde.
+WS6 è chiusa localmente:
 
-WS6.3 è partita dal contratto più stretto: il gateway materializzava già la
-prossima occorrenza dopo un task ricorrente completato, mentre il `TaskRuntime`
-standalone no. Slice WS6.3a completata: runtime allineato al gateway con test
-red/green.
+1. WS6.1 — approval resume, Path B workspace-scoped Filesystem, Telegram UX.
+2. WS6.2 — Resource Governor: recovery, visibility, stress gate.
+3. WS6.3 — scheduler/ricorrenza + proactive review: recurrence parity,
+   scheduled/proactive prompt thread, card surface/dedup.
+4. WS6.4 — write-back delle azioni proattive in memoria (`open_loop`/`decision`).
 
-Piano attivo:
-[2026-06-22-scheduler-recurrence-ws6-3.md](superpowers/plans/2026-06-22-scheduler-recurrence-ws6-3.md).
+Prima di pubblicare/taggare resta prudente un smoke manuale in-app su una
+automazione schedulata reale che compaia nel thread `scheduled`. Non è bloccante
+per iniziare WS7 in locale.
 
 ## Milestone
 
-1. WS6.3a — `TaskRuntime` materializza la prossima occorrenza dopo completion.
-2. WS6.3b — verificare comportamento terminal failure/retry su ricorrenze tra
-   runtime e gateway.
-3. WS6.3c — gate in-app di una automazione ricorrente/proactive prompt visibile
-   nel thread `scheduled`.
-4. WS6.3d — proactive review: schede governate, dedup e superficie UI verificati.
+1. WS7.1 — workflow dichiarativi per documenti/ricerca/meeting (`make_*`),
+   analoghi a `make_deck`.
+2. WS7.2 — contratto personalizzazione addon.
+3. WS7.3 — deliverable come entità di memoria + provenienza.
 
 ## Blocco noto
 
-Nessun blocco tecnico attivo. Il prossimo rischio è divergenza tra runtime
-standalone e worker gateway sui casi non-happy-path delle ricorrenze.
+Nessun blocco tecnico attivo. Il rischio successivo è evitare di riaprire la
+fragilità cross-modello già risolta per il deck: i nuovi deliverable devono
+essere schema/routine-driven, non prompt liberi.
 
 ## Prossima azione
 
-Committare WS6.3a senza co-author, poi proseguire con WS6.3b: failure/retry
-recurrence parity tra runtime standalone e gateway.
+Committare lo stack WS6.3b–WS6.4 senza co-author, poi iniziare WS7.1 dal deck
+come riferimento.

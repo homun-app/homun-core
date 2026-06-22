@@ -45,12 +45,11 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
 
 ### Cruscotto operativo attuale
 
-- **Linea attiva:** WS6.3 Scheduler / ricorrenza + proactive review. WS6.2 è
-  chiusa localmente: recovery `WaitingResource` gateway/runtime, API pressione
-  risorse e stress-gate cross-connection sono verdi. Slice WS6.3a completata
-  localmente: materializzazione della prossima occorrenza nel `TaskRuntime`
-  standalone; prossimo slice WS6.3b = failure/retry recurrence parity tra
-  runtime e gateway.
+- **Linea attiva:** WS7.1 deliverable Manus-style. **WS6 chiusa localmente**:
+  Resource Governor, scheduler/ricorrenza, proactive review card surface/dedup
+  e write-back memoria proattiva sono coperti da test e build. Resta consigliato
+  un ultimo smoke manuale in-app su automazione schedulata reale nel thread
+  `scheduled` prima di pubblicare/taggare.
 - **Fatto e verificato localmente:** root automatica del progetto, bypass conferma
   solo per scritture Filesystem MCP dentro root; outside-root resta confirm-gated;
   routing Auto thread-aware + fallback orchestratore su `400` con tool; approval
@@ -197,6 +196,42 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   local-first-desktop-gateway` = **162 passati, 1 ignorato**; `cargo build -p
   local-first-desktop-gateway` verde; `npm run build` desktop verde;
   `git diff --check` pulito.
+- **WS6.3b failure/retry recurrence parity FATTO (2026-06-22):** test
+  red/green aggiunto:
+  `task_runtime_materializes_next_recurrence_after_terminal_failure`. Red
+  confermato: un task ricorrente con `max_attempts=1` andava `Failed` ma non
+  inseriva la prossima `daily@occ@...`, mentre il gateway già lo fa nel path
+  `handle_failed_task_run`. Fix locale: `TaskRuntime` usa
+  `record_failure_and_insert_next_if_terminal`; dopo `RetryableFailure` o errore
+  executor ricarica il task, e se è `Failed` inserisce la prossima occorrenza.
+  Verifiche: `cargo test -p local-first-task-runtime` verde; `cargo test -p
+  local-first-desktop-gateway` = **162 passati, 1 ignorato**; `cargo build -p
+  local-first-desktop-gateway` verde; `npm run build` desktop verde;
+  `git diff --check` pulito.
+- **WS6.3c scheduled/proactive prompt gate FATTO (2026-06-22):** gate headless
+  sul contratto usato dall'app: `materialize_automation_task` crea un task
+  visibile `proactive_prompt` con `automation_id`, recurrence, `not_before`,
+  retry policy 3x/120s e policy approval; le occorrenze `autorun_x@occ@...`
+  riusano un solo thread `channel_scheduled_autorun_x`. Test:
+  `scheduled_automation_materializes_visible_proactive_task` e
+  `scheduled_occurrences_reuse_one_visible_thread`.
+- **WS6.3d proactive review surface/dedup FATTO (2026-06-22):** superficie card
+  coperta dai test esistenti: parse decline/card/action/choices, dedup fuzzy
+  anti-parafrasi e read model suggestions. Test rilevanti:
+  `proactive_parse_declines_cleanly`, `proactive_parse_builds_card`,
+  `proactive_parse_extracts_choices`, `proactive_fuzzy_dedup_blocks_paraphrases`,
+  `suggestions_dedup_list_and_act`.
+- **WS6.4 proactive memory write-back FATTO (2026-06-22):** `suggestion_act`
+  ora scrive anche in memoria: `accepted` e `snoozed` diventano `open_loop`,
+  `dismissed` diventa `decision`, con metadata della card/dedup/proposed_action.
+  La memoria viene auto-confermata nello scope della card, così una chat futura
+  vede loop aperti o decisioni prese dalle azioni proattive. Test:
+  `proactive_action_memory_writeback_maps_statuses` e
+  `suggestion_lookup_preserves_durable_dedup_key`.
+- **Gate finale locale WS6 (2026-06-22):** `cargo test -p
+  local-first-task-runtime` verde; `cargo test -p local-first-desktop-gateway`
+  = **166 passati, 1 ignorato**; `cargo build -p local-first-desktop-gateway`
+  verde; `npm run build` desktop verde; `git diff --check` pulito.
 - **Divieto operativo:** niente altri test di scrittura via endpoint HTTP grezzo;
   per questo gate usare solo UI/app o callback Telegram reale.
 

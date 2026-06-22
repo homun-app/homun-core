@@ -146,8 +146,7 @@ impl TaskRuntime {
                     summary.waiting += 1;
                 }
                 Ok(ExecutorResult::RetryableFailure { reason }) => {
-                    self.retry.record_failure(
-                        &self.store,
+                    self.record_failure_and_insert_next_if_terminal(
                         &leased_task.task_id,
                         user_id,
                         workspace_id,
@@ -157,8 +156,7 @@ impl TaskRuntime {
                     summary.failed_retryable += 1;
                 }
                 Err(error) => {
-                    self.retry.record_failure(
-                        &self.store,
+                    self.record_failure_and_insert_next_if_terminal(
                         &leased_task.task_id,
                         user_id,
                         workspace_id,
@@ -211,6 +209,23 @@ impl TaskRuntime {
     ) -> TaskRuntimeResult<()> {
         if let Some(next) = self.scheduler.next_recurrence(completed, now) {
             self.store.insert_task(&next)?;
+        }
+        Ok(())
+    }
+
+    fn record_failure_and_insert_next_if_terminal(
+        &self,
+        task_id: &TaskId,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+        reason: &str,
+        now: OffsetDateTime,
+    ) -> TaskRuntimeResult<()> {
+        self.retry
+            .record_failure(&self.store, task_id, user_id, workspace_id, reason, now)?;
+        let failed = self.reload_task(task_id, user_id, workspace_id)?;
+        if failed.status == TaskStatus::Failed {
+            self.insert_next_recurrence(&failed, now)?;
         }
         Ok(())
     }
