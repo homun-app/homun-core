@@ -534,6 +534,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     cancel_homun_checkins(&state);
     start_task_executor_worker(state.clone());
     spawn_memory_consolidation_tick(state.clone());
+    spawn_embedding_catchup(state.clone());
     spawn_thread_browser_session_reaper(state.clone());
     spawn_contained_computer_idle_reaper(state.clone());
     spawn_browser_handoff_reaper(state.clone());
@@ -1289,6 +1290,54 @@ fn spawn_memory_consolidation_tick(state: AppState) {
             if merged > 0 || dropped > 0 {
                 eprintln!("memory auto-consolidation: merged {merged}, dropped {dropped}");
             }
+        }
+    });
+}
+
+/// WS5.2 — embed EVERYTHING. One-shot startup catch-up that vectorizes any memory
+/// still missing an embedding, across personal + every project scope, looping until
+/// none remain (or the embed endpoint stops making progress). Off the startup
+/// critical path. Closes the recall gap: embeddings were written only lazily (4-12
+/// per op) and via consolidation (OFF by default) → most extracted memories never got
+/// a vector, so semantic recall covered a fraction (baseline: 391 vectors / 555 memories).
+fn spawn_embedding_catchup(state: AppState) {
+    tokio::spawn(async move {
+        // Delay so it never competes with the HTTP bind / first turn.
+        tokio::time::sleep(std::time::Duration::from_secs(20)).await;
+        let user = gateway_memory_user_id();
+        let mut scopes = vec![PERSONAL_WORKSPACE.to_string()];
+        for ws in load_workspaces_file().workspaces {
+            if ws.id != base_workspace_id() && ws.id != PERSONAL_WORKSPACE {
+                scopes.push(ws.id);
+            }
+        }
+        const BATCH: usize = 64;
+        let pending = |ws: &MemoryWorkspaceId| -> usize {
+            lock_memory_facade(&state)
+                .ok()
+                .and_then(|f| f.refs_without_embeddings(&user, ws, BATCH).ok())
+                .map(|r| r.len())
+                .unwrap_or(0)
+        };
+        let mut total = 0usize;
+        for scope in scopes {
+            let ws = MemoryWorkspaceId::new(&scope);
+            loop {
+                let before = pending(&ws);
+                if before == 0 {
+                    break;
+                }
+                backfill_embeddings(&state, &user, &ws, BATCH).await;
+                let after = pending(&ws);
+                if after >= before {
+                    break; // no progress (embed endpoint down) → retry next boot
+                }
+                total += before - after;
+                tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+            }
+        }
+        if total > 0 {
+            eprintln!("memory embedding catch-up: vectorized {total} memories");
         }
     });
 }

@@ -77,7 +77,10 @@ che fanno "ricordare il perché e sopravvivere". Caposaldo #8.
 - ☐ **5.1 Estendere il grafo** da solo-codice a **decisioni / artefatti / step di piano
   / esiti** + **archi causali** (`rationale_for`, `produced`, `derived_from`,
   `supersedes`, `blocks`).
-- ☐ **5.2 Embeddare tutto** l'importante (oggi 391) → recall semantico reale.
+- ✅ **5.2 Embeddare tutto** — `spawn_embedding_catchup` allo startup vettorizza ogni
+  memoria mancante su **tutti** gli scope, loop fino a esaurimento (off critical path).
+  Risolve il gap 391/555 (l'auto-consolidamento che faceva il backfill era OFF di
+  default; il backfill altrove era cappato a 4-12).
 - ☐ **5.3 Loop aperti** come entità di prima classe (lavoro incompiuto + perché,
   priorità di sopravvivenza; si chiudono a task completato — effetto Zeigarnik).
 - ☐ **5.4 Proiezione markdown attiva** per progetto (`brief.md` / `decisioni.md` /
