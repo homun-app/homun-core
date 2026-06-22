@@ -87,7 +87,7 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   più stretto*: stop multi-step **senza** confirm-gate (tool usati, niente piano). **NON**
   risolve `demo-piano` (`pending_confirm` rompe a :13518, *prima* del suo guard) → **in-app NON
   verificata**, non ha passato il gate. ⚠️ Side-note UI: turni cloud etichettati "Local model".
-- **VERO PROSSIMO PASSO = WS6 6.1b (APPROVAL-RESUME) — Passo 0 FATTO, design inchiodato:** dopo
+- **WS6 6.1b (APPROVAL-RESUME) — CODICE FATTO (commit `7f98d57`, 8/8 verdi), GATE IN-APP PENDENTE:** dopo
   un'azione confirm-gated approvata, rientrare nel loop del thread via **`run_agent_turn(state,
   thread_id, prompt, policy)`** (:17078, già usato da :16528 canale e :19360 autorun). Due rami:
   (a) **in-app** `mcp_execute` (:22259) ha già `thread_id`+`message_id` → `spawn(run_agent_turn)`
@@ -95,6 +95,11 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   `create_pending_approval` (:21078) ← `deliver_remote_approval` (:21082) ← :13362, poi
   `run_agent_turn`. Frizione "approva ogni scrittura" già coperta da **Policy B `allow_server`**
   (:22273). Blocca **ogni** deliverable che scrive file → **priorità su slice 3 / WS2**.
+  **IMPLEMENTATO:** `thread_id` in `PendingApproval` + helper `resume_thread_after_approval` →
+  `run_agent_turn(...,"full")`; agganciato a `mcp_execute` (in-app) e `execute_pending_approval`
+  (Telegram). **Gate:** riavviare `electron:dev` (codice nuovo), gemma, cancellare `~/demo-piano`,
+  prompt demo-piano, **approvare la 1ª scrittura** (con "always allow this server" per non
+  confermare ogni step) → il task deve **continuare** fino a **5/5**.
 - **Coda:** WS5.4b (`stato-lavori.md`) · WS5.4c (chiusura+dedup) · WS5.5 (provenienza) ·
   WS2 · WS1 3-6 · WS6/7/8/9. Ordine nel backlog.
 - **Regole operative:** build LOCAL, verde a ogni passo, doc aggiornati nello stesso turno,

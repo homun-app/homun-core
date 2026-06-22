@@ -141,8 +141,8 @@ cablato** nel flusso agente. ADR 0015.
 - ☐ **6.1 Cablare la durabilità**: task agente lunghi nella coda con
   checkpoint/heartbeat/recovery → sopravvivono a chiusura app/crash (lega ADR 0016 F4
   background+resume).
-- ☐ **6.1b Approval-resume — PRIORITÀ (è la causa REALE di demo-piano, confermata in-app
-  2026-06-22 su kimi+gemma):** un task che scrive file → la 1ª scrittura
+- 🟡 **6.1b Approval-resume — CODICE FATTO (commit `7f98d57`, 8/8 verdi; gate in-app pendente)**
+  (causa REALE di demo-piano, confermata in-app 2026-06-22 su kimi+gemma): un task che scrive file → la 1ª scrittura
   (`mcp__filesystem__create` ∈ `composio_writes`) attiva la card `‹‹MCP_CONFIRM››`
   (:13340-13367) + Telegram + `pending_confirm` → turno muore a :13518; dopo l'**approvazione**
   `execute_pending_approval` (:21029) esegue **solo quell'azione** + riscrive in "✓ MCP tool
@@ -156,6 +156,12 @@ cablato** nel flusso agente. ADR 0015.
   ← call-site loop (:13362), poi `run_agent_turn`. Frizione "approva ogni scrittura" già
   mitigata da **Policy B `allow_server`** (:22273). Blocca **ogni** deliverable che scrive file
   → **prima di slice 3 / WS2**. Lega ADR 0015 + caposaldo #2.
+  **IMPLEMENTATO (commit `7f98d57`):** `thread_id` aggiunto a `PendingApproval` +
+  `create/take_pending_approval` + `deliver_remote_approval`; helper `resume_thread_after_approval`
+  → `spawn(run_agent_turn(thread, prompt, "full"))`; agganciato a `mcp_execute` (in-app) e
+  `execute_pending_approval` (Telegram); call-site MCP (:13362)/Composio (:13452) passano il
+  thread, bozza-canale (:16572) `None`. **Gate in-app:** demo-piano su gemma → approvi la 1ª
+  scrittura → il task **continua** (5/5; usa "always allow this server" per evitare 1 conferma/step).
 - ☐ **6.2 Resource Governor** attivo sui task (limiti, backpressure).
 - ☐ **6.3 Scheduler / ricorrenza** + **proactive review** (l'assistente propone schede
   in autonomia governata) verificati end-to-end.
