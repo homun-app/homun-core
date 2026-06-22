@@ -540,7 +540,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     spawn_browser_handoff_reaper(state.clone());
     spawn_connector_event_poller(state.clone());
     start_proactivity_auto_review(state.clone());
-    reconnect_channels_on_startup();
     let chat_routes = Router::new()
         .route(
             "/api/chat/threads",
@@ -801,6 +800,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             state.clone(),
             require_gateway_token,
         ));
+    let startup_state = state.clone();
     let mut app = Router::new()
         .route("/api/health", get(health))
         // noVNC live-view proxy: OUTSIDE the bearer layer (an iframe/WS can't send
@@ -835,6 +835,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
     let listener = TcpListener::bind(addr).await?;
     println!("local-first-desktop-gateway listening on http://{addr}");
+    tokio::spawn(reconnect_channels_on_startup(startup_state));
     axum::serve(listener, app).await?;
     Ok(())
 }
@@ -15817,13 +15818,13 @@ struct WhatsAppConnectRequest {
 /// sidecars resume, the platforms replay their backlog (Telegram getUpdates from
 /// the persisted offset; WhatsApp store-and-forward), and the (now retrying)
 /// forward delivers them to the gateway. Best-effort: failures are logged.
-fn reconnect_channels_on_startup() {
+async fn reconnect_channels_on_startup(state: AppState) {
     if !load_channel_settings().enabled {
         return; // kill-switch off: stay disconnected.
     }
     let gw_port =
         env::var("HOMUN_DESKTOP_GATEWAY_PORT").unwrap_or_else(|_| "18765".to_string());
-    let gw_token = env::var("HOMUN_DESKTOP_GATEWAY_TOKEN").ok();
+    let gw_token = state.auth_token.as_ref();
 
     // WhatsApp: only if a session was previously paired (matches the sidecar's
     // own session path under $HOME/.homun).
@@ -15840,9 +15841,7 @@ fn reconnect_channels_on_startup() {
             }
             command.env("WA_HTTP_PORT", WHATSAPP_HTTP_PORT.to_string());
             command.env("WA_GATEWAY_URL", format!("http://127.0.0.1:{gw_port}"));
-            if let Some(token) = gw_token.as_ref() {
-                command.env("WA_GATEWAY_TOKEN", token);
-            }
+            command.env("WA_GATEWAY_TOKEN", gw_token);
             match command.spawn() {
                 Ok(child) => {
                     if let Ok(mut guard) = whatsapp_child().lock() {
@@ -15860,27 +15859,9 @@ fn reconnect_channels_on_startup() {
         .and_then(|p| fs::read_to_string(p).ok())
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
-    if !telegram_running() {
-        if let (Some(bin), Some(token)) = (telegram_bin(), tg_token) {
-            let mut command = std::process::Command::new(bin);
-            command.env("TG_BOT_TOKEN", &token);
-            command.env("TG_HTTP_PORT", TELEGRAM_HTTP_PORT.to_string());
-            if let Some(path) = telegram_status_path() {
-                command.env("TG_STATUS_FILE", path);
-            }
-            command.env("TG_GATEWAY_URL", format!("http://127.0.0.1:{gw_port}"));
-            if let Some(token) = gw_token.as_ref() {
-                command.env("TG_GATEWAY_TOKEN", token);
-            }
-            match command.spawn() {
-                Ok(child) => {
-                    if let Ok(mut guard) = telegram_child().lock() {
-                        *guard = Some(child);
-                    }
-                    eprintln!("channel/telegram: auto-reconnect at startup (token present)");
-                }
-                Err(error) => eprintln!("channel/telegram: auto-reconnect failed: {error}"),
-            }
+    if let Some(token) = tg_token {
+        if let Err(error) = ensure_telegram_sidecar(&state, &token).await {
+            eprintln!("channel/telegram: auto-reconnect failed: {error:?}");
         }
     }
 }
@@ -16015,6 +15996,104 @@ fn telegram_running() -> bool {
     telegram_port_open()
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RebindResult {
+    Configured,
+    Http(u16),
+    Transport,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TelegramBridgeAction {
+    Keep,
+    Replace,
+}
+
+fn telegram_bridge_action(result: RebindResult) -> TelegramBridgeAction {
+    match result {
+        RebindResult::Configured => TelegramBridgeAction::Keep,
+        RebindResult::Http(_) | RebindResult::Transport => TelegramBridgeAction::Replace,
+    }
+}
+
+async fn rebind_telegram_sidecar(state: &AppState, bot_token: &str) -> RebindResult {
+    let gateway_port = env::var("HOMUN_DESKTOP_GATEWAY_PORT").unwrap_or_else(|_| "18765".to_string());
+    let response = state
+        .http
+        .post(format!("http://127.0.0.1:{TELEGRAM_HTTP_PORT}/configure-gateway"))
+        .timeout(std::time::Duration::from_secs(3))
+        .bearer_auth(bot_token)
+        .json(&serde_json::json!({
+            "gateway_url": format!("http://127.0.0.1:{gateway_port}"),
+            "gateway_token": state.auth_token.as_ref(),
+        }))
+        .send()
+        .await;
+    match response {
+        Ok(response) if response.status() == StatusCode::NO_CONTENT => RebindResult::Configured,
+        Ok(response) => RebindResult::Http(response.status().as_u16()),
+        Err(_) => RebindResult::Transport,
+    }
+}
+
+fn stop_telegram_sidecar() {
+    if let Ok(mut guard) = telegram_child().lock() {
+        if let Some(mut child) = guard.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+    let _ = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(format!("lsof -tiTCP:{TELEGRAM_HTTP_PORT} -sTCP:LISTEN | xargs kill 2>/dev/null"))
+        .status();
+}
+
+fn spawn_telegram_sidecar(state: &AppState, token: &str) -> Result<(), GatewayError> {
+    let bin = telegram_bin().ok_or_else(|| GatewayError {
+        status: StatusCode::SERVICE_UNAVAILABLE,
+        code: "telegram_bin_missing",
+        message: "Bridge not compiled: run `cargo build --release` in runtimes/channel-telegram."
+            .to_string(),
+    })?;
+    let mut command = std::process::Command::new(bin);
+    command.env("TG_BOT_TOKEN", token);
+    command.env("TG_HTTP_PORT", TELEGRAM_HTTP_PORT.to_string());
+    if let Some(path) = telegram_status_path() {
+        command.env("TG_STATUS_FILE", path);
+    }
+    let gateway_port = env::var("HOMUN_DESKTOP_GATEWAY_PORT").unwrap_or_else(|_| "18765".to_string());
+    command.env("TG_GATEWAY_URL", format!("http://127.0.0.1:{gateway_port}"));
+    command.env("TG_GATEWAY_TOKEN", state.auth_token.as_ref());
+    let child = command.spawn().map_err(|error| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "telegram_spawn",
+        message: error.to_string(),
+    })?;
+    if let Ok(mut guard) = telegram_child().lock() {
+        *guard = Some(child);
+    }
+    Ok(())
+}
+
+async fn ensure_telegram_sidecar(
+    state: &AppState,
+    token: &str,
+) -> Result<TelegramBridgeAction, GatewayError> {
+    if telegram_running() {
+        let rebind = rebind_telegram_sidecar(state, token).await;
+        let action = telegram_bridge_action(rebind);
+        if action == TelegramBridgeAction::Keep {
+            eprintln!("channel/telegram: reconfigured existing sidecar");
+            return Ok(action);
+        }
+        eprintln!("channel/telegram: replacing stale or legacy sidecar");
+        stop_telegram_sidecar();
+    }
+    spawn_telegram_sidecar(state, token)?;
+    Ok(TelegramBridgeAction::Replace)
+}
+
 async fn telegram_status() -> Json<TelegramStatus> {
     let mut status = telegram_status_path()
         .and_then(|p| fs::read_to_string(p).ok())
@@ -16036,11 +16115,9 @@ struct TelegramConnectRequest {
 }
 
 async fn telegram_connect(
+    State(state): State<AppState>,
     Json(request): Json<TelegramConnectRequest>,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
-    if telegram_running() {
-        return Ok(Json(serde_json::json!({ "ok": true, "already_running": true })));
-    }
     // Resolve the token: explicit (persist it 0600) or previously persisted.
     let token = match request.token.as_ref().map(|t| t.trim()).filter(|t| !t.is_empty()) {
         Some(token) => {
@@ -16064,46 +16141,15 @@ async fn telegram_connect(
             })?,
     };
 
-    let bin = telegram_bin().ok_or_else(|| GatewayError {
-        status: StatusCode::SERVICE_UNAVAILABLE,
-        code: "telegram_bin_missing",
-        message: "Bridge not compiled: run `cargo build --release` in runtimes/channel-telegram."
-            .to_string(),
-    })?;
-    let mut command = std::process::Command::new(bin);
-    command.env("TG_BOT_TOKEN", &token);
-    command.env("TG_HTTP_PORT", TELEGRAM_HTTP_PORT.to_string());
-    if let Some(path) = telegram_status_path() {
-        command.env("TG_STATUS_FILE", path);
-    }
-    let gw_port = env::var("HOMUN_DESKTOP_GATEWAY_PORT").unwrap_or_else(|_| "18765".to_string());
-    command.env("TG_GATEWAY_URL", format!("http://127.0.0.1:{gw_port}"));
-    if let Ok(token) = env::var("HOMUN_DESKTOP_GATEWAY_TOKEN") {
-        command.env("TG_GATEWAY_TOKEN", token);
-    }
-    let child = command.spawn().map_err(|error| GatewayError {
-        status: StatusCode::INTERNAL_SERVER_ERROR,
-        code: "telegram_spawn",
-        message: error.to_string(),
-    })?;
-    if let Ok(mut guard) = telegram_child().lock() {
-        *guard = Some(child);
-    }
-    Ok(Json(serde_json::json!({ "ok": true })))
+    let action = ensure_telegram_sidecar(&state, &token).await?;
+    Ok(Json(serde_json::json!({
+        "ok": true,
+        "reconfigured": action == TelegramBridgeAction::Keep,
+    })))
 }
 
 async fn telegram_disconnect() -> Json<serde_json::Value> {
-    if let Ok(mut guard) = telegram_child().lock() {
-        if let Some(mut child) = guard.take() {
-            let _ = child.kill();
-            let _ = child.wait();
-        }
-    }
-    // Also kill any sidecar orphaned by a gateway restart (still on the port).
-    let _ = std::process::Command::new("sh")
-        .arg("-c")
-        .arg(format!("lsof -tiTCP:{TELEGRAM_HTTP_PORT} -sTCP:LISTEN | xargs kill 2>/dev/null"))
-        .status();
+    stop_telegram_sidecar();
     Json(serde_json::json!({ "ok": true }))
 }
 
@@ -30699,6 +30745,30 @@ mod tests {
         assert_eq!(sanitize_dedup_key("", "Idra"), "idra");
         assert_eq!(sanitize_dedup_key("progetto-fermo", ""), "progetto-fermo");
         assert_eq!(sanitize_dedup_key("", ""), "suggerimento");
+    }
+
+    #[test]
+    fn telegram_rebind_keeps_a_compatible_sidecar() {
+        assert_eq!(
+            super::telegram_bridge_action(super::RebindResult::Configured),
+            super::TelegramBridgeAction::Keep,
+        );
+    }
+
+    #[test]
+    fn telegram_rebind_replaces_legacy_or_failed_sidecars() {
+        assert_eq!(
+            super::telegram_bridge_action(super::RebindResult::Http(404)),
+            super::TelegramBridgeAction::Replace,
+        );
+        assert_eq!(
+            super::telegram_bridge_action(super::RebindResult::Http(401)),
+            super::TelegramBridgeAction::Replace,
+        );
+        assert_eq!(
+            super::telegram_bridge_action(super::RebindResult::Transport),
+            super::TelegramBridgeAction::Replace,
+        );
     }
 
     #[test]
