@@ -6253,6 +6253,21 @@ fn workspace_scoped_mcp_write_for_root(
     })
 }
 
+fn workspace_scoped_mcp_write(
+    state: &AppState,
+    thread_id: Option<&str>,
+    provider: &CapabilityProviderId,
+    tool: &str,
+    arguments: &serde_json::Value,
+) -> bool {
+    workspace_scoped_mcp_write_for_root(
+        project_root_for_thread(state, thread_id).as_deref(),
+        provider.as_str(),
+        tool,
+        arguments,
+    )
+}
+
 /// Resolves the host project root for the conversation's workspace, if one is set
 /// and exists on disk. Falls back to the active workspace when the thread is unknown.
 fn project_root_for_thread(state: &AppState, thread_id: Option<&str>) -> Option<PathBuf> {
@@ -13392,9 +13407,16 @@ require your confirmation in the app. Propose it and stop."
                         // read_only channel + write was already rejected just above
                         // (composio_writes now includes MCP writes). `autonomous` runs skip
                         // the card and execute (explicit per-automation opt-in).
-                        if composio_writes.contains(name) && !autonomous {
-                            let args_val: serde_json::Value = serde_json::from_str(args_raw)
-                                .unwrap_or_else(|_| serde_json::json!({}));
+                        let args_val: serde_json::Value = serde_json::from_str(args_raw)
+                            .unwrap_or_else(|_| serde_json::json!({}));
+                        let workspace_scoped = workspace_scoped_mcp_write(
+                            &state_owned,
+                            thread_id.as_deref(),
+                            &mcp_provider,
+                            &mcp_tool,
+                            &args_val,
+                        );
+                        if composio_writes.contains(name) && !autonomous && !workspace_scoped {
                             let marker = serde_json::json!({ "tool": name, "arguments": args_val })
                                 .to_string();
                             let card = format!(
@@ -13430,8 +13452,7 @@ confirmation card in the interface. Do NOT say it was executed."
                             let st = state_owned.clone();
                             let prov = mcp_provider.clone();
                             let tool = mcp_tool.clone();
-                            let args: serde_json::Value = serde_json::from_str(args_raw)
-                                .unwrap_or_else(|_| serde_json::json!({}));
+                            let args = args_val;
                             let mcp_started = std::time::Instant::now();
                             let exec = tokio::task::spawn_blocking(move || {
                                 run_mcp_chat_tool(&st, &prov, &tool, args)
