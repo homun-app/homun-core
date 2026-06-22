@@ -303,9 +303,25 @@ cablato** nel flusso agente. ADR 0015.
   `summary.completed=0`, dopo completa il task appena la risorsa viene rilasciata).
   Verifiche: `cargo test -p local-first-task-runtime` verde; focused gateway
   `task_executor_requeues_waiting_resource_before_scheduling` verde; build gateway
-  e desktop verdi; `git diff --check` pulito. **Prossimo slice:** visibilità
-  limiti/uso/backpressure nella API task/executor, poi stress-gate in-app con più
-  worker.
+  e desktop verdi; `git diff --check` pulito.
+  **Slice 3 FATTA (2026-06-22):** visibilità backpressure nella API task queue:
+  `resource_usage[]` ora espone `units`, `limit_units`, `available_units` e
+  `saturated` per classe. I limiti sono quelli effettivi del worker
+  (`conservative_defaults` + `active_llm_concurrency` per `llm_inference`).
+  Test red/green `task_queue_response_serializes_ui_read_model_for_renderer`;
+  gateway **162 passati, 1 ignorato**; task-runtime verde; build gateway/desktop
+  verdi; `git diff --check` pulito.
+  **Slice 4 FATTA (2026-06-22):** stress-gate headless multi-worker su SQLite
+  condiviso: due connessioni `TaskStore` separate, limite `llm_inference=1`,
+  un worker detiene la reservation e un secondo `TaskRuntime` porta il task
+  concorrente a `WaitingResource`; dopo rilascio reservation, il tick successivo
+  reidrata e completa il task. Test:
+  `task_runtime_recovers_resource_wait_across_worker_connections`. Verifiche:
+  `cargo test -p local-first-task-runtime` verde; gateway **162 passati, 1
+  ignorato**; build gateway e desktop verdi; `git diff --check` pulito.
+  **Prossimo passo:**
+  decidere se chiudere 6.2 e passare a 6.3, oppure aggiungere una micro-slice UI
+  per configurare/mostrare i limiti risorsa.
 - ☐ **6.3 Scheduler / ricorrenza** + **proactive review** (l'assistente propone schede
   in autonomia governata) verificati end-to-end.
 - ☐ **6.4** Le azioni proattive scrivono in memoria (loop aperti / decisioni) — lega WS5.

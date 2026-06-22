@@ -45,11 +45,13 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
 
 ### Cruscotto operativo attuale
 
-- **Linea attiva:** WS6.2 Resource Governor — slice 1+2+3 completate localmente:
+- **Linea attiva:** WS6.2 Resource Governor — slice 1+2+3+4 completate localmente:
   reidratazione dei task `WaitingResource` quando la capacità torna disponibile,
   sia nel gateway sia nel `TaskRuntime` standalone; la API task queue ora espone
-  uso, limite, disponibilità e saturazione per classe risorsa. Prossimo slice:
-  stress-gate in-app con più worker e `llm_inference` conteso.
+  uso, limite, disponibilità e saturazione per classe risorsa; stress-gate
+  cross-connection con due worker/store separati passato su `llm_inference`
+  conteso. Prossimo passo: decidere se chiudere WS6.2 così o aggiungere una
+  slice breve di configurabilità UI/diagnostica dei limiti prima di WS6.3.
 - **Fatto e verificato localmente:** root automatica del progetto, bypass conferma
   solo per scritture Filesystem MCP dentro root; outside-root resta confirm-gated;
   routing Auto thread-aware + fallback orchestratore su `400` con tool; approval
@@ -174,6 +176,17 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   `cargo test -p local-first-task-runtime` verde; `cargo build -p
   local-first-desktop-gateway` verde; `npm run build` desktop verde;
   `git diff --check` pulito.
+- **WS6.2d stress gate headless FATTO (2026-06-22):** aggiunto un gate
+  multi-worker realistico su SQLite condiviso: due connessioni `TaskStore`
+  separate simulano owner/worker diversi, limite `llm_inference=1`, un task
+  occupa la risorsa e il secondo va in `WaitingResource`; dopo rilascio della
+  reservation, un tick successivo del `TaskRuntime` separato reidrata e completa
+  il task bloccato. Test:
+  `task_runtime_recovers_resource_wait_across_worker_connections`.
+  Verifiche fresche: `cargo test -p local-first-task-runtime` verde;
+  `cargo test -p local-first-desktop-gateway` = **162 passati, 1 ignorato**;
+  `cargo build -p local-first-desktop-gateway` verde; `npm run build` desktop
+  verde; `git diff --check` pulito.
 - **Divieto operativo:** niente altri test di scrittura via endpoint HTTP grezzo;
   per questo gate usare solo UI/app o callback Telegram reale.
 

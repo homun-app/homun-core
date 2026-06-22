@@ -99,6 +99,95 @@ fn task_runtime_requeues_waiting_resource_before_scheduling() {
 }
 
 #[test]
+fn task_runtime_recovers_resource_wait_across_worker_connections() {
+    let user = UserId::new("user_1");
+    let workspace = WorkspaceId::new("workspace_1");
+    let path = std::env::temp_dir().join(format!(
+        "homun-task-runtime-{}.sqlite",
+        uuid::Uuid::new_v4()
+    ));
+
+    let seed = TaskStore::open(&path).unwrap();
+    let running = task("running", &user, &workspace)
+        .with_resource(ResourceRequirement::new(ResourceClass::LlmInference, 1));
+    let blocked = task("blocked", &user, &workspace)
+        .with_resource(ResourceRequirement::new(ResourceClass::LlmInference, 1));
+    seed.insert_task(&running).unwrap();
+    seed.insert_task(&blocked).unwrap();
+    drop(seed);
+
+    let owner_store = TaskStore::open(&path).unwrap();
+    let governor =
+        local_first_task_runtime::ResourceGovernor::new(
+            ResourceLimits::new().with_limit(ResourceClass::LlmInference, 1),
+        );
+    let now = OffsetDateTime::now_utc();
+    local_first_task_runtime::LeaseManager::new(Duration::minutes(5))
+        .acquire(
+            &owner_store,
+            &running.task_id,
+            &user,
+            &workspace,
+            "worker_a",
+            now,
+        )
+        .unwrap();
+    let leased = owner_store
+        .get_task(&running.task_id, &user, &workspace)
+        .unwrap()
+        .unwrap();
+    governor.reserve(&owner_store, &leased, "worker_a").unwrap();
+
+    let executor = FakeTaskExecutor::new(vec![ExecutorResult::Completed {
+        output: json!({"ok": true}),
+    }]);
+    let mut worker_b = TaskRuntime::new(
+        TaskStore::open(&path).unwrap(),
+        Box::new(executor),
+        ResourceLimits::new().with_limit(ResourceClass::LlmInference, 1),
+        "worker_b",
+    );
+
+    let first = worker_b.run_ready_once(&user, &workspace, now).unwrap();
+    let blocked_waiting = worker_b
+        .store()
+        .get_task(&TaskId::new("blocked"), &user, &workspace)
+        .unwrap()
+        .unwrap();
+    assert_eq!(first.completed, 0);
+    assert_eq!(first.skipped, 1);
+    assert_eq!(blocked_waiting.status, TaskStatus::WaitingResource);
+
+    owner_store
+        .update_task_status(&running.task_id, &user, &workspace, TaskStatus::Completed, None)
+        .unwrap();
+    governor.release(&owner_store, &leased).unwrap();
+
+    let second = worker_b
+        .run_ready_once(&user, &workspace, now + Duration::seconds(1))
+        .unwrap();
+    let reloaded = worker_b
+        .store()
+        .get_task(&TaskId::new("blocked"), &user, &workspace)
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(second.completed, 1);
+    assert_eq!(reloaded.status, TaskStatus::Completed);
+    assert_eq!(
+        worker_b
+            .store()
+            .resource_usage(&user, &workspace, ResourceClass::LlmInference)
+            .unwrap(),
+        0
+    );
+
+    drop(worker_b);
+    drop(owner_store);
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
 fn task_runtime_records_checkpoint_and_requeues_task() {
     let user = UserId::new("user_1");
     let workspace = WorkspaceId::new("workspace_1");
