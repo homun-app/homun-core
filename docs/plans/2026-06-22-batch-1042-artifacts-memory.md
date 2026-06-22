@@ -168,6 +168,12 @@ cablato** nel flusso agente. ADR 0015.
   (server-side, no frontend). Catena: continuazione si ferma alla 2ª confirm → card nel testo
   persistito → riappare in-app + msg Telegram → approvi → riprende. **Gate in-app pendente.**
   Limite: refresh, non token-live; nessun indicatore "sta lavorando".
+  **Blocco Telegram trovato nel re-test (2026-06-22):** bridge orfano della build installata su
+  `:18767` → card outbound funziona, ma `TG_GATEWAY_TOKEN` stale. Prova read-only contro il
+  gateway locale: token del bridge **401**, token corrente **200**. Il bridge ignora la response
+  della callback, perciò il tap non mostra errore. Prima del gate Telegram: rendere il lifecycle
+  del sidecar resiliente a restart/update (rebind/handshake con token corrente, senza credenziali
+  in log) e registrare esito HTTP redatto della callback. Non attribuire questo al resume 6.1b.
 - ☐ **6.2 Resource Governor** attivo sui task (limiti, backpressure).
 - ☐ **6.3 Scheduler / ricorrenza** + **proactive review** (l'assistente propone schede
   in autonomia governata) verificati end-to-end.

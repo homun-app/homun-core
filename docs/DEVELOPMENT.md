@@ -108,6 +108,14 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   multi-scrittura: la continuazione si ferma alla 2ª confirm → la card è nel testo persistito →
   riappare in-app + nuovo msg Telegram → approvi → riprende, un'approvazione per volta.
   *(Limite noto: refresh, non token-live; nessun indicatore "sta lavorando" durante il turno.)*
+  **Blocco Telegram diagnosticato (2026-06-22):** il bridge attivo era un processo orfano della
+  build installata (19 giugno), rimasto in ascolto su `:18767` durante il run dev. Inviava le
+  card ma conservava un `TG_GATEWAY_TOKEN` diverso da quello del gateway locale corrente. Prova
+  read-only: `GET /api/channels/telegram/status` col token del bridge → **401**; col token del
+  gateway corrente → **200**. Il bridge ignora la risposta della POST callback, quindi il tap
+  sembra non fare nulla. Da fare prima del gate Telegram: lifecycle/handshake che riagganci o
+  rimpiazzi un sidecar orfano senza riusare credenziali stale, più diagnostica redatta dello
+  status callback. Il resume 6.1b non è ancora falsificato da Telegram.
 - **Coda:** WS5.4b (`stato-lavori.md`) · WS5.4c (chiusura+dedup) · WS5.5 (provenienza) ·
   WS2 · WS1 3-6 · WS6/7/8/9. Ordine nel backlog.
 - **Regole operative:** build LOCAL, verde a ogni passo, doc aggiornati nello stesso turno,
