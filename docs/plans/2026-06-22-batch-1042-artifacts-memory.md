@@ -141,7 +141,7 @@ cablato** nel flusso agente. ADR 0015.
 - ☐ **6.1 Cablare la durabilità**: task agente lunghi nella coda con
   checkpoint/heartbeat/recovery → sopravvivono a chiusura app/crash (lega ADR 0016 F4
   background+resume).
-- 🟡 **6.1b Approval-resume — CODICE FATTO (commit `7f98d57`, 8/8 verdi; gate in-app pendente)**
+- 🟡 **6.1b Approval-resume — cut #1 (commit `7f98d57`) GATE FALLITO; serve cut #2 frontend-driven**
   (causa REALE di demo-piano, confermata in-app 2026-06-22 su kimi+gemma): un task che scrive file → la 1ª scrittura
   (`mcp__filesystem__create` ∈ `composio_writes`) attiva la card `‹‹MCP_CONFIRM››`
   (:13340-13367) + Telegram + `pending_confirm` → turno muore a :13518; dopo l'**approvazione**
@@ -160,8 +160,14 @@ cablato** nel flusso agente. ADR 0015.
   `create/take_pending_approval` + `deliver_remote_approval`; helper `resume_thread_after_approval`
   → `spawn(run_agent_turn(thread, prompt, "full"))`; agganciato a `mcp_execute` (in-app) e
   `execute_pending_approval` (Telegram); call-site MCP (:13362)/Composio (:13452) passano il
-  thread, bozza-canale (:16572) `None`. **Gate in-app:** demo-piano su gemma → approvi la 1ª
-  scrittura → il task **continua** (5/5; usa "always allow this server" per evitare 1 conferma/step).
+  thread, bozza-canale (:16572) `None`.
+  **GATE FALLITO (2026-06-22) — cut #1 = veicolo sbagliato:** `run_agent_turn` **drena** lo
+  stream e il resume **scarta** il risultato (no `append_assistant_message`/`thread.updated`) →
+  invisibile in chat; e la continuazione multi-scrittura non passa (confirm card drenate) → solo
+  `note.md` (1/5). **cut #2 (da fare) = continuazione FRONTEND-driven:** dopo `mcp_execute` ok,
+  il frontend (`apps/desktop/src`) ri-avvia un turno via `generate_stream` ("azione approvata,
+  continua") → live + persistito. Tenere il plumbing `thread_id`; togliere `run_agent_turn` da
+  `mcp_execute`. (Telegram: serve variante server-side che persiste, da valutare a parte.)
 - ☐ **6.2 Resource Governor** attivo sui task (limiti, backpressure).
 - ☐ **6.3 Scheduler / ricorrenza** + **proactive review** (l'assistente propone schede
   in autonomia governata) verificati end-to-end.
