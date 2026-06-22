@@ -4478,6 +4478,14 @@ function ArtifactsCard() {
   const { t } = useTranslation();
   const [usage, setUsage] = useState<ArtifactsUsage | null>(null);
   const [busy, setBusy] = useState(false);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const toggleExpanded = (thread: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(thread)) next.delete(thread);
+      else next.add(thread);
+      return next;
+    });
 
   const refresh = async () => {
     try {
@@ -4540,26 +4548,82 @@ function ArtifactsCard() {
         </div>
         {hasArtifacts ? (
           <div className="set-rows" style={{ marginTop: 10 }}>
-            {usage!.threads.map((thread) => (
-              <div className="set-row" key={thread.thread}>
-                <div style={{ minWidth: 0 }}>
-                  <div className="rk" style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
-                    {thread.thread}
+            {usage!.threads.map((thread) => {
+              const open = expanded.has(thread.thread);
+              return (
+                <div key={thread.thread}>
+                  <div className="set-row">
+                    <button
+                      type="button"
+                      onClick={() => toggleExpanded(thread.thread)}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 6,
+                        minWidth: 0,
+                        flex: 1,
+                        background: "none",
+                        border: "none",
+                        padding: 0,
+                        cursor: "pointer",
+                        textAlign: "left",
+                        color: "inherit",
+                      }}
+                      aria-expanded={open}
+                    >
+                      <ChevronRight
+                        size={14}
+                        style={{
+                          flex: "0 0 auto",
+                          transform: open ? "rotate(90deg)" : "none",
+                          transition: "transform .15s",
+                        }}
+                      />
+                      <span style={{ minWidth: 0 }}>
+                        <div className="rk" style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
+                          {thread.thread}
+                        </div>
+                        <div className="rv">
+                          {thread.files.length} file · {formatArtifactBytes(thread.bytes)}
+                        </div>
+                      </span>
+                    </button>
+                    <button
+                      className="set-btn danger"
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void run(() => coreBridge.deleteArtifactThread(thread.thread))}
+                    >
+                      {t("settings.deleteAll")}
+                    </button>
                   </div>
-                  <div className="rv">
-                    {thread.files.length} file · {formatArtifactBytes(thread.bytes)}
-                  </div>
+                  {open && (
+                    <div className="set-rows" style={{ paddingLeft: 22, marginTop: 4 }}>
+                      {thread.files.map((file) => (
+                        <div className="set-row" key={file.name}>
+                          <div style={{ minWidth: 0 }}>
+                            <div className="rk" style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
+                              {file.name}
+                            </div>
+                            <div className="rv">{formatArtifactBytes(file.size)}</div>
+                          </div>
+                          <button
+                            className="set-btn"
+                            type="button"
+                            disabled={busy}
+                            onClick={() =>
+                              void run(() => coreBridge.deleteArtifactFile(thread.thread, file.name))
+                            }
+                          >
+                            {t("common.remove")}
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
-                <button
-                  className="set-btn"
-                  type="button"
-                  disabled={busy}
-                  onClick={() => void run(() => coreBridge.deleteArtifactThread(thread.thread))}
-                >
-                  Delete
-                </button>
-              </div>
-            ))}
+              );
+            })}
           </div>
         ) : (
           <p className="set-hint">{t("settings.noGeneratedFile")}</p>
