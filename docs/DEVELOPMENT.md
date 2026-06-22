@@ -87,7 +87,7 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   più stretto*: stop multi-step **senza** confirm-gate (tool usati, niente piano). **NON**
   risolve `demo-piano` (`pending_confirm` rompe a :13518, *prima* del suo guard) → **in-app NON
   verificata**, non ha passato il gate. ⚠️ Side-note UI: turni cloud etichettati "Local model".
-- **WS6 6.1b (APPROVAL-RESUME) — cut #1 (commit `7f98d57`) ma GATE FALLITO (resume invisibile):** dopo
+- **WS6 6.1b (APPROVAL-RESUME) — cut #2 persist+publish (commit `6b0b9c7`), GATE IN-APP PENDENTE:** dopo
   un'azione confirm-gated approvata, rientrare nel loop del thread via **`run_agent_turn(state,
   thread_id, prompt, policy)`** (:17078, già usato da :16528 canale e :19360 autorun). Due rami:
   (a) **in-app** `mcp_execute` (:22259) ha già `thread_id`+`message_id` → `spawn(run_agent_turn)`
@@ -100,13 +100,14 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   (Telegram). **Gate:** riavviare `electron:dev` (codice nuovo), gemma, cancellare `~/demo-piano`,
   prompt demo-piano, **approvare la 1ª scrittura** (con "always allow this server" per non
   confermare ogni step) → il task deve **continuare** fino a **5/5**.
-  **GATE FALLITO (2026-06-22):** `run_agent_turn` **drena** lo stream server-side e il resume
-  **scarta** il risultato (no `append_assistant_message`/`thread.updated`) → niente in chat; e
-  la continuazione multi-scrittura non passa (le sue confirm card vengono drenate) → solo
-  `note.md` (1/5). **Veicolo SBAGLIATO.** **Design corretto = continuazione FRONTEND-driven:**
-  dopo `mcp_execute` ok, il frontend (`apps/desktop/src`) ri-avvia un turno via `generate_stream`
-  ("azione approvata, continua") → live, con card/plan/persistenza. Il plumbing `thread_id`
-  (commit `7f98d57`) **resta utile**; togliere il `run_agent_turn` server-side da `mcp_execute`.
+  **cut #1 GATE FALLITO (2026-06-22):** `run_agent_turn` drena lo stream e il resume **scartava**
+  il risultato → niente in chat ("approva su Telegram ma non cambia nulla"). **cut #2 FATTO
+  (commit `6b0b9c7`):** il resume ora **persiste** il risultato (`append_assistant_message`) +
+  **pubblica `thread.updated`** (pattern del canale inbound :16544) → la chat si aggiorna via
+  **refresh**, per approvazioni **sia in-app sia Telegram** (server-side, no frontend). Catena
+  multi-scrittura: la continuazione si ferma alla 2ª confirm → la card è nel testo persistito →
+  riappare in-app + nuovo msg Telegram → approvi → riprende, un'approvazione per volta.
+  *(Limite noto: refresh, non token-live; nessun indicatore "sta lavorando" durante il turno.)*
 - **Coda:** WS5.4b (`stato-lavori.md`) · WS5.4c (chiusura+dedup) · WS5.5 (provenienza) ·
   WS2 · WS1 3-6 · WS6/7/8/9. Ordine nel backlog.
 - **Regole operative:** build LOCAL, verde a ogni passo, doc aggiornati nello stesso turno,

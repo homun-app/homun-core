@@ -141,7 +141,7 @@ cablato** nel flusso agente. ADR 0015.
 - ☐ **6.1 Cablare la durabilità**: task agente lunghi nella coda con
   checkpoint/heartbeat/recovery → sopravvivono a chiusura app/crash (lega ADR 0016 F4
   background+resume).
-- 🟡 **6.1b Approval-resume — cut #1 (commit `7f98d57`) GATE FALLITO; serve cut #2 frontend-driven**
+- 🟡 **6.1b Approval-resume — cut #2 persist+publish (commit `6b0b9c7`), gate in-app pendente**
   (causa REALE di demo-piano, confermata in-app 2026-06-22 su kimi+gemma): un task che scrive file → la 1ª scrittura
   (`mcp__filesystem__create` ∈ `composio_writes`) attiva la card `‹‹MCP_CONFIRM››`
   (:13340-13367) + Telegram + `pending_confirm` → turno muore a :13518; dopo l'**approvazione**
@@ -161,13 +161,13 @@ cablato** nel flusso agente. ADR 0015.
   → `spawn(run_agent_turn(thread, prompt, "full"))`; agganciato a `mcp_execute` (in-app) e
   `execute_pending_approval` (Telegram); call-site MCP (:13362)/Composio (:13452) passano il
   thread, bozza-canale (:16572) `None`.
-  **GATE FALLITO (2026-06-22) — cut #1 = veicolo sbagliato:** `run_agent_turn` **drena** lo
-  stream e il resume **scarta** il risultato (no `append_assistant_message`/`thread.updated`) →
-  invisibile in chat; e la continuazione multi-scrittura non passa (confirm card drenate) → solo
-  `note.md` (1/5). **cut #2 (da fare) = continuazione FRONTEND-driven:** dopo `mcp_execute` ok,
-  il frontend (`apps/desktop/src`) ri-avvia un turno via `generate_stream` ("azione approvata,
-  continua") → live + persistito. Tenere il plumbing `thread_id`; togliere `run_agent_turn` da
-  `mcp_execute`. (Telegram: serve variante server-side che persiste, da valutare a parte.)
+  **cut #1 GATE FALLITO (2026-06-22):** `run_agent_turn` drena lo stream e il resume **scartava**
+  il risultato → invisibile ("approva su Telegram ma non cambia nulla"). **cut #2 FATTO (commit
+  `6b0b9c7`):** il resume **persiste** (`append_assistant_message`) + **pubblica `thread.updated`**
+  (pattern canale inbound :16544) → chat aggiornata via refresh, approvazioni **in-app E Telegram**
+  (server-side, no frontend). Catena: continuazione si ferma alla 2ª confirm → card nel testo
+  persistito → riappare in-app + msg Telegram → approvi → riprende. **Gate in-app pendente.**
+  Limite: refresh, non token-live; nessun indicatore "sta lavorando".
 - ☐ **6.2 Resource Governor** attivo sui task (limiti, backpressure).
 - ☐ **6.3 Scheduler / ricorrenza** + **proactive review** (l'assistente propone schede
   in autonomia governata) verificati end-to-end.
