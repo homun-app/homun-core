@@ -71,17 +71,21 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   `note.md`), poi turno chiuso. Le slice v1044 (merge-per-id, `step_advance`) sono
   **unit-verdi (8/8) ma non raggiunte**: stanno *a valle* di un piano che non viene **creato
   né guidato a termine**.
-- **ROOT CAUSE (ipotesi, evidenza solida):** l'harness **non compelle** un piano per i task
-  multi-step *generici* (≠ `make_deck`, l'unico oggi blindato) e il loop **non persiste**
-  fino al completamento. È il gap già aperto **"Floor ovunque" + continuazione-loop**.
-  Successo su modello **cloud** ⇒ caposaldo #2 (*piano non creato/seguito = bug di design*),
-  non debolezza del modello. ⚠️ Side-note UI: i turni cloud sono etichettati "Local model"
-  nel bubble (default fuorviante).
-- **PROSSIMO (reprioritizzato): slice 3 è PREMATURA.** Lever vero = **trigger-piano +
-  continuazione-loop a completamento** (l'harness garantisce un piano per i task multi-step
-  e guida `step_advance` fino a `done`/blocco), da verificare su **gemma** (demo-piano →
-  5/5). **Passo 0: leggere il codice del loop agente** (dove il turno termina; come/quando si
-  offre `update_plan`) per fissare la causa *prima* di scrivere il fix. Poi: slice 3 / WS2.
+- **ROOT CAUSE (INCHIODATA — Passo 0, lettura del loop):** il guard anti-stop-prematuro è a
+  `main.rs:13533`: allo stop (no tool-call) il nudge F5 scatta **solo** dentro
+  `if let Some(step) = plan_next_open(&plan)` → **solo se il piano ha uno step aperto**. Ma
+  `plan` cresce **solo** via `update_plan`/`step_advance` (`merge_plan`, :12717) o F4-resume
+  (:10742): **nulla lo forza**. Task generico → modello salta `update_plan` → `plan` vuoto →
+  `plan_next_open`=None → nudge saltato → stop a 2/5 accettato (:13584 `final_done;break`).
+  **Tutta F1–F5 è gated su `plan` non-vuoto** — protegge un piano esistente, non lo fa
+  nascere. `make_deck` immune perché **one-call** (no loop multi-step). Caposaldo #2.
+- **FIX proposto (slice 2.5 — guard SIMMETRICO @ `main.rs:13524-13565`):** se `mode=="agent"`
+  + tool usati nel turno + budget + `plan` **vuoto**, un giudice-completamento cheap (riusa
+  `verify_step_complete`, **fail-open**) valuta "richiesta soddisfatta?"; se NO → directive
+  nudge "chiama `update_plan` con TUTTI gli step, poi fai il primo non fatto". Bound già
+  esistenti: `MAX_PLAN_NUDGES=8` + `is_final_round`. Chirurgica, non sovra-pianifica i turni
+  banali, riusa F2. Follow-up = "Floor ovunque" (forza-piano a round 1). **Verifica: gemma
+  demo-piano → 5/5.** Poi: slice 3 / WS2. ⚠️ Side-note UI: turni cloud etichettati "Local model".
 - **Coda:** WS5.4b (`stato-lavori.md`) · WS5.4c (chiusura+dedup) · WS5.5 (provenienza) ·
   WS2 · WS1 3-6 · WS6/7/8/9. Ordine nel backlog.
 - **Regole operative:** build LOCAL, verde a ogni passo, doc aggiornati nello stesso turno,
