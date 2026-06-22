@@ -81,8 +81,10 @@ che fanno "ricordare il perché e sopravvivere". Caposaldo #8.
   memoria mancante su **tutti** gli scope, loop fino a esaurimento (off critical path).
   Risolve il gap 391/555 (l'auto-consolidamento che faceva il backfill era OFF di
   default; il backfill altrove era cappato a 4-12).
-- ☐ **5.3 Loop aperti** come entità di prima classe (lavoro incompiuto + perché,
-  priorità di sopravvivenza; si chiudono a task completato — effetto Zeigarnik).
+- 🟡 **5.3 Loop aperti** — tipo `open_loop` di prima classe: l'estrazione post-turn lo
+  cattura (lavoro incompiuto + perché), incluso in retain + recall + auto-confirm; eval
+  check aggiunto (`open_loop+why`). Resta: **chiusura automatica** quando il lavoro è
+  fatto + **iniezione nelle chat nuove** (via WS5.4 `stato-lavori.md`).
 - ☐ **5.4 Proiezione markdown attiva** per progetto (`brief.md` / `decisioni.md` /
   **`stato-lavori.md`**), iniettata nelle **chat nuove**, bidirezionale (edit→sync).
 - ☐ **5.5 Catena di provenienza** decisione → artefatto → codice → esito (unisce

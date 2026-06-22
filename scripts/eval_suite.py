@@ -153,6 +153,29 @@ def v_decision(d):
     return True, f"{o.get('memory_type')} +why"
 
 
+OPENLOOP_SCHEMA = {
+    "type": "object", "additionalProperties": False,
+    "required": ["memory_type", "text", "why"],
+    "properties": {
+        "memory_type": {"type": "string", "enum": ["open_loop"]},
+        "text": {"type": "string"}, "why": {"type": "string"},
+    },
+}
+
+
+def v_openloop(d):
+    o = find_with(d, "text")
+    if not o:
+        return False, "no object"
+    if o.get("memory_type") != "open_loop":
+        return False, f"type {o.get('memory_type')}"
+    if not isinstance(o.get("text"), str) or not o["text"].strip():
+        return False, "empty text"
+    if not isinstance(o.get("why"), str) or not o["why"].strip():
+        return False, "no why"  # WS5.3: an open loop must carry what remains + why
+    return True, "open_loop +why"
+
+
 CHECKS = [
     ("deck", DECK_SCHEMA,
      "You are a presentation designer. Output ONLY JSON matching the schema, in the language of the brief.",
@@ -166,6 +189,11 @@ CHECKS = [
      "the `why` field MUST capture the reasoning.",
      "Abbiamo scelto JSON invece di SQLite per lo storage del todo CLI perché è nativo in Python, "
      "human-readable e senza dipendenze.", v_decision),
+    ("open_loop+why", OPENLOOP_SCHEMA,
+     "Extract the OPEN LOOP (unfinished work) from the text as JSON: what REMAINS to do (text) "
+     "and WHY it is still open (why).",
+     "Abbiamo implementato il render del deck ma manca ancora la gestione delle immagini quando il "
+     "modello immagine non è configurato; va completato.", v_openloop),
 ]
 
 

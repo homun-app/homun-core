@@ -2011,7 +2011,7 @@ fn is_confirmation_reply(user_message: &str) -> bool {
 fn is_auto_confirmable(memory_type: &str, sensitivity: MemoryDataSensitivity, confidence: f64) -> bool {
     // Decisions are factual records of choices made during work (low privacy risk),
     // so they auto-confirm like facts/preferences when confident + non-sensitive.
-    matches!(memory_type, "preference" | "fact" | "decision" | "goal")
+    matches!(memory_type, "preference" | "fact" | "decision" | "goal" | "open_loop")
         && sensitivity <= MemoryDataSensitivity::Private
         && confidence >= 0.8
 }
@@ -3618,7 +3618,9 @@ async fn learn_from_exchange(
     let base_system = "You are a MEMORY extractor. From the last exchange extract DURABLE and REUSABLE \
 knowledge: (1) facts and preferences about the USER (who they are, people in their life, how they \
 prefer to work); (2) DECISIONS made during the work (technical or project choices) with the WHY \
-and the rejected alternatives. Do NOT extract the transient content of the task, NOT general world \
+and the rejected alternatives; (3) OPEN LOOPS — work left INCOMPLETE this turn: what REMAINS to do \
+and WHY, so it survives into future chats (memory_type \"open_loop\"; ONLY for genuinely unfinished \
+work, NEVER for items already done). Do NOT extract the transient content of the task, NOT general world \
 facts, NOT what the assistant said as a simple reply. \
 EPISTEMIC STATE — DISTINGUISH what is TRUE/HAPPENED/DECIDED from what is only ASKED, SEARCHED, \
 HYPOTHETICAL or UNDER EVALUATION. A question, a price/options search, an \"if/maybe/I'm \
@@ -3646,7 +3648,7 @@ memory a request to FORGET/delete something. Do not save as project memory facts
 ANOTHER project or tool unrelated to the current work. \
 Reply with valid JSON ONLY, \
 nothing else:\n\
-{\"memories\":[{\"memory_type\":\"fact|preference|decision|goal\",\"text\":\"short sentence in 3rd person \
+{\"memories\":[{\"memory_type\":\"fact|preference|decision|goal|open_loop\",\"text\":\"short sentence in 3rd person \
 in the user's language\",\"sensitivity\":\"internal|private|confidential|secret\",\"confidence\":0.0-1.0,\
 \"metadata\":{\"scope\":\"personal|project\",\"certainty\":\"committed|considered|intended\",\"decision\":{\"rationale\":\"the why\",\
 \"alternatives\":[{\"option\":\"alternative\",\"rejected_because\":\"reason\"}]}}}],\
@@ -3879,7 +3881,7 @@ substantially updated decisions relative to these):\n{known_decisions}"
     let graph_relations = std::mem::take(&mut extraction.relations);
     extraction
         .memories
-        .retain(|m| matches!(m.memory_type.as_str(), "fact" | "preference" | "decision" | "goal"));
+        .retain(|m| matches!(m.memory_type.as_str(), "fact" | "preference" | "decision" | "goal" | "open_loop"));
     if extraction.memories.is_empty()
         && graph_entities.is_empty()
         && graph_relations.is_empty()
@@ -6980,6 +6982,7 @@ async fn relevant_memory_for_prompt(state: &AppState, prompt: &str) -> Option<St
         query: query.to_string(),
         statuses: vec![MemoryStatus::Confirmed, MemoryStatus::Candidate],
         memory_types: vec![
+            "open_loop".to_string(),
             "goal".to_string(),
             "decision".to_string(),
             "fact".to_string(),
