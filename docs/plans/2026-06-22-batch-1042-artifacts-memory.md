@@ -141,7 +141,7 @@ cablato** nel flusso agente. ADR 0015.
 - ☐ **6.1 Cablare la durabilità**: task agente lunghi nella coda con
   checkpoint/heartbeat/recovery → sopravvivono a chiusura app/crash (lega ADR 0016 F4
   background+resume).
-- 🟡 **6.1b Approval-resume — cut #2 persist+publish (commit `6b0b9c7`), gate in-app pendente**
+- ✅ **6.1b Approval-resume — cut #2 persist+publish (commit `6b0b9c7`), gate in-app passato**
   (causa REALE di demo-piano, confermata in-app 2026-06-22 su kimi+gemma): un task che scrive file → la 1ª scrittura
   (`mcp__filesystem__create` ∈ `composio_writes`) attiva la card `‹‹MCP_CONFIRM››`
   (:13340-13367) + Telegram + `pending_confirm` → turno muore a :13518; dopo l'**approvazione**
@@ -179,9 +179,11 @@ cablato** nel flusso agente. ADR 0015.
   sostituisce solo bridge legacy/stale e attende al massimo 3 s il proprio child prima del primo
   rebind. Bridge test **6/6**, gateway **151 passati / 1 ignorato**, build locali verdi. Prova
   Electron: stale installato → replacement; avvio seguente → `reconfigured existing sidecar`;
-  connect API → `reconfigured:true`. **Gate Telegram END-TO-END ancora pendente:** serve la prova
-  approvazione reale di `demo-piano` con filesystem + chat store prima di chiudere 6.1b o aprire
-  WS6.1c / Path B.
+  connect API → `reconfigured:true`. **Gate Telegram END-TO-END PASSATO (Gemma, 2026-06-22):**
+  thread `thread_1782134906_1782134906142839000` ha emesso confirm MCP per `note.md` e
+  `riepilogo.md`, quindi ha persistito il completamento; filesystem verificato con entrambi i file
+  in `~/demo-piano`. La chat ha prima chiesto il path base, poi ha eseguito il flusso corretto.
+  **Prossimo bivio:** WS6.1c UX Telegram oppure Path B per le scritture routine; decisione aperta.
 - ☐ **6.2 Resource Governor** attivo sui task (limiti, backpressure).
 - ☐ **6.3 Scheduler / ricorrenza** + **proactive review** (l'assistente propone schede
   in autonomia governata) verificati end-to-end.

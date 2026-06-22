@@ -19,8 +19,9 @@
   `cargo test -p local-first-desktop-gateway` (**151 passed, 1 ignored**); both binaries build.
 - Runtime evidence: stale installed bridge was replaced; next Electron startup retained the
   live bridge; Telegram connect returned `reconfigured:true`.
-- Remaining: Task 4 only — the real Gemma `demo-piano` approval through Telegram and durable
-  filesystem/chat-store evidence. Do not mark WS6 6.1b complete before it passes.
+- Completed: Task 4. Gemma + Telegram emitted MCP confirm cards for `note.md` and `riepilogo.md`;
+  `~/demo-piano` contains both files and the originating `chat_messages` thread persisted the
+  completion message. WS6 6.1b may now be marked complete.
 
 ## File structure
 
