@@ -45,6 +45,14 @@ can use `Confirmed`; Telegram holds a live pending code before it may use
 `RemoteConfirmed`. An out-of-scope call without one of these proofs returns a
 policy error before invoking the MCP transport.
 
+Filesystem MCP is connected once at the stable user capability scope, never
+again per project. At turn construction, when both a linked project root and
+the live Filesystem MCP catalog are present, the gateway injects that absolute
+root into the model context. The model resolves a relative request against it;
+it must not ask the user where to write or claim that the already-connected MCP
+is unavailable. This is guidance only: the manifest+jail remains the actual
+authorization enforcement.
+
 ## Security properties
 
 - A configured workspace folder is the explicit user grant; personal and

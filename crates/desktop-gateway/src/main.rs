@@ -6268,6 +6268,30 @@ fn workspace_scoped_mcp_write(
     )
 }
 
+/// Gives the model the only filesystem context the MCP contract cannot infer:
+/// the project root of this particular conversation. The MCP connection itself
+/// stays global; the root is a per-thread authorization boundary.
+fn project_filesystem_mcp_instruction(
+    root: Option<&FsPath>,
+    filesystem_mcp_connected: bool,
+) -> Option<String> {
+    let root = root.filter(|_| filesystem_mcp_connected)?;
+    let root = root.display();
+    Some(format!(
+        "PROJECT FILESYSTEM MCP: this conversation is linked to the project folder \
+`{root}`. The Filesystem MCP is already connected globally and its tools are \
+available in THIS turn; do NOT say it is unavailable, ask the user to reconnect it, \
+or ask where inside this project to write.\n\
+When the user explicitly asks for the Filesystem MCP, call \
+`mcp__filesystem__create`, `mcp__filesystem__insert`, \
+`mcp__filesystem__str_replace`, or `mcp__filesystem__view` as appropriate. Those \
+tools require an ABSOLUTE `path`: resolve a relative request such as \
+`path-b-gate/note.md` as `{root}/path-b-gate/note.md` automatically. Routine \
+Filesystem MCP writes inside this root are authorized for this thread and do not \
+need a confirmation card. A path outside this root remains confirmation-gated."
+    ))
+}
+
 /// Resolves the host project root for the conversation's workspace, if one is set
 /// and exists on disk. Falls back to the active workspace when the thread is unknown.
 fn project_root_for_thread(state: &AppState, thread_id: Option<&str>) -> Option<PathBuf> {
@@ -10123,6 +10147,19 @@ files for questions the map or history already answer."
         tokio::task::spawn_blocking(move || mcp_chat_tools(&st, MCP_CATALOG_CAP))
             .await
             .unwrap_or_default()
+    };
+    let filesystem_mcp_connected = mcp_catalog.schemas.iter().any(|schema| {
+        schema
+            .pointer("/function/name")
+            .and_then(|name| name.as_str())
+            .is_some_and(|name| name.starts_with("mcp__filesystem__"))
+    });
+    let system = match project_filesystem_mcp_instruction(
+        project_root_for_thread(state, request.thread_id.as_deref()).as_deref(),
+        filesystem_mcp_connected,
+    ) {
+        Some(instruction) => format!("{system}\n\n{instruction}"),
+        None => system,
     };
     composio_writes.extend(mcp_catalog.writes.iter().cloned());
     for schema in &mcp_catalog.schemas {
@@ -30829,6 +30866,7 @@ mod tests {
         message_has_image_url,
         browser_snapshot_text,
         jail_in_root,
+        project_filesystem_mcp_instruction,
         parse_review_suggestion,
         sanitize_dedup_key,
         is_semantic_duplicate,
@@ -31039,6 +31077,19 @@ mod tests {
         assert!(jail_in_root(&root, "/etc/passwd").is_err());
         assert!(jail_in_root(&root, "a/../../b").is_err());
         assert!(jail_in_root(&root, "").is_err());
+    }
+
+    #[test]
+    fn project_filesystem_mcp_instruction_binds_connected_mcp_to_thread_root() {
+        let root = std::path::Path::new("/Users/fabio/Desktop/test-homun");
+        let instruction = project_filesystem_mcp_instruction(Some(root), true)
+            .expect("a linked project plus Filesystem MCP needs an explicit instruction");
+
+        assert!(instruction.contains("/Users/fabio/Desktop/test-homun"));
+        assert!(instruction.contains("mcp__filesystem__create"));
+        assert!(instruction.contains("path-b-gate/note.md"));
+        assert!(project_filesystem_mcp_instruction(None, true).is_none());
+        assert!(project_filesystem_mcp_instruction(Some(root), false).is_none());
     }
 
     #[test]

@@ -130,6 +130,18 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   l’esito finale. **6.1b chiusa. Prossima decisione, non ancora presa:** WS6.1c (feedback/UX
   Telegram: stato in esecuzione + esito callback) oppure **Path B** (scritture routine nel
   workspace senza confirm, gate solo per azioni sensibili/esterne).
+- **Path B DECISO e in corso (2026-06-22):** Filesystem MCP è una capacità globale collegata una
+  sola volta; il progetto della chat fornisce automaticamente la root ad ogni
+  chiamata. Implementati manifest/jail/authority in-root e la direttiva runtime
+  che espone la root assoluta al modello (mai chiedere una cartella o un reconnect
+  per una chat già in progetto). **Gate runtime Electron PASSATO su
+  `kimi-k2.6:cloud`:** nel thread
+  `thread_1782138001_1782138001354628000` del progetto `test-homun`,
+  `mcp__filesystem__create` ha creato
+  `/Users/fabio/Desktop/test-homun/path-b-gate/note.md` (`una`, `due`, `tre`)
+  senza `MCP_CONFIRM`; file e `chat_messages` verificati. Gateway:
+  **156 passati, 1 ignorato**. **Non chiudere ancora Path B:** restano il re-test
+  UI/Gemma in-root e la prova fuori-root (deve restare una card, senza esecuzione).
 - **Coda:** WS5.4b (`stato-lavori.md`) · WS5.4c (chiusura+dedup) · WS5.5 (provenienza) ·
   WS2 · WS1 3-6 · WS6/7/8/9. Ordine nel backlog.
 - **Regole operative:** build LOCAL, verde a ogni passo, doc aggiornati nello stesso turno,

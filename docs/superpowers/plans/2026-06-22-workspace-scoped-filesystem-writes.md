@@ -111,7 +111,7 @@ Expected: focused authority tests and the full gateway suite pass.
 - Modify: `docs/DEVELOPMENT.md`
 - Modify: `docs/plans/2026-06-22-batch-1042-artifacts-memory.md`
 
-- [ ] **Step 1: Build and run**
+- [x] **Step 1: Build and run**
 
 Run:
 
@@ -124,6 +124,14 @@ cd apps/desktop && npm run electron:dev
 
 Use Gemma in a chat assigned to a project workspace folder. Ask for `note.md` and `riepilogo.md` inside it: no MCP confirmation card may appear. Then request a filesystem write outside that root: a confirmation card must appear and remain needed.
 
-- [ ] **Step 3: Record only proven state**
+Progress (2026-06-22): the Electron gateway was restarted from HEAD and the
+`kimi-k2.6:cloud` gate passed in the `test-homun` project:
+`mcp__filesystem__create` created
+`/Users/fabio/Desktop/test-homun/path-b-gate/note.md` without an MCP card.
+The exact user/assistant turn is persisted in
+`thread_1782138001_1782138001354628000`. The visible-UI/Gemma repeat and the
+outside-root card remain open.
+
+- [x] **Step 3: Record only proven state**
 
 Document the exact workspace path, in-root no-card evidence, out-of-root card evidence, test counts, and remaining work. Do not publish, tag, or push.

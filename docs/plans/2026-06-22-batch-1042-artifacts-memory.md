@@ -184,6 +184,20 @@ cablato** nel flusso agente. ADR 0015.
   `riepilogo.md`, quindi ha persistito il completamento; filesystem verificato con entrambi i file
   in `~/demo-piano`. La chat ha prima chiesto il path base, poi ha eseguito il flusso corretto.
   **Prossimo bivio:** WS6.1c UX Telegram oppure Path B per le scritture routine; decisione aperta.
+- 🟡 **Path B — root automatica per Filesystem MCP (2026-06-22):** scelta utente:
+  il connettore MCP resta collegato una volta sola a livello utente; ogni chiamata
+  eredita la root del progetto del thread. Implementati manifest statico
+  `mcp:filesystem` (`create`/`insert`/`str_replace`), jail assoluta
+  symlink-safe, bypass card solo in-root e prova della confirm-card per il direct
+  endpoint. Correzione UX/runtime: il system context ora comunica al modello la
+  root assoluta del thread e che Filesystem è già disponibile — non deve chiedere
+  né cartella né reconnect. **Prova runtime Electron (Kimi, `test-homun`):**
+  `thread_1782138001_1782138001354628000` → attività `create`, nessun
+  `MCP_CONFIRM`, file
+  `/Users/fabio/Desktop/test-homun/path-b-gate/note.md` con `una/due/tre`,
+  messaggi persistiti in `chat_messages`. Test gateway: **156 passati, 1
+  ignorato**. Restano il re-test UI/Gemma in-root e il gate manuale fuori-root
+  (card obbligatoria, nessuna scrittura).
 - ☐ **6.2 Resource Governor** attivo sui task (limiti, backpressure).
 - ☐ **6.3 Scheduler / ricorrenza** + **proactive review** (l'assistente propone schede
   in autonomia governata) verificati end-to-end.
