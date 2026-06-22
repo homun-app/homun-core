@@ -10272,7 +10272,9 @@ on its own line `‹‹PLAN_PROPOSE››{{\"summary\":\"objective in brief\",\"
 (valid JSON). The user will see the Accept/Edit buttons. EXECUTE the plan ONLY in the NEXT turn, \
 after the user has approved it (e.g. «I approve the plan…»); if they ask for changes, revise and re-propose. \
 Once executing, use update_plan to update the step status (doing→done), shown in the \
-\"Plan\" panel. The plan (PLAN_PROPOSE or update_plan) is ALREADY shown to the user as a CARD: do NOT \
+\"Plan\" panel. When you UPDATE an existing step, echo its id EXACTLY as shown in the plan card \
+(the id in parentheses after the step title) so it stays the SAME step even if you rephrase the \
+title — this prevents duplicate steps. The plan (PLAN_PROPOSE or update_plan) is ALREADY shown to the user as a CARD: do NOT \
 repeat it in the reply text too — no list or table of the steps in prose (at most one \
 line of context). For single-step requests neither a plan nor a proposal is needed. \
 STEP-AT-A-TIME EXECUTION: work the plan ONE step at a time — do, then VERIFY that step's \
