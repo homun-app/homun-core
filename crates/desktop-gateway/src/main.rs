@@ -9150,14 +9150,18 @@ fn extract_deck_object(v: &serde_json::Value) -> Option<serde_json::Value> {
 /// ollama.com/v1). Mirrors the inference-crate floor; converge later (ADR 0016).
 async fn generate_deck_content(
     http: &reqwest::Client,
+    base_url: &str,
+    model: &str,
+    api_key: Option<&str>,
     brief: &str,
     brand: &BrandKit,
     slides: usize,
     language: &str,
 ) -> Result<serde_json::Value, String> {
-    let (base_url, model, api_key) =
-        chat_openai_stream_config().ok_or_else(|| "no inference provider configured".to_string())?;
-    let endpoint = chat_endpoint(&base_url);
+    // Use the CURRENT turn's model/endpoint (what the chat is actually running),
+    // NOT a fresh orchestrator-role resolution — otherwise make_deck diverges from
+    // the model the user selected and can hit a different, misconfigured provider.
+    let endpoint = chat_endpoint(base_url);
     let lang = if language.trim().is_empty() { "the user's language" } else { language.trim() };
     let org = if brand.organization.trim().is_empty() {
         "the organization"
@@ -9198,7 +9202,7 @@ any other key such as \"presentation\" or \"deck\", and add no extra top-level k
             .post(endpoint.as_str())
             .timeout(std::time::Duration::from_secs(120))
             .json(&body);
-        if let Some(k) = api_key.as_ref() {
+        if let Some(k) = api_key {
             req = req.bearer_auth(k);
         }
         match req.send().await {
@@ -9208,7 +9212,11 @@ any other key such as \"presentation\" or \"deck\", and add no extra top-level k
                     continue; // endpoint rejects strict json_schema → retry json_object
                 }
                 if !resp.status().is_success() {
-                    return Err(format!("deck content HTTP {code}"));
+                    return Err(format!(
+                        "deck content HTTP {code} from model «{model}» — the inference provider \
+                         rejected the request. Check it is reachable and authenticated (API key / \
+                         `ollama signin`), or switch the chat model to a working one."
+                    ));
                 }
                 let json: serde_json::Value =
                     resp.json().await.map_err(|e| format!("bad deck content response: {e}"))?;
@@ -12226,7 +12234,7 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                 .await
                                 .unwrap_or_default();
                             // 2) slide content — schema-enforced model call (the floor).
-                            match generate_deck_content(&state_owned.http, &brief, &brand, slides, &language).await {
+                            match generate_deck_content(&state_owned.http, &base_url, &model, api_key.as_deref(), &brief, &brand, slides, &language).await {
                                 Err(e) => format!("Could not generate deck content: {e}"),
                                 Ok(mut deck) => {
                                     // 3) images for want_image slides (cap 3, cover first).

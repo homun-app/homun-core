@@ -15,6 +15,11 @@ questi dati". Slides / deck / presentation / pitch.
 
 ## Process — ONE call, nothing else
 
+**Call `make_deck` IMMEDIATELY.** Do NOT propose a slide structure first, do NOT
+ask "should I proceed?", do NOT wait for confirmation — the engine designs the
+structure itself. The very first thing you do for a presentation request is call
+the tool.
+
 Call the **`make_deck`** tool with:
 
 - `brief`: the user's request **verbatim**, plus any structure, sections, points,
