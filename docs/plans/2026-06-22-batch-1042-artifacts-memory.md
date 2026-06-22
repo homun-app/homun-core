@@ -418,19 +418,26 @@ proprio — versioning, canali, scaricabili dal **sito Homun**, auto-aggiornabil
 
 ## Ordine d'esecuzione proposto
 
-1. **Chiudere WS3 (batch 1042)** — decidere #3 (+ eventuale strip `<tool_call>`) →
-   **pubblicare su comando**.
-2. **WS8.1 seed** — avviare la suite di eval (anche solo deck + memoria) come guardrail,
-   così ogni passo successivo è verificabile sul tier locale.
-3. **WS5 — fondamenta memoria** (il cervello, prerequisito trasversale; include 3.1
-   artefatti→memoria = 5.5, e prepara piano→memoria).
-4. **WS2-3.2 / 3.3** — schermata artefatti + lifecycle + delete-con-memoria.
-5. **WS1-Fase 2** — gestione piano (`ExecutionPlan`+`step_id`); il piano scrive in memoria.
-6. **WS1-Fase 3** — skill dichiarative + workflow runner → abilita WS7.
-7. **WS7** — ecosistema deliverable (`make_*` per documenti/ricerca/meeting).
-8. **WS6** — proattività & esecuzione durevole (poggia sul piano).
-9. **WS1-Fasi 4→6** — router+scaffolding adattivo, Brain (ADR 0008), memoria per-step + sub-agent.
-10. **WS4 + WS8 completo** — perf/affidabilità/UX a regime; eval come gate di release.
+1. **Consolidare/committare WS6 locale** — stack WS6.3b–WS6.4, senza co-author;
+   publish/tag solo su comando. Prima del publish resta consigliato uno smoke
+   manuale in-app su scheduled automation reale nel thread `scheduled`.
+2. **WS5.4b / WS5.4c — open loop governati**: proiezione leggibile/editabile
+   `stato-lavori.md`, chiusura automatica a lavoro concluso e dedup robusto.
+3. **WS2-3.1 — artefatti come entità di memoria** via `MemoryFacade` condiviso:
+   prerequisito per recall dei deliverable e per la provenienza.
+4. **WS2-3.2 / 3.3** — schermata Artifacts centralizzata + lifecycle/delete
+   coerente con memoria; cancellare chat non deve cancellare deliverable.
+5. **WS5.5 / WS5.6** — catena di provenienza decisione → artefatto → codice →
+   esito, più eval memoria come guardrail.
+6. **WS1-Fase 2** — gestione piano (`ExecutionPlan`+`step_id`); il piano scrive
+   in memoria.
+7. **WS1-Fase 3** — skill dichiarative + workflow runner.
+8. **WS7** — ecosistema deliverable (`make_*` per documenti/ricerca/meeting),
+   volutamente dopo memoria/artefatti/engine baseline.
+9. **WS8 completo + WS4** — eval come gate di release, perf/affidabilità/UX a
+   regime.
+10. **WS9 + WS1-Fasi 4→6** — marketplace/plugin distribution, router+scaffolding
+    adattivo, Brain (ADR 0008), memoria per-step + sub-agent.
 
 > Note: la **memoria (WS5)** è il filo trasversale (artefatti→memoria e piano→memoria la
 > alimentano). La **gestione piano (WS1-Fase 2)** è il refactor più profondo: dopo i quick

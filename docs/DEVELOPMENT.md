@@ -45,7 +45,7 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
 
 ### Cruscotto operativo attuale
 
-- **Linea attiva:** WS7.1 deliverable Manus-style. **WS6 chiusa localmente**:
+- **Linea attiva:** consolidamento memoria + artefatti prima di WS7. **WS6 chiusa localmente**:
   Resource Governor, scheduler/ricorrenza, proactive review card surface/dedup
   e write-back memoria proattiva sono coperti da test e build. Resta consigliato
   un ultimo smoke manuale in-app su automazione schedulata reale nel thread
@@ -386,8 +386,11 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   finale chat sul path approvato e zero `path-b-gate/note.md` nel thread.
   **Path B approval/provenienza chiusa**; non usare più endpoint grezzi per test
   di scrittura reali.
-- **Coda:** WS5.4b (`stato-lavori.md`) · WS5.4c (chiusura+dedup) · WS5.5 (provenienza) ·
-  WS2 · WS1 3-6 · WS6/7/8/9. Ordine nel backlog.
+- **Coda aggiornata:** WS5.4b (`stato-lavori.md`) · WS5.4c (chiusura+dedup) ·
+  WS2-3.1 (artefatti come entità memoria) · WS2-3.2/3.3 (schermata/lifecycle
+  artefatti) · WS5.5/5.6 (provenienza + eval memoria) · WS1-Fase 2/3
+  (piano/workflow runner) · WS7 per ultimo nel blocco prodotto, quando memoria
+  e deliverable lifecycle sono solidi.
 - **Regole operative:** build LOCAL, verde a ogni passo, doc aggiornati nello stesso turno,
   **publish solo su comando utente**, **niente trailer Co-Authored-By** ([[homun-no-claude-coauthor]]).
 - **Sfondo:** Motore cross-modello Fase 1 ✅ v1041 (deck verificato vero-locale, gemma4:latest).
