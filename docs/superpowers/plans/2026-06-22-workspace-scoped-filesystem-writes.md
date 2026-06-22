@@ -129,8 +129,14 @@ Progress (2026-06-22): the Electron gateway was restarted from HEAD and the
 `mcp__filesystem__create` created
 `/Users/fabio/Desktop/test-homun/path-b-gate/note.md` without an MCP card.
 The exact user/assistant turn is persisted in
-`thread_1782138001_1782138001354628000`. The visible-UI/Gemma repeat and the
-outside-root card remain open.
+`thread_1782138001_1782138001354628000`. The prompt was then corrected so an
+explicit outside-root path calls the tool and lets the runtime show its
+confirmation card, rather than making the model claim that Filesystem MCP is
+unavailable. Kimi produced that card in
+`thread_1782139063_1782139063946466000`; a subsequent Telegram authorization
+executed the write, as recorded in `tool_runs`. The visible-UI/Gemma repeat and
+a controlled outside-root check that confirms the file is absent before
+authorization remain open.
 
 - [x] **Step 3: Record only proven state**
 

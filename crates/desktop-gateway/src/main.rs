@@ -6288,7 +6288,9 @@ When the user explicitly asks for the Filesystem MCP, call \
 tools require an ABSOLUTE `path`: resolve a relative request such as \
 `path-b-gate/note.md` as `{root}/path-b-gate/note.md` automatically. Routine \
 Filesystem MCP writes inside this root are authorized for this thread and do not \
-need a confirmation card. A path outside this root remains confirmation-gated."
+need a confirmation card. For a requested path outside this root, call the MCP \
+write tool anyway with its complete absolute path: the runtime will show the \
+user a confirmation card and will not execute it until the user approves."
     ))
 }
 
@@ -31088,6 +31090,7 @@ mod tests {
         assert!(instruction.contains("/Users/fabio/Desktop/test-homun"));
         assert!(instruction.contains("mcp__filesystem__create"));
         assert!(instruction.contains("path-b-gate/note.md"));
+        assert!(instruction.contains("call the MCP write tool anyway"));
         assert!(project_filesystem_mcp_instruction(None, true).is_none());
         assert!(project_filesystem_mcp_instruction(Some(root), false).is_none());
     }

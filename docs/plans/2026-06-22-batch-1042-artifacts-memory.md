@@ -196,8 +196,14 @@ cablato** nel flusso agente. ADR 0015.
   `MCP_CONFIRM`, file
   `/Users/fabio/Desktop/test-homun/path-b-gate/note.md` con `una/due/tre`,
   messaggi persistiti in `chat_messages`. Test gateway: **156 passati, 1
-  ignorato**. Restano il re-test UI/Gemma in-root e il gate manuale fuori-root
-  (card obbligatoria, nessuna scrittura).
+  ignorato**. Corretto anche il prompt operativo per il path fuori-root: deve
+  chiamare il tool con path assoluto e far decidere al runtime, non dichiarare
+  l'MCP assente né deviare nel progetto. Runtime Kimi,
+  `thread_1782139063_1782139063946466000`: card prodotta per
+  `/Users/fabio/Desktop/path-b-outside-gate-1782139063.md`; il `tool_runs`
+  registra `create` solo dopo callback Telegram autorizzato alle 16:38:34.
+  Restano il re-test UI/Gemma in-root e il gate manuale fuori-root, con controllo
+  esplicito che il file non esista prima dell'approvazione.
 - ☐ **6.2 Resource Governor** attivo sui task (limiti, backpressure).
 - ☐ **6.3 Scheduler / ricorrenza** + **proactive review** (l'assistente propone schede
   in autonomia governata) verificati end-to-end.

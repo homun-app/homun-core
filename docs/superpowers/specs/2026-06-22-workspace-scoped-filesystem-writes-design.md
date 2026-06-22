@@ -50,8 +50,10 @@ again per project. At turn construction, when both a linked project root and
 the live Filesystem MCP catalog are present, the gateway injects that absolute
 root into the model context. The model resolves a relative request against it;
 it must not ask the user where to write or claim that the already-connected MCP
-is unavailable. This is guidance only: the manifest+jail remains the actual
-authorization enforcement.
+is unavailable. For an explicitly requested absolute path outside the root, it
+must still call the MCP tool: the runtime produces the confirmation card and
+does not execute until the user authorizes it. This is guidance only: the
+manifest+jail remains the actual authorization enforcement.
 
 ## Security properties
 

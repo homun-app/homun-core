@@ -140,8 +140,18 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   `mcp__filesystem__create` ha creato
   `/Users/fabio/Desktop/test-homun/path-b-gate/note.md` (`una`, `due`, `tre`)
   senza `MCP_CONFIRM`; file e `chat_messages` verificati. Gateway:
-  **156 passati, 1 ignorato**. **Non chiudere ancora Path B:** restano il re-test
-  UI/Gemma in-root e la prova fuori-root (deve restare una card, senza esecuzione).
+  **156 passati, 1 ignorato**. Correzione successiva: per un path fuori root la
+  direttiva ora impone al modello di chiamare comunque il Filesystem MCP con il
+  path assoluto e spiega che sarà il runtime a mostrare la card — non deve
+  inventare indisponibilità del connettore né proporre il salvataggio nel
+  progetto. Runtime Kimi: il thread
+  `thread_1782139063_1782139063946466000` ha emesso la card per
+  `/Users/fabio/Desktop/path-b-outside-gate-1782139063.md`; la successiva
+  esecuzione auditata è avvenuta dopo un callback Telegram autorizzato
+  (`mcp__filesystem__create`, 2026-06-22 16:38:34), non dal bypass in-root.
+  **Non chiudere ancora Path B:** restano il re-test UI/Gemma in-root e la
+  ripetizione manuale fuori-root, verificando che il file non compaia prima
+  dell'approvazione.
 - **Coda:** WS5.4b (`stato-lavori.md`) · WS5.4c (chiusura+dedup) · WS5.5 (provenienza) ·
   WS2 · WS1 3-6 · WS6/7/8/9. Ordine nel backlog.
 - **Regole operative:** build LOCAL, verde a ogni passo, doc aggiornati nello stesso turno,
