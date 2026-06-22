@@ -138,6 +138,14 @@ cablato** nel flusso agente. ADR 0015.
 - ☐ **6.1 Cablare la durabilità**: task agente lunghi nella coda con
   checkpoint/heartbeat/recovery → sopravvivono a chiusura app/crash (lega ADR 0016 F4
   background+resume).
+- ☐ **6.1b Approval-resume (CONFERMATO in-app 2026-06-22):** dopo che un'azione confirm-gated
+  è **approvata** (in-app o **Telegram**), l'harness deve **rientrare nel loop agente del
+  thread d'origine** e continuare il piano. Oggi `execute_pending_approval` (`main.rs:21029`)
+  esegue **solo la singola azione** e si ferma — `telegram_callback`/`handle_channel_inbound`
+  la trattano come *"control message, not a conversation"* (:16209); inoltre la pending-approval
+  code-based **non porta il thread d'origine** (`take_pending_approval` → solo tool+args), quindi
+  non *può* riprendere. Il turno originale era già chiuso al `pending_confirm` (:13518). Lega
+  ADR 0015 + caposaldo #2. *(Diverso dal gap "piano-non-creato" di WS1-F2 slice 2.5.)*
 - ☐ **6.2 Resource Governor** attivo sui task (limiti, backpressure).
 - ☐ **6.3 Scheduler / ricorrenza** + **proactive review** (l'assistente propone schede
   in autonomia governata) verificati end-to-end.

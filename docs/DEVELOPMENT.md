@@ -86,6 +86,16 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   esistenti: `MAX_PLAN_NUDGES=8` + `is_final_round`. Chirurgica, non sovra-pianifica i turni
   banali, riusa F2. Follow-up = "Floor ovunque" (forza-piano a round 1). **Verifica: gemma
   demo-piano → 5/5.** Poi: slice 3 / WS2. ⚠️ Side-note UI: turni cloud etichettati "Local model".
+- **2° GAP — APPROVAL-RESUME (intuizione utente, CONFERMATO ≠ B, 2026-06-22):** un'azione
+  confirm-gated instradata su Telegram, una volta **concessa**, esegue **solo la singola
+  azione** via `execute_pending_approval` (`main.rs:21029`) e risponde "✅ Done"; il
+  `telegram_callback` (:16140) / `handle_channel_inbound` (:16194) la trattano come *"control
+  message, **not a conversation**"* (:16209) → **NON rientra nel loop agente**, il task
+  multi-step **non prosegue**. Strutturale: (a) il turno era già morto al `pending_confirm`
+  (:13518 `final_done;break`); (b) la pending-approval code-based **non porta il thread
+  d'origine** (`take_pending_approval` → solo tool+args). Distinto da B (oggi 0 record in
+  `task_approvals` per i thread di oggi). Stessa radice (#2), **ramo diverso** → **WS6 6.1b**.
+  La slice 2.5 NON lo copre (`pending_confirm` rompe a :13518, prima del guard di 2.5).
 - **Coda:** WS5.4b (`stato-lavori.md`) · WS5.4c (chiusura+dedup) · WS5.5 (provenienza) ·
   WS2 · WS1 3-6 · WS6/7/8/9. Ordine nel backlog.
 - **Regole operative:** build LOCAL, verde a ogni passo, doc aggiornati nello stesso turno,
