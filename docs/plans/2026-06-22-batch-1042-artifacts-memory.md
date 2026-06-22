@@ -17,11 +17,15 @@ modelli deboli/locali. Invarianti: monotonìa, limitatezza, identità non inferi
 
 - ✅ **Fase 1** — enforcement output (floor) + `make_deck` (un-call, max scaffolding).
   Pubblicato **v1041**, deck verificato su `gemma4:latest` locale.
-- ☐ **Fase 2 — GESTIONE PIANO (il pezzo grosso ancora aperto).** Sostituire il piano
-  canonico merge-per-titolo (`merge_plan`, gonfiore/loop) con un **`ExecutionPlan`
-  runtime-owned a `step_id` stabili**: `plan_propose` (crea una volta) + `step_advance`
-  (avanza per id, monotòno). Ritira `update_plan`/`merge_plan`. Chiude gonfiore, loop
-  di rigenerazione e identità inferita.
+- 🟡 **Fase 2 — GESTIONE PIANO (il pezzo grosso).** Obiettivo: piano runtime-owned a
+  **`step_id` stabili** (l'`ExecutionPlan` del crate `orchestrator` ce l'ha già).
+  - ✅ **Slice 1 (fatto)**: `merge_plan` ora abbina **per `id`** quando il modello lo
+    rimanda (lo schema `update_plan` ha il campo `id`; il marker ‹‹PLAN›› lo mostra),
+    fallback al titolo → riduce il gonfiore da titoli parafrasati, retro-compatibile,
+    sicuro sui modelli deboli. Test `merge_plan_matches_by_id_despite_rephrased_title`.
+  - ☐ **Slice 2+**: `plan_propose` (crea una volta) + `step_advance` (avanza per id,
+    monotòno) che ritirano `update_plan`/`merge_plan` (identità mai inferita, anche
+    senza che il modello debole echi l'id). Convergere sull'`ExecutionPlan` orchestrator.
 - ☐ **Floor ovunque** — constrained decoding su **tutte** le emissioni di
   orchestrazione (tool call del loop principale, piano, verifica), locale+cloud. Oggi
   è imposto solo sul contenuto di `make_deck`; il planner OpenAI-compat declassa ancora.

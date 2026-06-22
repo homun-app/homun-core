@@ -4320,6 +4320,7 @@ for single-step requests.",
                         "items": {
                             "type": "object",
                             "properties": {
+                                "id": { "type": "string", "description": "When UPDATING an existing step, echo its id EXACTLY as shown in the plan (the `(`id`)` after the title, e.g. \"s2\"). This keeps the step stable even if you rephrase its title. OMIT for a brand-new step." },
                                 "title": { "type": "string", "description": "What the step does (short, imperative)." },
                                 "status": { "type": "string", "enum": ["todo", "doing", "done", "blocked"], "description": "Current status of the step." },
                                 "detail": { "type": "string", "description": "Optional detail." },
@@ -4438,7 +4439,14 @@ fn merge_plan(plan: &mut Vec<serde_json::Value>, sent: &[serde_json::Value]) -> 
         }
         let new_status = s.get("status").and_then(|v| v.as_str()).unwrap_or("todo");
         let detail = s.get("detail").and_then(|v| v.as_str()).unwrap_or("");
-        match plan.iter().position(|p| tkey(plan_step_title(p)) == tkey(title)) {
+        // Identity: prefer the stable `id` the model echoes (shown as (`id`) in the
+        // ‹‹PLAN›› marker); fall back to title. Id-first stops the ballooning from
+        // paraphrased titles — the original cross-model bug. (WS1-F2 first slice.)
+        let sent_id = s.get("id").and_then(|v| v.as_str()).map(str::trim).filter(|x| !x.is_empty());
+        let pos = sent_id
+            .and_then(|id| plan.iter().position(|p| p.get("id").and_then(|v| v.as_str()) == Some(id)))
+            .or_else(|| plan.iter().position(|p| tkey(plan_step_title(p)) == tkey(title)));
+        match pos {
             Some(i) => {
                 if plan_step_status(&plan[i]) == "done" {
                     // sticky: ignore any attempt to re-open a done step
@@ -30686,6 +30694,23 @@ mod tests {
         assert_eq!(plan[0]["id"], "s1");
         assert_eq!(plan[1]["id"], "s2");
         assert_eq!(plan_next_open(&plan).as_deref(), Some("Generate images"));
+    }
+
+    #[test]
+    fn merge_plan_matches_by_id_despite_rephrased_title() {
+        // Step exists with id s1; the model re-sends it with a PARAPHRASED title but
+        // echoes the id → UPDATE in place (no balloon), not a duplicate. (WS1-F2.)
+        let mut plan = vec![serde_json::json!({
+            "id": "s1", "title": "Generate images", "status": "doing", "detail": ""
+        })];
+        let claims = merge_plan(
+            &mut plan,
+            &[serde_json::json!({ "id": "s1", "title": "Render the images", "status": "done" })],
+        );
+        assert_eq!(plan.len(), 1, "id match must not create a duplicate");
+        assert_eq!(plan[0]["id"], "s1");
+        assert_eq!(claims, vec![0]);
+        assert_eq!(plan_step_status(&plan[0]), "doing");
     }
 
     #[test]
