@@ -45,10 +45,11 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
 
 ### Cruscotto operativo attuale
 
-- **Linea attiva:** WS6.2 Resource Governor — slice 1 completata localmente:
-  reidratazione dei task `WaitingResource` quando la capacità torna disponibile.
-  Prossimo slice: rendere più visibili limiti/uso/backpressure nella superficie
-  task o stress-gate in-app con più worker.
+- **Linea attiva:** WS6.2 Resource Governor — slice 1+2 completate localmente:
+  reidratazione dei task `WaitingResource` quando la capacità torna disponibile,
+  sia nel gateway sia nel `TaskRuntime` standalone. Prossimo slice: rendere
+  visibili limiti/uso/backpressure nella superficie task/executor e poi stress-gate
+  in-app con più worker.
 - **Fatto e verificato localmente:** root automatica del progetto, bypass conferma
   solo per scritture Filesystem MCP dentro root; outside-root resta confirm-gated;
   routing Auto thread-aware + fallback orchestratore su `400` con tool; approval
@@ -153,6 +154,15 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   local-first-desktop-gateway` = **162 passati, 1 ignorato**; `cargo build -p
   local-first-desktop-gateway` verde; `npm run build` desktop verde;
   `git diff --check` pulito.
+- **WS6.2b runtime-level recovery FATTO (2026-06-22):** stesso gap chiuso anche
+  nel crate `task-runtime`: `TaskRuntime::run_ready_once` ora esegue una sweep
+  di requeue dei `WaitingResource` prima di chiamare `ready_tasks`. Test
+  red/green: `task_runtime_requeues_waiting_resource_before_scheduling` (red:
+  `summary.completed` restava 0; green: task bloccato completato dopo rilascio
+  risorsa). Verifiche locali: `cargo test -p local-first-task-runtime` verde;
+  focused gateway `task_executor_requeues_waiting_resource_before_scheduling`
+  verde; `cargo build -p local-first-desktop-gateway` verde; `npm run build`
+  desktop verde; `git diff --check` pulito.
 - **Divieto operativo:** niente altri test di scrittura via endpoint HTTP grezzo;
   per questo gate usare solo UI/app o callback Telegram reale.
 

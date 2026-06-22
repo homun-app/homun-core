@@ -295,8 +295,17 @@ cablato** nel flusso agente. ADR 0015.
   `task_executor_requeues_waiting_resource_before_scheduling`. Verifiche:
   `cargo test -p local-first-task-runtime` verde; gateway **162 passati, 1
   ignorato**; `cargo build -p local-first-desktop-gateway` verde; `npm run build`
-  desktop verde; `git diff --check` pulito. **Prossimo slice:** visibilità
-  limiti/uso/backpressure o stress-gate in-app con più worker.
+  desktop verde; `git diff --check` pulito.
+  **Slice 2 FATTA (2026-06-22):** stesso recupero cablato anche nel
+  `TaskRuntime` standalone: `run_ready_once` reidrata i `WaitingResource` prima
+  di `ready_tasks`. Test red/green
+  `task_runtime_requeues_waiting_resource_before_scheduling` (prima
+  `summary.completed=0`, dopo completa il task appena la risorsa viene rilasciata).
+  Verifiche: `cargo test -p local-first-task-runtime` verde; focused gateway
+  `task_executor_requeues_waiting_resource_before_scheduling` verde; build gateway
+  e desktop verdi; `git diff --check` pulito. **Prossimo slice:** visibilità
+  limiti/uso/backpressure nella API task/executor, poi stress-gate in-app con più
+  worker.
 - ☐ **6.3 Scheduler / ricorrenza** + **proactive review** (l'assistente propone schede
   in autonomia governata) verificati end-to-end.
 - ☐ **6.4** Le azioni proattive scrivono in memoria (loop aperti / decisioni) — lega WS5.

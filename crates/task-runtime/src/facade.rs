@@ -55,6 +55,7 @@ impl TaskRuntime {
         workspace_id: &WorkspaceId,
         now: OffsetDateTime,
     ) -> TaskRuntimeResult<RunReadySummary> {
+        self.requeue_waiting_resource_tasks(user_id, workspace_id)?;
         let ready =
             self.scheduler
                 .ready_tasks(&self.store, user_id, workspace_id, now, usize::MAX)?;
@@ -169,6 +170,23 @@ impl TaskRuntime {
         }
 
         Ok(summary)
+    }
+
+    fn requeue_waiting_resource_tasks(
+        &self,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+    ) -> TaskRuntimeResult<usize> {
+        let mut requeued = 0usize;
+        for task in self.store.list_tasks(user_id, workspace_id)? {
+            if self
+                .resources
+                .requeue_waiting_if_available(&self.store, &task)?
+            {
+                requeued += 1;
+            }
+        }
+        Ok(requeued)
     }
 
     fn finish_task(

@@ -45,6 +45,60 @@ fn task_runtime_completes_ready_task_and_releases_resources() {
 }
 
 #[test]
+fn task_runtime_requeues_waiting_resource_before_scheduling() {
+    let user = UserId::new("user_1");
+    let workspace = WorkspaceId::new("workspace_1");
+    let store = TaskStore::open_in_memory().unwrap();
+    let running = task("running", &user, &workspace)
+        .with_resource(ResourceRequirement::new(ResourceClass::LlmInference, 1));
+    let blocked = task("blocked", &user, &workspace)
+        .with_resource(ResourceRequirement::new(ResourceClass::LlmInference, 1));
+    store.insert_task(&running).unwrap();
+    store.insert_task(&blocked).unwrap();
+    let governor =
+        local_first_task_runtime::ResourceGovernor::new(
+            ResourceLimits::new().with_limit(ResourceClass::LlmInference, 1),
+        );
+
+    governor.reserve(&store, &running, "worker_a").unwrap();
+    governor
+        .mark_waiting_if_unavailable(&store, &blocked)
+        .unwrap();
+    store
+        .update_task_status(
+            &running.task_id,
+            &user,
+            &workspace,
+            TaskStatus::Completed,
+            None,
+        )
+        .unwrap();
+    governor.release(&store, &running).unwrap();
+
+    let executor = FakeTaskExecutor::new(vec![ExecutorResult::Completed {
+        output: json!({"ok": true}),
+    }]);
+    let mut runtime = TaskRuntime::new(
+        store,
+        Box::new(executor),
+        ResourceLimits::new().with_limit(ResourceClass::LlmInference, 1),
+        "worker_b",
+    );
+
+    let summary = runtime
+        .run_ready_once(&user, &workspace, OffsetDateTime::now_utc())
+        .unwrap();
+    let reloaded = runtime
+        .store()
+        .get_task(&TaskId::new("blocked"), &user, &workspace)
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(summary.completed, 1);
+    assert_eq!(reloaded.status, TaskStatus::Completed);
+}
+
+#[test]
 fn task_runtime_records_checkpoint_and_requeues_task() {
     let user = UserId::new("user_1");
     let workspace = WorkspaceId::new("workspace_1");
