@@ -6216,6 +6216,24 @@ const PROJECT_READ_MAX_CHARS: usize = 50_000;
 const PROJECT_LIST_MAX_ENTRIES: usize = 300;
 const PROJECT_LIST_MAX_DEPTH: usize = 4;
 
+struct WorkspaceScopedMcpManifest {
+    provider: &'static str,
+    tool: &'static str,
+    paths: &'static [&'static str],
+}
+
+const WORKSPACE_FILESYSTEM_WRITES: &[WorkspaceScopedMcpManifest] = &[
+    WorkspaceScopedMcpManifest { provider: "mcp:filesystem", tool: "create", paths: &["/path"] },
+    WorkspaceScopedMcpManifest { provider: "mcp:filesystem", tool: "insert", paths: &["/path"] },
+    WorkspaceScopedMcpManifest { provider: "mcp:filesystem", tool: "str_replace", paths: &["/path"] },
+];
+
+fn workspace_filesystem_manifest(provider: &str, tool: &str) -> Option<&'static WorkspaceScopedMcpManifest> {
+    WORKSPACE_FILESYSTEM_WRITES
+        .iter()
+        .find(|entry| entry.provider == provider && entry.tool == tool)
+}
+
 /// Resolves the host project root for the conversation's workspace, if one is set
 /// and exists on disk. Falls back to the active workspace when the thread is unknown.
 fn project_root_for_thread(state: &AppState, thread_id: Option<&str>) -> Option<PathBuf> {
@@ -6273,6 +6291,16 @@ fn jail_in_root(root: &std::path::Path, rel: &str) -> Result<PathBuf, String> {
         }
     }
     Ok(joined)
+}
+
+fn jail_absolute_in_root(root: &std::path::Path, candidate: &std::path::Path) -> Result<PathBuf, String> {
+    if !candidate.is_absolute() {
+        return Err("use an absolute path".to_string());
+    }
+    let relative = candidate
+        .strip_prefix(root)
+        .map_err(|_| "path outside the project folder".to_string())?;
+    jail_in_root(root, &relative.to_string_lossy())
 }
 
 fn no_project_folder_msg() -> String {
@@ -30797,6 +30825,22 @@ mod tests {
         assert!(super::telegram_rebind_should_wait(true, false));
         assert!(!super::telegram_rebind_should_wait(false, false));
         assert!(!super::telegram_rebind_should_wait(true, true));
+    }
+
+    #[test]
+    fn workspace_filesystem_manifest_allows_only_declared_write_tools() {
+        assert!(super::workspace_filesystem_manifest("mcp:filesystem", "create").is_some());
+        assert!(super::workspace_filesystem_manifest("mcp:filesystem", "view").is_none());
+        assert!(super::workspace_filesystem_manifest("mcp:other", "create").is_none());
+    }
+
+    #[test]
+    fn absolute_jail_accepts_nested_new_path_and_rejects_escape() {
+        let root = std::env::temp_dir().join(format!("homun-scope-{}", std::process::id()));
+        std::fs::create_dir_all(&root).expect("root");
+        assert!(super::jail_absolute_in_root(&root, &root.join("nested/new.md")).is_ok());
+        assert!(super::jail_absolute_in_root(&root, &root.join("../outside.md")).is_err());
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
