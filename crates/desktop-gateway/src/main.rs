@@ -9158,10 +9158,15 @@ async fn generate_deck_content(
     slides: usize,
     language: &str,
 ) -> Result<serde_json::Value, String> {
-    // Use the CURRENT turn's model/endpoint (what the chat is actually running),
-    // NOT a fresh orchestrator-role resolution — otherwise make_deck diverges from
-    // the model the user selected and can hit a different, misconfigured provider.
-    let endpoint = chat_endpoint(base_url);
+    // Use the CURRENT turn's model (what the chat is actually running), NOT a
+    // fresh orchestrator-role resolution. Hit the OpenAI-compat endpoint DIRECTLY
+    // ({base}/chat/completions) — NOT chat_endpoint(), which rewrites an Ollama
+    // base to the NATIVE /api/chat (a different request+response shape: it wants
+    // `format` not `response_format`, and returns `message.content` not
+    // `choices[].message.content`). We build an OpenAI-compat body + parse
+    // `choices[0]`, so we MUST hit the OpenAI-compat endpoint (this is exactly the
+    // path the deck-content eval validates, 5/5 on gemma).
+    let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
     let lang = if language.trim().is_empty() { "the user's language" } else { language.trim() };
     let org = if brand.organization.trim().is_empty() {
         "the organization"
