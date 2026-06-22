@@ -123,8 +123,10 @@ risolta per il deck. ADR 0011 (addon + contratto personalizzazione).
 Il caposaldo #2 ("funziona sul tier locale") oggi è verificato solo sul deck
 (`scripts/eval_deck_content.py`). Serve un **guardrail trasversale**.
 
-- ☐ **8.1** Suite di eval che gira i **flussi chiave** (deck, documento, ricerca, piano,
-  memoria) sul **modello locale di base** (Gemma/7B) e verifica che **completino sempre**.
+- 🟡 **8.1** Suite di eval sui **flussi chiave** sul **modello locale di base**.
+  *Seed fatto:* `scripts/eval_suite.py` (deck · piano · decisione-con-perché —
+  structured-output a livello modello). Da estendere: flussi via gateway (tool-call
+  emission, render end-to-end) + documento/ricerca quando esistono (WS7).
 - ☐ **8.2** Eval memoria (= WS5.6): chat nuova → "stato + perché" → deve rispondere.
 - ☐ **8.3** Gate pre-release: nessuna pubblicazione se la suite non è verde sul tier base.
 
