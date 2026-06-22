@@ -34,10 +34,12 @@ modelli deboli/locali. Invarianti: monotonìa, limitatezza, identità non inferi
     raggiunte** — stanno a valle di un piano che non nasce. **Prima di slice 3** serve il
     pezzo a monte: **trigger-piano + continuazione-loop a completamento** (vedi "Floor
     ovunque" sotto, caposaldo #2). **Slice 3 (DAG) deprioritizzata.**
-  - ☐ **Slice 2.5 (NUOVO, priorità)**: l'harness garantisce un piano per i task multi-step e
-    tiene il loop avanzando via `step_advance` fino a `done`/blocco (no ritorno all'utente
-    dopo la 1ª tool-call). Verifica: demo-piano → **5/5** su **gemma**. Passo 0 = leggere il
-    loop agente (terminazione turno + offerta `update_plan`) per fissare la causa.
+  - 🟡 **Slice 2.5 (CODICE FATTO, commit `4706d7a` — gate in-app pendente)**: guard simmetrico
+    @ `main.rs:13534` — se il modello ha agito ma stoppa **senza piano**, un giudice cheap
+    (`task_appears_incomplete`, role `memory`, fail-open) → directive nudge a creare il piano
+    con `update_plan` e continuare (bootstrap one-shot → poi guida F5). Flag `turn_used_tools`
+    evita di toccare la chat pura; `make_deck` esente (one-call). 8/8 test verdi. **Verifica:
+    gemma demo-piano → 5/5** (riavviare `electron:dev`, cancellare `~/demo-piano`).
   - ☐ **Slice 3**: convergere sull'`ExecutionPlan` del crate `orchestrator` (DAG
     `depends_on`, `plan_propose`) e ritirare il `Vec<Value>` canonico.
 - ☐ **Floor ovunque** — constrained decoding su **tutte** le emissioni di

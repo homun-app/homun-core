@@ -79,13 +79,20 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   `plan_next_open`=None → nudge saltato → stop a 2/5 accettato (:13584 `final_done;break`).
   **Tutta F1–F5 è gated su `plan` non-vuoto** — protegge un piano esistente, non lo fa
   nascere. `make_deck` immune perché **one-call** (no loop multi-step). Caposaldo #2.
-- **FIX proposto (slice 2.5 — guard SIMMETRICO @ `main.rs:13524-13565`):** se `mode=="agent"`
-  + tool usati nel turno + budget + `plan` **vuoto**, un giudice-completamento cheap (riusa
-  `verify_step_complete`, **fail-open**) valuta "richiesta soddisfatta?"; se NO → directive
-  nudge "chiama `update_plan` con TUTTI gli step, poi fai il primo non fatto". Bound già
-  esistenti: `MAX_PLAN_NUDGES=8` + `is_final_round`. Chirurgica, non sovra-pianifica i turni
-  banali, riusa F2. Follow-up = "Floor ovunque" (forza-piano a round 1). **Verifica: gemma
-  demo-piano → 5/5.** Poi: slice 3 / WS2. ⚠️ Side-note UI: turni cloud etichettati "Local model".
+- **slice 2.5 SCRITTA + VERDE (8/8, commit `4706d7a`):** guard simmetrico @ `main.rs:13534`
+  (ramo `else if plan.is_empty() && turn_used_tools && task_appears_incomplete(...)`): se il
+  modello ha **agito** ma si ferma **senza piano** e il giudice-completamento cheap (role
+  `memory`, **fail-open** → "soddisfatto", mirror di `verify_step_complete`) dice "non finito"
+  → directive nudge *"chiama `update_plan` con TUTTI gli step e continua"*. È un **bootstrap
+  one-shot**: poi guida il ramo F5 esistente. Bound: `MAX_PLAN_NUDGES=8` + `is_final_round` +
+  `turn_used_tools` (non tocca la chat pura). `make_deck` esente (one-call). 4 modifiche: flag
+  `turn_used_tools` (decl + set @ :11107), `fn task_appears_incomplete`, guard.
+- **GATE in-app PENDENTE (slice 2.5 è cuore → verificare prima di impilare):** riavviare
+  `electron:dev` (l'istanza in bg gira il codice VECCHIO), modello **gemma**, cancellare
+  `~/demo-piano`, ridare il prompt demo-piano → atteso **5/5** (‹‹PLAN›› creato + `step_advance`
+  per id, no gonfiore, `done` non si riapre). Nessun unit-test nuovo: logica async/LLM-gated →
+  verifica = gate in-app (come la memoria 1043). **Dopo il verde:** WS6 6.1b (si appoggia a
+  2.5) · poi slice 3 / WS2. ⚠️ Side-note UI: turni cloud etichettati "Local model".
 - **2° GAP — APPROVAL-RESUME (intuizione utente, CONFERMATO ≠ B, 2026-06-22):** un'azione
   confirm-gated instradata su Telegram, una volta **concessa**, esegue **solo la singola
   azione** via `execute_pending_approval` (`main.rs:21029`) e risponde "✅ Done"; il
