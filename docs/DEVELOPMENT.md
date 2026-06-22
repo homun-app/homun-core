@@ -51,8 +51,13 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   file", B non lo riportava). Serve cattura **completa & coerente** (anche i negativi) +
   `open_loop` più ricchi. **Da fare PRIMA di WS5.4** (iniettare open_loop incompleti
   propagherebbe l'incoerenza).
-- **PROSSIMO:** WS5.7 (completezza/coerenza cattura) → poi WS5.4 (briefing auto-inject via
-  `context_pack`/`gather_profile_memory` main.rs ~1849 + `stato-lavori.md` + chiusura+dedup).
+- **In locale (2 commit, da verificare in-app):** ✅ WS5.7 (estrattore cattura finding +
+  negativi + open_loop completi) · ✅ WS5.4a (open_loop nel briefing always-on:
+  `gather_open_loops` + sezione OPEN LOOPS in cima a `format_memory_block`, test verdi).
+- **PROSSIMO:** **build v1043** per verificare in-app WS5.7+5.4a (re-test Rossi: la chat B
+  deve ricordare "nessun file ancora" E una chat NUOVA deve mostrare i loop aperti **senza**
+  nominare il topic) → poi WS5.4b (`stato-lavori.md`) + WS5.4c (chiusura+dedup) + WS5.5
+  (provenienza) → WS2 → WS1-Fase2 (piano).
 - **Poi:** WS5.5 (provenienza) · WS2 (artefatti) · WS1-Fase 2 (gestione piano) · WS1 3-6 ·
   WS6/7/8/9. Ordine completo nel backlog.
 - **Sfondo:** Motore cross-modello Fase 1 ✅ v1041 (deck verificato vero-locale).
