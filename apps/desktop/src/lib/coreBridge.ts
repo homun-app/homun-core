@@ -551,6 +551,23 @@ export interface RuntimeModelsList {
   groups: ProviderModelsGroup[];
 }
 
+/** Whether a model runs in the cloud (☁️) vs on this machine (💻): true when the
+ * model id carries an Ollama cloud tag (`:cloud`/`-cloud`) OR its provider endpoint
+ * is remote (not localhost). Engine-authoritative, the name tag as a fallback. */
+export function modelIsCloud(baseUrl: string | undefined, modelId: string): boolean {
+  const m = modelId.toLowerCase();
+  if (m.includes(":cloud") || m.includes("-cloud")) return true;
+  const b = (baseUrl ?? "").toLowerCase();
+  if (!b) return false;
+  const local =
+    b.includes("127.0.0.1") ||
+    b.includes("localhost") ||
+    b.includes("0.0.0.0") ||
+    b.includes("[::1]") ||
+    b.includes("://::1");
+  return !local;
+}
+
 export interface InferenceProvider {
   base_url: string | null;
   model: string | null;

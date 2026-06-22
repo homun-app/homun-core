@@ -91,6 +91,7 @@ import {
   type MemoryGraphNode,
   type MemoryWikiPage,
   type ProjectSubdir,
+  modelIsCloud,
   type ProviderModelsGroup,
   type SkillsSummary,
 } from "../lib/coreBridge";
@@ -7678,22 +7679,6 @@ function shortModelName(model: string): string {
   return tail.length > 22 ? `${tail.slice(0, 21)}…` : tail;
 }
 
-/** Whether a model runs in the cloud (☁️) vs on this machine (💻): true when the
- * model id carries an Ollama cloud tag (`:cloud`/`-cloud`) OR its provider endpoint
- * is remote (not localhost). Engine-authoritative, name as a fallback signal. */
-function modelIsCloud(baseUrl: string | undefined, modelId: string): boolean {
-  const m = modelId.toLowerCase();
-  if (m.includes(":cloud") || m.includes("-cloud")) return true;
-  const b = (baseUrl ?? "").toLowerCase();
-  if (!b) return false;
-  const local =
-    b.includes("127.0.0.1") ||
-    b.includes("localhost") ||
-    b.includes("0.0.0.0") ||
-    b.includes("[::1]") ||
-    b.includes("://::1");
-  return !local;
-}
 
 function formatContextTokens(n: number): string {
   if (!n || n <= 0) return "contesto n/d";
