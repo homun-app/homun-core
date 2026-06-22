@@ -43,16 +43,16 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
 > [backlog](plans/2026-06-22-batch-1042-artifacts-memory.md) (gli stati ☐/✅ = i loop
 > aperti) e sei di nuovo sul filo. Stesso principio della memoria di Homun (caposaldo #8).
 
-- **In corso:** rilascio **v0.1.1042 "corposa"** = WS3 (lingua deck · badge 💻/☁️ ·
-  gestione file per-file · strip `<tool_call>`) + WS8.1 (eval suite) + WS5.2
-  (embed-everything) + WS5.3 (`open_loop` tipo di prima classe). 8 commit, build in corso.
-- **Verifica pendente (solo a gateway acceso):** WS5 live — embed-catchup riempie gli
-  embedding (era 391/555) e gli `open_loop` vengono estratti/richiamati. L'eval headless
-  copre solo l'output del modello (4/4 verde su gemma4:latest), non recall/briefing.
-- **PROSSIMO (WS5.4):** iniettare gli `open_loop` nel **briefing always-on** —
-  investigare `context_pack` (`gather_profile_memory`, main.rs ~1849) che è la via che
-  alimenta la memoria sempre-attiva; + proiezione **`stato-lavori.md`**; + **chiusura
-  automatica** dell'open_loop a lavoro fatto.
+- **Pubblicato:** **v0.1.1042** (WS3 + WS8.1 eval + WS5.2 embed-everything + WS5.3
+  open_loop). Embedding 391→407 e cattura+recall open_loop **validati in-app** (test Rossi).
+- **GAP TROVATO (WS5.7):** la memoria salva il piano/open_loop ma **scarta i finding**
+  (l'estrattore: "do NOT extract … what the assistant said") → una chat nuova ricostruisce
+  un quadro "troppo pulito", **incoerente** con l'originale (es. A diceva "non trovo il
+  file", B non lo riportava). Serve cattura **completa & coerente** (anche i negativi) +
+  `open_loop` più ricchi. **Da fare PRIMA di WS5.4** (iniettare open_loop incompleti
+  propagherebbe l'incoerenza).
+- **PROSSIMO:** WS5.7 (completezza/coerenza cattura) → poi WS5.4 (briefing auto-inject via
+  `context_pack`/`gather_profile_memory` main.rs ~1849 + `stato-lavori.md` + chiusura+dedup).
 - **Poi:** WS5.5 (provenienza) · WS2 (artefatti) · WS1-Fase 2 (gestione piano) · WS1 3-6 ·
   WS6/7/8/9. Ordine completo nel backlog.
 - **Sfondo:** Motore cross-modello Fase 1 ✅ v1041 (deck verificato vero-locale).
