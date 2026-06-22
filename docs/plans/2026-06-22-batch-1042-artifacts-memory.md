@@ -28,6 +28,16 @@ modelli deboli/locali. Invarianti: monotonìa, limitatezza, identità non inferi
     parafrasare, niente gonfiore). Riusa lo stesso percorso merge+F2-verify di
     `update_plan` (zero duplicazione); `merge_plan` ora aggiorna anche per **id solo** (no
     titolo). Tool registrato + guida nel prompt + test. `update_plan` resta per creare/rivedere.
+  - ⚠️ **Trovato in-app (2026-06-22, `kimi-k2.6:cloud`)**: per un task multi-step *generico*
+    (≠ `make_deck`) l'harness **non crea il piano** (‹‹PLAN››=0 nel chat store) **né guida
+    il loop a termine** (demo-piano fermo a 2/5). Le slice 1/2 sono corrette ma **non
+    raggiunte** — stanno a valle di un piano che non nasce. **Prima di slice 3** serve il
+    pezzo a monte: **trigger-piano + continuazione-loop a completamento** (vedi "Floor
+    ovunque" sotto, caposaldo #2). **Slice 3 (DAG) deprioritizzata.**
+  - ☐ **Slice 2.5 (NUOVO, priorità)**: l'harness garantisce un piano per i task multi-step e
+    tiene il loop avanzando via `step_advance` fino a `done`/blocco (no ritorno all'utente
+    dopo la 1ª tool-call). Verifica: demo-piano → **5/5** su **gemma**. Passo 0 = leggere il
+    loop agente (terminazione turno + offerta `update_plan`) per fissare la causa.
   - ☐ **Slice 3**: convergere sull'`ExecutionPlan` del crate `orchestrator` (DAG
     `depends_on`, `plan_propose`) e ritirare il `Vec<Value>` canonico.
 - ☐ **Floor ovunque** — constrained decoding su **tutte** le emissioni di
@@ -92,8 +102,9 @@ che fanno "ricordare il perché e sopravvivere". Caposaldo #8.
 - 🟡 **5.3 Loop aperti** — tipo `open_loop` di prima classe: meccanismo validato in-app
   (cattura + recall cross-chat su gemma4:latest, v1042). Resta: **chiusura automatica** +
   **iniezione nelle chat nuove** (WS5.4) + **dedup** (erano 2 quasi-duplicati).
-- 🟡 **5.7 Completezza & coerenza della cattura** *(gap trovato nel test Rossi, 2026-06-22;
-  prompt estrattore sistemato — verifica in-app al prossimo build re-testando Rossi)*:
+- ✅ **5.7 Completezza & coerenza della cattura** *(gap trovato nel test Rossi, 2026-06-22;
+  prompt estrattore sistemato — **VERIFICATO in-app 2026-06-22**: chat B ha ricordato il
+  finding negativo "il file del preventivo non è stato ancora trovato")*:
   l'estrattore scarta i **finding** ("do NOT extract … what the assistant said") → la
   memoria salva il piano ma NON lo **stato reale** (es. "nessun file ancora / X non
   trovato"), e una chat nuova ricostruisce un quadro "troppo pulito", **incoerente** con
@@ -104,7 +115,8 @@ che fanno "ricordare il perché e sopravvivere". Caposaldo #8.
 - 🟡 **5.4 Open loops nelle chat nuove**:
   - ✅ **5.4a briefing always-on** — `gather_open_loops` + sezione "OPEN LOOPS" in cima a
     `format_memory_block` (priorità di budget): una chat nuova li riceve **senza** nominare
-    il topic (chiude il gap del test Rossi-B). Build+test verdi.
+    il topic (chiude il gap del test Rossi-B). Build+test verdi. **VERIFICATO in-app
+    2026-06-22**: chat nuova ha mostrato **2** loop (preventivo Rossi + bug gateway browser).
   - ☐ **5.4b** proiezione markdown `stato-lavori.md` (faccia leggibile/editabile, bidirezionale).
   - ☐ **5.4c** **chiusura automatica** dell'open_loop a lavoro fatto + **dedup** (erano 2).
 - ☐ **5.5 Catena di provenienza** decisione → artefatto → codice → esito (unisce

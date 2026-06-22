@@ -62,13 +62,26 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   ne impilerebbero una **terza**. Run: `cd apps/desktop && npm run electron:dev` — electron
   fa `cargo run -p local-first-desktop-gateway` **da HEAD = v1044** (nessun bump/tag: il
   tag *è* il publish, solo su comando). Un solo run copre memoria 1043 **e** piano.
-- **PASS-GATE in-app (entrambi prima di impilare slice 3 / WS2):**
-  · *Memoria (Rossi)*: chat B ricorda **"nessun file ancora"** (WS5.7); una chat **NUOVA**
-  mostra i loop aperti **senza** nominare il topic (WS5.4a). · *Piano*: task multi-step su
-  modello **locale/debole** → `update_plan` crea, poi `step_advance` **non gonfia** il piano
-  e un `done` **non si riapre**.
-- **DOPO il gate verde:** (2) WS1-F2 slice 3 (`ExecutionPlan`/DAG del crate `orchestrator`,
-  ritirare il `Vec<Value>` canonico) · oppure (3) WS2 artefatti / WS4 qualità.
+- **GATE in-app — RISULTATO (2026-06-22, modello `kimi-k2.6:cloud`):**
+  · ✅ **Memoria 1043 VERIFICATA → chiusa**: chat B ha ricordato *"il file del preventivo
+  non è stato ancora trovato"* (WS5.7, finding **negativo**); una chat **NUOVA** ha mostrato
+  **2** loop aperti (preventivo Rossi + bug gateway browser-headless) **senza** nominare il
+  topic (WS5.4a). · ❌ **Piano NON esercitato end-to-end**: task 5-step (`demo-piano`) →
+  **‹‹PLAN›› = 0** nel thread (verificato nel chat store), loop fermo a **2/5** (cartella +
+  `note.md`), poi turno chiuso. Le slice v1044 (merge-per-id, `step_advance`) sono
+  **unit-verdi (8/8) ma non raggiunte**: stanno *a valle* di un piano che non viene **creato
+  né guidato a termine**.
+- **ROOT CAUSE (ipotesi, evidenza solida):** l'harness **non compelle** un piano per i task
+  multi-step *generici* (≠ `make_deck`, l'unico oggi blindato) e il loop **non persiste**
+  fino al completamento. È il gap già aperto **"Floor ovunque" + continuazione-loop**.
+  Successo su modello **cloud** ⇒ caposaldo #2 (*piano non creato/seguito = bug di design*),
+  non debolezza del modello. ⚠️ Side-note UI: i turni cloud sono etichettati "Local model"
+  nel bubble (default fuorviante).
+- **PROSSIMO (reprioritizzato): slice 3 è PREMATURA.** Lever vero = **trigger-piano +
+  continuazione-loop a completamento** (l'harness garantisce un piano per i task multi-step
+  e guida `step_advance` fino a `done`/blocco), da verificare su **gemma** (demo-piano →
+  5/5). **Passo 0: leggere il codice del loop agente** (dove il turno termina; come/quando si
+  offre `update_plan`) per fissare la causa *prima* di scrivere il fix. Poi: slice 3 / WS2.
 - **Coda:** WS5.4b (`stato-lavori.md`) · WS5.4c (chiusura+dedup) · WS5.5 (provenienza) ·
   WS2 · WS1 3-6 · WS6/7/8/9. Ordine nel backlog.
 - **Regole operative:** build LOCAL, verde a ogni passo, doc aggiornati nello stesso turno,
