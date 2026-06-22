@@ -81,10 +81,18 @@ che fanno "ricordare il perché e sopravvivere". Caposaldo #8.
   memoria mancante su **tutti** gli scope, loop fino a esaurimento (off critical path).
   Risolve il gap 391/555 (l'auto-consolidamento che faceva il backfill era OFF di
   default; il backfill altrove era cappato a 4-12).
-- 🟡 **5.3 Loop aperti** — tipo `open_loop` di prima classe: l'estrazione post-turn lo
-  cattura (lavoro incompiuto + perché), incluso in retain + recall + auto-confirm; eval
-  check aggiunto (`open_loop+why`). Resta: **chiusura automatica** quando il lavoro è
-  fatto + **iniezione nelle chat nuove** (via WS5.4 `stato-lavori.md`).
+- 🟡 **5.3 Loop aperti** — tipo `open_loop` di prima classe: meccanismo validato in-app
+  (cattura + recall cross-chat su gemma4:latest, v1042). Resta: **chiusura automatica** +
+  **iniezione nelle chat nuove** (WS5.4) + **dedup** (erano 2 quasi-duplicati).
+- 🟡 **5.7 Completezza & coerenza della cattura** *(gap trovato nel test Rossi, 2026-06-22;
+  prompt estrattore sistemato — verifica in-app al prossimo build re-testando Rossi)*:
+  l'estrattore scarta i **finding** ("do NOT extract … what the assistant said") → la
+  memoria salva il piano ma NON lo **stato reale** (es. "nessun file ancora / X non
+  trovato"), e una chat nuova ricostruisce un quadro "troppo pulito", **incoerente** con
+  la chat originale. Fix: catturare i **finding salienti, inclusi i negativi**, e rendere
+  gli `open_loop` **più ricchi** (cosa esiste / cosa NON esiste / cosa blocca) — senza
+  però immortalare gli errori di processo del modello. Verificabile via eval (un check di
+  coerenza A→B).
 - ☐ **5.4 Proiezione markdown attiva** per progetto (`brief.md` / `decisioni.md` /
   **`stato-lavori.md`**), iniettata nelle **chat nuove**, bidirezionale (edit→sync).
 - ☐ **5.5 Catena di provenienza** decisione → artefatto → codice → esito (unisce

@@ -3618,10 +3618,15 @@ async fn learn_from_exchange(
     let base_system = "You are a MEMORY extractor. From the last exchange extract DURABLE and REUSABLE \
 knowledge: (1) facts and preferences about the USER (who they are, people in their life, how they \
 prefer to work); (2) DECISIONS made during the work (technical or project choices) with the WHY \
-and the rejected alternatives; (3) OPEN LOOPS — work left INCOMPLETE this turn: what REMAINS to do \
-and WHY, so it survives into future chats (memory_type \"open_loop\"; ONLY for genuinely unfinished \
-work, NEVER for items already done). Do NOT extract the transient content of the task, NOT general world \
-facts, NOT what the assistant said as a simple reply. \
+and the rejected alternatives; (3) OPEN LOOPS — work left INCOMPLETE: an \"open_loop\" must describe \
+the FULL situation (what is DONE, what is MISSING or does NOT exist yet, what BLOCKS it and WHY), so a \
+fresh chat reconstructs the REAL state, not a cleaned subset (memory_type \"open_loop\"; ONLY for \
+genuinely unfinished work, NEVER for done items); (4) SALIENT STATE & FINDINGS — INCLUDING NEGATIVES: \
+what does NOT exist yet, was NOT found, or is blocked/missing (e.g. \"the Rossi quote is only a verbal \
+draft, no file yet\"; \"the report file was not found\"). These ARE durable state — capture them (as a \
+\"fact\" or folded into the open_loop), capturing the CONCLUSION/state, NOT the assistant's search \
+process or its mistakes. Do NOT extract the transient chatter of the task, NOT general world facts, \
+NOT the assistant's pure conversational replies. \
 EPISTEMIC STATE — DISTINGUISH what is TRUE/HAPPENED/DECIDED from what is only ASKED, SEARCHED, \
 HYPOTHETICAL or UNDER EVALUATION. A question, a price/options search, an \"if/maybe/I'm \
 considering\" are NOT facts about the user's life: do NOT register them as accomplished (e.g. if the \
