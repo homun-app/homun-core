@@ -37,15 +37,25 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
 | **Prodotto / distribuzione / self-host** | [PRODUCT_LOOP.md](PRODUCT_LOOP.md) · [distribution.md](distribution.md) · [self-host.md](self-host.md) · [release-macos.md](release-macos.md) |
 | **Storico** (changelog, vecchi piani, snapshot) | [archive/](archive/) — non più "corrente", solo memoria storica |
 
-## Stato corrente (sintesi — dettaglio nel backlog)
+## Stato esecuzione — "SEI QUI" (aggiornato 2026-06-22, anti-compattazione)
 
-- **Motore cross-modello (ADR 0016)**: Fase 1 ✅ pubblicata **v1041** (`make_deck` +
-  enforcement output + endpoint OpenAI-compat); deck verificato su modello vero-locale.
-- **Batch 1042** (in locale, non pubblicato): lingua deck ✅ · badge 💻/☁️ ✅ ·
-  gestione file per-file ✅ · #3 memoria appiccicosa ☐.
-- **Memoria (WS5)**: la macchina a 3 livelli c'è ma è **sbilanciata** (grafo solo-codice,
-  391 embedding, 9 pagine wiki) → da completare (WS5).
-- **Prossimo grande**: gestione piano (`ExecutionPlan`+`step_id`, ADR 0016 Fase 2).
+> Se il contesto si è compattato: rileggi QUESTO blocco + il
+> [backlog](plans/2026-06-22-batch-1042-artifacts-memory.md) (gli stati ☐/✅ = i loop
+> aperti) e sei di nuovo sul filo. Stesso principio della memoria di Homun (caposaldo #8).
+
+- **In corso:** rilascio **v0.1.1042 "corposa"** = WS3 (lingua deck · badge 💻/☁️ ·
+  gestione file per-file · strip `<tool_call>`) + WS8.1 (eval suite) + WS5.2
+  (embed-everything) + WS5.3 (`open_loop` tipo di prima classe). 8 commit, build in corso.
+- **Verifica pendente (solo a gateway acceso):** WS5 live — embed-catchup riempie gli
+  embedding (era 391/555) e gli `open_loop` vengono estratti/richiamati. L'eval headless
+  copre solo l'output del modello (4/4 verde su gemma4:latest), non recall/briefing.
+- **PROSSIMO (WS5.4):** iniettare gli `open_loop` nel **briefing always-on** —
+  investigare `context_pack` (`gather_profile_memory`, main.rs ~1849) che è la via che
+  alimenta la memoria sempre-attiva; + proiezione **`stato-lavori.md`**; + **chiusura
+  automatica** dell'open_loop a lavoro fatto.
+- **Poi:** WS5.5 (provenienza) · WS2 (artefatti) · WS1-Fase 2 (gestione piano) · WS1 3-6 ·
+  WS6/7/8/9. Ordine completo nel backlog.
+- **Sfondo:** Motore cross-modello Fase 1 ✅ v1041 (deck verificato vero-locale).
 
 ## Diagrammi dettagliati (si aggiornano "man mano")
 
