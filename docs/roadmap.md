@@ -2,28 +2,27 @@
 
 ## Obiettivo attivo
 
-Chiudere WS6 6.1b: un’approvazione Telegram deve eseguire l’azione pending e
-far riprendere il thread, anche dopo restart o update del desktop gateway.
+Path B: consentire scritture MCP filesystem di routine solo entro la root
+esplicitamente configurata del workspace, senza ampliare l’autorità fuori scope.
 
 ## Fase corrente
 
-Implementazione del rebind autenticato del bridge Telegram. Il piano dettagliato
-è [2026-06-22-telegram-bridge-rebind.md](superpowers/plans/2026-06-22-telegram-bridge-rebind.md).
+Manifest dichiarativo + absolute jail completati (commit `447dc0f`, `c28cbf8`).
+Resta l’enforcement nel loop MCP e la prova persistita della confirm-card per
+l’endpoint. Piano: [2026-06-22-workspace-scoped-filesystem-writes.md](superpowers/plans/2026-06-22-workspace-scoped-filesystem-writes.md).
 
 ## Milestone
 
-1. Bridge: target gateway riconfigurabile e callback osservabile senza segreti.
-2. Gateway: rebind di sidecar già in ascolto, fallback a restart per bridge legacy.
-3. Gate Gemma: approve da Telegram → task `demo-piano` 5/5 + prove DB/filesystem.
-4. Decisione successiva: WS6 6.1c UX oppure Path B per le scritture routine.
+1. Applicare l’autorità workspace/confirm/remote-confirmed al dispatch MCP.
+2. Verificare Gemma in-root senza card e fuori-root con card.
+3. Decidere WS6.1c UX dopo il gate Path B.
 
 ## Blocco noto
 
-Il sidecar Telegram della build installata può sopravvivere al gateway e conservare
-un token stale: card outbound sì, callback 401. Evidenza e design sono in
-[DEVELOPMENT.md](DEVELOPMENT.md) e
-[2026-06-22-telegram-bridge-rebind-design.md](superpowers/specs/2026-06-22-telegram-bridge-rebind-design.md).
+Il direct MCP endpoint deve legare un write fuori root alla confirm-card
+persistita; il design è in
+[2026-06-22-workspace-scoped-filesystem-writes-design.md](superpowers/specs/2026-06-22-workspace-scoped-filesystem-writes-design.md).
 
 ## Prossima azione
 
-Eseguire il piano test-first del rebind, poi rifare il gate in-app.
+Completare test-first l’autorità MCP, quindi eseguire il gate in-app.
