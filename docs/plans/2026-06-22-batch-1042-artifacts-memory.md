@@ -34,12 +34,13 @@ modelli deboli/locali. Invarianti: monotonìa, limitatezza, identità non inferi
     raggiunte** — stanno a valle di un piano che non nasce. **Prima di slice 3** serve il
     pezzo a monte: **trigger-piano + continuazione-loop a completamento** (vedi "Floor
     ovunque" sotto, caposaldo #2). **Slice 3 (DAG) deprioritizzata.**
-  - 🟡 **Slice 2.5 (CODICE FATTO, commit `4706d7a` — gate in-app pendente)**: guard simmetrico
-    @ `main.rs:13534` — se il modello ha agito ma stoppa **senza piano**, un giudice cheap
-    (`task_appears_incomplete`, role `memory`, fail-open) → directive nudge a creare il piano
-    con `update_plan` e continuare (bootstrap one-shot → poi guida F5). Flag `turn_used_tools`
-    evita di toccare la chat pura; `make_deck` esente (one-call). 8/8 test verdi. **Verifica:
-    gemma demo-piano → 5/5** (riavviare `electron:dev`, cancellare `~/demo-piano`).
+  - 🟡 **Slice 2.5 (commit `4706d7a`, unit-verde 8/8) — RICLASSIFICATA, NON è il fix di
+    demo-piano**: guard simmetrico @ `main.rs:13534` (se il modello agisce ma stoppa **senza
+    piano** né confirm-gate, giudice cheap `task_appears_incomplete` → nudge a creare il piano).
+    **Caso più stretto:** il test `demo-piano` NON ci passa (la 1ª scrittura attiva
+    `pending_confirm` che rompe a :13518, *prima* del guard di 2.5 a :13524) → vedi 6.1b.
+    La tengo (corretta + low-risk), ma **in-app non verificata** (il suo caso non è stato
+    esercitato). `turn_used_tools` la tiene fuori dalla chat pura; `make_deck` esente.
   - ☐ **Slice 3**: convergere sull'`ExecutionPlan` del crate `orchestrator` (DAG
     `depends_on`, `plan_propose`) e ritirare il `Vec<Value>` canonico.
 - ☐ **Floor ovunque** — constrained decoding su **tutte** le emissioni di
@@ -140,14 +141,17 @@ cablato** nel flusso agente. ADR 0015.
 - ☐ **6.1 Cablare la durabilità**: task agente lunghi nella coda con
   checkpoint/heartbeat/recovery → sopravvivono a chiusura app/crash (lega ADR 0016 F4
   background+resume).
-- ☐ **6.1b Approval-resume (CONFERMATO in-app 2026-06-22):** dopo che un'azione confirm-gated
-  è **approvata** (in-app o **Telegram**), l'harness deve **rientrare nel loop agente del
-  thread d'origine** e continuare il piano. Oggi `execute_pending_approval` (`main.rs:21029`)
-  esegue **solo la singola azione** e si ferma — `telegram_callback`/`handle_channel_inbound`
-  la trattano come *"control message, not a conversation"* (:16209); inoltre la pending-approval
-  code-based **non porta il thread d'origine** (`take_pending_approval` → solo tool+args), quindi
-  non *può* riprendere. Il turno originale era già chiuso al `pending_confirm` (:13518). Lega
-  ADR 0015 + caposaldo #2. *(Diverso dal gap "piano-non-creato" di WS1-F2 slice 2.5.)*
+- ☐ **6.1b Approval-resume — PRIORITÀ (è la causa REALE di demo-piano, confermata in-app
+  2026-06-22 su kimi+gemma):** un task che scrive file → la 1ª scrittura
+  (`mcp__filesystem__create` ∈ `composio_writes`) attiva la card `‹‹MCP_CONFIRM››`
+  (:13340-13367) + Telegram + `pending_confirm` → turno muore a :13518; dopo l'**approvazione**
+  `execute_pending_approval` (:21029) esegue **solo quell'azione** + riscrive in "✓ MCP tool
+  executed" (:22315) → **nessuna continuazione**. Fix: dopo l'approvazione (in-app o Telegram)
+  l'harness **rientra nel loop del thread d'origine** col risultato e continua. Serve: (a) la
+  pending-approval porti `thread_id` (`PendingApproval` :21063 / `create_pending_approval`
+  :21078 oggi NO); (b) un punto che riavvia un turno sul thread (riusare
+  `task_channel_scheduled_autorun_*`). Blocca **ogni** deliverable che scrive file → **prima di
+  slice 3 / WS2**. Lega ADR 0015 + caposaldo #2.
 - ☐ **6.2 Resource Governor** attivo sui task (limiti, backpressure).
 - ☐ **6.3 Scheduler / ricorrenza** + **proactive review** (l'assistente propone schede
   in autonomia governata) verificati end-to-end.

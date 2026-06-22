@@ -66,43 +66,34 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   · ✅ **Memoria 1043 VERIFICATA → chiusa**: chat B ha ricordato *"il file del preventivo
   non è stato ancora trovato"* (WS5.7, finding **negativo**); una chat **NUOVA** ha mostrato
   **2** loop aperti (preventivo Rossi + bug gateway browser-headless) **senza** nominare il
-  topic (WS5.4a). · ❌ **Piano NON esercitato end-to-end**: task 5-step (`demo-piano`) →
-  **‹‹PLAN›› = 0** nel thread (verificato nel chat store), loop fermo a **2/5** (cartella +
-  `note.md`), poi turno chiuso. Le slice v1044 (merge-per-id, `step_advance`) sono
-  **unit-verdi (8/8) ma non raggiunte**: stanno *a valle* di un piano che non viene **creato
-  né guidato a termine**.
-- **ROOT CAUSE (INCHIODATA — Passo 0, lettura del loop):** il guard anti-stop-prematuro è a
-  `main.rs:13533`: allo stop (no tool-call) il nudge F5 scatta **solo** dentro
-  `if let Some(step) = plan_next_open(&plan)` → **solo se il piano ha uno step aperto**. Ma
-  `plan` cresce **solo** via `update_plan`/`step_advance` (`merge_plan`, :12717) o F4-resume
-  (:10742): **nulla lo forza**. Task generico → modello salta `update_plan` → `plan` vuoto →
-  `plan_next_open`=None → nudge saltato → stop a 2/5 accettato (:13584 `final_done;break`).
-  **Tutta F1–F5 è gated su `plan` non-vuoto** — protegge un piano esistente, non lo fa
-  nascere. `make_deck` immune perché **one-call** (no loop multi-step). Caposaldo #2.
-- **slice 2.5 SCRITTA + VERDE (8/8, commit `4706d7a`):** guard simmetrico @ `main.rs:13534`
-  (ramo `else if plan.is_empty() && turn_used_tools && task_appears_incomplete(...)`): se il
-  modello ha **agito** ma si ferma **senza piano** e il giudice-completamento cheap (role
-  `memory`, **fail-open** → "soddisfatto", mirror di `verify_step_complete`) dice "non finito"
-  → directive nudge *"chiama `update_plan` con TUTTI gli step e continua"*. È un **bootstrap
-  one-shot**: poi guida il ramo F5 esistente. Bound: `MAX_PLAN_NUDGES=8` + `is_final_round` +
-  `turn_used_tools` (non tocca la chat pura). `make_deck` esente (one-call). 4 modifiche: flag
-  `turn_used_tools` (decl + set @ :11107), `fn task_appears_incomplete`, guard.
-- **GATE in-app PENDENTE (slice 2.5 è cuore → verificare prima di impilare):** riavviare
-  `electron:dev` (l'istanza in bg gira il codice VECCHIO), modello **gemma**, cancellare
-  `~/demo-piano`, ridare il prompt demo-piano → atteso **5/5** (‹‹PLAN›› creato + `step_advance`
-  per id, no gonfiore, `done` non si riapre). Nessun unit-test nuovo: logica async/LLM-gated →
-  verifica = gate in-app (come la memoria 1043). **Dopo il verde:** WS6 6.1b (si appoggia a
-  2.5) · poi slice 3 / WS2. ⚠️ Side-note UI: turni cloud etichettati "Local model".
-- **2° GAP — APPROVAL-RESUME (intuizione utente, CONFERMATO ≠ B, 2026-06-22):** un'azione
-  confirm-gated instradata su Telegram, una volta **concessa**, esegue **solo la singola
-  azione** via `execute_pending_approval` (`main.rs:21029`) e risponde "✅ Done"; il
-  `telegram_callback` (:16140) / `handle_channel_inbound` (:16194) la trattano come *"control
-  message, **not a conversation**"* (:16209) → **NON rientra nel loop agente**, il task
-  multi-step **non prosegue**. Strutturale: (a) il turno era già morto al `pending_confirm`
-  (:13518 `final_done;break`); (b) la pending-approval code-based **non porta il thread
-  d'origine** (`take_pending_approval` → solo tool+args). Distinto da B (oggi 0 record in
-  `task_approvals` per i thread di oggi). Stessa radice (#2), **ramo diverso** → **WS6 6.1b**.
-  La slice 2.5 NON lo copre (`pending_confirm` rompe a :13518, prima del guard di 2.5).
+  topic (WS5.4a). · ❌ **`demo-piano` fermo a 2/5** (cartella + `note.md`) sia su
+  `kimi-k2.6:cloud` sia su **gemma** — causa CORRETTA sotto (NON "piano non creato": è
+  approval-resume).
+- **ROOT CAUSE — CORRETTA (la "plan-trigger" di prima era SBAGLIATA):** `demo-piano` non si
+  ferma per "piano non creato". Si ferma perché la **prima scrittura**
+  (`mcp__filesystem__create` ∈ `composio_writes`) attiva una **card di conferma**
+  (`‹‹MCP_CONFIRM››`, :13340-13367) + instradamento **Telegram** (`deliver_remote_approval`) +
+  `pending_confirm=true` → il turno **muore a :13518**. Dopo l'**approvazione**,
+  `execute_pending_approval` (:21029) esegue **la sola azione** e la card diventa "✓ MCP tool
+  executed" (riscrittura post-approvazione `rewrite_mcp_confirm_to_done` :22315) → **nessuna
+  continuazione**. `‹‹PLAN››=0` è una *conseguenza* (il turno muore prima di pianificare), non
+  la causa. **È l'APPROVAL-RESUME gap (WS6 6.1b), previsto dall'utente.** *(Mio errore: dedotto
+  "no approval" dalla tabella `task_approvals` — meccanismo task-runtime — ma il confirm MCP
+  in-chat usa `create_pending_approval`, mappa in-memory SENZA thread, che lì non scrive. Il
+  thread B ha lo stesso "✓ MCP tool executed" → stesso path.)*
+- **slice 2.5 (commit `4706d7a`) — RICLASSIFICATA, NON è questo il fix:** guard simmetrico @
+  :13534 (`else if plan.is_empty() && turn_used_tools && task_appears_incomplete(...)` → nudge
+  a creare il piano). Corretta + **unit-verde 8/8**, la **TENGO**, ma copre un caso *diverso e
+  più stretto*: stop multi-step **senza** confirm-gate (tool usati, niente piano). **NON**
+  risolve `demo-piano` (`pending_confirm` rompe a :13518, *prima* del suo guard) → **in-app NON
+  verificata**, non ha passato il gate. ⚠️ Side-note UI: turni cloud etichettati "Local model".
+- **VERO PROSSIMO PASSO = WS6 6.1b (APPROVAL-RESUME):** dopo che un'azione confirm-gated è
+  approvata (in-app o **Telegram**), l'harness deve **rientrare nel loop del thread d'origine**
+  e continuare il task. Serve: (a) la pending-approval porti `thread_id` (`PendingApproval`
+  :21063 + `create_pending_approval` :21078 oggi NON ce l'hanno; `take_pending_approval` → solo
+  tool+args); (b) un punto che **riavvia un turno** sul thread col risultato (riusare la strada
+  `task_channel_scheduled_autorun_*`, che già avvia turni senza messaggio utente). Blocca
+  **ogni** deliverable che scrive file (deck/documenti/file) → **priorità su slice 3 / WS2**.
 - **Coda:** WS5.4b (`stato-lavori.md`) · WS5.4c (chiusura+dedup) · WS5.5 (provenienza) ·
   WS2 · WS1 3-6 · WS6/7/8/9. Ordine nel backlog.
 - **Regole operative:** build LOCAL, verde a ogni passo, doc aggiornati nello stesso turno,
