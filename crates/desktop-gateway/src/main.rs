@@ -7985,6 +7985,66 @@ failed or error-laden tool result is NOT complete. Reply with STRICT JSON only, 
     }
 }
 
+/// Slice 2.5 plan-bootstrap judge: when the model STOPS having ACTED but WITHOUT ever creating
+/// a plan, decide whether the user's request is genuinely handled or there is obviously
+/// remaining work it skipped. Cheap, non-streaming, on the fast `memory` role (mirrors
+/// `verify_step_complete`). FAIL-OPEN to SATISFIED: returns `false` (no nudge) on any infra
+/// failure or ambiguity, so a judge outage can never cause spurious nudging or a loop.
+/// Returns `true` = INCOMPLETE (bootstrap a plan and keep going).
+async fn task_appears_incomplete(http: &reqwest::Client, request: &str, work: &str) -> bool {
+    let Some((base_url, model, api_key)) = role_openai_config("memory") else {
+        return false;
+    };
+    let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
+    let system = "You judge whether an autonomous agent has FINISHED a user's request. Given the \
+REQUEST and the agent's FINAL MESSAGE (what it did/said right before stopping), decide if the \
+request is fully handled or there is clearly remaining work the agent skipped. A multi-part \
+request where only the first part was done is INCOMPLETE. A genuinely answered or finished \
+request is COMPLETE. Reply with STRICT JSON only, no prose: \
+{\"complete\": true|false, \"reason\": \"one short sentence\"}.";
+    let user = format!(
+        "REQUEST:\n{}\n\nAGENT'S FINAL MESSAGE (it stopped here, with NO tracked plan):\n{}",
+        request.chars().take(2000).collect::<String>(),
+        work.chars().take(4000).collect::<String>()
+    );
+    let payload = serde_json::json!({
+        "model": model,
+        "temperature": 0,
+        "max_tokens": 200,
+        "messages": [
+            { "role": "system", "content": system },
+            { "role": "user", "content": user },
+        ],
+    });
+    let mut builder = http.post(&endpoint).timeout(std::time::Duration::from_secs(45));
+    if let Some(key) = api_key.as_ref() {
+        builder = builder.bearer_auth(key);
+    }
+    let Ok(resp) = builder.json(&payload).send().await else {
+        return false;
+    };
+    if !resp.status().is_success() {
+        return false;
+    }
+    let Ok(body) = resp.json::<serde_json::Value>().await else {
+        return false;
+    };
+    let content = body
+        .pointer("/choices/0/message/content")
+        .and_then(|c| c.as_str())
+        .unwrap_or("");
+    // Tolerant parse: the model may wrap the JSON in prose or code fences.
+    let json_slice = match (content.find('{'), content.rfind('}')) {
+        (Some(a), Some(b)) if b > a => &content[a..=b],
+        _ => return false,
+    };
+    match serde_json::from_str::<serde_json::Value>(json_slice) {
+        // `complete` defaults to true on any parse gap → NOT incomplete → no nudge (fail-open).
+        Ok(v) => !v.get("complete").and_then(|b| b.as_bool()).unwrap_or(true),
+        Err(_) => false,
+    }
+}
+
 /// F3 context compaction: collapse the messages a just-completed plan step produced into
 /// a single summary note, so a long multi-step turn stays within the context window.
 /// Replaces `messages[*start..]` with one assistant summary message and advances `*start`.
@@ -10756,6 +10816,10 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
         // Plan-completion enforcement: counts consecutive turns where the model STOPPED
         // (no tool call) while its plan still has open steps. Reset on any tool call.
         let mut plan_nudges: u32 = 0;
+        // Slice 2.5: did the model actually ACT (use a tool) this turn? Used at the no-tool
+        // stop to tell a PREMATURE stop on a real task (judge it, bootstrap a plan) apart from
+        // a plain conversational answer (let it end). Latches true once any tool has run.
+        let mut turn_used_tools = false;
         // Source URLs visited via browse_web this request, for the "Fonti" footer.
         let mut browse_sources: Vec<String> = Vec::new();
         // Tools offered to the model this run: the base set, plus any tools the
@@ -11105,6 +11169,7 @@ check/update the key in Settings → Model & Runtime.".to_string()
 
             if let Some(calls) = tool_calls {
                 plan_nudges = 0; // the model is acting again → reset the stop-nudge cap
+                turn_used_tools = true; // slice 2.5: acted → eligible for plan-bootstrap on a premature stop
                 // No-progress guard: if this round's tool calls are IDENTICAL to the
                 // previous round's, the agent is stuck repeating itself → stop after a
                 // couple of repeats and let the forced synthesis answer.
@@ -13557,6 +13622,37 @@ Tell the user clearly; do NOT claim it's done."
                                 "‹‹ACT››▶ Proseguo: {}‹‹/ACT››",
                                 step.chars().take(50).collect::<String>()
                             ),
+                        },
+                    )
+                    .await;
+                    continue;
+                } else if plan.is_empty()
+                    && turn_used_tools
+                    && task_appears_incomplete(&state_owned.http, &memory_user_message, &content)
+                        .await
+                {
+                    // Slice 2.5: the model ACTED but stopped WITHOUT ever creating a plan, and the
+                    // cheap judge says the request is not finished. Bootstrap a plan so F1–F5 take
+                    // over — the whole long-horizon machinery is gated on a NON-EMPTY plan, so an
+                    // empty plan silently bypasses it (the gap behind a generic multi-step task
+                    // stopping early). `make_deck` is exempt: one-call, never enters this loop.
+                    plan_nudges += 1;
+                    if !content.trim().is_empty() {
+                        messages
+                            .push(serde_json::json!({ "role": "assistant", "content": content }));
+                    }
+                    messages.push(serde_json::json!({
+                        "role": "user",
+                        "content": "You stopped, but the request is NOT finished and you never made \
+                            a plan. Call update_plan NOW with the COMPLETE list of steps needed to \
+                            fully satisfy the request, then do the FIRST unfinished step — reuse \
+                            anything you already produced, do not redo work. Mark steps done with \
+                            update_plan/step_advance as you go. No summary yet.",
+                    }));
+                    let _ = emit_stream_event(
+                        &tx,
+                        GenerateStreamEvent::Delta {
+                            text: "‹‹ACT››▶ Pianifico il lavoro rimanente‹‹/ACT››".to_string(),
                         },
                     )
                     .await;
