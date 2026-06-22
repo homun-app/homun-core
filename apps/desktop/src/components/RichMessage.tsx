@@ -25,6 +25,11 @@ const ARTIFACT_NOTE_RE = /\n?\[file generato: [^\]]*\]/g;
 // ‹‹ARTIFACT›› chip + inline preview, so drop any image whose src isn't a genuine
 // embeddable URL (http/https/data/blob).
 const BROKEN_IMAGE_RE = /!\[[^\]]*\]\(\s*(?!https?:\/\/|data:|blob:)[^)]*\)/g;
+// Weak/local models sometimes EMIT a tool call as PROSE instead of a real call
+// (e.g. `<tool_call name="run_in_sandbox">{…}</tool_call>`, often unclosed). The
+// harness ignores it, but it must not render as text. Strip from `<tool_call` to the
+// closing tag, or to end-of-message when the model left it dangling.
+const LEAKED_TOOLCALL_RE = /<tool_call\b[\s\S]*?(?:<\/tool_call>|$)/gi;
 
 export function RichMessage({ text, streaming = false }: RichMessageProps) {
   const withoutMarkers =
@@ -40,9 +45,12 @@ export function RichMessage({ text, streaming = false }: RichMessageProps) {
           .replace(ARTIFACT_NOTE_RE, "")
           .trim()
       : text;
-  const clean = withoutMarkers.includes("![")
+  let clean = withoutMarkers.includes("![")
     ? withoutMarkers.replace(BROKEN_IMAGE_RE, "").trim()
     : withoutMarkers;
+  if (clean.includes("<tool_call")) {
+    clean = clean.replace(LEAKED_TOOLCALL_RE, "").trim();
+  }
 
   // Render markdown LIVE while streaming (like Claude Code): the renderer is
   // streaming-aware (tolerates an unclosed code fence, defers mermaid until complete),
