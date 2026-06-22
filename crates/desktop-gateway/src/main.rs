@@ -6234,6 +6234,25 @@ fn workspace_filesystem_manifest(provider: &str, tool: &str) -> Option<&'static 
         .find(|entry| entry.provider == provider && entry.tool == tool)
 }
 
+fn workspace_scoped_mcp_write_for_root(
+    root: Option<&std::path::Path>,
+    provider: &str,
+    tool: &str,
+    arguments: &serde_json::Value,
+) -> bool {
+    let (Some(root), Some(manifest)) = (root, workspace_filesystem_manifest(provider, tool)) else {
+        return false;
+    };
+    manifest.paths.iter().all(|pointer| {
+        arguments
+            .pointer(pointer)
+            .and_then(serde_json::Value::as_str)
+            .map(std::path::Path::new)
+            .and_then(|path| jail_absolute_in_root(root, path).ok())
+            .is_some()
+    })
+}
+
 /// Resolves the host project root for the conversation's workspace, if one is set
 /// and exists on disk. Falls back to the active workspace when the thread is unknown.
 fn project_root_for_thread(state: &AppState, thread_id: Option<&str>) -> Option<PathBuf> {
@@ -30840,6 +30859,17 @@ mod tests {
         std::fs::create_dir_all(&root).expect("root");
         assert!(super::jail_absolute_in_root(&root, &root.join("nested/new.md")).is_ok());
         assert!(super::jail_absolute_in_root(&root, &root.join("../outside.md")).is_err());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn workspace_scope_requires_a_root_and_an_in_root_manifest_path() {
+        let root = std::env::temp_dir().join(format!("homun-scope-{}", std::process::id()));
+        std::fs::create_dir_all(&root).expect("root");
+        let args = serde_json::json!({ "path": root.join("note.md") });
+        assert!(super::workspace_scoped_mcp_write_for_root(Some(&root), "mcp:filesystem", "create", &args));
+        assert!(!super::workspace_scoped_mcp_write_for_root(None, "mcp:filesystem", "create", &args));
+        assert!(!super::workspace_scoped_mcp_write_for_root(Some(&root), "mcp:filesystem", "view", &args));
         let _ = std::fs::remove_dir_all(&root);
     }
 
