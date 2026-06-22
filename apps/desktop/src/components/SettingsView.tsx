@@ -61,6 +61,7 @@ import {
   type ConnectorToolRun,
   type SkillsCatalogResponse,
   type RoleView,
+  modelIsCloud,
   type RoutingDecision,
   type TimezoneInfo,
   type SkillsDetail,
@@ -1439,6 +1440,7 @@ function RuntimePane({
             <optgroup key={provider.id} label={provider.label}>
               {models.map((m) => (
                 <option key={`${provider.id}::${m.id}`} value={`${provider.id}::${m.id}`}>
+                  {modelIsCloud(provider.base_url, m.id) ? "☁️ " : "💻 "}
                   {m.id}
                   {m.tier ? ` · ${m.tier}` : ""}
                   {m.vision ? " · vision" : ""}
