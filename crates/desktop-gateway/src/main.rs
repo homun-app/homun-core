@@ -22382,6 +22382,21 @@ async fn connect_mark(
 const MCP_CONFIRM_OPEN: &str = "‹‹MCP_CONFIRM››";
 const MCP_CONFIRM_CLOSE: &str = "‹‹/MCP_CONFIRM››";
 
+fn mcp_confirm_matches(text: &str, tool: &str, arguments: &serde_json::Value) -> bool {
+    let Some(open) = text.find(MCP_CONFIRM_OPEN) else {
+        return false;
+    };
+    let start = open + MCP_CONFIRM_OPEN.len();
+    let Some(close_rel) = text[start..].find(MCP_CONFIRM_CLOSE) else {
+        return false;
+    };
+    let Ok(marker) = serde_json::from_str::<serde_json::Value>(&text[start..start + close_rel]) else {
+        return false;
+    };
+    marker.get("tool").and_then(serde_json::Value::as_str) == Some(tool)
+        && marker.get("arguments") == Some(arguments)
+}
+
 /// Like `rewrite_confirm_to_done` but for the MCP confirm marker. Replaces the
 /// pending-confirmation card with a plain "executed" note so reopening the chat
 /// can't re-trigger the action (and needs no extra frontend marker handling).
@@ -22445,9 +22460,25 @@ async fn mcp_execute(
             message: format!("Invalid MCP tool name: {}", request.tool),
         });
     };
-    // Policy B: trust this whole server from now on (skip the confirm card for its
-    // writes). Derive the `mcp__<server>__*` marker from the tool name exactly the
-    // way composio_tool_allowed() reads it, so the two always agree.
+    let args = if request.arguments.is_null() {
+        serde_json::json!({})
+    } else {
+        request.arguments.clone()
+    };
+    let confirmed = match (&request.thread_id, &request.message_id) {
+        (Some(thread_id), Some(message_id)) => lock_store(&state)
+            .ok()
+            .and_then(|store| store.message(thread_id, message_id).ok().flatten())
+            .is_some_and(|message| mcp_confirm_matches(&message.text, &request.tool, &args)),
+        _ => false,
+    };
+    if !confirmed {
+        return Err(GatewayError {
+            status: StatusCode::FORBIDDEN,
+            code: "mcp_confirmation_required",
+            message: "Execute MCP writes from their matching confirmation card.".to_string(),
+        });
+    }
     if request.allow_server {
         if let Some((server, _)) = request
             .tool
@@ -22457,11 +22488,6 @@ async fn mcp_execute(
             let _ = add_composio_tool_allow(&format!("mcp__{server}__*"));
         }
     }
-    let args = if request.arguments.is_null() {
-        serde_json::json!({})
-    } else {
-        request.arguments.clone()
-    };
     let handle = tokio::task::spawn_blocking({
         let state = state.clone();
         move || run_mcp_chat_tool(&state, &provider_id, &tool_name, args)
@@ -30871,6 +30897,15 @@ mod tests {
         assert!(!super::workspace_scoped_mcp_write_for_root(None, "mcp:filesystem", "create", &args));
         assert!(!super::workspace_scoped_mcp_write_for_root(Some(&root), "mcp:filesystem", "view", &args));
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn mcp_confirm_match_requires_exact_tool_and_arguments() {
+        let text = "I need your confirmation\n‹‹MCP_CONFIRM››{\"tool\":\"mcp__filesystem__create\",\"arguments\":{\"path\":\"/tmp/a\",\"content\":\"x\"}}‹‹/MCP_CONFIRM››";
+        let args = serde_json::json!({ "path": "/tmp/a", "content": "x" });
+        assert!(super::mcp_confirm_matches(text, "mcp__filesystem__create", &args));
+        assert!(!super::mcp_confirm_matches(text, "mcp__filesystem__create", &serde_json::json!({ "path": "/tmp/b", "content": "x" })));
+        assert!(!super::mcp_confirm_matches(text, "mcp__filesystem__insert", &args));
     }
 
     #[test]
