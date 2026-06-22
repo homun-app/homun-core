@@ -16,7 +16,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::extract::State;
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode, header::AUTHORIZATION};
 use axum::routing::post;
 use axum::{Json, Router};
 use frankenstein::client_reqwest::Bot;
@@ -41,6 +41,62 @@ struct Status {
     bot_username: Option<String>,
     /// Why the connection failed (e.g. invalid token), if it did.
     error: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct GatewayTarget {
+    url: String,
+    token: String,
+}
+
+impl GatewayTarget {
+    fn new(url: impl Into<String>, token: impl Into<String>) -> Self {
+        Self {
+            url: url.into(),
+            token: token.into(),
+        }
+    }
+}
+
+#[derive(Clone)]
+struct BridgeState {
+    bot: Arc<Bot>,
+    control_token: Arc<str>,
+    target: Arc<std::sync::RwLock<Option<GatewayTarget>>>,
+}
+
+impl BridgeState {
+    fn new(bot: Arc<Bot>, control_token: impl Into<Arc<str>>, target: Option<GatewayTarget>) -> Self {
+        Self {
+            bot,
+            control_token: control_token.into(),
+            target: Arc::new(std::sync::RwLock::new(target)),
+        }
+    }
+
+    #[cfg(test)]
+    fn for_test(control_token: &str, target: GatewayTarget) -> Self {
+        Self::new(
+            Arc::new(Bot::new(control_token)),
+            Arc::<str>::from(control_token),
+            Some(target),
+        )
+    }
+
+    fn gateway_target(&self) -> Option<GatewayTarget> {
+        self.target.read().ok()?.clone()
+    }
+
+    fn reconfigure(&self, control_token: &str, target: GatewayTarget) -> bool {
+        if control_token != self.control_token.as_ref() {
+            return false;
+        }
+        let Ok(mut current) = self.target.write() else {
+            return false;
+        };
+        *current = Some(target);
+        true
+    }
 }
 
 fn data_dir() -> PathBuf {
@@ -95,7 +151,7 @@ struct SendRequest {
     buttons: Vec<[String; 2]>,
 }
 
-async fn send_handler(State(bot): State<Arc<Bot>>, Json(request): Json<SendRequest>) -> StatusCode {
+async fn send_handler(State(state): State<BridgeState>, Json(request): Json<SendRequest>) -> StatusCode {
     let Ok(chat_id) = request.recipient.trim().parse::<i64>() else {
         eprintln!("recipient non valido (atteso chat_id numerico): {}", request.recipient);
         return StatusCode::BAD_REQUEST;
@@ -119,7 +175,7 @@ async fn send_handler(State(bot): State<Arc<Bot>>, Json(request): Json<SendReque
             .text(&request.text)
             .reply_markup(ReplyMarkup::InlineKeyboardMarkup(markup))
             .build();
-        return match bot.send_message(&params).await {
+        return match state.bot.send_message(&params).await {
             Ok(_) => StatusCode::OK,
             Err(error) => {
                 eprintln!("invio con bottoni fallito → chat {chat_id}: {error:?}");
@@ -137,12 +193,12 @@ async fn send_handler(State(bot): State<Arc<Bot>>, Json(request): Json<SendReque
             .text(&html)
             .parse_mode(ParseMode::Html)
             .build();
-        if bot.send_message(&params).await.is_err() {
+        if state.bot.send_message(&params).await.is_err() {
             let plain = SendMessageParams::builder()
                 .chat_id(ChatId::Integer(chat_id))
                 .text(&chunk)
                 .build();
-            if let Err(error) = bot.send_message(&plain).await {
+            if let Err(error) = state.bot.send_message(&plain).await {
                 eprintln!("invio fallito → chat {chat_id}: {error:?}");
                 return StatusCode::BAD_GATEWAY;
             }
@@ -162,7 +218,7 @@ struct PresenceRequest {
 }
 
 async fn presence_handler(
-    State(bot): State<Arc<Bot>>,
+    State(state): State<BridgeState>,
     Json(request): Json<PresenceRequest>,
 ) -> StatusCode {
     let Ok(chat_id) = request.recipient.trim().parse::<i64>() else {
@@ -174,17 +230,61 @@ async fn presence_handler(
             .chat_id(ChatId::Integer(chat_id))
             .action(ChatAction::Typing)
             .build();
-        let _ = bot.send_chat_action(&params).await;
+        let _ = state.bot.send_chat_action(&params).await;
     }
     StatusCode::OK
 }
 
 /// Local HTTP server so the gateway can push outbound messages + typing.
-async fn serve_http(bot: Arc<Bot>, port: u16) {
+#[derive(Deserialize)]
+struct ConfigureGatewayRequest {
+    gateway_url: String,
+    gateway_token: String,
+}
+
+fn is_loopback_gateway_url(url: &str) -> bool {
+    let Some(authority_and_path) = url.strip_prefix("http://") else {
+        return false;
+    };
+    let authority = authority_and_path.split('/').next().unwrap_or_default();
+    let host = authority
+        .strip_prefix('[')
+        .and_then(|value| value.split_once(']').map(|(host, _)| format!("[{host}]")))
+        .unwrap_or_else(|| authority.split(':').next().unwrap_or_default().to_string());
+    matches!(host.as_str(), "127.0.0.1" | "[::1]")
+}
+
+async fn configure_gateway_handler(
+    State(state): State<BridgeState>,
+    headers: HeaderMap,
+    Json(request): Json<ConfigureGatewayRequest>,
+) -> StatusCode {
+    let Some(control_token) = headers
+        .get(AUTHORIZATION)
+        .and_then(|header| header.to_str().ok())
+        .and_then(|header| header.strip_prefix("Bearer "))
+    else {
+        return StatusCode::UNAUTHORIZED;
+    };
+    if !is_loopback_gateway_url(request.gateway_url.trim()) {
+        return StatusCode::BAD_REQUEST;
+    }
+    if state.reconfigure(
+        control_token,
+        GatewayTarget::new(request.gateway_url.trim(), request.gateway_token),
+    ) {
+        StatusCode::NO_CONTENT
+    } else {
+        StatusCode::UNAUTHORIZED
+    }
+}
+
+async fn serve_http(state: BridgeState, port: u16) {
     let app = Router::new()
         .route("/send", post(send_handler))
         .route("/chatstate", post(presence_handler))
-        .with_state(bot);
+        .route("/configure-gateway", post(configure_gateway_handler))
+        .with_state(state);
     match tokio::net::TcpListener::bind(("127.0.0.1", port)).await {
         Ok(listener) => {
             println!("sidecar telegram: HTTP /send in ascolto su 127.0.0.1:{port}");
@@ -204,8 +304,7 @@ async fn serve_http(bot: Arc<Bot>, port: u16) {
 /// the same update on the next poll instead of losing it.
 async fn forward_inbound(
     http: &reqwest::Client,
-    gateway_url: Option<&str>,
-    gateway_token: Option<&str>,
+    target: Option<GatewayTarget>,
     msg: frankenstein::types::Message,
 ) -> bool {
     // v1: direct chats only (parity with the WhatsApp bridge); skip groups.
@@ -238,7 +337,7 @@ async fn forward_inbound(
         .unwrap_or_default();
     let chat_id = msg.chat.id.to_string();
 
-    let (Some(url), Some(token)) = (gateway_url, gateway_token) else {
+    let Some(target) = target else {
         return true;
     };
     let payload = serde_json::json!({
@@ -252,8 +351,8 @@ async fn forward_inbound(
     // outage doesn't drop the message. Don't log message content (privacy).
     for attempt in 0..3u32 {
         match http
-            .post(format!("{url}/api/channels/telegram/inbound"))
-            .bearer_auth(token)
+            .post(format!("{}/api/channels/telegram/inbound", target.url))
+            .bearer_auth(&target.token)
             .json(&payload)
             .send()
             .await
@@ -273,27 +372,47 @@ async fn forward_inbound(
     false
 }
 
+enum CallbackOutcome {
+    Delivered,
+    HttpFailure(u16),
+    TransportFailure,
+    Unconfigured,
+}
+
+fn callback_outcome_label(outcome: CallbackOutcome) -> String {
+    match outcome {
+        CallbackOutcome::Delivered => "delivered".to_string(),
+        CallbackOutcome::HttpFailure(code) => format!("http_{code}"),
+        CallbackOutcome::TransportFailure => "transport_failure".to_string(),
+        CallbackOutcome::Unconfigured => "unconfigured".to_string(),
+    }
+}
+
 /// Forward an inline-button tap (remote approval) to the gateway. `from` = the tapping user's
 /// id (== the private chat id), which the gateway checks against the configured self target.
 async fn forward_callback(
     http: &reqwest::Client,
-    gateway_url: Option<&str>,
-    gateway_token: Option<&str>,
+    target: Option<GatewayTarget>,
     cb: &frankenstein::types::CallbackQuery,
-) {
-    let (Some(url), Some(token)) = (gateway_url, gateway_token) else {
-        return;
+) -> CallbackOutcome {
+    let Some(target) = target else {
+        return CallbackOutcome::Unconfigured;
     };
     let payload = serde_json::json!({
         "from": cb.from.id.to_string(),
         "data": cb.data.clone().unwrap_or_default(),
     });
-    let _ = http
-        .post(format!("{url}/api/channels/telegram/callback"))
-        .bearer_auth(token)
+    match http
+        .post(format!("{}/api/channels/telegram/callback", target.url))
+        .bearer_auth(&target.token)
         .json(&payload)
         .send()
-        .await;
+        .await
+    {
+        Ok(response) if response.status().is_success() => CallbackOutcome::Delivered,
+        Ok(response) => CallbackOutcome::HttpFailure(response.status().as_u16()),
+        Err(_) => CallbackOutcome::TransportFailure,
+    }
 }
 
 fn main() -> anyhow::Result<()> {
@@ -337,16 +456,24 @@ fn main() -> anyhow::Result<()> {
             }
         }
 
+        // Where to forward inbound messages and approval callbacks. The mutable target lets a
+        // restarted gateway rebind an already-running bridge without dropping Telegram polling.
+        let target = match (
+            std::env::var("TG_GATEWAY_URL").ok().filter(|s| !s.is_empty()),
+            std::env::var("TG_GATEWAY_TOKEN").ok().filter(|s| !s.is_empty()),
+        ) {
+            (Some(url), Some(token)) => Some(GatewayTarget::new(url, token)),
+            _ => None,
+        };
+        let bridge_state = BridgeState::new(bot.clone(), Arc::<str>::from(token.as_str()), target);
+
         // Expose /send + /chatstate for the gateway.
         let port: u16 = std::env::var("TG_HTTP_PORT")
             .ok()
             .and_then(|p| p.parse().ok())
             .unwrap_or(DEFAULT_HTTP_PORT);
-        tokio::spawn(serve_http(bot.clone(), port));
+        tokio::spawn(serve_http(bridge_state.clone(), port));
 
-        // Where to forward inbound messages.
-        let gateway_url = std::env::var("TG_GATEWAY_URL").ok().filter(|s| !s.is_empty());
-        let gateway_token = std::env::var("TG_GATEWAY_TOKEN").ok().filter(|s| !s.is_empty());
         let http = reqwest::Client::new();
 
         // Long-polling loop. Resume from the persisted offset so a restart picks
@@ -374,8 +501,7 @@ fn main() -> anyhow::Result<()> {
                             UpdateContent::Message(message) => {
                                 let delivered = forward_inbound(
                                     &http,
-                                    gateway_url.as_deref(),
-                                    gateway_token.as_deref(),
+                                    bridge_state.gateway_target(),
                                     *message,
                                 )
                                 .await;
@@ -393,13 +519,16 @@ fn main() -> anyhow::Result<()> {
                                             .build(),
                                     )
                                     .await;
-                                forward_callback(
+                                let outcome = forward_callback(
                                     &http,
-                                    gateway_url.as_deref(),
-                                    gateway_token.as_deref(),
+                                    bridge_state.gateway_target(),
                                     &cb,
                                 )
                                 .await;
+                                eprintln!(
+                                    "telegram callback forward: outcome={}",
+                                    callback_outcome_label(outcome)
+                                );
                             }
                             _ => {}
                         }
@@ -562,5 +691,39 @@ mod tests {
     #[test]
     fn escapes_html() {
         assert_eq!(markdown_to_html("a < b & c"), "a &lt; b &amp; c");
+    }
+
+    #[test]
+    fn reconfigure_replaces_the_callback_target() {
+        let state = BridgeState::for_test(
+            "bot-secret",
+            GatewayTarget::new("http://127.0.0.1:18765", "old"),
+        );
+        assert!(state.reconfigure(
+            "bot-secret",
+            GatewayTarget::new("http://127.0.0.1:18765", "new"),
+        ));
+        assert_eq!(state.gateway_target().unwrap().token, "new");
+    }
+
+    #[test]
+    fn reconfigure_rejects_the_wrong_control_secret() {
+        let state = BridgeState::for_test(
+            "bot-secret",
+            GatewayTarget::new("http://127.0.0.1:18765", "old"),
+        );
+        assert!(!state.reconfigure(
+            "wrong",
+            GatewayTarget::new("http://127.0.0.1:18765", "new"),
+        ));
+        assert_eq!(state.gateway_target().unwrap().token, "old");
+    }
+
+    #[test]
+    fn callback_outcome_label_never_contains_sensitive_values() {
+        let label = callback_outcome_label(CallbackOutcome::HttpFailure(401));
+        assert_eq!(label, "http_401");
+        assert!(!label.contains("bot-secret"));
+        assert!(!label.contains("gateway-token"));
     }
 }
