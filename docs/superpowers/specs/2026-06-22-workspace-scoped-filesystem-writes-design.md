@@ -36,11 +36,14 @@ jail under that root. The jail accepts a target that does not yet exist by
 canonicalizing its deepest existing ancestor; it rejects `..`, root escapes, and
 symlinks that resolve outside the project.
 
-The chat loop skips the confirm card only when this policy returns eligible. The
-same policy is enforced inside `run_mcp_chat_tool`, which receives the origin
-thread id, so direct endpoint execution and approval-resume cannot bypass the
-scope. An out-of-scope call returns a policy error before invoking the MCP
-transport; it never becomes silently allowed.
+The chat loop skips the confirm card only when this policy returns eligible.
+`run_mcp_chat_tool` receives an execution authority: `WorkspaceScoped` must
+pass the root jail, while `Confirmed` and `RemoteConfirmed` require an explicit
+approval proof. The local `mcp_execute` endpoint verifies that its originating
+persisted MCP-confirm marker exactly matches the tool and arguments before it
+can use `Confirmed`; Telegram holds a live pending code before it may use
+`RemoteConfirmed`. An out-of-scope call without one of these proofs returns a
+policy error before invoking the MCP transport.
 
 ## Security properties
 
@@ -50,6 +53,9 @@ transport; it never becomes silently allowed.
   trusted manifest. No keyword or regex heuristic decides authorization.
 - The guard runs before the MCP process receives the call on every execution
   path. The server may receive only validated path arguments for Path B calls.
+- A bearer token to the local endpoint is not an approval proof: outside the
+  workspace scope the endpoint must bind execution to its persisted confirm
+  card, and remote execution to its pending approval code.
 - Existing confirm paths remain the fallback for any non-eligible write.
 
 ## Acceptance criteria
