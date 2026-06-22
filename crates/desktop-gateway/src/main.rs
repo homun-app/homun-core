@@ -13359,8 +13359,14 @@ require your confirmation in the app. Propose it and stop."
                             // Also route the approval to the user's channel (if configured) so
                             // it can be authorized remotely. No-op when approval channel = in-app.
                             let _ =
-                                deliver_remote_approval(&state_owned, name, &args_val, &mcp_tool)
-                                    .await;
+                                deliver_remote_approval(
+                                    &state_owned,
+                                    name,
+                                    &args_val,
+                                    &mcp_tool,
+                                    thread_id.as_deref(),
+                                )
+                                .await;
                             pending_confirm = true;
                             "AWAITING USER CONFIRMATION: the action was proposed via a \
 confirmation card in the interface. Do NOT say it was executed."
@@ -13454,6 +13460,7 @@ Connectors → MCP; do NOT claim it's done.",
                                 name,
                                 &args_val,
                                 &humanize_composio_tool(name),
+                                thread_id.as_deref(),
                             )
                             .await;
                             pending_confirm = true;
@@ -16569,7 +16576,7 @@ async fn handle_channel_inbound(
                             "channel": channel, "to": reply_to, "text": reply
                         });
                         let delivered =
-                            deliver_remote_approval(&st, "send_message", &args, &lbl).await;
+                            deliver_remote_approval(&st, "send_message", &args, &lbl, None).await;
                         let _ = channel_set_presence(&st, port, &reply_to, "paused").await;
                         if delivered {
                             eprintln!("channel/{channel}: draft sent for approval (contact {reply_to})");
@@ -21065,6 +21072,10 @@ struct PendingApproval {
     tool: String,
     args: serde_json::Value,
     label: String,
+    /// 6.1b: the chat thread that proposed this action, so approving it can RESUME that
+    /// thread's agent loop (continue a multi-step task) instead of dead-stopping. `None` for
+    /// one-shot approvals with no origin task (e.g. a channel draft reply).
+    thread_id: Option<String>,
     expires_at: std::time::Instant,
 }
 
@@ -21075,7 +21086,12 @@ fn pending_approvals() -> &'static std::sync::Mutex<Vec<PendingApproval>> {
 }
 
 /// Register a pending remote approval; returns its short code. Prunes expired + bounds the list.
-fn create_pending_approval(tool: &str, args: &serde_json::Value, label: &str) -> String {
+fn create_pending_approval(
+    tool: &str,
+    args: &serde_json::Value,
+    label: &str,
+    thread_id: Option<&str>,
+) -> String {
     let raw = uuid::Uuid::new_v4().simple().to_string();
     let code = raw[..4].to_uppercase();
     let now = std::time::Instant::now();
@@ -21090,6 +21106,7 @@ fn create_pending_approval(tool: &str, args: &serde_json::Value, label: &str) ->
             tool: tool.to_string(),
             args: args.clone(),
             label: label.to_string(),
+            thread_id: thread_id.map(|s| s.to_string()),
             expires_at: now + std::time::Duration::from_secs(600),
         });
     }
@@ -21097,14 +21114,14 @@ fn create_pending_approval(tool: &str, args: &serde_json::Value, label: &str) ->
 }
 
 /// Take (remove) a non-expired pending approval by code → (tool, args).
-fn take_pending_approval(code: &str) -> Option<(String, serde_json::Value)> {
+fn take_pending_approval(code: &str) -> Option<(String, serde_json::Value, Option<String>)> {
     let code = code.trim().to_uppercase();
     let now = std::time::Instant::now();
     let mut list = pending_approvals().lock().ok()?;
     list.retain(|p| p.expires_at > now);
     let idx = list.iter().position(|p| p.code == code)?;
     let p = list.remove(idx);
-    Some((p.tool, p.args))
+    Some((p.tool, p.args, p.thread_id))
 }
 
 /// Non-consuming check: is there a live (non-expired) pending approval with this code?
@@ -21122,22 +21139,51 @@ fn pending_approval_exists(code: &str) -> bool {
 
 /// Execute a confirmed pending approval (by code) → user-facing reply text. Routes MCP vs
 /// Composio/send_message. Shared by the inbound-text path AND the Telegram inline-button callback.
+/// 6.1b: after a confirm-gated action is approved AND executed, re-enter the agent loop on the
+/// ORIGIN thread (if known) so a multi-step task CONTINUES instead of dead-stopping at the
+/// `pending_confirm` break. Spawned so the caller (an HTTP handler / channel callback) returns at
+/// once; the continuation streams onto the thread (the UI reattaches via `active_streams`). The
+/// snapshot of `result` is taken BEFORE the spawn so no borrow escapes into the task. No-op when
+/// the pending action carried no origin thread (e.g. a one-shot channel draft reply).
+fn resume_thread_after_approval(state: &AppState, thread_id: Option<String>, tool: &str, result: &str) {
+    let Some(thread_id) = thread_id else {
+        return;
+    };
+    let st = state.clone();
+    let tool = tool.to_string();
+    let result_snip: String = result.chars().take(800).collect();
+    tokio::spawn(async move {
+        let prompt = format!(
+            "Your proposed action `{tool}` was approved and executed. Result: {result_snip}\n\n\
+             Continue the task from where you left off: do the NEXT unfinished step. Do NOT re-run \
+             the approved action. No summary unless the whole task is complete."
+        );
+        let _ = run_agent_turn(&st, &thread_id, &prompt, "full").await;
+    });
+}
+
 async fn execute_pending_approval(state: &AppState, code: &str) -> String {
     match take_pending_approval(code) {
-        Some((tool, args)) => {
+        Some((tool, args, thread_id)) => {
             let st = state.clone();
+            let tool_for_run = tool.clone();
             let result: Result<serde_json::Value, String> = tokio::task::spawn_blocking(move || {
-                if let Some((prov, mtool)) = parse_mcp_chat_name(&tool) {
+                if let Some((prov, mtool)) = parse_mcp_chat_name(&tool_for_run) {
                     run_mcp_chat_tool(&st, &prov, &mtool, args.clone()).map_err(|e| e.to_string())
                 } else {
-                    composio_execute_tool(&st, &tool, &args).map_err(|e| e.message)
+                    composio_execute_tool(&st, &tool_for_run, &args).map_err(|e| e.message)
                 }
             })
             .await
             .unwrap_or_else(|_| Err("execution interrupted".to_string()));
             match result {
                 Ok(value) => match composio_execution_error(&value) {
-                    None => format!("✅ Done ({code})."),
+                    None => {
+                        // 6.1b: the action ran out-of-band after the turn died at `pending_confirm`
+                        // — resume the origin thread so the multi-step task keeps going.
+                        resume_thread_after_approval(state, thread_id, &tool, &value.to_string());
+                        format!("✅ Done ({code}).")
+                    }
                     Some(err) => format!("⚠️ Failed ({code}): {err}"),
                 },
                 Err(e) => format!("⚠️ Error ({code}): {e}"),
@@ -21180,6 +21226,7 @@ async fn deliver_remote_approval(
     tool: &str,
     args: &serde_json::Value,
     label: &str,
+    thread_id: Option<&str>,
 ) -> bool {
     let prefs = load_user_prefs();
     let channel = prefs.approval_channel.as_deref().unwrap_or("in_app").to_string();
@@ -21187,7 +21234,7 @@ async fn deliver_remote_approval(
     if target.trim().is_empty() || channel == "in_app" {
         return false;
     }
-    let code = create_pending_approval(tool, args, label);
+    let code = create_pending_approval(tool, args, label, thread_id);
     match channel.as_str() {
         "telegram" => {
             let text = format!(
@@ -22318,6 +22365,9 @@ async fn mcp_execute(
                 }
             }
             let summary = output.to_string().chars().take(2000).collect::<String>();
+            // 6.1b approval-resume (in-app): the chat turn died at `pending_confirm`; now that the
+            // action ran, continue the multi-step task on the origin thread (thread_id is known here).
+            resume_thread_after_approval(&state, request.thread_id.clone(), &request.tool, &summary);
             Ok(Json(McpExecuteResponse { ok: true, summary }))
         }
         Err(error) => Ok(Json(McpExecuteResponse {
