@@ -147,11 +147,15 @@ cablato** nel flusso agente. ADR 0015.
   (:13340-13367) + Telegram + `pending_confirm` → turno muore a :13518; dopo l'**approvazione**
   `execute_pending_approval` (:21029) esegue **solo quell'azione** + riscrive in "✓ MCP tool
   executed" (:22315) → **nessuna continuazione**. Fix: dopo l'approvazione (in-app o Telegram)
-  l'harness **rientra nel loop del thread d'origine** col risultato e continua. Serve: (a) la
-  pending-approval porti `thread_id` (`PendingApproval` :21063 / `create_pending_approval`
-  :21078 oggi NO); (b) un punto che riavvia un turno sul thread (riusare
-  `task_channel_scheduled_autorun_*`). Blocca **ogni** deliverable che scrive file → **prima di
-  slice 3 / WS2**. Lega ADR 0015 + caposaldo #2.
+  l'harness **rientra nel loop del thread d'origine** col risultato e continua. **Passo 0
+  fatto** — meccanismo inchiodato: il ri-avvio è **`run_agent_turn(state, thread_id, prompt,
+  policy)`** (:17078), già usato da canale inbound (:16528) e autorun (:19360). Due rami: (a)
+  **in-app** `mcp_execute` (:22259) ha già `thread_id`+`message_id` → dopo exec+riscrittura,
+  `spawn(run_agent_turn(...))`; (b) **Telegram** → aggiungere `thread_id` a `PendingApproval`
+  (:21063) propagato da `create_pending_approval` (:21078) ← `deliver_remote_approval` (:21082)
+  ← call-site loop (:13362), poi `run_agent_turn`. Frizione "approva ogni scrittura" già
+  mitigata da **Policy B `allow_server`** (:22273). Blocca **ogni** deliverable che scrive file
+  → **prima di slice 3 / WS2**. Lega ADR 0015 + caposaldo #2.
 - ☐ **6.2 Resource Governor** attivo sui task (limiti, backpressure).
 - ☐ **6.3 Scheduler / ricorrenza** + **proactive review** (l'assistente propone schede
   in autonomia governata) verificati end-to-end.
