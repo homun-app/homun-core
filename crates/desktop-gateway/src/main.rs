@@ -235,6 +235,9 @@ struct ApprovalItemResponse {
 struct ResourceUsageResponse {
     resource_class: String,
     units: u32,
+    limit_units: Option<u32>,
+    available_units: Option<u32>,
+    saturated: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -18538,10 +18541,7 @@ fn run_next_task_once(
     // Dynamic LLM concurrency: the limit follows the active provider's locality
     // (loopback 1, cloud 4) or the user's override — resolved fresh each tick so a
     // Settings change applies with no restart. See `active_llm_concurrency`.
-    let governor = ResourceGovernor::new(
-        ResourceLimits::conservative_defaults()
-            .with_limit(ResourceClass::LlmInference, active_llm_concurrency()),
-    );
+    let governor = ResourceGovernor::new(effective_task_resource_limits());
     let lease_manager = LeaseManager::new(Duration::minutes(5));
     let task = {
         let store = lock_task_store(state)?;
@@ -18803,6 +18803,11 @@ fn run_next_task_once(
             message: outcome.summary,
         }],
     })
+}
+
+fn effective_task_resource_limits() -> ResourceLimits {
+    ResourceLimits::conservative_defaults()
+        .with_limit(ResourceClass::LlmInference, active_llm_concurrency())
 }
 
 fn requeue_waiting_resource_tasks(
@@ -29219,16 +29224,26 @@ fn task_queue_response_for_state(state: &AppState) -> Result<TaskQueueResponse, 
     let snapshot = TaskUiReadModel::new(&store)
         .queue_snapshot(&user, &workspace)
         .map_err(GatewayError::task)?;
-    task_queue_response(snapshot)
+    let limits = effective_task_resource_limits();
+    task_queue_response(snapshot, &limits)
 }
 
-fn task_queue_response(snapshot: TaskQueueSnapshot) -> Result<TaskQueueResponse, GatewayError> {
+fn task_queue_response(
+    snapshot: TaskQueueSnapshot,
+    limits: &ResourceLimits,
+) -> Result<TaskQueueResponse, GatewayError> {
     let mut resource_usage = snapshot
         .resource_usage
         .into_iter()
-        .map(|(resource_class, units)| ResourceUsageResponse {
-            resource_class: resource_class_label(resource_class).to_string(),
-            units,
+        .map(|(resource_class, units)| {
+            let limit = limits.limit_for(resource_class);
+            ResourceUsageResponse {
+                resource_class: resource_class_label(resource_class).to_string(),
+                units,
+                limit_units: limit,
+                available_units: limit.map(|limit| limit.saturating_sub(units)),
+                saturated: limit.is_some_and(|limit| units >= limit),
+            }
         })
         .collect::<Vec<_>>();
     resource_usage.sort_by(|left, right| left.resource_class.cmp(&right.resource_class));
@@ -32551,30 +32566,33 @@ data: [DONE]\n";
         let workspace = WorkspaceId::new("local-workspace");
         let mut resource_usage = HashMap::new();
         resource_usage.insert(ResourceClass::LlmInference, 1);
-        let response = task_queue_response(TaskQueueSnapshot {
-            queued: vec![TaskUiItem {
-                task_id: TaskId::new("task-1"),
-                kind: "browser_automation".to_string(),
-                goal: "Find train options".to_string(),
-                status: TaskStatus::Queued,
-                priority: TaskPriority::High,
-                blocked_reason: None,
-            }],
-            active: Vec::new(),
-            blocked: Vec::new(),
-            waiting_approvals: vec![ApprovalRequest::new(
-                "approval-1",
-                TaskId::new("task-2"),
-                user,
-                workspace,
-                "book train",
-                "high",
-                "browser",
-                "Purchase requires confirmation",
-            )],
-            recent_failures: Vec::new(),
-            resource_usage,
-        })
+        let response = task_queue_response(
+            TaskQueueSnapshot {
+                queued: vec![TaskUiItem {
+                    task_id: TaskId::new("task-1"),
+                    kind: "browser_automation".to_string(),
+                    goal: "Find train options".to_string(),
+                    status: TaskStatus::Queued,
+                    priority: TaskPriority::High,
+                    blocked_reason: None,
+                }],
+                active: Vec::new(),
+                blocked: Vec::new(),
+                waiting_approvals: vec![ApprovalRequest::new(
+                    "approval-1",
+                    TaskId::new("task-2"),
+                    user,
+                    workspace,
+                    "book train",
+                    "high",
+                    "browser",
+                    "Purchase requires confirmation",
+                )],
+                recent_failures: Vec::new(),
+                resource_usage,
+            },
+            &ResourceLimits::new().with_limit(ResourceClass::LlmInference, 4),
+        )
         .unwrap();
 
         assert_eq!(response.queued[0].task_id, "task-1");
@@ -32582,6 +32600,10 @@ data: [DONE]\n";
         assert_eq!(response.queued[0].priority, "high");
         assert_eq!(response.waiting_approvals[0].status, "pending");
         assert_eq!(response.resource_usage[0].resource_class, "llm_inference");
+        assert_eq!(response.resource_usage[0].units, 1);
+        assert_eq!(response.resource_usage[0].limit_units, Some(4));
+        assert_eq!(response.resource_usage[0].available_units, Some(3));
+        assert!(!response.resource_usage[0].saturated);
     }
 
     #[test]

@@ -45,11 +45,11 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
 
 ### Cruscotto operativo attuale
 
-- **Linea attiva:** WS6.2 Resource Governor — slice 1+2 completate localmente:
+- **Linea attiva:** WS6.2 Resource Governor — slice 1+2+3 completate localmente:
   reidratazione dei task `WaitingResource` quando la capacità torna disponibile,
-  sia nel gateway sia nel `TaskRuntime` standalone. Prossimo slice: rendere
-  visibili limiti/uso/backpressure nella superficie task/executor e poi stress-gate
-  in-app con più worker.
+  sia nel gateway sia nel `TaskRuntime` standalone; la API task queue ora espone
+  uso, limite, disponibilità e saturazione per classe risorsa. Prossimo slice:
+  stress-gate in-app con più worker e `llm_inference` conteso.
 - **Fatto e verificato localmente:** root automatica del progetto, bypass conferma
   solo per scritture Filesystem MCP dentro root; outside-root resta confirm-gated;
   routing Auto thread-aware + fallback orchestratore su `400` con tool; approval
@@ -163,6 +163,17 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   focused gateway `task_executor_requeues_waiting_resource_before_scheduling`
   verde; `cargo build -p local-first-desktop-gateway` verde; `npm run build`
   desktop verde; `git diff --check` pulito.
+- **WS6.2c visibility API FATTO (2026-06-22):** la risposta task queue espone
+  pressione risorse per classe: `units`, `limit_units`, `available_units`,
+  `saturated`. I limiti usati dal payload sono gli stessi del worker
+  (`ResourceLimits::conservative_defaults()` + override dinamico
+  `active_llm_concurrency()` per `llm_inference`). Test red/green:
+  `task_queue_response_serializes_ui_read_model_for_renderer` (red: campi assenti;
+  green: `llm_inference` con used=1, limit=4, available=3, non saturo). Verifiche:
+  `cargo test -p local-first-desktop-gateway` = **162 passati, 1 ignorato**;
+  `cargo test -p local-first-task-runtime` verde; `cargo build -p
+  local-first-desktop-gateway` verde; `npm run build` desktop verde;
+  `git diff --check` pulito.
 - **Divieto operativo:** niente altri test di scrittura via endpoint HTTP grezzo;
   per questo gate usare solo UI/app o callback Telegram reale.
 
