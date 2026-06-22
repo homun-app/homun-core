@@ -969,6 +969,32 @@ fn gather_scope_memory(state: &AppState, scope: &str, cap: usize) -> Vec<String>
     items
 }
 
+/// WS5.4 — OPEN LOOPS of the active scope (unfinished work + why), ALWAYS injected into
+/// the briefing so a fresh chat resumes them WITHOUT the user naming the topic (the
+/// Zeigarnik guarantee). Most-recent first, small cap. Separate from the general profile
+/// so they get a guaranteed, high-priority slot instead of competing in the relevance mix.
+fn gather_open_loops(state: &AppState, cap: usize) -> Vec<String> {
+    let Ok(facade) = lock_memory_facade(state) else {
+        return Vec::new();
+    };
+    let user = gateway_memory_user_id();
+    let workspace = gateway_memory_workspace_id();
+    let mut items: Vec<String> = facade
+        .list_memories_for_ui(&user, &workspace)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|m| {
+            m.memory_type == "open_loop"
+                && matches!(m.status, MemoryStatus::Confirmed | MemoryStatus::Candidate)
+        })
+        .map(|m| m.text.trim().replace('\n', " "))
+        .collect();
+    if items.len() > cap {
+        items.drain(0..items.len() - cap);
+    }
+    items
+}
+
 /// Recent connector activity (Composio/MCP tool runs) — the "what's been
 /// happening" signal that lets the supervisor say "ho visto che hai fatto X".
 fn gather_recent_connector_activity(state: &AppState, cap: usize) -> Vec<String> {
@@ -1899,11 +1925,21 @@ fn gather_profile_memory(state: &AppState) -> (Vec<String>, Vec<String>) {
 /// Formats the personal + project memories into a compact, budgeted prompt block.
 /// Pure (testable): one item per line, sections labelled, truncated to `budget`
 /// with a marker. Returns `None` when there is nothing to inject.
-fn format_memory_block(personal: &[String], project: &[String], budget: usize) -> Option<String> {
+fn format_memory_block(
+    open_loops: &[String],
+    personal: &[String],
+    project: &[String],
+    budget: usize,
+) -> Option<String> {
     if budget == 0 {
         return None;
     }
-    let sections = [("Personal", personal), ("Project", project)];
+    // OPEN LOOPS first → guaranteed budget priority (unfinished work must never fall off).
+    let sections = [
+        ("OPEN LOOPS — unfinished work, resume from here", open_loops),
+        ("Personal", personal),
+        ("Project", project),
+    ];
     let mut body = String::new();
     let mut used = 0usize;
     let mut truncated = false;
@@ -10142,7 +10178,9 @@ save/export a file to a folder, call save_artifact(file, destination)."
         // (personal scope) and the active project, so the chat is continuous instead
         // of starting cold every turn. Sensitive items are excluded here by design.
         let (memory_personal, memory_project) = gather_profile_memory(state);
+        let memory_open_loops = gather_open_loops(state, 6);
         let system = match format_memory_block(
+            &memory_open_loops,
             &memory_personal,
             &memory_project,
             CHAT_MEMORY_BUDGET_CHARS,
@@ -30626,9 +30664,9 @@ mod tests {
 
     #[test]
     fn memory_block_is_none_when_empty_or_zero_budget() {
-        assert!(format_memory_block(&[], &[], 1500).is_none());
+        assert!(format_memory_block(&[], &[], &[], 1500).is_none());
         let some = vec!["Preferisce risposte concise".to_string()];
-        assert!(format_memory_block(&some, &[], 0).is_none());
+        assert!(format_memory_block(&[], &some, &[], 0).is_none());
     }
 
     // ── Canonical plan (the loop fix) ───────────────────────────────────────
@@ -30702,7 +30740,7 @@ mod tests {
     fn memory_block_labels_sections_and_includes_text() {
         let personal = vec!["Preferisce risposte concise in italiano".to_string()];
         let project = vec!["Repo principale: /Clients/Acme/app".to_string()];
-        let block = format_memory_block(&personal, &project, 1500).expect("block");
+        let block = format_memory_block(&[], &personal, &project, 1500).expect("block");
         assert!(block.contains("Personal:"));
         assert!(block.contains("risposte concise"));
         assert!(block.contains("Project:"));
@@ -30710,11 +30748,24 @@ mod tests {
     }
 
     #[test]
+    fn memory_block_puts_open_loops_first() {
+        let ol = vec!["Preventivo Rossi incompleto: manca assistenza".to_string()];
+        let personal = vec!["Preferisce risposte in italiano".to_string()];
+        let block = format_memory_block(&ol, &personal, &[], 1500).expect("block");
+        assert!(block.contains("OPEN LOOPS"));
+        assert!(block.contains("Preventivo Rossi"));
+        assert!(
+            block.find("OPEN LOOPS").unwrap() < block.find("Personal:").unwrap(),
+            "open loops must come before personal"
+        );
+    }
+
+    #[test]
     fn memory_block_respects_budget_and_marks_truncation() {
         let many: Vec<String> = (0..200)
             .map(|i| format!("fatto numero {i} con testo abbastanza lungo da occupare spazio"))
             .collect();
-        let block = format_memory_block(&many, &[], 300).expect("block");
+        let block = format_memory_block(&[], &many, &[], 300).expect("block");
         assert!(block.len() < 600, "block should be bounded, got {}", block.len());
         assert!(block.contains("more available in memory"));
     }

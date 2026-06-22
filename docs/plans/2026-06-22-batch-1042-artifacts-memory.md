@@ -93,8 +93,12 @@ che fanno "ricordare il perché e sopravvivere". Caposaldo #8.
   gli `open_loop` **più ricchi** (cosa esiste / cosa NON esiste / cosa blocca) — senza
   però immortalare gli errori di processo del modello. Verificabile via eval (un check di
   coerenza A→B).
-- ☐ **5.4 Proiezione markdown attiva** per progetto (`brief.md` / `decisioni.md` /
-  **`stato-lavori.md`**), iniettata nelle **chat nuove**, bidirezionale (edit→sync).
+- 🟡 **5.4 Open loops nelle chat nuove**:
+  - ✅ **5.4a briefing always-on** — `gather_open_loops` + sezione "OPEN LOOPS" in cima a
+    `format_memory_block` (priorità di budget): una chat nuova li riceve **senza** nominare
+    il topic (chiude il gap del test Rossi-B). Build+test verdi.
+  - ☐ **5.4b** proiezione markdown `stato-lavori.md` (faccia leggibile/editabile, bidirezionale).
+  - ☐ **5.4c** **chiusura automatica** dell'open_loop a lavoro fatto + **dedup** (erano 2).
 - ☐ **5.5 Catena di provenienza** decisione → artefatto → codice → esito (unisce
   WS2-3.1 artefatti→memoria + WS1-F6 piano→memoria + codice già nel grafo).
 - ☐ **5.6 Eval memoria** (guardrail): chat nuova → *"a che punto è il workflow e perché
