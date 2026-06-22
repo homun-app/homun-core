@@ -39,7 +39,7 @@ use axum::{
     routing::put,
 };
 use base64::Engine as _;
-use chat_store::{BranchPoint, ChatStore};
+use chat_store::{BranchPoint, ChatStore, RemoteApprovalInput, RemoteApprovalRow};
 use local_first_browser_automation::{
     BrowserAutomationClient, BrowserAutomationError, BrowserMethod, BrowserResponse,
     BrowserSidecarSession, BrowserSidecarSpawnOptions, BrowserUrlApprovalGrant,
@@ -1633,6 +1633,7 @@ async fn commit_prompt_result(
             request.branch_from_id.as_deref(),
         )
         .map_err(GatewayError::store)?;
+    activate_remote_approvals_from_message(&state, &thread_id, &request.assistant_message).await;
     Ok(Json(snapshot))
 }
 
@@ -1641,11 +1642,11 @@ async fn commit_continuation_result(
     Path((thread_id, message_id)): Path<(String, String)>,
     Json(request): Json<CommitContinuationResultRequest>,
 ) -> Result<Json<ChatMessagesSnapshot>, GatewayError> {
-    Ok(Json(
-        lock_store(&state)?
-            .commit_continuation_result(&thread_id, &message_id, &request.assistant_message)
-            .map_err(GatewayError::store)?,
-    ))
+    let snapshot = lock_store(&state)?
+        .commit_continuation_result(&thread_id, &message_id, &request.assistant_message)
+        .map_err(GatewayError::store)?;
+    activate_remote_approvals_from_message(&state, &thread_id, &request.assistant_message).await;
+    Ok(Json(snapshot))
 }
 
 async fn commit_regenerated_result(
@@ -1653,15 +1654,71 @@ async fn commit_regenerated_result(
     Path(thread_id): Path<String>,
     Json(request): Json<CommitRegeneratedResultRequest>,
 ) -> Result<Json<ChatMessagesSnapshot>, GatewayError> {
-    Ok(Json(
-        lock_store(&state)?
-            .commit_regenerated_answer(
-                &thread_id,
-                &request.user_message_id,
-                &request.assistant_message,
-            )
-            .map_err(GatewayError::store)?,
-    ))
+    let snapshot = lock_store(&state)?
+        .commit_regenerated_answer(
+            &thread_id,
+            &request.user_message_id,
+            &request.assistant_message,
+        )
+        .map_err(GatewayError::store)?;
+    activate_remote_approvals_from_message(&state, &thread_id, &request.assistant_message).await;
+    Ok(Json(snapshot))
+}
+
+async fn activate_remote_approvals_from_message(
+    state: &AppState,
+    thread_id: &str,
+    message: &ChatMessage,
+) {
+    for (open_tag, close_tag) in [
+        (MCP_CONFIRM_OPEN, MCP_CONFIRM_CLOSE),
+        (COMPOSIO_CONFIRM_OPEN, COMPOSIO_CONFIRM_CLOSE),
+    ] {
+        let Some(marker) = confirm_marker_value(&message.text, open_tag, close_tag) else {
+            continue;
+        };
+        let Some(approval_id) = marker.get("approval_id").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        let Some(tool) = marker.get("tool").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        let arguments = marker
+            .get("arguments")
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!({}));
+        let matches = if open_tag == MCP_CONFIRM_OPEN {
+            mcp_confirm_matches_approval(&message.text, approval_id, tool, &arguments)
+        } else {
+            composio_confirm_matches_approval(&message.text, approval_id, tool, &arguments)
+        };
+        if !matches {
+            continue;
+        }
+        let row = lock_store(state)
+            .ok()
+            .and_then(|store| {
+                store
+                    .bind_remote_approval_source(approval_id, thread_id, &message.id)
+                    .ok()
+                    .flatten()
+            });
+        let Some(row) = row else {
+            continue;
+        };
+        if row.status != "pending"
+            || !row.requires_source
+            || row.dispatched_at.is_some()
+            || row.source_message_id.as_deref() != Some(message.id.as_str())
+        {
+            continue;
+        }
+        if dispatch_remote_approval(state, &row).await {
+            if let Ok(store) = lock_store(state) {
+                let _ = store.mark_remote_approval_dispatched(&row.approval_id);
+            }
+        }
+    }
 }
 
 /// Branch switcher (‹ n/m ›): every branch point on the thread's active path.
@@ -8785,7 +8842,7 @@ fn build_chat_payload(
             "keep_alive": "10m",
             "options": { "temperature": temperature, "num_predict": 6000 },
         });
-        if !is_final_round {
+        if !is_final_round && !tools.is_empty() {
             payload["tools"] = serde_json::Value::Array(tools.to_vec());
         }
         payload
@@ -8806,7 +8863,7 @@ fn build_chat_payload(
         if is_zai_base(base_url) && !zai_thinking_enabled() {
             payload["thinking"] = serde_json::json!({ "type": "disabled" });
         }
-        if !is_final_round {
+        if !is_final_round && !tools.is_empty() {
             payload["tools"] = serde_json::Value::Array(tools.to_vec());
             payload["tool_choice"] = serde_json::Value::String("auto".to_string());
         }
@@ -8842,6 +8899,30 @@ fn auth_fallback_config(failing_model: &str) -> Option<(String, String, Option<S
         }
     }
     None
+}
+
+/// A provider can serve normal chat yet reject a tool-bearing request. Recover with
+/// the explicitly configured orchestrator role, but only for that one failed round:
+/// auth and transport fallbacks below retain their own retry budget.
+fn tool_compatibility_fallback_config(
+    failing_base_url: &str,
+    failing_model: &str,
+) -> Option<(String, String, Option<String>)> {
+    let registry = load_provider_registry();
+    let fallback = registry.resolve_role("orchestrator")?;
+    if fallback.base_url == failing_base_url && fallback.model == failing_model {
+        return None;
+    }
+    let api_key = provider_api_key(&fallback.provider_id).or_else(env_inference_api_key);
+    Some((fallback.base_url, fallback.model, api_key))
+}
+
+fn should_try_tool_compatibility_fallback(
+    status_code: u16,
+    payload_has_tools: bool,
+    already_tried: bool,
+) -> bool {
+    status_code == 400 && payload_has_tools && !already_tried
 }
 
 /// Project-aware chat config: a chat in a PROJECT (thread with a linked folder)
@@ -10555,6 +10636,9 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
     // `:cloud` model without `ollama signin`) self-heals ONCE to the orchestrator's
     // manual binding (a provider with a valid key) instead of dead-ending the turn.
     let mut fallback_tried = false;
+    // Kept separate from auth/transport recovery: a compatibility retry must not
+    // consume the distinct recovery path for a later network or credentials failure.
+    let mut tool_compatibility_fallback_tried = false;
     // Channel turns run read-only: offer only tools without side effects (search,
     // recall, skill instructions, Composio reads). Side-effecting tools (write
     // files, run sandbox, Composio writes) are withheld → Phase 2 routes them to
@@ -11022,6 +11106,7 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
             // /v1 layer drops tool calls when streaming (ollama#12557). The payload
             // shape is provider-specific; both stream from upstream so the governor is
             // INACTIVITY (idle timeout) not total time.
+            let payload_has_tools = !is_final_round && !tool_schemas.is_empty();
             let mut payload = build_chat_payload(
                 &model,
                 &base_url,
@@ -11057,7 +11142,9 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
                                 .take(600)
                                 .collect();
                             eprintln!(
-                                "[model-error] {code} model={model} endpoint={endpoint} body={err_body}"
+                                "[model-error] {code} model={model} endpoint={endpoint} \
+round={round} tools={payload_has_tools} tool_count={} body={err_body}",
+                                tool_schemas.len()
                             );
                             // Shape map of the failing payload: which message carries
                             // tool_calls with non-string arguments (the classic
@@ -11085,6 +11172,44 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
                                     })
                                     .collect();
                                 eprintln!("[model-error] shapes: {}", shapes.join(" | "));
+                            }
+                            // A project can intentionally route Auto to its coding
+                            // provider. If that provider rejects this actual TOOLS
+                            // payload, do not print a generic 400 and then continue
+                            // with a no-tools synthesis: retry the same round once
+                            // through the configured orchestrator, which owns the
+                            // general agent/tool contract.
+                            if should_try_tool_compatibility_fallback(
+                                code.as_u16(),
+                                payload_has_tools,
+                                tool_compatibility_fallback_tried,
+                            ) {
+                                if let Some((fb_base, fb_model, fb_key)) =
+                                    tool_compatibility_fallback_config(&base_url, &model)
+                                {
+                                    tool_compatibility_fallback_tried = true;
+                                    let _ = emit_stream_event(&tx, GenerateStreamEvent::Delta {
+                                        text: format!(
+                                            "‹‹ACT››↩ «{model}» rejected the tool request (400); \
+retrying through «{fb_model}»…‹‹/ACT››"
+                                        ),
+                                    })
+                                    .await;
+                                    model = fb_model;
+                                    base_url = fb_base;
+                                    endpoint = chat_endpoint(&base_url);
+                                    api_key = fb_key;
+                                    payload = build_chat_payload(
+                                        &model,
+                                        &base_url,
+                                        &messages,
+                                        &tool_schemas,
+                                        temperature,
+                                        is_final_round,
+                                    );
+                                    attempt = 0;
+                                    continue;
+                                }
                             }
                             let transient = matches!(code.as_u16(), 408 | 429 | 500 | 502 | 503 | 504);
                             if transient && attempt < 2 {
@@ -13456,25 +13581,29 @@ require your confirmation in the app. Propose it and stop."
                             &args_val,
                         );
                         if composio_writes.contains(name) && !autonomous && !workspace_scoped {
-                            let marker = serde_json::json!({ "tool": name, "arguments": args_val })
-                                .to_string();
+                            let approval = create_pending_approval(
+                                &state_owned,
+                                name,
+                                &args_val,
+                                &mcp_tool,
+                                thread_id.as_deref(),
+                                true,
+                            );
+                            let marker = match approval.as_ref() {
+                                Some(approval) => serde_json::json!({
+                                    "approval_id": approval.approval_id,
+                                    "tool": name,
+                                    "arguments": args_val,
+                                }),
+                                None => serde_json::json!({ "tool": name, "arguments": args_val }),
+                            }
+                            .to_string();
                             let card = format!(
                                 "\n\nI need your confirmation for the action below.\n\
 ‹‹MCP_CONFIRM››{marker}‹‹/MCP_CONFIRM››\n"
                             );
                             accumulated.push_str(&card);
                             let _ = emit_stream_event(&tx, GenerateStreamEvent::Delta { text: card })
-                                .await;
-                            // Also route the approval to the user's channel (if configured) so
-                            // it can be authorized remotely. No-op when approval channel = in-app.
-                            let _ =
-                                deliver_remote_approval(
-                                    &state_owned,
-                                    name,
-                                    &args_val,
-                                    &mcp_tool,
-                                    thread_id.as_deref(),
-                                )
                                 .await;
                             pending_confirm = true;
                             "AWAITING USER CONFIRMATION: the action was proposed via a \
@@ -13552,8 +13681,23 @@ Connectors → MCP; do NOT claim it's done.",
                             // must never claim it's done — the real outcome comes from the card.
                             let args_val: serde_json::Value = serde_json::from_str(args_raw)
                                 .unwrap_or_else(|_| serde_json::json!({}));
-                            let marker = serde_json::json!({ "tool": name, "arguments": args_val })
-                                .to_string();
+                            let approval = create_pending_approval(
+                                &state_owned,
+                                name,
+                                &args_val,
+                                &humanize_composio_tool(name),
+                                thread_id.as_deref(),
+                                true,
+                            );
+                            let marker = match approval.as_ref() {
+                                Some(approval) => serde_json::json!({
+                                    "approval_id": approval.approval_id,
+                                    "tool": name,
+                                    "arguments": args_val,
+                                }),
+                                None => serde_json::json!({ "tool": name, "arguments": args_val }),
+                            }
+                            .to_string();
                             let card = format!(
                                 "\n\nI need your confirmation for the action below.\n\
 ‹‹COMPOSIO_CONFIRM››{marker}‹‹/COMPOSIO_CONFIRM››\n"
@@ -13561,16 +13705,6 @@ Connectors → MCP; do NOT claim it's done.",
                             accumulated.push_str(&card);
                             let _ = emit_stream_event(&tx, GenerateStreamEvent::Delta { text: card })
                                 .await;
-                            // Also route the approval to the user's channel (if configured) for
-                            // remote authorization. No-op when approval channel = in-app.
-                            let _ = deliver_remote_approval(
-                                &state_owned,
-                                name,
-                                &args_val,
-                                &humanize_composio_tool(name),
-                                thread_id.as_deref(),
-                            )
-                            .await;
                             pending_confirm = true;
                             "AWAITING USER CONFIRMATION: the action was proposed via a \
 confirmation card in the interface. Do NOT say it was executed."
@@ -16055,6 +16189,13 @@ fn telegram_token_path() -> Option<PathBuf> {
     gateway_data_dir().ok().map(|dir| dir.join("telegram-bot-token"))
 }
 
+fn load_telegram_token() -> Option<String> {
+    telegram_token_path()
+        .and_then(|p| fs::read_to_string(p).ok())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
 fn telegram_bin() -> Option<PathBuf> {
     if let Ok(p) = env::var("HOMUN_TELEGRAM_BIN") {
         let path = PathBuf::from(p);
@@ -16305,6 +16446,45 @@ async fn channel_send(
     }
 }
 
+async fn telegram_send_with_rebind(
+    state: &AppState,
+    recipient: &str,
+    text: &str,
+) -> Result<(), String> {
+    match channel_send(state, TELEGRAM_HTTP_PORT, recipient, text).await {
+        Ok(()) => return Ok(()),
+        Err(first_error) => {
+            let Some(token) = load_telegram_token() else {
+                return Err(format!("{first_error}; telegram token unavailable"));
+            };
+            if let Err(error) = ensure_telegram_sidecar(state, &token).await {
+                return Err(format!("{first_error}; rebind failed: {}", error.message));
+            }
+        }
+    }
+    channel_send(state, TELEGRAM_HTTP_PORT, recipient, text).await
+}
+
+async fn telegram_send_buttons_with_rebind(
+    state: &AppState,
+    recipient: &str,
+    text: &str,
+    buttons: Vec<[String; 2]>,
+) -> Result<(), String> {
+    match channel_send_buttons(state, TELEGRAM_HTTP_PORT, recipient, text, buttons.clone()).await {
+        Ok(()) => return Ok(()),
+        Err(first_error) => {
+            let Some(token) = load_telegram_token() else {
+                return Err(format!("{first_error}; telegram token unavailable"));
+            };
+            if let Err(error) = ensure_telegram_sidecar(state, &token).await {
+                return Err(format!("{first_error}; rebind failed: {}", error.message));
+            }
+        }
+    }
+    channel_send_buttons(state, TELEGRAM_HTTP_PORT, recipient, text, buttons).await
+}
+
 /// Drives a channel's typing indicator via its sidecar: `presence` is
 /// "composing" (typing…) or "paused" (cleared). Best-effort, short timeout.
 async fn channel_set_presence(
@@ -16431,14 +16611,21 @@ async fn telegram_callback(
     };
     let approve = verb.eq_ignore_ascii_case("approve");
     let reply = if approve {
+        if pending_approval_exists(&state, code) {
+            let _ = telegram_send_with_rebind(&state, target.trim(), &approval_progress_reply(code))
+                .await;
+        }
         execute_pending_approval(&state, code).await
     } else {
-        match take_pending_approval(code) {
-            Some(_) => format!("❌ Cancelled ({code})."),
-            None => format!("Code {code} not valid or expired."),
+        match lock_store(&state)
+            .ok()
+            .and_then(|store| store.cancel_remote_approval_by_code(code).ok())
+        {
+            Some(true) => format!("❌ Cancelled ({code})."),
+            _ => format!("Code {code} not valid or expired."),
         }
     };
-    let _ = channel_send(&state, TELEGRAM_HTTP_PORT, target.trim(), &reply).await;
+    let _ = telegram_send_with_rebind(&state, target.trim(), &reply).await;
     Json(serde_json::json!({ "ok": true, "approved": approve }))
 }
 
@@ -16473,16 +16660,39 @@ async fn handle_channel_inbound(
                 // normal message that merely starts with No/Ok/Sì (e.g. "No, that's
                 // wrong…") and must flow to the conversation — not be answered with
                 // "Code … not valid or expired."
-                if pending_approval_exists(&code) {
+                if pending_approval_exists(state, &code) {
                     let reply = if approve {
+                        if channel == "telegram" {
+                            let _ = telegram_send_with_rebind(
+                                state,
+                                &message.sender,
+                                &approval_progress_reply(&code),
+                            )
+                            .await;
+                        } else {
+                            let _ = channel_send(
+                                state,
+                                port,
+                                &message.sender,
+                                &approval_progress_reply(&code),
+                            )
+                            .await;
+                        }
                         execute_pending_approval(state, &code).await
                     } else {
-                        match take_pending_approval(&code) {
-                            Some(_) => format!("❌ Cancelled ({code})."),
-                            None => format!("Code {code} not valid or expired."),
+                        match lock_store(state)
+                            .ok()
+                            .and_then(|store| store.cancel_remote_approval_by_code(&code).ok())
+                        {
+                            Some(true) => format!("❌ Cancelled ({code})."),
+                            _ => format!("Code {code} not valid or expired."),
                         }
                     };
-                    let _ = channel_send(state, port, &message.sender, &reply).await;
+                    if channel == "telegram" {
+                        let _ = telegram_send_with_rebind(state, &message.sender, &reply).await;
+                    } else {
+                        let _ = channel_send(state, port, &message.sender, &reply).await;
+                    }
                     return Json(serde_json::json!({
                         "action": "approval", "code": code, "approved": approve
                     }));
@@ -17262,7 +17472,7 @@ async fn run_agent_turn(
     prompt: &str,
     tool_policy: &str,
 ) -> Option<String> {
-    let (base_url, model, api_key) = chat_openai_stream_config()?;
+    let (base_url, model, api_key) = chat_role_config_for_thread(state, Some(thread_id))?;
     // Prior conversation on this thread (oldest→newest), user/assistant only,
     // capped to the last 16 turns. The current inbound is passed as `prompt`, so
     // it is NOT yet in the thread (the handler appends it after the reply).
@@ -21239,76 +21449,144 @@ fn verbose_debug() -> bool {
     std::env::var("HOMUN_DEBUG").is_ok()
 }
 
-/// A confirmation routed to a channel for REMOTE authorization (the user approves from their
-/// phone with `OK <code>` / `NO <code>`). 10-minute TTL; in-memory (short-lived by design).
-struct PendingApproval {
-    code: String,
-    tool: String,
-    args: serde_json::Value,
-    label: String,
-    /// 6.1b: the chat thread that proposed this action, so approving it can RESUME that
-    /// thread's agent loop (continue a multi-step task) instead of dead-stopping. `None` for
-    /// one-shot approvals with no origin task (e.g. a channel draft reply).
-    thread_id: Option<String>,
-    expires_at: std::time::Instant,
+fn approval_expires_at_secs() -> i64 {
+    OffsetDateTime::now_utc().unix_timestamp() + 600
 }
 
-fn pending_approvals() -> &'static std::sync::Mutex<Vec<PendingApproval>> {
-    static CELL: std::sync::OnceLock<std::sync::Mutex<Vec<PendingApproval>>> =
-        std::sync::OnceLock::new();
-    CELL.get_or_init(|| std::sync::Mutex::new(Vec::new()))
-}
-
-/// Register a pending remote approval; returns its short code. Prunes expired + bounds the list.
+/// Register a durable remote approval. For chat-originated cards
+/// `requires_source=true`: the row is not executable until the persisted
+/// assistant message binds to the same approval_id marker.
 fn create_pending_approval(
+    state: &AppState,
     tool: &str,
     args: &serde_json::Value,
     label: &str,
     thread_id: Option<&str>,
-) -> String {
-    let raw = uuid::Uuid::new_v4().simple().to_string();
-    let code = raw[..4].to_uppercase();
-    let now = std::time::Instant::now();
-    if let Ok(mut list) = pending_approvals().lock() {
-        list.retain(|p| p.expires_at > now);
-        if list.len() > 50 {
-            let drop = list.len() - 50;
-            list.drain(0..drop);
-        }
-        list.push(PendingApproval {
-            code: code.clone(),
-            tool: tool.to_string(),
-            args: args.clone(),
-            label: label.to_string(),
-            thread_id: thread_id.map(|s| s.to_string()),
-            expires_at: now + std::time::Duration::from_secs(600),
-        });
+    requires_source: bool,
+) -> Option<RemoteApprovalRow> {
+    let prefs = load_user_prefs();
+    let channel = prefs.approval_channel.as_deref().unwrap_or("in_app");
+    let target = prefs.approval_target.unwrap_or_default();
+    if target.trim().is_empty() || channel == "in_app" {
+        return None;
     }
-    code
+    if requires_source && thread_id.is_none() {
+        return None;
+    }
+    for _ in 0..8 {
+        let raw = uuid::Uuid::new_v4().simple().to_string();
+        let approval_id = format!("approval_{raw}");
+        let code = raw[..6].to_uppercase();
+        let expires_at = approval_expires_at_secs();
+        let input = RemoteApprovalInput {
+            approval_id: &approval_id,
+            code: &code,
+            tool,
+            arguments: args,
+            label,
+            thread_id,
+            requires_source,
+            expires_at,
+        };
+        match lock_store(state).and_then(|store| {
+            store
+                .create_remote_approval(&input)
+                .map_err(GatewayError::store)
+        }) {
+            Ok(()) => {
+                return Some(RemoteApprovalRow {
+                    approval_id,
+                    code,
+                    tool: tool.to_string(),
+                    arguments: args.clone(),
+                    label: label.to_string(),
+                    thread_id: thread_id.map(ToString::to_string),
+                    source_message_id: None,
+                    requires_source,
+                    status: "pending".to_string(),
+                    expires_at,
+                    dispatched_at: None,
+                });
+            }
+            Err(error) => {
+                if verbose_debug() {
+                    eprintln!("remote approval create failed: {}", error.message);
+                }
+            }
+        }
+    }
+    None
 }
 
-/// Take (remove) a non-expired pending approval by code → (tool, args).
-fn take_pending_approval(code: &str) -> Option<(String, serde_json::Value, Option<String>)> {
-    let code = code.trim().to_uppercase();
-    let now = std::time::Instant::now();
-    let mut list = pending_approvals().lock().ok()?;
-    list.retain(|p| p.expires_at > now);
-    let idx = list.iter().position(|p| p.code == code)?;
-    let p = list.remove(idx);
-    Some((p.tool, p.args, p.thread_id))
+/// Non-consuming check: is there a live pending approval with this code? Lets
+/// channel handlers treat `OK/NO <word>` as control replies only for real codes.
+fn pending_approval_exists(state: &AppState, code: &str) -> bool {
+    lock_store(state)
+        .ok()
+        .and_then(|store| store.pending_remote_approval(code).ok().flatten())
+        .is_some()
 }
 
-/// Non-consuming check: is there a live (non-expired) pending approval with this code?
-/// Lets the channel handler treat "OK/NO <word>" as an approval reply ONLY for real
-/// codes, so a normal message that happens to start with No/Ok/Sì (e.g. "No, that's
-/// wrong…") isn't hijacked and answered with "Code … not valid or expired."
-fn pending_approval_exists(code: &str) -> bool {
-    let code = code.trim().to_uppercase();
-    let now = std::time::Instant::now();
-    pending_approvals()
-        .lock()
-        .map(|list| list.iter().any(|p| p.expires_at > now && p.code == code))
-        .unwrap_or(false)
+fn approval_progress_reply(code: &str) -> String {
+    format!(
+        "⏳ Ricevuto ({code}). Verifico la card salvata e avvio l'azione…"
+    )
+}
+
+fn approval_action_target(args: &serde_json::Value) -> Option<String> {
+    args.get("path")
+        .and_then(serde_json::Value::as_str)
+        .or_else(|| args.get("to").and_then(serde_json::Value::as_str))
+        .map(|value| value.chars().take(180).collect())
+}
+
+fn remote_approval_thread_status(
+    approval: &RemoteApprovalRow,
+    phase: &str,
+    detail: Option<&str>,
+) -> String {
+    let target = approval_action_target(&approval.arguments)
+        .map(|target| format!(" su `{target}`"))
+        .unwrap_or_default();
+    let detail = detail
+        .filter(|text| !text.trim().is_empty())
+        .map(|text| format!("\n\n{text}"))
+        .unwrap_or_default();
+    match phase {
+        "running" => format!(
+            "⏳ Approvazione Telegram ricevuta. Eseguo `{}`{}…{}",
+            approval.tool, target, detail
+        ),
+        "executed" => format!(
+            "✅ Azione approvata da Telegram eseguita: `{}`{}. Riprendo il task…{}",
+            approval.tool, target, detail
+        ),
+        "failed" => format!(
+            "⚠️ Azione approvata da Telegram fallita: `{}`{}.{}",
+            approval.tool, target, detail
+        ),
+        _ => format!("ℹ️ Stato approvazione Telegram: `{phase}` per `{}`{}.{detail}", approval.tool, target),
+    }
+}
+
+fn append_remote_approval_thread_status(
+    state: &AppState,
+    approval: &RemoteApprovalRow,
+    phase: &str,
+    detail: Option<&str>,
+) {
+    let Some(thread_id) = approval.thread_id.as_deref() else {
+        return;
+    };
+    let text = remote_approval_thread_status(approval, phase, detail);
+    if let Ok(store) = lock_store(state) {
+        let _ = store.append_assistant_message(thread_id, &channel_chat_message("assistant", &text));
+    }
+    publish_app_event(serde_json::json!({
+        "type": "thread.updated",
+        "thread_id": thread_id,
+        "workspace": base_workspace_id(),
+    }));
 }
 
 /// Execute a confirmed pending approval (by code) → user-facing reply text. Routes MCP vs
@@ -21319,31 +21597,87 @@ fn pending_approval_exists(code: &str) -> bool {
 /// once; the continuation streams onto the thread (the UI reattaches via `active_streams`). The
 /// snapshot of `result` is taken BEFORE the spawn so no borrow escapes into the task. No-op when
 /// the pending action carried no origin thread (e.g. a one-shot channel draft reply).
-fn resume_thread_after_approval(state: &AppState, thread_id: Option<String>, tool: &str, result: &str) {
+fn approval_resume_prompt(
+    tool: &str,
+    result: &str,
+    approved_args: Option<&serde_json::Value>,
+    source_user_text: Option<&str>,
+) -> String {
+    let source = source_user_text
+        .map(|text| text.chars().take(1200).collect::<String>())
+        .unwrap_or_else(|| "(source user request unavailable)".to_string());
+    let args = approved_args
+        .map(|value| value.to_string().chars().take(1600).collect::<String>())
+        .unwrap_or_else(|| "{}".to_string());
+    let result_snip: String = result.chars().take(1200).collect();
+    format!(
+        "A user-approved action has just executed in the CURRENT chat task.\n\n\
+         ORIGINAL USER REQUEST:\n{source}\n\n\
+         APPROVED TOOL ACTION:\n{tool}\n\n\
+         APPROVED ARGUMENTS JSON:\n{args}\n\n\
+         EXECUTION RESULT:\n{result_snip}\n\n\
+         Continue ONLY this original request. Do not switch to any other file, path, \
+         task, memory, or open loop. Do not mention or act on paths that are not in \
+         the original request or approved arguments. If the approved action satisfies \
+         the request, answer with a concise completion message using the exact \
+         approved path/content/result. Continue with another tool only if the original \
+         request clearly has unfinished steps."
+    )
+}
+
+fn approval_source_user_text(
+    state: &AppState,
+    thread_id: &str,
+    source_message_id: Option<&str>,
+) -> Option<String> {
+    let source_message_id = source_message_id?;
+    let snapshot = lock_store(state).ok()?.messages(thread_id).ok()?;
+    let source_idx = snapshot
+        .messages
+        .iter()
+        .position(|message| message.id == source_message_id)?;
+    snapshot.messages[..source_idx]
+        .iter()
+        .rev()
+        .find(|message| message.role == "user")
+        .map(|message| message.text.clone())
+}
+
+fn resume_thread_after_approval(
+    state: &AppState,
+    thread_id: Option<String>,
+    tool: &str,
+    result: &str,
+    approved_args: Option<serde_json::Value>,
+    source_message_id: Option<String>,
+) {
     let Some(thread_id) = thread_id else {
         return;
     };
     let st = state.clone();
     let tool = tool.to_string();
-    let result_snip: String = result.chars().take(800).collect();
+    let result = result.to_string();
     tokio::spawn(async move {
-        let prompt = format!(
-            "Your proposed action `{tool}` was approved and executed. Result: {result_snip}\n\n\
-             Continue the task from where you left off: do the NEXT unfinished step. Do NOT re-run \
-             the approved action. No summary unless the whole task is complete."
+        let source_user_text = approval_source_user_text(&st, &thread_id, source_message_id.as_deref());
+        let prompt = approval_resume_prompt(
+            &tool,
+            &result,
+            approved_args.as_ref(),
+            source_user_text.as_deref(),
         );
         // `run_agent_turn` DRAINS the stream in-process and does NOT persist — so, exactly like the
         // channel-inbound path (see `// Persist the exchange into the thread`), we persist its
         // output and publish `thread.updated` so the IN-APP chat surfaces the continuation even
         // when the approval came from Telegram (no live frontend turn to stream it). If the
         // continuation stops at the NEXT confirm, that card text is in the returned text → the new
-        // card reappears in-app (and `deliver_remote_approval` already pinged the channel), so the
+        // card reappears in-app (and remote delivery is activated only after this persisted message), so the
         // multi-step / multi-write chain advances one approval at a time.
         if let Some(reply) = run_agent_turn(&st, &thread_id, &prompt, "full").await {
+            let assistant_message = channel_chat_message("assistant", &reply);
             if let Ok(store) = lock_store(&st) {
-                let _ = store
-                    .append_assistant_message(&thread_id, &channel_chat_message("assistant", &reply));
+                let _ = store.append_assistant_message(&thread_id, &assistant_message);
             }
+            activate_remote_approvals_from_message(&st, &thread_id, &assistant_message).await;
             publish_app_event(serde_json::json!({
                 "type": "thread.updated",
                 "thread_id": thread_id,
@@ -21354,8 +21688,57 @@ fn resume_thread_after_approval(state: &AppState, thread_id: Option<String>, too
 }
 
 async fn execute_pending_approval(state: &AppState, code: &str) -> String {
-    match take_pending_approval(code) {
-        Some((tool, args, thread_id)) => {
+    let pending = match lock_store(state)
+        .ok()
+        .and_then(|store| store.pending_remote_approval(code).ok().flatten())
+    {
+        Some(row) => row,
+        None => return format!("Code {code} not valid or expired."),
+    };
+    if pending.requires_source {
+        let Some(thread_id) = pending.thread_id.as_deref() else {
+            return format!("Approval {code} is missing its origin thread; please retry in the app.");
+        };
+        let Some(message_id) = pending.source_message_id.as_deref() else {
+            return format!("Approval {code} is not ready yet: the in-app confirmation card has not been saved.");
+        };
+        let source_ok = lock_store(state)
+            .ok()
+            .and_then(|store| store.message(thread_id, message_id).ok().flatten())
+            .is_some_and(|message| {
+                if pending.tool.starts_with("mcp__") {
+                    mcp_confirm_matches_approval(
+                        &message.text,
+                        &pending.approval_id,
+                        &pending.tool,
+                        &pending.arguments,
+                    )
+                } else {
+                    composio_confirm_matches_approval(
+                        &message.text,
+                        &pending.approval_id,
+                        &pending.tool,
+                        &pending.arguments,
+                    )
+                }
+            });
+        if !source_ok {
+            return format!(
+                "Approval {code} does not match its saved confirmation card; please retry in the app."
+            );
+        }
+    }
+    match lock_store(state)
+        .ok()
+        .and_then(|store| store.claim_remote_approval(&pending.approval_id).ok().flatten())
+    {
+        Some(claimed) => {
+            append_remote_approval_thread_status(state, &claimed, "running", None);
+            let tool = claimed.tool.clone();
+            let args = claimed.arguments.clone();
+            let args_for_resume = claimed.arguments.clone();
+            let thread_id = claimed.thread_id.clone();
+            let source_message_id = claimed.source_message_id.clone();
             let st = state.clone();
             let tool_for_run = tool.clone();
             let result: Result<serde_json::Value, String> = tokio::task::spawn_blocking(move || {
@@ -21370,14 +21753,59 @@ async fn execute_pending_approval(state: &AppState, code: &str) -> String {
             match result {
                 Ok(value) => match composio_execution_error(&value) {
                     None => {
+                        if let Ok(store) = lock_store(state) {
+                            if let (Some(thread_id), Some(message_id)) =
+                                (&claimed.thread_id, &claimed.source_message_id)
+                            {
+                                if let Ok(Some(message)) = store.message(thread_id, message_id) {
+                                    let rewritten = if claimed.tool.starts_with("mcp__") {
+                                        rewrite_mcp_confirm_to_done(&message.text, &claimed.tool)
+                                    } else {
+                                        rewrite_confirm_to_done(&message.text, &claimed.tool)
+                                    };
+                                    let _ = store.set_message_text(thread_id, message_id, &rewritten);
+                                }
+                                publish_app_event(serde_json::json!({
+                                    "type": "thread.updated",
+                                    "thread_id": thread_id,
+                                    "workspace": base_workspace_id(),
+                                }));
+                            }
+                            let _ = store.complete_remote_approval(&claimed.approval_id, "executed");
+                        }
+                        append_remote_approval_thread_status(
+                            state,
+                            &claimed,
+                            "executed",
+                            Some("Tool completato; sto riaprendo il contesto del thread."),
+                        );
                         // 6.1b: the action ran out-of-band after the turn died at `pending_confirm`
                         // — resume the origin thread so the multi-step task keeps going.
-                        resume_thread_after_approval(state, thread_id, &tool, &value.to_string());
+                        resume_thread_after_approval(
+                            state,
+                            thread_id,
+                            &tool,
+                            &value.to_string(),
+                            Some(args_for_resume),
+                            source_message_id,
+                        );
                         format!("✅ Done ({code}).")
                     }
-                    Some(err) => format!("⚠️ Failed ({code}): {err}"),
+                    Some(err) => {
+                        if let Ok(store) = lock_store(state) {
+                            let _ = store.complete_remote_approval(&claimed.approval_id, "failed");
+                        }
+                        append_remote_approval_thread_status(state, &claimed, "failed", Some(&err));
+                        format!("⚠️ Failed ({code}): {err}")
+                    }
                 },
-                Err(e) => format!("⚠️ Error ({code}): {e}"),
+                Err(e) => {
+                    if let Ok(store) = lock_store(state) {
+                        let _ = store.complete_remote_approval(&claimed.approval_id, "failed");
+                    }
+                    append_remote_approval_thread_status(state, &claimed, "failed", Some(&e));
+                    format!("⚠️ Error ({code}): {e}")
+                }
             }
         }
         None => format!("Code {code} not valid or expired."),
@@ -21409,15 +21837,9 @@ async fn channel_send_buttons(
     }
 }
 
-/// If the user routes approvals to a channel, deliver this pending action to their OWN number so
-/// they can authorize remotely. No-op (returns false) when the approval channel is in-app/unset.
-/// Telegram gets tappable buttons (+ code fallback); WhatsApp gets the code text.
-async fn deliver_remote_approval(
+async fn dispatch_remote_approval(
     state: &AppState,
-    tool: &str,
-    args: &serde_json::Value,
-    label: &str,
-    thread_id: Option<&str>,
+    approval: &RemoteApprovalRow,
 ) -> bool {
     let prefs = load_user_prefs();
     let channel = prefs.approval_channel.as_deref().unwrap_or("in_app").to_string();
@@ -21425,28 +21847,64 @@ async fn deliver_remote_approval(
     if target.trim().is_empty() || channel == "in_app" {
         return false;
     }
-    let code = create_pending_approval(tool, args, label, thread_id);
+    let code = approval.code.as_str();
     match channel.as_str() {
         "telegram" => {
             let text = format!(
-                "🔐 Homun is asking for your confirmation:\n{label}\n\n(or reply: OK {code} / NO {code} — expires in 10 min)"
+                "🔐 Homun is asking for your confirmation:\n{}\n\n(or reply: OK {code} / NO {code} — expires in 10 min)",
+                approval.label
             );
             let buttons = vec![
                 ["✅ Authorize".to_string(), format!("approve:{code}")],
                 ["❌ Cancel".to_string(), format!("cancel:{code}")],
             ];
-            channel_send_buttons(state, TELEGRAM_HTTP_PORT, target.trim(), &text, buttons)
-                .await
-                .is_ok()
+            let sent = telegram_send_buttons_with_rebind(state, target.trim(), &text, buttons)
+                .await;
+            if let Err(error) = &sent {
+                append_remote_approval_thread_status(
+                    state,
+                    approval,
+                    "delivery_failed",
+                    Some(&format!(
+                        "Non sono riuscito a inviare la notifica Telegram: {error}. \
+Puoi usare la card in app o riconnettere Telegram."
+                    )),
+                );
+            }
+            sent.is_ok()
         }
         "whatsapp" => {
             let text = format!(
-                "🔐 Homun is asking for your confirmation:\n{label}\n\nAuthorize: OK {code}\nCancel: NO {code}\n(expires in 10 minutes)"
+                "🔐 Homun is asking for your confirmation:\n{}\n\nAuthorize: OK {code}\nCancel: NO {code}\n(expires in 10 minutes)",
+                approval.label
             );
             channel_send(state, WHATSAPP_HTTP_PORT, target.trim(), &text).await.is_ok()
         }
         _ => false,
     }
+}
+
+/// If the user routes approvals to a channel, create and immediately deliver a
+/// channel-only approval. Chat confirmation cards use
+/// `create_pending_approval(..., requires_source=true)` and are dispatched only
+/// after their source message is persisted.
+async fn deliver_remote_approval(
+    state: &AppState,
+    tool: &str,
+    args: &serde_json::Value,
+    label: &str,
+    thread_id: Option<&str>,
+) -> bool {
+    let Some(approval) = create_pending_approval(state, tool, args, label, thread_id, false) else {
+        return false;
+    };
+    let sent = dispatch_remote_approval(state, &approval).await;
+    if sent {
+        if let Ok(store) = lock_store(state) {
+            let _ = store.mark_remote_approval_dispatched(&approval.approval_id);
+        }
+    }
+    sent
 }
 
 /// Parse a remote-approval control reply: `OK 7F3` / `SI 7F3` (approve) or `NO 7F3` (cancel).
@@ -22048,6 +22506,61 @@ struct ComposioExecuteRequest {
 const COMPOSIO_CONFIRM_OPEN: &str = "‹‹COMPOSIO_CONFIRM››";
 const COMPOSIO_CONFIRM_CLOSE: &str = "‹‹/COMPOSIO_CONFIRM››";
 
+fn confirm_marker_value(text: &str, open_tag: &str, close_tag: &str) -> Option<serde_json::Value> {
+    let open = text.find(open_tag)?;
+    let start = open + open_tag.len();
+    let close_rel = text[start..].find(close_tag)?;
+    serde_json::from_str::<serde_json::Value>(&text[start..start + close_rel]).ok()
+}
+
+fn confirm_marker_approval_id(text: &str, open_tag: &str, close_tag: &str) -> Option<String> {
+    confirm_marker_value(text, open_tag, close_tag)?
+        .get("approval_id")?
+        .as_str()
+        .map(ToString::to_string)
+}
+
+fn confirm_marker_matches_approval(
+    text: &str,
+    open_tag: &str,
+    close_tag: &str,
+    approval_id: &str,
+    tool: &str,
+    arguments: &serde_json::Value,
+) -> bool {
+    let Some(marker) = confirm_marker_value(text, open_tag, close_tag) else {
+        return false;
+    };
+    marker.get("approval_id").and_then(serde_json::Value::as_str) == Some(approval_id)
+        && marker.get("tool").and_then(serde_json::Value::as_str) == Some(tool)
+        && marker.get("arguments") == Some(arguments)
+}
+
+fn composio_confirm_matches(text: &str, tool: &str, arguments: &serde_json::Value) -> bool {
+    let Some(marker) = confirm_marker_value(text, COMPOSIO_CONFIRM_OPEN, COMPOSIO_CONFIRM_CLOSE)
+    else {
+        return false;
+    };
+    marker.get("tool").and_then(serde_json::Value::as_str) == Some(tool)
+        && marker.get("arguments") == Some(arguments)
+}
+
+fn composio_confirm_matches_approval(
+    text: &str,
+    approval_id: &str,
+    tool: &str,
+    arguments: &serde_json::Value,
+) -> bool {
+    confirm_marker_matches_approval(
+        text,
+        COMPOSIO_CONFIRM_OPEN,
+        COMPOSIO_CONFIRM_CLOSE,
+        approval_id,
+        tool,
+        arguments,
+    )
+}
+
 /// Rewrites a message that carries a pending-confirmation marker into a
 /// "done" marker, dropping the "Serve la tua conferma…" prompt line. Idempotent
 /// if no confirm marker is present.
@@ -22089,15 +22602,29 @@ async fn composio_execute(
     State(state): State<AppState>,
     Json(request): Json<ComposioExecuteRequest>,
 ) -> Result<Json<ComposioExecuteResponse>, GatewayError> {
-    if request.scope.as_deref() == Some("always") {
-        let _ = add_composio_tool_allow(&request.tool);
-    }
     let tool = request.tool.clone();
     let args = if request.arguments.is_null() {
         serde_json::json!({})
     } else {
         request.arguments.clone()
     };
+    let confirmed = match (&request.thread_id, &request.message_id) {
+        (Some(thread_id), Some(message_id)) => lock_store(&state)
+            .ok()
+            .and_then(|store| store.message(thread_id, message_id).ok().flatten())
+            .is_some_and(|message| composio_confirm_matches(&message.text, &request.tool, &args)),
+        _ => false,
+    };
+    if !confirmed {
+        return Err(GatewayError {
+            status: StatusCode::FORBIDDEN,
+            code: "composio_confirmation_required",
+            message: "Execute Composio writes from their matching confirmation card.".to_string(),
+        });
+    }
+    if request.scope.as_deref() == Some("always") {
+        let _ = add_composio_tool_allow(&request.tool);
+    }
     let output = tokio::task::spawn_blocking({
         let state = state.clone();
         move || composio_execute_tool(&state, &tool, &args)
@@ -22123,6 +22650,13 @@ async fn composio_execute(
     if let (Some(thread_id), Some(message_id)) = (&request.thread_id, &request.message_id) {
         if let Ok(store) = lock_store(&state) {
             if let Ok(Some(message)) = store.message(thread_id, message_id) {
+                if let Some(approval_id) = confirm_marker_approval_id(
+                    &message.text,
+                    COMPOSIO_CONFIRM_OPEN,
+                    COMPOSIO_CONFIRM_CLOSE,
+                ) {
+                    let _ = store.supersede_remote_approval(&approval_id);
+                }
                 let rewritten = rewrite_confirm_to_done(&message.text, &request.tool);
                 let _ = store.set_message_text(thread_id, message_id, &rewritten);
             }
@@ -22443,18 +22977,30 @@ const MCP_CONFIRM_OPEN: &str = "‹‹MCP_CONFIRM››";
 const MCP_CONFIRM_CLOSE: &str = "‹‹/MCP_CONFIRM››";
 
 fn mcp_confirm_matches(text: &str, tool: &str, arguments: &serde_json::Value) -> bool {
-    let Some(open) = text.find(MCP_CONFIRM_OPEN) else {
-        return false;
-    };
-    let start = open + MCP_CONFIRM_OPEN.len();
-    let Some(close_rel) = text[start..].find(MCP_CONFIRM_CLOSE) else {
-        return false;
-    };
-    let Ok(marker) = serde_json::from_str::<serde_json::Value>(&text[start..start + close_rel]) else {
+    let Some(marker) = confirm_marker_value(text, MCP_CONFIRM_OPEN, MCP_CONFIRM_CLOSE) else {
         return false;
     };
     marker.get("tool").and_then(serde_json::Value::as_str) == Some(tool)
         && marker.get("arguments") == Some(arguments)
+}
+
+/// Remote approvals additionally carry a random, durable ID. Tool + arguments
+/// are not enough provenance: another equal-looking card (or an unpersisted
+/// streamed response) must never authorize this specific request.
+fn mcp_confirm_matches_approval(
+    text: &str,
+    approval_id: &str,
+    tool: &str,
+    arguments: &serde_json::Value,
+) -> bool {
+    confirm_marker_matches_approval(
+        text,
+        MCP_CONFIRM_OPEN,
+        MCP_CONFIRM_CLOSE,
+        approval_id,
+        tool,
+        arguments,
+    )
 }
 
 /// Like `rewrite_confirm_to_done` but for the MCP confirm marker. Replaces the
@@ -22525,6 +23071,8 @@ async fn mcp_execute(
     } else {
         request.arguments.clone()
     };
+    let args_for_run = args.clone();
+    let args_for_resume = args.clone();
     let confirmed = match (&request.thread_id, &request.message_id) {
         (Some(thread_id), Some(message_id)) => lock_store(&state)
             .ok()
@@ -22550,7 +23098,7 @@ async fn mcp_execute(
     }
     let handle = tokio::task::spawn_blocking({
         let state = state.clone();
-        move || run_mcp_chat_tool(&state, &provider_id, &tool_name, args)
+        move || run_mcp_chat_tool(&state, &provider_id, &tool_name, args_for_run)
     });
     let outcome = match tokio::time::timeout(mcp_call_timeout(), handle).await {
         Ok(Ok(result)) => result,
@@ -22576,6 +23124,13 @@ async fn mcp_execute(
             if let (Some(thread_id), Some(message_id)) = (&request.thread_id, &request.message_id) {
                 if let Ok(store) = lock_store(&state) {
                     if let Ok(Some(message)) = store.message(thread_id, message_id) {
+                        if let Some(approval_id) = confirm_marker_approval_id(
+                            &message.text,
+                            MCP_CONFIRM_OPEN,
+                            MCP_CONFIRM_CLOSE,
+                        ) {
+                            let _ = store.supersede_remote_approval(&approval_id);
+                        }
                         let rewritten = rewrite_mcp_confirm_to_done(&message.text, &request.tool);
                         let _ = store.set_message_text(thread_id, message_id, &rewritten);
                     }
@@ -22584,7 +23139,14 @@ async fn mcp_execute(
             let summary = output.to_string().chars().take(2000).collect::<String>();
             // 6.1b approval-resume (in-app): the chat turn died at `pending_confirm`; now that the
             // action ran, continue the multi-step task on the origin thread (thread_id is known here).
-            resume_thread_after_approval(&state, request.thread_id.clone(), &request.tool, &summary);
+            resume_thread_after_approval(
+                &state,
+                request.thread_id.clone(),
+                &request.tool,
+                &summary,
+                Some(args_for_resume),
+                request.message_id.clone(),
+            );
             Ok(Json(McpExecuteResponse { ok: true, summary }))
         }
         Err(error) => Ok(Json(McpExecuteResponse {
@@ -25098,22 +25660,31 @@ struct RuntimeModelsResponse {
     groups: Vec<ProviderModelsGroup>,
 }
 
+#[derive(Debug, Deserialize, Default)]
+struct RuntimeModelsQuery {
+    #[serde(default)]
+    thread_id: Option<String>,
+}
+
 /// Lists the models the configured backend exposes (OpenAI-compatible `/models`,
 /// which Ollama also serves) so Settings can offer a real picker.
-async fn runtime_models(State(state): State<AppState>) -> Json<RuntimeModelsResponse> {
+async fn runtime_models(
+    State(state): State<AppState>,
+    Query(query): Query<RuntimeModelsQuery>,
+) -> Json<RuntimeModelsResponse> {
     // Prefer the provider registry (what the user configured): the active provider
     // already carries its model catalog, so the in-app picker gets the REAL list
     // with no network round-trip — this is why the composer model menu was empty.
     {
         let registry = load_provider_registry();
         if let Some(provider) = registry.active() {
-            // The composer default must mirror what CHAT actually uses = the
-            // orchestrator role binding (not the active provider's stray
-            // active_model) — otherwise changing the role default in Settings
-            // leaves the composer showing the old model.
-            let active = registry
-                .resolve_role("orchestrator")
-                .map(|r| r.model)
+            // "Auto" must show what this THREAD would actually use: project chats
+            // can resolve to coding, personal chats to orchestrator. Previously the
+            // composer always displayed orchestrator even while the gateway sent a
+            // project turn to coding, making provider failures impossible to reason
+            // about from the UI.
+            let active = chat_role_config_for_thread(&state, query.thread_id.as_deref())
+                .map(|(_, model, _)| model)
                 .or_else(|| provider.effective_model());
             // List models from ALL providers so the per-message override can pick
             // any configured model (e.g. a Z.ai model while Ollama is active).
@@ -30869,6 +31440,7 @@ mod tests {
         browser_snapshot_text,
         jail_in_root,
         project_filesystem_mcp_instruction,
+        should_try_tool_compatibility_fallback,
         parse_review_suggestion,
         sanitize_dedup_key,
         is_semantic_duplicate,
@@ -30967,6 +31539,88 @@ mod tests {
         assert!(super::mcp_confirm_matches(text, "mcp__filesystem__create", &args));
         assert!(!super::mcp_confirm_matches(text, "mcp__filesystem__create", &serde_json::json!({ "path": "/tmp/b", "content": "x" })));
         assert!(!super::mcp_confirm_matches(text, "mcp__filesystem__insert", &args));
+    }
+
+    #[test]
+    fn remote_approval_requires_its_exact_persisted_card_id() {
+        let text = "I need your confirmation\n‹‹MCP_CONFIRM››{\"approval_id\":\"approval-a\",\"tool\":\"mcp__filesystem__create\",\"arguments\":{\"path\":\"/tmp/a\",\"content\":\"x\"}}‹‹/MCP_CONFIRM››";
+        let args = serde_json::json!({ "path": "/tmp/a", "content": "x" });
+        assert!(super::mcp_confirm_matches_approval(
+            text,
+            "approval-a",
+            "mcp__filesystem__create",
+            &args
+        ));
+        assert!(!super::mcp_confirm_matches_approval(
+            text,
+            "approval-b",
+            "mcp__filesystem__create",
+            &args
+        ));
+        assert!(!super::mcp_confirm_matches_approval(
+            "‹‹MCP_CONFIRM››{\"tool\":\"mcp__filesystem__create\",\"arguments\":{\"path\":\"/tmp/a\",\"content\":\"x\"}}‹‹/MCP_CONFIRM››",
+            "approval-a",
+            "mcp__filesystem__create",
+            &args
+        ));
+    }
+
+    #[test]
+    fn approval_resume_prompt_anchors_to_source_request_and_approved_args() {
+        let args = serde_json::json!({
+            "path": "/Users/fabio/Desktop/path-b-telegram-bound.md",
+            "content": "telegram-test"
+        });
+        let prompt = super::approval_resume_prompt(
+            "mcp__filesystem__create",
+            "{\"ok\":true}",
+            Some(&args),
+            Some("Usa il tool MCP filesystem per creare /Users/fabio/Desktop/path-b-telegram-bound.md con una riga: telegram-test."),
+        );
+        assert!(prompt.contains("ORIGINAL USER REQUEST"));
+        assert!(prompt.contains("/Users/fabio/Desktop/path-b-telegram-bound.md"));
+        assert!(prompt.contains("telegram-test"));
+        assert!(prompt.contains("Do not switch to any other file, path, task, memory, or open loop"));
+        assert!(prompt.contains("Do not mention or act on paths that are not in"));
+    }
+
+    #[test]
+    fn telegram_approval_progress_messages_are_actionable() {
+        let reply = super::approval_progress_reply("AB12CD");
+        assert!(reply.contains("AB12CD"));
+        assert!(reply.contains("Verifico"));
+        assert!(reply.contains("avvio"));
+
+        let approval = crate::chat_store::RemoteApprovalRow {
+            approval_id: "approval-test".to_string(),
+            code: "AB12CD".to_string(),
+            tool: "mcp__filesystem__create".to_string(),
+            arguments: serde_json::json!({
+                "path": "/Users/fabio/Desktop/status.md",
+                "content": "x"
+            }),
+            label: "create".to_string(),
+            thread_id: Some("thread-test".to_string()),
+            source_message_id: Some("assistant-test".to_string()),
+            requires_source: true,
+            status: "executing".to_string(),
+            expires_at: 0,
+            dispatched_at: Some(1),
+        };
+        let running = super::remote_approval_thread_status(&approval, "running", None);
+        assert!(running.contains("Approvazione Telegram ricevuta"));
+        assert!(running.contains("mcp__filesystem__create"));
+        assert!(running.contains("/Users/fabio/Desktop/status.md"));
+        let executed = super::remote_approval_thread_status(&approval, "executed", Some("ok"));
+        assert!(executed.contains("Riprendo il task"));
+        assert!(executed.contains("ok"));
+        let failed = super::remote_approval_thread_status(
+            &approval,
+            "delivery_failed",
+            Some("sidecar unreachable"),
+        );
+        assert!(failed.contains("delivery_failed"));
+        assert!(failed.contains("sidecar unreachable"));
     }
 
     #[test]
@@ -31093,6 +31747,14 @@ mod tests {
         assert!(instruction.contains("call the MCP write tool anyway"));
         assert!(project_filesystem_mcp_instruction(None, true).is_none());
         assert!(project_filesystem_mcp_instruction(Some(root), false).is_none());
+    }
+
+    #[test]
+    fn tool_compatibility_fallback_is_limited_to_a_first_tool_round_bad_request() {
+        assert!(should_try_tool_compatibility_fallback(400, true, false));
+        assert!(!should_try_tool_compatibility_fallback(400, false, false));
+        assert!(!should_try_tool_compatibility_fallback(400, true, true));
+        assert!(!should_try_tool_compatibility_fallback(401, true, false));
     }
 
     #[test]

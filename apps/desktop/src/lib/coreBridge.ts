@@ -586,8 +586,9 @@ async function electronSetRuntimeProvider(input: {
   return gatewayPostJson<{ ok: boolean }>("/api/runtime/provider", input);
 }
 
-async function electronRuntimeModels(): Promise<RuntimeModelsList> {
-  return gatewayGetJson<RuntimeModelsList>("/api/runtime/models");
+async function electronRuntimeModels(threadId?: string): Promise<RuntimeModelsList> {
+  const query = threadId ? `?thread_id=${encodeURIComponent(threadId)}` : "";
+  return gatewayGetJson<RuntimeModelsList>(`/api/runtime/models${query}`);
 }
 
 async function electronSetRuntimeModel(model: string): Promise<{ active: string }> {
@@ -1899,7 +1900,7 @@ async function electronInstallRegistrySkills(
 export const coreBridge = {
   status: () => Promise.resolve(electronCoreStatus()),
   runtimeModel: () => electronRuntimeModel(),
-  runtimeModels: () => electronRuntimeModels(),
+  runtimeModels: (threadId?: string) => electronRuntimeModels(threadId),
   setRuntimeModel: (model: string) => electronSetRuntimeModel(model),
   timezone: () => electronTimezone(),
   setTimezone: (timezone: string | null) => electronSetTimezone(timezone),
@@ -2267,6 +2268,7 @@ export const coreBridge = {
     messageId: string,
     sessionId: string,
     previousText: string,
+    model?: string,
   ) =>
     submitBrowserRuntimeChatPromptStream(
       requestId,
@@ -2276,6 +2278,7 @@ export const coreBridge = {
       "Continue",
       messageId,
       previousText,
+      model,
     ),
   listenChatStreamDelta: (handler: (payload: CoreChatStreamDelta) => void) =>
     chatApi.listenChatStreamDelta(handler),

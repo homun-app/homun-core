@@ -68,6 +68,36 @@ pub struct ToolRunRow {
     pub summary: Option<String>,
 }
 
+/// A remote approval is a durable authorization request. Chat-originated
+/// requests bind to the exact persisted confirmation card before they can be
+/// delivered or executed; channel-only requests may opt out of that binding.
+#[derive(Debug, Clone)]
+pub struct RemoteApprovalInput<'a> {
+    pub approval_id: &'a str,
+    pub code: &'a str,
+    pub tool: &'a str,
+    pub arguments: &'a serde_json::Value,
+    pub label: &'a str,
+    pub thread_id: Option<&'a str>,
+    pub requires_source: bool,
+    pub expires_at: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct RemoteApprovalRow {
+    pub approval_id: String,
+    pub code: String,
+    pub tool: String,
+    pub arguments: serde_json::Value,
+    pub label: String,
+    pub thread_id: Option<String>,
+    pub source_message_id: Option<String>,
+    pub requires_source: bool,
+    pub status: String,
+    pub expires_at: i64,
+    pub dispatched_at: Option<i64>,
+}
+
 /// A proactive suggestion card to insert (ADR 0011 §7). `scope` = a workspace id
 /// or "__personal__". `dedup_key` is the durable no-repeat key.
 #[derive(Debug, Clone, Default)]
@@ -844,6 +874,177 @@ impl ChatStore {
         self.messages(thread_id)
     }
 
+    /// Store a remote approval before a card is streamed. It is deliberately
+    /// not executable until a chat-originated request has later been bound to
+    /// the assistant message that contains its exact marker.
+    pub fn create_remote_approval(
+        &self,
+        input: &RemoteApprovalInput<'_>,
+    ) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "insert into remote_approvals (
+                approval_id, code, tool, arguments_json, label, thread_id,
+                source_message_id, requires_source, status, created_at,
+                expires_at, dispatched_at
+             ) values (?1, ?2, ?3, ?4, ?5, ?6, null, ?7, 'pending', ?8, ?9, null)",
+            params![
+                input.approval_id,
+                input.code,
+                input.tool,
+                input.arguments.to_string(),
+                input.label,
+                input.thread_id,
+                if input.requires_source { 1 } else { 0 },
+                Self::now_secs(),
+                input.expires_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Bind an approval to the exact assistant message that persisted its
+    /// confirmation card. A different source can never overwrite this binding.
+    pub fn bind_remote_approval_source(
+        &self,
+        approval_id: &str,
+        thread_id: &str,
+        message_id: &str,
+    ) -> rusqlite::Result<Option<RemoteApprovalRow>> {
+        self.conn.execute(
+            "update remote_approvals
+                set source_message_id = ?1
+              where approval_id = ?2
+                and thread_id = ?3
+                and status = 'pending'
+                and source_message_id is null",
+            params![message_id, approval_id, thread_id],
+        )?;
+        self.remote_approval_by_id(approval_id)
+    }
+
+    /// Read a pending approval by its public short code, expiring stale rows as
+    /// part of the lookup so channel control words cannot activate old work.
+    pub fn pending_remote_approval(
+        &self,
+        code: &str,
+    ) -> rusqlite::Result<Option<RemoteApprovalRow>> {
+        let now = Self::now_secs();
+        self.conn.execute(
+            "update remote_approvals
+                set status = 'expired'
+              where status = 'pending' and expires_at <= ?1",
+            params![now],
+        )?;
+        self.remote_approval_by_code_status(code, "pending")
+    }
+
+    /// Claim a pending approval exactly once. The caller must validate source
+    /// provenance before calling this transition.
+    pub fn claim_remote_approval(
+        &self,
+        approval_id: &str,
+    ) -> rusqlite::Result<Option<RemoteApprovalRow>> {
+        let changed = self.conn.execute(
+            "update remote_approvals
+                set status = 'executing'
+              where approval_id = ?1
+                and status = 'pending'
+                and expires_at > ?2",
+            params![approval_id, Self::now_secs()],
+        )?;
+        if changed == 0 {
+            return Ok(None);
+        }
+        self.remote_approval_by_id(approval_id)
+    }
+
+    pub fn complete_remote_approval(
+        &self,
+        approval_id: &str,
+        status: &str,
+    ) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "update remote_approvals
+                set status = ?1, resolved_at = ?2
+              where approval_id = ?3 and status = 'executing'",
+            params![status, Self::now_secs(), approval_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn cancel_remote_approval_by_code(
+        &self,
+        code: &str,
+    ) -> rusqlite::Result<bool> {
+        let changed = self.conn.execute(
+            "update remote_approvals
+                set status = 'cancelled', resolved_at = ?1
+              where code = ?2 and status = 'pending'",
+            params![Self::now_secs(), code.trim().to_ascii_uppercase()],
+        )?;
+        Ok(changed > 0)
+    }
+
+    /// An in-app confirmation wins over its remote counterpart, preventing a
+    /// later Telegram tap from replaying the same action.
+    pub fn supersede_remote_approval(
+        &self,
+        approval_id: &str,
+    ) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "update remote_approvals
+                set status = 'superseded', resolved_at = ?1
+              where approval_id = ?2 and status = 'pending'",
+            params![Self::now_secs(), approval_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn mark_remote_approval_dispatched(
+        &self,
+        approval_id: &str,
+    ) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "update remote_approvals
+                set dispatched_at = ?1
+              where approval_id = ?2 and status = 'pending'",
+            params![Self::now_secs(), approval_id],
+        )?;
+        Ok(())
+    }
+
+    fn remote_approval_by_id(
+        &self,
+        approval_id: &str,
+    ) -> rusqlite::Result<Option<RemoteApprovalRow>> {
+        self.conn
+            .query_row(
+                "select approval_id, code, tool, arguments_json, label, thread_id,
+                        source_message_id, requires_source, status, expires_at, dispatched_at
+                   from remote_approvals where approval_id = ?1",
+                params![approval_id],
+                remote_approval_from_row,
+            )
+            .optional()
+    }
+
+    fn remote_approval_by_code_status(
+        &self,
+        code: &str,
+        status: &str,
+    ) -> rusqlite::Result<Option<RemoteApprovalRow>> {
+        self.conn
+            .query_row(
+                "select approval_id, code, tool, arguments_json, label, thread_id,
+                        source_message_id, requires_source, status, expires_at, dispatched_at
+                   from remote_approvals
+                  where code = ?1 and status = ?2",
+                params![code.trim().to_ascii_uppercase(), status],
+                remote_approval_from_row,
+            )
+            .optional()
+    }
+
     // ---- Contact book (curated rubrica) -------------------------------------
 
     fn now_secs() -> i64 {
@@ -1554,6 +1755,30 @@ impl ChatStore {
 
             create index if not exists idx_chat_messages_thread
                 on chat_messages(thread_id);
+
+            -- Remote approvals are durable, auditable authorization requests.
+            -- A chat-originated row is not executable until source_message_id
+            -- identifies the exact persisted confirmation card.
+            create table if not exists remote_approvals (
+                approval_id text primary key,
+                code text not null unique,
+                tool text not null,
+                arguments_json text not null,
+                label text not null,
+                thread_id text,
+                source_message_id text,
+                requires_source integer not null default 1,
+                status text not null,
+                created_at integer not null,
+                expires_at integer not null,
+                dispatched_at integer,
+                resolved_at integer
+            );
+
+            create index if not exists idx_remote_approvals_code_status
+                on remote_approvals(code, status);
+            create index if not exists idx_remote_approvals_thread_source
+                on remote_approvals(thread_id, source_message_id);
 
             -- A1.2: a chat thread owns ONE Local Computer session but may drive
             -- MANY durable tasks (the OrchestratorBrain materializes N steps from
@@ -2493,6 +2718,23 @@ fn message_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChatMessage> {
     })
 }
 
+fn remote_approval_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<RemoteApprovalRow> {
+    let arguments_json: String = row.get(3)?;
+    Ok(RemoteApprovalRow {
+        approval_id: row.get(0)?,
+        code: row.get(1)?,
+        tool: row.get(2)?,
+        arguments: serde_json::from_str(&arguments_json).unwrap_or(serde_json::Value::Null),
+        label: row.get(4)?,
+        thread_id: row.get(5)?,
+        source_message_id: row.get(6)?,
+        requires_source: row.get::<_, i64>(7)? != 0,
+        status: row.get(8)?,
+        expires_at: row.get(9)?,
+        dispatched_at: row.get(10)?,
+    })
+}
+
 fn metrics_to_json(message: &ChatMessage) -> rusqlite::Result<Option<String>> {
     message
         .metrics
@@ -2644,6 +2886,62 @@ mod tests {
                 .iter()
                 .any(|item| item.title == "tell me a joke")
         );
+    }
+
+    #[test]
+    fn remote_approval_persists_binding_and_claims_once() {
+        let store = ChatStore::in_memory().unwrap();
+        let thread = store.create_thread("default").unwrap();
+        let approval_id = "approval-test";
+        let args = serde_json::json!({ "path": "/tmp/a", "content": "x" });
+        store
+            .create_remote_approval(&RemoteApprovalInput {
+                approval_id,
+                code: "ABC123",
+                tool: "mcp__filesystem__create",
+                arguments: &args,
+                label: "create file",
+                thread_id: Some(&thread.thread_id),
+                requires_source: true,
+                expires_at: ChatStore::now_secs() + 600,
+            })
+            .unwrap();
+
+        let pending = store.pending_remote_approval("ABC123").unwrap().unwrap();
+        assert!(pending.requires_source);
+        assert_eq!(pending.source_message_id, None);
+
+        let assistant = ChatMessage {
+            id: "assistant_confirm".to_string(),
+            role: "assistant".to_string(),
+            text: format!(
+                "I need your confirmation\n‹‹MCP_CONFIRM››{}‹‹/MCP_CONFIRM››",
+                serde_json::json!({
+                    "approval_id": approval_id,
+                    "tool": "mcp__filesystem__create",
+                    "arguments": args,
+                })
+            ),
+            timestamp: current_timestamp_seconds(),
+            metadata: None,
+            metrics: None,
+            feedback: None,
+            saved_memory_ref: None,
+            linked_task_id: None,
+            linked_automation_ref: None,
+            attachments: Vec::new(),
+        };
+        store
+            .append_assistant_message(&thread.thread_id, &assistant)
+            .unwrap();
+        let bound = store
+            .bind_remote_approval_source(approval_id, &thread.thread_id, &assistant.id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(bound.source_message_id.as_deref(), Some("assistant_confirm"));
+
+        assert!(store.claim_remote_approval(approval_id).unwrap().is_some());
+        assert!(store.claim_remote_approval(approval_id).unwrap().is_none());
     }
 
     fn mk_message(id: &str, role: &str) -> ChatMessage {

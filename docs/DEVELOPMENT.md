@@ -43,6 +43,104 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
 > [backlog](plans/2026-06-22-batch-1042-artifacts-memory.md) (gli stati ☐/✅ = i loop
 > aperti) e sei di nuovo sul filo. Stesso principio della memoria di Homun (caposaldo #8).
 
+### Cruscotto operativo attuale
+
+- **Linea attiva:** WS6 prossimo step dopo WS6.1c — UX Telegram approval chiusa;
+  scegliere tra hardening ciclo release/commit locale e proseguire backlog WS6.2
+  Resource Governor.
+- **Fatto e verificato localmente:** root automatica del progetto, bypass conferma
+  solo per scritture Filesystem MCP dentro root; outside-root resta confirm-gated;
+  routing Auto thread-aware + fallback orchestratore su `400` con tool; approval
+  remota persistita in `remote_approvals`, legata a `approval_id` +
+  `source_message_id`, notificata solo dopo card salvata, claim una-sola-volta
+  `pending→executing`; in-app supersede il codice remoto; Composio verifica la
+  card sorgente prima di eseguire/allow. Dopo il retry Telegram è stato aggiunto
+  anche il prompt di resume vincolato a richiesta originale + args approvati
+  (`approval_resume_prompt`) per evitare contaminazione da vecchi loop. Verifiche:
+  `cargo test -p local-first-desktop-gateway` = **160 passati, 1 ignorato**; `npm run build`
+  desktop = verde; `cargo build -p local-first-desktop-gateway` = verde;
+  `git diff --check` = pulito.
+- **Gate appena verificato:** fuori-root con approval in-app + binding remoto
+  superseduto. Prompt:
+  `Usa il tool MCP filesystem per creare /Users/fabio/Desktop/path-b-approval-bound.md con una riga: test.`
+  Prove: file creato con contenuto `test`; thread
+  `thread_1782142399_1782142399448892000`; `chat_messages` mostra user prompt →
+  `✓ MCP tool executed: mcp__filesystem__create` → finale corretto sul file
+  esatto; nessuna occorrenza di `path-b-gate/note.md` nel thread; riga
+  `remote_approvals` `approval_b7a4a02ae4944ead862ecb9ef8af02c4` legata a
+  `source_message_id=browser_assistant_1782142417646` e stato `superseded`
+  (coerente con approvazione in-app che invalida il codice remoto).
+- **Retry Telegram #1 (fallito solo nel resume, 2026-06-22):** prompt
+  `.../path-b-telegram-bound.md` + approvazione Telegram ha creato correttamente
+  `/Users/fabio/Desktop/path-b-telegram-bound.md` con `telegram-test`;
+  `remote_approvals` ha `status='executed'`,
+  `source_message_id=browser_assistant_1782142921059`, args corretti e thread
+  `thread_1782142906_1782142906959786000`. Però il resume model-driven ha
+  risposto col vecchio `path-b-gate/note.md` (`una/due/tre`). Causa: il prompt
+  di `resume_thread_after_approval` era ancora generico e non includeva richiesta
+  utente originale + args approvati, quindi il modello poteva pescare memoria o
+  loop vecchi.
+- **Fix locale dopo il retry:** `resume_thread_after_approval` ora costruisce un
+  prompt con `ORIGINAL USER REQUEST`, `APPROVED ARGUMENTS JSON`, risultato e
+  guardrail espliciti: continuare solo la richiesta originale, non cambiare
+  file/path/task/memoria/open-loop; se l'azione approvata soddisfa la richiesta,
+  chiudere con messaggio conciso sul path esatto. Test dedicato:
+  `approval_resume_prompt_anchors_to_source_request_and_approved_args`.
+- **Gate Telegram #2 PASSATO (2026-06-22, dopo rebuild+riavvio da HEAD):**
+  prompt `.../path-b-telegram-bound-2.md` + approvazione Telegram ha creato
+  `/Users/fabio/Desktop/path-b-telegram-bound-2.md` con `telegram-test-2`.
+  Prove: `remote_approvals` =
+  `approval_bf564060200f430fa6dd653ec585aa79`, `status='executed'`,
+  `source_message_id=browser_assistant_1782143967279`, args corretti; thread
+  `thread_1782143941_1782143941578301000` mostra prompt → `✓ MCP tool executed`
+  → finale “Percorso: `/Users/fabio/Desktop/path-b-telegram-bound-2.md` /
+  Contenuto: `telegram-test-2` / Byte: 15”; zero occorrenze di
+  `path-b-gate/note.md` nel thread. **Path B approval/provenienza chiusa.**
+- **WS6.1c slice locale implementata (UX Telegram):** al tap/reply Telegram su
+  un codice valido viene inviato subito un messaggio “Ricevuto… verifico/avvio”;
+  nel thread app vengono persistiti status assistant “Approvazione Telegram
+  ricevuta / eseguo …” e “Azione approvata da Telegram eseguita … riprendo il
+  task” o “fallita …”, con target derivato dagli args (`path`/`to`) e
+  `thread.updated`. **Bug trovato nel gate UX:** la card era persistita e la
+  riga `remote_approvals` era corretta, ma `dispatched_at` restava `NULL`
+  (`approval_fc2026c6804a45029123b354672cd130`, codice `FC2026`) quindi
+  Telegram non riceveva nulla. Causa: errore di delivery del sidecar Telegram
+  silenziato nel path `dispatch_remote_approval`. **Fix locale:** l'invio
+  Telegram usa un retry con rebind automatico al token persistito sia per la
+  notifica con bottoni sia per i messaggi di callback/progresso; se anche il
+  retry fallisce, il thread riceve uno status `delivery_failed` con errore e
+  fallback alla card in-app/reconnect, invece di lasciare l'utente al buio.
+  Test dedicato: `telegram_approval_progress_messages_are_actionable`.
+  Verifiche locali: gateway **161 passati, 1 ignorato**,
+  `cargo build -p local-first-desktop-gateway` verde, `npm run build`
+  desktop verde, `git diff --check` pulito.
+- **Prossimo passo unico:** riavviare Electron da HEAD e fare un micro-gate
+  Telegram con path nuovo verificando: ricezione notifica Telegram iniziale,
+  messaggio Telegram immediato dopo tap/reply, due status nel thread, finale
+  corretto del resume, `remote_approvals.dispatched_at IS NOT NULL` e
+  `remote_approvals.status='executed'`. Non riusare `FC2026`: è la riga di
+  prova creata prima del fix ed è rimasta pending/non inviata.
+- **Gate fallito pre-riavvio (18:17):** nuovo tentativo
+  `path-b-telegram-ux-2.md` ha creato `approval_e14399953a6c4dd6a5f9a7c7d1214114`
+  / codice `E14399`, ma resta `pending` con `dispatched_at=NULL` e nel thread
+  non compare nessuno status `delivery_failed`. Le preferenze sono corrette
+  (`approval_channel=telegram`, target presente). Questo è incompatibile con
+  il codice locale appena compilato, quindi prima ipotesi da falsificare:
+  Electron/gateway attivo è un processo vecchio o non riavviato da HEAD. Prossima
+  azione: hard-stop di Electron/gateway/sidecar Telegram, poi `npm run
+  electron:dev` da `apps/desktop` e micro-gate con path ancora nuovo.
+- **Gate WS6.1c PASSATO dopo riavvio (18:20):** nuovo tentativo su
+  `/Users/fabio/Desktop/path-b-telegram-ux-2.md` ha creato
+  `approval_1a16fb7978fe4a91b163560fafbecff0` / codice `1A16FB`,
+  `status='executed'`, `dispatched_at=1782145205`,
+  `resolved_at=1782145211`. Il thread
+  `thread_1782145191_1782145191727307000` mostra card eseguita → status
+  “Approvazione Telegram ricevuta / Eseguo …” → status “Azione approvata da
+  Telegram eseguita … Riprendo il task…” → finale ancorato al path corretto
+  con `ux-ok-2`, byte 8. Filesystem: file presente su Desktop. **WS6.1c chiusa.**
+- **Divieto operativo:** niente altri test di scrittura via endpoint HTTP grezzo;
+  per questo gate usare solo UI/app o callback Telegram reale.
+
 - **Pubblicato:** **v0.1.1043** = memoria coerente (WS5.7: estrattore cattura i *finding*
   inclusi i **negativi** + `open_loop` completi) + **WS5.4a** (open_loop nel briefing
   always-on: `gather_open_loops` + sezione "OPEN LOOPS" in cima a `format_memory_block`).
@@ -149,9 +247,51 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   `/Users/fabio/Desktop/path-b-outside-gate-1782139063.md`; la successiva
   esecuzione auditata è avvenuta dopo un callback Telegram autorizzato
   (`mcp__filesystem__create`, 2026-06-22 16:38:34), non dal bypass in-root.
-  **Non chiudere ancora Path B:** restano il re-test UI/Gemma in-root e la
-  ripetizione manuale fuori-root, verificando che il file non compaia prima
-  dell'approvazione.
+  **Diagnosi successiva, verificata end-to-end (2026-06-22):** la chat progetto
+  in Auto risolveva il ruolo `coding` (`glm-5.2`), ma il composer mostrava
+  erroneamente l'orchestratore (`kimi-k2.6:cloud`). GLM rifiuta il primo round
+  con tool (`400/1210`); il loop poi sintetizzava senza tool, dando l'illusione
+  di proseguire senza mai chiamare Filesystem MCP. Kimi esplicito ha invece
+  eseguito `mcp__filesystem__view` nello stesso progetto. **Fix locale da
+  verificare in Electron:** Auto ora mostra il modello risolto per il thread,
+  gli array tool vuoti sono omessi dal payload, e un `400` su un round con tool
+  ritenta una sola volta l'orchestratore configurato senza mostrare il falso
+  errore. `run_agent_turn` usa inoltre lo stesso routing thread-aware. Test
+  gateway **157 passati, 1 ignorato** + build desktop verde. **Prova runtime
+  Electron (gateway da HEAD):** thread
+  `thread_1782140733_1782140733708101000`, Auto=`glm-5.2`, attività fallback
+  una volta, card per
+  `/Users/fabio/Desktop/path-b-provider-fallback-1782140733.md`, file assente
+  prima dell'approvazione. **GATE INVALIDATO (2026-06-22, non chiudere Path
+  B):** quel probe HTTP ha inviato una vera approval Telegram, ma non ha
+  persistito la richiesta/card nel thread. La successiva approvazione ha
+  eseguito il file probe e chiamato `resume_thread_after_approval` sul thread
+  quasi vuoto; il resume ha quindi recuperato il vecchio `path-b-gate/note.md`
+  dal contesto/memoria e lo ha eseguito/riportato come se appartenesse al task
+  nuovo. Prove: nel thread `thread_1782140733_1782140733708101000` la catena
+  `browser_user` → `✓ MCP tool executed` → messaggio `msg_…` cita il vecchio
+  note; `path-b-provider-fallback-1782140733.md` esiste. Nessuno stream è
+  attivo al controllo, ma le approval pendenti erano solo in-memory e non
+  ispezionabili/auditabili. **Fix locale implementato (2026-06-22):** le remote
+  approval ora sono persistite in `remote_approvals` con `approval_id`, codice,
+  tool/args, thread e stato; le card chat includono `approval_id`; Telegram/WA
+  vengono inviati solo dopo `commit_prompt_result`/continuation/regenerate o
+  `append_assistant_message` server-side, quando la card è già legata a
+  `source_message_id`; `execute_pending_approval` rifiuta origini non
+  persistite o marker non corrispondenti e claim-a una sola volta
+  `pending→executing`; le approvazioni in-app supersedono il codice remoto.
+  Anche `composio_execute` ora verifica la card sorgente prima di eseguire e di
+  salvare "always allow". Test gateway **159 passati, 1 ignorato**. **Gate
+  parziale:** in-app ha passato e ha superseduto il codice remoto; Telegram ha
+  eseguito l'azione corretta (`status='executed'`, file
+  `path-b-telegram-bound.md` creato) ma il resume ha contaminato la risposta con
+  il vecchio `path-b-gate/note.md`. **Fix locale successivo:** resume prompt
+  vincolato a richiesta originale + args approvati; test gateway ora **160
+  passati, 1 ignorato**. **Gate finale PASSATO:** retry con
+  `path-b-telegram-bound-2.md` ha prodotto `status='executed'`, file corretto,
+  finale chat sul path approvato e zero `path-b-gate/note.md` nel thread.
+  **Path B approval/provenienza chiusa**; non usare più endpoint grezzi per test
+  di scrittura reali.
 - **Coda:** WS5.4b (`stato-lavori.md`) · WS5.4c (chiusura+dedup) · WS5.5 (provenienza) ·
   WS2 · WS1 3-6 · WS6/7/8/9. Ordine nel backlog.
 - **Regole operative:** build LOCAL, verde a ogni passo, doc aggiornati nello stesso turno,

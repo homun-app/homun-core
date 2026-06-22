@@ -111,6 +111,20 @@ Expected: focused authority tests and the full gateway suite pass.
 - Modify: `docs/DEVELOPMENT.md`
 - Modify: `docs/plans/2026-06-22-batch-1042-artifacts-memory.md`
 
+**Current checkpoint (2026-06-22):** local code is past the original Path B
+implementation and now includes the approval provenance fix required by the
+invalidated HTTP probe. The next Electron gate must validate the full persisted
+chain: `MCP_CONFIRM` marker with `approval_id` → saved assistant card in
+`chat_messages` → `remote_approvals.source_message_id` → Telegram callback →
+tool execution → source card rewritten/done → resume without stale-context
+contamination. The in-app approval branch passed. The first Telegram retry
+proved callback execution (`status='executed'`) but failed the resume output:
+the model answered with stale `path-b-gate/note.md`. Local fix: resume prompts
+now include original user request + approved args + anti-memory/open-loop
+guardrails. The second Telegram retry passed from HEAD: file, `executed` row,
+and final assistant message all reference the approved path. Do not use direct
+HTTP write probes for this gate.
+
 - [x] **Step 1: Build and run**
 
 Run:
@@ -120,9 +134,44 @@ cargo build -p local-first-desktop-gateway
 cd apps/desktop && npm run electron:dev
 ```
 
-- [ ] **Step 2: Verify both policy branches**
+- [x] **Step 2: Verify both policy branches plus persisted remote provenance**
 
 Use Gemma in a chat assigned to a project workspace folder. Ask for `note.md` and `riepilogo.md` inside it: no MCP confirmation card may appear. Then request a filesystem write outside that root: a confirmation card must appear and remain needed.
+
+For the outside-root branch, use the canonical prompt:
+
+```text
+Usa il tool MCP filesystem per creare /Users/fabio/Desktop/path-b-approval-bound.md con una riga: test.
+```
+
+Acceptance evidence:
+
+- `/Users/fabio/Desktop/path-b-approval-bound.md` exists with `test`.
+- `chat_messages` contains the source card with `approval_id` before Telegram execution.
+- `remote_approvals` has `source_message_id` for that approval and ends in `executed`.
+- No assistant continuation mentions or acts on older `path-b-gate/note.md` context.
+
+Partial result (2026-06-22, in-app approval branch): prompt above created
+`/Users/fabio/Desktop/path-b-approval-bound.md` with `test`. Evidence:
+thread `thread_1782142399_1782142399448892000`; `chat_messages` records prompt,
+`✓ MCP tool executed: mcp__filesystem__create`, and final success message; zero
+`path-b-gate/note.md` mentions in the thread. The `remote_approvals` row
+`approval_b7a4a02ae4944ead862ecb9ef8af02c4` is bound to
+`source_message_id=browser_assistant_1782142417646` and ended `superseded`,
+which proves the in-app execution invalidated the remote code. Still open:
+Telegram callback execution branch ending `executed` **and** a final assistant
+message anchored to the approved path. First retry created
+`/Users/fabio/Desktop/path-b-telegram-bound.md` with `telegram-test` and
+`remote_approvals.status='executed'`, but the resume message switched to stale
+`path-b-gate/note.md`; this invalidates the UX/resume half of that gate.
+Final result (2026-06-22, Telegram approval branch): after rebuild+restart,
+prompt created `/Users/fabio/Desktop/path-b-telegram-bound-2.md` with
+`telegram-test-2`; `remote_approvals` row
+`approval_bf564060200f430fa6dd653ec585aa79` ended `executed` with
+`source_message_id=browser_assistant_1782143967279`; thread
+`thread_1782143941_1782143941578301000` records prompt, executed marker, and a
+final message anchored to the approved path/content/byte count; zero
+`path-b-gate/note.md` mentions in that thread. Gate closed.
 
 Progress (2026-06-22): the Electron gateway was restarted from HEAD and the
 `kimi-k2.6:cloud` gate passed in the `test-homun` project:
@@ -136,7 +185,32 @@ unavailable. Kimi produced that card in
 `thread_1782139063_1782139063946466000`; a subsequent Telegram authorization
 executed the write, as recorded in `tool_runs`. The visible-UI/Gemma repeat and
 a controlled outside-root check that confirms the file is absent before
-authorization remain open.
+authorization remain open. A later end-to-end reproduction found an upstream
+routing/compatibility failure, not a missing filesystem connection: Auto chose
+the project's `coding` role (`glm-5.2`) while the composer displayed
+`kimi-k2.6:cloud`; GLM rejected the tool-bearing round with `400/1210`, then
+the agent loop generated a no-tool synthesis. The local fix makes the model
+listing thread-aware, omits empty tool arrays, retries one tool-bearing `400`
+through the configured orchestrator, and routes headless resume through the
+same thread resolver. Gateway tests are 157 passed / 1 ignored and the desktop
+build is green. The Electron gateway runtime proof used
+`thread_1782140733_1782140733708101000`: Auto resolved `glm-5.2`, the fallback
+activity occurred once, an MCP confirmation marker was emitted for
+`/Users/fabio/Desktop/path-b-provider-fallback-1782140733.md`, and the file was
+absent before authorization. This is NOT a valid closure: the raw HTTP probe
+delivered a real Telegram approval while never persisting its source card in the
+thread. Its later approval executed the probe and resumed a nearly empty thread,
+which then contaminated the current task with the older
+`path-b-gate/note.md` context. The thread/store chain proves the resume; active
+streams are now empty. The durable fix is implemented locally: pending remote
+approvals are stored in `remote_approvals`, card markers carry `approval_id`,
+remote delivery is deferred until the assistant card is persisted and bound to a
+`source_message_id`, and callback execution verifies approval_id+tool+args
+against that saved card before claiming `pending→executing`. In-app approval
+supersedes its remote code, and Composio now uses the same server-side card
+verification. Gateway tests are 159 passed / 1 ignored. Next Path B gate:
+restart Electron from HEAD and validate the in-app/Telegram chain only; do not
+use the direct endpoint for live write testing.
 
 - [x] **Step 3: Record only proven state**
 

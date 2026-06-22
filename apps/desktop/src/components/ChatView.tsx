@@ -1316,6 +1316,7 @@ export function ChatView({
         message.id,
         computerSessionId,
         message.text,
+        message.model,
       );
       if (cancelledStreamIdsRef.current.has(requestId)) {
         return baseMessages;
@@ -6674,9 +6675,10 @@ function Composer({
   const [models, setModels] = useState<string[]>([]);
   const [modelGroups, setModelGroups] = useState<ProviderModelsGroup[]>([]);
   const [activeModel, setActiveModel] = useState<string | null>(null);
-  // Per-message model override. null = "Auto" (use the configured default = orchestrator
-  // role). A picked value is the composite "<provider_id>::<model>", so the same model
-  // id present in two providers resolves to the provider the user actually chose.
+  // Per-message model override. null = "Auto" (use this thread's resolved role:
+  // coding in a linked project, orchestrator otherwise). A picked value is the
+  // composite "<provider_id>::<model>", so the same model id present in two
+  // providers resolves to the provider the user actually chose.
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   // Interaction mode (composer pill, Cursor-style): agent | plan | ask | debug.
@@ -6684,12 +6686,12 @@ function Composer({
   const [chatMode, setChatMode] = useState<ChatMode>("agent");
   const [modelQuery, setModelQuery] = useState("");
 
-  // Refetches the model list + default (= orchestrator role) + per-provider groups.
+  // Refetches the model list + default resolved for THIS thread + per-provider groups.
   // Called on mount and when the menu opens, so a Settings change reflects without an
   // app restart. Does NOT touch the user's selection (Auto stays Auto unless they pick).
   async function refreshModels() {
     try {
-      const list = await coreBridge.runtimeModels();
+      const list = await coreBridge.runtimeModels(threadId);
       setModels(list.available ?? []);
       setModelGroups(list.groups ?? []);
       setActiveModel(list.active);

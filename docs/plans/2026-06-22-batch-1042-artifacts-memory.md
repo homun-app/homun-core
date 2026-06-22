@@ -183,8 +183,27 @@ cablato** nel flusso agente. ADR 0015.
   thread `thread_1782134906_1782134906142839000` ha emesso confirm MCP per `note.md` e
   `riepilogo.md`, quindi ha persistito il completamento; filesystem verificato con entrambi i file
   in `~/demo-piano`. La chat ha prima chiesto il path base, poi ha eseguito il flusso corretto.
-  **Prossimo bivio:** WS6.1c UX Telegram oppure Path B per le scritture routine; decisione aperta.
-- 🟡 **Path B — root automatica per Filesystem MCP (2026-06-22):** scelta utente:
+  **Bivio risolto:** Path B e WS6.1c sono stati entrambi implementati e verificati sotto.
+- ✅ **Path B — root automatica per Filesystem MCP (2026-06-22):** scelta utente:
+  **STATO ATTUALE / resume rapido:** implementazione locale completata fino al
+  binding persistente delle approval remote. **Gate fuori-root/in-app passato
+  (2026-06-22):** prompt canonico
+  `Usa il tool MCP filesystem per creare /Users/fabio/Desktop/path-b-approval-bound.md con una riga: test.`
+  ha creato il file esatto con `test`; thread
+  `thread_1782142399_1782142399448892000`; `chat_messages` mostra user prompt →
+  `✓ MCP tool executed` → finale sul file corretto; zero occorrenze di
+  `path-b-gate/note.md`; `remote_approvals` ha
+  `source_message_id=browser_assistant_1782142417646` e stato `superseded`
+  (approvazione in-app ha invalidato il codice remoto). **Retry Telegram
+  successivo:** callback Telegram ha eseguito correttamente l'azione (`status=
+  'executed'`, file `/Users/fabio/Desktop/path-b-telegram-bound.md` con
+  `telegram-test`, source `browser_assistant_1782142921059`), ma il resume ha
+  sintetizzato il vecchio `path-b-gate/note.md`. **Fix locale:** prompt di
+  resume ancorato a richiesta originale + args approvati + guardrail anti
+  memoria/open-loop; test gateway **160 passati, 1 ignorato**. **Gate finale
+  passato:** micro-gate Telegram-only con `path-b-telegram-bound-2.md` termina
+  con `status='executed'`, finale chat sul path corretto e zero vecchio
+  `path-b-gate`. Vietato ripetere probe di scrittura via endpoint HTTP grezzo.
   il connettore MCP resta collegato una volta sola a livello utente; ogni chiamata
   eredita la root del progetto del thread. Implementati manifest statico
   `mcp:filesystem` (`create`/`insert`/`str_replace`), jail assoluta
@@ -202,8 +221,69 @@ cablato** nel flusso agente. ADR 0015.
   `thread_1782139063_1782139063946466000`: card prodotta per
   `/Users/fabio/Desktop/path-b-outside-gate-1782139063.md`; il `tool_runs`
   registra `create` solo dopo callback Telegram autorizzato alle 16:38:34.
-  Restano il re-test UI/Gemma in-root e il gate manuale fuori-root, con controllo
-  esplicito che il file non esista prima dell'approvazione.
+  **Root cause ulteriore (verificata end-to-end):** Auto in un thread progetto
+  sceglieva `coding`/`glm-5.2`, mentre il composer mostrava l'orchestratore
+  `kimi-k2.6:cloud`; GLM risponde `400/1210` al round con tool e il loop
+  proseguiva poi con una sintesi senza tool. Kimi esplicito ha provato che il
+  Filesystem MCP è connesso e callable. **Fix locale, gate pendente:** endpoint
+  modelli thread-aware (Auto mostra il routing reale), payload senza `tools: []`,
+  fallback una sola volta al ruolo orchestratore dopo `400` con tool, e
+  `run_agent_turn` thread-aware. Gateway **157 passati, 1 ignorato** + build
+  desktop verde. **Prova runtime Electron da HEAD:** thread
+  `thread_1782140733_1782140733708101000` ha risolto Auto=`glm-5.2`, emesso una
+  sola attività fallback e poi la card per
+  `/Users/fabio/Desktop/path-b-provider-fallback-1782140733.md`; il file era
+  assente. **Gate invalidato subito dopo:** il probe HTTP ha realmente spedito
+  un'approval Telegram, ma non ha persistito la sorgente nel thread. Quando
+  approvata, ha eseguito il probe e ha fatto ripartire un thread senza il prompt
+  originario; il resume ha contaminato il nuovo task con
+  `path-b-gate/note.md` (catena verificata in `chat_messages`, file probe
+  esistente). Gli stream sono ora vuoti; la vecchia mappa in-memory non era
+  auditabile. **Fix locale implementato:** nuova tabella `remote_approvals`
+  (`approval_id`, codice, tool/args, thread, `source_message_id`, stato);
+  marker chat con `approval_id`; notifica Telegram/WA differita fino a card
+  persistita; callback remoto valida card+tool+args+approval_id prima di
+  `pending→executing`; origini non persistite vengono rifiutate; in-app
+  supersede il codice remoto. `composio_execute` verifica ora la card come MCP.
+  Gateway **159 passati, 1 ignorato**. **Gate parziale:** in-app passa;
+  Telegram esegue (`executed`) ma resume contaminava il finale. **Fix locale
+  successivo:** `approval_resume_prompt` con richiesta originale + args approvati
+  e test gateway **160 passati, 1 ignorato**. **Gate finale PASSATO:** retry con
+  `path-b-telegram-bound-2.md` ha prodotto `status='executed'`, file corretto,
+  finale chat sul path approvato e zero `path-b-gate/note.md` nel thread.
+  **Path B approval/provenienza chiusa**; non usare più il direct endpoint per
+  test di scrittura reali.
+- ✅ **6.1c UX Telegram approval (2026-06-22):** slice locale implementata dopo
+  Path B: il callback Telegram su codice valido invia subito “Ricevuto…
+  verifico/avvio”; il thread app riceve status persistiti “Approvazione Telegram
+  ricevuta / eseguo …” e “Azione approvata da Telegram eseguita … riprendo il
+  task” o “fallita …”, con target da args (`path`/`to`) e `thread.updated`.
+  **Gate UX ha trovato una causa ulteriore:** notifica Telegram iniziale non
+  inviata anche se card e `remote_approvals` erano corrette; prova:
+  `approval_fc2026c6804a45029123b354672cd130`/`FC2026` resta `pending` con
+  `dispatched_at=NULL`. Fix locale: outbound Telegram per approval/progresso
+  ritenta con rebind automatico del sidecar usando il token persistito; se fallisce
+  ancora, appende nel thread status `delivery_failed` con fallback esplicito a
+  card in-app/reconnect invece del silenzio. Test
+  `telegram_approval_progress_messages_are_actionable`; gateway **161 passati,
+  1 ignorato**; `cargo build -p local-first-desktop-gateway` verde; `npm run
+  build` desktop verde; `git diff --check` pulito. **Gate pendente:** riavvio
+  Electron da HEAD e micro-test Telegram con nuovo path: verificare notifica
+  Telegram iniziale, messaggio Telegram immediato, due status nel thread, finale
+  resume corretto, `remote_approvals.dispatched_at IS NOT NULL` e
+  `remote_approvals.status='executed'`. Non riusare `FC2026`.
+  **Gate 18:17 ancora fallito:** `approval_e14399953a6c4dd6a5f9a7c7d1214114`
+  / `E14399` per `path-b-telegram-ux-2.md` resta `pending` con
+  `dispatched_at=NULL`; thread senza `delivery_failed`; prefs Telegram corrette.
+  Questa evidenza punta a processo Electron/gateway vecchio/non riavviato da
+  HEAD. Prossimo check: hard-stop dei processi, restart `npm run electron:dev`
+  da `apps/desktop`, path nuovo.
+  **Gate finale PASSATO dopo riavvio (18:20):**
+  `approval_1a16fb7978fe4a91b163560fafbecff0` / `1A16FB` per
+  `/Users/fabio/Desktop/path-b-telegram-ux-2.md` ha
+  `status='executed'`, `dispatched_at` valorizzato e `resolved_at` valorizzato;
+  thread con status running+executed e finale ancorato al path/contenuto
+  `ux-ok-2`; file presente sul Desktop. **WS6.1c chiusa.**
 - ☐ **6.2 Resource Governor** attivo sui task (limiti, backpressure).
 - ☐ **6.3 Scheduler / ricorrenza** + **proactive review** (l'assistente propone schede
   in autonomia governata) verificati end-to-end.
