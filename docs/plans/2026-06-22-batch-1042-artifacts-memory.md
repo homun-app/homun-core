@@ -284,7 +284,19 @@ cablato** nel flusso agente. ADR 0015.
   `status='executed'`, `dispatched_at` valorizzato e `resolved_at` valorizzato;
   thread con status running+executed e finale ancorato al path/contenuto
   `ux-ok-2`; file presente sul Desktop. **WS6.1c chiusa.**
-- ☐ **6.2 Resource Governor** attivo sui task (limiti, backpressure).
+- 🟡 **6.2 Resource Governor** attivo sui task (limiti, backpressure).
+  **Slice 1 FATTA (2026-06-22):** fix backpressure recuperabile. Gap trovato:
+  `WaitingResource` non rientrava in `ready_tasks` dopo rilascio risorsa, perché
+  lo scheduler considera solo `Queued|Pending`. Implementato
+  `ResourceGovernor::requeue_waiting_if_available` + sweep gateway
+  `requeue_waiting_resource_tasks` prima di `ready_tasks`, dopo lease recovery.
+  Test red/green task-runtime
+  `resource_governor_requeues_waiting_task_when_capacity_returns`; test gateway
+  `task_executor_requeues_waiting_resource_before_scheduling`. Verifiche:
+  `cargo test -p local-first-task-runtime` verde; gateway **162 passati, 1
+  ignorato**; `cargo build -p local-first-desktop-gateway` verde; `npm run build`
+  desktop verde; `git diff --check` pulito. **Prossimo slice:** visibilità
+  limiti/uso/backpressure o stress-gate in-app con più worker.
 - ☐ **6.3 Scheduler / ricorrenza** + **proactive review** (l'assistente propone schede
   in autonomia governata) verificati end-to-end.
 - ☐ **6.4** Le azioni proattive scrivono in memoria (loop aperti / decisioni) — lega WS5.

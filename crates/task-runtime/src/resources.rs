@@ -79,6 +79,27 @@ impl ResourceGovernor {
         Ok(false)
     }
 
+    pub fn requeue_waiting_if_available(
+        &self,
+        store: &TaskStore,
+        task: &TaskRecord,
+    ) -> TaskRuntimeResult<bool> {
+        if task.status != TaskStatus::WaitingResource {
+            return Ok(false);
+        }
+        if self.unavailable_reason(store, task)?.is_some() {
+            return Ok(false);
+        }
+        store.update_task_status(
+            &task.task_id,
+            &task.user_id,
+            &task.workspace_id,
+            TaskStatus::Queued,
+            None,
+        )?;
+        Ok(true)
+    }
+
     fn unavailable_reason(
         &self,
         store: &TaskStore,

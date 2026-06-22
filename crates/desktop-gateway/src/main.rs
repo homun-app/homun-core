@@ -96,8 +96,8 @@ use local_first_task_runtime::{
     ApprovalGate, ApprovalPolicy, ApprovalRequest, Automation, AutomationSource, AutomationTrigger,
     EventTrigger, ExecutorResult, LeaseManager, ResourceClass, ResourceGovernor, ResourceLimits,
     TaskExecutor,
-    TaskId, TaskQueueSnapshot, TaskRecord, TaskRuntimeError, TaskScheduler, TaskStatus, TaskStore,
-    TaskUiDetail, TaskUiItem, TaskUiReadModel, UserId, WorkspaceId,
+    TaskId, TaskQueueSnapshot, TaskRecord, TaskRuntimeError, TaskRuntimeResult, TaskScheduler,
+    TaskStatus, TaskStore, TaskUiDetail, TaskUiItem, TaskUiReadModel, UserId, WorkspaceId,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -18549,6 +18549,8 @@ fn run_next_task_once(
         lease_manager
             .recover_stale_leases(&store, &user, &workspace, now)
             .map_err(GatewayError::task)?;
+        requeue_waiting_resource_tasks(&store, &user, &workspace, &governor)
+            .map_err(GatewayError::task)?;
         scheduler
             .mark_blocked_by_terminal_dependencies(&store, &user, &workspace)
             .map_err(GatewayError::task)?;
@@ -18801,6 +18803,21 @@ fn run_next_task_once(
             message: outcome.summary,
         }],
     })
+}
+
+fn requeue_waiting_resource_tasks(
+    store: &TaskStore,
+    user: &UserId,
+    workspace: &WorkspaceId,
+    governor: &ResourceGovernor,
+) -> TaskRuntimeResult<usize> {
+    let mut requeued = 0usize;
+    for task in store.list_tasks(user, workspace)? {
+        if governor.requeue_waiting_if_available(store, &task)? {
+            requeued += 1;
+        }
+    }
+    Ok(requeued)
 }
 
 fn start_task_executor_worker(state: AppState) {
@@ -31433,6 +31450,7 @@ mod tests {
         mcp_stdio_config_to_metadata,
         mcp_provider_slug,
         sanitize_wiki_filename,
+        requeue_waiting_resource_tasks,
         task_queue_response,
         wiki_title_from_text,
         prune_browser_history,
@@ -31455,8 +31473,9 @@ mod tests {
     use local_first_local_computer_session::SessionStatus;
     use local_first_browser_automation::BrowserMethod;
     use local_first_task_runtime::{
-        ApprovalRequest, ExecutorResult, ResourceClass, TaskId, TaskPriority, TaskQueueSnapshot,
-        TaskRecord, TaskStatus, TaskStore, TaskUiItem, UserId, WorkspaceId,
+        ApprovalRequest, ExecutorResult, ResourceClass, ResourceGovernor, ResourceLimits,
+        ResourceRequirement, TaskId, TaskPriority, TaskQueueSnapshot, TaskRecord, TaskStatus,
+        TaskStore, TaskUiItem, UserId, WorkspaceId,
     };
     use std::collections::HashMap;
 
@@ -33162,6 +33181,51 @@ data: [DONE]\n";
     fn task_executor_worker_id_is_stable_per_index() {
         assert_eq!(task_executor_worker_id(0), "desktop-gateway-background-worker-0");
         assert_eq!(task_executor_worker_id(2), "desktop-gateway-background-worker-2");
+    }
+
+    #[test]
+    fn task_executor_requeues_waiting_resource_before_scheduling() {
+        let store = TaskStore::open_in_memory().unwrap();
+        let user = UserId::new("user_1");
+        let workspace = WorkspaceId::new("workspace_1");
+        let running = TaskRecord::new(
+            "running",
+            user.clone(),
+            workspace.clone(),
+            "test.task",
+            "Running",
+            serde_json::json!({}),
+        )
+        .with_resource(ResourceRequirement::new(ResourceClass::LlmInference, 1));
+        let blocked = TaskRecord::new(
+            "blocked",
+            user.clone(),
+            workspace.clone(),
+            "test.task",
+            "Blocked",
+            serde_json::json!({}),
+        )
+        .with_resource(ResourceRequirement::new(ResourceClass::LlmInference, 1));
+        store.insert_task(&running).unwrap();
+        store.insert_task(&blocked).unwrap();
+        let governor =
+            ResourceGovernor::new(ResourceLimits::new().with_limit(ResourceClass::LlmInference, 1));
+
+        governor.reserve(&store, &running, "worker_a").unwrap();
+        governor
+            .mark_waiting_if_unavailable(&store, &blocked)
+            .unwrap();
+        governor.release(&store, &running).unwrap();
+
+        assert_eq!(
+            requeue_waiting_resource_tasks(&store, &user, &workspace, &governor).unwrap(),
+            1
+        );
+        let ready = local_first_task_runtime::TaskScheduler::new()
+            .ready_tasks(&store, &user, &workspace, time::OffsetDateTime::now_utc(), 10)
+            .unwrap();
+
+        assert!(ready.iter().any(|task| task.task_id.as_str() == "blocked"));
     }
 
     #[test]

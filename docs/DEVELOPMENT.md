@@ -45,9 +45,10 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
 
 ### Cruscotto operativo attuale
 
-- **Linea attiva:** WS6 prossimo step dopo WS6.1c — UX Telegram approval chiusa;
-  scegliere tra hardening ciclo release/commit locale e proseguire backlog WS6.2
-  Resource Governor.
+- **Linea attiva:** WS6.2 Resource Governor — slice 1 completata localmente:
+  reidratazione dei task `WaitingResource` quando la capacità torna disponibile.
+  Prossimo slice: rendere più visibili limiti/uso/backpressure nella superficie
+  task o stress-gate in-app con più worker.
 - **Fatto e verificato localmente:** root automatica del progetto, bypass conferma
   solo per scritture Filesystem MCP dentro root; outside-root resta confirm-gated;
   routing Auto thread-aware + fallback orchestratore su `400` con tool; approval
@@ -138,6 +139,20 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   “Approvazione Telegram ricevuta / Eseguo …” → status “Azione approvata da
   Telegram eseguita … Riprendo il task…” → finale ancorato al path corretto
   con `ux-ok-2`, byte 8. Filesystem: file presente su Desktop. **WS6.1c chiusa.**
+- **WS6.2a Resource Governor FATTO (2026-06-22):** root cause trovata nel
+  cablaggio task: un task marcato `WaitingResource` non tornava più in `ready_tasks`
+  quando la risorsa si liberava, perché lo scheduler seleziona solo
+  `Queued|Pending`. Fix: `ResourceGovernor::requeue_waiting_if_available`
+  riporta il task a `Queued` e pulisce `blocked_reason` se la capacità è di nuovo
+  disponibile; il gateway esegue `requeue_waiting_resource_tasks` dopo recovery
+  lease e prima di `ready_tasks`, così il task può ripartire nel tick successivo.
+  Test red/green:
+  `resource_governor_requeues_waiting_task_when_capacity_returns`; test gateway:
+  `task_executor_requeues_waiting_resource_before_scheduling`. Verifiche locali:
+  `cargo test -p local-first-task-runtime` verde; `cargo test -p
+  local-first-desktop-gateway` = **162 passati, 1 ignorato**; `cargo build -p
+  local-first-desktop-gateway` verde; `npm run build` desktop verde;
+  `git diff --check` pulito.
 - **Divieto operativo:** niente altri test di scrittura via endpoint HTTP grezzo;
   per questo gate usare solo UI/app o callback Telegram reale.
 

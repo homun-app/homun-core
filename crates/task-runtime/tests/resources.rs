@@ -57,6 +57,42 @@ fn resource_governor_marks_task_waiting_resource_with_reason() {
 }
 
 #[test]
+fn resource_governor_requeues_waiting_task_when_capacity_returns() {
+    let store = TaskStore::open_in_memory().unwrap();
+    let user = UserId::new("user_1");
+    let workspace = WorkspaceId::new("workspace_1");
+    let running = task("running", &user, &workspace)
+        .with_resource(ResourceRequirement::new(ResourceClass::LlmInference, 1));
+    let blocked = task("blocked", &user, &workspace)
+        .with_resource(ResourceRequirement::new(ResourceClass::LlmInference, 1));
+    store.insert_task(&running).unwrap();
+    store.insert_task(&blocked).unwrap();
+    let governor =
+        ResourceGovernor::new(ResourceLimits::new().with_limit(ResourceClass::LlmInference, 1));
+
+    governor.reserve(&store, &running, "worker_a").unwrap();
+    assert!(governor
+        .mark_waiting_if_unavailable(&store, &blocked)
+        .unwrap());
+    governor.release(&store, &running).unwrap();
+
+    let blocked = store
+        .get_task(&TaskId::new("blocked"), &user, &workspace)
+        .unwrap()
+        .unwrap();
+    assert!(governor
+        .requeue_waiting_if_available(&store, &blocked)
+        .unwrap());
+    let reloaded = store
+        .get_task(&TaskId::new("blocked"), &user, &workspace)
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(reloaded.status, TaskStatus::Queued);
+    assert_eq!(reloaded.blocked_reason, None);
+}
+
+#[test]
 fn resource_governor_tracks_multiple_resource_classes() {
     let store = TaskStore::open_in_memory().unwrap();
     let user = UserId::new("user_1");
