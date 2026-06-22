@@ -4336,6 +4336,28 @@ for single-step requests.",
     })
 }
 
+/// WS1-F2 slice 2 — report progress on a SINGLE plan step by its stable id, WITHOUT
+/// re-sending the whole plan (weak-model-proof: nothing to paraphrase, nothing to
+/// balloon). Rides the same merge + F2-verify path as update_plan.
+fn step_advance_tool_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": "step_advance",
+            "description": "Set a SINGLE plan step's new status by its id (e.g. move it to \"done\" when you finish it), WITHOUT re-sending the whole plan. This is the preferred way to report progress as you work; use update_plan only to CREATE or revise the plan. The id is shown in parentheses after each step's title in the Plan card.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "id": { "type": "string", "description": "The step id, EXACTLY as shown in the Plan card (e.g. \"s2\")." },
+                    "status": { "type": "string", "enum": ["todo", "doing", "done", "blocked"], "description": "The step's new status." },
+                    "detail": { "type": "string", "description": "Optional updated detail." }
+                },
+                "required": ["id", "status"]
+            }
+        }
+    })
+}
+
 fn plan_status_marker(status: &str) -> char {
     match status {
         "done" => 'x',
@@ -4434,18 +4456,25 @@ fn merge_plan(plan: &mut Vec<serde_json::Value>, sent: &[serde_json::Value]) -> 
     let mut claims: Vec<usize> = Vec::new();
     for s in sent {
         let title = s.get("title").and_then(|v| v.as_str()).unwrap_or("").trim();
-        if title.is_empty() {
+        // Identity: prefer the stable `id` the model echoes (shown as (`id`) in the
+        // ‹‹PLAN›› marker); fall back to title. Id-first stops ballooning from
+        // paraphrased titles, AND lets `step_advance` update a step by id ALONE (no
+        // title) — the model reports progress without re-sending the whole plan. (WS1-F2.)
+        let sent_id = s.get("id").and_then(|v| v.as_str()).map(str::trim).filter(|x| !x.is_empty());
+        if title.is_empty() && sent_id.is_none() {
             continue;
         }
         let new_status = s.get("status").and_then(|v| v.as_str()).unwrap_or("todo");
         let detail = s.get("detail").and_then(|v| v.as_str()).unwrap_or("");
-        // Identity: prefer the stable `id` the model echoes (shown as (`id`) in the
-        // ‹‹PLAN›› marker); fall back to title. Id-first stops the ballooning from
-        // paraphrased titles — the original cross-model bug. (WS1-F2 first slice.)
-        let sent_id = s.get("id").and_then(|v| v.as_str()).map(str::trim).filter(|x| !x.is_empty());
         let pos = sent_id
             .and_then(|id| plan.iter().position(|p| p.get("id").and_then(|v| v.as_str()) == Some(id)))
-            .or_else(|| plan.iter().position(|p| tkey(plan_step_title(p)) == tkey(title)));
+            .or_else(|| {
+                if title.is_empty() {
+                    None
+                } else {
+                    plan.iter().position(|p| tkey(plan_step_title(p)) == tkey(title))
+                }
+            });
         match pos {
             Some(i) => {
                 if plan_step_status(&plan[i]) == "done" {
@@ -4461,6 +4490,11 @@ fn merge_plan(plan: &mut Vec<serde_json::Value>, sent: &[serde_json::Value]) -> 
                 }
             }
             None => {
+                if title.is_empty() {
+                    // id-only update (step_advance) for a step that doesn't exist →
+                    // ignore; we never create a titleless step.
+                    continue;
+                }
                 let id = format!("s{}", plan.len() + 1);
                 let status = if new_status == "done" { "doing" } else { new_status };
                 plan.push(serde_json::json!({
@@ -10272,9 +10306,10 @@ on its own line `‹‹PLAN_PROPOSE››{{\"summary\":\"objective in brief\",\"
 (valid JSON). The user will see the Accept/Edit buttons. EXECUTE the plan ONLY in the NEXT turn, \
 after the user has approved it (e.g. «I approve the plan…»); if they ask for changes, revise and re-propose. \
 Once executing, use update_plan to update the step status (doing→done), shown in the \
-\"Plan\" panel. When you UPDATE an existing step, echo its id EXACTLY as shown in the plan card \
-(the id in parentheses after the step title) so it stays the SAME step even if you rephrase the \
-title — this prevents duplicate steps. The plan (PLAN_PROPOSE or update_plan) is ALREADY shown to the user as a CARD: do NOT \
+\"Plan\" panel. To move a step's status (e.g. doing→done) call step_advance with its id (shown in \
+parentheses after the title in the plan card) and the new status — this updates that ONE step \
+WITHOUT re-sending the plan, so steps never duplicate; use update_plan only to CREATE or revise \
+the plan. The plan (PLAN_PROPOSE or update_plan) is ALREADY shown to the user as a CARD: do NOT \
 repeat it in the reply text too — no list or table of the steps in prose (at most one \
 line of context). For single-step requests neither a plan nor a proposal is needed. \
 STEP-AT-A-TIME EXECUTION: work the plan ONE step at a time — do, then VERIFY that step's \
@@ -10399,6 +10434,7 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
         base_tools.push(record_decision_tool_schema());
         base_tools.push(forget_memory_tool_schema());
         base_tools.push(update_plan_tool_schema());
+        base_tools.push(step_advance_tool_schema());
         base_tools.push(schedule_task_tool_schema());
         base_tools.push(create_automation_tool_schema());
         base_tools.push(update_automation_tool_schema());
@@ -12656,14 +12692,25 @@ an uncertain date.",
                         tokio::task::spawn_blocking(move || forget_memory(&st, &args_val))
                             .await
                             .unwrap_or_else(|e| format!("Execution error: {e}"))
-                    } else if name == "update_plan" {
+                    } else if name == "update_plan" || name == "step_advance" {
                         let args_val: serde_json::Value =
                             serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
-                        let sent = args_val
-                            .get("steps")
-                            .and_then(|s| s.as_array())
-                            .cloned()
-                            .unwrap_or_default();
+                        // `step_advance` reports progress on a SINGLE step by id (no need to
+                        // re-send the whole plan → weak-model-proof, no ballooning). It maps to
+                        // a one-element `sent` and rides the exact same merge + F2-verify path.
+                        let sent = if name == "step_advance" {
+                            vec![serde_json::json!({
+                                "id": args_val.get("id").and_then(|v| v.as_str()).unwrap_or(""),
+                                "status": args_val.get("status").and_then(|v| v.as_str()).unwrap_or("doing"),
+                                "detail": args_val.get("detail").and_then(|v| v.as_str()).unwrap_or(""),
+                            })]
+                        } else {
+                            args_val
+                                .get("steps")
+                                .and_then(|s| s.as_array())
+                                .cloned()
+                                .unwrap_or_default()
+                        };
                         // MERGE the model's steps into the CANONICAL plan (never replace);
                         // returns the canonical indices newly claimed done (held `doing`
                         // until F2 verifies). See `merge_plan` for the anti-reset rule.
@@ -30713,6 +30760,28 @@ mod tests {
         assert_eq!(plan[0]["id"], "s1");
         assert_eq!(claims, vec![0]);
         assert_eq!(plan_step_status(&plan[0]), "doing");
+    }
+
+    #[test]
+    fn merge_plan_id_only_advance_no_title() {
+        // step_advance sends {id, status} WITHOUT a title → update the matching step in
+        // place (not skip, not create a titleless step). (WS1-F2 slice 2.)
+        let mut plan = vec![serde_json::json!({
+            "id": "s1", "title": "Render deck", "status": "doing", "detail": ""
+        })];
+        let claims = merge_plan(&mut plan, &[serde_json::json!({ "id": "s1", "status": "done" })]);
+        assert_eq!(plan.len(), 1, "id-only update must not create a step");
+        assert_eq!(plan[0]["title"], "Render deck", "title preserved");
+        assert_eq!(claims, vec![0]);
+        assert_eq!(plan_step_status(&plan[0]), "doing");
+    }
+
+    #[test]
+    fn merge_plan_id_only_for_missing_step_is_ignored() {
+        let mut plan: Vec<serde_json::Value> = Vec::new();
+        let claims = merge_plan(&mut plan, &[serde_json::json!({ "id": "s9", "status": "done" })]);
+        assert!(plan.is_empty(), "id-only for a non-existent step → no titleless step created");
+        assert!(claims.is_empty());
     }
 
     #[test]

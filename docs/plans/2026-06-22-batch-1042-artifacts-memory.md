@@ -23,9 +23,13 @@ modelli deboli/locali. Invarianti: monotonìa, limitatezza, identità non inferi
     rimanda (lo schema `update_plan` ha il campo `id`; il marker ‹‹PLAN›› lo mostra),
     fallback al titolo → riduce il gonfiore da titoli parafrasati, retro-compatibile,
     sicuro sui modelli deboli. Test `merge_plan_matches_by_id_despite_rephrased_title`.
-  - ☐ **Slice 2+**: `plan_propose` (crea una volta) + `step_advance` (avanza per id,
-    monotòno) che ritirano `update_plan`/`merge_plan` (identità mai inferita, anche
-    senza che il modello debole echi l'id). Convergere sull'`ExecutionPlan` orchestrator.
+  - ✅ **Slice 2 (fatto)**: tool **`step_advance(id, status)`** — riporta il progresso su
+    UN solo step per id, **senza re-inviare il piano** (weak-model-proof: niente da
+    parafrasare, niente gonfiore). Riusa lo stesso percorso merge+F2-verify di
+    `update_plan` (zero duplicazione); `merge_plan` ora aggiorna anche per **id solo** (no
+    titolo). Tool registrato + guida nel prompt + test. `update_plan` resta per creare/rivedere.
+  - ☐ **Slice 3**: convergere sull'`ExecutionPlan` del crate `orchestrator` (DAG
+    `depends_on`, `plan_propose`) e ritirare il `Vec<Value>` canonico.
 - ☐ **Floor ovunque** — constrained decoding su **tutte** le emissioni di
   orchestrazione (tool call del loop principale, piano, verifica), locale+cloud. Oggi
   è imposto solo sul contenuto di `make_deck`; il planner OpenAI-compat declassa ancora.
