@@ -21158,7 +21158,24 @@ fn resume_thread_after_approval(state: &AppState, thread_id: Option<String>, too
              Continue the task from where you left off: do the NEXT unfinished step. Do NOT re-run \
              the approved action. No summary unless the whole task is complete."
         );
-        let _ = run_agent_turn(&st, &thread_id, &prompt, "full").await;
+        // `run_agent_turn` DRAINS the stream in-process and does NOT persist — so, exactly like the
+        // channel-inbound path (see `// Persist the exchange into the thread`), we persist its
+        // output and publish `thread.updated` so the IN-APP chat surfaces the continuation even
+        // when the approval came from Telegram (no live frontend turn to stream it). If the
+        // continuation stops at the NEXT confirm, that card text is in the returned text → the new
+        // card reappears in-app (and `deliver_remote_approval` already pinged the channel), so the
+        // multi-step / multi-write chain advances one approval at a time.
+        if let Some(reply) = run_agent_turn(&st, &thread_id, &prompt, "full").await {
+            if let Ok(store) = lock_store(&st) {
+                let _ = store
+                    .append_assistant_message(&thread_id, &channel_chat_message("assistant", &reply));
+            }
+            publish_app_event(serde_json::json!({
+                "type": "thread.updated",
+                "thread_id": thread_id,
+                "workspace": base_workspace_id(),
+            }));
+        }
     });
 }
 
