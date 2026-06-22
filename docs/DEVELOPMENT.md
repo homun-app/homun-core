@@ -43,24 +43,27 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
 > [backlog](plans/2026-06-22-batch-1042-artifacts-memory.md) (gli stati ☐/✅ = i loop
 > aperti) e sei di nuovo sul filo. Stesso principio della memoria di Homun (caposaldo #8).
 
-- **Pubblicato:** **v0.1.1042** (WS3 + WS8.1 eval + WS5.2 embed-everything + WS5.3
-  open_loop). Embedding 391→407 e cattura+recall open_loop **validati in-app** (test Rossi).
-- **GAP TROVATO (WS5.7):** la memoria salva il piano/open_loop ma **scarta i finding**
-  (l'estrattore: "do NOT extract … what the assistant said") → una chat nuova ricostruisce
-  un quadro "troppo pulito", **incoerente** con l'originale (es. A diceva "non trovo il
-  file", B non lo riportava). Serve cattura **completa & coerente** (anche i negativi) +
-  `open_loop` più ricchi. **Da fare PRIMA di WS5.4** (iniettare open_loop incompleti
-  propagherebbe l'incoerenza).
-- **In locale (2 commit, da verificare in-app):** ✅ WS5.7 (estrattore cattura finding +
-  negativi + open_loop completi) · ✅ WS5.4a (open_loop nel briefing always-on:
-  `gather_open_loops` + sezione OPEN LOOPS in cima a `format_memory_block`, test verdi).
-- **PROSSIMO:** **build v1043** per verificare in-app WS5.7+5.4a (re-test Rossi: la chat B
-  deve ricordare "nessun file ancora" E una chat NUOVA deve mostrare i loop aperti **senza**
-  nominare il topic) → poi WS5.4b (`stato-lavori.md`) + WS5.4c (chiusura+dedup) + WS5.5
-  (provenienza) → WS2 → WS1-Fase2 (piano).
-- **Poi:** WS5.5 (provenienza) · WS2 (artefatti) · WS1-Fase 2 (gestione piano) · WS1 3-6 ·
-  WS6/7/8/9. Ordine completo nel backlog.
-- **Sfondo:** Motore cross-modello Fase 1 ✅ v1041 (deck verificato vero-locale).
+- **Pubblicato:** **v0.1.1043** = memoria coerente (WS5.7: estrattore cattura i *finding*
+  inclusi i **negativi** + `open_loop` completi) + **WS5.4a** (open_loop nel briefing
+  always-on: `gather_open_loops` + sezione "OPEN LOOPS" in cima a `format_memory_block`).
+  *(v1042 aveva WS3 + WS8.1 eval + WS5.2 embed-everything + WS5.3 open_loop.)*
+- **DA VERIFICARE IN-APP (gate, modifiche memoria CORE):** re-test Rossi su 1043 →
+  (1) chat B deve ricordare anche **"nessun file ancora"** (WS5.7); (2) una chat **NUOVA**
+  deve mostrare i loop aperti **senza** nominare il topic (WS5.4a). L'eval headless non
+  copre recall/briefing.
+- **In locale, 3 commit → v1044 (tutto verde, no trailer):** WS1-F2 motore piano —
+  ✅ slice 1 (`merge_plan` per `id`, fallback titolo) · ✅ slice 1b (prompt: eco dell'`id`) ·
+  ✅ slice 2 (**`step_advance(id,status)`**: progresso per id **senza re-inviare il piano**,
+  weak-model-proof; riusa merge+F2-verify). Chiude alla radice il gonfiore del piano.
+- **PROSSIMO (decidere):** **(1) build v1044** per testare in-app il motore piano + la
+  memoria 1043 *(consigliato prima di impilare)* · oppure **(2) WS1-F2 slice 3** (convergere
+  sull'`ExecutionPlan`/DAG del crate `orchestrator`, ritirare il `Vec<Value>` canonico) ·
+  oppure **(3) WS2 artefatti** / **WS4 qualità**.
+- **Coda:** WS5.4b (`stato-lavori.md`) · WS5.4c (chiusura+dedup) · WS5.5 (provenienza) ·
+  WS2 · WS1 3-6 · WS6/7/8/9. Ordine nel backlog.
+- **Regole operative:** build LOCAL, verde a ogni passo, doc aggiornati nello stesso turno,
+  **publish solo su comando utente**, **niente trailer Co-Authored-By** ([[homun-no-claude-coauthor]]).
+- **Sfondo:** Motore cross-modello Fase 1 ✅ v1041 (deck verificato vero-locale, gemma4:latest).
 
 ## Diagrammi dettagliati (si aggiornano "man mano")
 
