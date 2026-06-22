@@ -45,13 +45,12 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
 
 ### Cruscotto operativo attuale
 
-- **Linea attiva:** WS6.2 Resource Governor — slice 1+2+3+4 completate localmente:
-  reidratazione dei task `WaitingResource` quando la capacità torna disponibile,
-  sia nel gateway sia nel `TaskRuntime` standalone; la API task queue ora espone
-  uso, limite, disponibilità e saturazione per classe risorsa; stress-gate
-  cross-connection con due worker/store separati passato su `llm_inference`
-  conteso. Prossimo passo: decidere se chiudere WS6.2 così o aggiungere una
-  slice breve di configurabilità UI/diagnostica dei limiti prima di WS6.3.
+- **Linea attiva:** WS6.3 Scheduler / ricorrenza + proactive review. WS6.2 è
+  chiusa localmente: recovery `WaitingResource` gateway/runtime, API pressione
+  risorse e stress-gate cross-connection sono verdi. Slice WS6.3a completata
+  localmente: materializzazione della prossima occorrenza nel `TaskRuntime`
+  standalone; prossimo slice WS6.3b = failure/retry recurrence parity tra
+  runtime e gateway.
 - **Fatto e verificato localmente:** root automatica del progetto, bypass conferma
   solo per scritture Filesystem MCP dentro root; outside-root resta confirm-gated;
   routing Auto thread-aware + fallback orchestratore su `400` con tool; approval
@@ -187,6 +186,17 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   `cargo test -p local-first-desktop-gateway` = **162 passati, 1 ignorato**;
   `cargo build -p local-first-desktop-gateway` verde; `npm run build` desktop
   verde; `git diff --check` pulito.
+- **WS6.3a runtime recurrence materialization FATTO (2026-06-22):** test
+  red/green aggiunto:
+  `task_runtime_materializes_next_recurrence_after_completion`. Red confermato:
+  `TaskRuntime::run_ready_once` completava il task ricorrente ma non inseriva
+  `daily@occ@...`; il gateway lo faceva già nel proprio worker. Fix locale:
+  dopo `Completed`, `TaskRuntime` chiama `TaskScheduler::next_recurrence` e
+  inserisce l'occorrenza successiva nello stesso store. Verifiche:
+  `cargo test -p local-first-task-runtime` verde; `cargo test -p
+  local-first-desktop-gateway` = **162 passati, 1 ignorato**; `cargo build -p
+  local-first-desktop-gateway` verde; `npm run build` desktop verde;
+  `git diff --check` pulito.
 - **Divieto operativo:** niente altri test di scrittura via endpoint HTTP grezzo;
   per questo gate usare solo UI/app o callback Telegram reale.
 

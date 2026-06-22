@@ -2,43 +2,39 @@
 
 ## Obiettivo attivo
 
-WS6.2 Resource Governor: rendere durevole e osservabile la backpressure dei task,
-così un task bloccato da saturazione risorsa non resta stranded e l'app espone
-uso/limite/disponibilità per classe risorsa.
+WS6.3 Scheduler / ricorrenza + proactive review: rendere affidabile il ciclo
+ricorrente end-to-end, dal runtime task fino alla consegna delle schede/proposte
+proattive.
 
 ## Fase corrente
 
-Path B e WS6.1c sono chiusi: le scritture MCP Filesystem dentro root progetto
-sono workspace-scoped, fuori root restano confirm-gated, e l'approvazione
-Telegram riprende il turno restando ancorata a richiesta originale e argomenti
-approvati.
+WS6.2 Resource Governor è chiusa localmente: i task in `WaitingResource` vengono
+reidratati quando torna capacità, la task queue espone pressione risorse, e il
+gate cross-connection con due worker/store separati è verde.
 
-WS6.2 ha completato quattro slice locali:
-
-1. gateway sweep `WaitingResource` → `Queued` quando la risorsa torna disponibile;
-2. stesso recupero in `TaskRuntime::run_ready_once`;
-3. API task queue con `units`, `limit_units`, `available_units`, `saturated`;
-4. stress gate cross-connection su SQLite condiviso con due worker/store separati
-   e `llm_inference=1`.
+WS6.3 è partita dal contratto più stretto: il gateway materializzava già la
+prossima occorrenza dopo un task ricorrente completato, mentre il `TaskRuntime`
+standalone no. Slice WS6.3a completata: runtime allineato al gateway con test
+red/green.
 
 Piano attivo:
-[2026-06-22-resource-governor-ws6-2.md](superpowers/plans/2026-06-22-resource-governor-ws6-2.md).
+[2026-06-22-scheduler-recurrence-ws6-3.md](superpowers/plans/2026-06-22-scheduler-recurrence-ws6-3.md).
 
 ## Milestone
 
-1. Decidere se WS6.2 è chiudibile con le verifiche attuali o se serve una
-   micro-slice UI/diagnostica per configurare/mostrare i limiti risorsa.
-2. Se chiusa, passare a WS6.3 Scheduler/ricorrenza + proactive review.
-3. Tenere aggiornata la memoria durevole (`docs/DEVELOPMENT.md` + backlog) a
-   ogni checkpoint verificato.
+1. WS6.3a — `TaskRuntime` materializza la prossima occorrenza dopo completion.
+2. WS6.3b — verificare comportamento terminal failure/retry su ricorrenze tra
+   runtime e gateway.
+3. WS6.3c — gate in-app di una automazione ricorrente/proactive prompt visibile
+   nel thread `scheduled`.
+4. WS6.3d — proactive review: schede governate, dedup e superficie UI verificati.
 
 ## Blocco noto
 
-Nessun blocco tecnico attivo su WS6.2. La limitazione residua è di prodotto: non
-è ancora deciso se i limiti risorsa debbano essere configurabili in UI prima di
-iniziare WS6.3.
+Nessun blocco tecnico attivo. Il prossimo rischio è divergenza tra runtime
+standalone e worker gateway sui casi non-happy-path delle ricorrenze.
 
 ## Prossima azione
 
-Committare il checkpoint WS6.2d, poi decidere: chiusura WS6.2 e passaggio a
-WS6.3 oppure micro-slice WS6.2e UI/diagnostica limiti.
+Committare WS6.3a senza co-author, poi proseguire con WS6.3b: failure/retry
+recurrence parity tra runtime standalone e gateway.

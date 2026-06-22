@@ -96,6 +96,7 @@ impl TaskRuntime {
             match self.executor.execute_step(&leased_task, checkpoint) {
                 Ok(ExecutorResult::Completed { .. }) => {
                     self.finish_task(&mut leased_task, TaskStatus::Completed, None, now)?;
+                    self.insert_next_recurrence(&leased_task, now)?;
                     summary.completed += 1;
                 }
                 Ok(ExecutorResult::Checkpoint {
@@ -201,6 +202,17 @@ impl TaskRuntime {
         self.clear_execution_state(task, now);
         self.resources.release(&self.store, task)?;
         self.store.insert_task(task)
+    }
+
+    fn insert_next_recurrence(
+        &self,
+        completed: &TaskRecord,
+        now: OffsetDateTime,
+    ) -> TaskRuntimeResult<()> {
+        if let Some(next) = self.scheduler.next_recurrence(completed, now) {
+            self.store.insert_task(&next)?;
+        }
+        Ok(())
     }
 
     fn clear_execution_state(&self, task: &mut TaskRecord, now: OffsetDateTime) {

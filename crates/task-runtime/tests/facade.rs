@@ -45,6 +45,37 @@ fn task_runtime_completes_ready_task_and_releases_resources() {
 }
 
 #[test]
+fn task_runtime_materializes_next_recurrence_after_completion() {
+    let user = UserId::new("user_1");
+    let workspace = WorkspaceId::new("workspace_1");
+    let store = TaskStore::open_in_memory().unwrap();
+    let now = OffsetDateTime::now_utc();
+    let recurring = task("daily", &user, &workspace).with_recurrence("every 1d", None);
+    store.insert_task(&recurring).unwrap();
+    let executor = FakeTaskExecutor::new(vec![ExecutorResult::Completed {
+        output: json!({"ok": true}),
+    }]);
+    let mut runtime = TaskRuntime::new(
+        store,
+        Box::new(executor),
+        ResourceLimits::new().with_limit(ResourceClass::LlmInference, 1),
+        "worker_a",
+    );
+
+    let summary = runtime.run_ready_once(&user, &workspace, now).unwrap();
+    let tasks = runtime.store().list_tasks(&user, &workspace).unwrap();
+    let next = tasks
+        .iter()
+        .find(|task| task.task_id.as_str().starts_with("daily@occ@"))
+        .expect("next recurring occurrence inserted");
+
+    assert_eq!(summary.completed, 1);
+    assert_eq!(next.status, TaskStatus::Queued);
+    assert_eq!(next.recurrence.as_deref(), Some("every 1d"));
+    assert!(next.not_before.expect("next occurrence time") > now);
+}
+
+#[test]
 fn task_runtime_requeues_waiting_resource_before_scheduling() {
     let user = UserId::new("user_1");
     let workspace = WorkspaceId::new("workspace_1");

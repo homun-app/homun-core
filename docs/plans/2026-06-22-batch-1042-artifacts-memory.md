@@ -284,7 +284,7 @@ cablato** nel flusso agente. ADR 0015.
   `status='executed'`, `dispatched_at` valorizzato e `resolved_at` valorizzato;
   thread con status running+executed e finale ancorato al path/contenuto
   `ux-ok-2`; file presente sul Desktop. **WS6.1c chiusa.**
-- 🟡 **6.2 Resource Governor** attivo sui task (limiti, backpressure).
+- ✅ **6.2 Resource Governor** attivo sui task (limiti, backpressure).
   **Slice 1 FATTA (2026-06-22):** fix backpressure recuperabile. Gap trovato:
   `WaitingResource` non rientrava in `ready_tasks` dopo rilascio risorsa, perché
   lo scheduler considera solo `Queued|Pending`. Implementato
@@ -319,11 +319,18 @@ cablato** nel flusso agente. ADR 0015.
   `task_runtime_recovers_resource_wait_across_worker_connections`. Verifiche:
   `cargo test -p local-first-task-runtime` verde; gateway **162 passati, 1
   ignorato**; build gateway e desktop verdi; `git diff --check` pulito.
-  **Prossimo passo:**
-  decidere se chiudere 6.2 e passare a 6.3, oppure aggiungere una micro-slice UI
-  per configurare/mostrare i limiti risorsa.
-- ☐ **6.3 Scheduler / ricorrenza** + **proactive review** (l'assistente propone schede
+  **Decisione:** 6.2 chiusa; la UI configurabile dei limiti resta una futura
+  micro-slice opzionale, non blocca 6.3.
+- 🟡 **6.3 Scheduler / ricorrenza** + **proactive review** (l'assistente propone schede
   in autonomia governata) verificati end-to-end.
+  **Slice 1 FATTA (2026-06-22):** allineato `TaskRuntime` standalone al worker
+  gateway sulla ricorrenza. Test red/green:
+  `task_runtime_materializes_next_recurrence_after_completion` (red: completava
+  il task `daily` ma non inseriva `daily@occ@...`; green: occorrenza successiva
+  `Queued`, `not_before > now`, stessa recurrence). Verifiche: task-runtime
+  verde; gateway **162 passati, 1 ignorato**; build gateway e desktop verdi;
+  `git diff --check` pulito.
+  **Prossimo slice:** failure/retry recurrence parity tra runtime e gateway.
 - ☐ **6.4** Le azioni proattive scrivono in memoria (loop aperti / decisioni) — lega WS5.
 
 ## WS7 — Ecosistema deliverable (Manus)
