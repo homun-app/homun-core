@@ -10,6 +10,18 @@
 
 ---
 
+## Execution checkpoint — 2026-06-22
+
+- Completed: bridge rebind/authentication + redacted callback outcome (`1ab8a53`); gateway
+  rebind/fallback after HTTP bind (`793ca9c`); bounded readiness wait for the tracked startup
+  child (`417ee95`).
+- Verified: `cargo test --manifest-path runtimes/channel-telegram/Cargo.toml` (**6 passed**);
+  `cargo test -p local-first-desktop-gateway` (**151 passed, 1 ignored**); both binaries build.
+- Runtime evidence: stale installed bridge was replaced; next Electron startup retained the
+  live bridge; Telegram connect returned `reconfigured:true`.
+- Remaining: Task 4 only — the real Gemma `demo-piano` approval through Telegram and durable
+  filesystem/chat-store evidence. Do not mark WS6 6.1b complete before it passes.
+
 ## File structure
 
 - `runtimes/channel-telegram/src/main.rs`: loopback bridge API, mutable callback target, callback forwarding diagnostics and unit tests.

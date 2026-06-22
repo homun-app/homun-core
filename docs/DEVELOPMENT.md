@@ -116,6 +116,15 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   sembra non fare nulla. Da fare prima del gate Telegram: lifecycle/handshake che riagganci o
   rimpiazzi un sidecar orfano senza riusare credenziali stale, più diagnostica redatta dello
   status callback. Il resume 6.1b non è ancora falsificato da Telegram.
+  **Lifecycle Telegram IMPLEMENTATO e verificato tecnicamente (2026-06-22):** bridge con target
+  callback mutabile + `POST /configure-gateway` autenticato loopback (commit `1ab8a53`);
+  gateway rebind→fallback legacy dopo il bind HTTP (commit `793ca9c`) + wait limitato per il
+  proprio child in avvio (commit `417ee95`). Test: bridge **6/6**; gateway **151 passati, 1
+  ignorato**; entrambi i binari buildano. Runtime in Electron: bridge installato stale sostituito,
+  riavvio successivo logga `reconfigured existing sidecar`, e `POST .../telegram/connect` ritorna
+  `{"ok":true,"reconfigured":true}`. **Resta PENDENTE il gate funzionale 6.1b:** prompt Gemma →
+  approvazione Telegram → `✅ Done` → resume fino a `note.md` + `riepilogo.md` + prova
+  `chat_messages`. Non avviare WS6.1c/Path B prima di questa prova.
 - **Coda:** WS5.4b (`stato-lavori.md`) · WS5.4c (chiusura+dedup) · WS5.5 (provenienza) ·
   WS2 · WS1 3-6 · WS6/7/8/9. Ordine nel backlog.
 - **Regole operative:** build LOCAL, verde a ogni passo, doc aggiornati nello stesso turno,

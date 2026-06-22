@@ -174,6 +174,14 @@ cablato** nel flusso agente. ADR 0015.
   della callback, perciò il tap non mostra errore. Prima del gate Telegram: rendere il lifecycle
   del sidecar resiliente a restart/update (rebind/handshake con token corrente, senza credenziali
   in log) e registrare esito HTTP redatto della callback. Non attribuire questo al resume 6.1b.
+  **Lifecycle fix FATTO (commit `1ab8a53` + `793ca9c` + `417ee95`):** `/configure-gateway`
+  autenticato reimposta URL+token callback in memoria; il gateway tenta rebind dopo il bind HTTP,
+  sostituisce solo bridge legacy/stale e attende al massimo 3 s il proprio child prima del primo
+  rebind. Bridge test **6/6**, gateway **151 passati / 1 ignorato**, build locali verdi. Prova
+  Electron: stale installato → replacement; avvio seguente → `reconfigured existing sidecar`;
+  connect API → `reconfigured:true`. **Gate Telegram END-TO-END ancora pendente:** serve la prova
+  approvazione reale di `demo-piano` con filesystem + chat store prima di chiudere 6.1b o aprire
+  WS6.1c / Path B.
 - ☐ **6.2 Resource Governor** attivo sui task (limiti, backpressure).
 - ☐ **6.3 Scheduler / ricorrenza** + **proactive review** (l'assistente propone schede
   in autonomia governata) verificati end-to-end.
