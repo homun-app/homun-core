@@ -9167,7 +9167,15 @@ async fn generate_deck_content(
     // `choices[0]`, so we MUST hit the OpenAI-compat endpoint (this is exactly the
     // path the deck-content eval validates, 5/5 on gemma).
     let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
-    let lang = if language.trim().is_empty() { "the user's language" } else { language.trim() };
+    // Robust, model-independent language: if the caller didn't pass one, tell the
+    // model to MATCH the brief's language (the brief is always present and in the
+    // user's language) instead of a vague "the user's language" that defaults to
+    // English. Fixes Italian requests coming back as an English deck.
+    let lang = if language.trim().is_empty() {
+        "the SAME language as the user's brief below".to_string()
+    } else {
+        format!("the language with code '{}'", language.trim())
+    };
     let org = if brand.organization.trim().is_empty() {
         "the organization"
     } else {
@@ -24559,6 +24567,9 @@ fn active_inference_model_info() -> ActiveModelResponse {
 struct ProviderModelsGroup {
     provider_id: String,
     label: String,
+    /// Provider endpoint, so the picker can label each model 💻 local vs ☁️ cloud
+    /// (a remote base_url OR a `:cloud`/`-cloud` model tag = cloud compute).
+    base_url: String,
     models: Vec<String>,
 }
 
@@ -24611,6 +24622,7 @@ async fn runtime_models(State(state): State<AppState>) -> Json<RuntimeModelsResp
                 .map(|p| ProviderModelsGroup {
                     provider_id: p.id.clone(),
                     label: p.label.clone(),
+                    base_url: p.base_url.clone(),
                     models: p.models.iter().map(|m| m.id.clone()).collect(),
                 })
                 .collect();

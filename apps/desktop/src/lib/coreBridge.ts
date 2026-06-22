@@ -539,6 +539,8 @@ export interface CloseAllBrowsersResult {
 export interface ProviderModelsGroup {
   provider_id: string;
   label: string;
+  /** Provider endpoint — lets the picker badge each model 💻 local vs ☁️ cloud. */
+  base_url?: string;
   models: string[];
 }
 

@@ -7551,6 +7551,18 @@ function Composer({
                                   <span className="composer-model-dot" />
                                 )}
                                 <span className="composer-model-name">{modelId}</span>
+                                {(() => {
+                                  const cloud = modelIsCloud(group.base_url, modelId);
+                                  return (
+                                    <span
+                                      className={`composer-model-loc ${cloud ? "cloud" : "local"}`}
+                                      title={cloud ? "Runs in the cloud" : "Runs on this machine"}
+                                      aria-label={cloud ? "cloud" : "local"}
+                                    >
+                                      {cloud ? "☁️" : "💻"}
+                                    </span>
+                                  );
+                                })()}
                                 {modelId === activeModel && <small>default</small>}
                               </button>
                             );
@@ -7664,6 +7676,23 @@ function blobToBase64(blob: Blob): Promise<string> {
 function shortModelName(model: string): string {
   const tail = model.includes("/") ? model.slice(model.lastIndexOf("/") + 1) : model;
   return tail.length > 22 ? `${tail.slice(0, 21)}…` : tail;
+}
+
+/** Whether a model runs in the cloud (☁️) vs on this machine (💻): true when the
+ * model id carries an Ollama cloud tag (`:cloud`/`-cloud`) OR its provider endpoint
+ * is remote (not localhost). Engine-authoritative, name as a fallback signal. */
+function modelIsCloud(baseUrl: string | undefined, modelId: string): boolean {
+  const m = modelId.toLowerCase();
+  if (m.includes(":cloud") || m.includes("-cloud")) return true;
+  const b = (baseUrl ?? "").toLowerCase();
+  if (!b) return false;
+  const local =
+    b.includes("127.0.0.1") ||
+    b.includes("localhost") ||
+    b.includes("0.0.0.0") ||
+    b.includes("[::1]") ||
+    b.includes("://::1");
+  return !local;
 }
 
 function formatContextTokens(n: number): string {
