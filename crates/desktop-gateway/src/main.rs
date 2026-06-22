@@ -15984,7 +15984,7 @@ fn telegram_port_open() -> bool {
     .is_ok()
 }
 
-fn telegram_running() -> bool {
+fn tracked_telegram_child_running() -> bool {
     if let Ok(mut guard) = telegram_child().lock() {
         if let Some(child) = guard.as_mut() {
             match child.try_wait() {
@@ -15993,7 +15993,24 @@ fn telegram_running() -> bool {
             }
         }
     }
-    telegram_port_open()
+    false
+}
+
+fn telegram_running() -> bool {
+    tracked_telegram_child_running() || telegram_port_open()
+}
+
+fn telegram_rebind_should_wait(tracked_child_running: bool, port_open: bool) -> bool {
+    tracked_child_running && !port_open
+}
+
+async fn wait_for_telegram_sidecar_ready() {
+    for _ in 0..30 {
+        if telegram_port_open() {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -16080,6 +16097,10 @@ async fn ensure_telegram_sidecar(
     state: &AppState,
     token: &str,
 ) -> Result<TelegramBridgeAction, GatewayError> {
+    let tracked_child_running = tracked_telegram_child_running();
+    if telegram_rebind_should_wait(tracked_child_running, telegram_port_open()) {
+        wait_for_telegram_sidecar_ready().await;
+    }
     if telegram_running() {
         let rebind = rebind_telegram_sidecar(state, token).await;
         let action = telegram_bridge_action(rebind);
@@ -30769,6 +30790,13 @@ mod tests {
             super::telegram_bridge_action(super::RebindResult::Transport),
             super::TelegramBridgeAction::Replace,
         );
+    }
+
+    #[test]
+    fn telegram_rebind_waits_only_for_its_starting_child() {
+        assert!(super::telegram_rebind_should_wait(true, false));
+        assert!(!super::telegram_rebind_should_wait(false, false));
+        assert!(!super::telegram_rebind_should_wait(true, true));
     }
 
     #[test]
