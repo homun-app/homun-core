@@ -33,7 +33,7 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
 | **Scelte precise** (perché abbiamo deciso X) | [decisions/](decisions/) — ADR 0001-0016 (immutabili) |
 | **Com'è fatto** (architettura + diagrammi) | [architecture/](architecture/) — overview + memory + agent-loop + plugins + system-map |
 | **Dove siamo / cosa manca** (backlog corrente) | [plans/2026-06-22-…](plans/2026-06-22-batch-1042-artifacts-memory.md) |
-| **La memoria** (visione + struttura) | [memory-vision.md](memory-vision.md) · [memory-architecture.md](memory-architecture.md) |
+| **La memoria** (contratto operativo + visione + struttura) | [MEMORIA.md](MEMORIA.md) · [memory-vision.md](memory-vision.md) · [memory-architecture.md](memory-architecture.md) |
 | **Prodotto / distribuzione / self-host** | [PRODUCT_LOOP.md](PRODUCT_LOOP.md) · [distribution.md](distribution.md) · [self-host.md](self-host.md) · [release-macos.md](release-macos.md) |
 | **Storico** (changelog, vecchi piani, snapshot) | [archive/](archive/) — non più "corrente", solo memoria storica |
 
@@ -50,6 +50,7 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   e write-back memoria proattiva sono coperti da test e build. Resta consigliato
   un ultimo smoke manuale in-app su automazione schedulata reale nel thread
   `scheduled` prima di pubblicare/taggare.
+  Il contratto operativo corrente della memoria è [MEMORIA.md](MEMORIA.md).
 - **Fatto e verificato localmente:** root automatica del progetto, bypass conferma
   solo per scritture Filesystem MCP dentro root; outside-root resta confirm-gated;
   routing Auto thread-aware + fallback orchestratore su `400` con tool; approval
@@ -386,11 +387,23 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   finale chat sul path approvato e zero `path-b-gate/note.md` nel thread.
   **Path B approval/provenienza chiusa**; non usare più endpoint grezzi per test
   di scrittura reali.
-- **Coda aggiornata:** WS5.4b (`stato-lavori.md`) · WS5.4c (chiusura+dedup) ·
-  WS2-3.1 (artefatti come entità memoria) · WS2-3.2/3.3 (schermata/lifecycle
-  artefatti) · WS5.5/5.6 (provenienza + eval memoria) · WS1-Fase 2/3
-  (piano/workflow runner) · WS7 per ultimo nel blocco prodotto, quando memoria
-  e deliverable lifecycle sono solidi.
+- **Coda aggiornata:** WS2-3.1 gate in-app (artefatti come entità memoria) ·
+  WS2-3.2/3.3 (schermata/lifecycle artefatti) · WS5.5/5.6 (provenienza + eval
+  memoria) · WS1-Fase 2/3 (piano/workflow runner) · WS7 per ultimo nel blocco
+  prodotto, quando memoria e deliverable lifecycle sono solidi.
+- **WS5.4b locale/verde:** `/api/memory/wiki` proietta `stato-lavori.md` dagli
+  `open_loop`, con ref sorgenti e dedup parafrasi nella pagina; il re-ingest wiki
+  è generico per pagine memoria. Test focalizzato `status_wiki` verde.
+- **WS5.4c locale/verde:** gli `open_loop` parafrasati vengono superseduti nello
+  store via `MemoryFacade::merge_memories`; briefing e `stato-lavori.md`
+  filtrano `superseded_by`. La chiusura avviene con evidenza esplicita:
+  l'estrattore emette `metadata.closes_open_loop`, il runtime verifica overlap
+  con un loop attivo e marca quel loop `Stale`.
+- **WS2-3.1 locale/headless:** i produttori artifact principali registrano ogni
+  artifact surfaced nel `MemoryFacade` come `memory_type="artifact"` + entity
+  grafo `artifact`, con metadata path/thread/tipo/dimensione e backfill embedding
+  immediato. Test mirato `artifact_memory_upsert_creates_single_record_and_graph_entity`
+  verde. **Prossimo gate:** creare un artifact in-app e verificare DB/recall.
 - **Regole operative:** build LOCAL, verde a ogni passo, doc aggiornati nello stesso turno,
   **publish solo su comando utente**, **niente trailer Co-Authored-By** ([[homun-no-claude-coauthor]]).
 - **Sfondo:** Motore cross-modello Fase 1 ✅ v1041 (deck verificato vero-locale, gemma4:latest).

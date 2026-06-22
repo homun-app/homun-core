@@ -8,11 +8,13 @@
 
 | Livello | Ruolo (cervello) | Tecnologia |
 |---|---|---|
-| **Grafo** (entità+relazioni) | sinapsi — COSA↔COSA + **PERCHÉ** (archi causali) | `entities`/`relations`, `graphify` |
+| **Grafo** (entità+relazioni) | sinapsi — COSA↔COSA + **PERCHÉ** (archi causali) | `entities`/`relations`; **Graphify/graphification** come pattern di estrazione/import |
 | **SQL** (memorie+embedding+FTS) | richiamo veloce — atomi + indici | `memories`, `memory_embeddings`, FTS5, **RRF** |
 | **Markdown** (wiki per progetto) | pagine del quaderno — leggibile/editabile/portabile | `wiki_pages` + `WikiFileStore`, **bidirezionale** |
 
-Verità = SQL+grafo; **markdown = proiezione + superficie editabile + export portabile**
+Verità = SQL+grafo; **Graphify** è oggi l'adapter maturo per il sottografo codice,
+ma il pattern è più generale: graphificare conoscenza strutturata prima di ridurla
+a testo. `graphify-out` e cache simili sono derivate; **markdown = proiezione + superficie editabile + export portabile**
 (ciò che una **chat nuova** legge per la continuità).
 
 ## Il flusso
@@ -39,7 +41,9 @@ flowchart LR
 ## Mappa memoria umana (copertura)
 
 semantica ✅ · episodica ✅ · procedurale 🟡 · **provenienza/PERCHÉ 🟡 poco popolata** ·
-**working-memory/loop-aperti ❌** · associativa (grafo) 🟡 (enorme ma **solo codice**).
+**working-memory/loop-aperti ✅ locale** · artifact/deliverable 🟡 locale/headless ·
+associativa (grafo) 🟡 (enorme ma oggi **soprattutto codice**, perché il code graph
+è il primo adapter maturo).
 
 ## Baseline reale (2026-06-22)
 
@@ -50,6 +54,6 @@ pezzi che fanno "ricordare il perché e sopravvivere".
 ## Da completare → backlog WS5
 
 5.1 grafo esteso a decisioni/artefatti/piano + **archi-perché** · 5.2 embeddare tutto ·
-5.3 **loop aperti** di prima classe (Zeigarnik) · 5.4 **proiezione markdown attiva**
-(iniettata nelle chat nuove) · 5.5 catena provenienza decisione→artefatto→codice→esito ·
+5.3/5.4 **loop aperti** di prima classe + proiezione markdown attiva · WS2-3.1
+artifact come memoria/entity · 5.5 catena provenienza decisione→artefatto→codice→esito ·
 5.6 **eval memoria**. Vedi [WS5](../plans/2026-06-22-batch-1042-artifacts-memory.md).

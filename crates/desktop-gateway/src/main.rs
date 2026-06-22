@@ -82,7 +82,7 @@ use local_first_memory::{
     DataSensitivity as MemoryDataSensitivity, ExtractedEntity, ExtractedMemory, ExtractedRelation,
     MemoryAccessRequest, MemoryCreateRequest, MemoryDashboard, MemoryEntity,
     MemoryExtraction,
-    MemoryFacade, MemoryLifecycleRequest, MemoryRef, MemoryRefKind, MemoryRelation,
+    MemoryFacade, MemoryLifecycleRequest, MemoryRecord, MemoryRef, MemoryRefKind, MemoryRelation,
     MemorySearchRequest, MemoryStatus, MemoryUiReadModel, MemoryUpdatePatch, MemoryWikiProjection,
     PrivacyDomain,
     SQLiteMemoryStore, UserId as MemoryUserId, WikiFileStore, WikiPage,
@@ -987,10 +987,7 @@ fn gather_open_loops(state: &AppState, cap: usize) -> Vec<String> {
         .list_memories_for_ui(&user, &workspace)
         .unwrap_or_default()
         .into_iter()
-        .filter(|m| {
-            m.memory_type == "open_loop"
-                && matches!(m.status, MemoryStatus::Confirmed | MemoryStatus::Candidate)
-        })
+        .filter(active_open_loop_record)
         .map(|m| m.text.trim().replace('\n', " "))
         .collect();
     if items.len() > cap {
@@ -2538,6 +2535,11 @@ fn persist_scope_memories(
     if memories.is_empty() {
         return;
     }
+    let closure_targets: Vec<String> = memories
+        .iter()
+        .filter(|memory| memory.memory_type != "open_loop")
+        .flat_map(open_loop_closure_targets)
+        .collect();
     // Dedup against the FULL set of existing memories in this scope (not the
     // budget-limited profile) by content overlap — the extractor re-phrases the same
     // decision across turns ("Scelto JSON…" / "taskline usa JSON…"), so exact-match
@@ -2595,6 +2597,7 @@ fn persist_scope_memories(
             let _ = facade.confirm_memory(&lifecycle, reference, "auto-confirmed (low risk)");
         }
     }
+    let closed = close_matching_open_loops(facade, user_id, workspace, &closure_targets);
     // G2/regeneration invariant: connect memories to the entities they mention.
     // We re-link the WHOLE live set of this scope (not just the new items) so that
     // entities created in THIS extraction retroactively pick up older memories that
@@ -2615,6 +2618,9 @@ fn persist_scope_memories(
         }
     }
     link_memory_mentions(facade, user_id, workspace, &items);
+    if deduplicate_open_loops(facade, user_id, workspace) > 0 || closed > 0 {
+        rebuild_status_wiki(facade, user_id, workspace);
+    }
 }
 
 /// Reserved workspace for THREAD (episodic) memory — "what we discussed". Kept
@@ -2666,6 +2672,251 @@ fn store_episode(
     };
     if let Some(reference) = result.memory_refs.first() {
         let _ = facade.confirm_memory(&lifecycle, reference, "episode");
+    }
+}
+
+fn artifact_memory_kind(name: &str) -> String {
+    let lower = name.to_ascii_lowercase();
+    if lower.ends_with(".pdf") {
+        "pdf".to_string()
+    } else if lower.ends_with(".pptx") {
+        "presentation".to_string()
+    } else if lower.ends_with(".xlsx") || lower.ends_with(".csv") {
+        "spreadsheet".to_string()
+    } else if lower.ends_with(".html") {
+        "html".to_string()
+    } else if lower.ends_with(".png")
+        || lower.ends_with(".jpg")
+        || lower.ends_with(".jpeg")
+        || lower.ends_with(".webp")
+    {
+        "image".to_string()
+    } else if lower.ends_with(".json") {
+        "data".to_string()
+    } else if lower.ends_with(".md") || lower.ends_with(".txt") {
+        "document".to_string()
+    } else {
+        "file".to_string()
+    }
+}
+
+fn artifact_memory_matches(memory: &MemoryRecord, thread_slug: &str, name: &str) -> bool {
+    memory.memory_type == "artifact"
+        && !matches!(
+            memory.status,
+            MemoryStatus::Deleted | MemoryStatus::Rejected | MemoryStatus::Stale
+        )
+        && memory
+            .metadata
+            .get("thread_slug")
+            .and_then(|value| value.as_str())
+            == Some(thread_slug)
+        && memory
+            .metadata
+            .get("name")
+            .and_then(|value| value.as_str())
+            == Some(name)
+}
+
+fn upsert_artifact_memory_record(
+    facade: &MemoryFacade,
+    user: &MemoryUserId,
+    workspace: &MemoryWorkspaceId,
+    lifecycle: &MemoryLifecycleRequest,
+    privacy_domain: &str,
+    thread_slug: &str,
+    name: &str,
+    text: String,
+    metadata: serde_json::Value,
+) -> Result<MemoryRef, String> {
+    let existing = facade
+        .list_memories_for_ui(user, workspace)
+        .unwrap_or_default()
+        .into_iter()
+        .find(|memory| artifact_memory_matches(memory, thread_slug, name));
+    let record = if let Some(existing) = existing {
+        facade
+            .update_memory(
+                lifecycle,
+                &existing.reference,
+                MemoryUpdatePatch {
+                    text: Some(text),
+                    aliases: None,
+                    language_hints: None,
+                    confidence: Some(1.0),
+                    privacy_domain: Some(PrivacyDomain::new(privacy_domain)),
+                    sensitivity: Some(MemoryDataSensitivity::Internal),
+                    metadata: Some(metadata.clone()),
+                    last_seen_at: None,
+                },
+            )
+            .map_err(|error| error.to_string())?
+    } else {
+        let record = facade
+            .create_memory_candidate(MemoryCreateRequest {
+                request: lifecycle.clone(),
+                memory_type: "artifact".to_string(),
+                text,
+                aliases: vec![name.to_string()],
+                language_hints: Vec::new(),
+                confidence: 1.0,
+                privacy_domain: PrivacyDomain::new(privacy_domain),
+                sensitivity: MemoryDataSensitivity::Internal,
+                evidence_refs: Vec::new(),
+                metadata: metadata.clone(),
+            })
+            .map_err(|error| error.to_string())?;
+        facade
+            .confirm_memory(lifecycle, &record.reference, "artifact generated")
+            .map_err(|error| error.to_string())?
+    };
+    let canonical_key = format!("artifact:{thread_slug}:{name}");
+    let entity_ref = MemoryRef::new(
+        MemoryRefKind::Entity,
+        user.clone(),
+        workspace.clone(),
+        canonical_key.clone(),
+    );
+    facade
+        .upsert_entity(&MemoryEntity {
+            reference: entity_ref.clone(),
+            user_id: user.clone(),
+            workspace_id: workspace.clone(),
+            entity_type: "artifact".to_string(),
+            name: name.to_string(),
+            canonical_key,
+            aliases: vec![name.to_string()],
+            privacy_domain: PrivacyDomain::new(privacy_domain),
+            sensitivity: MemoryDataSensitivity::Internal,
+            metadata: metadata.clone(),
+        })
+        .map_err(|error| error.to_string())?;
+    let relation_ref = MemoryRef::new(
+        MemoryRefKind::Relation,
+        user.clone(),
+        workspace.clone(),
+        format!("artifact_described_by:{thread_slug}:{name}"),
+    );
+    facade
+        .upsert_relation(&MemoryRelation {
+            reference: relation_ref,
+            user_id: user.clone(),
+            workspace_id: workspace.clone(),
+            source_ref: record.reference.clone(),
+            relation_type: "describes".to_string(),
+            target_ref: entity_ref,
+            confidence: 1.0,
+            privacy_domain: PrivacyDomain::new(privacy_domain),
+            sensitivity: MemoryDataSensitivity::Internal,
+            evidence: vec![record.reference.clone()],
+            metadata: serde_json::json!({
+                "source": "artifact_runtime",
+                "thread_slug": thread_slug,
+                "name": name,
+            }),
+        })
+        .map_err(|error| error.to_string())?;
+    Ok(record.reference)
+}
+
+fn remember_artifact_memory(
+    state: &AppState,
+    thread_id: Option<&str>,
+    thread_slug: &str,
+    name: &str,
+    size_bytes: u64,
+    updated: bool,
+    producer: &str,
+    delivered_to: Option<&str>,
+) -> Result<(MemoryUserId, MemoryWorkspaceId, MemoryRef), String> {
+    if name.trim().is_empty() || name.contains('/') || name.contains('\\') || name.contains("..") {
+        return Err("invalid artifact name".to_string());
+    }
+    let user = gateway_memory_user_id();
+    let workspace = gateway_memory_workspace_id();
+    let privacy_domain = if workspace.as_str() == PERSONAL_WORKSPACE {
+        "personal"
+    } else {
+        "project"
+    };
+    let kind = artifact_memory_kind(name);
+    let managed_path = sandbox::artifacts_dir().join(thread_slug).join(name);
+    let project_path = delivered_to.map(|path| path.to_string()).or_else(|| {
+        active_workspace_folder().map(|folder| {
+            std::path::Path::new(&folder)
+                .join(name)
+                .to_string_lossy()
+                .to_string()
+        })
+    });
+    let text = if updated {
+        format!(
+            "Artifact {name} ({kind}) aggiornato nel thread {}.",
+            thread_id.unwrap_or(thread_slug)
+        )
+    } else {
+        format!(
+            "Artifact {name} ({kind}) creato nel thread {}.",
+            thread_id.unwrap_or(thread_slug)
+        )
+    };
+    let metadata = serde_json::json!({
+        "source": "artifact_runtime",
+        "producer": producer,
+        "thread_id": thread_id,
+        "thread_slug": thread_slug,
+        "name": name,
+        "title": name,
+        "artifact_type": kind,
+        "path_ref": format!("{thread_slug}/{name}"),
+        "managed_path": managed_path.to_string_lossy().to_string(),
+        "project_path": project_path,
+        "size_bytes": size_bytes,
+        "updated": updated,
+        "lifecycle_status": "active",
+    });
+    let lifecycle = MemoryLifecycleRequest {
+        actor_id: "artifact-runtime".to_string(),
+        user_id: user.clone(),
+        workspace_id: workspace.clone(),
+        purpose: "artifact_created".to_string(),
+    };
+    let facade = lock_memory_facade(state).map_err(|error| error.message)?;
+    let reference = upsert_artifact_memory_record(
+        &facade,
+        &user,
+        &workspace,
+        &lifecycle,
+        privacy_domain,
+        thread_slug,
+        name,
+        text,
+        metadata,
+    )?;
+    Ok((user, workspace, reference))
+}
+
+async fn register_artifact_memory(
+    state: &AppState,
+    thread_id: Option<&str>,
+    thread_slug: &str,
+    name: &str,
+    size_bytes: u64,
+    updated: bool,
+    producer: &str,
+    delivered_to: Option<&str>,
+) {
+    if let Ok((user, workspace, _reference)) = remember_artifact_memory(
+        state,
+        thread_id,
+        thread_slug,
+        name,
+        size_bytes,
+        updated,
+        producer,
+        delivered_to,
+    ) {
+        backfill_embeddings(state, &user, &workspace, 4).await;
     }
 }
 
@@ -2960,6 +3211,234 @@ Your edits stick. It's what the assistant ALWAYS keeps in mind about the project
     let _ = facade.record_wiki_page_for_ui(&page);
 }
 
+/// Project status (`stato-lavori.md`): the readable/editable face of open loops.
+/// SQL stays canonical; this page makes unfinished work visible in the wiki and
+/// links each item back to its source memory ref. Manual edits win like the other
+/// generated wiki pages.
+fn rebuild_status_wiki(
+    facade: &MemoryFacade,
+    user_id: &MemoryUserId,
+    workspace: &MemoryWorkspaceId,
+) {
+    let path = "stato-lavori.md";
+    if wiki_is_edited(workspace, path) {
+        return;
+    }
+    let Ok(memories) = facade.list_memories_for_ui(user_id, workspace) else {
+        return;
+    };
+    let open_loops: Vec<(MemoryRef, String)> = memories
+        .into_iter()
+        .filter(active_open_loop_record)
+        .map(|memory| (memory.reference, memory.text))
+        .collect();
+    let (body, linked_refs) = status_wiki_body_from_open_loops(&open_loops);
+    let reference = facade
+        .list_wiki_pages_for_ui(user_id, workspace)
+        .ok()
+        .and_then(|pages| pages.into_iter().find(|p| p.path == path).map(|p| p.reference))
+        .unwrap_or_else(|| MemoryRef::generated(MemoryRefKind::Wiki, user_id.clone(), workspace.clone()));
+    let privacy_domain = if workspace.as_str() == PERSONAL_WORKSPACE {
+        PrivacyDomain::new("personal")
+    } else {
+        PrivacyDomain::new("work")
+    };
+    let page = WikiPage {
+        reference,
+        user_id: user_id.clone(),
+        workspace_id: workspace.clone(),
+        path: path.to_string(),
+        title: "Stato lavori".to_string(),
+        body,
+        linked_refs,
+        privacy_domain,
+        sensitivity: MemoryDataSensitivity::Internal,
+    };
+    let _ = facade.record_wiki_page_for_ui(&page);
+}
+
+fn active_open_loop_record(memory: &MemoryRecord) -> bool {
+    memory.memory_type == "open_loop"
+        && matches!(memory.status, MemoryStatus::Confirmed | MemoryStatus::Candidate)
+        && memory.superseded_by.is_none()
+        && !memory.text.trim().is_empty()
+}
+
+fn deduplicate_open_loops(
+    facade: &MemoryFacade,
+    user_id: &MemoryUserId,
+    workspace: &MemoryWorkspaceId,
+) -> usize {
+    let mut loops: Vec<MemoryRecord> = facade
+        .list_memories_for_ui(user_id, workspace)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(active_open_loop_record)
+        .collect();
+    if loops.len() < 2 {
+        return 0;
+    }
+
+    loops.sort_by_key(|m| std::cmp::Reverse(m.text.chars().count()));
+    let lifecycle = MemoryLifecycleRequest {
+        actor_id: "open-loop-dedup".to_string(),
+        user_id: user_id.clone(),
+        workspace_id: workspace.clone(),
+        purpose: "deduplicate_open_loops".to_string(),
+    };
+    let mut kept: Vec<(MemoryRef, std::collections::HashSet<String>)> = Vec::new();
+    let mut merged = 0usize;
+    for memory in loops {
+        let tokens = dedup_tokens(&memory.text);
+        if let Some((canonical, _)) = kept.iter().find(|(_, existing)| {
+            jaccard(&tokens, existing) >= DEDUP_JACCARD
+                || (tokens.len() >= 2 && tokens.is_subset(existing))
+                || (existing.len() >= 2 && existing.is_subset(&tokens))
+        }) {
+            if facade
+                .merge_memories(
+                    &lifecycle,
+                    canonical,
+                    vec![memory.reference.clone()],
+                    "open_loop duplicate/superseded",
+                )
+                .is_ok()
+            {
+                merged += 1;
+            }
+        } else {
+            kept.push((memory.reference, tokens));
+        }
+    }
+    merged
+}
+
+fn open_loop_closure_targets(memory: &ExtractedMemory) -> Vec<String> {
+    let Some(value) = memory.metadata.get("closes_open_loop") else {
+        return Vec::new();
+    };
+    match value {
+        serde_json::Value::String(text) => {
+            let trimmed = text.trim();
+            if trimmed.is_empty() {
+                Vec::new()
+            } else {
+                vec![trimmed.to_string()]
+            }
+        }
+        serde_json::Value::Array(items) => items
+            .iter()
+            .filter_map(|item| item.as_str().map(str::trim))
+            .filter(|text| !text.is_empty())
+            .map(ToString::to_string)
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn open_loop_matches_target(open_loop_text: &str, target: &str) -> bool {
+    let loop_tokens = dedup_tokens(open_loop_text);
+    let target_tokens = dedup_tokens(target);
+    if loop_tokens.is_empty() || target_tokens.is_empty() {
+        return false;
+    }
+    let shared = loop_tokens.intersection(&target_tokens).count();
+    shared >= 2
+        && (jaccard(&loop_tokens, &target_tokens) >= 0.35
+            || target_tokens.is_subset(&loop_tokens)
+            || loop_tokens.is_subset(&target_tokens))
+}
+
+fn close_matching_open_loops(
+    facade: &MemoryFacade,
+    user_id: &MemoryUserId,
+    workspace: &MemoryWorkspaceId,
+    targets: &[String],
+) -> usize {
+    if targets.is_empty() {
+        return 0;
+    }
+    let loops: Vec<MemoryRecord> = facade
+        .list_memories_for_ui(user_id, workspace)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(active_open_loop_record)
+        .collect();
+    if loops.is_empty() {
+        return 0;
+    }
+    let lifecycle = MemoryLifecycleRequest {
+        actor_id: "open-loop-closure".to_string(),
+        user_id: user_id.clone(),
+        workspace_id: workspace.clone(),
+        purpose: "close_completed_open_loops".to_string(),
+    };
+    let mut closed = 0usize;
+    for open_loop in loops {
+        if targets
+            .iter()
+            .any(|target| open_loop_matches_target(&open_loop.text, target))
+            && facade
+                .mark_memory_stale(
+                    &lifecycle,
+                    &open_loop.reference,
+                    "open_loop closed by verified exchange evidence",
+                )
+                .is_ok()
+        {
+            closed += 1;
+        }
+    }
+    closed
+}
+
+fn status_wiki_body_from_open_loops(open_loops: &[(MemoryRef, String)]) -> (String, Vec<MemoryRef>) {
+    let mut loops: Vec<(MemoryRef, String)> = open_loops
+        .iter()
+        .filter_map(|(reference, text)| {
+            let trimmed = text.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some((reference.clone(), trimmed.to_string()))
+            }
+        })
+        .collect();
+    loops.sort_by_key(|(_, text)| std::cmp::Reverse(text.chars().count()));
+    let mut kept_tokens: Vec<std::collections::HashSet<String>> = Vec::new();
+    loops.retain(|(_, text)| {
+        let tokens = dedup_tokens(text);
+        if kept_tokens.iter().any(|existing| jaccard(&tokens, existing) >= DEDUP_JACCARD) {
+            false
+        } else {
+            kept_tokens.push(tokens);
+            true
+        }
+    });
+
+    let mut body = String::from(
+        "# Stato lavori\n\n> Pagina generata dagli open loop della memoria. \
+Editabile a mano: le correzioni rientrano nello store strutturato tramite re-ingest.\n\n",
+    );
+    if loops.is_empty() {
+        body.push_str("## Loop aperti\n\n_Nessun loop aperto registrato._\n");
+        return (body, Vec::new());
+    }
+
+    body.push_str("## Loop aperti\n\n");
+    let mut linked_refs = Vec::new();
+    for (idx, (reference, text)) in loops.iter().enumerate() {
+        linked_refs.push(reference.clone());
+        let title = wiki_title_from_text(text);
+        body.push_str(&format!("### {}. {title}\n\n", idx + 1));
+        body.push_str("- Stato: aperto\n");
+        body.push_str(&format!("- Memoria: `{}`\n\n", reference));
+        body.push_str(text);
+        body.push_str("\n\n");
+    }
+    (body, linked_refs)
+}
+
 /// The project's OBJECTIVE (north star) — injected FIRST, with a focus directive, so every
 /// turn is anchored to where the project is going. A goal is the intent to steer BY
 /// (forward-looking: "where we must arrive / how this must work"), distinct from a decision
@@ -3100,6 +3579,16 @@ async fn consolidate_scope(
     user: &MemoryUserId,
     workspace: &MemoryWorkspaceId,
 ) -> (usize, usize) {
+    let open_loop_merged = {
+        let Ok(facade) = lock_memory_facade(state) else {
+            return (0, 0);
+        };
+        let merged = deduplicate_open_loops(&facade, user, workspace);
+        if merged > 0 {
+            rebuild_status_wiki(&facade, user, workspace);
+        }
+        merged
+    };
     // 1. Read the durable memories + their embeddings (off-lock thereafter).
     let (mems, embeddings) = {
         let Ok(facade) = lock_memory_facade(state) else {
@@ -3125,7 +3614,7 @@ async fn consolidate_scope(
         (mems, embeddings)
     };
     if mems.len() < 2 {
-        return (0, 0);
+        return (open_loop_merged, 0);
     }
 
     // 1a. STRUCTURAL signal: which entities each memory is linked to (mentions edges).
@@ -3205,7 +3694,7 @@ async fn consolidate_scope(
             kept_meta.push((mtype.clone(), tokens, vector, entset));
         }
     }
-    let mut merged = 0usize;
+    let mut merged = open_loop_merged;
     if !redundant.is_empty() {
         if let Ok(facade) = lock_memory_facade(state) {
             let lifecycle = MemoryLifecycleRequest {
@@ -3231,6 +3720,7 @@ async fn consolidate_scope(
         if let Ok(facade) = lock_memory_facade(state) {
             rebuild_decisions_wiki(&facade, user, workspace);
             rebuild_project_brief(&facade, user, workspace);
+            rebuild_status_wiki(&facade, user, workspace);
         }
         return (merged, 0);
     }
@@ -3256,6 +3746,7 @@ If there is nothing to do: {\"merges\":[],\"drops\":[]}.";
         if let Ok(facade) = lock_memory_facade(state) {
             rebuild_decisions_wiki(&facade, user, workspace);
             rebuild_project_brief(&facade, user, workspace);
+            rebuild_status_wiki(&facade, user, workspace);
         }
         return (merged, 0);
     };
@@ -3321,6 +3812,7 @@ If there is nothing to do: {\"merges\":[],\"drops\":[]}.";
     }
     rebuild_decisions_wiki(&facade, user, workspace);
     rebuild_project_brief(&facade, user, workspace);
+    rebuild_status_wiki(&facade, user, workspace);
     (merged, dropped)
 }
 
@@ -3792,7 +4284,11 @@ if explicit, otherwise leave the arrays empty. sensitivity: PII (tax ID, address
 = \"secret\"; personal facts (children, partner, city) = \"private\"; preferences and decisions = \
 \"internal\". confidence >=0.8 only if explicit and unambiguous. \"episode\" is ALWAYS a short \
 sentence about the exchange (even if memories/entities/relations are empty). If there is nothing to \
-remember: {\"memories\":[],\"entities\":[],\"relations\":[],\"episode\":\"…\"}.";
+remember: {\"memories\":[],\"entities\":[],\"relations\":[],\"episode\":\"…\"}. \
+OPEN LOOP CLOSURE: if the exchange or ACTIONS PERFORMED explicitly prove an existing open loop is \
+now complete, do NOT emit another open_loop. Emit the durable fact/decision/outcome and add \
+metadata.closes_open_loop with a short copy/paraphrase of the existing open loop. Use this only for \
+completion with evidence, never for partial progress.";
     // Channel mode: clarify that the speaker is a contact so facts are attributed
     // to them (e.g. person:marco), not mistakenly to the user (person:self).
     let system = match speaker {
@@ -3880,6 +4376,40 @@ otherwise do not save it."
         format!(
             "{system}\n\nDECISIONS ALREADY IN MEMORY (do NOT re-register them: extract ONLY NEW or \
 substantially updated decisions relative to these):\n{known_decisions}"
+        )
+    };
+    let known_open_loops = {
+        let user = gateway_memory_user_id();
+        let active = gateway_memory_workspace_id();
+        let mut lines = Vec::new();
+        if let Ok(facade) = lock_memory_facade(state) {
+            for (label, workspace) in [
+                ("personal", MemoryWorkspaceId::new(PERSONAL_WORKSPACE)),
+                ("project", active.clone()),
+            ] {
+                if label == "project" && workspace.as_str() == PERSONAL_WORKSPACE {
+                    continue;
+                }
+                for memory in facade
+                    .list_memories_for_ui(&user, &workspace)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter(active_open_loop_record)
+                    .take(8)
+                {
+                    lines.push(format!("- ({label}) {}", memory.text.trim().replace('\n', " ")));
+                }
+            }
+        }
+        lines.join("\n")
+    };
+    let system = if known_open_loops.trim().is_empty() {
+        system
+    } else {
+        format!(
+            "{system}\n\nOPEN LOOPS ALREADY IN MEMORY. If this exchange/ACTIONS explicitly complete \
+one of these, set metadata.scope to the matching scope and metadata.closes_open_loop to the matching \
+loop text/paraphrase:\n{known_open_loops}"
         )
     };
     let exchange = match speaker {
@@ -12374,6 +12904,17 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                         GenerateStreamEvent::Delta { text: artifact_mark },
                                     )
                                     .await;
+                                    register_artifact_memory(
+                                        &state_owned,
+                                        thread_id.as_deref(),
+                                        &thread_slug,
+                                        &file_name,
+                                        size,
+                                        false,
+                                        "run_in_sandbox",
+                                        delivered_to.as_deref(),
+                                    )
+                                    .await;
                                     match delivered_to {
                                         Some(path) => model_output
                                             .push_str(&format!("\n[file generated and saved to {path}]")),
@@ -12435,6 +12976,17 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                 let _ = emit_stream_event(
                                     &tx,
                                     GenerateStreamEvent::Delta { text: artifact_mark },
+                                )
+                                .await;
+                                register_artifact_memory(
+                                    &state_owned,
+                                    thread_id.as_deref(),
+                                    &thread_slug,
+                                    &fname,
+                                    size,
+                                    updated,
+                                    "create_artifact",
+                                    None,
                                 )
                                 .await;
                                 if updated {
@@ -12505,6 +13057,17 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                             let _ = emit_stream_event(
                                                 &tx,
                                                 GenerateStreamEvent::Delta { text: artifact_mark },
+                                            )
+                                            .await;
+                                            register_artifact_memory(
+                                                &state_owned,
+                                                thread_id.as_deref(),
+                                                &thread_slug,
+                                                &fname,
+                                                size_b,
+                                                updated,
+                                                "generate_image",
+                                                None,
                                             )
                                             .await;
                                             format!(
@@ -12622,6 +13185,17 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                             let _ = emit_stream_event(
                                                 &tx,
                                                 GenerateStreamEvent::Delta { text: m },
+                                            )
+                                            .await;
+                                            register_artifact_memory(
+                                                &state_owned,
+                                                thread_id.as_deref(),
+                                                &thread_slug,
+                                                fname,
+                                                meta.len(),
+                                                false,
+                                                "render_deck",
+                                                None,
                                             )
                                             .await;
                                             produced.push(fname);
@@ -12798,6 +13372,17 @@ Absolutely NO text, NO words, NO letters, NO numbers, NO captions, NO logos."
                                                     let _ = emit_stream_event(
                                                         &tx,
                                                         GenerateStreamEvent::Delta { text: m },
+                                                    )
+                                                    .await;
+                                                    register_artifact_memory(
+                                                        &state_owned,
+                                                        thread_id.as_deref(),
+                                                        &thread_slug,
+                                                        fname,
+                                                        meta.len(),
+                                                        false,
+                                                        "make_deck",
+                                                        None,
                                                     )
                                                     .await;
                                                     produced.push(fname);
@@ -27843,6 +28428,7 @@ async fn memory_wiki(
     // Regenerate the "Decisioni" page from current decisions so existing projects show
     // it without needing a fresh turn (idempotent).
     rebuild_decisions_wiki(&facade, &user, &ws);
+    rebuild_status_wiki(&facade, &user, &ws);
     let pages = facade.list_wiki_pages_for_ui(&user, &ws).unwrap_or_default();
     Ok(Json(
         pages
@@ -27909,7 +28495,7 @@ async fn memory_wiki_save(
             .map_err(|e| GatewayError::memory(e.to_string()))?;
     }
     mark_wiki_edited(&ws, &req.path);
-    // Re-ingest: scope the MEMORY workspace to this page, then extract decisions from
+    // Re-ingest: scope the MEMORY workspace to this page, then extract memories from
     // the edited markdown into the structured store (non-empty `actions` bypasses the
     // salience gate). Background — the save returns immediately. (Memory scope only —
     // doesn't touch the global active workspace / Composio.)
@@ -27919,9 +28505,9 @@ async fn memory_wiki_save(
     tokio::spawn(async move {
         learn_from_exchange(
             &st,
-            "Manual correction of the project decisions wiki",
+            "Manual correction of the project memory wiki",
             &body,
-            "The user manually corrected the Decisions wiki",
+            "The user manually corrected a project memory wiki page",
             None,
             None,
             None,
@@ -32186,6 +32772,243 @@ mod tests {
             block.find("OPEN LOOPS").unwrap() < block.find("Personal:").unwrap(),
             "open loops must come before personal"
         );
+    }
+
+    #[test]
+    fn status_wiki_projects_open_loops_with_refs_and_dedup() {
+        let user = local_first_memory::UserId::new("local");
+        let workspace = local_first_memory::WorkspaceId::new("project");
+        let first = local_first_memory::MemoryRef::generated(
+            local_first_memory::MemoryRefKind::Memory,
+            user.clone(),
+            workspace.clone(),
+        );
+        let duplicate = local_first_memory::MemoryRef::generated(
+            local_first_memory::MemoryRefKind::Memory,
+            user.clone(),
+            workspace.clone(),
+        );
+        let second = local_first_memory::MemoryRef::generated(
+            local_first_memory::MemoryRefKind::Memory,
+            user,
+            workspace,
+        );
+        let loops = vec![
+            (
+                first.clone(),
+                "Preventivo Rossi incompleto: manca assistenza".to_string(),
+            ),
+            (
+                duplicate.clone(),
+                "Rossi: preventivo incompleto, manca assistenza".to_string(),
+            ),
+            (
+                second.clone(),
+                "Bug gateway browser ancora da verificare in app".to_string(),
+            ),
+        ];
+
+        let (body, linked) = super::status_wiki_body_from_open_loops(&loops);
+
+        assert!(body.contains("# Stato lavori"));
+        assert!(body.contains("## Loop aperti"));
+        assert!(body.contains(&first.to_string()) || body.contains(&duplicate.to_string()));
+        assert!(body.contains(&second.to_string()));
+        assert!(body.contains("Preventivo Rossi") || body.contains("Rossi: preventivo"));
+        assert!(body.contains("Bug gateway browser"));
+        assert_eq!(linked.len(), 2, "paraphrased open loops should be collapsed in the page");
+        assert!(linked.contains(&second));
+        assert!(linked.contains(&first) || linked.contains(&duplicate));
+    }
+
+    #[test]
+    fn status_wiki_has_empty_state_when_no_open_loops_exist() {
+        let (body, linked) = super::status_wiki_body_from_open_loops(&[]);
+
+        assert!(body.contains("Nessun loop aperto"));
+        assert!(linked.is_empty());
+    }
+
+    #[test]
+    fn artifact_memory_upsert_creates_single_record_and_graph_entity() {
+        let facade = local_first_memory::MemoryFacade::new(
+            local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
+        );
+        let user = local_first_memory::UserId::new("local");
+        let workspace = local_first_memory::WorkspaceId::new("project");
+        let lifecycle = local_first_memory::MemoryLifecycleRequest {
+            actor_id: "test".to_string(),
+            user_id: user.clone(),
+            workspace_id: workspace.clone(),
+            purpose: "test".to_string(),
+        };
+        let first = super::upsert_artifact_memory_record(
+            &facade,
+            &user,
+            &workspace,
+            &lifecycle,
+            "project",
+            "thread-1",
+            "report.pdf",
+            "Artifact report.pdf (pdf) creato nel thread thread-1.".to_string(),
+            serde_json::json!({
+                "source": "artifact_runtime",
+                "thread_slug": "thread-1",
+                "name": "report.pdf",
+                "artifact_type": "pdf",
+                "size_bytes": 120,
+            }),
+        )
+        .unwrap();
+        let second = super::upsert_artifact_memory_record(
+            &facade,
+            &user,
+            &workspace,
+            &lifecycle,
+            "project",
+            "thread-1",
+            "report.pdf",
+            "Artifact report.pdf (pdf) aggiornato nel thread thread-1.".to_string(),
+            serde_json::json!({
+                "source": "artifact_runtime",
+                "thread_slug": "thread-1",
+                "name": "report.pdf",
+                "artifact_type": "pdf",
+                "size_bytes": 456,
+                "updated": true,
+            }),
+        )
+        .unwrap();
+
+        let memories = facade.list_memories_for_ui(&user, &workspace).unwrap();
+        let artifacts: Vec<_> = memories
+            .iter()
+            .filter(|memory| memory.memory_type == "artifact")
+            .collect();
+        let entities = facade.list_entities_for_ui(&user, &workspace).unwrap();
+        let relations = facade.list_relations_for_ui(&user, &workspace).unwrap();
+
+        assert_eq!(first, second);
+        assert_eq!(artifacts.len(), 1);
+        assert_eq!(artifacts[0].status, local_first_memory::MemoryStatus::Confirmed);
+        assert_eq!(artifacts[0].metadata["size_bytes"], serde_json::json!(456));
+        assert!(entities
+            .iter()
+            .any(|entity| entity.entity_type == "artifact" && entity.name == "report.pdf"));
+        assert!(relations
+            .iter()
+            .any(|relation| relation.relation_type == "describes"));
+    }
+
+    #[test]
+    fn open_loop_dedup_supersedes_duplicate_records() {
+        let facade = local_first_memory::MemoryFacade::new(
+            local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
+        );
+        let user = local_first_memory::UserId::new("local");
+        let workspace = local_first_memory::WorkspaceId::new("project");
+        let lifecycle = local_first_memory::MemoryLifecycleRequest {
+            actor_id: "test".to_string(),
+            user_id: user.clone(),
+            workspace_id: workspace.clone(),
+            purpose: "test".to_string(),
+        };
+        for text in [
+            "Preventivo Rossi incompleto: manca assistenza",
+            "Rossi: preventivo incompleto, manca assistenza",
+            "Bug gateway browser ancora da verificare in app",
+        ] {
+            let record = facade
+                .create_memory_candidate(local_first_memory::MemoryCreateRequest {
+                    request: lifecycle.clone(),
+                    memory_type: "open_loop".to_string(),
+                    text: text.to_string(),
+                    aliases: Vec::new(),
+                    language_hints: Vec::new(),
+                    confidence: 1.0,
+                    privacy_domain: local_first_memory::PrivacyDomain::new("work"),
+                    sensitivity: local_first_memory::DataSensitivity::Internal,
+                    evidence_refs: Vec::new(),
+                    metadata: serde_json::json!({ "source": "test" }),
+                })
+                .unwrap();
+            facade
+                .confirm_memory(&lifecycle, &record.reference, "test")
+                .unwrap();
+        }
+
+        let merged = super::deduplicate_open_loops(&facade, &user, &workspace);
+        let memories = facade.list_memories_for_ui(&user, &workspace).unwrap();
+        let active = memories.iter().filter(|memory| super::active_open_loop_record(memory)).count();
+        let superseded = memories
+            .iter()
+            .filter(|memory| memory.memory_type == "open_loop" && memory.superseded_by.is_some())
+            .count();
+
+        assert_eq!(merged, 1);
+        assert_eq!(active, 2);
+        assert_eq!(superseded, 1);
+    }
+
+    #[test]
+    fn open_loop_closure_marks_matching_loop_stale_only_with_overlap() {
+        let facade = local_first_memory::MemoryFacade::new(
+            local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
+        );
+        let user = local_first_memory::UserId::new("local");
+        let workspace = local_first_memory::WorkspaceId::new("project");
+        let lifecycle = local_first_memory::MemoryLifecycleRequest {
+            actor_id: "test".to_string(),
+            user_id: user.clone(),
+            workspace_id: workspace.clone(),
+            purpose: "test".to_string(),
+        };
+        for text in [
+            "Preventivo Rossi incompleto: manca assistenza",
+            "Bug gateway browser ancora da verificare in app",
+        ] {
+            let record = facade
+                .create_memory_candidate(local_first_memory::MemoryCreateRequest {
+                    request: lifecycle.clone(),
+                    memory_type: "open_loop".to_string(),
+                    text: text.to_string(),
+                    aliases: Vec::new(),
+                    language_hints: Vec::new(),
+                    confidence: 1.0,
+                    privacy_domain: local_first_memory::PrivacyDomain::new("work"),
+                    sensitivity: local_first_memory::DataSensitivity::Internal,
+                    evidence_refs: Vec::new(),
+                    metadata: serde_json::json!({ "source": "test" }),
+                })
+                .unwrap();
+            facade
+                .confirm_memory(&lifecycle, &record.reference, "test")
+                .unwrap();
+        }
+
+        let closed_none = super::close_matching_open_loops(
+            &facade,
+            &user,
+            &workspace,
+            &["Tema non correlato".to_string()],
+        );
+        let closed = super::close_matching_open_loops(
+            &facade,
+            &user,
+            &workspace,
+            &["Preventivo Rossi assistenza completato".to_string()],
+        );
+        let memories = facade.list_memories_for_ui(&user, &workspace).unwrap();
+        let active = memories.iter().filter(|memory| super::active_open_loop_record(memory)).count();
+        let stale = memories
+            .iter()
+            .filter(|memory| memory.memory_type == "open_loop" && memory.status == local_first_memory::MemoryStatus::Stale)
+            .count();
+
+        assert_eq!(closed_none, 0);
+        assert_eq!(closed, 1);
+        assert_eq!(active, 1);
+        assert_eq!(stale, 1);
     }
 
     #[test]

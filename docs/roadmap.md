@@ -23,18 +23,16 @@ per iniziare il consolidamento memoria in locale.
 
 ## Milestone
 
-1. WS5.4b/5.4c — rendere gli open loop leggibili/editabili
-   (`stato-lavori.md`) e chiuderli/deduplicarli automaticamente quando il lavoro
-   viene completato.
-2. WS2-3.1 — artefatti come entità di memoria via `MemoryFacade` condiviso:
-   `title/type/project/path/thread/created_at` + embedding.
-3. WS2-3.2/3.3 — schermata Artifacts centralizzata + lifecycle/delete coerente
+1. WS2-3.1 — artefatti come entità di memoria via `MemoryFacade` condiviso:
+   `title/type/project/path/thread/created_at` + embedding. Slice locale/headless
+   implementata; manca gate in-app e recall esplicito del deliverable.
+2. WS2-3.2/3.3 — schermata Artifacts centralizzata + lifecycle/delete coerente
    con la memoria.
-4. WS5.5/5.6 — catena di provenienza decisione → artefatto → codice → esito,
+3. WS5.5/5.6 — catena di provenienza decisione → artefatto → codice → esito,
    più eval memoria.
-5. WS1-Fase 2/3 — piano runtime-owned e workflow runner dichiarativo, così i
+4. WS1-Fase 2/3 — piano runtime-owned e workflow runner dichiarativo, così i
    deliverable futuri non riaprono fragilità cross-modello.
-6. WS7 — deliverable Manus-style (`make_document`, `make_research`,
+5. WS7 — deliverable Manus-style (`make_document`, `make_research`,
    `make_meeting`) solo dopo memoria/artefatti/engine baseline.
 
 ## Blocco noto
@@ -45,5 +43,7 @@ collegarli al perché. Per questo WS7 non è più il prossimo step.
 
 ## Prossima azione
 
-Committare lo stack WS6.3b–WS6.4 senza co-author, poi iniziare dal
-consolidamento memoria: WS5.4b/5.4c e WS2-3.1 sono il prossimo blocco operativo.
+Chiudere il gate in-app di WS2-3.1: creare un artifact reale, verificare che
+compaia come `memory_type="artifact"` + entity `artifact` nel DB memoria e che
+sia richiamabile in una chat successiva. Il contratto corrente della memoria è
+in [MEMORIA.md](MEMORIA.md).

@@ -61,10 +61,16 @@ modelli deboli/locali. Invarianti: monotonìa, limitatezza, identità non inferi
 Gli artefatti sono i **deliverable** (valore del prodotto); ciclo di vita ≠ chat;
 tutto passa dal motore di memoria.
 
-- ☐ **3.1 — chiudere il BUCO (prerequisito):** artefatti come **entità di memoria**
+- 🟡 **3.1 — chiudere il BUCO (prerequisito):** artefatti come **entità di memoria**
   (`title/type/project/path/thread/created_at` + embedding) via il `MemoryFacade`
-  condiviso → recall del deliverable ("rifammi il deck del consiglio"). *Oggi gli
-  artefatti sono solo su filesystem; la memoria è memory-safe ma non li conosce.*
+  condiviso → recall del deliverable ("rifammi il deck del consiglio").
+  **Slice locale/headless:** i produttori artifact principali (`run_in_sandbox`,
+  `create_artifact`, `generate_image`, `render_deck`, `make_deck`) registrano
+  ogni artifact surfaced come `memory_type="artifact"` + entity grafo `artifact`,
+  metadata canonici (`thread_slug`, `name`, `artifact_type`, `path_ref`,
+  `managed_path`, `project_path`, `size_bytes`) e backfill embedding immediato.
+  Test: `artifact_memory_upsert_creates_single_record_and_graph_entity` verde.
+  Resta gate in-app + recall esplicito del deliverable.
 - ☐ **3.2 — schermata Artefatti centralizzata** (Settings): selettore progetto
   (workspace) + filtri (progetto/tipo/orfani) + multi-selezione + **Esporta ZIP**
   (cross-OS, salva in cartella) + **Elimina**. Dati: `artifacts_usage` arricchito con
@@ -91,20 +97,22 @@ tutto passa dal motore di memoria.
 ## WS5 — Completare la MEMORIA (cervello che sa il perché e sopravvive)
 
 Visione & ragionamento: [memory-vision.md](../memory-vision.md). Baseline reale
-(2026-06-22): grafo 49k entità/236k relazioni ma **solo codice**; **391** embedding;
+(2026-06-22): grafo 49k entità/236k relazioni ma oggi **soprattutto codice**; **391** embedding;
 **9** pagine wiki markdown → la macchina c'è ma è **sbilanciata/dormiente** sui pezzi
 che fanno "ricordare il perché e sopravvivere". Caposaldo #8.
 
-- ☐ **5.1 Estendere il grafo** da solo-codice a **decisioni / artefatti / step di piano
-  / esiti** + **archi causali** (`rationale_for`, `produced`, `derived_from`,
-  `supersedes`, `blocks`).
+- ☐ **5.1 Estendere il grafo** dal primo adapter maturo (code graph/Graphify) a
+  **decisioni / artefatti / step di piano / esiti** + **archi causali**
+  (`rationale_for`, `produced`, `derived_from`, `supersedes`, `blocks`). Include
+  audit dei read-model graph-like (`contact_relationships`): se portano conoscenza
+  semantica devono essere mirrorati/convergenti nel grafo canonico memoria.
 - ✅ **5.2 Embeddare tutto** — `spawn_embedding_catchup` allo startup vettorizza ogni
   memoria mancante su **tutti** gli scope, loop fino a esaurimento (off critical path).
   Risolve il gap 391/555 (l'auto-consolidamento che faceva il backfill era OFF di
   default; il backfill altrove era cappato a 4-12).
-- 🟡 **5.3 Loop aperti** — tipo `open_loop` di prima classe: meccanismo validato in-app
-  (cattura + recall cross-chat su gemma4:latest, v1042). Resta: **chiusura automatica** +
-  **iniezione nelle chat nuove** (WS5.4) + **dedup** (erano 2 quasi-duplicati).
+- ✅ **5.3 Loop aperti** — tipo `open_loop` di prima classe: meccanismo validato
+  in-app (cattura + recall cross-chat su gemma4:latest, v1042). Iniezione nelle
+  chat nuove, proiezione wiki, dedup e chiusura automatica sono coperti da WS5.4.
 - ✅ **5.7 Completezza & coerenza della cattura** *(gap trovato nel test Rossi, 2026-06-22;
   prompt estrattore sistemato — **VERIFICATO in-app 2026-06-22**: chat B ha ricordato il
   finding negativo "il file del preventivo non è stato ancora trovato")*:
@@ -120,8 +128,20 @@ che fanno "ricordare il perché e sopravvivere". Caposaldo #8.
     `format_memory_block` (priorità di budget): una chat nuova li riceve **senza** nominare
     il topic (chiude il gap del test Rossi-B). Build+test verdi. **VERIFICATO in-app
     2026-06-22**: chat nuova ha mostrato **2** loop (preventivo Rossi + bug gateway browser).
-  - ☐ **5.4b** proiezione markdown `stato-lavori.md` (faccia leggibile/editabile, bidirezionale).
-  - ☐ **5.4c** **chiusura automatica** dell'open_loop a lavoro fatto + **dedup** (erano 2).
+  - ✅ **5.4b** proiezione markdown `stato-lavori.md` (faccia leggibile/editabile,
+    bidirezionale): `/api/memory/wiki` rigenera una pagina "Stato lavori" dagli
+    `open_loop`, linka i memory ref sorgenti, collassa parafrasi sulla pagina e
+    rispetta `wiki-edited.json` come le altre proiezioni. Il save wiki ora re-ingesta
+    genericamente la pagina memoria, non solo "decisioni". Test:
+    `cargo test -p local-first-desktop-gateway status_wiki -- --nocapture` verde.
+  - ✅ **5.4c** **chiusura automatica** dell'open_loop a lavoro fatto + **dedup**:
+    gli `open_loop` parafrasati vengono superseduti via
+    `MemoryFacade::merge_memories`; briefing e `stato-lavori.md` filtrano
+    `superseded_by`; il salvataggio memoria e il consolidamento periodico
+    deduplicano; l'estrattore può chiudere un loop attivo con
+    `metadata.closes_open_loop`, marcandolo `Stale` solo se c'è overlap con un
+    loop reale. Test: `open_loop_dedup_supersedes_duplicate_records` e
+    `open_loop_closure_marks_matching_loop_stale_only_with_overlap` verdi.
 - ☐ **5.5 Catena di provenienza** decisione → artefatto → codice → esito (unisce
   WS2-3.1 artefatti→memoria + WS1-F6 piano→memoria + codice già nel grafo).
 - ☐ **5.6 Eval memoria** (guardrail): chat nuova → *"a che punto è il workflow e perché
@@ -418,25 +438,23 @@ proprio — versioning, canali, scaricabili dal **sito Homun**, auto-aggiornabil
 
 ## Ordine d'esecuzione proposto
 
-1. **Consolidare/committare WS6 locale** — stack WS6.3b–WS6.4, senza co-author;
-   publish/tag solo su comando. Prima del publish resta consigliato uno smoke
-   manuale in-app su scheduled automation reale nel thread `scheduled`.
-2. **WS5.4b / WS5.4c — open loop governati**: proiezione leggibile/editabile
-   `stato-lavori.md`, chiusura automatica a lavoro concluso e dedup robusto.
-3. **WS2-3.1 — artefatti come entità di memoria** via `MemoryFacade` condiviso:
+1. **WS6 locale consolidata/committata** — publish/tag solo su comando. Prima
+   del publish resta consigliato uno smoke manuale in-app su scheduled
+   automation reale nel thread `scheduled`.
+2. **WS2-3.1 — artefatti come entità di memoria** via `MemoryFacade` condiviso:
    prerequisito per recall dei deliverable e per la provenienza.
-4. **WS2-3.2 / 3.3** — schermata Artifacts centralizzata + lifecycle/delete
+3. **WS2-3.2 / 3.3** — schermata Artifacts centralizzata + lifecycle/delete
    coerente con memoria; cancellare chat non deve cancellare deliverable.
-5. **WS5.5 / WS5.6** — catena di provenienza decisione → artefatto → codice →
+4. **WS5.5 / WS5.6** — catena di provenienza decisione → artefatto → codice →
    esito, più eval memoria come guardrail.
-6. **WS1-Fase 2** — gestione piano (`ExecutionPlan`+`step_id`); il piano scrive
+5. **WS1-Fase 2** — gestione piano (`ExecutionPlan`+`step_id`); il piano scrive
    in memoria.
-7. **WS1-Fase 3** — skill dichiarative + workflow runner.
-8. **WS7** — ecosistema deliverable (`make_*` per documenti/ricerca/meeting),
+6. **WS1-Fase 3** — skill dichiarative + workflow runner.
+7. **WS7** — ecosistema deliverable (`make_*` per documenti/ricerca/meeting),
    volutamente dopo memoria/artefatti/engine baseline.
-9. **WS8 completo + WS4** — eval come gate di release, perf/affidabilità/UX a
+8. **WS8 completo + WS4** — eval come gate di release, perf/affidabilità/UX a
    regime.
-10. **WS9 + WS1-Fasi 4→6** — marketplace/plugin distribution, router+scaffolding
+9. **WS9 + WS1-Fasi 4→6** — marketplace/plugin distribution, router+scaffolding
     adattivo, Brain (ADR 0008), memoria per-step + sub-agent.
 
 > Note: la **memoria (WS5)** è il filo trasversale (artefatti→memoria e piano→memoria la
