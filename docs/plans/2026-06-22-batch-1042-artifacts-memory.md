@@ -815,6 +815,15 @@ ragionato il contratto degli strumenti `make_*` creati dall'harness. ADR 0011
   i codici. Test mirati: `rendered_deck_qa_failure_is_extracted_from_renderer_output`,
   `python3 runtimes/contained-computer/deck_qa.py --self-test`,
   `python3 -m py_compile runtimes/contained-computer/deck_qa.py`.
+  **Dodicesima slice document QA (2026-06-23, locale/verde):**
+  `make_document` valida il Markdown generato prima di scrivere artifact
+  `.md`/`.pdf`/`.docx`: linee troppo lunghe, token non spezzabili oltre soglia
+  e righe tabella con numero celle incoerente producono un errore QA invece di
+  un deliverable fragile. Il controllo resta deterministico e interno al
+  workflow esistente, senza nuovo store o renderer parallelo. Test mirati:
+  `document_quality_guardrail_accepts_structured_markdown`,
+  `document_quality_guardrail_flags_unrenderable_markdown`,
+  `make_document_generation_options_are_explicit_and_bounded`.
 - ☐ **7.1b (futuro)** Portare ricerca/meeting al livello del deck solo dopo il
   chiarimento sul contratto strumenti: `make_research` e `make_meeting` non sono
   essenziali per la prossima release.

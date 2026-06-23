@@ -236,6 +236,10 @@ primo percorso locale verde:
 56. WS7 deck legibility QA — `deck-qa` ora misura anche font-size e contrasto
     sul DOM renderizzato. `text_too_small` e `low_contrast` entrano nel
     `DECK_QA_JSON` e bloccano consegna/registrazione del deck.
+57. WS7 document Markdown QA — `make_document` valida il Markdown prima della
+    scrittura degli artifact `.md`/`.pdf`/`.docx`: linee troppo lunghe, token
+    non spezzabili e tabelle pipe con numero celle incoerente bloccano la
+    consegna fragile con errore QA deterministico.
 
 Prima di pubblicare/taggare resta prudente ripetere lo smoke manuale in-app su
 una automazione schedulata reale con il binario aggiornato. Il primo smoke ha
@@ -300,7 +304,8 @@ ottava slice: template catalog provider `monet/*` read-only nel registry, con
 `template_ref` risolto dai workflow esistenti; nona slice: contract
 `TemplateCatalogProvider` interno per agganciare MCP/marketplace/template pack
 senza toccare i workflow; decima slice: manifest JSON locale caricabile e
-validato; undicesima slice: QA leggibilità deck su font-size/contrasto. Prossima
-slice: QA documenti o template library più ampia/adapter esterno.
+validato; undicesima slice: QA leggibilità deck su font-size/contrasto;
+dodicesima slice: QA Markdown per documenti prima di scrivere MD/PDF/DOCX.
+Prossima slice: template library più ampia/adapter esterno.
 `make_research` e `make_meeting` restano futuri.
 Il contratto corrente della memoria è in [MEMORIA.md](MEMORIA.md).

@@ -13816,6 +13816,64 @@ fn apply_document_design_components(markdown: &str, components: &[String]) -> St
     output
 }
 
+fn markdown_table_cell_count(line: &str) -> Option<usize> {
+    let trimmed = line.trim();
+    if !trimmed.starts_with('|') || !trimmed.ends_with('|') {
+        return None;
+    }
+    Some(
+        trimmed
+            .trim_matches('|')
+            .split('|')
+            .map(str::trim)
+            .count(),
+    )
+}
+
+fn document_quality_issues(markdown: &str) -> Vec<String> {
+    let mut issues = Vec::new();
+    let mut expected_table_cells: Option<usize> = None;
+    for (index, line) in markdown.lines().enumerate() {
+        let line_no = index + 1;
+        let trimmed = line.trim();
+        if trimmed.chars().count() > 420 {
+            issues.push(format!("line {line_no}: line is too long for stable document rendering"));
+        }
+        for token in trimmed.split_whitespace() {
+            if token.starts_with("http://") || token.starts_with("https://") {
+                continue;
+            }
+            if token.chars().count() > 160 {
+                issues.push(format!(
+                    "line {line_no}: long unbroken text exceeds 160 characters"
+                ));
+                break;
+            }
+        }
+        if trimmed.is_empty() || !trimmed.starts_with('|') {
+            expected_table_cells = None;
+            continue;
+        }
+        let Some(cell_count) = markdown_table_cell_count(trimmed) else {
+            expected_table_cells = None;
+            continue;
+        };
+        if markdown_table_separator(trimmed) {
+            continue;
+        }
+        match expected_table_cells {
+            Some(expected) if cell_count != expected => {
+                issues.push(format!(
+                    "line {line_no}: table row has {cell_count} cells but expected {expected}"
+                ));
+            }
+            Some(_) => {}
+            None => expected_table_cells = Some(cell_count),
+        }
+    }
+    issues
+}
+
 fn document_artifact_name(raw: Option<&str>) -> String {
     document_artifact_name_with_extension(raw, "md")
 }
@@ -17816,88 +17874,101 @@ Absolutely NO text, NO words, NO letters, NO numbers, NO captions, NO logos."
                                         &markdown,
                                         &document_options.design_components,
                                     );
-                                    let mut produced = Vec::new();
-                                    let mut artifact_error: Option<String> = None;
-                                    for format in formats {
-                                        let artifact_name =
-                                            document_artifact_name_with_extension(Some(&fname), &format);
-                                        let slug_w = thread_slug.clone();
-                                        let fname_w = artifact_name.clone();
-                                        let markdown_w = markdown.clone();
-                                        let result = tokio::task::spawn_blocking(move || {
-                                            if format == "pdf" {
-                                                let title = fname_w
-                                                    .trim_end_matches(".pdf")
-                                                    .trim_end_matches(".PDF");
-                                                let bytes = pdf_render::markdown_to_pdf(title, &markdown_w)
-                                                    .map_err(|e| format!("PDF render failed: {e}"))?;
-                                                write_artifact_bytes(&slug_w, &fname_w, &bytes)
-                                            } else if format == "docx" {
-                                                let title = fname_w
-                                                    .trim_end_matches(".docx")
-                                                    .trim_end_matches(".DOCX");
-                                                let bytes = markdown_to_docx(title, &markdown_w)
-                                                    .map_err(|e| format!("DOCX render failed: {e}"))?;
-                                                write_artifact_bytes(&slug_w, &fname_w, &bytes)
-                                            } else {
-                                                write_text_artifact(&slug_w, &fname_w, &markdown_w)
-                                            }
-                                        })
-                                        .await
-                                        .unwrap_or_else(|error| Err(format!("Error: {error}")));
-                                        match result {
-                                            Ok((size, updated)) => {
-                                                let marker = serde_json::json!({
-                                                    "name": artifact_name,
-                                                    "thread": thread_slug,
-                                                    "size": size,
-                                                    "updated": updated,
-                                                });
-                                                let artifact_mark =
-                                                    format!("‹‹ARTIFACT››{marker}‹‹/ARTIFACT››");
-                                                accumulated.push_str(&artifact_mark);
-                                                let _ = emit_stream_event(
-                                                    &tx,
-                                                    GenerateStreamEvent::Delta { text: artifact_mark },
-                                                )
-                                                .await;
-                                                let artifact_name = marker
-                                                    .get("name")
-                                                    .and_then(|value| value.as_str())
-                                                    .unwrap_or("document.md")
-                                                    .to_string();
-                                                register_artifact_memory(
-                                                    &state_owned,
-                                                    thread_id.as_deref(),
-                                                    &thread_slug,
-                                                    &artifact_name,
-                                                    size,
-                                                    updated,
-                                                    "make_document",
-                                                    None,
-                                                )
-                                                .await;
-                                                produced.push(artifact_name);
-                                            }
-                                            Err(error) => {
-                                                artifact_error = Some(error);
-                                                break;
+                                    let quality_issues = document_quality_issues(&markdown);
+                                    if !quality_issues.is_empty() {
+                                        let summary = quality_issues
+                                            .iter()
+                                            .take(5)
+                                            .cloned()
+                                            .collect::<Vec<_>>()
+                                            .join("; ");
+                                        format!(
+                                            "Could not generate document artifact: document QA failed: {summary}"
+                                        )
+                                    } else {
+                                        let mut produced = Vec::new();
+                                        let mut artifact_error: Option<String> = None;
+                                        for format in formats {
+                                            let artifact_name =
+                                                document_artifact_name_with_extension(Some(&fname), &format);
+                                            let slug_w = thread_slug.clone();
+                                            let fname_w = artifact_name.clone();
+                                            let markdown_w = markdown.clone();
+                                            let result = tokio::task::spawn_blocking(move || {
+                                                if format == "pdf" {
+                                                    let title = fname_w
+                                                        .trim_end_matches(".pdf")
+                                                        .trim_end_matches(".PDF");
+                                                    let bytes = pdf_render::markdown_to_pdf(title, &markdown_w)
+                                                        .map_err(|e| format!("PDF render failed: {e}"))?;
+                                                    write_artifact_bytes(&slug_w, &fname_w, &bytes)
+                                                } else if format == "docx" {
+                                                    let title = fname_w
+                                                        .trim_end_matches(".docx")
+                                                        .trim_end_matches(".DOCX");
+                                                    let bytes = markdown_to_docx(title, &markdown_w)
+                                                        .map_err(|e| format!("DOCX render failed: {e}"))?;
+                                                    write_artifact_bytes(&slug_w, &fname_w, &bytes)
+                                                } else {
+                                                    write_text_artifact(&slug_w, &fname_w, &markdown_w)
+                                                }
+                                            })
+                                            .await
+                                            .unwrap_or_else(|error| Err(format!("Error: {error}")));
+                                            match result {
+                                                Ok((size, updated)) => {
+                                                    let marker = serde_json::json!({
+                                                        "name": artifact_name,
+                                                        "thread": thread_slug,
+                                                        "size": size,
+                                                        "updated": updated,
+                                                    });
+                                                    let artifact_mark =
+                                                        format!("‹‹ARTIFACT››{marker}‹‹/ARTIFACT››");
+                                                    accumulated.push_str(&artifact_mark);
+                                                    let _ = emit_stream_event(
+                                                        &tx,
+                                                        GenerateStreamEvent::Delta { text: artifact_mark },
+                                                    )
+                                                    .await;
+                                                    let artifact_name = marker
+                                                        .get("name")
+                                                        .and_then(|value| value.as_str())
+                                                        .unwrap_or("document.md")
+                                                        .to_string();
+                                                    register_artifact_memory(
+                                                        &state_owned,
+                                                        thread_id.as_deref(),
+                                                        &thread_slug,
+                                                        &artifact_name,
+                                                        size,
+                                                        updated,
+                                                        "make_document",
+                                                        None,
+                                                    )
+                                                    .await;
+                                                    produced.push(artifact_name);
+                                                }
+                                                Err(error) => {
+                                                    artifact_error = Some(error);
+                                                    break;
+                                                }
                                             }
                                         }
-                                    }
-                                    if let Some(error) = artifact_error {
-                                        error
-                                    } else {
-                                        format!(
-                                            "Document created via workflow {}: {}. The document is DONE — give the user a one-line summary.",
-                                            workflow_plan
-                                                .steps
-                                                .first()
-                                                .and_then(|step| step.arguments.get("workflow_id"))
-                                                .and_then(|value| value.as_str())
-                                                .unwrap_or("make_document"),
-                                            produced.join(", "),
-                                        )
+                                        if let Some(error) = artifact_error {
+                                            error
+                                        } else {
+                                            format!(
+                                                "Document created via workflow {}: {}. The document is DONE — give the user a one-line summary.",
+                                                workflow_plan
+                                                    .steps
+                                                    .first()
+                                                    .and_then(|step| step.arguments.get("workflow_id"))
+                                                    .and_then(|value| value.as_str())
+                                                    .unwrap_or("make_document"),
+                                                produced.join(", "),
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -39151,6 +39222,31 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         assert!(document.contains("Key metrics"), "{document}");
         assert!(document.contains("Risks and mitigations"), "{document}");
         assert!(document.matches("<w:tbl>").count() >= 2, "{document}");
+    }
+
+    #[test]
+    fn document_quality_guardrail_accepts_structured_markdown() {
+        let markdown = "# Brief\n\nExecutive summary.\n\n| Metric | Value |\n| --- | --- |\n| ARR | +42% |\n";
+
+        assert!(super::document_quality_issues(markdown).is_empty());
+    }
+
+    #[test]
+    fn document_quality_guardrail_flags_unrenderable_markdown() {
+        let long_word = "A".repeat(180);
+        let markdown = format!(
+            "# Brief\n\n{long_word}\n\n| Metric | Value |\n| --- | --- |\n| ARR | +42% | extra |\n"
+        );
+        let issues = super::document_quality_issues(&markdown);
+
+        assert!(
+            issues.iter().any(|issue| issue.contains("long unbroken text")),
+            "{issues:?}"
+        );
+        assert!(
+            issues.iter().any(|issue| issue.contains("table row has 3 cells but expected 2")),
+            "{issues:?}"
+        );
     }
 
     #[test]
