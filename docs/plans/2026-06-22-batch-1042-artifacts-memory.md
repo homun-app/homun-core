@@ -204,6 +204,12 @@ modelli deboli/locali. Invarianti: monotonìa, limitatezza, identità non inferi
     in `CapabilityEntry` con source `ConnectorTool` prima di essere caricati nel
     live toolset e mostrati al modello. Test mirato:
     `connector_hits_are_typed_capability_entries`.
+  - ✅ **Settima slice registry connector search typed (2026-06-23,
+    locale/verde):** la ricerca connector passa da
+    `search_connector_capability_entries`, che restituisce direttamente entry
+    `ConnectorTool` typed mantenendo il set toolkit-aware. `find_capability`
+    consuma così lo stesso shape per native/MCP/connector. Test mirato:
+    `connector_search_returns_typed_toolkit_entries`.
   - 🟡 Possibile step futuro: atomico PDF dedicato con schema più guidato
     (input/output files, operazione), se `run_in_sandbox` risulta troppo generico
     nello smoke.

@@ -134,24 +134,28 @@ primo percorso locale verde:
     `find_capability` restano toolkit-aware ma vengono convertiti in
     `CapabilityEntry` source `ConnectorTool`; anche questa sorgente ora parla il
     contratto typed del registry invece di emettere righe speciali fuori tipo.
-35. WS1/WS7 document focus — `make_document` ora materializza anche `.docx`
+35. WS1-Fase 4b settima slice — la ricerca connector usa
+    `search_connector_capability_entries` e restituisce direttamente entry
+    `ConnectorTool` typed, mantenendo il set toolkit-aware; `find_capability`
+    consuma lo stesso shape per native/MCP/connector.
+36. WS1/WS7 document focus — `make_document` ora materializza anche `.docx`
     editabile dalla stessa sorgente Markdown canonica, oltre a `md`/`pdf`, con
     package OOXML generato in-process e registrazione artifact/memoria invariata.
-36. WS1/WS7 document focus — `make_document` ora accetta struttura/stile
+37. WS1/WS7 document focus — `make_document` ora accetta struttura/stile
     espliciti (`document_type`, `audience`, `tone`, `sections`) nello stesso
     schema tool; il workflow li usa come contratto di generazione solo se
     dichiarati, senza attivazioni euristiche o nuovi registry paralleli.
-37. WS1/WS7 document focus — il renderer DOCX di `make_document` traduce le
+38. WS1/WS7 document focus — il renderer DOCX di `make_document` traduce le
     tabelle pipe Markdown in tabelle Word reali (`w:tbl`) con escaping XML,
     mantenendo sorgente Markdown canonica e registrazione artifact invariata.
-38. WS1/WS7 document focus — feedback smoke reale DOCX: il file era valido ma
+39. WS1/WS7 document focus — feedback smoke reale DOCX: il file era valido ma
     troppo grezzo. Il renderer ora include `styles.xml`, converte bold/italic
     Markdown in run Word, promuove il primo titolo e gestisce liste numerate.
-39. WS1/WS7 document focus — secondo feedback smoke DOCX: tabelle leggibili ma
+40. WS1/WS7 document focus — secondo feedback smoke DOCX: tabelle leggibili ma
     non adattate alla pagina. Il renderer ora emette tabelle full-width con
     `tblGrid`, layout fixed, celle percentuali, padding e proporzione 35/65 per
     tabelle a due colonne.
-40. WS1/WS7 document focus — `make_document` ha un `layout_profile` dichiarativo
+41. WS1/WS7 document focus — `make_document` ha un `layout_profile` dichiarativo
     nello stesso schema tool (`standard`, `one_page`, `executive_brief`,
     `detailed_report`, `proposal`); il profilo diventa direttiva di generazione
     esplicita, non un nuovo workflow e non una euristica di routing.
@@ -193,8 +197,9 @@ corpus `find_capability`; la decisione strutturata ora distingue workflow,
 atomici PDF e agent loop con ragione esplicita; il loop agente emette la route
 come `ACT` e la aggiunge al `tool_trace` del turno. `pdf_atomic` ora è una
 capability atomica nativa mappata a `run_in_sandbox`. MCP e connector Composio
-parlano ora il contratto typed del registry (`McpTool`, `ConnectorTool`), con i
-connector ancora toolkit-aware per non perdere CRUD/perimeter. `make_document`
+parlano ora il contratto typed del registry (`McpTool`, `ConnectorTool`), e la
+ricerca connector restituisce direttamente entry typed mantenendo il set
+toolkit-aware per non perdere CRUD/perimeter. `make_document`
 supporta anche output `.docx` editabile, parametri espliciti di struttura/stile e
 tabelle Word generate da Markdown; lo smoke reale ha corretto anche stili,
 grassetto, corsivo, liste numerate e sizing tabelle nel DOCX. `layout_profile` è

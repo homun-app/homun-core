@@ -336,10 +336,14 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   (servono CRUD completi e perimeter read/write), ma non sono più output
   speciale fuori tipo: vengono convertiti in `CapabilityEntry` con source
   `ConnectorTool` e mostrati come `connector «TOOL»: ...`. Test mirato:
-  `connector_hits_are_typed_capability_entries`. **Prossimo passo unico:**
-  rendere questa sorgente interrogabile/auditabile nello stesso contratto del
-  registry senza perdere la ricerca toolkit-aware, poi fare smoke in-app su un
-  connector reale.
+  `connector_hits_are_typed_capability_entries`. **Settima slice locale/verde:**
+  la ricerca connector stessa ora passa da
+  `search_connector_capability_entries`, che restituisce entry typed mantenendo
+  il set toolkit-aware; `find_capability` consuma quindi lo stesso contratto per
+  native/MCP/connector. Test mirato:
+  `connector_search_returns_typed_toolkit_entries`. **Prossimo passo unico:**
+  smoke in-app su un connector reale e, se serve, aggiungere trace runtime della
+  sorgente selezionata.
 - **make_document DOCX locale/verde (2026-06-23):** lo stesso workflow ora
   materializza anche artifact `.docx` editabili dalla sorgente Markdown canonica,
   via pacchetto OOXML minimale generato in-process con `zip` già presente.

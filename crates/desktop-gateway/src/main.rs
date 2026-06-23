@@ -13331,6 +13331,17 @@ fn search_composio_catalog(
     out
 }
 
+fn search_connector_capability_entries(
+    index: &[(String, String, serde_json::Value)],
+    query: &str,
+    k: usize,
+) -> Vec<CapabilityEntry> {
+    search_composio_catalog(index, query, k)
+        .into_iter()
+        .filter_map(|(slug, schema)| connector_capability_entry(slug, schema))
+        .collect()
+}
+
 /// Capable (OpenAI-compatible) chat path with NATIVE TOOL-CALLING. The model is
 /// given real tools and decides when to use them (no keyword routing). Tool
 /// rounds run non-streamed; the final assistant answer is emitted as Delta+Done
@@ -16777,23 +16788,22 @@ an uncertain date.",
                         // contact_only turns: don't surface connected services at all (the
                         // dispatch refuses them anyway — this just avoids a wasted round).
                         if !catalog_index.is_empty() && !contact_only {
-                            for (slug, schema) in
-                                search_composio_catalog(&catalog_index, &intent, COMPOSIO_DISCOVERY_RESULTS)
-                            {
-                                if read_only && !composio_tool_is_read(&slug) {
+                            for entry in search_connector_capability_entries(
+                                &catalog_index,
+                                &intent,
+                                COMPOSIO_DISCOVERY_RESULTS,
+                            ) {
+                                if read_only && !composio_tool_is_read(&entry.key) {
                                     continue;
                                 }
                                 // PERIMETER: don't even surface calendar/contacts tools when the
                                 // matching axis is off (the dispatch refuses them anyway).
-                                if !can_see_calendar && tool_touches_calendar(&slug) {
+                                if !can_see_calendar && tool_touches_calendar(&entry.key) {
                                     continue;
                                 }
-                                if !can_see_contacts && tool_touches_contacts(&slug) {
+                                if !can_see_contacts && tool_touches_contacts(&entry.key) {
                                     continue;
                                 }
-                                let Some(entry) = connector_capability_entry(slug, schema) else {
-                                    continue;
-                                };
                                 if loaded_tools.insert(entry.key.clone()) {
                                     if let Some(schema) = &entry.schema {
                                         tool_schemas.push(schema.clone());
@@ -36845,6 +36855,24 @@ mod tests {
                 .and_then(|value| value.as_str()),
             Some("GMAIL_SEND_EMAIL"),
         );
+    }
+
+    #[test]
+    fn connector_search_returns_typed_toolkit_entries() {
+        let index = vec![
+            catalog_entry("GMAIL_FETCH_EMAILS", "Fetch a list of email messages from Gmail"),
+            catalog_entry("GMAIL_SEND_EMAIL", "Send an email message via Gmail"),
+            catalog_entry("GOOGLECALENDAR_EVENTS_LIST", "List calendar events in a time range"),
+        ];
+
+        let hits = super::search_connector_capability_entries(&index, "send gmail email", 8);
+        let keys: Vec<&str> = hits.iter().map(|entry| entry.key.as_str()).collect();
+
+        assert!(keys.contains(&"GMAIL_FETCH_EMAILS"));
+        assert!(keys.contains(&"GMAIL_SEND_EMAIL"));
+        assert!(!keys.contains(&"GOOGLECALENDAR_EVENTS_LIST"));
+        assert!(hits.iter().all(|entry| entry.source == super::CapabilitySource::ConnectorTool));
+        assert!(hits.iter().all(|entry| entry.schema.is_some()));
     }
 
     #[test]
