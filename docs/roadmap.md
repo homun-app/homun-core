@@ -245,6 +245,10 @@ primo percorso locale verde:
     technical brief, one-pager, case study, meeting minutes, launch plan,
     incident review e product roadmap. Sono ancora capability di catalogo non
     callable, risolte nei token `design_*` già supportati.
+59. WS7 template manifest metadata — i manifest JSON esterni possono includere
+    `tags`, `preview_ref`, `source_ref` e `license`, con riferimenti sanificati
+    prima dell'indicizzazione. Questo prepara gallery/cataloghi visuali senza
+    introdurre un secondo sistema di template o nuovi tool callable.
 
 Prima di pubblicare/taggare resta prudente ripetere lo smoke manuale in-app su
 una automazione schedulata reale con il binario aggiornato. Il primo smoke ha
@@ -311,7 +315,8 @@ ottava slice: template catalog provider `monet/*` read-only nel registry, con
 senza toccare i workflow; decima slice: manifest JSON locale caricabile e
 validato; undicesima slice: QA leggibilità deck su font-size/contrasto;
 dodicesima slice: QA Markdown per documenti prima di scrivere MD/PDF/DOCX.
-Tredicesima slice: catalogo seed `monet/*` ampliato a 11 template PMI. Prossima
-slice: adapter esterno/manifest più ricchi e QA più profonda.
+Tredicesima slice: catalogo seed `monet/*` ampliato a 11 template PMI.
+Quattordicesima slice: manifest con metadati sanificati per preview/gallery
+futura. Prossimo asse: UI/gallery e QA più profonda.
 `make_research` e `make_meeting` restano futuri.
 Il contratto corrente della memoria è in [MEMORIA.md](MEMORIA.md).

@@ -5846,6 +5846,10 @@ struct TemplateCatalogEntry {
     design_profile: Option<String>,
     design_components: Vec<String>,
     layout_archetypes: Vec<String>,
+    tags: Vec<String>,
+    preview_ref: Option<String>,
+    source_ref: Option<String>,
+    license: Option<String>,
     route_text: String,
 }
 
@@ -6024,6 +6028,10 @@ fn template_catalog_entry(
             .iter()
             .map(|value| value.to_string())
             .collect(),
+        tags: Vec::new(),
+        preview_ref: None,
+        source_ref: None,
+        license: None,
         route_text: route_text.to_string(),
     }
 }
@@ -6304,6 +6312,27 @@ fn clean_template_catalog_string_list(
         .unwrap_or_default()
 }
 
+fn clean_template_catalog_ref(value: Option<&serde_json::Value>) -> Option<String> {
+    let value = value.and_then(|value| value.as_str())?.trim();
+    if value.is_empty() || value.len() > 240 || value.contains("..") {
+        return None;
+    }
+    if value.starts_with("https://") || value.starts_with("http://") {
+        return Some(value.to_string());
+    }
+    if value.starts_with('/') || value.starts_with("file:") {
+        return None;
+    }
+    if value
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '/' | '.' | ':' | '#'))
+    {
+        Some(value.to_string())
+    } else {
+        None
+    }
+}
+
 fn parse_file_template_catalog_entry(
     provider_id: &str,
     value: &serde_json::Value,
@@ -6371,6 +6400,10 @@ fn parse_file_template_catalog_entry(
             16,
             80,
         ),
+        tags: clean_template_catalog_string_list(value.get("tags"), 16, 40),
+        preview_ref: clean_template_catalog_ref(value.get("preview_ref")),
+        source_ref: clean_template_catalog_ref(value.get("source_ref")),
+        license: clean_template_catalog_text(value.get("license"), 80),
         route_text,
     })
 }
@@ -6438,7 +6471,7 @@ fn template_catalog_capability_entries() -> Vec<CapabilityEntry> {
             key: entry.id.to_string(),
             desc: entry.description.to_string(),
             text: format!(
-                "template catalog {} {} {} {} {} {} {} {} {} {} {} {}",
+                "template catalog {} {} {} {} {} {} {} {} {} {} {} {} {} {} {} {}",
                 entry.provider,
                 entry.id,
                 entry.name,
@@ -6447,6 +6480,10 @@ fn template_catalog_capability_entries() -> Vec<CapabilityEntry> {
                 entry.use_cases.join(" "),
                 entry.audience.join(" "),
                 entry.layout_archetypes.join(" "),
+                entry.tags.join(" "),
+                entry.preview_ref.as_deref().unwrap_or(""),
+                entry.source_ref.as_deref().unwrap_or(""),
+                entry.license.as_deref().unwrap_or(""),
                 entry.design_template,
                 entry.design_theme.as_deref().unwrap_or(""),
                 entry.design_profile.as_deref().unwrap_or(""),
@@ -38591,6 +38628,10 @@ mod tests {
                     "design_profile": "sales_pitch",
                     "design_components": ["kpi_grid", "timeline", "unknown_component"],
                     "layout_archetypes": ["cover", "traction", "ask"],
+                    "tags": ["premium", "investor", "premium"],
+                    "preview_ref": "assets/investor-pitch.png",
+                    "source_ref": "https://example.com/templates/investor-pitch",
+                    "license": "commercial",
                     "route_text": "investor pitch fundraising"
                 }
             ]
@@ -38611,6 +38652,44 @@ mod tests {
             entries[0].design_components,
             vec!["kpi_grid".to_string(), "timeline".to_string()],
         );
+        assert_eq!(
+            entries[0].tags,
+            vec!["premium".to_string(), "investor".to_string()],
+        );
+        assert_eq!(entries[0].preview_ref.as_deref(), Some("assets/investor-pitch.png"));
+        assert_eq!(
+            entries[0].source_ref.as_deref(),
+            Some("https://example.com/templates/investor-pitch"),
+        );
+        assert_eq!(entries[0].license.as_deref(), Some("commercial"));
+    }
+
+    #[test]
+    fn file_template_catalog_provider_ignores_unsafe_preview_refs() {
+        let manifest = serde_json::json!({
+            "provider_id": "monet_file",
+            "templates": [
+                {
+                    "id": "monet_file/unsafe-preview-01",
+                    "name": "Unsafe Preview",
+                    "kind": "document",
+                    "description": "Template with unsafe preview metadata.",
+                    "design_template": "technical_brief",
+                    "preview_ref": "../secret.png",
+                    "source_ref": "file:///Users/fabio/secrets/template.json",
+                    "route_text": "unsafe preview"
+                }
+            ]
+        });
+        let provider = super::FileTemplateCatalogProvider::from_json_str(
+            manifest.to_string().as_str(),
+        )
+        .expect("file provider");
+        let entry = super::TemplateCatalogProvider::get(&provider, "monet_file/unsafe-preview-01")
+            .expect("entry");
+
+        assert_eq!(entry.preview_ref, None);
+        assert_eq!(entry.source_ref, None);
     }
 
     #[test]

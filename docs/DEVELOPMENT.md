@@ -104,8 +104,11 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   Tredicesima slice locale/verde: il seed `monet/*` sale da 5 a 11 template
   PMI reali (one-pager, case study, verbale riunione, launch plan, incident
   review, product roadmap) sempre come entry catalogo non callable risolte nei
-  token esistenti. Prossimo asse: adapter esterni/manifest più ricchi e QA
-  ancora più profonda. `make_research` e `make_meeting` restano dopo questo
+  token esistenti. Quattordicesima slice locale/verde: i manifest file possono
+  portare metadati opzionali `tags`, `preview_ref`, `source_ref` e `license`,
+  sanificati prima dell'indicizzazione; servono a cataloghi/gallery futuri senza
+  trasformare i template in tool o store paralleli. Prossimo asse: UI/gallery e
+  QA ancora più profonda. `make_research` e `make_meeting` restano dopo questo
   asse.
 - **WS2-3.1 PASSATA in runtime (2026-06-23):** gli artifact scritti via
   Filesystem MCP dentro la root progetto vengono registrati come

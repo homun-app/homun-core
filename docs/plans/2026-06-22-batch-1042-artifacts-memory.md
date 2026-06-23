@@ -832,6 +832,13 @@ ragionato il contratto degli strumenti `make_*` creati dall'harness. ADR 0011
   `design_*` esistenti senza introdurre nuovi renderer o tool. Test mirati:
   `local_template_catalog_provider_exposes_seed_templates`,
   `expanded_template_catalog_routes_common_pmi_deliverables`.
+  **Quattordicesima slice manifest metadata (2026-06-23, locale/verde):**
+  i cataloghi file accettano metadati opzionali `tags`, `preview_ref`,
+  `source_ref` e `license`; i riferimenti vengono sanificati (niente path
+  assoluti, `file:` o traversal) e indicizzati nella capability entry per
+  discovery/UI futura. Non cambiano i workflow e non diventano tool callable.
+  Test mirati: `file_template_catalog_provider_loads_valid_manifest`,
+  `file_template_catalog_provider_ignores_unsafe_preview_refs`.
 - ☐ **7.1b (futuro)** Portare ricerca/meeting al livello del deck solo dopo il
   chiarimento sul contratto strumenti: `make_research` e `make_meeting` non sono
   essenziali per la prossima release.
