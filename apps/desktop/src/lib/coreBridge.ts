@@ -1031,6 +1031,11 @@ async function electronArtifactVersions(thread: string, name: string): Promise<n
 export interface ArtifactFileView {
   name: string;
   size: number;
+  source?: "managed" | "memory" | string | null;
+  reference?: string | null;
+  project_path?: string | null;
+  project_relative_path?: string | null;
+  title?: string | null;
 }
 export interface ArtifactThreadView {
   thread: string;
@@ -1104,6 +1109,13 @@ async function electronMemoryArtifacts(thread?: string): Promise<MemoryArtifactV
 async function electronDeleteArtifactFile(thread: string, name: string): Promise<void> {
   await fetch(
     `${DESKTOP_GATEWAY_URL}/api/artifacts/file?thread=${encodeURIComponent(thread)}&name=${encodeURIComponent(name)}`,
+    { method: "DELETE", headers: gatewayHeaders() },
+  );
+}
+
+async function electronDeleteMemoryArtifact(reference: string): Promise<void> {
+  await fetch(
+    `${DESKTOP_GATEWAY_URL}/api/artifacts/memory?reference=${encodeURIComponent(reference)}`,
     { method: "DELETE", headers: gatewayHeaders() },
   );
 }
@@ -2258,6 +2270,7 @@ export const coreBridge = {
   addArtifactDestination: (label: string, path: string) =>
     electronAddArtifactDestination(label, path),
   removeArtifactDestination: (path: string) => electronRemoveArtifactDestination(path),
+  deleteMemoryArtifact: (reference: string) => electronDeleteMemoryArtifact(reference),
   deleteArtifactFile: (thread: string, name: string) =>
     electronDeleteArtifactFile(thread, name),
   deleteArtifactThread: (thread: string) => electronDeleteArtifactThread(thread),

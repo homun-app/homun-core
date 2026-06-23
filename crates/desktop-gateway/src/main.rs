@@ -611,7 +611,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/artifacts/versions", get(artifact_versions))
         .route("/api/artifacts/content", post(save_artifact_content))
         .route("/api/artifacts/usage", get(artifacts_usage))
-        .route("/api/artifacts/memory", get(memory_artifacts))
+        .route(
+            "/api/artifacts/memory",
+            get(memory_artifacts).delete(delete_memory_artifact),
+        )
         .route("/api/artifacts/thread", delete(delete_artifact_thread))
         .route("/api/artifacts/clear", post(clear_artifacts))
         .route(
@@ -1600,10 +1603,18 @@ async fn delete_chat_thread(
     let st = state.clone();
     let tid = thread_id.clone();
     let _ = tokio::task::spawn_blocking(move || close_thread_browser_session(&st, &tid)).await;
-    // Also drop the thread's generated artifacts so they don't fill the disk.
-    let artifacts = sandbox::artifacts_dir().join(artifact_thread_slug(Some(&thread_id)));
-    let _ = tokio::task::spawn_blocking(move || std::fs::remove_dir_all(&artifacts)).await;
+    // WS2-3.3: deleting chat history must NOT delete deliverables. Artifacts are
+    // product outputs with their own lifecycle; users delete them explicitly from
+    // the Artifacts surface so memory/provenance can be tombstoned coherently.
+    if delete_chat_thread_should_remove_artifacts() {
+        let artifacts = sandbox::artifacts_dir().join(artifact_thread_slug(Some(&thread_id)));
+        let _ = tokio::task::spawn_blocking(move || std::fs::remove_dir_all(&artifacts)).await;
+    }
     Ok(Json(snapshot))
+}
+
+fn delete_chat_thread_should_remove_artifacts() -> bool {
+    false
 }
 
 async fn chat_messages(
@@ -18600,6 +18611,16 @@ async fn artifact_folder_path(Query(query): Query<ArtifactFolderQuery>) -> Json<
 struct ArtifactFileView {
     name: String,
     size: u64,
+    #[serde(default)]
+    source: Option<String>,
+    #[serde(default)]
+    reference: Option<String>,
+    #[serde(default)]
+    project_path: Option<String>,
+    #[serde(default)]
+    project_relative_path: Option<String>,
+    #[serde(default)]
+    title: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -18624,6 +18645,11 @@ struct MemoryArtifactsQuery {
     workspace: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct DeleteMemoryArtifactQuery {
+    reference: String,
+}
+
 #[derive(Debug, Serialize)]
 struct MemoryArtifactView {
     reference: String,
@@ -18639,9 +18665,27 @@ struct MemoryArtifactView {
     thread: String,
 }
 
+fn workspace_root_for_memory_workspace(workspace: &MemoryWorkspaceId) -> Option<PathBuf> {
+    load_workspaces_file()
+        .workspaces
+        .into_iter()
+        .find(|w| w.id == workspace.as_str())
+        .and_then(|w| w.folder)
+        .map(PathBuf::from)
+        .filter(|path| path.is_dir())
+}
+
+fn artifact_memory_delete_path_allowed(
+    workspace_root: Option<&std::path::Path>,
+    managed_root: &std::path::Path,
+    path: &std::path::Path,
+) -> bool {
+    workspace_root.is_some_and(|root| path_within(root, path)) || path_within(managed_root, path)
+}
+
 /// Disk usage of generated artifacts, grouped per conversation — drives the
 /// management/cleanup view so the folder can't silently fill the disk.
-async fn artifacts_usage() -> Json<ArtifactsUsage> {
+async fn artifacts_usage(State(state): State<AppState>) -> Json<ArtifactsUsage> {
     let base = sandbox::artifacts_dir();
     let mut threads: Vec<ArtifactThreadView> = Vec::new();
     let mut total: u64 = 0;
@@ -18663,6 +18707,11 @@ async fn artifacts_usage() -> Json<ArtifactsUsage> {
                     files.push(ArtifactFileView {
                         name: file.file_name().to_string_lossy().to_string(),
                         size,
+                        source: Some("managed".to_string()),
+                        reference: None,
+                        project_path: None,
+                        project_relative_path: None,
+                        title: None,
                     });
                 }
             }
@@ -18672,6 +18721,85 @@ async fn artifacts_usage() -> Json<ArtifactsUsage> {
             files.sort_by(|a, b| a.name.cmp(&b.name));
             total += bytes;
             threads.push(ArtifactThreadView { thread, bytes, files });
+        }
+    }
+    let user = gateway_memory_user_id();
+    let workspace = gateway_memory_workspace_id();
+    if let Ok(facade) = lock_memory_facade(&state) {
+        let mut files: Vec<ArtifactFileView> = facade
+            .list_memories_for_ui(&user, &workspace)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|memory| {
+                memory.memory_type == "artifact"
+                    && matches!(
+                        memory.status,
+                        MemoryStatus::Confirmed | MemoryStatus::Candidate
+                    )
+            })
+            .filter_map(|memory| {
+                let metadata = &memory.metadata;
+                let name = metadata
+                    .get("name")
+                    .and_then(|value| value.as_str())
+                    .or_else(|| {
+                        metadata
+                            .get("project_relative_path")
+                            .and_then(|value| value.as_str())
+                    })
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())?
+                    .to_string();
+                let project_path = metadata
+                    .get("project_path")
+                    .and_then(|value| value.as_str())
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_string);
+                let managed_path = metadata
+                    .get("managed_path")
+                    .and_then(|value| value.as_str())
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_string);
+                let path = project_path.as_deref().or(managed_path.as_deref());
+                let path_exists = path
+                    .map(|path| std::path::Path::new(path).is_file())
+                    .unwrap_or(true);
+                if !path_exists {
+                    return None;
+                }
+                let size = path
+                    .and_then(|path| std::fs::metadata(path).ok())
+                    .map(|metadata| metadata.len())
+                    .or_else(|| metadata.get("size_bytes").and_then(|value| value.as_u64()))
+                    .unwrap_or_default();
+                Some(ArtifactFileView {
+                    name,
+                    size,
+                    source: Some("memory".to_string()),
+                    reference: Some(memory.reference.to_string()),
+                    project_path,
+                    project_relative_path: metadata
+                        .get("project_relative_path")
+                        .and_then(|value| value.as_str())
+                        .map(str::to_string),
+                    title: metadata
+                        .get("title")
+                        .and_then(|value| value.as_str())
+                        .map(str::to_string),
+                })
+            })
+            .collect();
+        if !files.is_empty() {
+            files.sort_by(|a, b| a.name.cmp(&b.name));
+            let bytes = files.iter().map(|file| file.size).sum();
+            total += bytes;
+            threads.push(ArtifactThreadView {
+                thread: format!("memory:{}", workspace.as_str()),
+                bytes,
+                files,
+            });
         }
     }
     threads.sort_by(|a, b| b.bytes.cmp(&a.bytes));
@@ -18799,6 +18927,92 @@ async fn memory_artifacts(
         "workspace": workspace.as_str(),
         "artifacts": artifacts,
     })))
+}
+
+async fn delete_memory_artifact(
+    State(state): State<AppState>,
+    Query(query): Query<DeleteMemoryArtifactQuery>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let reference = query.reference.parse::<MemoryRef>().map_err(|error| GatewayError {
+        status: StatusCode::BAD_REQUEST,
+        code: "artifact_bad_ref",
+        message: error,
+    })?;
+    let user = reference.user_id.clone();
+    let workspace = reference.workspace_id.clone();
+    let facade = lock_memory_facade(&state)?;
+    let memory = facade
+        .list_memories_for_ui(&user, &workspace)
+        .unwrap_or_default()
+        .into_iter()
+        .find(|memory| memory.reference == reference)
+        .ok_or_else(|| GatewayError {
+            status: StatusCode::NOT_FOUND,
+            code: "artifact_not_found",
+            message: "artifact memory not found".to_string(),
+        })?;
+    if memory.memory_type != "artifact" {
+        return Err(GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "artifact_bad_type",
+            message: "memory reference is not an artifact".to_string(),
+        });
+    }
+
+    let metadata = memory.metadata.clone();
+    let path = metadata
+        .get("project_path")
+        .and_then(|value| value.as_str())
+        .or_else(|| metadata.get("managed_path").and_then(|value| value.as_str()))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from);
+    if let Some(path) = path.as_deref() {
+        let workspace_root = workspace_root_for_memory_workspace(&workspace);
+        let managed_root = sandbox::artifacts_dir();
+        if !artifact_memory_delete_path_allowed(workspace_root.as_deref(), &managed_root, path) {
+            return Err(GatewayError {
+                status: StatusCode::BAD_REQUEST,
+                code: "artifact_path_outside_scope",
+                message: "artifact path is outside the authorized project/artifact roots".to_string(),
+            });
+        }
+        if path.is_file() {
+            std::fs::remove_file(path).map_err(|error| GatewayError {
+                status: StatusCode::INTERNAL_SERVER_ERROR,
+                code: "artifact_delete_file",
+                message: error.to_string(),
+            })?;
+        }
+    }
+
+    let lifecycle = MemoryLifecycleRequest {
+        actor_id: "artifact-ui".to_string(),
+        user_id: user.clone(),
+        workspace_id: workspace.clone(),
+        purpose: "artifact_delete".to_string(),
+    };
+    facade
+        .delete_memory(&lifecycle, &reference, "artifact deleted by user")
+        .map_err(|error| GatewayError::memory(error.to_string()))?;
+    if let (Some(thread_slug), Some(name)) = (
+        metadata.get("thread_slug").and_then(|value| value.as_str()),
+        metadata.get("name").and_then(|value| value.as_str()),
+    ) {
+        let entity_ref = MemoryRef::new(
+            MemoryRefKind::Entity,
+            user.clone(),
+            workspace.clone(),
+            format!("artifact:{thread_slug}:{name}"),
+        );
+        let _ = facade.tombstone_entity(
+            &entity_ref,
+            &user,
+            &workspace,
+            "artifact deleted by user",
+        );
+    }
+    Ok(Json(serde_json::json!({ "ok": true })))
 }
 
 fn ok_json() -> Json<serde_json::Value> {
@@ -33246,6 +33460,62 @@ mod tests {
 
         assert_eq!(detected.as_deref(), Some("artifact-memory-gate.md"));
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn delete_chat_thread_preserves_artifact_lifecycle() {
+        assert!(
+            !super::delete_chat_thread_should_remove_artifacts(),
+            "chat deletion must not remove deliverables; artifact deletion is explicit"
+        );
+    }
+
+    #[test]
+    fn artifact_memory_delete_path_is_jail_scoped() {
+        let root = std::env::temp_dir().join(format!(
+            "homun-artifact-delete-root-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        let managed = std::env::temp_dir().join(format!(
+            "homun-artifact-delete-managed-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::create_dir_all(root.join("sub")).unwrap();
+        std::fs::create_dir_all(&managed).unwrap();
+        let project_file = root.join("sub").join("artifact.md");
+        let managed_file = managed.join("artifact.md");
+        let outside = std::env::temp_dir().join(format!(
+            "homun-artifact-delete-outside-{}.md",
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::write(&project_file, "x").unwrap();
+        std::fs::write(&managed_file, "x").unwrap();
+        std::fs::write(&outside, "x").unwrap();
+
+        assert!(super::artifact_memory_delete_path_allowed(
+            Some(&root),
+            &managed,
+            &project_file
+        ));
+        assert!(super::artifact_memory_delete_path_allowed(
+            Some(&root),
+            &managed,
+            &managed_file
+        ));
+        assert!(!super::artifact_memory_delete_path_allowed(
+            Some(&root),
+            &managed,
+            &outside
+        ));
+        assert!(!super::artifact_memory_delete_path_allowed(
+            None,
+            &managed,
+            &outside
+        ));
+
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&managed);
+        let _ = std::fs::remove_file(&outside);
     }
 
     #[test]

@@ -72,9 +72,29 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   `thread_1782197059_1782197059045808000`. Gate visuale DOM/in-app: badge
   Workbench `1`, tab Artifacts mostra `artifact-memory-gate-5.md` e preview
   `test memoria artifact 5`.
-- **Prossimo passo unico:** WS2-3.2b/3.3 — lifecycle coerente: schermata
-  centralizzata, esporta ZIP, delete esplicito da memoria, e cancellazione chat
-  che non elimina deliverable.
+- **WS2-3.2b/3.3 slice locale/verde:** lifecycle artifact separato dalla chat.
+  `delete_chat_thread` non rimuove più i deliverable; `/api/artifacts/usage`
+  include anche gli artifact registrati come memoria; `DELETE /api/artifacts/memory`
+  elimina il file solo se resta dentro root progetto/artifacts jail e poi
+  tombstona memoria + entity artifact. Settings usa il delete memoria quando il
+  file arriva da `memory_type="artifact"`. Test:
+  `delete_chat_thread_preserves_artifact_lifecycle`,
+  `artifact_memory_delete_path_is_jail_scoped`, gateway completo `174 passati, 1
+  ignorato`; frontend `npm run build` verde. Smoke runtime non distruttivo dopo
+  restart Electron da HEAD: `GET /api/artifacts/usage` include il gruppo
+  `memory:workspace_0d46c4470d97422298ece7ee7f0b74c6` con
+  `artifact-memory-gate-5.md`, `source=memory`, `reference` e `project_path`.
+  **Gate in-app/Settings PASSATO:** la card “Generated files (artifacts)” nel
+  pane Local computer mostra il gruppo `memory:workspace_...` con
+  `artifact-memory-gate-5.md`; un artifact usa-e-getta
+  `settings-delete-gate-fe0f6585.md` è stato rimosso dalla UI, il file è sparito
+  dal filesystem, la memoria è passata a `status=deleted` e sono presenti i
+  tombstone di memoria + entity. Gate chat-delete: un thread usa-e-getta
+  cancellato via API ha preservato il file artifact managed finché non è stato
+  pulito esplicitamente via API artifact. Copy Settings aggiornata: cancellare
+  conversazioni non elimina deliverable.
+- **Prossimo passo unico:** completare WS2-3.2 con export ZIP e filtri
+  progetto/tipo/orfani nella surface centralizzata; poi passare a WS5.5/5.6.
 - **Nota aperta non bloccante:** durante i gate con tool il provider primario
   `glm-5.2` continua a rispondere `400 Bad Request` sul primo round con tool; il
   fallback a `kimi-k2.6:cloud` prosegue correttamente. Da riprendere come task

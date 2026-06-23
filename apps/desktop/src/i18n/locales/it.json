@@ -931,7 +931,7 @@
     "noAuthorizedFolder": "Nessuna cartella autorizzata. Aggiungine una per consentire i salvataggi.",
     "generatedFiles": "File generati (artifacts)",
     "spaceUsed": "Spazio usato",
-    "artifactsDesc": "I file creati dalle skill restano sul disco{{location}}. Delete what you do not need to save space. Deleted conversations clean up the loro file automaticamente.",
+    "artifactsDesc": "I file creati dalle skill restano sul disco{{location}}. Cancellare una conversazione non elimina i deliverable: rimuovi qui i file quando vuoi pulirli.",
     "artifactsLocation": " in {{path}}",
     "noGeneratedFile": "Nessun file generato finora.",
     "botTokenPlaceholder": "token bot (123456:ABC…) — vuoto se già salvato",

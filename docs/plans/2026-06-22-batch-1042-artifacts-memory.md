@@ -95,11 +95,25 @@ tutto passa dal motore di memoria.
   `size=24`, `source=mcp_filesystem`. Gate visuale DOM/in-app: badge Workbench
   `1`, tab Artifacts mostra `artifact-memory-gate-5.md` e preview
   `test memoria artifact 5`.
-  **Resta:** Settings/export/delete.
-- ☐ **3.3 — lifecycle + cancellazione con memoria:** `delete_chat_thread` **non**
-  cancella più gli artefatti (oggi sì, `main.rs:1526`) → preserva + `meta.json`
-  (titolo/progetto/data); la cancellazione dalla schermata elimina **file + entità di
-  memoria** (possibile solo dopo 3.1).
+  **Slice 3.2b locale/verde:** `/api/artifacts/usage` include anche gli artifact
+  memoria dello workspace corrente, con `source=memory`, `reference`,
+  `project_path`, `project_relative_path` e `title`; Settings distingue file
+  managed vs memoria e chiama il delete memoria quando disponibile. **Resta:**
+  export ZIP, filtri/progetto/tipo/orfani. Smoke runtime non distruttivo:
+  `GET /api/artifacts/usage` su nuova build include `artifact-memory-gate-5.md`
+  nel gruppo `memory:workspace_...`. Gate UI Settings passato: il gruppo memoria
+  è visibile nella card Artifacts del pane Local computer.
+- 🟡 **3.3 — lifecycle + cancellazione con memoria:** `delete_chat_thread` **non**
+  cancella più gli artefatti: la chat è storia conversazionale, il deliverable ha
+  lifecycle proprio. `DELETE /api/artifacts/memory?reference=...` rimuove il file
+  solo se resta dentro root progetto o artifacts jail, poi tombstona memoria +
+  entity artifact. Test verdi: `delete_chat_thread_preserves_artifact_lifecycle`,
+  `artifact_memory_delete_path_is_jail_scoped`, gateway completo `174 passati, 1
+  ignorato`, frontend `npm run build`.
+  Gate runtime/in-app passato: `settings-delete-gate-fe0f6585.md` eliminato dalla
+  UI → file rimosso, memoria `status=deleted`, tombstone memoria + entity
+  presenti; cancellare un thread usa-e-getta ha preservato il file artifact
+  managed finché non è stato rimosso esplicitamente via API artifact.
 
 ## WS3 — Batch 1042 (in locale, da pubblicare su comando)
 
@@ -462,8 +476,8 @@ proprio — versioning, canali, scaricabili dal **sito Homun**, auto-aggiornabil
 1. **WS6 locale consolidata/committata** — publish/tag solo su comando. Prima
    del publish resta consigliato uno smoke manuale in-app su scheduled
    automation reale nel thread `scheduled`.
-2. **WS2-3.2b / 3.3** — schermata centralizzata + lifecycle/delete
-   coerente con memoria; cancellare chat non deve cancellare deliverable.
+2. **WS2-3.2b / 3.3** — completare export ZIP/filtri: central surface e
+   lifecycle/delete sono cablati e passati in-app.
 3. **WS5.5 / WS5.6** — catena di provenienza decisione → artefatto → codice →
    esito, più eval memoria come guardrail.
 4. **WS1-Fase 2** — gestione piano (`ExecutionPlan`+`step_id`); il piano scrive

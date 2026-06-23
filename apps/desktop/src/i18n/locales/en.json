@@ -931,7 +931,7 @@
     "noAuthorizedFolder": "No authorized folder. Add one to allow saving.",
     "generatedFiles": "Generated files (artifacts)",
     "spaceUsed": "Space used",
-    "artifactsDesc": "Files created by skills stay on disk{{location}}. Delete what you do not need to save space. Deleted conversations clean up their files automatically.",
+    "artifactsDesc": "Files created by skills stay on disk{{location}}. Deleted conversations do not delete deliverables; remove files here when you want to clean them up.",
     "artifactsLocation": " in {{path}}",
     "noGeneratedFile": "No file generated yet.",
     "botTokenPlaceholder": "bot token (123456:ABC…) — empty if already saved",

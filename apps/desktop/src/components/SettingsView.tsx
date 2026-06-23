@@ -4508,6 +4508,25 @@ function ArtifactsCard() {
     }
   }
 
+  async function deleteArtifactFile(thread: ArtifactsUsage["threads"][number], file: ArtifactsUsage["threads"][number]["files"][number]) {
+    if (file.source === "memory" && file.reference) {
+      await coreBridge.deleteMemoryArtifact(file.reference);
+      return;
+    }
+    await coreBridge.deleteArtifactFile(thread.thread, file.name);
+  }
+
+  async function deleteArtifactGroup(thread: ArtifactsUsage["threads"][number]) {
+    const memoryFiles = thread.files.filter((file) => file.source === "memory" && file.reference);
+    if (memoryFiles.length === thread.files.length && memoryFiles.length > 0) {
+      for (const file of memoryFiles) {
+        await coreBridge.deleteMemoryArtifact(file.reference!);
+      }
+      return;
+    }
+    await coreBridge.deleteArtifactThread(thread.thread);
+  }
+
   const hasArtifacts = (usage?.threads.length ?? 0) > 0;
 
   return (
@@ -4592,7 +4611,7 @@ function ArtifactsCard() {
                       className="set-btn danger"
                       type="button"
                       disabled={busy}
-                      onClick={() => void run(() => coreBridge.deleteArtifactThread(thread.thread))}
+                      onClick={() => void run(() => deleteArtifactGroup(thread))}
                     >
                       {t("settings.deleteAll")}
                     </button>
@@ -4603,16 +4622,18 @@ function ArtifactsCard() {
                         <div className="set-row" key={file.name}>
                           <div style={{ minWidth: 0 }}>
                             <div className="rk" style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
-                              {file.name}
+                              {file.title || file.name}
                             </div>
-                            <div className="rv">{formatArtifactBytes(file.size)}</div>
+                            <div className="rv">
+                              {file.project_relative_path || file.name} · {formatArtifactBytes(file.size)}
+                            </div>
                           </div>
                           <button
                             className="set-btn"
                             type="button"
                             disabled={busy}
                             onClick={() =>
-                              void run(() => coreBridge.deleteArtifactFile(thread.thread, file.name))
+                              void run(() => deleteArtifactFile(thread, file))
                             }
                           >
                             {t("common.remove")}
