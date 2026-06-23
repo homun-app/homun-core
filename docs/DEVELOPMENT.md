@@ -67,8 +67,14 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   propagato nei rispettivi workflow/prompt senza nuovi `make_*`. Seconda slice
   locale/verde: `design_components` condiviso (`kpi_grid`, `timeline`,
   `comparison_table`, `quote_callout`, `process_steps`, `risks_table`) come
-  componenti dichiarativi per il composer. `make_research` e `make_meeting`
-  restano dopo questo asse.
+  componenti dichiarativi per il composer. Terza/quarta slice locali/verdi:
+  quei componenti vengono materializzati deterministicamente nei layout deck
+  (`kpi`, `quote`, `two_column`) e in blocchi/tabelle Markdown-DOCX. Slice
+  corrente locale/verde: `design_template` condiviso (`startup_pitch`,
+  `executive_update`, `project_plan`, `technical_brief`, `sales_proposal`) che
+  espande in default profilo/componenti; gli argomenti espliciti restano
+  sovrani. Prossimo asse: theme tokens + QA visuale renderizzata. `make_research`
+  e `make_meeting` restano dopo questo asse.
 - **WS2-3.1 PASSATA in runtime (2026-06-23):** gli artifact scritti via
   Filesystem MCP dentro la root progetto vengono registrati come
   `memory_type="artifact"` + entity grafo `artifact` + embedding. Gate:

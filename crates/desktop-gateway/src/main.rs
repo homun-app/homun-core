@@ -12062,6 +12062,7 @@ fn make_deck_tool_schema() -> serde_json::Value {
                     "brief": { "type": "string", "description": "What the deck is about, plus any structure, sections or points the user specified — verbatim." },
                     "language": { "type": "string", "description": "Deck language code, e.g. 'it' or 'en'. Default: the user's language." },
                     "slides": { "type": "integer", "description": "Desired number of slides (3-12). Default 6." },
+                    "design_template": deliverable_design_template_schema(),
                     "design_profile": deliverable_design_profile_schema(),
                     "design_components": deliverable_design_components_schema()
                 },
@@ -12101,6 +12102,7 @@ fn make_document_tool_schema() -> serde_json::Value {
                         "description": "Explicit document layout profile requested by the user. Preserve explicit intent; omit when unspecified.",
                         "enum": ["standard", "one_page", "executive_brief", "detailed_report", "proposal"]
                     },
+                    "design_template": deliverable_design_template_schema(),
                     "design_profile": deliverable_design_profile_schema(),
                     "design_components": deliverable_design_components_schema(),
                     "sections": {
@@ -12129,6 +12131,14 @@ fn deliverable_design_components_schema() -> serde_json::Value {
     })
 }
 
+fn deliverable_design_template_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "string",
+        "description": "Shared reusable deliverable template requested by the user. Applies across presentations and documents. Expands to default profile/components; explicit profile/components override or extend it.",
+        "enum": DELIVERABLE_DESIGN_TEMPLATES
+    })
+}
+
 fn deliverable_design_profile_schema() -> serde_json::Value {
     serde_json::json!({
         "type": "string",
@@ -12145,6 +12155,14 @@ const DELIVERABLE_DESIGN_PROFILES: &[&str] = &[
     "minimal",
 ];
 
+const DELIVERABLE_DESIGN_TEMPLATES: &[&str] = &[
+    "startup_pitch",
+    "executive_update",
+    "project_plan",
+    "technical_brief",
+    "sales_proposal",
+];
+
 const DELIVERABLE_DESIGN_COMPONENTS: &[&str] = &[
     "kpi_grid",
     "timeline",
@@ -12154,9 +12172,39 @@ const DELIVERABLE_DESIGN_COMPONENTS: &[&str] = &[
     "risks_table",
 ];
 
-fn deliverable_design_components(parsed: &serde_json::Value) -> Vec<String> {
+fn deliverable_design_template(parsed: &serde_json::Value) -> Option<String> {
     parsed
-        .get("design_components")
+        .get("design_template")
+        .and_then(|value| value.as_str())
+        .map(|value| value.trim().to_ascii_lowercase())
+        .filter(|value| DELIVERABLE_DESIGN_TEMPLATES.contains(&value.as_str()))
+}
+
+fn deliverable_template_defaults(
+    template: Option<&str>,
+) -> (Option<&'static str>, Vec<&'static str>) {
+    match template {
+        Some("startup_pitch") => {
+            (Some("sales_pitch"), vec!["kpi_grid", "timeline", "quote_callout"])
+        }
+        Some("executive_update") => {
+            (Some("executive"), vec!["kpi_grid", "risks_table", "timeline"])
+        }
+        Some("project_plan") => {
+            (Some("technical"), vec!["process_steps", "timeline", "risks_table"])
+        }
+        Some("technical_brief") => {
+            (Some("technical"), vec!["process_steps", "comparison_table", "risks_table"])
+        }
+        Some("sales_proposal") => {
+            (Some("sales_pitch"), vec!["comparison_table", "timeline", "kpi_grid"])
+        }
+        _ => (None, Vec::new()),
+    }
+}
+
+fn deliverable_design_components_from_value(value: Option<&serde_json::Value>) -> Vec<String> {
+    value
         .and_then(|value| value.as_array())
         .map(|values| {
             values
@@ -12174,12 +12222,80 @@ fn deliverable_design_components(parsed: &serde_json::Value) -> Vec<String> {
         .unwrap_or_default()
 }
 
+fn deliverable_design_components(parsed: &serde_json::Value) -> Vec<String> {
+    deliverable_design_components_from_value(parsed.get("design_components"))
+}
+
+fn resolved_deliverable_design_components(
+    parsed: &serde_json::Value,
+    template: Option<&str>,
+) -> Vec<String> {
+    let (_, defaults) = deliverable_template_defaults(template);
+    defaults
+        .into_iter()
+        .map(|value| value.to_string())
+        .chain(deliverable_design_components(parsed))
+        .fold(Vec::<String>::new(), |mut acc, value| {
+            if acc.len() < 6 && !acc.iter().any(|existing| existing == &value) {
+                acc.push(value);
+            }
+            acc
+        })
+}
+
 fn deliverable_design_profile(parsed: &serde_json::Value) -> Option<String> {
     parsed
         .get("design_profile")
         .and_then(|value| value.as_str())
         .map(|value| value.trim().to_ascii_lowercase())
         .filter(|value| DELIVERABLE_DESIGN_PROFILES.contains(&value.as_str()))
+}
+
+fn resolved_deliverable_design_profile(
+    parsed: &serde_json::Value,
+    template: Option<&str>,
+) -> Option<String> {
+    deliverable_design_profile(parsed).or_else(|| {
+        let (profile, _) = deliverable_template_defaults(template);
+        profile.map(String::from)
+    })
+}
+
+fn deliverable_design_template_directive(template: Option<&str>, medium: &str) -> Option<String> {
+    let directive = match (template, medium) {
+        (Some("startup_pitch"), "deck") => {
+            "Design template: startup_pitch. Shape the deliverable like an investor/customer pitch with problem, value, proof, roadmap and ask."
+        }
+        (Some("startup_pitch"), "document") => {
+            "Design template: startup_pitch. Shape the document like a concise pitch brief with problem, value, proof, roadmap and ask."
+        }
+        (Some("executive_update"), "deck") => {
+            "Design template: executive_update. Structure around status, metrics, risks, decisions and next steps."
+        }
+        (Some("executive_update"), "document") => {
+            "Design template: executive_update. Structure around status, metrics, risks, decisions and next steps."
+        }
+        (Some("project_plan"), "deck") => {
+            "Design template: project_plan. Structure around objectives, phases, responsibilities, risks and milestones."
+        }
+        (Some("project_plan"), "document") => {
+            "Design template: project_plan. Structure around objectives, phases, responsibilities, risks and milestones."
+        }
+        (Some("technical_brief"), "deck") => {
+            "Design template: technical_brief. Structure around architecture, constraints, tradeoffs, implementation sequence and verification."
+        }
+        (Some("technical_brief"), "document") => {
+            "Design template: technical_brief. Structure around architecture, constraints, tradeoffs, implementation sequence and verification."
+        }
+        (Some("sales_proposal"), "deck") => {
+            "Design template: sales_proposal. Structure around client problem, proposed solution, differentiators, timeline and next action."
+        }
+        (Some("sales_proposal"), "document") => {
+            "Design template: sales_proposal. Structure around client problem, proposed solution, differentiators, scope, timeline and next action."
+        }
+        _ => return None,
+    };
+    Some(directive.to_string())
 }
 
 fn deliverable_design_profile_directive(profile: Option<&str>, medium: &str) -> Option<String> {
@@ -12516,6 +12632,7 @@ async fn generate_deck_content(
     brand: &BrandKit,
     slides: usize,
     language: &str,
+    design_template: Option<&str>,
     design_profile: Option<&str>,
     design_components: &[String],
 ) -> Result<serde_json::Value, String> {
@@ -12544,6 +12661,8 @@ async fn generate_deck_content(
     };
     let design_directive =
         deliverable_design_profile_directive(design_profile, "deck").unwrap_or_default();
+    let template_directive =
+        deliverable_design_template_directive(design_template, "deck").unwrap_or_default();
     let component_directives =
         deliverable_design_component_directives(design_components, "deck").join(" ");
     let system = format!(
@@ -12554,6 +12673,7 @@ other slide is \"bullets\". Headline titles of at most 6 words. At most 4 bullet
 numbers over adjectives, one idea per slide. Write speaker `notes` for the substantive slides. \
 Set want_image=true on the cover and on AT MOST two of the most visual slides (false on the rest). \
 {design_directive} \
+{template_directive} \
 {component_directives} \
 Brand: organization «{org}», accent colour {accent}. Do NOT output colours, fonts, logos or file \
 names — textual content only. Return a JSON object with EXACTLY these top-level keys: \"title\" \
@@ -12657,6 +12777,7 @@ struct DocumentGenerationOptions {
     audience: Option<String>,
     tone: Option<String>,
     layout_profile: Option<String>,
+    design_template: Option<String>,
     design_profile: Option<String>,
     design_components: Vec<String>,
     sections: Vec<String>,
@@ -12709,8 +12830,10 @@ fn document_generation_options(parsed: &serde_json::Value) -> DocumentGeneration
         .and_then(|value| value.as_str())
         .map(|value| value.trim().to_ascii_lowercase())
         .filter(|value| allowed_layout_profiles.contains(&value.as_str()));
-    let design_profile = deliverable_design_profile(parsed);
-    let design_components = deliverable_design_components(parsed);
+    let design_template = deliverable_design_template(parsed);
+    let design_profile = resolved_deliverable_design_profile(parsed, design_template.as_deref());
+    let design_components =
+        resolved_deliverable_design_components(parsed, design_template.as_deref());
     let audience = parsed
         .get("audience")
         .and_then(|value| value.as_str())
@@ -12733,6 +12856,7 @@ fn document_generation_options(parsed: &serde_json::Value) -> DocumentGeneration
         audience,
         tone,
         layout_profile,
+        design_template,
         design_profile,
         design_components,
         sections,
@@ -12767,6 +12891,11 @@ fn document_generation_directives(options: &DocumentGenerationOptions) -> String
         ),
         Some("standard") | None => {}
         Some(_) => {}
+    }
+    if let Some(directive) =
+        deliverable_design_template_directive(options.design_template.as_deref(), "document")
+    {
+        directives.push(directive);
     }
     if let Some(directive) =
         deliverable_design_profile_directive(options.design_profile.as_deref(), "document")
@@ -16610,8 +16739,13 @@ available tools (for data from the web use the browser: browser_navigate on the 
                             .and_then(|v| v.as_u64())
                             .unwrap_or(6)
                             .clamp(3, 12) as usize;
-                        let design_profile = deliverable_design_profile(&parsed);
-                        let design_components = deliverable_design_components(&parsed);
+                        let design_template = deliverable_design_template(&parsed);
+                        let design_profile =
+                            resolved_deliverable_design_profile(&parsed, design_template.as_deref());
+                        let design_components = resolved_deliverable_design_components(
+                            &parsed,
+                            design_template.as_deref(),
+                        );
                         if brief.is_empty() {
                             "make_deck needs a 'brief' describing the presentation.".to_string()
                         } else {
@@ -16621,6 +16755,7 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                     "brief": brief.clone(),
                                     "language": language.clone(),
                                     "slides": slides,
+                                    "design_template": design_template.clone(),
                                     "design_profile": design_profile.clone(),
                                     "design_components": design_components.clone(),
                                 }),
@@ -16643,6 +16778,7 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                                 "brief": brief.clone(),
                                                 "language": language.clone(),
                                                 "slides": slides,
+                                                "design_template": design_template.clone(),
                                                 "design_profile": design_profile.clone(),
                                                 "design_components": design_components.clone(),
                                             }),
@@ -16664,7 +16800,21 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                 .await
                                 .unwrap_or_default();
                             // 2) slide content — schema-enforced model call (the floor).
-                            match generate_deck_content(&state_owned.http, &base_url, &model, api_key.as_deref(), &brief, &brand, slides, &language, design_profile.as_deref(), &design_components).await {
+                            match generate_deck_content(
+                                &state_owned.http,
+                                &base_url,
+                                &model,
+                                api_key.as_deref(),
+                                &brief,
+                                &brand,
+                                slides,
+                                &language,
+                                design_template.as_deref(),
+                                design_profile.as_deref(),
+                                &design_components,
+                            )
+                            .await
+                            {
                                 Err(e) => format!("Could not generate deck content: {e}"),
                                 Ok(mut deck) => {
                                     apply_deck_design_components(&mut deck, &design_components);
@@ -16853,6 +17003,7 @@ Absolutely NO text, NO words, NO letters, NO numbers, NO captions, NO logos."
                                 "audience": document_options.audience.clone(),
                                 "tone": document_options.tone.clone(),
                                 "layout_profile": document_options.layout_profile.clone(),
+                                "design_template": document_options.design_template.clone(),
                                 "design_profile": document_options.design_profile.clone(),
                                 "design_components": document_options.design_components.clone(),
                                 "sections": document_options.sections.clone(),
@@ -37091,6 +37242,7 @@ mod tests {
                 "brief": "Quarterly results",
                 "language": "en",
                 "slides": 6,
+                "design_template": "executive_update",
                 "design_profile": "executive",
                 "design_components": ["kpi_grid", "timeline"],
             }),
@@ -37112,6 +37264,13 @@ mod tests {
                 .get("workflow_id")
                 .and_then(|value| value.as_str()),
             Some("make_deck"),
+        );
+        assert_eq!(
+            plan.steps[0]
+                .arguments
+                .pointer("/input/design_template")
+                .and_then(|value| value.as_str()),
+            Some("executive_update"),
         );
         assert_eq!(
             plan.steps[0]
@@ -37626,6 +37785,91 @@ mod tests {
     }
 
     #[test]
+    fn deliverable_design_template_schema_is_shared_by_deck_and_document() {
+        let deck_schema = super::make_deck_tool_schema();
+        let document_schema = super::make_document_tool_schema();
+        let expected = Some(vec![
+            "startup_pitch",
+            "executive_update",
+            "project_plan",
+            "technical_brief",
+            "sales_proposal",
+        ]);
+        let deck_templates = deck_schema
+            .pointer("/function/parameters/properties/design_template/enum")
+            .and_then(|value| value.as_array())
+            .map(|values| {
+                values
+                    .iter()
+                    .filter_map(|value| value.as_str())
+                    .collect::<Vec<_>>()
+            });
+        let document_templates = document_schema
+            .pointer("/function/parameters/properties/design_template/enum")
+            .and_then(|value| value.as_array())
+            .map(|values| {
+                values
+                    .iter()
+                    .filter_map(|value| value.as_str())
+                    .collect::<Vec<_>>()
+            });
+
+        assert_eq!(deck_templates, expected);
+        assert_eq!(document_templates, expected);
+    }
+
+    #[test]
+    fn deliverable_design_template_expands_to_defaults_without_overriding_explicit_args() {
+        let parsed = serde_json::json!({ "design_template": "startup_pitch" });
+
+        assert_eq!(
+            super::resolved_deliverable_design_profile(
+                &parsed,
+                super::deliverable_design_template(&parsed).as_deref(),
+            )
+            .as_deref(),
+            Some("sales_pitch"),
+        );
+        assert_eq!(
+            super::resolved_deliverable_design_components(
+                &parsed,
+                super::deliverable_design_template(&parsed).as_deref(),
+            ),
+            vec![
+                "kpi_grid".to_string(),
+                "timeline".to_string(),
+                "quote_callout".to_string(),
+            ],
+        );
+
+        let explicit = serde_json::json!({
+            "design_template": "startup_pitch",
+            "design_profile": "technical",
+            "design_components": ["risks_table", "kpi_grid"]
+        });
+        assert_eq!(
+            super::resolved_deliverable_design_profile(
+                &explicit,
+                super::deliverable_design_template(&explicit).as_deref(),
+            )
+            .as_deref(),
+            Some("technical"),
+        );
+        assert_eq!(
+            super::resolved_deliverable_design_components(
+                &explicit,
+                super::deliverable_design_template(&explicit).as_deref(),
+            ),
+            vec![
+                "kpi_grid".to_string(),
+                "timeline".to_string(),
+                "quote_callout".to_string(),
+                "risks_table".to_string(),
+            ],
+        );
+    }
+
+    #[test]
     fn deliverable_design_components_schema_is_shared_by_deck_and_document() {
         let deck_schema = super::make_deck_tool_schema();
         let document_schema = super::make_document_tool_schema();
@@ -37745,6 +37989,7 @@ mod tests {
             "audience": " PMI italiana ",
             "tone": "executive",
             "layout_profile": "executive_brief",
+            "design_template": "executive_update",
             "design_profile": "technical",
             "design_components": [
                 "kpi_grid",
@@ -37764,10 +38009,15 @@ mod tests {
         assert_eq!(options.audience.as_deref(), Some("PMI italiana"));
         assert_eq!(options.tone.as_deref(), Some("executive"));
         assert_eq!(options.layout_profile.as_deref(), Some("executive_brief"));
+        assert_eq!(options.design_template.as_deref(), Some("executive_update"));
         assert_eq!(options.design_profile.as_deref(), Some("technical"));
         assert_eq!(
             options.design_components,
-            vec!["kpi_grid".to_string(), "timeline".to_string()],
+            vec![
+                "kpi_grid".to_string(),
+                "risks_table".to_string(),
+                "timeline".to_string(),
+            ],
         );
         assert_eq!(
             options.sections,
@@ -37784,10 +38034,12 @@ mod tests {
         assert!(directives.contains("Tone: executive."), "{directives}");
         assert!(directives.contains("Layout profile: executive_brief."), "{directives}");
         assert!(directives.contains("decision-ready headings"), "{directives}");
+        assert!(directives.contains("Design template: executive_update."), "{directives}");
         assert!(directives.contains("Design profile: technical."), "{directives}");
         assert!(directives.contains("implementation details"), "{directives}");
         assert!(directives.contains("Component: kpi_grid."), "{directives}");
         assert!(directives.contains("Component: timeline."), "{directives}");
+        assert!(directives.contains("Component: risks_table."), "{directives}");
         assert!(
             directives.contains("Required section order: Problema -> Soluzione -> Roadmap."),
             "{directives}"
@@ -37797,6 +38049,7 @@ mod tests {
             "document_type": "pitch",
             "tone": "friendly",
             "layout_profile": "marketing_site",
+            "design_template": "cinematic",
             "design_profile": "cinematic",
             "design_components": ["hero", "kpi_grid"],
             "sections": ["Valida"]
@@ -37804,6 +38057,7 @@ mod tests {
         assert_eq!(ignored.document_type, None);
         assert_eq!(ignored.tone, None);
         assert_eq!(ignored.layout_profile, None);
+        assert_eq!(ignored.design_template, None);
         assert_eq!(ignored.design_profile, None);
         assert_eq!(ignored.design_components, vec!["kpi_grid".to_string()]);
         assert_eq!(ignored.sections, vec!["Valida".to_string()]);

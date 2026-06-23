@@ -197,6 +197,13 @@ primo percorso locale verde:
     sezioni/tabelle sono derivate dal contenuto generato e diventano vere tabelle
     DOCX quando il formato richiesto è Word. Resta da fare QA visuale e template
     library completa.
+50. WS7 shared template contract — `make_document` e `make_deck` espongono anche
+    `design_template` condiviso (`startup_pitch`, `executive_update`,
+    `project_plan`, `technical_brief`, `sales_proposal`). Il template espande in
+    default `design_profile` + `design_components`, ma gli argomenti espliciti
+    restano sovrani; il workflow registra il template scelto e i prompt ricevono
+    una direttiva medium-specific. Non è ancora la gallery visuale completa:
+    mancano theme tokens e QA renderizzata.
 
 Prima di pubblicare/taggare resta prudente ripetere lo smoke manuale in-app su
 una automazione schedulata reale con il binario aggiornato. Il primo smoke ha
@@ -253,6 +260,8 @@ registry, non keyword o nuovi tool ad hoc. Prima slice locale/verde:
 `design_components` condiviso per KPI, timeline, confronti, callout, processi e
 rischi; terza slice: materializzazione fisica lato deck nei layout `kpi`,
 `quote` e `two_column`; quarta slice: materializzazione lato documenti in
-blocchi/tabelle Markdown-DOCX. Prossima slice: QA visuale renderizzata o template
-library completa. `make_research` e `make_meeting` restano futuri.
+blocchi/tabelle Markdown-DOCX; quinta slice: `design_template` condiviso con
+default profilo/componenti override-safe. Prossima slice: theme tokens, QA
+visuale renderizzata o template library più ampia. `make_research` e
+`make_meeting` restano futuri.
 Il contratto corrente della memoria è in [MEMORIA.md](MEMORIA.md).

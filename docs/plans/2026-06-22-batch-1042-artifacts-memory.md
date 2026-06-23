@@ -181,6 +181,18 @@ modelli deboli/locali. Invarianti: monotonìa, limitatezza, identità non inferi
     tabelle Word reali. Test mirati:
     `document_design_components_append_renderable_markdown_blocks`,
     `document_design_components_render_as_docx_tables`.
+    **Quinta slice design_template (2026-06-23, locale/verde):** `make_document`
+    e `make_deck` espongono lo stesso `design_template` (`startup_pitch`,
+    `executive_update`, `project_plan`, `technical_brief`, `sales_proposal`).
+    Il template è grammatica dichiarativa del registry: espande in default
+    `design_profile` + `design_components`, ma profilo e componenti espliciti
+    prevalgono/estendono senza euristiche keyword. Il template viene registrato
+    negli args workflow e tradotto in direttive specifiche per documento/deck.
+    Test mirati:
+    `deliverable_design_template_schema_is_shared_by_deck_and_document`,
+    `deliverable_design_template_expands_to_defaults_without_overriding_explicit_args`,
+    `make_document_generation_options_are_explicit_and_bounded`,
+    `make_deck_workflow_definition_projects_execution_plan`.
   - ☐ **Backlog deliberato:** `make_research` / `make_meeting` restano in fondo
     finché non è chiarito il contratto degli strumenti creati dall'harness.
 - ✅ **Fase 4 (2026-06-23, locale/verde)** — router workflow|agent + primo
@@ -732,8 +744,9 @@ ragionato il contratto degli strumenti `make_*` creati dall'harness. ADR 0011
   senza store paralleli e senza attivazioni euristiche. Prima base locale/verde:
   `design_profile` e `design_components` condivisi negli schemi e nei workflow;
   lato deck i componenti arrivano già a layout fisici `deck_render.py`; lato
-  documenti arrivano a blocchi/tabelle Markdown renderizzate in DOCX. Restano
-  template completi e QA visuale.
+  documenti arrivano a blocchi/tabelle Markdown renderizzate in DOCX; i
+  `design_template` condivisi espandono ora default profilo/componenti restando
+  override-safe. Restano theme tokens, template library più ampia e QA visuale.
 - ☐ **7.1b (futuro)** Portare ricerca/meeting al livello del deck solo dopo il
   chiarimento sul contratto strumenti: `make_research` e `make_meeting` non sono
   essenziali per la prossima release.
