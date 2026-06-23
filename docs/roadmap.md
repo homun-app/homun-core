@@ -87,6 +87,11 @@ primo percorso locale verde:
     deck reale: il composer non è più ridimensionabile manualmente fino a
     espandere la chat, e il recall artifact/provenance ora espone `managed_path`,
     workflow `make_deck`/`DeckWorkflow` e outcome `runtime_plan_step`.
+25. WS1 generalizzazione deliverable — `make_document` ha ora una
+    `WorkflowDefinition` harness-owned (`DocumentWorkflow`) proiettata in
+    `ExecutionPlan`, passa da `OrchestratorBrain::run_plan`, viene instradato dal
+    router workflow|agent per richieste esplicite di scrittura documenti/report e
+    registra l'artifact Markdown in memoria con provenance canonica.
 
 Prima di pubblicare/taggare resta prudente ripetere lo smoke manuale in-app su
 una automazione schedulata reale con il binario aggiornato. Il primo smoke ha
@@ -114,6 +119,8 @@ runtime primario del loop agente, una prima `WorkflowDefinition` per `make_deck`
 e outcome per-step confermati nel loop principale e nei sub-agent. `make_deck`
 entra ora nel Brain con `run_plan` prima della pipeline deterministica.
 Il router workflow/agent instrada i deck a scaffolding massimo. Il primo smoke
-release ha corretto composer e recall provenance/status. Prossimo: ripetere smoke
-in-app sul fix e poi generalizzare documenti/ricerca/meeting. Il contratto
-corrente della memoria è in [MEMORIA.md](MEMORIA.md).
+release ha corretto composer e recall provenance/status. La prima
+generalizzazione documenti è locale/verde su `make_document`. Prossimo: gate
+allargato e smoke in-app prima di decidere cosa aggiungere alla 1046; poi
+estendere lo stesso pattern a ricerca/meeting o arricchire output DOCX/PDF. Il
+contratto corrente della memoria è in [MEMORIA.md](MEMORIA.md).

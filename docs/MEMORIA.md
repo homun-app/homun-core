@@ -80,6 +80,11 @@ Fatto:
   `managed_path` locale degli artifact gestiti e collega producer `make_deck` al
   workflow `DeckWorkflow`; il reader di stato workflow considera gli outcome
   canonici `fact` con `source="runtime_plan_step"` come evidenze verificate.
+- prima generalizzazione documenti WS1: `make_document` riusa
+  `WorkflowDefinition`/`ExecutionPlan`/`OrchestratorBrain::run_plan`, produce un
+  artifact Markdown gestito e registra la memoria artifact con producer
+  `make_document`; il reader provenance lo collega a `DocumentWorkflow` nello
+  stesso grafo canonico.
 - prima slice WS1 piano→memoria: il piano runtime-owned materializza un solo
   `open_loop` canonico `source="runtime_plan"` per thread, aggiornato in-place da
   `update_plan` / `step_advance` con conteggi, prossimo step e snapshot degli step;

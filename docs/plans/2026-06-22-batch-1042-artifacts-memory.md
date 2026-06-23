@@ -98,8 +98,18 @@ modelli deboli/locali. Invarianti: monotonìa, limitatezza, identità non inferi
     prima della pipeline deterministica, senza planner LLM e senza store
     workflow parallelo. Test mirato:
     `make_deck_workflow_plan_runs_through_brain_without_planner`.
-  - ☐ Generalizzare lo stesso pattern per `make_document` / `make_research` /
-    `make_meeting`.
+  - ✅ **Slice make_document (2026-06-23, locale/verde)**: primo workflow
+    documenti dichiarativo. `make_document` ha `WorkflowDefinition`
+    harness-owned (`brief → draft_markdown → write_artifact → register_artifact`)
+    proiettata in `ExecutionPlan` con contratto `DocumentWorkflow`, passa da
+    `OrchestratorBrain::run_plan`, viene instradato dal router workflow|agent per
+    richieste esplicite di scrittura/creazione documenti/report e registra
+    l'artifact Markdown in memoria/provenance con producer `make_document`. Test
+    mirati: `make_document_workflow`,
+    `workflow_router_sends_document_requests_to_document_workflow`,
+    `artifact_provenance_context_surfaces_make_document_workflow`.
+  - ☐ Generalizzare lo stesso pattern per `make_research` / `make_meeting` e
+    arricchire `make_document` con output DOCX/PDF quando serve.
 - ✅ **Fase 4 (2026-06-23, locale/verde)** — router workflow|agent + primo
   scaffolding adattivo: richieste deck/presentation/slide/pptx vengono
   instradate dal runtime al workflow `make_deck` con scaffolding `maximum` e

@@ -247,6 +247,15 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   e lo status workflow include anche fact `source="runtime_plan_step"`. Test
   mirati: `artifact_provenance_context_surfaces_managed_path_and_make_deck_workflow`,
   `memory_eval_surfaces_workflow_status_and_why`; frontend `npm run build` verde.
+- **WS1 generalizzazione make_document locale/verde:** aggiunto il primo workflow
+  dichiarativo documenti senza store paralleli: `make_document` ha
+  `WorkflowDefinition`/`ExecutionPlan` (`DocumentWorkflow`), passa da
+  `OrchestratorBrain::run_plan`, viene instradato dal router harness-owned per
+  richieste esplicite di scrittura/creazione documenti/report e produce un
+  artifact Markdown gestito, registrato in memoria con producer `make_document`.
+  Il reader provenance collega `make_document` a `DocumentWorkflow`. Test mirati:
+  `make_document_workflow`, `workflow_router_sends_document_requests_to_document_workflow`,
+  `artifact_provenance_context_surfaces_make_document_workflow`.
 - **Nota aperta non bloccante:** durante i gate con tool il provider primario
   `glm-5.2` continua a rispondere `400 Bad Request` sul primo round con tool; il
   fallback a `kimi-k2.6:cloud` prosegue correttamente. Da riprendere come task

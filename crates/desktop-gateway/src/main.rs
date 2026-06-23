@@ -5836,12 +5836,44 @@ const MAKE_DECK_WORKFLOW_STEPS: &[WorkflowStepDefinition] = &[
     },
 ];
 
+const MAKE_DOCUMENT_WORKFLOW_STEPS: &[WorkflowStepDefinition] = &[
+    WorkflowStepDefinition {
+        id: "brief",
+        title: "Normalize document brief",
+        depends_on: &[],
+    },
+    WorkflowStepDefinition {
+        id: "draft_markdown",
+        title: "Draft structured Markdown document",
+        depends_on: &["brief"],
+    },
+    WorkflowStepDefinition {
+        id: "write_artifact",
+        title: "Write document artifact",
+        depends_on: &["draft_markdown"],
+    },
+    WorkflowStepDefinition {
+        id: "register_artifact",
+        title: "Register document artifact in memory",
+        depends_on: &["write_artifact"],
+    },
+];
+
 fn make_deck_workflow_definition() -> WorkflowDefinition {
     WorkflowDefinition {
         id: "make_deck",
         tool_name: "make_deck",
         contract: "DeckWorkflow",
         steps: MAKE_DECK_WORKFLOW_STEPS,
+    }
+}
+
+fn make_document_workflow_definition() -> WorkflowDefinition {
+    WorkflowDefinition {
+        id: "make_document",
+        tool_name: "make_document",
+        contract: "DocumentWorkflow",
+        steps: MAKE_DOCUMENT_WORKFLOW_STEPS,
     }
 }
 
@@ -5949,9 +5981,45 @@ fn route_workflow_or_agent(prompt: &str) -> WorkflowRouteDecision {
             tool_name: "make_deck",
             scaffolding_tier: "maximum",
         }
+    } else if asks_for_document_workflow(&normalized) {
+        WorkflowRouteDecision::Workflow {
+            workflow_id: "make_document",
+            tool_name: "make_document",
+            scaffolding_tier: "document",
+        }
     } else {
         WorkflowRouteDecision::AgentLoop
     }
+}
+
+fn asks_for_document_workflow(normalized_prompt: &str) -> bool {
+    let has_action = [
+        "write",
+        "create",
+        "make",
+        "draft",
+        "prepare",
+        "scrivi",
+        "crea",
+        "genera",
+        "prepara",
+        "redigi",
+    ]
+    .iter()
+    .any(|needle| normalized_prompt.contains(needle));
+    let has_document = [
+        "document",
+        "documento",
+        "docx",
+        "markdown",
+        "report",
+        "relazione",
+        "memo",
+        "verbale",
+    ]
+    .iter()
+    .any(|needle| normalized_prompt.contains(needle));
+    has_action && has_document
 }
 
 fn workflow_router_instruction(prompt: &str) -> Option<String> {
@@ -9168,8 +9236,11 @@ fn artifact_provenance_context_for_query(
         producers.dedup();
         if !producers.is_empty() {
             detail.push_str(&format!("; produced by {}", producers.join(", ")));
-            if producers.iter().any(|producer| producer == "make_deck") {
-                detail.push_str("; derives from workflow make_deck / DeckWorkflow");
+            for producer in &producers {
+                if let Some(workflow) = producer_workflow_contract(producer) {
+                    detail.push_str(&format!("; derives from workflow {producer} / {workflow}"));
+                    break;
+                }
             }
         }
 
@@ -9205,6 +9276,14 @@ fn artifact_provenance_context_for_query(
         "ARTIFACT PROVENANCE FROM CANONICAL MEMORY GRAPH:\n{}",
         lines.into_iter().take(8).collect::<Vec<_>>().join("\n")
     ))
+}
+
+fn producer_workflow_contract(producer: &str) -> Option<&'static str> {
+    match producer {
+        "make_deck" => Some("DeckWorkflow"),
+        "make_document" => Some("DocumentWorkflow"),
+        _ => None,
+    }
 }
 
 fn workflow_status_context_for_query(
@@ -11748,6 +11827,27 @@ fn make_deck_tool_schema() -> serde_json::Value {
     })
 }
 
+/// One-call document generation. The model supplies only the brief; the harness
+/// owns the workflow contract and writes/registers the managed artifact.
+fn make_document_tool_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": "make_document",
+            "description": "Create a COMPLETE structured document artifact from a brief in ONE call. The engine drafts a polished Markdown document, writes it as a managed artifact, and registers it in memory. Use this for requests to write/create/draft a document, report, memo, meeting minutes or relazione. Do NOT create a separate plan and do NOT call create_artifact/write_file/shell for this workflow. Just call make_document with the brief; when it returns, the document is DONE.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "brief": { "type": "string", "description": "What the document must contain, including any sections, audience, tone, constraints or source material the user provided — verbatim." },
+                    "language": { "type": "string", "description": "Document language code, e.g. 'it' or 'en'. Default: the user's language." },
+                    "name": { "type": "string", "description": "Optional artifact filename. Must be a simple Markdown filename such as report.md. Default: document.md." }
+                },
+                "required": ["brief"]
+            }
+        }
+    })
+}
+
 /// Strict JSON schema for the deck CONTENT the model produces. Deliberately
 /// UNIFORM (cover/section/bullets/closing + a `want_image` flag) so it is valid
 /// under OpenAI strict mode (every property required, additionalProperties:false)
@@ -11942,6 +12042,102 @@ any other key such as \"presentation\" or \"deck\", and add no extra top-level k
         .unwrap_or_else(|| brief.chars().take(60).collect::<String>());
     let subtitle = deck.get("subtitle").and_then(|t| t.as_str()).unwrap_or("").to_string();
     Ok(serde_json::json!({ "title": title, "subtitle": subtitle, "slides": slides }))
+}
+
+async fn generate_document_markdown(
+    http: &reqwest::Client,
+    base_url: &str,
+    model: &str,
+    api_key: Option<&str>,
+    brief: &str,
+    language: &str,
+) -> Result<String, String> {
+    let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
+    let lang = if language.trim().is_empty() {
+        "the SAME language as the user's brief below".to_string()
+    } else {
+        format!("the language with code '{}'", language.trim())
+    };
+    let system = format!(
+        "You are a senior business writer. Produce ONLY a complete Markdown document in {lang}. \
+Use a clear title, concise executive opening, structured sections with headings, and concrete \
+bullets or tables when useful. Do not wrap the answer in code fences. Do not mention that you are \
+an AI. The output must be ready to save as a deliverable artifact."
+    );
+    let body = serde_json::json!({
+        "model": model,
+        "temperature": 0.35,
+        "messages": [
+            { "role": "system", "content": system },
+            { "role": "user", "content": brief },
+        ],
+    });
+    let mut req = http
+        .post(endpoint.as_str())
+        .timeout(std::time::Duration::from_secs(120))
+        .json(&body);
+    if let Some(k) = api_key {
+        req = req.bearer_auth(k);
+    }
+    let resp = req
+        .send()
+        .await
+        .map_err(|error| format!("document provider unreachable: {error}"))?;
+    let code = resp.status().as_u16();
+    if !resp.status().is_success() {
+        return Err(format!(
+            "document generation HTTP {code} from model «{model}» — check the provider or switch model."
+        ));
+    }
+    let json: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|error| format!("bad document response: {error}"))?;
+    let content = json
+        .get("choices")
+        .and_then(|choices| choices.as_array())
+        .and_then(|choices| choices.first())
+        .and_then(|choice| choice.get("message"))
+        .and_then(|message| message.get("content"))
+        .and_then(|content| content.as_str())
+        .unwrap_or_default()
+        .trim()
+        .trim_start_matches("```markdown")
+        .trim_start_matches("```md")
+        .trim_start_matches("```")
+        .trim_end_matches("```")
+        .trim()
+        .to_string();
+    if content.is_empty() {
+        Err("document generation returned empty content".to_string())
+    } else {
+        Ok(content)
+    }
+}
+
+fn document_artifact_name(raw: Option<&str>) -> String {
+    let candidate = raw.unwrap_or("document.md").trim();
+    let candidate = if candidate.is_empty() { "document.md" } else { candidate };
+    let basename = candidate
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or("document.md")
+        .trim();
+    let mut safe = String::new();
+    for ch in basename.chars() {
+        if ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-' | '_') {
+            safe.push(ch);
+        } else if ch.is_whitespace() {
+            safe.push('-');
+        }
+    }
+    let safe = safe.trim_matches('.').trim_matches('-').to_string();
+    let safe = if safe.is_empty() { "document".to_string() } else { safe };
+    if safe.to_ascii_lowercase().ends_with(".md") {
+        safe
+    } else {
+        format!("{safe}.md")
+    }
 }
 
 fn generate_image_tool_schema() -> serde_json::Value {
@@ -12974,6 +13170,7 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
         base_tools.push(generate_image_tool_schema());
         base_tools.push(render_deck_tool_schema());
         base_tools.push(make_deck_tool_schema());
+        base_tools.push(make_document_tool_schema());
         base_tools.push(get_brand_kit_tool_schema());
         base_tools.push(create_skill_tool_schema());
         base_tools.push(record_decision_tool_schema());
@@ -15197,6 +15394,120 @@ Absolutely NO text, NO words, NO letters, NO numbers, NO captions, NO logos."
                                                 render_out.chars().take(800).collect::<String>()
                                             )
                                         }
+                                    }
+                                }
+                            }
+                        }
+                    } else if name == "make_document" {
+                        let parsed = serde_json::from_str::<serde_json::Value>(args_raw)
+                            .unwrap_or_else(|_| serde_json::json!({}));
+                        let brief = parsed
+                            .get("brief")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .trim()
+                            .to_string();
+                        let language = parsed
+                            .get("language")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        let fname = document_artifact_name(parsed.get("name").and_then(|v| v.as_str()));
+                        if brief.is_empty() {
+                            "make_document needs a 'brief' describing the document.".to_string()
+                        } else {
+                            let workflow_args = serde_json::json!({
+                                "brief": brief.clone(),
+                                "language": language.clone(),
+                                "name": fname.clone(),
+                            });
+                            let workflow_plan = workflow_execution_plan(
+                                &make_document_workflow_definition(),
+                                workflow_args.clone(),
+                            );
+                            let workflow_plan =
+                                match run_static_workflow_plan_through_brain(&brief, workflow_plan) {
+                                    Ok(plan) => plan,
+                                    Err(error) => {
+                                        eprintln!(
+                                            "make_document: static workflow plan validation failed: {error}"
+                                        );
+                                        workflow_execution_plan(
+                                            &make_document_workflow_definition(),
+                                            workflow_args,
+                                        )
+                                    }
+                                };
+                            let thread_slug = artifact_thread_slug(thread_id.as_deref());
+                            let _ = emit_stream_event(
+                                &tx,
+                                GenerateStreamEvent::Delta {
+                                    text: "‹‹ACT››📝 Building the document (brief · draft · artifact · memory)‹‹/ACT››".to_string(),
+                                },
+                            )
+                            .await;
+                            match generate_document_markdown(
+                                &state_owned.http,
+                                &base_url,
+                                &model,
+                                api_key.as_deref(),
+                                &brief,
+                                &language,
+                            )
+                            .await
+                            {
+                                Err(error) => format!("Could not generate document content: {error}"),
+                                Ok(markdown) => {
+                                    let slug_w = thread_slug.clone();
+                                    let fname_w = fname.clone();
+                                    let result = tokio::task::spawn_blocking(move || {
+                                        write_text_artifact(&slug_w, &fname_w, &markdown)
+                                    })
+                                    .await
+                                    .unwrap_or_else(|error| Err(format!("Error: {error}")));
+                                    match result {
+                                        Ok((size, updated)) => {
+                                            let marker = serde_json::json!({
+                                                "name": fname,
+                                                "thread": thread_slug,
+                                                "size": size,
+                                                "updated": updated,
+                                            });
+                                            let artifact_mark =
+                                                format!("‹‹ARTIFACT››{marker}‹‹/ARTIFACT››");
+                                            accumulated.push_str(&artifact_mark);
+                                            let _ = emit_stream_event(
+                                                &tx,
+                                                GenerateStreamEvent::Delta { text: artifact_mark },
+                                            )
+                                            .await;
+                                            let artifact_name = marker
+                                                .get("name")
+                                                .and_then(|value| value.as_str())
+                                                .unwrap_or("document.md");
+                                            register_artifact_memory(
+                                                &state_owned,
+                                                thread_id.as_deref(),
+                                                &thread_slug,
+                                                artifact_name,
+                                                size,
+                                                updated,
+                                                "make_document",
+                                                None,
+                                            )
+                                            .await;
+                                            format!(
+                                                "Document created via workflow {}: {}. The document is DONE — give the user a one-line summary.",
+                                                workflow_plan
+                                                    .steps
+                                                    .first()
+                                                    .and_then(|step| step.arguments.get("workflow_id"))
+                                                    .and_then(|value| value.as_str())
+                                                    .unwrap_or("make_document"),
+                                                artifact_name,
+                                            )
+                                        }
+                                        Err(error) => error,
                                     }
                                 }
                             }
@@ -35338,6 +35649,57 @@ mod tests {
     }
 
     #[test]
+    fn make_document_workflow_definition_projects_execution_plan() {
+        let definition = super::make_document_workflow_definition();
+        let plan = super::workflow_execution_plan(
+            &definition,
+            serde_json::json!({
+                "brief": "Write a customer onboarding memo",
+                "language": "en",
+                "name": "onboarding.md",
+            }),
+        );
+
+        assert_eq!(definition.id, "make_document");
+        assert_eq!(definition.tool_name, "make_document");
+        assert_eq!(plan.route, local_first_orchestrator::OrchestratorRoute::MixedWorkflow);
+        assert_eq!(plan.steps.len(), 4);
+        assert_eq!(plan.steps[0].step_id, "brief");
+        assert_eq!(plan.steps[0].contract.as_deref(), Some("DocumentWorkflow"));
+        assert_eq!(plan.steps[2].step_id, "write_artifact");
+        assert_eq!(plan.steps[2].depends_on, vec!["draft_markdown".to_string()]);
+        assert_eq!(
+            plan.steps[3]
+                .arguments
+                .get("workflow_id")
+                .and_then(|value| value.as_str()),
+            Some("make_document"),
+        );
+    }
+
+    #[test]
+    fn make_document_workflow_plan_runs_through_brain_without_planner() {
+        let definition = super::make_document_workflow_definition();
+        let plan = super::workflow_execution_plan(
+            &definition,
+            serde_json::json!({
+                "brief": "Write a customer onboarding memo",
+                "language": "en",
+                "name": "onboarding.md",
+            }),
+        );
+
+        let validated =
+            super::run_static_workflow_plan_through_brain("Write onboarding memo", plan).unwrap();
+
+        assert_eq!(validated.route, local_first_orchestrator::OrchestratorRoute::MixedWorkflow);
+        assert_eq!(validated.steps.len(), 4);
+        assert_eq!(validated.steps[0].step_id, "brief");
+        assert_eq!(validated.steps[3].step_id, "register_artifact");
+        assert_eq!(validated.steps[3].contract.as_deref(), Some("DocumentWorkflow"));
+    }
+
+    #[test]
     fn workflow_router_sends_deck_requests_to_max_scaffolding_workflow() {
         let decision = super::route_workflow_or_agent(
             "Crea una presentazione pptx per il meeting commerciale",
@@ -35354,6 +35716,29 @@ mod tests {
         let instruction = super::workflow_router_instruction("Create a 6 slide deck")
             .expect("workflow instruction");
         assert!(instruction.contains("Call `make_deck` exactly once"), "{instruction}");
+    }
+
+    #[test]
+    fn workflow_router_sends_document_requests_to_document_workflow() {
+        let decision = super::route_workflow_or_agent(
+            "Scrivi un documento operativo per onboarding clienti",
+        );
+
+        assert_eq!(
+            decision,
+            super::WorkflowRouteDecision::Workflow {
+                workflow_id: "make_document",
+                tool_name: "make_document",
+                scaffolding_tier: "document",
+            },
+        );
+        let instruction = super::workflow_router_instruction("Write a document about onboarding")
+            .expect("workflow instruction");
+        assert!(instruction.contains("Call `make_document` exactly once"), "{instruction}");
+        assert_eq!(
+            super::document_artifact_name(Some("../Customer Brief 2026")),
+            "Customer-Brief-2026.md",
+        );
     }
 
     #[test]
@@ -36635,6 +37020,54 @@ mod tests {
         assert!(context.contains("/Users/fabio/.homun/artifacts/thread-deck/deck.pptx"), "{context}");
         assert!(context.contains("produced by make_deck"), "{context}");
         assert!(context.contains("derives from workflow make_deck"), "{context}");
+    }
+
+    #[test]
+    fn artifact_provenance_context_surfaces_make_document_workflow() {
+        let facade = local_first_memory::MemoryFacade::new(
+            local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
+        );
+        let user = local_first_memory::UserId::new("local");
+        let workspace = local_first_memory::WorkspaceId::new("project");
+        let lifecycle = local_first_memory::MemoryLifecycleRequest {
+            actor_id: "test".to_string(),
+            user_id: user.clone(),
+            workspace_id: workspace.clone(),
+            purpose: "test".to_string(),
+        };
+        super::upsert_artifact_memory_record(
+            &facade,
+            &user,
+            &workspace,
+            &lifecycle,
+            "project",
+            "thread-doc",
+            "document.md",
+            "Artifact document.md (document) creato nel thread thread-doc.".to_string(),
+            serde_json::json!({
+                "source": "artifact_runtime",
+                "producer": "make_document",
+                "thread_slug": "thread-doc",
+                "name": "document.md",
+                "artifact_type": "document",
+                "path_ref": "thread-doc/document.md",
+                "managed_path": "/Users/fabio/.homun/artifacts/thread-doc/document.md",
+                "size_bytes": 456,
+            }),
+        )
+        .unwrap();
+
+        let context = super::artifact_provenance_context_for_query(
+            &facade,
+            &user,
+            &workspace,
+            "quali artifact documenti hai creato e da quale workflow derivano?",
+        )
+        .expect("artifact context");
+
+        assert!(context.contains("document.md"), "{context}");
+        assert!(context.contains("produced by make_document"), "{context}");
+        assert!(context.contains("derives from workflow make_document / DocumentWorkflow"), "{context}");
     }
 
     #[test]
