@@ -192,6 +192,12 @@ modelli deboli/locali. Invarianti: monotonìa, limitatezza, identità non inferi
     è mappato a schema tool reale `run_in_sandbox` per operazioni PDF su file
     esistenti. Una route atomica carica `run_in_sandbox` nel live toolset e
     mantiene `find_capability`, senza attivare workflow deliverable.
+  - ✅ **Quinta slice registry MCP (2026-06-23, locale/verde):** i tool MCP
+    connessi entrano nel corpus unico `find_capability` come entry tipizzate
+    `McpTool`, con schema attivabile nello stesso live toolset. Questo copre il
+    fallback oltre `MCP_ALWAYS_LOAD_MAX` e rimuove un altro ramo parallelo tra
+    registry nativo e catalogo MCP. Test mirato:
+    `mcp_tools_contribute_typed_entries_to_capability_corpus`.
   - 🟡 Possibile step futuro: atomico PDF dedicato con schema più guidato
     (input/output files, operazione), se `run_in_sandbox` risulta troppo generico
     nello smoke.

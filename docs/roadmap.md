@@ -126,24 +126,28 @@ primo percorso locale verde:
     registry/corpus e mappa a un tool reale (`run_in_sandbox`) per operazioni su
     PDF esistenti; la route atomica carica quel tool nel live toolset e non
     attiva `make_document`.
-33. WS1/WS7 document focus — `make_document` ora materializza anche `.docx`
+33. WS1-Fase 4b quinta slice — i tool MCP connessi entrano nel corpus unico
+    `find_capability` come `McpTool` tipizzati, con schema attivabile nello
+    stesso live toolset; quando non sono always-loaded non vivono più in un ramo
+    parallelo fuori registry.
+34. WS1/WS7 document focus — `make_document` ora materializza anche `.docx`
     editabile dalla stessa sorgente Markdown canonica, oltre a `md`/`pdf`, con
     package OOXML generato in-process e registrazione artifact/memoria invariata.
-34. WS1/WS7 document focus — `make_document` ora accetta struttura/stile
+35. WS1/WS7 document focus — `make_document` ora accetta struttura/stile
     espliciti (`document_type`, `audience`, `tone`, `sections`) nello stesso
     schema tool; il workflow li usa come contratto di generazione solo se
     dichiarati, senza attivazioni euristiche o nuovi registry paralleli.
-35. WS1/WS7 document focus — il renderer DOCX di `make_document` traduce le
+36. WS1/WS7 document focus — il renderer DOCX di `make_document` traduce le
     tabelle pipe Markdown in tabelle Word reali (`w:tbl`) con escaping XML,
     mantenendo sorgente Markdown canonica e registrazione artifact invariata.
-36. WS1/WS7 document focus — feedback smoke reale DOCX: il file era valido ma
+37. WS1/WS7 document focus — feedback smoke reale DOCX: il file era valido ma
     troppo grezzo. Il renderer ora include `styles.xml`, converte bold/italic
     Markdown in run Word, promuove il primo titolo e gestisce liste numerate.
-37. WS1/WS7 document focus — secondo feedback smoke DOCX: tabelle leggibili ma
+38. WS1/WS7 document focus — secondo feedback smoke DOCX: tabelle leggibili ma
     non adattate alla pagina. Il renderer ora emette tabelle full-width con
     `tblGrid`, layout fixed, celle percentuali, padding e proporzione 35/65 per
     tabelle a due colonne.
-38. WS1/WS7 document focus — `make_document` ha un `layout_profile` dichiarativo
+39. WS1/WS7 document focus — `make_document` ha un `layout_profile` dichiarativo
     nello stesso schema tool (`standard`, `one_page`, `executive_brief`,
     `detailed_report`, `proposal`); il profilo diventa direttiva di generazione
     esplicita, non un nuovo workflow e non una euristica di routing.

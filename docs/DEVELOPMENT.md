@@ -325,6 +325,12 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   unico:** aggiungere un atomico PDF dedicato se serve UX più guidata; altrimenti
   proseguire con smoke reale DOCX e template/layout dichiarativi dentro
   `make_document`.
+- **Capability registry MCP locale/verde (2026-06-23):** il corpus unico di
+  `find_capability` ora include anche tool MCP connessi come entry tipizzate
+  `McpTool`, oltre a workflow nativi, atomici, tool deferred e skill. Gli MCP non
+  sono più solo schema live/anonimo: quando superano l'always-load cap possono
+  essere recuperati dallo stesso registry e attivati con lo stesso meccanismo.
+  Test mirato: `mcp_tools_contribute_typed_entries_to_capability_corpus`.
 - **make_document DOCX locale/verde (2026-06-23):** lo stesso workflow ora
   materializza anche artifact `.docx` editabili dalla sorgente Markdown canonica,
   via pacchetto OOXML minimale generato in-process con `zip` già presente.

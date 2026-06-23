@@ -5951,6 +5951,7 @@ fn native_workflow_capability_entries() -> Vec<CapabilityEntry> {
             ),
             schema: Some((capability.schema)()),
             is_skill: false,
+            source: CapabilitySource::NativeWorkflow,
         })
         .collect()
 }
@@ -5984,6 +5985,7 @@ fn native_atomic_capability_entries() -> Vec<CapabilityEntry> {
             ),
             schema: Some((capability.schema)()),
             is_skill: false,
+            source: CapabilitySource::NativeAtomic,
         })
         .collect()
 }
@@ -13073,6 +13075,15 @@ fn find_capability_tool_schema() -> serde_json::Value {
 /// One searchable capability in the UNIFIED registry: a deferred native tool, an installed
 /// skill, or a connected connector tool. `schema` is Some for tools/connectors (pushed into
 /// the live tool set on match); None for skills (the model loads them with `use_skill`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CapabilitySource {
+    NativeTool,
+    NativeWorkflow,
+    NativeAtomic,
+    Skill,
+    McpTool,
+}
+
 #[derive(Clone)]
 struct CapabilityEntry {
     key: String,
@@ -13080,6 +13091,46 @@ struct CapabilityEntry {
     text: String,
     schema: Option<serde_json::Value>,
     is_skill: bool,
+    source: CapabilitySource,
+}
+
+fn capability_entry_from_tool_schema(
+    schema: serde_json::Value,
+    source: CapabilitySource,
+) -> Option<CapabilityEntry> {
+    let name = schema
+        .pointer("/function/name")
+        .and_then(|v| v.as_str())
+        .filter(|name| !name.is_empty())?
+        .to_string();
+    let desc = schema
+        .pointer("/function/description")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let source_text = match source {
+        CapabilitySource::NativeTool => "native tool",
+        CapabilitySource::NativeWorkflow => "native workflow",
+        CapabilitySource::NativeAtomic => "native atomic tool",
+        CapabilitySource::Skill => "skill",
+        CapabilitySource::McpTool => "mcp connected tool",
+    };
+    Some(CapabilityEntry {
+        key: name.clone(),
+        desc: desc.chars().take(140).collect(),
+        text: format!("{source_text} {name} {desc}"),
+        schema: Some(schema),
+        is_skill: false,
+        source,
+    })
+}
+
+fn mcp_capability_entries(schemas: &[serde_json::Value]) -> Vec<CapabilityEntry> {
+    schemas
+        .iter()
+        .cloned()
+        .filter_map(|schema| capability_entry_from_tool_schema(schema, CapabilitySource::McpTool))
+        .collect()
 }
 
 fn cap_tokenize(s: &str) -> Vec<String> {
@@ -14061,35 +14112,19 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
     // path instead of three (find_capability subsumes find_connected_tools).
     let mut capability_corpus: Vec<CapabilityEntry> = Vec::new();
     for schema in deferred_tools {
-        let name = schema
-            .pointer("/function/name")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        if name.is_empty() {
+        let Some(entry) = capability_entry_from_tool_schema(schema, CapabilitySource::NativeTool)
+        else {
             continue;
+        };
+        if native_workflow_by_tool_name(&entry.key).is_none() {
+            capability_corpus.push(entry);
         }
-        if native_workflow_by_tool_name(&name).is_some() {
-            continue;
-        }
-        let desc = schema
-            .pointer("/function/description")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        let text = format!("{name} {desc}");
-        capability_corpus.push(CapabilityEntry {
-            desc: desc.chars().take(140).collect(),
-            key: name,
-            text,
-            schema: Some(schema),
-            is_skill: false,
-        });
     }
     if !read_only {
         capability_corpus.extend(native_workflow_capability_entries());
         capability_corpus.extend(native_atomic_capability_entries());
     }
+    capability_corpus.extend(mcp_capability_entries(&mcp_catalog.schemas));
     if has_skills {
         for (id, sname, sdesc) in &enabled_skills {
             capability_corpus.push(CapabilityEntry {
@@ -14098,6 +14133,7 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
                 text: format!("{id} {sname} {sdesc}"),
                 schema: None,
                 is_skill: true,
+                source: CapabilitySource::Skill,
             });
         }
     }
@@ -16714,7 +16750,14 @@ an uncertain date.",
                                 if loaded_tools.insert(entry.key.clone()) {
                                     tool_schemas.push(schema.clone());
                                 }
-                                lines.push(format!("- {}: {}", entry.key, entry.desc));
+                                let label = match entry.source {
+                                    CapabilitySource::McpTool => "mcp",
+                                    CapabilitySource::NativeWorkflow => "workflow",
+                                    CapabilitySource::NativeAtomic => "atomic",
+                                    CapabilitySource::NativeTool => "tool",
+                                    CapabilitySource::Skill => "skill",
+                                };
+                                lines.push(format!("- {label} «{}»: {}", entry.key, entry.desc));
                             }
                         }
                         // Connected services (toolkit-aware): activate the matching toolkit's
@@ -36730,6 +36773,44 @@ mod tests {
     }
 
     #[test]
+    fn mcp_tools_contribute_typed_entries_to_capability_corpus() {
+        let schemas = vec![
+            serde_json::json!({
+                "type": "function",
+                "function": {
+                    "name": "mcp__filesystem__read_file",
+                    "description": "Read a file from the connected filesystem MCP server.",
+                    "parameters": { "type": "object", "properties": {} }
+                }
+            }),
+            serde_json::json!({
+                "type": "function",
+                "function": {
+                    "name": "mcp__calendar__list_events",
+                    "description": "List calendar events from the connected calendar MCP server.",
+                    "parameters": { "type": "object", "properties": {} }
+                }
+            }),
+        ];
+        let corpus = super::mcp_capability_entries(&schemas);
+        let ranked = super::bm25_rank(&corpus, "read a file from filesystem", 1);
+        let entry = ranked.first().expect("mcp entry");
+
+        assert_eq!(entry.key, "mcp__filesystem__read_file");
+        assert_eq!(entry.source, super::CapabilitySource::McpTool);
+        assert!(!entry.is_skill);
+        assert!(entry.text.contains("mcp connected tool"), "{}", entry.text);
+        assert_eq!(
+            entry
+                .schema
+                .as_ref()
+                .and_then(|schema| schema.pointer("/function/name"))
+                .and_then(|value| value.as_str()),
+            Some("mcp__filesystem__read_file"),
+        );
+    }
+
+    #[test]
     fn workflow_router_sends_document_requests_to_document_workflow() {
         let decision = super::route_workflow_or_agent(
             "Scrivi un documento operativo per onboarding clienti",
@@ -38751,13 +38832,14 @@ data: [DONE]\n";
 
     #[test]
     fn bm25_rank_orders_by_relevance() {
-        use super::{bm25_rank, CapabilityEntry};
+        use super::{bm25_rank, CapabilityEntry, CapabilitySource};
         let entry = |key: &str, text: &str| CapabilityEntry {
             key: key.to_string(),
             desc: text.to_string(),
             text: text.to_string(),
             schema: None,
             is_skill: false,
+            source: CapabilitySource::NativeTool,
         };
         let corpus = vec![
             entry("gmail_send", "send an email message via gmail"),
