@@ -47,9 +47,11 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
 
 - **Linea attiva:** consolidamento memoria + artefatti prima di WS7. **WS6 chiusa localmente**:
   Resource Governor, scheduler/ricorrenza, proactive review card surface/dedup
-  e write-back memoria proattiva sono coperti da test e build. Resta consigliato
-  un ultimo smoke manuale in-app su automazione schedulata reale nel thread
-  `scheduled` prima di pubblicare/taggare.
+  e write-back memoria proattiva sono coperti da test e build. Lo smoke reale
+  su automazione schedulata nel thread `scheduled` ha trovato una falsa chiusura:
+  il runtime marcava `completed` una risposta non vuota anche quando conteneva
+  solo `PLAN` intermedio. Fix locale: i proactive prompt ora bloccano risposte
+  vuote/fallback e piani non completati invece di schedulare un falso successo.
   Il contratto operativo corrente della memoria è [MEMORIA.md](MEMORIA.md).
 - **WS2-3.1 PASSATA in runtime (2026-06-23):** gli artifact scritti via
   Filesystem MCP dentro la root progetto vengono registrati come
@@ -165,6 +167,18 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   passo unico:** completare verifica allargata della nuova slice grafo piano e
   poi proseguire verso convergenza `ExecutionPlan`/workflow runner dichiarativo,
   senza aprire WS7 prima delle fondamenta.
+- **WS6 post-smoke automation guard (2026-06-23):** analisi runtime su
+  `~/.homun/task-runtime.sqlite` e `~/.homun/desktop-gateway.sqlite`: il task
+  scheduled `autorun_a4bd...@occ@1782194400` era stato registrato come
+  `completed`/`ok=1`, ma il thread conteneva solo un messaggio assistant con
+  piano 2/4 e testo intermedio ("Sky Sport ha solo il menu..."), senza briefing
+  finale né tool run registrati. Root cause: `execute_proactive_prompt_task`
+  considerava completata qualsiasi risposta non vuota di `run_agent_turn`.
+  Fix locale: `proactive_prompt_incomplete_reason` rifiuta fallback "No reply
+  generated..." e marker `PLAN` con step aperti, restituendo
+  `completed=false`/`blocked_reason` e evento `proactive_prompt_incomplete`.
+  Test mirato:
+  `cargo test -p local-first-desktop-gateway proactive_prompt_plan_guard -- --nocapture`.
 - **Nota aperta non bloccante:** durante i gate con tool il provider primario
   `glm-5.2` continua a rispondere `400 Bad Request` sul primo round con tool; il
   fallback a `kimi-k2.6:cloud` prosegue correttamente. Da riprendere come task

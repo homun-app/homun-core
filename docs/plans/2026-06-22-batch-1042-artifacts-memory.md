@@ -471,6 +471,14 @@ cablato** nel flusso agente. ADR 0015.
   `suggestion_lookup_preserves_durable_dedup_key`. Gate finale locale:
   task-runtime verde; gateway **166 passati, 1 ignorato**; build gateway/desktop
   verdi; `git diff --check` pulito. **WS6 chiusa localmente.**
+  **Post-smoke fix (2026-06-23):** lo smoke reale su scheduled automation ha
+  mostrato un falso positivo: il runtime registrava `completed`/`ok=1` per una
+  risposta non vuota che conteneva solo un `PLAN` ancora aperto (2/4) e testo di
+  progresso. `execute_proactive_prompt_task` ora classifica come incompleti il
+  fallback "No reply generated..." e i marker `PLAN` con step non completati,
+  producendo `completed=false`, `blocked_reason` ed evento
+  `proactive_prompt_incomplete` invece di una falsa chiusura. Test mirato:
+  `cargo test -p local-first-desktop-gateway proactive_prompt_plan_guard -- --nocapture`.
 
 ## WS7 — Ecosistema deliverable (Manus)
 
@@ -538,9 +546,10 @@ proprio — versioning, canali, scaricabili dal **sito Homun**, auto-aggiornabil
 
 ## Ordine d'esecuzione proposto
 
-1. **WS6 locale consolidata/committata** — publish/tag solo su comando. Prima
-   del publish resta consigliato uno smoke manuale in-app su scheduled
-   automation reale nel thread `scheduled`.
+1. **WS6 locale consolidata/committata** — publish/tag solo su comando. Lo smoke
+   manuale in-app su scheduled automation reale ha prodotto un fix post-smoke
+   contro le false chiusure; prima del publish resta utile ripetere il gate con
+   il binario aggiornato.
 2. **WS2-3.2b / 3.3** — completare export ZIP/filtri: central surface e
    lifecycle/delete sono cablati e passati in-app.
 3. **WS5.5 / WS5.6** — catena di provenienza decisione → artefatto → codice →

@@ -17,6 +17,8 @@ primo percorso locale verde:
 3. WS6.3 — scheduler/ricorrenza + proactive review: recurrence parity,
    scheduled/proactive prompt thread, card surface/dedup.
 4. WS6.4 — write-back delle azioni proattive in memoria (`open_loop`/`decision`).
+   Post-smoke scheduled automation: una risposta con solo piano intermedio non
+   viene più marcata come completata.
 5. WS2-3.1 — artifact come `memory_type="artifact"` + entity grafo + embedding,
    inclusi file in-place scritti via Filesystem MCP dentro root progetto.
 6. WS2-3.2a — il Workbench Artifacts legge anche gli artifact memoria e mostra
@@ -55,9 +57,9 @@ primo percorso locale verde:
     e step nel grafo canonico, con relazioni `describes`, `relates_to`/`has_step`
     e `depends_on` quando esplicito.
 
-Prima di pubblicare/taggare resta prudente un smoke manuale in-app su una
-automazione schedulata reale che compaia nel thread `scheduled`. Non è bloccante
-per iniziare il consolidamento memoria in locale.
+Prima di pubblicare/taggare resta prudente ripetere lo smoke manuale in-app su
+una automazione schedulata reale con il binario aggiornato. Il primo smoke ha
+trovato e corretto una falsa chiusura su piano non completato.
 
 ## Milestone
 

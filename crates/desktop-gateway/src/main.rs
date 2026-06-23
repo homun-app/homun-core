@@ -22271,6 +22271,28 @@ fn execute_read_only_task(
     }
 }
 
+fn proactive_prompt_incomplete_reason(answer: &str) -> Option<String> {
+    let trimmed = answer.trim();
+    if trimmed.is_empty() || trimmed == "No reply generated for the scheduled task." {
+        return Some("scheduled task produced no final reply".to_string());
+    }
+
+    let plan = parse_plan_marker(trimmed);
+    if plan.is_empty() {
+        return None;
+    }
+    let done = plan_done_count(&plan);
+    let total = plan.len();
+    if done < total {
+        let next = plan_next_open(&plan)
+            .unwrap_or_else(|| "blocked or unfinished step".to_string());
+        return Some(format!(
+            "scheduled task stopped with an incomplete plan ({done}/{total}); next step: {next}"
+        ));
+    }
+    None
+}
+
 /// Executes a scheduled/recurring "proactive prompt": runs a full agent turn on
 /// the task's goal in a stable per-schedule chat thread, persists the exchange,
 /// and pushes a live `/api/events` update so the desktop app surfaces it — the
@@ -22329,6 +22351,7 @@ fn execute_proactive_prompt_task(
     let answer = tokio::runtime::Handle::current()
         .block_on(run_agent_turn(state, &thread_id, &goal, policy))
         .unwrap_or_else(|| "No reply generated for the scheduled task.".to_string());
+    let incomplete_reason = proactive_prompt_incomplete_reason(&answer);
 
     if let Ok(store) = lock_store(state) {
         // The goal documents what the scheduled task was asked — keep it as a user bubble.
@@ -22343,22 +22366,42 @@ fn execute_proactive_prompt_task(
         "channel": "scheduled",
     }));
 
+    let completed = incomplete_reason.is_none();
+    let summary = incomplete_reason
+        .clone()
+        .unwrap_or_else(|| "Scheduled task executed.".to_string());
     Ok(TaskExecutionOutcome {
-        completed: true,
-        blocked_reason: None,
+        completed,
+        blocked_reason: incomplete_reason,
         pending_approval: None,
-        summary: "Scheduled task executed.".to_string(),
+        summary,
         checkpoint_payload: serde_json::json!({
             "kind": "proactive_prompt",
             "goal": goal,
             "thread_id": thread_id,
+            "completed": completed,
         }),
-        checkpoint_redacted: serde_json::json!({ "kind": "proactive_prompt" }),
+        checkpoint_redacted: serde_json::json!({
+            "kind": "proactive_prompt",
+            "completed": completed,
+        }),
         chat_message: answer,
         surface: SurfaceKind::Logs,
-        event_kind: "proactive_prompt_completed".to_string(),
-        event_title: "Scheduled task completed".to_string(),
-        event_subtitle: "Scheduled proactive execution.".to_string(),
+        event_kind: if completed {
+            "proactive_prompt_completed".to_string()
+        } else {
+            "proactive_prompt_incomplete".to_string()
+        },
+        event_title: if completed {
+            "Scheduled task completed".to_string()
+        } else {
+            "Scheduled task incomplete".to_string()
+        },
+        event_subtitle: if completed {
+            "Scheduled proactive execution.".to_string()
+        } else {
+            "Scheduled task stopped before finishing its plan.".to_string()
+        },
         event_payload: serde_json::json!({ "goal": goal }),
         artifacts: vec![],
     })
@@ -36890,6 +36933,38 @@ data: [DONE]\n";
         assert_eq!(first.thread_id, "channel_scheduled_autorun_abc");
         assert_eq!(second.thread_id, first.thread_id);
         assert_eq!(second.source.as_deref(), Some("scheduled"));
+    }
+
+    #[test]
+    fn proactive_prompt_plan_guard_rejects_incomplete_plan_answer() {
+        let answer = "‹‹PLAN››- [x] **Read sources** (`s1`): done\n\
+- [-] **Check standings** (`s2`): still running\n\
+- [ ] **Write briefing** (`s3`): pending‹‹/PLAN››\
+Sky Sport ha solo il menu. Vado direttamente alla pagina dei Mondiali.";
+
+        let reason = super::proactive_prompt_incomplete_reason(answer).expect("incomplete plan");
+
+        assert!(reason.contains("incomplete plan"), "{reason}");
+        assert!(reason.contains("1/3"), "{reason}");
+        assert!(reason.contains("Check standings"), "{reason}");
+    }
+
+    #[test]
+    fn proactive_prompt_plan_guard_allows_completed_plan_answer() {
+        let answer = "‹‹PLAN››- [x] **Read sources** (`s1`): done\n\
+- [x] **Write briefing** (`s2`): done‹‹/PLAN››\
+\n\n## Briefing finale\nTutto completato.";
+
+        assert!(super::proactive_prompt_incomplete_reason(answer).is_none());
+    }
+
+    #[test]
+    fn proactive_prompt_plan_guard_rejects_missing_reply() {
+        assert_eq!(
+            super::proactive_prompt_incomplete_reason("No reply generated for the scheduled task.")
+                .as_deref(),
+            Some("scheduled task produced no final reply"),
+        );
     }
 
     #[test]
