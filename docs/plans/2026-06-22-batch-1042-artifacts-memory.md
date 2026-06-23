@@ -859,6 +859,9 @@ ragionato il contratto degli strumenti `make_*` creati dall'harness. ADR 0011
   one-call il gateway rifiuta tool diversi dal workflow selezionato, anche se
   arrivano da MCP/connector caricati dopo il pruning. Questo impedisce fallback
   manuali tipo `mcp__filesystem__create` dopo un errore `make_deck`.
+  Chiarimento importante: i `template_ref` `monet/*` attuali sono seed locali
+  del catalogo Homun; MCP Monet resta un adapter futuro, non una dipendenza
+  runtime della generazione.
 - ☐ **7.1b (futuro)** Portare ricerca/meeting al livello del deck solo dopo il
   chiarimento sul contratto strumenti: `make_research` e `make_meeting` non sono
   essenziali per la prossima release.

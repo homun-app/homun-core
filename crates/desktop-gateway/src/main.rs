@@ -13620,6 +13620,27 @@ any other key such as \"presentation\" or \"deck\", and add no extra top-level k
     Ok(serde_json::json!({ "title": title, "subtitle": subtitle, "slides": slides }))
 }
 
+fn make_deck_content_failure_message(
+    error: &str,
+    requested_template_ref: Option<&str>,
+    resolved_template_ref: Option<&str>,
+    base_url: &str,
+    model: &str,
+) -> String {
+    let template_status = match (requested_template_ref, resolved_template_ref) {
+        (Some(requested), Some(resolved)) => format!(
+            "Template reference `{requested}` was resolved locally as `{resolved}` from Homun's built-in template catalog; it does NOT require a Monet MCP connection."
+        ),
+        (Some(requested), None) => format!(
+            "Template reference `{requested}` is not present in Homun's local template catalog, so the workflow fell back to explicit/default design settings; this is still NOT a Monet MCP lookup."
+        ),
+        (None, _) => "No external template lookup was needed; the workflow uses Homun's local design defaults.".to_string(),
+    };
+    format!(
+        "MAKE_DECK_CONTENT_PROVIDER_UNAVAILABLE: make_deck could not generate slide content because the inference provider is unreachable. {template_status} Provider endpoint: `{base_url}`. Model: `{model}`. Error: {error}. Do not create files manually and do not use shell/filesystem/MCP fallback. Ask the user to choose a reachable provider or start the required local service, then retry make_deck."
+    )
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 struct DocumentGenerationOptions {
     template_ref: Option<String>,
@@ -17816,7 +17837,13 @@ available tools (for data from the web use the browser: browser_navigate on the 
                             )
                             .await
                             {
-                                Err(e) => format!("Could not generate deck content: {e}"),
+                                Err(e) => make_deck_content_failure_message(
+                                    &e,
+                                    requested_template_ref.as_deref(),
+                                    template_ref.as_deref(),
+                                    &base_url,
+                                    &model,
+                                ),
                                 Ok(mut deck) => {
                                     apply_deck_design_components(&mut deck, &design_components);
                                     apply_deck_design_theme(
@@ -39342,6 +39369,23 @@ mod tests {
                 "quote_callout".to_string(),
             ],
         );
+    }
+
+    #[test]
+    fn make_deck_content_failure_distinguishes_template_from_provider() {
+        let message = super::make_deck_content_failure_message(
+            "connection refused",
+            Some("monet/startup-pitch-clean-01"),
+            Some("monet/startup-pitch-clean-01"),
+            "http://127.0.0.1:11434/v1",
+            "kimi-k2.6:cloud",
+        );
+
+        assert!(message.contains("MAKE_DECK_CONTENT_PROVIDER_UNAVAILABLE"), "{message}");
+        assert!(message.contains("resolved locally"), "{message}");
+        assert!(message.contains("does NOT require a Monet MCP connection"), "{message}");
+        assert!(message.contains("Provider endpoint: `http://127.0.0.1:11434/v1`"), "{message}");
+        assert!(message.contains("Do not create files manually"), "{message}");
     }
 
     #[test]
