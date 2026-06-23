@@ -51,6 +51,9 @@ primo percorso locale verde:
     aggiorna un solo `open_loop` canonico `source="runtime_plan"` per thread,
     con prossimo step e conteggi; a completamento il record viene marcato stale e
     `stato-lavori.md` è rigenerato come vista derivata.
+14. WS1-Fase 2 — grafo piano/step: lo stesso write-back materializza entity piano
+    e step nel grafo canonico, con relazioni `describes`, `relates_to`/`has_step`
+    e `depends_on` quando esplicito.
 
 Prima di pubblicare/taggare resta prudente un smoke manuale in-app su una
 automazione schedulata reale che compaia nel thread `scheduled`. Non è bloccante
@@ -58,8 +61,7 @@ per iniziare il consolidamento memoria in locale.
 
 ## Milestone
 
-1. Valutare uno smoke in-app mirato piano/memoria oppure proseguire direttamente
-   verso `ExecutionPlan`/workflow runner dichiarativo.
+1. Completare verifica allargata della nuova slice grafo piano/step.
 2. WS1-Fase 2/3 — piano runtime-owned e workflow runner dichiarativo, così i
    deliverable futuri non riaprono fragilità cross-modello.
 3. WS7 — deliverable Manus-style (`make_document`, `make_research`,
@@ -73,8 +75,7 @@ collegarli al perché. Per questo WS7 non è più il prossimo step.
 
 ## Prossima azione
 
-WS1 ha ora una prima slice locale verde di write-back piano→memoria, verificata
-con gateway full, memory crate, build desktop e `git diff --check`. Prossimo:
-decidere se fare smoke in-app piano/memoria o proseguire verso `ExecutionPlan`/
-workflow runner dichiarativo. Il contratto corrente della memoria è in
-[MEMORIA.md](MEMORIA.md).
+WS1 ha ora write-back piano→memoria e prima materializzazione grafo piano/step
+locali/verdi. Prossimo: verifica allargata della slice grafo piano, poi
+convergenza verso `ExecutionPlan`/workflow runner dichiarativo. Il contratto
+corrente della memoria è in [MEMORIA.md](MEMORIA.md).

@@ -5666,6 +5666,182 @@ fn runtime_plan_memory_matches(memory: &MemoryRecord, thread_key: &str) -> bool 
         && memory.metadata.get("thread_id").and_then(|v| v.as_str()) == Some(thread_key)
 }
 
+fn plan_step_id(step: &serde_json::Value) -> Option<&str> {
+    step.get("id")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+}
+
+fn upsert_runtime_plan_graph(
+    facade: &MemoryFacade,
+    user: &MemoryUserId,
+    workspace: &MemoryWorkspaceId,
+    privacy_domain: &str,
+    memory_ref: &MemoryRef,
+    thread_key: &str,
+    plan: &[serde_json::Value],
+) -> Result<(), String> {
+    let plan_key = format!("runtime_plan:{thread_key}");
+    let plan_ref = MemoryRef::new(
+        MemoryRefKind::Entity,
+        user.clone(),
+        workspace.clone(),
+        plan_key.clone(),
+    );
+    facade
+        .upsert_entity(&MemoryEntity {
+            reference: plan_ref.clone(),
+            user_id: user.clone(),
+            workspace_id: workspace.clone(),
+            entity_type: "document".to_string(),
+            name: format!("Runtime plan {thread_key}"),
+            canonical_key: plan_key,
+            aliases: vec![thread_key.to_string()],
+            privacy_domain: PrivacyDomain::new(privacy_domain),
+            sensitivity: MemoryDataSensitivity::Internal,
+            metadata: serde_json::json!({
+                "source": "runtime_plan",
+                "kind": "runtime_plan",
+                "thread_id": thread_key,
+                "status": if plan_next_open(plan).is_some() { "open" } else { "complete" },
+                "done_count": plan_done_count(plan),
+                "total_count": plan.len(),
+                "next_step": plan_next_open(plan),
+            }),
+        })
+        .map_err(|error| error.to_string())?;
+    upsert_memory_relation(
+        facade,
+        user,
+        workspace,
+        privacy_domain,
+        format!("runtime_plan_described_by:{}", provenance_key_fragment(thread_key)),
+        memory_ref.clone(),
+        "describes",
+        plan_ref.clone(),
+        vec![memory_ref.clone()],
+        serde_json::json!({
+            "source": "runtime_plan",
+            "thread_id": thread_key,
+        }),
+    )?;
+
+    let step_refs: std::collections::HashMap<String, MemoryRef> = plan
+        .iter()
+        .filter_map(|step| {
+            let id = plan_step_id(step)?;
+            Some((
+                id.to_string(),
+                MemoryRef::new(
+                    MemoryRefKind::Entity,
+                    user.clone(),
+                    workspace.clone(),
+                    format!("runtime_plan:{thread_key}:step:{id}"),
+                ),
+            ))
+        })
+        .collect();
+
+    for (index, step) in plan.iter().enumerate() {
+        let Some(step_id) = plan_step_id(step) else {
+            continue;
+        };
+        let step_ref = step_refs
+            .get(step_id)
+            .cloned()
+            .expect("step ref built from same step id");
+        let title = plan_step_title(step);
+        facade
+            .upsert_entity(&MemoryEntity {
+                reference: step_ref.clone(),
+                user_id: user.clone(),
+                workspace_id: workspace.clone(),
+                entity_type: "asset".to_string(),
+                name: if title.is_empty() {
+                    step_id.to_string()
+                } else {
+                    title.to_string()
+                },
+                canonical_key: format!("runtime_plan:{thread_key}:step:{step_id}"),
+                aliases: vec![step_id.to_string()],
+                privacy_domain: PrivacyDomain::new(privacy_domain),
+                sensitivity: MemoryDataSensitivity::Internal,
+                metadata: serde_json::json!({
+                    "source": "runtime_plan",
+                    "kind": "runtime_plan_step",
+                    "thread_id": thread_key,
+                    "step_id": step_id,
+                    "index": index,
+                    "title": title,
+                    "status": plan_step_status(step),
+                    "detail": step.get("detail").cloned().unwrap_or(serde_json::Value::Null),
+                    "done_criterion": step.get("done_criterion").cloned().unwrap_or(serde_json::Value::Null),
+                }),
+            })
+            .map_err(|error| error.to_string())?;
+        upsert_memory_relation(
+            facade,
+            user,
+            workspace,
+            privacy_domain,
+            format!(
+                "runtime_plan_step:{}:{}",
+                provenance_key_fragment(thread_key),
+                provenance_key_fragment(step_id)
+            ),
+            plan_ref.clone(),
+            "relates_to",
+            step_ref.clone(),
+            vec![memory_ref.clone()],
+            serde_json::json!({
+                "source": "runtime_plan",
+                "kind": "has_step",
+                "thread_id": thread_key,
+                "step_id": step_id,
+                "index": index,
+            }),
+        )?;
+
+        let dependencies = step
+            .get("depends_on")
+            .and_then(|value| value.as_array())
+            .into_iter()
+            .flatten()
+            .filter_map(|value| value.as_str())
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        for dependency_id in dependencies {
+            let Some(dependency_ref) = step_refs.get(dependency_id) else {
+                continue;
+            };
+            upsert_memory_relation(
+                facade,
+                user,
+                workspace,
+                privacy_domain,
+                format!(
+                    "runtime_plan_step_depends:{}:{}:{}",
+                    provenance_key_fragment(thread_key),
+                    provenance_key_fragment(step_id),
+                    provenance_key_fragment(dependency_id)
+                ),
+                step_ref.clone(),
+                "depends_on",
+                dependency_ref.clone(),
+                vec![memory_ref.clone()],
+                serde_json::json!({
+                    "source": "runtime_plan",
+                    "thread_id": thread_key,
+                    "step_id": step_id,
+                    "depends_on": dependency_id,
+                }),
+            )?;
+        }
+    }
+    Ok(())
+}
+
 fn upsert_runtime_plan_memory(
     facade: &MemoryFacade,
     user: &MemoryUserId,
@@ -5713,6 +5889,15 @@ fn upsert_runtime_plan_memory(
                     .confirm_memory(lifecycle, &record.reference, "runtime plan updated")
                     .map_err(|error| error.to_string())?;
             }
+            upsert_runtime_plan_graph(
+                facade,
+                user,
+                workspace,
+                "work",
+                &record.reference,
+                &thread_key,
+                plan,
+            )?;
             Ok(Some(record.reference))
         }
         None if complete => Ok(None),
@@ -5734,6 +5919,15 @@ fn upsert_runtime_plan_memory(
             facade
                 .confirm_memory(lifecycle, &record.reference, "runtime plan opened")
                 .map_err(|error| error.to_string())?;
+            upsert_runtime_plan_graph(
+                facade,
+                user,
+                workspace,
+                "work",
+                &record.reference,
+                &thread_key,
+                plan,
+            )?;
             Ok(Some(record.reference))
         }
     }
@@ -34553,6 +34747,89 @@ mod tests {
         assert_eq!(memory.status, local_first_memory::MemoryStatus::Stale);
         assert_eq!(memory.metadata.get("status").and_then(|v| v.as_str()), Some("complete"));
         assert!(!super::active_open_loop_record(&memory));
+    }
+
+    #[test]
+    fn runtime_plan_memory_materializes_plan_step_graph() {
+        let facade = local_first_memory::MemoryFacade::new(
+            local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
+        );
+        let user = local_first_memory::UserId::new("local");
+        let workspace = local_first_memory::WorkspaceId::new("project");
+        let lifecycle = local_first_memory::MemoryLifecycleRequest {
+            actor_id: "test".to_string(),
+            user_id: user.clone(),
+            workspace_id: workspace.clone(),
+            purpose: "test".to_string(),
+        };
+        let plan = vec![
+            serde_json::json!({
+                "id":"s1",
+                "title":"Read docs",
+                "status":"done",
+                "detail":"",
+                "done_criterion":"docs read"
+            }),
+            serde_json::json!({
+                "id":"s2",
+                "title":"Implement slice",
+                "status":"doing",
+                "detail":"",
+                "depends_on":["s1"]
+            }),
+        ];
+
+        let memory_ref = super::upsert_runtime_plan_memory(
+            &facade,
+            &user,
+            &workspace,
+            &lifecycle,
+            Some("thread-graph"),
+            &plan,
+        )
+        .unwrap()
+        .expect("created");
+
+        let entities = facade.list_entities_for_ui(&user, &workspace).unwrap();
+        let plan_entity = entities
+            .iter()
+            .find(|entity| entity.canonical_key == "runtime_plan:thread-graph")
+            .expect("plan entity");
+        assert_eq!(plan_entity.entity_type, "document");
+        assert_eq!(plan_entity.metadata.get("kind").and_then(|value| value.as_str()), Some("runtime_plan"));
+        assert_eq!(plan_entity.metadata.get("done_count").and_then(|value| value.as_u64()), Some(1));
+
+        let step_one = entities
+            .iter()
+            .find(|entity| entity.canonical_key == "runtime_plan:thread-graph:step:s1")
+            .expect("step s1");
+        let step_two = entities
+            .iter()
+            .find(|entity| entity.canonical_key == "runtime_plan:thread-graph:step:s2")
+            .expect("step s2");
+        assert_eq!(step_two.entity_type, "asset");
+        assert_eq!(
+            step_two.metadata.get("kind").and_then(|value| value.as_str()),
+            Some("runtime_plan_step"),
+        );
+
+        let relations = facade.list_relations_for_ui(&user, &workspace).unwrap();
+        assert!(relations.iter().any(|relation| {
+            relation.source_ref == memory_ref
+                && relation.target_ref == plan_entity.reference
+                && relation.relation_type == "describes"
+        }));
+        assert!(relations.iter().any(|relation| {
+            relation.source_ref == plan_entity.reference
+                && relation.target_ref == step_two.reference
+                && relation.relation_type == "relates_to"
+                && relation.metadata.get("kind").and_then(|value| value.as_str()) == Some("has_step")
+        }));
+        assert!(relations.iter().any(|relation| {
+            relation.source_ref == step_two.reference
+                && relation.target_ref == step_one.reference
+                && relation.relation_type == "depends_on"
+        }));
     }
 
     #[test]

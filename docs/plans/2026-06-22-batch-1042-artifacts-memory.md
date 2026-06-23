@@ -48,6 +48,13 @@ modelli deboli/locali. Invarianti: monotonìa, limitatezza, identità non inferi
     marcato stale. `stato-lavori.md` resta una proiezione derivata rigenerata dal
     `MemoryFacade`, non uno store parallelo. Test:
     `cargo test -p local-first-desktop-gateway runtime_plan_memory -- --nocapture`.
+  - ✅ **Slice 2.7 (2026-06-23, locale/verde)**: lo stesso write-back materializza
+    anche il grafo canonico del piano: entity piano (`metadata.kind="runtime_plan"`),
+    entity step (`metadata.kind="runtime_plan_step"`), relazione memoria→piano
+    `describes`, piano→step `relates_to` con `metadata.kind="has_step"` e
+    step→step `depends_on` quando il piano porta `depends_on` espliciti. Resta
+    dentro `MemoryFacade`, nessun workflow store parallelo. Test mirato:
+    `runtime_plan_memory_materializes_plan_step_graph`.
   - ☐ **Slice 3**: convergere sull'`ExecutionPlan` del crate `orchestrator` (DAG
     `depends_on`, `plan_propose`) e ritirare il `Vec<Value>` canonico.
 - ☐ **Floor ovunque** — constrained decoding su **tutte** le emissioni di
@@ -222,8 +229,8 @@ che fanno "ricordare il perché e sopravvivere". Caposaldo #8.
   con evidence refs alla memoria sorgente e alla memoria artifact. Non fa matching
   semantico né inferisce relazioni probabili. Test:
   `cargo test -p local-first-desktop-gateway artifact_memory_links_ -- --nocapture`.
-  **Resta:** alimentare refs piano/task quando WS1-F6 persisterà step/piano in
-  memoria.
+  **Resta:** alimentare refs piano/task dagli artifact verso le entity/ref piano
+  ora disponibili, senza inferire relazioni non evidenziate.
 - 🟡 **5.6 Eval memoria** (guardrail): chat nuova → *"a che punto è il workflow e perché
   make_deck?"* / *"quali artefatti per il progetto X e da quale decisione?"* → deve
   rispondere. Anti-regressione, come l'eval del deck.
@@ -239,8 +246,7 @@ che fanno "ricordare il perché e sopravvivere". Caposaldo #8.
   e artifact provenance come evidenza. Test red/green:
   `cargo test -p local-first-desktop-gateway memory_eval_surfaces_workflow_status_and_why -- --nocapture`.
   **Resta:** decidere se serve smoke in-app mirato del reader memoria; piano/task
-  refs complete arrivano con WS1-F6 quando il piano runtime-owned farà write-back
-  memoria.
+  refs complete ora possono appoggiarsi al grafo piano materializzato da WS1.
 
 > Nota: WS2-3.1 (artefatti→memoria) e WS1-F6 (piano→memoria) **alimentano** WS5 — sono
 > i nodi che rendono la memoria il cervello connesso. Stesso north-star.
@@ -539,8 +545,9 @@ proprio — versioning, canali, scaricabili dal **sito Homun**, auto-aggiornabil
    lifecycle/delete sono cablati e passati in-app.
 3. **WS5.5 / WS5.6** — catena di provenienza decisione → artefatto → codice →
    esito, più eval memoria come guardrail.
-4. **WS1-Fase 2** — gestione piano (`ExecutionPlan`+`step_id`); primo write-back
-   piano→memoria locale/verde, resta convergere sul tipo `ExecutionPlan`.
+4. **WS1-Fase 2** — gestione piano (`ExecutionPlan`+`step_id`); write-back
+   piano→memoria e grafo piano/step locali/verdi, resta convergere sul tipo
+   `ExecutionPlan`.
 6. **WS1-Fase 3** — skill dichiarative + workflow runner.
 7. **WS7** — ecosistema deliverable (`make_*` per documenti/ricerca/meeting),
    volutamente dopo memoria/artefatti/engine baseline.

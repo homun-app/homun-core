@@ -81,17 +81,22 @@ Fatto:
   `update_plan` / `step_advance` con conteggi, prossimo step e snapshot degli step;
   quando non restano step aperti il record viene marcato stale. `stato-lavori.md`
   viene rigenerato dal `MemoryFacade` come vista derivata.
+- grafo piano runtime-owned: lo stesso write-back materializza entity piano e step
+  nel grafo canonico (`metadata.kind="runtime_plan"` /
+  `metadata.kind="runtime_plan_step"`), con relazioni `describes`, `relates_to`
+  (`kind="has_step"`) e `depends_on` per dipendenze esplicite tra step.
 
 Mancante:
 
 - convergenza/mirroring dei read-model graph-like, in particolare relazioni
   contatti, nel grafo canonico memoria;
 - graphification estesa oltre il codice: artifact, piano, decisioni, outcome e loop
-  aperti devono diventare nodi/archi causali; il piano ora ha il primo write-back
-  SQL canonico come `open_loop`, ma non ancora un grafo step-level completo;
+  aperti devono diventare nodi/archi causali; il piano ora ha write-back SQL e
+  grafo step-level iniziale, ma non ancora il runner `ExecutionPlan` completo;
 - provenance completa decisione/piano → artifact → codice → esito: la slice
   decisione/source-ref → artifact e i reader/eval sono locali/verdi; il piano ora
-  scrive stato in memoria, resta collegare step/piano al grafo causale completo;
+  scrive stato e step nel grafo, resta collegare artifact/esiti a step/piano con
+  evidenza esplicita;
 - eval memoria come gate completo in-app/release; i reader headless per artifact
   provenance e stato workflow sono locali/verdi.
 
@@ -151,7 +156,8 @@ Acceptance:
    locale/verde.
 5. WS5.6 — eval memoria: ✅ artifact/provenance e stato workflow/perché locali;
    resta eventuale smoke in-app mirato.
-6. WS1-Fase 2/3 — piano runtime-owned e workflow runner con write-back memoria.
+6. WS1-Fase 2/3 — piano runtime-owned e workflow runner con write-back memoria e
+   grafo step-level.
 7. WS7 — deliverable Manus-style, solo dopo queste fondamenta.
 
 ## File codice principali

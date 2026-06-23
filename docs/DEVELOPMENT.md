@@ -153,12 +153,18 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   thread; aggiorna in-place, rigenera `stato-lavori.md` come proiezione derivata
   e marca stale il record quando non restano step aperti. Test mirati:
   `cargo test -p local-first-desktop-gateway runtime_plan_memory -- --nocapture`.
+  **WS1-Fase 2 grafo piano locale/verde:** lo stesso write-back ora materializza
+  nel grafo canonico entity `runtime_plan` e `runtime_plan_step` (come metadata
+  su entity `document`/`asset`) e relazioni memoria `describes` piano,
+  piano `relates_to` step (`metadata.kind="has_step"`) e step `depends_on` step
+  quando il piano porta dipendenze esplicite. Test mirato:
+  `runtime_plan_memory_materializes_plan_step_graph`.
   Gate locale allargato: `cargo test -p local-first-desktop-gateway -- --nocapture`
   = 182 passati, 1 ignorato; `cargo test -p local-first-memory -- --nocapture` =
   verde; `npm run build` desktop = verde; `git diff --check` pulito. **Prossimo
-  passo unico:** scegliere tra smoke in-app del piano/memoria o proseguire verso
-  `ExecutionPlan`/workflow runner dichiarativo, senza aprire WS7 prima delle
-  fondamenta.
+  passo unico:** completare verifica allargata della nuova slice grafo piano e
+  poi proseguire verso convergenza `ExecutionPlan`/workflow runner dichiarativo,
+  senza aprire WS7 prima delle fondamenta.
 - **Nota aperta non bloccante:** durante i gate con tool il provider primario
   `glm-5.2` continua a rispondere `400 Bad Request` sul primo round con tool; il
   fallback a `kimi-k2.6:cloud` prosegue correttamente. Da riprendere come task
