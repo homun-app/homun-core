@@ -142,6 +142,9 @@ modelli deboli/locali. Invarianti: monotonìa, limitatezza, identità non inferi
     **Smoke fix DOCX formatting (2026-06-23, locale/verde):** dopo lo smoke
     reale, il renderer scrive `styles.xml`, converte bold/italic Markdown in run
     Word, promuove il primo titolo e tratta liste numerate come paragrafi lista.
+    **Smoke fix DOCX table sizing (2026-06-23, locale/verde):** dopo il secondo
+    smoke reale, le tabelle Word sono full-width con `tblGrid`, layout fixed,
+    celle percentuali e proporzione 35/65 per tabelle a due colonne.
   - 🟡 **Prossime slice make_document:** smoke reale DOCX in-app e poi controlli
     più ricchi su template/layout solo se restano dentro il registry unico.
   - ☐ **Backlog deliberato:** `make_research` / `make_meeting` restano in fondo

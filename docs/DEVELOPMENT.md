@@ -346,6 +346,12 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   bold/italic in run Word e riconosce liste numerate come `ListParagraph`. Test
   mirati: `markdown_to_docx_writes_valid_word_package`,
   `markdown_to_docx_promotes_plain_first_line_to_title`.
+- **make_document DOCX table sizing smoke fix (2026-06-23):** secondo smoke
+  reale: contenuto migliorato, ma le tabelle restavano a larghezza automatica
+  con celle `w=0`. Il renderer ora emette tabella full-width (`pct=5000`),
+  griglia colonne, layout fixed, padding celle, proporzione 35/65 per tabelle a
+  due colonne e header evidenziato. Test mirato:
+  `markdown_to_docx_renders_pipe_tables`.
 - **Gate provider Z.ai/GLM risolto (test manuale utente, 2026-06-23):** Settings
   espone sia `Z.ai (GLM)` standard (`https://api.z.ai/api/paas/v4`) sia
   `Z.ai Coding (GLM)` (`https://api.z.ai/api/coding/paas/v4`); il preset coding

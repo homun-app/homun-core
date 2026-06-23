@@ -12716,15 +12716,46 @@ fn markdown_table_separator(line: &str) -> bool {
 }
 
 fn markdown_table_to_docx(rows: &[Vec<String>]) -> String {
-    let mut out = String::from(
-        r#"<w:tbl><w:tblPr><w:tblStyle w:val="TableGrid"/><w:tblW w:w="0" w:type="auto"/><w:tblBorders><w:top w:val="single" w:sz="4" w:space="0" w:color="auto"/><w:left w:val="single" w:sz="4" w:space="0" w:color="auto"/><w:bottom w:val="single" w:sz="4" w:space="0" w:color="auto"/><w:right w:val="single" w:sz="4" w:space="0" w:color="auto"/><w:insideH w:val="single" w:sz="4" w:space="0" w:color="auto"/><w:insideV w:val="single" w:sz="4" w:space="0" w:color="auto"/></w:tblBorders></w:tblPr>"#,
+    let col_count = rows.iter().map(Vec::len).max().unwrap_or(1).max(1);
+    let pct_widths = if col_count == 2 {
+        vec![1750, 3250]
+    } else {
+        let base = 5000 / col_count;
+        let mut widths = vec![base; col_count];
+        if let Some(last) = widths.last_mut() {
+            *last += 5000 - base * col_count;
+        }
+        widths
+    };
+    let page_width_twips = 9026;
+    let grid_widths = pct_widths
+        .iter()
+        .map(|width| ((*width as f32 / 5000.0) * page_width_twips as f32).round() as usize)
+        .collect::<Vec<_>>();
+    let grid = grid_widths
+        .iter()
+        .map(|width| format!(r#"<w:gridCol w:w="{width}"/>"#))
+        .collect::<String>();
+    let mut out = format!(
+        r#"<w:tbl><w:tblPr><w:tblStyle w:val="TableGrid"/><w:tblW w:w="5000" w:type="pct"/><w:tblLayout w:type="fixed"/><w:tblCellMar><w:top w:w="80" w:type="dxa"/><w:left w:w="100" w:type="dxa"/><w:bottom w:w="80" w:type="dxa"/><w:right w:w="100" w:type="dxa"/></w:tblCellMar><w:tblBorders><w:top w:val="single" w:sz="4" w:space="0" w:color="B7B7B7"/><w:left w:val="single" w:sz="4" w:space="0" w:color="B7B7B7"/><w:bottom w:val="single" w:sz="4" w:space="0" w:color="B7B7B7"/><w:right w:val="single" w:sz="4" w:space="0" w:color="B7B7B7"/><w:insideH w:val="single" w:sz="4" w:space="0" w:color="B7B7B7"/><w:insideV w:val="single" w:sz="4" w:space="0" w:color="B7B7B7"/></w:tblBorders></w:tblPr><w:tblGrid>{grid}</w:tblGrid>"#,
     );
-    for row in rows {
+    for (row_index, row) in rows.iter().enumerate() {
         out.push_str("<w:tr>");
-        for cell in row {
-            out.push_str(&format!(
-                r#"<w:tc><w:tcPr><w:tcW w:w="0" w:type="auto"/></w:tcPr><w:p>{}</w:p></w:tc>"#,
+        for col_index in 0..col_count {
+            let cell = row.get(col_index).map(String::as_str).unwrap_or("");
+            let width = pct_widths.get(col_index).copied().unwrap_or(5000);
+            let fill = if row_index == 0 {
+                r#"<w:shd w:fill="F2F2F2"/>"#
+            } else {
+                ""
+            };
+            let runs = if row_index == 0 {
+                docx_text_run(cell, true, false)
+            } else {
                 markdown_inline_to_docx_runs(cell)
+            };
+            out.push_str(&format!(
+                r#"<w:tc><w:tcPr><w:tcW w:w="{width}" w:type="pct"/>{fill}</w:tcPr><w:p>{runs}</w:p></w:tc>"#,
             ));
         }
         out.push_str("</w:tr>");
@@ -36897,9 +36928,15 @@ mod tests {
         .unwrap();
 
         assert!(document.contains("<w:tbl>"), "{document}");
+        assert!(document.contains(r#"<w:tblW w:w="5000" w:type="pct"/>"#), "{document}");
+        assert!(document.contains("<w:tblGrid>"), "{document}");
+        assert!(document.contains(r#"<w:tcW w:w="1750" w:type="pct"/>"#), "{document}");
+        assert!(document.contains(r#"<w:tcW w:w="3250" w:type="pct"/>"#), "{document}");
+        assert!(document.contains(r#"<w:shd w:fill="F2F2F2"/>"#), "{document}");
         assert!(document.contains("<w:tr>"), "{document}");
         assert!(document.contains("Metrica"), "{document}");
         assert!(document.contains("120 &lt; 150"), "{document}");
+        assert!(!document.contains(r#"<w:tcW w:w="0" w:type="auto"/>"#), "{document}");
         assert!(!document.contains("---:"), "{document}");
     }
 
