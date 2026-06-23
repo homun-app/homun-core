@@ -76,6 +76,10 @@ Fatto:
 - secondo eval/read path WS5.6 per stato workflow: recall esplicito e RAG
   automatico leggono `goal`, `open_loop`, outcome/fact verificati, decisioni con
   rationale e artifact provenance per rispondere “a che punto siamo e perché?”.
+- post-smoke v0.1.1045: il reader di provenance artifact espone anche il
+  `managed_path` locale degli artifact gestiti e collega producer `make_deck` al
+  workflow `DeckWorkflow`; il reader di stato workflow considera gli outcome
+  canonici `fact` con `source="runtime_plan_step"` come evidenze verificate.
 - prima slice WS1 piano→memoria: il piano runtime-owned materializza un solo
   `open_loop` canonico `source="runtime_plan"` per thread, aggiornato in-place da
   `update_plan` / `step_advance` con conteggi, prossimo step e snapshot degli step;

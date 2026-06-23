@@ -9024,6 +9024,10 @@ fn artifact_provenance_context_for_query(
         "why",
         "perché",
         "perche",
+        "dove",
+        "where",
+        "salvat",
+        "saved",
         "lavoro",
         "workflow",
     ]
@@ -9131,6 +9135,11 @@ fn artifact_provenance_context_for_query(
                 path_bits.push(format!("ref: {path}"));
             }
         }
+        if let Some(path) = artifact.metadata.get("managed_path").and_then(|value| value.as_str()) {
+            if !path_bits.iter().any(|bit| bit.contains(path)) {
+                path_bits.push(format!("local managed path: {path}"));
+            }
+        }
         if !path_bits.is_empty() {
             detail.push_str(&format!(" [{}]", path_bits.join("; ")));
         }
@@ -9159,6 +9168,9 @@ fn artifact_provenance_context_for_query(
         producers.dedup();
         if !producers.is_empty() {
             detail.push_str(&format!("; produced by {}", producers.join(", ")));
+            if producers.iter().any(|producer| producer == "make_deck") {
+                detail.push_str("; derives from workflow make_deck / DeckWorkflow");
+            }
         }
 
         let mut source_lines = Vec::new();
@@ -9248,11 +9260,16 @@ fn workflow_status_context_for_query(
         .filter(live)
         .filter(|memory| {
             memory.memory_type == "fact"
-                && memory
-                    .metadata
-                    .get("certainty")
-                    .and_then(|value| value.as_str())
-                    .is_some_and(|value| matches!(value, "committed" | "completed" | "verified"))
+                && (memory
+                        .metadata
+                        .get("certainty")
+                        .and_then(|value| value.as_str())
+                        .is_some_and(|value| matches!(value, "committed" | "completed" | "verified"))
+                    || memory
+                        .metadata
+                        .get("source")
+                        .and_then(|value| value.as_str())
+                        == Some("runtime_plan_step"))
         })
         .collect();
     goals.sort_by_key(|memory| std::cmp::Reverse(memory.text.chars().count()));
@@ -36571,6 +36588,56 @@ mod tests {
     }
 
     #[test]
+    fn artifact_provenance_context_surfaces_managed_path_and_make_deck_workflow() {
+        let facade = local_first_memory::MemoryFacade::new(
+            local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
+        );
+        let user = local_first_memory::UserId::new("local");
+        let workspace = local_first_memory::WorkspaceId::new("project");
+        let lifecycle = local_first_memory::MemoryLifecycleRequest {
+            actor_id: "test".to_string(),
+            user_id: user.clone(),
+            workspace_id: workspace.clone(),
+            purpose: "test".to_string(),
+        };
+        super::upsert_artifact_memory_record(
+            &facade,
+            &user,
+            &workspace,
+            &lifecycle,
+            "project",
+            "thread-deck",
+            "deck.pptx",
+            "Artifact deck.pptx (presentation) creato nel thread thread-deck.".to_string(),
+            serde_json::json!({
+                "source": "artifact_runtime",
+                "producer": "make_deck",
+                "thread_slug": "thread-deck",
+                "name": "deck.pptx",
+                "artifact_type": "presentation",
+                "path_ref": "thread-deck/deck.pptx",
+                "managed_path": "/Users/fabio/.homun/artifacts/thread-deck/deck.pptx",
+                "size_bytes": 456,
+            }),
+        )
+        .unwrap();
+
+        let context = super::artifact_provenance_context_for_query(
+            &facade,
+            &user,
+            &workspace,
+            "quali artifact hai creato e dove sono salvati?",
+        )
+        .expect("artifact context");
+
+        assert!(context.contains("deck.pptx"), "{context}");
+        assert!(context.contains("local managed path"), "{context}");
+        assert!(context.contains("/Users/fabio/.homun/artifacts/thread-deck/deck.pptx"), "{context}");
+        assert!(context.contains("produced by make_deck"), "{context}");
+        assert!(context.contains("derives from workflow make_deck"), "{context}");
+    }
+
+    #[test]
     fn memory_eval_surfaces_workflow_status_and_why() {
         let facade = local_first_memory::MemoryFacade::new(
             local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
@@ -36610,6 +36677,17 @@ mod tests {
                         ]
                     },
                     "affects_labels": ["reports/status.md"],
+                }),
+            ),
+            (
+                "fact",
+                "Runtime plan step completed: Render deck artifacts.",
+                serde_json::json!({
+                    "source": "runtime_plan_step",
+                    "thread_id": "thread-1",
+                    "step_id": "render",
+                    "status": "done",
+                    "done_criterion": "deck.pptx, deck.html and deck.pdf exist"
                 }),
             ),
         ] {
@@ -36666,6 +36744,8 @@ mod tests {
         assert!(context.contains("memory guardrails"), "{context}");
         assert!(context.contains("Open loops"), "{context}");
         assert!(context.contains("WS5.6 workflow status eval remains open"), "{context}");
+        assert!(context.contains("Verified outcomes"), "{context}");
+        assert!(context.contains("Render deck artifacts"), "{context}");
         assert!(context.contains("Recent decisions"), "{context}");
         assert!(context.contains("why: New deliverables would reopen fragility"), "{context}");
         assert!(context.contains("reports/status.md"), "{context}");

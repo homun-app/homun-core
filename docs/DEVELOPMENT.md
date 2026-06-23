@@ -238,6 +238,15 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   "call `make_deck` exactly once"; le richieste generiche restano nel normale
   agent loop. Test mirati: `workflow_router_sends_deck_requests_to_max_scaffolding_workflow`,
   `workflow_router_keeps_generic_requests_on_agent_loop`.
+- **Post-smoke v0.1.1045 locale/verde:** lo smoke deck reale ha evidenziato due
+  follow-up: composer ridimensionabile che poteva espandere la chat in modo
+  anomalo, e risposte artifact/provenance che non esponevano abbastanza
+  `managed_path`, workflow `make_deck` e outcome `runtime_plan_step`. Fix locale:
+  il textarea del composer non è più ridimensionabile manualmente; il reader
+  provenance include `local managed path`, collega `make_deck` a `DeckWorkflow`
+  e lo status workflow include anche fact `source="runtime_plan_step"`. Test
+  mirati: `artifact_provenance_context_surfaces_managed_path_and_make_deck_workflow`,
+  `memory_eval_surfaces_workflow_status_and_why`; frontend `npm run build` verde.
 - **Nota aperta non bloccante:** durante i gate con tool il provider primario
   `glm-5.2` continua a rispondere `400 Bad Request` sul primo round con tool; il
   fallback a `kimi-k2.6:cloud` prosegue correttamente. Da riprendere come task

@@ -83,6 +83,10 @@ primo percorso locale verde:
 23. WS1-Fase 4 — router workflow|agent harness-owned: deck/presentation/slide/pptx
     vanno a `make_deck` con scaffolding `maximum`; richieste generiche restano
     nel loop agente.
+24. Post-smoke v0.1.1045 — fix locale su due regressioni osservate nello smoke
+    deck reale: il composer non è più ridimensionabile manualmente fino a
+    espandere la chat, e il recall artifact/provenance ora espone `managed_path`,
+    workflow `make_deck`/`DeckWorkflow` e outcome `runtime_plan_step`.
 
 Prima di pubblicare/taggare resta prudente ripetere lo smoke manuale in-app su
 una automazione schedulata reale con il binario aggiornato. Il primo smoke ha
@@ -109,6 +113,7 @@ proiezione `ExecutionPlan` nei metadata canonici, `ExecutionPlan` come stato
 runtime primario del loop agente, una prima `WorkflowDefinition` per `make_deck`
 e outcome per-step confermati nel loop principale e nei sub-agent. `make_deck`
 entra ora nel Brain con `run_plan` prima della pipeline deterministica.
-Il router workflow/agent instrada i deck a scaffolding massimo. Prossimo:
-generalizzare documenti/ricerca/meeting. Il contratto corrente della memoria è in
-[MEMORIA.md](MEMORIA.md).
+Il router workflow/agent instrada i deck a scaffolding massimo. Il primo smoke
+release ha corretto composer e recall provenance/status. Prossimo: ripetere smoke
+in-app sul fix e poi generalizzare documenti/ricerca/meeting. Il contratto
+corrente della memoria è in [MEMORIA.md](MEMORIA.md).
