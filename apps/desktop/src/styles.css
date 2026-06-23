@@ -5376,6 +5376,17 @@ body.resizing-drawer {
 .artifact-name:hover .artifact-fname {
   text-decoration: underline;
 }
+.artifact-path-hint {
+  max-width: 100%;
+  padding: 0 4px 2px 30px;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .artifact-quick,
 .artifact-expand {
   flex: none;

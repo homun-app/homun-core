@@ -287,6 +287,9 @@ primo percorso locale verde:
 67. Provider settings robustness — le card provider matchano prima per id stabile
     e solo poi per endpoint, preservando preset Z.ai standard/coding separati
     anche con configurazioni legacy o cambi URL.
+68. Artifact location UX — i marker dei workflow managed includono `managed_path`
+    e le card chat mostrano il path compatto del deliverable, riducendo la
+    confusione su dove siano stati creati i file.
 
 Prima di pubblicare/taggare resta prudente ripetere lo smoke manuale in-app su
 una automazione schedulata reale con il binario aggiornato. Il primo smoke ha

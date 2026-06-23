@@ -2996,6 +2996,7 @@ interface ParsedArtifact {
   updated?: boolean;
   /** Managed artifacts live in Homun's artifact folder; project artifacts live in the project root. */
   source?: "managed" | "project";
+  managed_path?: string;
   projectPath?: string;
   projectRelativePath?: string;
 }
@@ -3109,6 +3110,11 @@ function ArtifactCardRow({
   // Images render their preview inline by default — a generated picture should be
   // visible in the chat without the user having to expand the chip.
   const isImage = ARTIFACT_IMAGE_EXT.includes(artifactExt(artifact.name));
+  const locationHint =
+    artifact.projectPath ??
+    artifact.projectRelativePath ??
+    artifact.managed_path ??
+    null;
 
   useEffect(() => {
     if (!artifact.updated || artifact.source === "project") return;
@@ -3173,6 +3179,11 @@ function ArtifactCardRow({
           </button>
         )}
       </div>
+      {locationHint && (
+        <div className="artifact-path-hint" title={locationHint}>
+          {locationHint}
+        </div>
+      )}
       {(expanded || isImage) && <InlineArtifactPreview artifact={artifact} />}
     </div>
   );

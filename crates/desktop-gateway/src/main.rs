@@ -3403,7 +3403,12 @@ async fn emit_rendered_deck_artifacts(
                 continue;
             }
             let marker = serde_json::json!({
-                "name": fname, "thread": thread_slug, "size": meta.len(), "updated": false,
+                "name": fname,
+                "thread": thread_slug,
+                "size": meta.len(),
+                "updated": false,
+                "source": "managed",
+                "managed_path": host_dir.join(fname).to_string_lossy().to_string(),
             });
             let m = format!("‹‹ARTIFACT››{marker}‹‹/ARTIFACT››");
             accumulated.push_str(&m);
@@ -18190,6 +18195,12 @@ Absolutely NO text, NO words, NO letters, NO numbers, NO captions, NO logos."
                                                         "thread": thread_slug,
                                                         "size": size,
                                                         "updated": updated,
+                                                        "source": "managed",
+                                                        "managed_path": sandbox::artifacts_dir()
+                                                            .join(&thread_slug)
+                                                            .join(&artifact_name)
+                                                            .to_string_lossy()
+                                                            .to_string(),
                                                     });
                                                     let artifact_mark =
                                                         format!("‹‹ARTIFACT››{marker}‹‹/ARTIFACT››");

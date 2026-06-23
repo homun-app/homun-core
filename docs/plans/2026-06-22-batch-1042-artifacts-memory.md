@@ -943,6 +943,10 @@ proprio — versioning, canali, scaricabili dal **sito Homun**, auto-aggiornabil
   Z.ai Coding come preset separati anche se un endpoint legacy/cambiato non
   coincide esattamente con il preset corrente; `test:ui-contract` blocca gli
   endpoint Z.ai standard/coding e il matching id-first.
+- ✅ **Artifact location UX (2026-06-24):** i marker `make_deck`/`make_document`
+  includono `managed_path` e le card chat mostrano una riga path compatta sotto
+  ogni artifact managed; resta invariato il download/preview e la memoria
+  canonica resta la fonte per provenance/lifecycle.
 - ☐ **Seeder skill fragile** — una skill modificata a mano (hash desync) non viene più
   auto-aggiornata (ha tenuto `create-presentations` vecchia su disco fino al fix manuale)
   → irrobustire.
