@@ -264,6 +264,16 @@ primo percorso locale verde:
     permettere al modello di aggirare `make_deck`/`make_document` dopo un errore
     provider. Se il provider non risponde, il workflow si ferma e chiede una
     binding/provider raggiungibile.
+63. Runtime chat activity guard — gli stream chat marcano `finished` quando il
+    gateway emette `done/error`, non solo dopo il cleanup post-turn; gli stream
+    senza eventi recenti vengono esclusi dal segnale sidebar per evitare pallini
+    working infiniti dopo cambio chat. I resume marker frontend hanno TTL e i
+    marker legacy senza timestamp vengono scartati; il riattach nella stessa
+    sessione ripristina solo la preview live, senza secondo commit. Il dock
+    Computer è filtrato per `thread_id`, resta visibile solo durante attività
+    browser/terminal running; il pannello inline Computer legacy non viene più
+    riaperto da timeline/artifact già completati. Il rendering streaming riusa il
+    parser finale per plan/progress/markdown progressivi.
 
 Prima di pubblicare/taggare resta prudente ripetere lo smoke manuale in-app su
 una automazione schedulata reale con il binario aggiornato. Il primo smoke ha

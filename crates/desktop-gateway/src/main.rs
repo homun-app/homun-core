@@ -15964,6 +15964,7 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
         lines: std::sync::Mutex::new(Vec::new()),
         tx: broadcast_tx,
         finished: std::sync::atomic::AtomicBool::new(false),
+        last_event_at: std::sync::atomic::AtomicU64::new(now_epoch_secs()),
         thread_id: request.thread_id.clone(),
     });
     let resume_id = request.request_id.clone();
@@ -16117,7 +16118,7 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
         let mut opened_targets: Vec<String> = Vec::new();
         // Fresh terminal buffer for this request; the computer panel shows the
         // CLI commands + output run during THIS response.
-        sandbox_clear();
+        sandbox_clear(thread_id.clone());
 
         // F3: the first plan step's work begins after the initial context is in place.
         step_messages_start = messages.len();
@@ -16578,7 +16579,7 @@ require your confirmation in the app. Propose it and stop."
                         // (reuse the thread's warm one, else spawn a chat sidecar).
                         if !browser_used {
                             browser_used = true;
-                            begin_browser_activity(prompt.clone());
+                            begin_browser_activity(prompt.clone(), thread_id.clone());
                             // Honor an EXPLICIT "browser" role: switch the driver
                             // model for the rest of this (browsing) turn. Skipped
                             // when the user forced a per-message model override.
@@ -17374,7 +17375,7 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                     .await;
                                 }
                                 // Publish the command to the computer terminal panel.
-                                sandbox_begin(command.clone());
+                                sandbox_begin(command.clone(), thread_id.clone());
                                 // Per-conversation output dir: skills save generated
                                 // files to $OUTPUT_DIR, bind-mounted to the host so
                                 // they become downloadable artifacts.
@@ -17702,7 +17703,7 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                      if [ \"$qa_code\" -ne 0 ]; then exit \"$qa_code\"; fi; \
                                      ls -la deck.pptx deck.html deck.pdf 2>&1"
                                 );
-                                sandbox_begin(cmd.clone());
+                                sandbox_begin(cmd.clone(), thread_id.clone());
                                 let render = tokio::task::spawn_blocking(move || {
                                     sandbox::run_command(&cmd, None)
                                 })
@@ -17995,7 +17996,7 @@ Absolutely NO text, NO words, NO letters, NO numbers, NO captions, NO logos."
                                              if [ \"$qa_code\" -ne 0 ]; then exit \"$qa_code\"; fi; \
                                              ls -la deck.pptx deck.html deck.pdf 2>&1"
                                         );
-                                        sandbox_begin(cmd.clone());
+                                        sandbox_begin(cmd.clone(), thread_id.clone());
                                         let render = tokio::task::spawn_blocking(move || {
                                             sandbox::run_command(&cmd, None)
                                         })
@@ -21047,6 +21048,7 @@ struct BrowserStepView {
 /// "● LIVE" + the step checklist in the UI.
 #[derive(Debug, Clone, Default)]
 struct BrowserActivityState {
+    thread_id: Option<String>,
     goal: String,
     steps: Vec<BrowserStepView>,
 }
@@ -21089,10 +21091,11 @@ fn browser_activity_cell() -> &'static std::sync::RwLock<Option<BrowserActivityS
     CELL.get_or_init(|| std::sync::RwLock::new(None))
 }
 
-fn begin_browser_activity(goal: String) {
+fn begin_browser_activity(goal: String, thread_id: Option<String>) {
     touch_cc_activity();
     if let Ok(mut guard) = browser_activity_cell().write() {
         *guard = Some(BrowserActivityState {
+            thread_id,
             goal,
             steps: Vec::new(),
         });
@@ -21129,9 +21132,16 @@ fn current_browser_activity() -> Option<BrowserActivityState> {
 /// (the Manus-style view of CLI skill execution in the contained computer).
 #[derive(Debug, Clone, Serialize)]
 struct TerminalEntryView {
+    thread_id: Option<String>,
     command: String,
     output: String,
     running: bool,
+}
+
+fn sandbox_owner_cell() -> &'static std::sync::RwLock<Option<String>> {
+    static CELL: std::sync::OnceLock<std::sync::RwLock<Option<String>>> =
+        std::sync::OnceLock::new();
+    CELL.get_or_init(|| std::sync::RwLock::new(None))
 }
 
 fn sandbox_activity_cell() -> &'static std::sync::RwLock<Vec<TerminalEntryView>> {
@@ -21143,20 +21153,31 @@ fn sandbox_activity_cell() -> &'static std::sync::RwLock<Vec<TerminalEntryView>>
 /// Resets the terminal buffer — called when a new chat request starts so the
 /// panel shows the CURRENT request's commands, then stays visible (with output)
 /// until the next request replaces it.
-fn sandbox_clear() {
+fn sandbox_clear(thread_id: Option<String>) {
+    if let Ok(mut owner) = sandbox_owner_cell().write() {
+        *owner = thread_id;
+    }
     if let Ok(mut guard) = sandbox_activity_cell().write() {
         guard.clear();
     }
 }
 
 /// Records a command about to run (output filled in by `sandbox_end`).
-fn sandbox_begin(command: String) {
+fn sandbox_begin(command: String, thread_id: Option<String>) {
     touch_cc_activity();
+    if let Ok(mut owner) = sandbox_owner_cell().write() {
+        *owner = thread_id.clone();
+    }
     if let Ok(mut guard) = sandbox_activity_cell().write() {
         if guard.len() >= 20 {
             guard.remove(0);
         }
-        guard.push(TerminalEntryView { command, output: String::new(), running: true });
+        guard.push(TerminalEntryView {
+            thread_id,
+            command,
+            output: String::new(),
+            running: true,
+        });
     }
 }
 
@@ -21172,6 +21193,10 @@ fn sandbox_end(output: String) {
 
 fn current_sandbox_activity() -> Vec<TerminalEntryView> {
     sandbox_activity_cell().read().ok().map(|guard| guard.clone()).unwrap_or_default()
+}
+
+fn current_sandbox_owner() -> Option<String> {
+    sandbox_owner_cell().read().ok().and_then(|guard| guard.clone())
 }
 
 #[derive(Debug, Deserialize)]
@@ -24249,6 +24274,9 @@ struct StreamEntry {
     /// Live fan-out to currently-attached readers.
     tx: tokio::sync::broadcast::Sender<String>,
     finished: std::sync::atomic::AtomicBool,
+    /// Last event emitted to this stream. Used only to suppress stale sidebar
+    /// activity when a generation loses its terminal event.
+    last_event_at: std::sync::atomic::AtomicU64,
     /// The chat thread this generation belongs to, so the sidebar can show the
     /// "working" dots on EVERY thread with an in-flight answer (not just the one
     /// currently on screen). `None` for a first-message thread without an id yet.
@@ -24282,6 +24310,15 @@ fn stream_entry_has_terminal_event(entry: &StreamEntry) -> bool {
         .unwrap_or(false)
 }
 
+const STREAM_ACTIVITY_IDLE_STALE_SECS: u64 = 180;
+
+fn stream_entry_is_activity_stale(entry: &StreamEntry, now: u64) -> bool {
+    let last = entry
+        .last_event_at
+        .load(std::sync::atomic::Ordering::Relaxed);
+    last > 0 && now.saturating_sub(last) > STREAM_ACTIVITY_IDLE_STALE_SECS
+}
+
 /// Thread ids that currently have a live (not-yet-finished) in-flight generation.
 /// Lets the sidebar show the "working" dots on EVERY busy thread, including chats
 /// generating in the background while another is on screen. Finished entries are
@@ -24291,11 +24328,12 @@ fn active_stream_thread_ids() -> Vec<String> {
     let Ok(mut map) = stream_registry().lock() else {
         return Vec::new();
     };
+    let now = now_epoch_secs();
     map.retain(|_, entry| {
         if entry.finished.load(std::sync::atomic::Ordering::Relaxed) {
             return true;
         }
-        if stream_entry_has_terminal_event(entry) {
+        if stream_entry_has_terminal_event(entry) || stream_entry_is_activity_stale(entry, now) {
             entry
                 .finished
                 .store(true, std::sync::atomic::Ordering::Relaxed);
@@ -24429,6 +24467,15 @@ async fn app_events() -> Response {
 
 async fn emit_stream_event(sink: &StreamSink, event: GenerateStreamEvent) -> Result<(), ()> {
     let line = serde_json::to_string(&event).map_err(|_| ())?;
+    let terminal = stream_event_is_terminal(&line);
+    sink.entry
+        .last_event_at
+        .store(now_epoch_secs(), std::sync::atomic::Ordering::Relaxed);
+    if terminal {
+        sink.entry
+            .finished
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
     // Tee to the resume registry (buffer + broadcast) under one lock so a
     // reattaching reader never misses or duplicates an event.
     if let Ok(mut buf) = sink.entry.lines.lock() {
@@ -35959,6 +36006,8 @@ fn resolve_contained_computer_novnc(
 #[derive(Debug, Serialize)]
 struct ContainedComputerLiveResponse {
     enabled: bool,
+    /// Chat thread that owns the current live activity, if known.
+    thread_id: Option<String>,
     novnc_url: Option<String>,
     /// True only while a browse_web is actually running right now.
     active: bool,
@@ -36097,10 +36146,16 @@ async fn contained_computer_live(State(state): State<AppState>) -> Json<Containe
     let activity_state = current_browser_activity();
     let terminal = current_sandbox_activity();
     let terminal_active = terminal.iter().any(|entry| entry.running);
+    let owner_thread_id = activity_state
+        .as_ref()
+        .and_then(|state| state.thread_id.clone())
+        .or_else(|| current_sandbox_owner())
+        .or_else(|| terminal.iter().rev().find_map(|entry| entry.thread_id.clone()));
     Json(ContainedComputerLiveResponse {
         // The panel is useful for terminal activity even when the noVNC view is
         // not available, so report enabled when either surface has something.
         enabled: novnc_url.is_some() || !terminal.is_empty(),
+        thread_id: owner_thread_id,
         novnc_url,
         active: activity_state.is_some(),
         activity: activity_state.as_ref().map(|state| state.goal.clone()),
@@ -39952,10 +40007,61 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             ]),
             tx,
             finished: std::sync::atomic::AtomicBool::new(false),
+            last_event_at: std::sync::atomic::AtomicU64::new(super::now_epoch_secs()),
             thread_id: Some("thread-a".to_string()),
         };
 
         assert!(super::stream_entry_has_terminal_event(&entry));
+    }
+
+    #[test]
+    fn idle_stream_entry_counts_as_stale_for_activity() {
+        let (tx, _) = tokio::sync::broadcast::channel::<String>(4);
+        let now = super::now_epoch_secs();
+        let entry = super::StreamEntry {
+            lines: std::sync::Mutex::new(vec![r#"{"type":"delta","text":"still"}"#.to_string()]),
+            tx,
+            finished: std::sync::atomic::AtomicBool::new(false),
+            last_event_at: std::sync::atomic::AtomicU64::new(
+                now.saturating_sub(super::STREAM_ACTIVITY_IDLE_STALE_SECS + 1),
+            ),
+            thread_id: Some("thread-a".to_string()),
+        };
+
+        assert!(super::stream_entry_is_activity_stale(&entry, now));
+    }
+
+    #[tokio::test]
+    async fn terminal_emit_marks_stream_entry_finished() {
+        let (mpsc, mut rx) =
+            tokio::sync::mpsc::channel::<Result<axum::body::Bytes, std::io::Error>>(4);
+        let (tx, _) = tokio::sync::broadcast::channel::<String>(4);
+        let entry = std::sync::Arc::new(super::StreamEntry {
+            lines: std::sync::Mutex::new(Vec::new()),
+            tx,
+            finished: std::sync::atomic::AtomicBool::new(false),
+            last_event_at: std::sync::atomic::AtomicU64::new(super::now_epoch_secs()),
+            thread_id: Some("thread-a".to_string()),
+        });
+        let sink = super::StreamSink {
+            mpsc,
+            entry: entry.clone(),
+        };
+
+        super::emit_stream_event(
+            &sink,
+            super::GenerateStreamEvent::Done {
+                text: "ok".to_string(),
+                metrics: super::TokenMetrics::zero(),
+            },
+        )
+        .await
+        .expect("done event emits");
+        let _ = rx.recv().await;
+
+        assert!(entry
+            .finished
+            .load(std::sync::atomic::Ordering::Relaxed));
     }
 
     #[test]

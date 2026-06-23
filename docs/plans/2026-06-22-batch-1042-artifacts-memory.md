@@ -298,9 +298,10 @@ modelli deboli/locali. Invarianti: monotonìa, limitatezza, identità non inferi
     lo smoke Gmail ha evidenziato doppio user/assistant persistito. Causa:
     resume marker letto dalla stessa sessione JS, che committava un secondo ramo
     con `local_assistant_*` prima del commit normale `browser_assistant_*`.
-    Fix: marker con `ownerId`, resume ignorato se appartiene alla sessione
-    corrente; resume dopo vero reload preservato. Gate: `npm run build` desktop
-    verde + retest utente senza duplicazione.
+    Fix: marker con `ownerId`; il resume della stessa sessione viene riattaccato
+    solo come preview live senza commit, mentre il vero reload continua a fare
+    resume con commit. Gate: `npm run build` desktop verde + retest utente senza
+    duplicazione; follow-up 2026-06-23 copre il cambio-chat durante stream.
   - 🟡 Possibile step futuro: atomico PDF dedicato con schema più guidato
     (input/output files, operazione), se `run_in_sandbox` risulta troppo generico
     nello smoke.
@@ -869,7 +870,17 @@ ragionato il contratto degli strumenti `make_*` creati dall'harness. ADR 0011
   come provider incompatibile per il JSON schema deck. **Correzione active
   streams (2026-06-23):** la sidebar non deve restare in stato working dopo un
   evento `done/error`; `active_streams` ora tratta il terminal marker come fonte
-  sufficiente anche se il cleanup finale è ancora in post-processing.
+  sufficiente nello stesso punto di emissione del gateway, anche se il cleanup
+  finale è ancora in post-processing, e marca stale gli stream senza eventi
+  recenti per evitare lampeggi infiniti dopo cambio chat. Il resume marker
+  frontend è ora scadibile e i marker legacy senza timestamp vengono eliminati,
+  evitando riattach a stream vecchi dopo restart/reload; i marker della stessa
+  sessione riattaccano solo la preview live, non un secondo commit. Follow-up:
+  `/api/local-computer/live` espone il `thread_id` proprietario e la UI filtra il
+  dock Computer per chat e solo quando browser/terminal sono running; il pannello
+  inline Computer legacy non si apre più solo per timeline/artifact completati.
+  La branch streaming usa `AssistantMessageBody`, quindi plan/progress/markdown
+  sono renderizzati progressivamente come nel messaggio finale.
 - ☐ **7.1b (futuro)** Portare ricerca/meeting al livello del deck solo dopo il
   chiarimento sul contratto strumenti: `make_research` e `make_meeting` non sono
   essenziali per la prossima release.

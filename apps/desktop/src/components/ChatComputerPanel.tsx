@@ -15,6 +15,7 @@ import { coreBridge, type ContainedComputerLive, type TerminalEntry } from "../l
 
 const IDLE: ContainedComputerLive = {
   enabled: false,
+  thread_id: null,
   novnc_url: null,
   active: false,
   activity: null,
@@ -26,7 +27,7 @@ const IDLE: ContainedComputerLive = {
 // Manus-style: a short card DOCKED above the prompt (same width), shown ONLY
 // while the contained browser is working. Header + live "Activity progress"
 // checklist; expand to the live view; fullscreen for the overlay. Hidden idle.
-export function ChatComputerPanel() {
+export function ChatComputerPanel({ threadId }: { threadId: string }) {
   const { t } = useTranslation();
   const [live, setLive] = useState<ContainedComputerLive | null>(null);
   // "bar" (collapsed, default) | "expanded" (live inline) | "full" (overlay)
@@ -44,7 +45,7 @@ export function ChatComputerPanel() {
       }
     };
     void poll();
-    pollRef.current = setInterval(() => void poll(), 1500);
+    pollRef.current = setInterval(() => void poll(), 600);
     return () => {
       cancelled = true;
       if (pollRef.current) clearInterval(pollRef.current);
@@ -62,7 +63,10 @@ export function ChatComputerPanel() {
 
   const browserActive = Boolean(live?.active && live?.novnc_url);
   const terminal = live?.terminal ?? [];
-  const hasTerminal = terminal.length > 0;
+  const terminalRunning = Boolean(live?.terminal_active || terminal.some((entry) => entry.running));
+  const hasTerminal = terminal.length > 0 && terminalRunning;
+  const ownedByThisThread = !live?.thread_id || live.thread_id === threadId;
+  if (!ownedByThisThread) return null;
 
   // Terminal-only mode: CLI skill running/ran, no browser GUI to show. Render a
   // Manus-style terminal with the executed commands + their output.

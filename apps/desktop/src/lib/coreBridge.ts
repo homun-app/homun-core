@@ -371,6 +371,7 @@ export interface BrowserStep {
 
 export interface ContainedComputerLive {
   enabled: boolean;
+  thread_id?: string | null;
   novnc_url: string | null;
   /** True only while a browse_web is actually running right now. */
   active: boolean;
@@ -2287,6 +2288,7 @@ export const coreBridge = {
     sessionId: string,
     userText: string,
     assistantMessageId: string,
+    commitResult = true,
   ) =>
     resumeBrowserRuntimeChatPromptStream(
       requestId,
@@ -2294,6 +2296,7 @@ export const coreBridge = {
       sessionId,
       userText,
       assistantMessageId,
+      commitResult,
     ),
   transcribe: (audioBase64: string, language?: string) =>
     electronTranscribe(audioBase64, language),
@@ -3282,6 +3285,7 @@ async function resumeBrowserRuntimeChatPromptStream(
   sessionId: string,
   userText: string,
   assistantMessageId: string,
+  commitResult = true,
 ): Promise<CorePromptSubmissionResult> {
   const startedAt = performance.now();
   const response = await fetch(
@@ -3352,7 +3356,9 @@ async function resumeBrowserRuntimeChatPromptStream(
     computer_session: browserComputerSession(sessionId, totalElapsedSeconds),
     plan: null,
   };
-  await chatApi.commitChatPromptResult(threadId, result);
+  if (commitResult) {
+    await chatApi.commitChatPromptResult(threadId, result);
+  }
   result.computer_session = await electronLocalComputerSession(sessionId);
   return result;
 }

@@ -363,8 +363,6 @@ export function ChatView({
     activeApprovels.length > 0 ||
     planStepRunning ||
     smokeTestRunning ||
-    visibleComputerSession.timeline.length > 0 ||
-    visibleComputerSession.artifacts.length > 0 ||
     detailsOpen;
 
   function scrollConversationToBottom(behavior: ScrollBehavior) {
@@ -720,7 +718,7 @@ export function ChatView({
 
   // Reattach to an answer that was streaming when the app was reloaded: replays
   // the buffered events from the gateway and continues live, then persists.
-  async function resumeActiveStream(marker: ResumeMarker) {
+  async function resumeActiveStream(marker: ResumeMarker, options?: { commitResult?: boolean }) {
     if (promptSubmitting || streamingAssistantId) return;
     const requestId = marker.requestId;
     const userMessage: ChatMessage = {
@@ -774,15 +772,23 @@ export function ChatView({
         computerSessionId,
         marker.userText,
         marker.assistantMessageId,
+        options?.commitResult ?? true,
       );
       streamedText = result.assistant_message.text || streamedText;
       cancelScheduledStreamingFrame();
       const finalAssistant = chatMessageFromAssistantResult(result, streamedText);
       const finalMessages = [...promptMessages, finalAssistant];
       setOptimisticMessages(finalMessages);
-      onMessagesChange(finalMessages);
+      if (options?.commitResult !== false) {
+        onMessagesChange(finalMessages);
+      }
+      if (options?.commitResult === false) {
+        await new Promise((resolve) => window.setTimeout(resolve, 350));
+      }
       await refreshAfterChatSubmit();
-      setOptimisticMessages(null);
+      if (options?.commitResult !== false) {
+        setOptimisticMessages(null);
+      }
     } catch {
       // Stream gone (expired/evicted) → drop the optimistic pair, keep persisted.
       setOptimisticMessages(null);
@@ -795,7 +801,9 @@ export function ChatView({
       setStreamStatus((current) => (current?.requestId === requestId ? null : current));
       setPromptSubmitting(false);
       notifyStreaming(false);
-      clearResumeMarker(thread.threadId);
+      if (options?.commitResult !== false) {
+        clearResumeMarker(thread.threadId);
+      }
     }
   }
 
@@ -1558,9 +1566,9 @@ export function ChatView({
     if (promptSubmitting || streamingAssistantId) return;
     const marker = readResumeMarker(thread.threadId);
     if (!marker) return;
-    if (isOwnResumeMarker(marker)) return;
+    const commitResult = !isOwnResumeMarker(marker);
     resumedThreadsRef.current.add(thread.threadId);
-    void resumeActiveStream(marker);
+    void resumeActiveStream(marker, { commitResult });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [thread.threadId]);
 
@@ -1765,9 +1773,19 @@ export function ChatView({
                   {!streamHasVisibleText && (
                     <AssistantThinkingState status={streamStatus} />
                   )}
-                  <MessageActivity text={displayMessage.text} live />
                   {displayMessage.text && (
-                    <RichMessage text={displayMessage.text} streaming />
+                    <AssistantMessageBody
+                      text={displayMessage.text}
+                      streaming
+                      messageId={displayMessage.id}
+                      threadId={thread.threadId}
+                      onOpenArtifact={(artifact) => {
+                        setArtifactsInitial(artifact.name);
+                        setWorkbenchTab("artifacts");
+                        setArtifactsOpen(true);
+                      }}
+                      onChoose={(answer) => void submitComposerPrompt(answer, [])}
+                    />
                   )}
                 </>
               ) : editingMessageId === displayMessage.id ? (
@@ -2095,7 +2113,7 @@ export function ChatView({
         operationalPlanMarkdown={conversationPlan ?? visibleComputerSession.operationalPlanMarkdown}
       />
 
-      <ChatComputerPanel />
+      <ChatComputerPanel threadId={thread.threadId} />
 
       <Composer
         disabled={promptSubmitting}
@@ -7732,7 +7750,10 @@ interface ResumeMarker {
   userText: string;
   assistantMessageId: string;
   ownerId?: string;
+  createdAt?: number;
 }
+
+const RESUME_MARKER_TTL_MS = 5 * 60 * 1000;
 
 function resumeMarkerKey(threadId: string) {
   return `lfpa.resume.${threadId}`;
@@ -7742,7 +7763,7 @@ function writeResumeMarker(threadId: string, marker: ResumeMarker) {
   try {
     window.localStorage.setItem(
       resumeMarkerKey(threadId),
-      JSON.stringify({ ...marker, ownerId: CHAT_VIEW_SESSION_ID }),
+      JSON.stringify({ ...marker, ownerId: CHAT_VIEW_SESSION_ID, createdAt: Date.now() }),
     );
   } catch {
     /* storage unavailable → resume simply won't be offered */
@@ -7766,6 +7787,10 @@ function readResumeMarker(threadId: string): ResumeMarker | null {
     const raw = window.localStorage.getItem(resumeMarkerKey(threadId));
     if (!raw) return null;
     const parsed = JSON.parse(raw) as ResumeMarker;
+    if (!parsed.createdAt || Date.now() - parsed.createdAt > RESUME_MARKER_TTL_MS) {
+      clearResumeMarker(threadId);
+      return null;
+    }
     if (parsed && parsed.requestId && parsed.assistantMessageId) return parsed;
   } catch {
     /* ignore malformed */

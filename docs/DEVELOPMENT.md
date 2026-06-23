@@ -133,8 +133,19 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   file già scritti vengono comunque emessi come artifact visibili e registrati
   in memoria, con warning QA invece di sparire. Correzione activity stream:
   `/api/chat/active_streams` ora considera terminato qualunque stream che abbia
-  già emesso `done/error`, anche se il post-processing memoria è ancora lento,
-  evitando lampeggi sidebar fantasma quando si cambia chat.
+  già emesso `done/error` nello stesso punto in cui il gateway emette il
+  terminale, anche se il post-processing memoria è ancora lento; inoltre gli
+  stream senza eventi recenti vengono marcati stale per evitare lampeggi
+  sidebar fantasma quando si cambia chat. Il resume marker frontend ora ha TTL
+  e scarta i marker legacy senza timestamp, così un reload non riattacca stream
+  vecchi e non ricrea lo stato busy. Follow-up UI live: il dock Computer riceve
+  `thread_id` dal gateway e viene mostrato solo nella chat proprietaria
+  dell'attività e solo mentre browser/terminal sono effettivamente running (non
+  resta come storico a fine comando); anche il vecchio pannello inline Computer
+  non si apre più automaticamente solo perché la sessione contiene timeline o
+  artifact completati. Il messaggio streaming usa lo stesso parser del messaggio
+  finale, quindi plan/progress/markdown emergono durante lo stream invece che
+  solo a fine risposta.
   `make_research` e `make_meeting` restano dopo questo asse.
 - **WS2-3.1 PASSATA in runtime (2026-06-23):** gli artifact scritti via
   Filesystem MCP dentro la root progetto vengono registrati come
@@ -437,9 +448,11 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   verificato (2026-06-23):** durante lo smoke Gmail la chat duplicava domanda e
   risposta perché il resume marker dello stream veniva letto dalla stessa sessione
   JS e committava un secondo ramo (`local_assistant_*` + `browser_assistant_*`).
-  Il marker ora include `ownerId` e il resume viene ignorato se appartiene alla
-  sessione corrente; il resume dopo vero reload resta valido. Verifica: build
-  desktop verde + retest utente senza duplicazione.
+  Il marker ora include `ownerId`: se appartiene alla stessa sessione viene
+  riattaccato solo per mostrare il live stream senza committare un secondo ramo;
+  dopo vero reload resta valido come resume con commit. Verifica: build desktop
+  verde + retest utente senza duplicazione; follow-up 2026-06-23 corregge anche
+  il cambio-chat durante stream, preservando il reasoning live al ritorno.
 - **make_document DOCX locale/verde (2026-06-23):** lo stesso workflow ora
   materializza anche artifact `.docx` editabili dalla sorgente Markdown canonica,
   via pacchetto OOXML minimale generato in-process con `zip` già presente.
