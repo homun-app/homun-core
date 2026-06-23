@@ -5890,11 +5890,133 @@ fn runtime_plan_memory_matches(memory: &MemoryRecord, thread_key: &str) -> bool 
         && memory.metadata.get("thread_id").and_then(|v| v.as_str()) == Some(thread_key)
 }
 
+fn runtime_plan_step_outcome_matches(memory: &MemoryRecord, thread_key: &str, step_id: &str) -> bool {
+    memory.memory_type == "fact"
+        && !matches!(memory.status, MemoryStatus::Deleted | MemoryStatus::Rejected | MemoryStatus::Stale)
+        && memory.metadata.get("source").and_then(|v| v.as_str()) == Some("runtime_plan_step")
+        && memory.metadata.get("thread_id").and_then(|v| v.as_str()) == Some(thread_key)
+        && memory.metadata.get("step_id").and_then(|v| v.as_str()) == Some(step_id)
+}
+
 fn plan_step_id(step: &serde_json::Value) -> Option<&str> {
     step.get("id")
         .and_then(|value| value.as_str())
         .map(str::trim)
         .filter(|value| !value.is_empty())
+}
+
+fn record_runtime_plan_step_outcome(
+    facade: &MemoryFacade,
+    user: &MemoryUserId,
+    workspace: &MemoryWorkspaceId,
+    lifecycle: &MemoryLifecycleRequest,
+    thread_id: Option<&str>,
+    step: &serde_json::Value,
+    evidence: &[String],
+) -> Result<MemoryRef, String> {
+    let thread_key = runtime_plan_thread_key(thread_id);
+    let title = plan_step_title(step).trim();
+    if title.is_empty() {
+        return Err("runtime plan step outcome requires a title".to_string());
+    }
+    let step_id = plan_step_id(step).unwrap_or(title);
+    let done_criterion = step
+        .get("done_criterion")
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
+        .trim();
+    let text = if done_criterion.is_empty() {
+        format!("Runtime plan step completed: {title}.")
+    } else {
+        format!("Runtime plan step completed: {title}. Done criterion: {done_criterion}.")
+    };
+    let metadata = serde_json::json!({
+        "source": "runtime_plan_step",
+        "thread_id": thread_key,
+        "execution_plan_ref": format!("runtime_plan:{thread_key}"),
+        "step_id": step_id,
+        "title": title,
+        "status": "done",
+        "done_criterion": done_criterion,
+        "detail": step.get("detail").cloned().unwrap_or(serde_json::Value::Null),
+        "evidence": evidence,
+    });
+
+    let existing = facade
+        .list_memories_for_ui(user, workspace)
+        .unwrap_or_default()
+        .into_iter()
+        .find(|memory| runtime_plan_step_outcome_matches(memory, &thread_key, step_id));
+
+    let record = if let Some(existing) = existing {
+        facade
+            .update_memory(
+                lifecycle,
+                &existing.reference,
+                MemoryUpdatePatch {
+                    text: Some(text),
+                    aliases: None,
+                    language_hints: None,
+                    confidence: Some(1.0),
+                    privacy_domain: Some(PrivacyDomain::new("work")),
+                    sensitivity: Some(MemoryDataSensitivity::Internal),
+                    metadata: Some(metadata),
+                    last_seen_at: None,
+                },
+            )
+            .map_err(|error| error.to_string())?
+    } else {
+        facade
+            .create_memory_candidate(MemoryCreateRequest {
+                request: lifecycle.clone(),
+                memory_type: "fact".to_string(),
+                text,
+                aliases: Vec::new(),
+                language_hints: Vec::new(),
+                confidence: 1.0,
+                privacy_domain: PrivacyDomain::new("work"),
+                sensitivity: MemoryDataSensitivity::Internal,
+                evidence_refs: Vec::new(),
+                metadata,
+            })
+            .map_err(|error| error.to_string())?
+    };
+    facade
+        .confirm_memory(lifecycle, &record.reference, "runtime plan step verified")
+        .map_err(|error| error.to_string())?;
+    Ok(record.reference)
+}
+
+fn record_runtime_plan_step_outcome_from_state(
+    state: &AppState,
+    thread_id: Option<&str>,
+    step: &serde_json::Value,
+    evidence: &[String],
+) {
+    let Ok(facade) = lock_memory_facade(state) else {
+        return;
+    };
+    let user = gateway_memory_user_id();
+    let workspace = gateway_memory_workspace_id();
+    let lifecycle = MemoryLifecycleRequest {
+        actor_id: "runtime-plan".to_string(),
+        user_id: user.clone(),
+        workspace_id: workspace.clone(),
+        purpose: "runtime_plan_step_verified".to_string(),
+    };
+    if record_runtime_plan_step_outcome(
+        &facade,
+        &user,
+        &workspace,
+        &lifecycle,
+        thread_id,
+        step,
+        evidence,
+    )
+    .is_ok()
+    {
+        rebuild_status_wiki(&facade, &user, &workspace);
+    }
 }
 
 fn upsert_runtime_plan_graph(
@@ -15087,6 +15209,19 @@ an uncertain date.",
                                 };
                                 if ok {
                                     plan_steps[i]["status"] = serde_json::json!("done");
+                                    let verified_step = plan_steps[i].clone();
+                                    let verified_evidence = step_evidence.clone();
+                                    let st = state_owned.clone();
+                                    let thread_for_memory = thread_id.clone();
+                                    let _ = tokio::task::spawn_blocking(move || {
+                                        record_runtime_plan_step_outcome_from_state(
+                                            &st,
+                                            thread_for_memory.as_deref(),
+                                            &verified_step,
+                                            &verified_evidence,
+                                        );
+                                    })
+                                    .await;
                                     plan = runtime_execution_plan(&plan_steps);
                                     progress_anchor_round = round; // F1: real progress
                                     step_evidence.clear();
@@ -35272,6 +35407,89 @@ mod tests {
         assert_eq!(
             steps[1].get("depends_on").and_then(|value| value.as_array()).map(|items| items.len()),
             Some(1),
+        );
+    }
+
+    #[test]
+    fn runtime_plan_step_outcome_writes_confirmed_fact_memory() {
+        let facade = local_first_memory::MemoryFacade::new(
+            local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
+        );
+        let user = local_first_memory::UserId::new("local");
+        let workspace = local_first_memory::WorkspaceId::new("project");
+        let lifecycle = local_first_memory::MemoryLifecycleRequest {
+            actor_id: "test".to_string(),
+            user_id: user.clone(),
+            workspace_id: workspace.clone(),
+            purpose: "test".to_string(),
+        };
+        let step = serde_json::json!({
+            "id": "s2",
+            "title": "Run focused tests",
+            "status": "done",
+            "detail": "cargo test -p local-first-desktop-gateway runtime_plan_step_outcome",
+            "done_criterion": "test passes",
+        });
+        let evidence = vec!["cargo test passed".to_string()];
+
+        let first = super::record_runtime_plan_step_outcome(
+            &facade,
+            &user,
+            &workspace,
+            &lifecycle,
+            Some("thread-step"),
+            &step,
+            &evidence,
+        )
+        .unwrap();
+        let second = super::record_runtime_plan_step_outcome(
+            &facade,
+            &user,
+            &workspace,
+            &lifecycle,
+            Some("thread-step"),
+            &step,
+            &["cargo test passed again".to_string()],
+        )
+        .unwrap();
+
+        assert_eq!(first, second, "same runtime step outcome should update in place");
+        let memories = facade.list_memories_for_ui(&user, &workspace).unwrap();
+        let outcomes: Vec<_> = memories
+            .iter()
+            .filter(|memory| {
+                memory.metadata.get("source").and_then(|value| value.as_str())
+                    == Some("runtime_plan_step")
+            })
+            .collect();
+        assert_eq!(outcomes.len(), 1);
+        let memory = outcomes[0];
+        assert_eq!(memory.memory_type, "fact");
+        assert_eq!(memory.status, local_first_memory::MemoryStatus::Confirmed);
+        assert!(memory.text.contains("Run focused tests"), "{}", memory.text);
+        assert_eq!(
+            memory.metadata.get("thread_id").and_then(|value| value.as_str()),
+            Some("thread-step"),
+        );
+        assert_eq!(
+            memory.metadata.get("step_id").and_then(|value| value.as_str()),
+            Some("s2"),
+        );
+        assert_eq!(
+            memory
+                .metadata
+                .get("execution_plan_ref")
+                .and_then(|value| value.as_str()),
+            Some("runtime_plan:thread-step"),
+        );
+        assert_eq!(
+            memory
+                .metadata
+                .get("evidence")
+                .and_then(|value| value.as_array())
+                .and_then(|items| items.first())
+                .and_then(|value| value.as_str()),
+            Some("cargo test passed again"),
         );
     }
 

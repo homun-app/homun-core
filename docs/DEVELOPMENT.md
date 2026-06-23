@@ -216,6 +216,13 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   task-runtime, dipendenze e subagent path dei piani generati dal planner, con
   `planner_rounds=0` e senza roundtrip LLM. Test mirato:
   `brain_runs_static_execution_plan_without_planner_roundtrip`.
+- **WS1-Fase 6a locale/verde:** quando il loop principale verifica davvero uno
+  step `done`, scrive una `fact` confermata nel `MemoryFacade` canonico con
+  `source="runtime_plan_step"`, `thread_id`, `step_id`, criterio ed evidenze
+  usate dalla verifica. Il piano resta l'unico `open_loop` runtime-owned; la
+  `fact` è l'outcome storico recuperabile e viene aggiornata in-place per lo
+  stesso step. Test mirato:
+  `runtime_plan_step_outcome_writes_confirmed_fact_memory`.
 - **Nota aperta non bloccante:** durante i gate con tool il provider primario
   `glm-5.2` continua a rispondere `400 Bad Request` sul primo round con tool; il
   fallback a `kimi-k2.6:cloud` prosegue correttamente. Da riprendere come task

@@ -72,6 +72,9 @@ primo percorso locale verde:
 19. WS1-Fase 3b/F5 — `OrchestratorBrain::run_plan` esegue workflow
     dichiarativi già costruiti dall'harness usando gli stessi provider,
     task-runtime, dipendenze e subagent path dei piani planner-generated.
+20. WS1-Fase 6a — il loop principale scrive outcome per-step come `fact`
+    confermate `source="runtime_plan_step"` nel `MemoryFacade` canonico, con
+    criterio ed evidenze della verifica; il piano resta l'unico `open_loop`.
 
 Prima di pubblicare/taggare resta prudente ripetere lo smoke manuale in-app su
 una automazione schedulata reale con il binario aggiornato. Il primo smoke ha
@@ -95,7 +98,8 @@ collegarli al perché. Per questo WS7 non è più il prossimo step.
 
 WS1 ha ora write-back piano→memoria, prima materializzazione grafo piano/step,
 proiezione `ExecutionPlan` nei metadata canonici, `ExecutionPlan` come stato
-runtime primario del loop agente e una prima `WorkflowDefinition` per `make_deck`.
-Prossimo: applicare `run_plan` alla pipeline deck end-to-end, poi generalizzare
+runtime primario del loop agente, una prima `WorkflowDefinition` per `make_deck`
+e outcome per-step confermati nel loop principale. Prossimo: chiudere F6 sui
+sub-agent e applicare `run_plan` alla pipeline deck end-to-end, poi generalizzare
 documenti/ricerca/meeting. Il contratto corrente della memoria è in
 [MEMORIA.md](MEMORIA.md).

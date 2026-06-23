@@ -99,6 +99,11 @@ Fatto:
 - `OrchestratorBrain::run_plan` esegue workflow dichiarativi già costruiti
   dall'harness attraverso lo stesso Brain/task-runtime/subagent path dei piani
   generati dal planner; non introduce un runner/store parallelo.
+- outcome per-step WS1-F6a: quando il loop principale verifica uno step `done`,
+  scrive una `fact` confermata `source="runtime_plan_step"` nel `MemoryFacade`,
+  con `thread_id`, `step_id`, criterio ed evidenze della verifica. Il piano
+  resta il solo `open_loop` canonico runtime-owned; la `fact` è storico
+  recuperabile e viene aggiornata in-place per lo stesso step.
 
 Mancante:
 
@@ -171,9 +176,10 @@ Acceptance:
    locale/verde.
 5. WS5.6 — eval memoria: ✅ artifact/provenance e stato workflow/perché locali;
    resta eventuale smoke in-app mirato.
-6. WS1-Fase 3 — estrarre il runner workflow generico riusabile sullo stesso
+6. WS1-Fase 6 — completare write-back per-step anche per sub-agent.
+7. WS1-Fase 3 — estrarre il runner workflow generico riusabile sullo stesso
    `ExecutionPlan` + write-back memoria/grafo.
-7. WS7 — deliverable Manus-style, solo dopo queste fondamenta.
+8. WS7 — deliverable Manus-style, solo dopo queste fondamenta.
 
 ## File codice principali
 
