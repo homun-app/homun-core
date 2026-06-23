@@ -64,8 +64,11 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   overflow, tabelle, immagini e leggibilità. Prima slice locale/verde:
   `design_profile` condiviso (`executive`, `sales_pitch`, `technical`,
   `editorial`, `minimal`) nello schema di `make_document` e `make_deck`,
-  propagato nei rispettivi workflow/prompt senza nuovi `make_*`. `make_research`
-  e `make_meeting` restano dopo questo asse.
+  propagato nei rispettivi workflow/prompt senza nuovi `make_*`. Seconda slice
+  locale/verde: `design_components` condiviso (`kpi_grid`, `timeline`,
+  `comparison_table`, `quote_callout`, `process_steps`, `risks_table`) come
+  componenti dichiarativi per il composer. `make_research` e `make_meeting`
+  restano dopo questo asse.
 - **WS2-3.1 PASSATA in runtime (2026-06-23):** gli artifact scritti via
   Filesystem MCP dentro la root progetto vengono registrati come
   `memory_type="artifact"` + entity grafo `artifact` + embedding. Gate:
@@ -413,6 +416,15 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   per documento o deck, senza creare template come nuovi tool e senza routing
   keyword-based. Test mirati:
   `deliverable_design_profile_schema_is_shared_by_deck_and_document`,
+  `make_document_generation_options_are_explicit_and_bounded`,
+  `make_deck_workflow_definition_projects_execution_plan`.
+- **Deliverable design components locale/verde (2026-06-23):** seconda base del
+  design system condiviso: `make_document` e `make_deck` espongono lo stesso
+  array `design_components` (`kpi_grid`, `timeline`, `comparison_table`,
+  `quote_callout`, `process_steps`, `risks_table`). I componenti sono deduplicati,
+  bounded e tradotti in direttive specifiche per documento/deck; non sono ancora
+  layout fisici del renderer né una gallery template completa. Test mirati:
+  `deliverable_design_components_schema_is_shared_by_deck_and_document`,
   `make_document_generation_options_are_explicit_and_bounded`,
   `make_deck_workflow_definition_projects_execution_plan`.
 - **Gate provider Z.ai/GLM risolto (test manuale utente, 2026-06-23):** Settings

@@ -12062,7 +12062,8 @@ fn make_deck_tool_schema() -> serde_json::Value {
                     "brief": { "type": "string", "description": "What the deck is about, plus any structure, sections or points the user specified — verbatim." },
                     "language": { "type": "string", "description": "Deck language code, e.g. 'it' or 'en'. Default: the user's language." },
                     "slides": { "type": "integer", "description": "Desired number of slides (3-12). Default 6." },
-                    "design_profile": deliverable_design_profile_schema()
+                    "design_profile": deliverable_design_profile_schema(),
+                    "design_components": deliverable_design_components_schema()
                 },
                 "required": ["brief"]
             }
@@ -12101,6 +12102,7 @@ fn make_document_tool_schema() -> serde_json::Value {
                         "enum": ["standard", "one_page", "executive_brief", "detailed_report", "proposal"]
                     },
                     "design_profile": deliverable_design_profile_schema(),
+                    "design_components": deliverable_design_components_schema(),
                     "sections": {
                         "type": "array",
                         "description": "Section headings explicitly requested by the user, in order. Do not invent this list when unspecified.",
@@ -12115,6 +12117,15 @@ fn make_document_tool_schema() -> serde_json::Value {
                 "required": ["brief", "name"]
             }
         }
+    })
+}
+
+fn deliverable_design_components_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "array",
+        "description": "Shared reusable deliverable components explicitly requested by the user. Applies across presentations and documents. Preserve explicit intent; omit when unspecified.",
+        "items": { "type": "string", "enum": DELIVERABLE_DESIGN_COMPONENTS },
+        "maxItems": 6
     })
 }
 
@@ -12133,6 +12144,35 @@ const DELIVERABLE_DESIGN_PROFILES: &[&str] = &[
     "editorial",
     "minimal",
 ];
+
+const DELIVERABLE_DESIGN_COMPONENTS: &[&str] = &[
+    "kpi_grid",
+    "timeline",
+    "comparison_table",
+    "quote_callout",
+    "process_steps",
+    "risks_table",
+];
+
+fn deliverable_design_components(parsed: &serde_json::Value) -> Vec<String> {
+    parsed
+        .get("design_components")
+        .and_then(|value| value.as_array())
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(|value| value.as_str())
+                .map(|value| value.trim().to_ascii_lowercase())
+                .filter(|value| DELIVERABLE_DESIGN_COMPONENTS.contains(&value.as_str()))
+                .fold(Vec::<String>::new(), |mut acc, value| {
+                    if acc.len() < 6 && !acc.iter().any(|existing| existing == &value) {
+                        acc.push(value);
+                    }
+                    acc
+                })
+        })
+        .unwrap_or_default()
+}
 
 fn deliverable_design_profile(parsed: &serde_json::Value) -> Option<String> {
     parsed
@@ -12177,6 +12217,54 @@ fn deliverable_design_profile_directive(profile: Option<&str>, medium: &str) -> 
         _ => return None,
     };
     Some(directive.to_string())
+}
+
+fn deliverable_design_component_directives(components: &[String], medium: &str) -> Vec<String> {
+    components
+        .iter()
+        .filter_map(|component| {
+            let directive = match (component.as_str(), medium) {
+                ("kpi_grid", "deck") => {
+                    "Component: kpi_grid. Include one KPI-focused slide with 3-5 quantified metrics and concise labels."
+                }
+                ("kpi_grid", "document") => {
+                    "Component: kpi_grid. Include a compact KPI table with metric, value and implication."
+                }
+                ("timeline", "deck") => {
+                    "Component: timeline. Include a timeline slide with clear phases, dates or sequence markers."
+                }
+                ("timeline", "document") => {
+                    "Component: timeline. Include a timeline table with phase, owner/date and expected outcome."
+                }
+                ("comparison_table", "deck") => {
+                    "Component: comparison_table. Include a comparison slide contrasting options or alternatives."
+                }
+                ("comparison_table", "document") => {
+                    "Component: comparison_table. Include a comparison table with criteria and alternatives."
+                }
+                ("quote_callout", "deck") => {
+                    "Component: quote_callout. Include one short quote or principle slide used as emphasis, not decoration."
+                }
+                ("quote_callout", "document") => {
+                    "Component: quote_callout. Include one short highlighted quote or principle paragraph when supported by the brief."
+                }
+                ("process_steps", "deck") => {
+                    "Component: process_steps. Include a process slide with 3-6 ordered steps."
+                }
+                ("process_steps", "document") => {
+                    "Component: process_steps. Include ordered process steps with clear actions."
+                }
+                ("risks_table", "deck") => {
+                    "Component: risks_table. Include a risk slide with risk, impact and mitigation."
+                }
+                ("risks_table", "document") => {
+                    "Component: risks_table. Include a risk table with risk, impact, mitigation and owner when known."
+                }
+                _ => return None,
+            };
+            Some(directive.to_string())
+        })
+        .collect()
 }
 
 /// Strict JSON schema for the deck CONTENT the model produces. Deliberately
@@ -12249,6 +12337,7 @@ async fn generate_deck_content(
     slides: usize,
     language: &str,
     design_profile: Option<&str>,
+    design_components: &[String],
 ) -> Result<serde_json::Value, String> {
     // Use the CURRENT turn's model (what the chat is actually running), NOT a
     // fresh orchestrator-role resolution. Hit the OpenAI-compat endpoint DIRECTLY
@@ -12275,6 +12364,8 @@ async fn generate_deck_content(
     };
     let design_directive =
         deliverable_design_profile_directive(design_profile, "deck").unwrap_or_default();
+    let component_directives =
+        deliverable_design_component_directives(design_components, "deck").join(" ");
     let system = format!(
         "You are a senior presentation designer. Output ONLY JSON matching the schema. \
 Design a tight, on-brand deck of about {slides} slides in {lang}. Rules: the FIRST slide layout \
@@ -12283,6 +12374,7 @@ other slide is \"bullets\". Headline titles of at most 6 words. At most 4 bullet
 numbers over adjectives, one idea per slide. Write speaker `notes` for the substantive slides. \
 Set want_image=true on the cover and on AT MOST two of the most visual slides (false on the rest). \
 {design_directive} \
+{component_directives} \
 Brand: organization «{org}», accent colour {accent}. Do NOT output colours, fonts, logos or file \
 names — textual content only. Return a JSON object with EXACTLY these top-level keys: \"title\" \
 (string), \"subtitle\" (string) and \"slides\" (array of slide objects). Do NOT wrap them under \
@@ -12386,6 +12478,7 @@ struct DocumentGenerationOptions {
     tone: Option<String>,
     layout_profile: Option<String>,
     design_profile: Option<String>,
+    design_components: Vec<String>,
     sections: Vec<String>,
 }
 
@@ -12437,6 +12530,7 @@ fn document_generation_options(parsed: &serde_json::Value) -> DocumentGeneration
         .map(|value| value.trim().to_ascii_lowercase())
         .filter(|value| allowed_layout_profiles.contains(&value.as_str()));
     let design_profile = deliverable_design_profile(parsed);
+    let design_components = deliverable_design_components(parsed);
     let audience = parsed
         .get("audience")
         .and_then(|value| value.as_str())
@@ -12460,6 +12554,7 @@ fn document_generation_options(parsed: &serde_json::Value) -> DocumentGeneration
         tone,
         layout_profile,
         design_profile,
+        design_components,
         sections,
     }
 }
@@ -12498,6 +12593,10 @@ fn document_generation_directives(options: &DocumentGenerationOptions) -> String
     {
         directives.push(directive);
     }
+    directives.extend(deliverable_design_component_directives(
+        &options.design_components,
+        "document",
+    ));
     if !options.sections.is_empty() {
         directives.push(format!(
             "Required section order: {}.",
@@ -16192,6 +16291,7 @@ available tools (for data from the web use the browser: browser_navigate on the 
                             .unwrap_or(6)
                             .clamp(3, 12) as usize;
                         let design_profile = deliverable_design_profile(&parsed);
+                        let design_components = deliverable_design_components(&parsed);
                         if brief.is_empty() {
                             "make_deck needs a 'brief' describing the presentation.".to_string()
                         } else {
@@ -16202,6 +16302,7 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                     "language": language.clone(),
                                     "slides": slides,
                                     "design_profile": design_profile.clone(),
+                                    "design_components": design_components.clone(),
                                 }),
                             );
                             let workflow_plan =
@@ -16223,6 +16324,7 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                                 "language": language.clone(),
                                                 "slides": slides,
                                                 "design_profile": design_profile.clone(),
+                                                "design_components": design_components.clone(),
                                             }),
                                         )
                                     }
@@ -16242,7 +16344,7 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                 .await
                                 .unwrap_or_default();
                             // 2) slide content — schema-enforced model call (the floor).
-                            match generate_deck_content(&state_owned.http, &base_url, &model, api_key.as_deref(), &brief, &brand, slides, &language, design_profile.as_deref()).await {
+                            match generate_deck_content(&state_owned.http, &base_url, &model, api_key.as_deref(), &brief, &brand, slides, &language, design_profile.as_deref(), &design_components).await {
                                 Err(e) => format!("Could not generate deck content: {e}"),
                                 Ok(mut deck) => {
                                     // 3) images for want_image slides (cap 3, cover first).
@@ -16431,6 +16533,7 @@ Absolutely NO text, NO words, NO letters, NO numbers, NO captions, NO logos."
                                 "tone": document_options.tone.clone(),
                                 "layout_profile": document_options.layout_profile.clone(),
                                 "design_profile": document_options.design_profile.clone(),
+                                "design_components": document_options.design_components.clone(),
                                 "sections": document_options.sections.clone(),
                             });
                             let workflow_plan = workflow_execution_plan(
@@ -36664,6 +36767,7 @@ mod tests {
                 "language": "en",
                 "slides": 6,
                 "design_profile": "executive",
+                "design_components": ["kpi_grid", "timeline"],
             }),
         );
 
@@ -36690,6 +36794,19 @@ mod tests {
                 .pointer("/input/design_profile")
                 .and_then(|value| value.as_str()),
             Some("executive"),
+        );
+        assert_eq!(
+            plan.steps[0]
+                .arguments
+                .pointer("/input/design_components")
+                .and_then(|value| value.as_array())
+                .map(|values| {
+                    values
+                        .iter()
+                        .filter_map(|value| value.as_str())
+                        .collect::<Vec<_>>()
+                }),
+            Some(vec!["kpi_grid", "timeline"]),
         );
     }
 
@@ -37184,6 +37301,41 @@ mod tests {
     }
 
     #[test]
+    fn deliverable_design_components_schema_is_shared_by_deck_and_document() {
+        let deck_schema = super::make_deck_tool_schema();
+        let document_schema = super::make_document_tool_schema();
+        let expected = Some(vec![
+            "kpi_grid",
+            "timeline",
+            "comparison_table",
+            "quote_callout",
+            "process_steps",
+            "risks_table",
+        ]);
+        let deck_components = deck_schema
+            .pointer("/function/parameters/properties/design_components/items/enum")
+            .and_then(|value| value.as_array())
+            .map(|values| {
+                values
+                    .iter()
+                    .filter_map(|value| value.as_str())
+                    .collect::<Vec<_>>()
+            });
+        let document_components = document_schema
+            .pointer("/function/parameters/properties/design_components/items/enum")
+            .and_then(|value| value.as_array())
+            .map(|values| {
+                values
+                    .iter()
+                    .filter_map(|value| value.as_str())
+                    .collect::<Vec<_>>()
+            });
+
+        assert_eq!(deck_components, expected);
+        assert_eq!(document_components, expected);
+    }
+
+    #[test]
     fn make_document_generation_options_are_explicit_and_bounded() {
         let options = super::document_generation_options(&serde_json::json!({
             "document_type": "report",
@@ -37191,6 +37343,12 @@ mod tests {
             "tone": "executive",
             "layout_profile": "executive_brief",
             "design_profile": "technical",
+            "design_components": [
+                "kpi_grid",
+                "timeline",
+                "kpi_grid",
+                "unknown_component"
+            ],
             "sections": [
                 "Problema",
                 "Soluzione",
@@ -37204,6 +37362,10 @@ mod tests {
         assert_eq!(options.tone.as_deref(), Some("executive"));
         assert_eq!(options.layout_profile.as_deref(), Some("executive_brief"));
         assert_eq!(options.design_profile.as_deref(), Some("technical"));
+        assert_eq!(
+            options.design_components,
+            vec!["kpi_grid".to_string(), "timeline".to_string()],
+        );
         assert_eq!(
             options.sections,
             vec![
@@ -37221,6 +37383,8 @@ mod tests {
         assert!(directives.contains("decision-ready headings"), "{directives}");
         assert!(directives.contains("Design profile: technical."), "{directives}");
         assert!(directives.contains("implementation details"), "{directives}");
+        assert!(directives.contains("Component: kpi_grid."), "{directives}");
+        assert!(directives.contains("Component: timeline."), "{directives}");
         assert!(
             directives.contains("Required section order: Problema -> Soluzione -> Roadmap."),
             "{directives}"
@@ -37231,12 +37395,14 @@ mod tests {
             "tone": "friendly",
             "layout_profile": "marketing_site",
             "design_profile": "cinematic",
+            "design_components": ["hero", "kpi_grid"],
             "sections": ["Valida"]
         }));
         assert_eq!(ignored.document_type, None);
         assert_eq!(ignored.tone, None);
         assert_eq!(ignored.layout_profile, None);
         assert_eq!(ignored.design_profile, None);
+        assert_eq!(ignored.design_components, vec!["kpi_grid".to_string()]);
         assert_eq!(ignored.sections, vec!["Valida".to_string()]);
     }
 

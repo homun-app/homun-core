@@ -158,6 +158,15 @@ modelli deboli/locali. Invarianti: monotonìa, limitatezza, identità non inferi
     Test mirati: `deliverable_design_profile_schema_is_shared_by_deck_and_document`,
     `make_document_generation_options_are_explicit_and_bounded`,
     `make_deck_workflow_definition_projects_execution_plan`.
+    **Seconda slice design_components (2026-06-23, locale/verde):** stessi
+    componenti dichiarativi per documenti e presentazioni: `kpi_grid`,
+    `timeline`, `comparison_table`, `quote_callout`, `process_steps`,
+    `risks_table`. Il parser deduplica/limita i valori e il composer riceve
+    direttive specifiche per medium; i renderer fisici e la gallery restano step
+    successivi. Test mirati:
+    `deliverable_design_components_schema_is_shared_by_deck_and_document`,
+    `make_document_generation_options_are_explicit_and_bounded`,
+    `make_deck_workflow_definition_projects_execution_plan`.
   - ☐ **Backlog deliberato:** `make_research` / `make_meeting` restano in fondo
     finché non è chiarito il contratto degli strumenti creati dall'harness.
 - ✅ **Fase 4 (2026-06-23, locale/verde)** — router workflow|agent + primo
@@ -707,8 +716,8 @@ ragionato il contratto degli strumenti `make_*` creati dall'harness. ADR 0011
   template dichiarativi, layout archetype, componenti riusabili, theme tokens e
   controlli QA visuali condivisi da `make_document` e `make_deck`/presentation,
   senza store paralleli e senza attivazioni euristiche. Prima base locale/verde:
-  `design_profile` condiviso negli schemi e nei workflow; restano componenti,
-  template e QA visuale.
+  `design_profile` e `design_components` condivisi negli schemi e nei workflow;
+  restano template/layout fisici e QA visuale.
 - ☐ **7.1b (futuro)** Portare ricerca/meeting al livello del deck solo dopo il
   chiarimento sul contratto strumenti: `make_research` e `make_meeting` non sono
   essenziali per la prossima release.

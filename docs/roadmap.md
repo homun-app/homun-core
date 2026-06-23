@@ -182,6 +182,11 @@ primo percorso locale verde:
     `technical`, `editorial`, `minimal`), lo portano nel workflow e lo traducono
     in direttive specifiche per documento o deck. È il primo pezzo di grammatica
     condivisa; non è ancora template library completa né QA visuale.
+47. WS7 shared component contract — `make_document` e `make_deck` espongono anche
+    `design_components` condiviso (`kpi_grid`, `timeline`, `comparison_table`,
+    `quote_callout`, `process_steps`, `risks_table`), deduplicato e bounded. È
+    ancora composer contract: i layout fisici del renderer e la gallery template
+    arrivano dopo.
 
 Prima di pubblicare/taggare resta prudente ripetere lo smoke manuale in-app su
 una automazione schedulata reale con il binario aggiornato. Il primo smoke ha
@@ -234,7 +239,8 @@ anche stili, grassetto, corsivo, liste numerate e sizing tabelle nel DOCX.
 sviluppare WS7 come design system condiviso per documenti e presentazioni
 (`make_deck`/presentation inclusi): template e layout sono grammatica del
 registry, non keyword o nuovi tool ad hoc. Prima slice locale/verde:
-`design_profile` condiviso fra `make_document` e `make_deck`; prossima slice:
-componenti/template dichiarativi reali e QA visuale. `make_research` e
-`make_meeting` restano futuri.
+`design_profile` condiviso fra `make_document` e `make_deck`; seconda slice:
+`design_components` condiviso per KPI, timeline, confronti, callout, processi e
+rischi. Prossima slice: layout fisici/template dichiarativi reali e QA visuale.
+`make_research` e `make_meeting` restano futuri.
 Il contratto corrente della memoria è in [MEMORIA.md](MEMORIA.md).
