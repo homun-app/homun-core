@@ -2,10 +2,12 @@
 
 ## Obiettivo attivo
 
-Consolidamento memoria + artefatti prima dell'espansione deliverable: chiudere
-il buco per cui i deliverable sono file su filesystem ma non ancora entità
-ricordabili, ricercabili e governate dal lifecycle. WS7 resta importante, ma
-viene spostato dopo le fondamenta memoria/artefatti/engine.
+Consolidamento memoria + artefatti completato abbastanza da riprendere
+l'espansione deliverable con un vincolo nuovo: Homun deve arrivare a documenti e
+presentazioni di qualità alta tramite un **design system dichiarativo condiviso**
+per temi, layout, componenti, template e QA visuale. Non si aggiungono gallery o
+`make_*` isolati: `make_document`, `make_deck`/presentation e i futuri plugin
+consumano la stessa grammatica dal registry unico.
 
 ## Fase corrente
 
@@ -170,6 +172,11 @@ primo percorso locale verde:
     nello stesso schema tool (`standard`, `one_page`, `executive_brief`,
     `detailed_report`, `proposal`); il profilo diventa direttiva di generazione
     esplicita, non un nuovo workflow e non una euristica di routing.
+45. WS7 direction — deliverable design system condiviso: documenti e
+    presentazioni/plugin convergono su temi, layout, componenti, template e QA
+    visuale comuni. Il modello sceglie struttura e blocchi dal registry; renderer
+    deterministici producono `.docx`, `.pptx`, `.pdf`/HTML. Una gallery può
+    esistere come UI/catalogo sopra questa grammatica, non come secondo sistema.
 
 Prima di pubblicare/taggare resta prudente ripetere lo smoke manuale in-app su
 una automazione schedulata reale con il binario aggiornato. Il primo smoke ha
@@ -180,10 +187,11 @@ trovato e corretto una falsa chiusura su piano non completato.
 1. Completare verifica allargata della nuova slice `ExecutionPlan` runtime.
 2. WS1-Fase 2/3 — piano runtime-owned e workflow runner dichiarativo, così i
    deliverable futuri non riaprono fragilità cross-modello.
-3. WS1/WS7 document focus — smoke reale del nuovo `layout_profile` quando serve
-   la prossima release, poi eventuali template dichiarativi dentro
-   `make_document`, prima di aggiungere altri `make_*`.
-4. WS7 — deliverable Manus-style: prima consolidare `make_document`; solo dopo
+3. WS1/WS7 deliverable design system — smoke reale del nuovo `layout_profile`
+   quando serve la prossima release, poi introdurre template/componenti
+   dichiarativi condivisi da `make_document` e `make_deck`/presentation.
+4. WS7 — deliverable Manus/Z.ai-style: prima qualità di documenti e
+   presentazioni tramite design system + composer + renderer + QA; solo dopo
    ragionare su `make_research` e `make_meeting`.
 
 ## Blocco noto
@@ -214,11 +222,12 @@ toolkit-aware per non perdere CRUD/perimeter; smoke Gmail unread passato in app.
 `find_capability` ora traccia discovery ed execution delle capability connesse
 nel `tool_trace`. Lo smoke Gmail ha anche corretto una duplicazione chat causata
 dal resume marker riusato nella stessa sessione JS.
-`make_document`
-supporta anche output `.docx` editabile, parametri espliciti di struttura/stile e
-tabelle Word generate da Markdown; lo smoke reale ha corretto anche stili,
-grassetto, corsivo, liste numerate e sizing tabelle nel DOCX. `layout_profile` è
-ora dichiarativo dentro `make_document`. Scelta corrente: proseguire sulla
-unificazione registry/discovery e poi smoke del profilo layout su una prossima
-build; `make_research` e `make_meeting` restano futuri.
+`make_document` supporta anche output `.docx` editabile, parametri espliciti di
+struttura/stile e tabelle Word generate da Markdown; lo smoke reale ha corretto
+anche stili, grassetto, corsivo, liste numerate e sizing tabelle nel DOCX.
+`layout_profile` è ora dichiarativo dentro `make_document`. Scelta corrente:
+sviluppare WS7 come design system condiviso per documenti e presentazioni
+(`make_deck`/presentation inclusi): template e layout sono grammatica del
+registry, non keyword o nuovi tool ad hoc; `make_research` e `make_meeting`
+restano futuri.
 Il contratto corrente della memoria è in [MEMORIA.md](MEMORIA.md).

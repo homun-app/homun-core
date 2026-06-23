@@ -42,7 +42,7 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
 
 > Se il contesto si è compattato: rileggi QUESTO blocco + il
 > [backlog](plans/2026-06-22-batch-1042-artifacts-memory.md) (gli stati ☐/✅ = i loop
-> aperti) e sei di nuovo sul filo. Stesso principio della memoria di Homun (caposaldo #9).
+> aperti) e sei di nuovo sul filo. Stesso principio della memoria di Homun (caposaldo #10).
 
 ### Cruscotto operativo attuale
 
@@ -55,6 +55,14 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   distingue piano completo (`done == total`) da piano aperto/bloccato; i
   proactive prompt usano quella guardia invece di schedulare un falso successo.
   Il contratto operativo corrente della memoria è [MEMORIA.md](MEMORIA.md).
+- **Direzione WS7 aggiornata:** l'obiettivo deliverable non è una gallery statica
+  clonata tool-per-tool, ma un **design system dichiarativo condiviso** per
+  documenti e presentazioni/plugin: temi, layout, componenti, template e QA
+  visuale sono grammatica comune; `make_document` e `make_deck` la consumano come
+  capability del registry unico. Il modello compone narrativa e blocchi, il
+  renderer deterministico produce `.docx`/`.pptx`/`.pdf`/HTML e la QA verifica
+  overflow, tabelle, immagini e leggibilità. `make_research` e `make_meeting`
+  restano dopo questo asse.
 - **WS2-3.1 PASSATA in runtime (2026-06-23):** gli artifact scritti via
   Filesystem MCP dentro la root progetto vengono registrati come
   `memory_type="artifact"` + entity grafo `artifact` + embedding. Gate:
@@ -323,8 +331,8 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   a `find_capability`, senza esporre `make_document`. Test mirato:
   `native_atomic_registry_maps_pdf_atomic_to_real_tool_schema`. **Prossimo passo
   unico:** aggiungere un atomico PDF dedicato se serve UX più guidata; altrimenti
-  proseguire con smoke reale DOCX e template/layout dichiarativi dentro
-  `make_document`.
+  proseguire con smoke reale DOCX e design system/template/layout dichiarativi
+  condivisi da `make_document` e `make_deck`.
 - **Capability registry MCP locale/verde (2026-06-23):** il corpus unico di
   `find_capability` ora include anche tool MCP connessi come entry tipizzate
   `McpTool`, oltre a workflow nativi, atomici, tool deferred e skill. Gli MCP non

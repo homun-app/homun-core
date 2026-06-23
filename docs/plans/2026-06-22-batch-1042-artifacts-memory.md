@@ -145,9 +145,12 @@ modelli deboli/locali. Invarianti: monotonìa, limitatezza, identità non inferi
     **Smoke fix DOCX table sizing (2026-06-23, locale/verde):** dopo il secondo
     smoke reale, le tabelle Word sono full-width con `tblGrid`, layout fixed,
     celle percentuali e proporzione 35/65 per tabelle a due colonne.
-  - 🟡 **Prossime slice make_document:** smoke reale del nuovo `layout_profile`
-    quando serve una prossima release; poi eventuali template più ricchi solo se
-    restano dentro il registry unico.
+  - 🟡 **Prossime slice deliverable design system:** smoke reale del nuovo
+    `layout_profile` quando serve una prossima release; poi template, componenti,
+    temi e controlli QA più ricchi come grammatica condivisa da `make_document` e
+    `make_deck`/presentation. Una gallery può essere UI/catalogo, non un secondo
+    sistema. Restano vietati routing keyword-based e nuovi `make_*` per ogni
+    template.
   - ☐ **Backlog deliberato:** `make_research` / `make_meeting` restano in fondo
     finché non è chiarito il contratto degli strumenti creati dall'harness.
 - ✅ **Fase 4 (2026-06-23, locale/verde)** — router workflow|agent + primo
@@ -679,14 +682,24 @@ cablato** nel flusso agente. ADR 0015.
 ## WS7 — Ecosistema deliverable (Manus)
 
 `make_deck` è affidabile cross-modello; `make_document` è il secondo workflow
-stabilizzato e ora cresce per formati/controlli. `make_research` e
-`make_meeting` restano deliberatamente in coda: prima va ragionato il contratto
-degli strumenti `make_*` creati dall'harness. ADR 0011 (addon + contratto
-personalizzazione).
+stabilizzato e ora cresce per formati/controlli. Il nuovo obiettivo WS7 è
+arrivare a deliverable stile Manus/Z.ai tramite **design system dichiarativo
+condiviso**: temi, layout, componenti, template e QA visuale sono una grammatica
+comune per documenti e presentazioni/plugin. Il modello compone narrativa e
+blocchi scegliendo dal registry; renderer deterministici producono `.pptx`,
+`.docx`, `.pdf`/HTML; la QA verifica overflow, tabelle, immagini e leggibilità.
+Una gallery può diventare UI/catalogo sopra questa grammatica, non il motore.
+`make_research` e `make_meeting` restano deliberatamente in coda: prima va
+ragionato il contratto degli strumenti `make_*` creati dall'harness. ADR 0011
+(addon + contratto personalizzazione).
 
 - 🟡 **7.1** Portare documenti al livello del deck: `make_document` dichiarativo
   guidato dal runtime, con formati gestiti e contenuto sempre derivato da una
   sorgente canonica.
+- 🟡 **7.1a** Portare documenti e presentazioni sullo stesso design system:
+  template dichiarativi, layout archetype, componenti riusabili, theme tokens e
+  controlli QA visuali condivisi da `make_document` e `make_deck`/presentation,
+  senza store paralleli e senza attivazioni euristiche.
 - ☐ **7.1b (futuro)** Portare ricerca/meeting al livello del deck solo dopo il
   chiarimento sul contratto strumenti: `make_research` e `make_meeting` non sono
   essenziali per la prossima release.
@@ -760,8 +773,9 @@ proprio — versioning, canali, scaricabili dal **sito Homun**, auto-aggiornabil
    piano→memoria e grafo piano/step locali/verdi, resta convergere sul tipo
    `ExecutionPlan`.
 6. **WS1-Fase 3** — skill dichiarative + workflow runner.
-7. **WS7** — ecosistema deliverable: prima consolidare `make_document`; ricerca
-   e meeting restano alla fine.
+7. **WS7** — ecosistema deliverable: prima design system condiviso per
+   `make_document` e `make_deck`/presentation; ricerca e meeting restano alla
+   fine.
 8. **WS8 completo + WS4** — eval come gate di release, perf/affidabilità/UX a
    regime.
 9. **WS9 + WS1-Fasi 4→6** — marketplace/plugin distribution, router+scaffolding

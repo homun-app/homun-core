@@ -109,10 +109,19 @@ Tutto è **scoped per `workspace_id` (progetto) + `user_id`**.
    fallback offline o guardrail di sicurezza, **non** come verità primaria di
    routing. Esempio: “voglio creare un pitch per Homun” deve poter recuperare
    `make_deck` dal registry anche senza parole come `slide` o `pptx`.
-8. **Comprensione senza keyword/regex; verità verificabile.** Il core non capisce le
+8. **Design system deliverable condiviso, non proliferazione di tool.** Documenti,
+   presentazioni e futuri deliverable devono consumare un unico sistema
+   dichiarativo di temi, layout, componenti, template e controlli qualità. Il
+   modello fa da composer: sceglie struttura, narrativa e blocchi dal registry;
+   il renderer deterministico materializza `.pptx`, `.docx`, `.pdf`/HTML e la QA
+   verifica overflow, tabelle, immagini e leggibilità. `make_deck` e
+   `make_document` sono capability/plugin che usano questa grammatica comune, non
+   sistemi separati; aggiungere un template non deve creare un nuovo `make_*` né
+   un routing euristico parallelo.
+9. **Comprensione senza keyword/regex; verità verificabile.** Il core non capisce le
    richieste con regex/keyword (de-gemma/capable-first); la verifica è deterministica
    dove possibile.
-9. **La memoria cattura il PERCHÉ e i LOOP APERTI, non solo i fatti, e collega TUTTO
+10. **La memoria cattura il PERCHÉ e i LOOP APERTI, non solo i fatti, e collega TUTTO
    nel grafo** (codice, decisioni, artefatti, piano), con archi causali. Il lavoro
    incompiuto resta richiamabile finché non è chiuso. Obiettivo: un cervello che
    sopravvive alle chat e sa sempre il perché — **verificabile via eval**. Vedi
