@@ -120,6 +120,11 @@ import type {
   TaskItem,
 } from "../types";
 
+const CHAT_VIEW_SESSION_ID =
+  typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `chat_view_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+
 interface ChatViewProps {
   approvals: ApprovelItem[];
   approvalBusyId: string | null;
@@ -1553,6 +1558,7 @@ export function ChatView({
     if (promptSubmitting || streamingAssistantId) return;
     const marker = readResumeMarker(thread.threadId);
     if (!marker) return;
+    if (isOwnResumeMarker(marker)) return;
     resumedThreadsRef.current.add(thread.threadId);
     void resumeActiveStream(marker);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -7704,6 +7710,7 @@ interface ResumeMarker {
   requestId: string;
   userText: string;
   assistantMessageId: string;
+  ownerId?: string;
 }
 
 function resumeMarkerKey(threadId: string) {
@@ -7712,10 +7719,17 @@ function resumeMarkerKey(threadId: string) {
 
 function writeResumeMarker(threadId: string, marker: ResumeMarker) {
   try {
-    window.localStorage.setItem(resumeMarkerKey(threadId), JSON.stringify(marker));
+    window.localStorage.setItem(
+      resumeMarkerKey(threadId),
+      JSON.stringify({ ...marker, ownerId: CHAT_VIEW_SESSION_ID }),
+    );
   } catch {
     /* storage unavailable → resume simply won't be offered */
   }
+}
+
+function isOwnResumeMarker(marker: ResumeMarker): boolean {
+  return marker.ownerId === CHAT_VIEW_SESSION_ID;
 }
 
 function clearResumeMarker(threadId: string) {

@@ -352,7 +352,13 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   locale/verde:** anche l'esecuzione di capability connesse viene tracciata come
   `capability execution connector:TOOL` o `capability execution mcp:TOOL`,
   inclusi i read connector come Gmail. Test mirato:
-  `connected_capability_execution_trace_records_source`.
+  `connected_capability_execution_trace_records_source`. **Bugfix in-app
+  verificato (2026-06-23):** durante lo smoke Gmail la chat duplicava domanda e
+  risposta perché il resume marker dello stream veniva letto dalla stessa sessione
+  JS e committava un secondo ramo (`local_assistant_*` + `browser_assistant_*`).
+  Il marker ora include `ownerId` e il resume viene ignorato se appartiene alla
+  sessione corrente; il resume dopo vero reload resta valido. Verifica: build
+  desktop verde + retest utente senza duplicazione.
 - **make_document DOCX locale/verde (2026-06-23):** lo stesso workflow ora
   materializza anche artifact `.docx` editabili dalla sorgente Markdown canonica,
   via pacchetto OOXML minimale generato in-process con `zip` già presente.

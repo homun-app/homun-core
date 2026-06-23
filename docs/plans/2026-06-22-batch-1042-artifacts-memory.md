@@ -224,6 +224,13 @@ modelli deboli/locali. Invarianti: monotonìa, limitatezza, identità non inferi
     includendo anche read connector come Gmail che prima non entravano nel trace
     se non erano write. Test mirato:
     `connected_capability_execution_trace_records_source`.
+  - ✅ **Bugfix stream resume duplicate commit (2026-06-23, in-app passato):**
+    lo smoke Gmail ha evidenziato doppio user/assistant persistito. Causa:
+    resume marker letto dalla stessa sessione JS, che committava un secondo ramo
+    con `local_assistant_*` prima del commit normale `browser_assistant_*`.
+    Fix: marker con `ownerId`, resume ignorato se appartiene alla sessione
+    corrente; resume dopo vero reload preservato. Gate: `npm run build` desktop
+    verde + retest utente senza duplicazione.
   - 🟡 Possibile step futuro: atomico PDF dedicato con schema più guidato
     (input/output files, operazione), se `run_in_sandbox` risulta troppo generico
     nello smoke.
