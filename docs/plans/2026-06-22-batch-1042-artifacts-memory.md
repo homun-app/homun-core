@@ -806,6 +806,15 @@ ragionato il contratto degli strumenti `make_*` creati dall'harness. ADR 0011
   `file_template_catalog_provider_loads_valid_manifest`,
   `file_template_catalog_provider_rejects_invalid_manifest_identity`,
   `file_template_catalog_provider_loads_manifest_from_path`.
+  **Undicesima slice deck leggibilità (2026-06-23, locale/verde):**
+  `deck_qa.py` misura ora anche font-size e contrast ratio sui nodi testuali
+  renderizzati nell'HTML reale. I codici `text_too_small` e `low_contrast`
+  entrano nel `DECK_QA_JSON` e quindi bloccano `make_deck`/`render_deck` prima
+  della registrazione artifact/memoria. Smoke reale locale: Chrome headless
+  passa su HTML leggibile e fallisce su testo 9px/contrasto basso con entrambi
+  i codici. Test mirati: `rendered_deck_qa_failure_is_extracted_from_renderer_output`,
+  `python3 runtimes/contained-computer/deck_qa.py --self-test`,
+  `python3 -m py_compile runtimes/contained-computer/deck_qa.py`.
 - ☐ **7.1b (futuro)** Portare ricerca/meeting al livello del deck solo dopo il
   chiarimento sul contratto strumenti: `make_research` e `make_meeting` non sono
   essenziali per la prossima release.

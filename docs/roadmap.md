@@ -233,6 +233,9 @@ primo percorso locale verde:
     JSON locali caricabili da `HOMUN_TEMPLATE_CATALOG_PATH` o
     `~/.homun/template-catalog.json`, validati contro il vocabolario `design_*`.
     I file catalog estendono il registry ma non sovrascrivono i seed built-in.
+56. WS7 deck legibility QA — `deck-qa` ora misura anche font-size e contrasto
+    sul DOM renderizzato. `text_too_small` e `low_contrast` entrano nel
+    `DECK_QA_JSON` e bloccano consegna/registrazione del deck.
 
 Prima di pubblicare/taggare resta prudente ripetere lo smoke manuale in-app su
 una automazione schedulata reale con il binario aggiornato. Il primo smoke ha
@@ -297,7 +300,7 @@ ottava slice: template catalog provider `monet/*` read-only nel registry, con
 `template_ref` risolto dai workflow esistenti; nona slice: contract
 `TemplateCatalogProvider` interno per agganciare MCP/marketplace/template pack
 senza toccare i workflow; decima slice: manifest JSON locale caricabile e
-validato. Prossima slice: contrasto/leggibilità, QA documenti o template library
-più ampia/adapter esterno.
+validato; undicesima slice: QA leggibilità deck su font-size/contrasto. Prossima
+slice: QA documenti o template library più ampia/adapter esterno.
 `make_research` e `make_meeting` restano futuri.
 Il contratto corrente della memoria è in [MEMORIA.md](MEMORIA.md).

@@ -94,9 +94,11 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   `FileTemplateCatalogProvider` carica manifest JSON locali da
   `HOMUN_TEMPLATE_CATALOG_PATH` o `~/.homun/template-catalog.json`, validando ID,
   kind e token `design_*`; i cataloghi file aggiungono template al registry ma
-  non sovrascrivono i seed built-in. Prossimo asse: estendere la template
-  library e la QA visuale a contrasto/leggibilità e documenti. `make_research`
-  e `make_meeting` restano dopo questo asse.
+  non sovrascrivono i seed built-in. Undicesima slice locale/verde:
+  `deck-qa` verifica anche leggibilità su HTML reale: font-size minimo e
+  contrast ratio WCAG-like (`low_contrast`, `text_too_small`) bloccano la
+  consegna del deck come gli overflow. Prossimo asse: QA documenti e template
+  library più ampia. `make_research` e `make_meeting` restano dopo questo asse.
 - **WS2-3.1 PASSATA in runtime (2026-06-23):** gli artifact scritti via
   Filesystem MCP dentro la root progetto vengono registrati come
   `memory_type="artifact"` + entity grafo `artifact` + embedding. Gate:

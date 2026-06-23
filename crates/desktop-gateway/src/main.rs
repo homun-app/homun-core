@@ -13242,10 +13242,15 @@ fn rendered_deck_qa_failure(render_output: &str) -> Option<String> {
             values
                 .iter()
                 .filter_map(|issue| {
-                    issue
+                    let message = issue
                         .get("message")
                         .and_then(|value| value.as_str())
-                        .map(ToString::to_string)
+                        .map(ToString::to_string)?;
+                    let code = issue
+                        .get("code")
+                        .and_then(|value| value.as_str())
+                        .unwrap_or("qa_issue");
+                    Some(format!("{code}: {message}"))
                 })
                 .take(5)
                 .collect::<Vec<_>>()
@@ -39092,13 +39097,15 @@ mod tests {
     #[test]
     fn rendered_deck_qa_failure_is_extracted_from_renderer_output() {
         let output = r#"wrote deck.html
-DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"slide_overflow","message":"slide 1 overflows"},{"severity":"error","code":"image_not_loaded","message":"slide 1: image failed to load"}]}
+DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"slide_overflow","message":"slide 1 overflows"},{"severity":"error","code":"image_not_loaded","message":"slide 1: image failed to load"},{"severity":"error","code":"low_contrast","message":"slide 1: p contrast ratio 2.1 is below 4.5"},{"severity":"error","code":"text_too_small","message":"slide 1: p font-size 9px is below 12px"}]}
 "#;
 
         let failure = super::rendered_deck_qa_failure(output).expect("qa failure");
 
-        assert!(failure.contains("slide 1 overflows"), "{failure}");
-        assert!(failure.contains("image failed to load"), "{failure}");
+        assert!(failure.contains("slide_overflow: slide 1 overflows"), "{failure}");
+        assert!(failure.contains("image_not_loaded: slide 1: image failed to load"), "{failure}");
+        assert!(failure.contains("low_contrast:"), "{failure}");
+        assert!(failure.contains("text_too_small:"), "{failure}");
         assert!(super::rendered_deck_qa_failure(
             r#"DECK_QA_JSON:{"ok":true,"slide_count":1,"issues":[]}"#
         )

@@ -120,6 +120,39 @@ QA_JS = r"""
   const issues = [];
   const slides = Array.from(document.querySelectorAll('.slide'));
   const px = n => Math.round(Number(n || 0));
+  const parseRgb = (value) => {
+    const match = String(value || '').match(/rgba?\(([^)]+)\)/);
+    if (!match) return null;
+    const parts = match[1].split(',').map(part => Number(part.trim()));
+    if (parts.length < 3 || parts.slice(0, 3).some(part => Number.isNaN(part))) return null;
+    const alpha = parts.length >= 4 && !Number.isNaN(parts[3]) ? parts[3] : 1;
+    return { r: parts[0], g: parts[1], b: parts[2], a: alpha };
+  };
+  const luminance = (rgb) => {
+    const channel = (value) => {
+      const normalized = Math.max(0, Math.min(255, value)) / 255;
+      return normalized <= 0.03928
+        ? normalized / 12.92
+        : Math.pow((normalized + 0.055) / 1.055, 2.4);
+    };
+    return 0.2126 * channel(rgb.r) + 0.7152 * channel(rgb.g) + 0.0722 * channel(rgb.b);
+  };
+  const contrastRatio = (fg, bg) => {
+    const l1 = luminance(fg);
+    const l2 = luminance(bg);
+    const lighter = Math.max(l1, l2);
+    const darker = Math.min(l1, l2);
+    return (lighter + 0.05) / (darker + 0.05);
+  };
+  const effectiveBackground = (node) => {
+    let current = node;
+    while (current && current !== document.documentElement) {
+      const bg = parseRgb(getComputedStyle(current).backgroundColor);
+      if (bg && bg.a > 0.05) return bg;
+      current = current.parentElement;
+    }
+    return parseRgb(getComputedStyle(document.body).backgroundColor) || { r: 255, g: 255, b: 255, a: 1 };
+  };
   const label = (el) => {
     const tag = el.tagName ? el.tagName.toLowerCase() : 'element';
     const text = (el.innerText || el.alt || '').trim().replace(/\s+/g, ' ').slice(0, 72);
@@ -158,6 +191,33 @@ QA_JS = r"""
             code: 'image_not_loaded',
             message: `slide ${slideNo}: image failed to load`
           });
+        }
+        return;
+      }
+      const text = (node.innerText || '').trim();
+      if (text) {
+        const style = getComputedStyle(node);
+        const fontSize = Number.parseFloat(style.fontSize || '0');
+        const fontWeight = Number.parseInt(style.fontWeight || '400', 10);
+        if (fontSize > 0 && fontSize < 12) {
+          issues.push({
+            severity: 'error',
+            code: 'text_too_small',
+            message: `slide ${slideNo}: ${label(node)} font-size ${fontSize.toFixed(1)}px is below 12px`
+          });
+        }
+        const fg = parseRgb(style.color);
+        const bg = effectiveBackground(node);
+        if (fg && bg) {
+          const ratio = contrastRatio(fg, bg);
+          const minRatio = fontSize >= 18 || (fontSize >= 14 && fontWeight >= 700) ? 3.0 : 4.5;
+          if (ratio < minRatio) {
+            issues.push({
+              severity: 'error',
+              code: 'low_contrast',
+              message: `slide ${slideNo}: ${label(node)} contrast ratio ${ratio.toFixed(2)} is below ${minRatio.toFixed(1)}`
+            });
+          }
         }
       }
     });
@@ -245,10 +305,23 @@ def run_qa(path, chromium="chromium"):
 
 def main():
     parser = argparse.ArgumentParser(description="Run rendered QA on a Homun deck HTML file.")
-    parser.add_argument("html", help="deck.html path")
+    parser.add_argument("html", nargs="?", help="deck.html path")
     parser.add_argument("--json", action="store_true", help="print JSON result")
     parser.add_argument("--chromium", default=os.environ.get("CHROMIUM", "chromium"))
+    parser.add_argument("--self-test", action="store_true", help="verify built-in QA checks")
     args = parser.parse_args()
+
+    if args.self_test:
+        required_codes = ["slide_overflow", "element_outside_slide", "image_not_loaded", "low_contrast", "text_too_small"]
+        missing = [code for code in required_codes if code not in QA_JS]
+        if missing:
+            print(json.dumps({"ok": False, "missing": missing}, ensure_ascii=False))
+            return 2
+        print(json.dumps({"ok": True, "codes": required_codes}, ensure_ascii=False))
+        return 0
+
+    if not args.html:
+        parser.error("the following arguments are required: html")
 
     try:
         result = run_qa(args.html, args.chromium)
