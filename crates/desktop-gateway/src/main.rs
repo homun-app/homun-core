@@ -5952,6 +5952,15 @@ fn run_static_workflow_plan_through_brain(
     Ok(outcome.plan)
 }
 
+async fn run_static_workflow_plan_through_brain_async(
+    goal: String,
+    plan: ExecutionPlan,
+) -> Result<ExecutionPlan, String> {
+    tokio::task::spawn_blocking(move || run_static_workflow_plan_through_brain(&goal, plan))
+        .await
+        .map_err(|error| format!("static workflow validation join error: {error}"))?
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum WorkflowRouteDecision {
     Workflow {
@@ -6022,8 +6031,14 @@ fn asks_for_document_workflow(normalized_prompt: &str) -> bool {
     has_action && has_document
 }
 
+#[cfg(test)]
 fn workflow_router_instruction(prompt: &str) -> Option<String> {
-    match route_workflow_or_agent(prompt) {
+    let decision = route_workflow_or_agent(prompt);
+    workflow_router_instruction_for_decision(&decision)
+}
+
+fn workflow_router_instruction_for_decision(decision: &WorkflowRouteDecision) -> Option<String> {
+    match decision {
         WorkflowRouteDecision::Workflow {
             workflow_id,
             tool_name,
@@ -6034,6 +6049,20 @@ with `{scaffolding_tier}` scaffolding. Call `{tool_name}` exactly once with the 
 do not create a separate plan, do not decompose it into lower-level tools, and do not use shell/file tools for this workflow."
         )),
         WorkflowRouteDecision::AgentLoop => None,
+    }
+}
+
+fn prune_tools_for_workflow_route(
+    tools: &mut Vec<serde_json::Value>,
+    route: &WorkflowRouteDecision,
+) {
+    if let WorkflowRouteDecision::Workflow { tool_name, .. } = route {
+        tools.retain(|schema| {
+            schema
+                .pointer("/function/name")
+                .and_then(|value| value.as_str())
+                == Some(*tool_name)
+        });
     }
 }
 
@@ -11840,9 +11869,9 @@ fn make_document_tool_schema() -> serde_json::Value {
                 "properties": {
                     "brief": { "type": "string", "description": "What the document must contain, including any sections, audience, tone, constraints or source material the user provided — verbatim." },
                     "language": { "type": "string", "description": "Document language code, e.g. 'it' or 'en'. Default: the user's language." },
-                    "name": { "type": "string", "description": "Optional artifact filename. Must be a simple Markdown filename such as report.md. Default: document.md." }
+                    "name": { "type": "string", "description": "Artifact filename. If the user named the file, preserve that name exactly as a simple Markdown filename such as report.md. If no name was specified, choose a concise descriptive .md filename." }
                 },
-                "required": ["brief"]
+                "required": ["brief", "name"]
             }
         }
     })
@@ -12138,6 +12167,32 @@ fn document_artifact_name(raw: Option<&str>) -> String {
     } else {
         format!("{safe}.md")
     }
+}
+
+fn document_artifact_name_from_brief(brief: &str) -> Option<String> {
+    for token in brief.split_whitespace() {
+        let raw = token.trim_matches(|ch: char| {
+            matches!(
+                ch,
+                '"' | '\'' | '`' | '(' | ')' | '[' | ']' | '{' | '}' | ':' | ';' | ','
+            )
+        });
+        let lower = raw.to_ascii_lowercase();
+        let Some(pos) = lower.find(".md") else {
+            continue;
+        };
+        let end = pos + ".md".len();
+        let candidate = &raw[..end];
+        if !candidate
+            .trim_end_matches(".md")
+            .chars()
+            .any(|ch| ch.is_ascii_alphanumeric())
+        {
+            continue;
+        }
+        return Some(document_artifact_name(Some(candidate)));
+    }
+    None
 }
 
 fn generate_image_tool_schema() -> serde_json::Value {
@@ -13059,7 +13114,8 @@ in-progress plan (some steps done, others not), CONTINUE it — re-emit the plan
 keeping the completed steps as done, and proceed from the first not-done step; do NOT restart \
 from scratch or re-propose."
     );
-    let system = match workflow_router_instruction(&request.prompt) {
+    let workflow_route = route_workflow_or_agent(&request.prompt);
+    let system = match workflow_router_instruction_for_decision(&workflow_route) {
         Some(instruction) => format!("{system}\n\n{instruction}"),
         None => system,
     };
@@ -13216,6 +13272,7 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
     if !artifact_destinations.is_empty() && !read_only {
         base_tools.push(save_artifact_tool_schema(&artifact_destinations));
     }
+    prune_tools_for_workflow_route(&mut base_tools, &workflow_route);
     // Tool Search (Anthropic pattern): split the full toolset into a SMALL always-loaded
     // CORE + a DEFERRED registry the model discovers via `find_capability`. Keeps the
     // upfront tool count low (selection accuracy + context budget) as tools grow, and makes
@@ -13229,7 +13286,9 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
                 .map(|name| CORE_TOOL_NAMES.contains(&name))
                 .unwrap_or(false)
         });
-    base_tools.push(find_capability_tool_schema());
+    if !matches!(workflow_route, WorkflowRouteDecision::Workflow { .. }) {
+        base_tools.push(find_capability_tool_schema());
+    }
     // MCP servers are installed deliberately and are few, so their tools go STRAIGHT
     // into the live tool set (not deferred behind find_capability) when the count is
     // small — the model uses them naturally instead of having to "discover" them via
@@ -13261,6 +13320,7 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
             }
         }
     }
+    prune_tools_for_workflow_route(&mut base_tools, &workflow_route);
     // Unified capability corpus for `find_capability`: deferred native tools + installed
     // skills + connected connector tools, all in one BM25-searchable list. One discovery
     // path instead of three (find_capability subsumes find_connected_tools).
@@ -15214,7 +15274,12 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                 }),
                             );
                             let workflow_plan =
-                                match run_static_workflow_plan_through_brain(&brief, workflow_plan) {
+                                match run_static_workflow_plan_through_brain_async(
+                                    brief.clone(),
+                                    workflow_plan,
+                                )
+                                .await
+                                {
                                     Ok(plan) => plan,
                                     Err(error) => {
                                         eprintln!(
@@ -15412,7 +15477,13 @@ Absolutely NO text, NO words, NO letters, NO numbers, NO captions, NO logos."
                             .and_then(|v| v.as_str())
                             .unwrap_or("")
                             .to_string();
-                        let fname = document_artifact_name(parsed.get("name").and_then(|v| v.as_str()));
+                        let fname = parsed
+                            .get("name")
+                            .and_then(|v| v.as_str())
+                            .filter(|value| !value.trim().is_empty())
+                            .map(|value| document_artifact_name(Some(value)))
+                            .or_else(|| document_artifact_name_from_brief(&brief))
+                            .unwrap_or_else(|| document_artifact_name(None));
                         if brief.is_empty() {
                             "make_document needs a 'brief' describing the document.".to_string()
                         } else {
@@ -15426,7 +15497,12 @@ Absolutely NO text, NO words, NO letters, NO numbers, NO captions, NO logos."
                                 workflow_args.clone(),
                             );
                             let workflow_plan =
-                                match run_static_workflow_plan_through_brain(&brief, workflow_plan) {
+                                match run_static_workflow_plan_through_brain_async(
+                                    brief.clone(),
+                                    workflow_plan,
+                                )
+                                .await
+                                {
                                     Ok(plan) => plan,
                                     Err(error) => {
                                         eprintln!(
@@ -35699,6 +35775,29 @@ mod tests {
         assert_eq!(validated.steps[3].contract.as_deref(), Some("DocumentWorkflow"));
     }
 
+    #[tokio::test]
+    async fn static_workflow_plan_validation_is_async_runtime_safe() {
+        let definition = super::make_document_workflow_definition();
+        let plan = super::workflow_execution_plan(
+            &definition,
+            serde_json::json!({
+                "brief": "Write a customer onboarding memo",
+                "language": "en",
+                "name": "onboarding.md",
+            }),
+        );
+
+        let validated = super::run_static_workflow_plan_through_brain_async(
+            "Write onboarding memo".to_string(),
+            plan,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(validated.route, local_first_orchestrator::OrchestratorRoute::MixedWorkflow);
+        assert_eq!(validated.steps[3].step_id, "register_artifact");
+    }
+
     #[test]
     fn workflow_router_sends_deck_requests_to_max_scaffolding_workflow() {
         let decision = super::route_workflow_or_agent(
@@ -35739,6 +35838,45 @@ mod tests {
             super::document_artifact_name(Some("../Customer Brief 2026")),
             "Customer-Brief-2026.md",
         );
+        assert_eq!(
+            super::document_artifact_name_from_brief(
+                "Scrivi un documento markdown breve chiamato homun-smoke-document.md: una nota operativa",
+            )
+            .as_deref(),
+            Some("homun-smoke-document.md"),
+        );
+    }
+
+    #[test]
+    fn make_document_tool_requires_artifact_name() {
+        let schema = super::make_document_tool_schema();
+        let required = schema
+            .pointer("/function/parameters/required")
+            .and_then(|value| value.as_array())
+            .expect("required array");
+
+        assert!(required.iter().any(|value| value.as_str() == Some("brief")));
+        assert!(required.iter().any(|value| value.as_str() == Some("name")));
+    }
+
+    #[test]
+    fn workflow_router_prunes_alternative_tools_for_document_workflow() {
+        let decision = super::route_workflow_or_agent(
+            "Scrivi un documento operativo per onboarding clienti",
+        );
+        let mut tools = vec![
+            super::make_document_tool_schema(),
+            super::run_in_sandbox_tool_schema(),
+            super::create_artifact_tool_schema(),
+        ];
+
+        super::prune_tools_for_workflow_route(&mut tools, &decision);
+
+        let names: Vec<&str> = tools
+            .iter()
+            .filter_map(|schema| schema.pointer("/function/name").and_then(|value| value.as_str()))
+            .collect();
+        assert_eq!(names, vec!["make_document"]);
     }
 
     #[test]

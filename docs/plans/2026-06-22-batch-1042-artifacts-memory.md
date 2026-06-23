@@ -104,9 +104,17 @@ modelli deboli/locali. Invarianti: monotonìa, limitatezza, identità non inferi
     proiettata in `ExecutionPlan` con contratto `DocumentWorkflow`, passa da
     `OrchestratorBrain::run_plan`, viene instradato dal router workflow|agent per
     richieste esplicite di scrittura/creazione documenti/report e registra
-    l'artifact Markdown in memoria/provenance con producer `make_document`. Test
-    mirati: `make_document_workflow`,
+    l'artifact Markdown in memoria/provenance con producer `make_document`.
+    Post-smoke runtime: validazione statica async-safe, pruning del toolset
+    workflow anche dopo MCP/Composio injection e nome artifact richiesto/preservato
+    (`homun-smoke-document.md` non degrada più a `document.md`). Gate API passato
+    su `thread_1782222457104_348911810416083`: artifact gestito, memoria
+    `artifact|confirmed`, entity artifact e relazione `make_document produced`.
+    Test mirati: `make_document_workflow`,
     `workflow_router_sends_document_requests_to_document_workflow`,
+    `workflow_router_prunes_alternative_tools_for_document_workflow`,
+    `make_document_tool_requires_artifact_name`,
+    `static_workflow_plan_validation_is_async_runtime_safe`,
     `artifact_provenance_context_surfaces_make_document_workflow`.
   - ☐ Generalizzare lo stesso pattern per `make_research` / `make_meeting` e
     arricchire `make_document` con output DOCX/PDF quando serve.

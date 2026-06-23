@@ -91,7 +91,10 @@ primo percorso locale verde:
     `WorkflowDefinition` harness-owned (`DocumentWorkflow`) proiettata in
     `ExecutionPlan`, passa da `OrchestratorBrain::run_plan`, viene instradato dal
     router workflow|agent per richieste esplicite di scrittura documenti/report e
-    registra l'artifact Markdown in memoria con provenance canonica.
+    registra l'artifact Markdown in memoria con provenance canonica. Post-smoke:
+    il percorso è async-safe nel runtime Tokio, il toolset viene ristretto al
+    workflow anche dopo MCP/Composio injection e il nome artifact esplicito viene
+    preservato (`homun-smoke-document.md`).
 
 Prima di pubblicare/taggare resta prudente ripetere lo smoke manuale in-app su
 una automazione schedulata reale con il binario aggiornato. Il primo smoke ha
@@ -120,7 +123,8 @@ e outcome per-step confermati nel loop principale e nei sub-agent. `make_deck`
 entra ora nel Brain con `run_plan` prima della pipeline deterministica.
 Il router workflow/agent instrada i deck a scaffolding massimo. Il primo smoke
 release ha corretto composer e recall provenance/status. La prima
-generalizzazione documenti è locale/verde su `make_document`. Prossimo: gate
-allargato e smoke in-app prima di decidere cosa aggiungere alla 1046; poi
-estendere lo stesso pattern a ricerca/meeting o arricchire output DOCX/PDF. Il
+generalizzazione documenti è locale/verde su `make_document` e ha superato smoke
+API reale con artifact gestito + memoria/provenance canonica. Prossimo: gate
+allargato, poi scegliere la prossima slice WS1/WS7 da mettere nella 1046:
+`make_research`, `make_meeting` o arricchire `make_document` con DOCX/PDF. Il
 contratto corrente della memoria è in [MEMORIA.md](MEMORIA.md).

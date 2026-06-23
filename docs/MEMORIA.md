@@ -84,7 +84,11 @@ Fatto:
   `WorkflowDefinition`/`ExecutionPlan`/`OrchestratorBrain::run_plan`, produce un
   artifact Markdown gestito e registra la memoria artifact con producer
   `make_document`; il reader provenance lo collega a `DocumentWorkflow` nello
-  stesso grafo canonico.
+  stesso grafo canonico. Post-smoke runtime: il router workflow restringe il
+  toolset a `make_document` anche dopo injection MCP/Composio, il nome artifact
+  esplicito viene preservato, e il gate API ha confermato memoria
+  `artifact|confirmed`, entity artifact e relazione canonica
+  `tool:make_document --produced--> artifact`.
 - prima slice WS1 piano→memoria: il piano runtime-owned materializza un solo
   `open_loop` canonico `source="runtime_plan"` per thread, aggiornato in-place da
   `update_plan` / `step_advance` con conteggi, prossimo step e snapshot degli step;

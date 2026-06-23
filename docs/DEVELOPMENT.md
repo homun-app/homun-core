@@ -253,8 +253,20 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   `OrchestratorBrain::run_plan`, viene instradato dal router harness-owned per
   richieste esplicite di scrittura/creazione documenti/report e produce un
   artifact Markdown gestito, registrato in memoria con producer `make_document`.
-  Il reader provenance collega `make_document` a `DocumentWorkflow`. Test mirati:
+  Post-smoke runtime: la validazione del piano statico gira via `spawn_blocking`
+  (niente drop di runtime Tokio in contesto async), il router workflow pruna il
+  toolset anche dopo injection MCP/Composio così il modello non bypassa su shell
+  o filesystem, e il tool `make_document` richiede/preserva il nome artifact.
+  Gate API passato su `thread_1782222457104_348911810416083`: prompt
+  `homun-smoke-document.md` ha usato `make_document`, creato
+  `/Users/fabio/.homun/artifacts/thread_1782222457104_348911810416083/homun-smoke-document.md`,
+  memoria `artifact|confirmed`, entity artifact e relazione
+  `tool:make_document --produced--> artifact`. Il reader provenance collega
+  `make_document` a `DocumentWorkflow`. Test mirati:
   `make_document_workflow`, `workflow_router_sends_document_requests_to_document_workflow`,
+  `workflow_router_prunes_alternative_tools_for_document_workflow`,
+  `make_document_tool_requires_artifact_name`,
+  `static_workflow_plan_validation_is_async_runtime_safe`,
   `artifact_provenance_context_surfaces_make_document_workflow`.
 - **Gate provider Z.ai/GLM risolto (test manuale utente, 2026-06-23):** Settings
   espone sia `Z.ai (GLM)` standard (`https://api.z.ai/api/paas/v4`) sia
