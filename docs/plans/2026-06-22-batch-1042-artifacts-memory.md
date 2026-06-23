@@ -938,6 +938,11 @@ proprio — versioning, canali, scaricabili dal **sito Homun**, auto-aggiornabil
   anti-regressione. Seconda slice: `RichMessage` e `RichMessageRenderer` sono
   memoizzati, con contratto UI dedicato, per non ricalcolare markdown pesante sui
   messaggi completati invariati; restano altri polling/render specifici.
+- ✅ **Provider Settings robustness (2026-06-24):** le card preset provider
+  matchano prima per id stabile e poi per URL. Questo mantiene Z.ai standard e
+  Z.ai Coding come preset separati anche se un endpoint legacy/cambiato non
+  coincide esattamente con il preset corrente; `test:ui-contract` blocca gli
+  endpoint Z.ai standard/coding e il matching id-first.
 - ☐ **Seeder skill fragile** — una skill modificata a mano (hash desync) non viene più
   auto-aggiornata (ha tenuto `create-presentations` vecchia su disco fino al fix manuale)
   → irrobustire.

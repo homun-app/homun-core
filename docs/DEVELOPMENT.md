@@ -155,6 +155,10 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   **WS4 chat perf:** `RichMessage` e il renderer markdown lazy sono memoizzati,
   così polling/live state e sidebar non ricalcolano markdown pesante per messaggi
   completati invariati.
+  **Provider UX:** le card Settings per preset provider ora matchano prima
+  l'id stabile e poi l'URL, così preset come Z.ai standard/coding non ricadono a
+  Custom quando l'endpoint cambia o una configurazione legacy conserva lo stesso
+  id; il contratto UI blocca regressioni sugli endpoint Z.ai separati.
   `make_research` e `make_meeting` restano dopo questo asse.
 - **WS2-3.1 PASSATA in runtime (2026-06-23):** gli artifact scritti via
   Filesystem MCP dentro la root progetto vengono registrati come

@@ -1482,7 +1482,11 @@ function RuntimePane({
   for (const p of PROVIDER_PRESETS) {
     const view =
       p.baseUrl !== ""
-        ? providers.find((v) => !matched.has(v.id) && normUrl(v.base_url) === normUrl(p.baseUrl))
+        ? providers.find(
+            (v) =>
+              !matched.has(v.id) &&
+              (v.id === p.id || normUrl(v.base_url) === normUrl(p.baseUrl)),
+          )
         : undefined;
     if (view) matched.add(view.id);
     providerCards.push({

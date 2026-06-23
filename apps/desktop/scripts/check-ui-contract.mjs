@@ -98,6 +98,9 @@ assertNotMatches(
   "completed computer timeline/artifacts must not reopen the inline Computer card",
 );
 assertContains("src/components/ChatView.tsx", "approval-scope-options", "approval UI must make temporary vs fixed scope explicit");
+assertContains("src/components/SettingsView.tsx", "https://api.z.ai/api/paas/v4", "Z.ai standard preset must keep the standard GLM endpoint");
+assertContains("src/components/SettingsView.tsx", "https://api.z.ai/api/coding/paas/v4", "Z.ai coding preset must keep the coding GLM endpoint");
+assertContains("src/components/SettingsView.tsx", "v.id === p.id || normUrl(v.base_url) === normUrl(p.baseUrl)", "provider preset cards must match by stable id before URL fallback");
 
 assertContains("src/components/ChatView.tsx", "coreBridge.submitChatPromptStream", "composer must submit prompts through the local chat transport");
 assertContains("src/lib/coreBridge.ts", "submitBrowserRuntimeChatPromptStream", "Electron bridge must stream from the local Gemma runtime through Electron-safe transport");

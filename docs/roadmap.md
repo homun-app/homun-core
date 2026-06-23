@@ -284,6 +284,9 @@ primo percorso locale verde:
 66. WS4 markdown render perf — `RichMessage` e il renderer markdown lazy sono
     memoizzati per evitare rerender dei messaggi completati invariati quando
     cambiano polling, dock live o stato laterale.
+67. Provider settings robustness — le card provider matchano prima per id stabile
+    e solo poi per endpoint, preservando preset Z.ai standard/coding separati
+    anche con configurazioni legacy o cambi URL.
 
 Prima di pubblicare/taggare resta prudente ripetere lo smoke manuale in-app su
 una automazione schedulata reale con il binario aggiornato. Il primo smoke ha
