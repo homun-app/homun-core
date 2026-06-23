@@ -124,6 +124,7 @@ modelli deboli/locali. Invarianti: monotonìa, limitatezza, identità non inferi
     `make_document_formats_support_editable_docx_outputs`,
     `markdown_to_docx_writes_valid_word_package`,
     `markdown_to_docx_renders_pipe_tables`,
+    `markdown_to_docx_promotes_plain_first_line_to_title`,
     `artifact_memories_do_not_participate_in_semantic_dedup`,
     `static_workflow_plan_validation_is_async_runtime_safe`,
     `artifact_provenance_context_surfaces_make_document_workflow`.
@@ -138,6 +139,9 @@ modelli deboli/locali. Invarianti: monotonìa, limitatezza, identità non inferi
     **Slice DOCX tables (2026-06-23, locale/verde):** il renderer OOXML converte
     tabelle pipe Markdown in tabelle Word reali (`w:tbl`) con escaping XML,
     mantenendo la stessa registrazione artifact/memoria.
+    **Smoke fix DOCX formatting (2026-06-23, locale/verde):** dopo lo smoke
+    reale, il renderer scrive `styles.xml`, converte bold/italic Markdown in run
+    Word, promuove il primo titolo e tratta liste numerate come paragrafi lista.
   - 🟡 **Prossime slice make_document:** smoke reale DOCX in-app e poi controlli
     più ricchi su template/layout solo se restano dentro il registry unico.
   - ☐ **Backlog deliberato:** `make_research` / `make_meeting` restano in fondo

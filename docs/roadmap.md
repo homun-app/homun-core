@@ -132,6 +132,9 @@ primo percorso locale verde:
 34. WS1/WS7 document focus — il renderer DOCX di `make_document` traduce le
     tabelle pipe Markdown in tabelle Word reali (`w:tbl`) con escaping XML,
     mantenendo sorgente Markdown canonica e registrazione artifact invariata.
+35. WS1/WS7 document focus — feedback smoke reale DOCX: il file era valido ma
+    troppo grezzo. Il renderer ora include `styles.xml`, converte bold/italic
+    Markdown in run Word, promuove il primo titolo e gestisce liste numerate.
 
 Prima di pubblicare/taggare resta prudente ripetere lo smoke manuale in-app su
 una automazione schedulata reale con il binario aggiornato. Il primo smoke ha
@@ -171,7 +174,8 @@ atomici PDF e agent loop con ragione esplicita; il loop agente emette la route
 come `ACT` e la aggiunge al `tool_trace` del turno. `pdf_atomic` ora è una
 capability atomica nativa mappata a `run_in_sandbox`. `make_document` supporta
 anche output `.docx` editabile, parametri espliciti di struttura/stile e tabelle
-Word generate da Markdown. Scelta corrente: smoke reale DOCX in-app e poi
-template/layout dichiarativi solo dentro il registry unico; `make_research` e
-`make_meeting` restano futuri.
+Word generate da Markdown; lo smoke reale ha corretto anche stili, grassetto,
+corsivo e liste numerate nel DOCX. Scelta corrente: ripetere smoke reale DOCX
+in-app e poi template/layout dichiarativi solo dentro il registry unico;
+`make_research` e `make_meeting` restano futuri.
 Il contratto corrente della memoria è in [MEMORIA.md](MEMORIA.md).

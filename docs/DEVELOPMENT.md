@@ -339,6 +339,13 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   invece di salvarle come paragrafi grezzi; conserva escaping XML e scarta la
   riga separatore Markdown. Test mirato:
   `markdown_to_docx_renders_pipe_tables`.
+- **make_document DOCX formatting smoke fix (2026-06-23):** lo smoke reale ha
+  mostrato un DOCX valido ma povero: marker Markdown (`**bold**`, `*italic*`),
+  titolo iniziale e liste numerate finivano come testo grezzo. Il renderer OOXML
+  ora scrive `styles.xml`, promuove la prima riga a `Heading1`, converte inline
+  bold/italic in run Word e riconosce liste numerate come `ListParagraph`. Test
+  mirati: `markdown_to_docx_writes_valid_word_package`,
+  `markdown_to_docx_promotes_plain_first_line_to_title`.
 - **Gate provider Z.ai/GLM risolto (test manuale utente, 2026-06-23):** Settings
   espone sia `Z.ai (GLM)` standard (`https://api.z.ai/api/paas/v4`) sia
   `Z.ai Coding (GLM)` (`https://api.z.ai/api/coding/paas/v4`); il preset coding

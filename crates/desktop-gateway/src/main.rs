@@ -12601,7 +12601,62 @@ fn xml_escape_text(value: &str) -> String {
         .replace('\'', "&apos;")
 }
 
-fn markdown_line_to_docx_paragraph(line: &str) -> String {
+fn docx_text_run(text: &str, bold: bool, italic: bool) -> String {
+    if text.is_empty() {
+        return String::new();
+    }
+    let mut props = String::new();
+    if bold {
+        props.push_str("<w:b/>");
+    }
+    if italic {
+        props.push_str("<w:i/>");
+    }
+    let props = if props.is_empty() {
+        String::new()
+    } else {
+        format!("<w:rPr>{props}</w:rPr>")
+    };
+    let space = if text.starts_with(char::is_whitespace) || text.ends_with(char::is_whitespace) {
+        r#" xml:space="preserve""#
+    } else {
+        ""
+    };
+    format!(
+        r#"<w:r>{props}<w:t{space}>{}</w:t></w:r>"#,
+        xml_escape_text(text)
+    )
+}
+
+fn markdown_inline_to_docx_runs(text: &str) -> String {
+    let mut runs = String::new();
+    let mut buffer = String::new();
+    let mut bold = false;
+    let mut italic = false;
+    let mut chars = text.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '*' && chars.peek() == Some(&'*') {
+            chars.next();
+            runs.push_str(&docx_text_run(&buffer, bold, italic));
+            buffer.clear();
+            bold = !bold;
+        } else if ch == '*' {
+            runs.push_str(&docx_text_run(&buffer, bold, italic));
+            buffer.clear();
+            italic = !italic;
+        } else {
+            buffer.push(ch);
+        }
+    }
+    runs.push_str(&docx_text_run(&buffer, bold, italic));
+    if runs.is_empty() {
+        docx_text_run(text, false, false)
+    } else {
+        runs
+    }
+}
+
+fn markdown_line_to_docx_paragraph(line: &str, force_heading1: bool) -> String {
     let trimmed = line.trim();
     let (style, text) = if let Some(text) = trimmed.strip_prefix("# ") {
         (Some("Heading1"), text.trim())
@@ -12611,6 +12666,16 @@ fn markdown_line_to_docx_paragraph(line: &str) -> String {
         (Some("Heading3"), text.trim())
     } else if let Some(text) = trimmed.strip_prefix("- ").or_else(|| trimmed.strip_prefix("* ")) {
         (Some("ListParagraph"), text.trim())
+    } else if let Some((number, _)) = trimmed.split_once(". ") {
+        if number.chars().all(|ch| ch.is_ascii_digit()) && !number.is_empty() {
+            (Some("ListParagraph"), trimmed)
+        } else if force_heading1 {
+            (Some("Heading1"), trimmed)
+        } else {
+            (None, trimmed)
+        }
+    } else if force_heading1 {
+        (Some("Heading1"), trimmed)
     } else {
         (None, trimmed)
     };
@@ -12618,8 +12683,8 @@ fn markdown_line_to_docx_paragraph(line: &str) -> String {
         .map(|style| format!(r#"<w:pPr><w:pStyle w:val="{style}"/></w:pPr>"#))
         .unwrap_or_default();
     format!(
-        r#"<w:p>{style_xml}<w:r><w:t>{}</w:t></w:r></w:p>"#,
-        xml_escape_text(text)
+        r#"<w:p>{style_xml}{}</w:p>"#,
+        markdown_inline_to_docx_runs(text)
     )
 }
 
@@ -12658,8 +12723,8 @@ fn markdown_table_to_docx(rows: &[Vec<String>]) -> String {
         out.push_str("<w:tr>");
         for cell in row {
             out.push_str(&format!(
-                r#"<w:tc><w:tcPr><w:tcW w:w="0" w:type="auto"/></w:tcPr><w:p><w:r><w:t>{}</w:t></w:r></w:p></w:tc>"#,
-                xml_escape_text(cell)
+                r#"<w:tc><w:tcPr><w:tcW w:w="0" w:type="auto"/></w:tcPr><w:p>{}</w:p></w:tc>"#,
+                markdown_inline_to_docx_runs(cell)
             ));
         }
         out.push_str("</w:tr>");
@@ -12673,10 +12738,13 @@ fn markdown_to_docx(title: &str, markdown: &str) -> Result<Vec<u8>, String> {
     let mut saw_content = false;
     let lines = markdown.lines().collect::<Vec<_>>();
     let mut i = 0;
+    let mut first_content = true;
     while i < lines.len() {
         let line = lines[i];
         if line.trim().is_empty() {
-            document_body.push_str("<w:p/>");
+            if saw_content {
+                document_body.push_str("<w:p/>");
+            }
             i += 1;
             continue;
         }
@@ -12695,20 +12763,22 @@ fn markdown_to_docx(title: &str, markdown: &str) -> Result<Vec<u8>, String> {
                     i += 1;
                 }
                 saw_content = true;
+                first_content = false;
                 document_body.push_str(&markdown_table_to_docx(&rows));
                 continue;
             }
         }
         saw_content = true;
-        document_body.push_str(&markdown_line_to_docx_paragraph(line));
+        document_body.push_str(&markdown_line_to_docx_paragraph(line, first_content));
+        first_content = false;
         i += 1;
     }
     if !saw_content {
-        document_body.push_str(&markdown_line_to_docx_paragraph(title));
+        document_body.push_str(&markdown_line_to_docx_paragraph(title, true));
     }
     let document_xml = format!(
         r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:xml="http://www.w3.org/XML/1998/namespace">
 <w:body>{document_body}<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/></w:sectPr></w:body>
 </w:document>"#
     );
@@ -12717,11 +12787,25 @@ fn markdown_to_docx(title: &str, markdown: &str) -> Result<Vec<u8>, String> {
 <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
 <Default Extension="xml" ContentType="application/xml"/>
 <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+<Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
 </Types>"#;
     let rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
 <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
 </Relationships>"#;
+    let document_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+</Relationships>"#;
+    let styles = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/><w:pPr><w:spacing w:after="160" w:line="276" w:lineRule="auto"/></w:pPr><w:rPr><w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr></w:style>
+<w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/><w:pPr><w:spacing w:before="240" w:after="120"/><w:outlineLvl w:val="0"/></w:pPr><w:rPr><w:b/><w:sz w:val="34"/><w:szCs w:val="34"/></w:rPr></w:style>
+<w:style w:type="paragraph" w:styleId="Heading2"><w:name w:val="heading 2"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/><w:pPr><w:spacing w:before="220" w:after="100"/><w:outlineLvl w:val="1"/></w:pPr><w:rPr><w:b/><w:sz w:val="28"/><w:szCs w:val="28"/></w:rPr></w:style>
+<w:style w:type="paragraph" w:styleId="Heading3"><w:name w:val="heading 3"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/><w:pPr><w:spacing w:before="180" w:after="80"/><w:outlineLvl w:val="2"/></w:pPr><w:rPr><w:b/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr></w:style>
+<w:style w:type="paragraph" w:styleId="ListParagraph"><w:name w:val="List Paragraph"/><w:basedOn w:val="Normal"/><w:qFormat/><w:pPr><w:ind w:left="720"/></w:pPr></w:style>
+<w:style w:type="table" w:styleId="TableGrid"><w:name w:val="Table Grid"/><w:basedOn w:val="TableNormal"/><w:uiPriority w:val="59"/><w:qFormat/><w:tblPr><w:tblBorders><w:top w:val="single" w:sz="4" w:space="0" w:color="B7B7B7"/><w:left w:val="single" w:sz="4" w:space="0" w:color="B7B7B7"/><w:bottom w:val="single" w:sz="4" w:space="0" w:color="B7B7B7"/><w:right w:val="single" w:sz="4" w:space="0" w:color="B7B7B7"/><w:insideH w:val="single" w:sz="4" w:space="0" w:color="B7B7B7"/><w:insideV w:val="single" w:sz="4" w:space="0" w:color="B7B7B7"/></w:tblBorders></w:tblPr></w:style>
+</w:styles>"#;
     let mut cursor = std::io::Cursor::new(Vec::new());
     {
         let mut writer = zip::ZipWriter::new(&mut cursor);
@@ -12742,6 +12826,19 @@ fn markdown_to_docx(title: &str, markdown: &str) -> Result<Vec<u8>, String> {
             .map_err(|error| error.to_string())?;
         writer
             .add_directory("word/", options)
+            .map_err(|error| error.to_string())?;
+        writer
+            .add_directory("word/_rels/", options)
+            .map_err(|error| error.to_string())?;
+        writer
+            .start_file("word/_rels/document.xml.rels", options)
+            .map_err(|error| error.to_string())?;
+        std::io::Write::write_all(&mut writer, document_rels.as_bytes())
+            .map_err(|error| error.to_string())?;
+        writer
+            .start_file("word/styles.xml", options)
+            .map_err(|error| error.to_string())?;
+        std::io::Write::write_all(&mut writer, styles.as_bytes())
             .map_err(|error| error.to_string())?;
         writer
             .start_file("word/document.xml", options)
@@ -36759,7 +36856,7 @@ mod tests {
 
     #[test]
     fn markdown_to_docx_writes_valid_word_package() {
-        let bytes = super::markdown_to_docx("brief", "# Titolo\n\n- Punto & valore").unwrap();
+        let bytes = super::markdown_to_docx("brief", "# Titolo\n\n- **Punto** & *valore*").unwrap();
         let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
         let mut document = String::new();
         std::io::Read::read_to_string(
@@ -36769,8 +36866,15 @@ mod tests {
         .unwrap();
 
         assert!(document.contains("Titolo"), "{document}");
-        assert!(document.contains("Punto &amp; valore"), "{document}");
+        assert!(document.contains("<w:b/>"), "{document}");
+        assert!(document.contains("<w:i/>"), "{document}");
+        assert!(document.contains("Punto"), "{document}");
+        assert!(document.contains("&amp;"), "{document}");
+        assert!(!document.contains("**"), "{document}");
+        assert!(!document.contains("*valore*"), "{document}");
         assert!(archive.by_name("[Content_Types].xml").is_ok());
+        assert!(archive.by_name("word/styles.xml").is_ok());
+        assert!(archive.by_name("word/_rels/document.xml.rels").is_ok());
     }
 
     #[test]
@@ -36797,6 +36901,23 @@ mod tests {
         assert!(document.contains("Metrica"), "{document}");
         assert!(document.contains("120 &lt; 150"), "{document}");
         assert!(!document.contains("---:"), "{document}");
+    }
+
+    #[test]
+    fn markdown_to_docx_promotes_plain_first_line_to_title() {
+        let bytes =
+            super::markdown_to_docx("brief", "Titolo documento\n\n1. Primo passo").unwrap();
+        let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+        let mut document = String::new();
+        std::io::Read::read_to_string(
+            &mut archive.by_name("word/document.xml").unwrap(),
+            &mut document,
+        )
+        .unwrap();
+
+        assert!(document.contains(r#"<w:pStyle w:val="Heading1"/>"#), "{document}");
+        assert!(document.contains(r#"<w:pStyle w:val="ListParagraph"/>"#), "{document}");
+        assert!(document.contains("1. Primo passo"), "{document}");
     }
 
     #[test]
