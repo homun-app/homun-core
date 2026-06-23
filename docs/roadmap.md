@@ -240,6 +240,11 @@ primo percorso locale verde:
     scrittura degli artifact `.md`/`.pdf`/`.docx`: linee troppo lunghe, token
     non spezzabili e tabelle pipe con numero celle incoerente bloccano la
     consegna fragile con errore QA deterministico.
+58. WS7 expanded Monet seed catalog — il catalogo built-in `monet/*` copre ora
+    11 template PMI: pitch, executive update, project plan, sales proposal,
+    technical brief, one-pager, case study, meeting minutes, launch plan,
+    incident review e product roadmap. Sono ancora capability di catalogo non
+    callable, risolte nei token `design_*` già supportati.
 
 Prima di pubblicare/taggare resta prudente ripetere lo smoke manuale in-app su
 una automazione schedulata reale con il binario aggiornato. Il primo smoke ha
@@ -306,6 +311,7 @@ ottava slice: template catalog provider `monet/*` read-only nel registry, con
 senza toccare i workflow; decima slice: manifest JSON locale caricabile e
 validato; undicesima slice: QA leggibilità deck su font-size/contrasto;
 dodicesima slice: QA Markdown per documenti prima di scrivere MD/PDF/DOCX.
-Prossima slice: template library più ampia/adapter esterno.
+Tredicesima slice: catalogo seed `monet/*` ampliato a 11 template PMI. Prossima
+slice: adapter esterno/manifest più ricchi e QA più profonda.
 `make_research` e `make_meeting` restano futuri.
 Il contratto corrente della memoria è in [MEMORIA.md](MEMORIA.md).

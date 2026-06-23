@@ -6105,6 +6105,96 @@ fn local_template_catalog_seed(provider: &str) -> Vec<TemplateCatalogEntry> {
             &["summary", "architecture", "tradeoffs", "implementation", "verification"],
             "technical brief architecture implementation tradeoffs verification engineering documento tecnico architettura",
         ),
+        template_catalog_entry(
+            provider,
+            "monet/company-one-pager-clean-01",
+            "Company One-Pager Clean",
+            "document",
+            "One-page company overview for customers, partners or investors.",
+            &["one pager", "company overview", "partner brief"],
+            &["customers", "partners", "investors"],
+            "sales_proposal",
+            Some("clean_corporate"),
+            Some("executive"),
+            &["kpi_grid", "quote_callout", "comparison_table"],
+            &["headline", "company", "proof", "offer", "contact"],
+            "one pager company overview partner brief investor customer azienda presentazione sintetica scheda commerciale",
+        ),
+        template_catalog_entry(
+            provider,
+            "monet/customer-case-study-proof-01",
+            "Customer Case Study Proof",
+            "document",
+            "Customer case study template focused on situation, solution, proof metrics and outcomes.",
+            &["case study", "customer proof", "success story"],
+            &["customers", "sales", "marketing"],
+            "sales_proposal",
+            Some("warm_editorial"),
+            Some("sales_pitch"),
+            &["quote_callout", "kpi_grid", "timeline"],
+            &["customer", "challenge", "solution", "proof", "outcomes"],
+            "customer case study proof success story risultati cliente caso studio metriche outcomes marketing vendite",
+        ),
+        template_catalog_entry(
+            provider,
+            "monet/meeting-minutes-executive-01",
+            "Meeting Minutes Executive",
+            "document",
+            "Executive meeting minutes with decisions, owners, open actions and follow-up timeline.",
+            &["meeting minutes", "decision log", "action items"],
+            &["executives", "teams", "project leads"],
+            "executive_update",
+            Some("clean_corporate"),
+            Some("executive"),
+            &["process_steps", "risks_table", "timeline"],
+            &["context", "decisions", "actions", "risks", "follow-up"],
+            "meeting minutes verbale riunione decisioni azioni action items owner follow up executive team",
+        ),
+        template_catalog_entry(
+            provider,
+            "monet/product-launch-plan-01",
+            "Product Launch Plan",
+            "presentation",
+            "Product launch plan deck covering positioning, channels, timeline, risks and launch metrics.",
+            &["product launch", "go to market", "launch plan"],
+            &["product", "marketing", "sales"],
+            "project_plan",
+            Some("soft_gradient"),
+            Some("sales_pitch"),
+            &["timeline", "comparison_table", "kpi_grid", "risks_table"],
+            &["cover", "positioning", "channels", "timeline", "metrics", "risks"],
+            "product launch go to market lancio prodotto piano marketing sales canali timeline metriche rischi",
+        ),
+        template_catalog_entry(
+            provider,
+            "monet/incident-review-technical-01",
+            "Incident Review Technical",
+            "document",
+            "Technical incident review with timeline, root cause, impact, remediation and prevention.",
+            &["incident review", "postmortem", "root cause analysis"],
+            &["engineering", "operations", "leadership"],
+            "technical_brief",
+            Some("minimal_mono"),
+            Some("technical"),
+            &["timeline", "process_steps", "risks_table"],
+            &["summary", "impact", "timeline", "root cause", "remediation", "prevention"],
+            "incident review postmortem root cause analysis RCA timeline remediation prevenzione incidente tecnico operations",
+        ),
+        template_catalog_entry(
+            provider,
+            "monet/product-roadmap-board-01",
+            "Product Roadmap Board",
+            "presentation",
+            "Board-level product roadmap with priorities, releases, dependencies, risks and asks.",
+            &["product roadmap", "release plan", "board roadmap"],
+            &["board", "product", "engineering"],
+            "project_plan",
+            Some("high_contrast"),
+            Some("executive"),
+            &["timeline", "kpi_grid", "risks_table"],
+            &["cover", "priorities", "roadmap", "dependencies", "risks", "asks"],
+            "product roadmap board release plan priorità rilasci dipendenze rischi richieste CDA prodotto engineering",
+        ),
     ]
 }
 
@@ -38371,15 +38461,44 @@ mod tests {
         let provider = super::LocalTemplateCatalogProvider;
         let entries = super::TemplateCatalogProvider::entries(&provider);
 
+        assert!(entries.len() >= 11);
         assert!(entries
             .iter()
             .any(|entry| entry.id == "monet/startup-pitch-clean-01"));
+        assert!(entries
+            .iter()
+            .any(|entry| entry.id == "monet/meeting-minutes-executive-01"));
+        assert!(entries
+            .iter()
+            .any(|entry| entry.id == "monet/customer-case-study-proof-01"));
         assert!(entries.iter().all(|entry| entry.provider == "local_seed"));
         assert_eq!(
             super::TemplateCatalogProvider::get(&provider, "monet/sales-proposal-warm-01")
                 .map(|entry| entry.design_template),
             Some("sales_proposal".to_string()),
         );
+        assert_eq!(
+            super::TemplateCatalogProvider::get(&provider, "monet/product-roadmap-board-01")
+                .map(|entry| entry.design_template),
+            Some("project_plan".to_string()),
+        );
+    }
+
+    #[test]
+    fn expanded_template_catalog_routes_common_pmi_deliverables() {
+        let corpus = super::template_catalog_capability_entries();
+
+        let meeting = super::bm25_rank(&corpus, "verbale riunione decisioni azioni", 1)
+            .into_iter()
+            .next()
+            .expect("meeting template");
+        assert_eq!(meeting.key, "monet/meeting-minutes-executive-01");
+
+        let case_study = super::bm25_rank(&corpus, "customer case study risultati proof", 1)
+            .into_iter()
+            .next()
+            .expect("case study template");
+        assert_eq!(case_study.key, "monet/customer-case-study-proof-01");
     }
 
     #[test]

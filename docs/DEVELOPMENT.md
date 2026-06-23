@@ -101,8 +101,12 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   `make_document` applica un guardrail QA deterministico al Markdown generato
   prima di scrivere artifact MD/PDF/DOCX: linee troppo lunghe, token non
   spezzabili e righe tabella con numero celle incoerente bloccano la consegna.
-  Prossimo asse: template library più ampia/adapter esterni. `make_research` e
-  `make_meeting` restano dopo questo asse.
+  Tredicesima slice locale/verde: il seed `monet/*` sale da 5 a 11 template
+  PMI reali (one-pager, case study, verbale riunione, launch plan, incident
+  review, product roadmap) sempre come entry catalogo non callable risolte nei
+  token esistenti. Prossimo asse: adapter esterni/manifest più ricchi e QA
+  ancora più profonda. `make_research` e `make_meeting` restano dopo questo
+  asse.
 - **WS2-3.1 PASSATA in runtime (2026-06-23):** gli artifact scritti via
   Filesystem MCP dentro la root progetto vengono registrati come
   `memory_type="artifact"` + entity grafo `artifact` + embedding. Gate:

@@ -824,6 +824,14 @@ ragionato il contratto degli strumenti `make_*` creati dall'harness. ADR 0011
   `document_quality_guardrail_accepts_structured_markdown`,
   `document_quality_guardrail_flags_unrenderable_markdown`,
   `make_document_generation_options_are_explicit_and_bounded`.
+  **Tredicesima slice template library (2026-06-23, locale/verde):**
+  il seed `monet/*` passa da 5 a 11 template coprendo deliverable PMI comuni:
+  company one-pager, customer case study, meeting minutes/verbale con azioni,
+  product launch plan, incident review tecnico e product roadmap board-level.
+  Sono ancora entry catalogo cercabili e non callable, risolte nei token
+  `design_*` esistenti senza introdurre nuovi renderer o tool. Test mirati:
+  `local_template_catalog_provider_exposes_seed_templates`,
+  `expanded_template_catalog_routes_common_pmi_deliverables`.
 - ☐ **7.1b (futuro)** Portare ricerca/meeting al livello del deck solo dopo il
   chiarimento sul contratto strumenti: `make_research` e `make_meeting` non sono
   essenziali per la prossima release.
