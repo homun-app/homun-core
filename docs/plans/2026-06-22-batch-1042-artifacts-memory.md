@@ -193,6 +193,20 @@ modelli deboli/locali. Invarianti: monotonìa, limitatezza, identità non inferi
     `deliverable_design_template_expands_to_defaults_without_overriding_explicit_args`,
     `make_document_generation_options_are_explicit_and_bounded`,
     `make_deck_workflow_definition_projects_execution_plan`.
+    **Sesta slice design_theme + QA floor (2026-06-23, locale/verde):**
+    `make_document` e `make_deck` espongono lo stesso `design_theme`
+    (`clean_corporate`, `high_contrast`, `warm_editorial`, `minimal_mono`,
+    `soft_gradient`). Il tema è token dichiarativo del registry: entra negli
+    args workflow e nei prompt; lato deck viene materializzato in `theme`
+    renderer-compatible (`primary`, `secondary`, `accent`, font) prima di
+    `deck_render.py`. Aggiunto anche un primo guardrail QA harness-owned che
+    rileva/accorcia titoli e bullet fuori soglia prima del render, evitando
+    overflow banali senza affidarsi al modello. Test mirati:
+    `deliverable_design_theme_schema_is_shared_by_deck_and_document`,
+    `deck_design_theme_materializes_renderer_theme_tokens`,
+    `deck_quality_guardrails_bound_text_before_render`,
+    `make_document_generation_options_are_explicit_and_bounded`,
+    `make_deck_workflow_definition_projects_execution_plan`.
   - ☐ **Backlog deliberato:** `make_research` / `make_meeting` restano in fondo
     finché non è chiarito il contratto degli strumenti creati dall'harness.
 - ✅ **Fase 4 (2026-06-23, locale/verde)** — router workflow|agent + primo
@@ -746,7 +760,9 @@ ragionato il contratto degli strumenti `make_*` creati dall'harness. ADR 0011
   lato deck i componenti arrivano già a layout fisici `deck_render.py`; lato
   documenti arrivano a blocchi/tabelle Markdown renderizzate in DOCX; i
   `design_template` condivisi espandono ora default profilo/componenti restando
-  override-safe. Restano theme tokens, template library più ampia e QA visuale.
+  override-safe; `design_theme` condiviso materializza token renderer-compatible
+  lato deck e abilita un primo guardrail QA sui testi. Restano QA visuale
+  renderizzata, template library più ampia e controlli su immagini/leggibilità.
 - ☐ **7.1b (futuro)** Portare ricerca/meeting al livello del deck solo dopo il
   chiarimento sul contratto strumenti: `make_research` e `make_meeting` non sono
   essenziali per la prossima release.

@@ -202,8 +202,15 @@ primo percorso locale verde:
     `project_plan`, `technical_brief`, `sales_proposal`). Il template espande in
     default `design_profile` + `design_components`, ma gli argomenti espliciti
     restano sovrani; il workflow registra il template scelto e i prompt ricevono
-    una direttiva medium-specific. Non è ancora la gallery visuale completa:
-    mancano theme tokens e QA renderizzata.
+    una direttiva medium-specific. Non è ancora la gallery visuale completa; i
+    theme token e il primo floor QA arrivano nella slice successiva.
+51. WS7 shared theme tokens + QA floor — `make_document` e `make_deck`
+    espongono `design_theme` condiviso (`clean_corporate`, `high_contrast`,
+    `warm_editorial`, `minimal_mono`, `soft_gradient`). Lato deck il tema viene
+    materializzato in token renderer-compatible prima del render; il workflow
+    applica anche un primo guardrail QA deterministico che rileva e corregge
+    titoli/bullet troppo lunghi. Resta da fare QA visuale vera su output
+    renderizzato e controlli immagini/leggibilità.
 
 Prima di pubblicare/taggare resta prudente ripetere lo smoke manuale in-app su
 una automazione schedulata reale con il binario aggiornato. Il primo smoke ha
@@ -261,7 +268,8 @@ registry, non keyword o nuovi tool ad hoc. Prima slice locale/verde:
 rischi; terza slice: materializzazione fisica lato deck nei layout `kpi`,
 `quote` e `two_column`; quarta slice: materializzazione lato documenti in
 blocchi/tabelle Markdown-DOCX; quinta slice: `design_template` condiviso con
-default profilo/componenti override-safe. Prossima slice: theme tokens, QA
-visuale renderizzata o template library più ampia. `make_research` e
-`make_meeting` restano futuri.
+default profilo/componenti override-safe; sesta slice: `design_theme` condiviso
+e primo guardrail QA testuale prima del render. Prossima slice: QA visuale
+renderizzata su screenshot/PDF/HTML o template library più ampia. `make_research`
+e `make_meeting` restano futuri.
 Il contratto corrente della memoria è in [MEMORIA.md](MEMORIA.md).

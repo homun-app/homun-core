@@ -12063,6 +12063,7 @@ fn make_deck_tool_schema() -> serde_json::Value {
                     "language": { "type": "string", "description": "Deck language code, e.g. 'it' or 'en'. Default: the user's language." },
                     "slides": { "type": "integer", "description": "Desired number of slides (3-12). Default 6." },
                     "design_template": deliverable_design_template_schema(),
+                    "design_theme": deliverable_design_theme_schema(),
                     "design_profile": deliverable_design_profile_schema(),
                     "design_components": deliverable_design_components_schema()
                 },
@@ -12103,6 +12104,7 @@ fn make_document_tool_schema() -> serde_json::Value {
                         "enum": ["standard", "one_page", "executive_brief", "detailed_report", "proposal"]
                     },
                     "design_template": deliverable_design_template_schema(),
+                    "design_theme": deliverable_design_theme_schema(),
                     "design_profile": deliverable_design_profile_schema(),
                     "design_components": deliverable_design_components_schema(),
                     "sections": {
@@ -12139,6 +12141,14 @@ fn deliverable_design_template_schema() -> serde_json::Value {
     })
 }
 
+fn deliverable_design_theme_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "string",
+        "description": "Shared visual theme token explicitly requested by the user. Applies across presentations and documents. Preserve explicit intent; omit when unspecified.",
+        "enum": DELIVERABLE_DESIGN_THEMES
+    })
+}
+
 fn deliverable_design_profile_schema() -> serde_json::Value {
     serde_json::json!({
         "type": "string",
@@ -12163,6 +12173,14 @@ const DELIVERABLE_DESIGN_TEMPLATES: &[&str] = &[
     "sales_proposal",
 ];
 
+const DELIVERABLE_DESIGN_THEMES: &[&str] = &[
+    "clean_corporate",
+    "high_contrast",
+    "warm_editorial",
+    "minimal_mono",
+    "soft_gradient",
+];
+
 const DELIVERABLE_DESIGN_COMPONENTS: &[&str] = &[
     "kpi_grid",
     "timeline",
@@ -12178,6 +12196,14 @@ fn deliverable_design_template(parsed: &serde_json::Value) -> Option<String> {
         .and_then(|value| value.as_str())
         .map(|value| value.trim().to_ascii_lowercase())
         .filter(|value| DELIVERABLE_DESIGN_TEMPLATES.contains(&value.as_str()))
+}
+
+fn deliverable_design_theme(parsed: &serde_json::Value) -> Option<String> {
+    parsed
+        .get("design_theme")
+        .and_then(|value| value.as_str())
+        .map(|value| value.trim().to_ascii_lowercase())
+        .filter(|value| DELIVERABLE_DESIGN_THEMES.contains(&value.as_str()))
 }
 
 fn deliverable_template_defaults(
@@ -12292,6 +12318,43 @@ fn deliverable_design_template_directive(template: Option<&str>, medium: &str) -
         }
         (Some("sales_proposal"), "document") => {
             "Design template: sales_proposal. Structure around client problem, proposed solution, differentiators, scope, timeline and next action."
+        }
+        _ => return None,
+    };
+    Some(directive.to_string())
+}
+
+fn deliverable_design_theme_directive(theme: Option<&str>, medium: &str) -> Option<String> {
+    let directive = match (theme, medium) {
+        (Some("clean_corporate"), "deck") => {
+            "Design theme: clean_corporate. Use a crisp SaaS/business visual rhythm, clear whitespace, brand-led accents and calm evidence hierarchy."
+        }
+        (Some("clean_corporate"), "document") => {
+            "Design theme: clean_corporate. Use a crisp business document style, compact sections, clear tables and calm evidence hierarchy."
+        }
+        (Some("high_contrast"), "deck") => {
+            "Design theme: high_contrast. Use strong contrast, bold hierarchy and restrained accent colour for decision-ready emphasis."
+        }
+        (Some("high_contrast"), "document") => {
+            "Design theme: high_contrast. Use strong hierarchy, short headings and high-signal tables with minimal decorative language."
+        }
+        (Some("warm_editorial"), "deck") => {
+            "Design theme: warm_editorial. Use a warmer editorial rhythm, narrative pacing and human-readable section titles."
+        }
+        (Some("warm_editorial"), "document") => {
+            "Design theme: warm_editorial. Use a warmer editorial narrative, readable transitions and polished section rhythm."
+        }
+        (Some("minimal_mono"), "deck") => {
+            "Design theme: minimal_mono. Use sparse composition, monochrome structure and only one accent for orientation."
+        }
+        (Some("minimal_mono"), "document") => {
+            "Design theme: minimal_mono. Use sparse structure, short paragraphs, compact tables and no ornamental prose."
+        }
+        (Some("soft_gradient"), "deck") => {
+            "Design theme: soft_gradient. Use soft depth, restrained gradients and calm modern visual hierarchy."
+        }
+        (Some("soft_gradient"), "document") => {
+            "Design theme: soft_gradient. Use a modern soft hierarchy, clear section grouping and concise visual tables."
         }
         _ => return None,
     };
@@ -12619,6 +12682,108 @@ fn apply_deck_design_components(deck: &mut serde_json::Value, components: &[Stri
     }
 }
 
+fn design_theme_tokens(theme: Option<&str>, brand: &BrandKit) -> serde_json::Value {
+    let (primary, secondary, accent, heading_font, body_font) = match theme {
+        Some("high_contrast") => ("#111827", "#000000", "#f59e0b", "Inter", "Inter"),
+        Some("warm_editorial") => ("#7c2d12", "#431407", "#f97316", "Georgia", "Inter"),
+        Some("minimal_mono") => ("#111827", "#374151", "#6b7280", "Inter", "Inter"),
+        Some("soft_gradient") => ("#0f766e", "#164e63", "#14b8a6", "Inter", "Inter"),
+        Some("clean_corporate") | None | Some(_) => (
+            brand.primary_color.as_str(),
+            brand.secondary_color.as_str(),
+            brand.accent_color.as_str(),
+            brand.heading_font.as_str(),
+            brand.body_font.as_str(),
+        ),
+    };
+    serde_json::json!({
+        "organization": brand.organization,
+        "primary": primary,
+        "secondary": secondary,
+        "accent": accent,
+        "heading_font": heading_font,
+        "body_font": body_font,
+    })
+}
+
+fn apply_deck_design_theme(deck: &mut serde_json::Value, theme: Option<&str>, brand: &BrandKit) {
+    if theme.is_none() {
+        return;
+    }
+    deck["theme"] = design_theme_tokens(theme, brand);
+}
+
+fn clip_chars(value: &str, max_chars: usize) -> String {
+    if value.chars().count() <= max_chars {
+        return value.to_string();
+    }
+    let mut clipped = value.chars().take(max_chars.saturating_sub(1)).collect::<String>();
+    clipped.push('…');
+    clipped
+}
+
+fn deck_quality_guardrail_issues(deck: &serde_json::Value) -> Vec<String> {
+    let mut issues = Vec::new();
+    let Some(slides) = deck.get("slides").and_then(|value| value.as_array()) else {
+        return issues;
+    };
+    for (index, slide) in slides.iter().enumerate() {
+        let slide_no = index + 1;
+        let title_len = slide
+            .get("title")
+            .and_then(|value| value.as_str())
+            .map(|value| value.chars().count())
+            .unwrap_or(0);
+        if title_len > 72 {
+            issues.push(format!("slide {slide_no}: title exceeds 72 chars"));
+        }
+        let bullet_count = slide
+            .get("bullets")
+            .and_then(|value| value.as_array())
+            .map(|values| values.len())
+            .unwrap_or(0);
+        if bullet_count > 4 {
+            issues.push(format!("slide {slide_no}: more than 4 bullets"));
+        }
+        if let Some(bullets) = slide.get("bullets").and_then(|value| value.as_array()) {
+            for (bullet_index, bullet) in bullets.iter().enumerate() {
+                let len = bullet
+                    .as_str()
+                    .map(|value| value.chars().count())
+                    .unwrap_or(0);
+                if len > 150 {
+                    issues.push(format!(
+                        "slide {slide_no}: bullet {} exceeds 150 chars",
+                        bullet_index + 1
+                    ));
+                }
+            }
+        }
+    }
+    issues
+}
+
+fn apply_deck_quality_guardrails(deck: &mut serde_json::Value) -> Vec<String> {
+    let issues = deck_quality_guardrail_issues(deck);
+    let Some(slides) = deck.get_mut("slides").and_then(|value| value.as_array_mut()) else {
+        return issues;
+    };
+    for slide in slides {
+        if let Some(title) = slide.get("title").and_then(|value| value.as_str()) {
+            slide["title"] = serde_json::json!(clip_chars(title, 72));
+        }
+        if let Some(bullets) = slide.get_mut("bullets").and_then(|value| value.as_array_mut()) {
+            bullets.truncate(4);
+            for bullet in bullets {
+                if let Some(text) = bullet.as_str() {
+                    *bullet = serde_json::json!(clip_chars(text, 150));
+                }
+            }
+        }
+    }
+    issues
+}
+
 /// Produce the deck CONTENT as schema-enforced JSON. Uses the orchestrator-role
 /// endpoint with `response_format: json_schema` (constrained decoding — the
 /// cross-model floor), degrading ONCE to `json_object` on a 400 (e.g.
@@ -12633,6 +12798,7 @@ async fn generate_deck_content(
     slides: usize,
     language: &str,
     design_template: Option<&str>,
+    design_theme: Option<&str>,
     design_profile: Option<&str>,
     design_components: &[String],
 ) -> Result<serde_json::Value, String> {
@@ -12663,6 +12829,8 @@ async fn generate_deck_content(
         deliverable_design_profile_directive(design_profile, "deck").unwrap_or_default();
     let template_directive =
         deliverable_design_template_directive(design_template, "deck").unwrap_or_default();
+    let theme_directive =
+        deliverable_design_theme_directive(design_theme, "deck").unwrap_or_default();
     let component_directives =
         deliverable_design_component_directives(design_components, "deck").join(" ");
     let system = format!(
@@ -12674,6 +12842,7 @@ numbers over adjectives, one idea per slide. Write speaker `notes` for the subst
 Set want_image=true on the cover and on AT MOST two of the most visual slides (false on the rest). \
 {design_directive} \
 {template_directive} \
+{theme_directive} \
 {component_directives} \
 Brand: organization «{org}», accent colour {accent}. Do NOT output colours, fonts, logos or file \
 names — textual content only. Return a JSON object with EXACTLY these top-level keys: \"title\" \
@@ -12778,6 +12947,7 @@ struct DocumentGenerationOptions {
     tone: Option<String>,
     layout_profile: Option<String>,
     design_template: Option<String>,
+    design_theme: Option<String>,
     design_profile: Option<String>,
     design_components: Vec<String>,
     sections: Vec<String>,
@@ -12831,6 +13001,7 @@ fn document_generation_options(parsed: &serde_json::Value) -> DocumentGeneration
         .map(|value| value.trim().to_ascii_lowercase())
         .filter(|value| allowed_layout_profiles.contains(&value.as_str()));
     let design_template = deliverable_design_template(parsed);
+    let design_theme = deliverable_design_theme(parsed);
     let design_profile = resolved_deliverable_design_profile(parsed, design_template.as_deref());
     let design_components =
         resolved_deliverable_design_components(parsed, design_template.as_deref());
@@ -12857,6 +13028,7 @@ fn document_generation_options(parsed: &serde_json::Value) -> DocumentGeneration
         tone,
         layout_profile,
         design_template,
+        design_theme,
         design_profile,
         design_components,
         sections,
@@ -12894,6 +13066,11 @@ fn document_generation_directives(options: &DocumentGenerationOptions) -> String
     }
     if let Some(directive) =
         deliverable_design_template_directive(options.design_template.as_deref(), "document")
+    {
+        directives.push(directive);
+    }
+    if let Some(directive) =
+        deliverable_design_theme_directive(options.design_theme.as_deref(), "document")
     {
         directives.push(directive);
     }
@@ -16740,6 +16917,7 @@ available tools (for data from the web use the browser: browser_navigate on the 
                             .unwrap_or(6)
                             .clamp(3, 12) as usize;
                         let design_template = deliverable_design_template(&parsed);
+                        let design_theme = deliverable_design_theme(&parsed);
                         let design_profile =
                             resolved_deliverable_design_profile(&parsed, design_template.as_deref());
                         let design_components = resolved_deliverable_design_components(
@@ -16756,6 +16934,7 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                     "language": language.clone(),
                                     "slides": slides,
                                     "design_template": design_template.clone(),
+                                    "design_theme": design_theme.clone(),
                                     "design_profile": design_profile.clone(),
                                     "design_components": design_components.clone(),
                                 }),
@@ -16779,6 +16958,7 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                                 "language": language.clone(),
                                                 "slides": slides,
                                                 "design_template": design_template.clone(),
+                                                "design_theme": design_theme.clone(),
                                                 "design_profile": design_profile.clone(),
                                                 "design_components": design_components.clone(),
                                             }),
@@ -16810,6 +16990,7 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                 slides,
                                 &language,
                                 design_template.as_deref(),
+                                design_theme.as_deref(),
                                 design_profile.as_deref(),
                                 &design_components,
                             )
@@ -16818,6 +16999,24 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                 Err(e) => format!("Could not generate deck content: {e}"),
                                 Ok(mut deck) => {
                                     apply_deck_design_components(&mut deck, &design_components);
+                                    apply_deck_design_theme(
+                                        &mut deck,
+                                        design_theme.as_deref(),
+                                        &brand,
+                                    );
+                                    let quality_issues = apply_deck_quality_guardrails(&mut deck);
+                                    if !quality_issues.is_empty() {
+                                        let _ = emit_stream_event(
+                                            &tx,
+                                            GenerateStreamEvent::Delta {
+                                                text: format!(
+                                                    "‹‹ACT››🔎 Deck QA adjusted {} layout-risk items‹‹/ACT››",
+                                                    quality_issues.len()
+                                                ),
+                                            },
+                                        )
+                                        .await;
+                                    }
                                     // 3) images for want_image slides (cap 3, cover first).
                                     let accent = brand.accent_color.clone();
                                     let mut made = 0usize;
@@ -17004,6 +17203,7 @@ Absolutely NO text, NO words, NO letters, NO numbers, NO captions, NO logos."
                                 "tone": document_options.tone.clone(),
                                 "layout_profile": document_options.layout_profile.clone(),
                                 "design_template": document_options.design_template.clone(),
+                                "design_theme": document_options.design_theme.clone(),
                                 "design_profile": document_options.design_profile.clone(),
                                 "design_components": document_options.design_components.clone(),
                                 "sections": document_options.sections.clone(),
@@ -37243,6 +37443,7 @@ mod tests {
                 "language": "en",
                 "slides": 6,
                 "design_template": "executive_update",
+                "design_theme": "high_contrast",
                 "design_profile": "executive",
                 "design_components": ["kpi_grid", "timeline"],
             }),
@@ -37271,6 +37472,13 @@ mod tests {
                 .pointer("/input/design_template")
                 .and_then(|value| value.as_str()),
             Some("executive_update"),
+        );
+        assert_eq!(
+            plan.steps[0]
+                .arguments
+                .pointer("/input/design_theme")
+                .and_then(|value| value.as_str()),
+            Some("high_contrast"),
         );
         assert_eq!(
             plan.steps[0]
@@ -37819,6 +38027,40 @@ mod tests {
     }
 
     #[test]
+    fn deliverable_design_theme_schema_is_shared_by_deck_and_document() {
+        let deck_schema = super::make_deck_tool_schema();
+        let document_schema = super::make_document_tool_schema();
+        let expected = Some(vec![
+            "clean_corporate",
+            "high_contrast",
+            "warm_editorial",
+            "minimal_mono",
+            "soft_gradient",
+        ]);
+        let deck_themes = deck_schema
+            .pointer("/function/parameters/properties/design_theme/enum")
+            .and_then(|value| value.as_array())
+            .map(|values| {
+                values
+                    .iter()
+                    .filter_map(|value| value.as_str())
+                    .collect::<Vec<_>>()
+            });
+        let document_themes = document_schema
+            .pointer("/function/parameters/properties/design_theme/enum")
+            .and_then(|value| value.as_array())
+            .map(|values| {
+                values
+                    .iter()
+                    .filter_map(|value| value.as_str())
+                    .collect::<Vec<_>>()
+            });
+
+        assert_eq!(deck_themes, expected);
+        assert_eq!(document_themes, expected);
+    }
+
+    #[test]
     fn deliverable_design_template_expands_to_defaults_without_overriding_explicit_args() {
         let parsed = serde_json::json!({ "design_template": "startup_pitch" });
 
@@ -37942,6 +38184,73 @@ mod tests {
     }
 
     #[test]
+    fn deck_design_theme_materializes_renderer_theme_tokens() {
+        let mut deck = serde_json::json!({
+            "title": "Homun",
+            "subtitle": "",
+            "slides": [
+                { "layout": "cover", "title": "Homun", "bullets": [], "notes": "", "want_image": true }
+            ]
+        });
+        let brand = super::BrandKit {
+            organization: "Homun".to_string(),
+            primary_color: "#123456".to_string(),
+            secondary_color: "#234567".to_string(),
+            accent_color: "#345678".to_string(),
+            heading_font: "Inter".to_string(),
+            body_font: "Inter".to_string(),
+            logo_data_url: String::new(),
+        };
+
+        super::apply_deck_design_theme(&mut deck, Some("warm_editorial"), &brand);
+
+        assert_eq!(deck.pointer("/theme/organization").and_then(|v| v.as_str()), Some("Homun"));
+        assert_eq!(deck.pointer("/theme/primary").and_then(|v| v.as_str()), Some("#7c2d12"));
+        assert_eq!(deck.pointer("/theme/secondary").and_then(|v| v.as_str()), Some("#431407"));
+        assert_eq!(deck.pointer("/theme/accent").and_then(|v| v.as_str()), Some("#f97316"));
+        assert_eq!(deck.pointer("/theme/heading_font").and_then(|v| v.as_str()), Some("Georgia"));
+    }
+
+    #[test]
+    fn deck_quality_guardrails_bound_text_before_render() {
+        let long_title = "A".repeat(90);
+        let long_bullet = "B".repeat(180);
+        let mut deck = serde_json::json!({
+            "title": "Homun",
+            "subtitle": "",
+            "slides": [
+                {
+                    "layout": "bullets",
+                    "title": long_title,
+                    "bullets": [
+                        long_bullet,
+                        "two",
+                        "three",
+                        "four",
+                        "five"
+                    ],
+                    "notes": "",
+                    "want_image": false
+                }
+            ]
+        });
+
+        let issues = super::apply_deck_quality_guardrails(&mut deck);
+        let slide = deck.pointer("/slides/0").expect("slide");
+
+        assert_eq!(issues.len(), 3, "{issues:?}");
+        assert!(
+            slide["title"].as_str().unwrap().chars().count() <= 72,
+            "{slide}"
+        );
+        assert_eq!(slide["bullets"].as_array().unwrap().len(), 4);
+        assert!(
+            slide["bullets"][0].as_str().unwrap().chars().count() <= 150,
+            "{slide}"
+        );
+    }
+
+    #[test]
     fn document_design_components_append_renderable_markdown_blocks() {
         let markdown = "# Homun brief\n\nARR +42% from retained teams.\n\n- Ship document workflow\n- Improve deck quality\n- Reduce risk";
         let components = vec![
@@ -37990,6 +38299,7 @@ mod tests {
             "tone": "executive",
             "layout_profile": "executive_brief",
             "design_template": "executive_update",
+            "design_theme": "minimal_mono",
             "design_profile": "technical",
             "design_components": [
                 "kpi_grid",
@@ -38010,6 +38320,7 @@ mod tests {
         assert_eq!(options.tone.as_deref(), Some("executive"));
         assert_eq!(options.layout_profile.as_deref(), Some("executive_brief"));
         assert_eq!(options.design_template.as_deref(), Some("executive_update"));
+        assert_eq!(options.design_theme.as_deref(), Some("minimal_mono"));
         assert_eq!(options.design_profile.as_deref(), Some("technical"));
         assert_eq!(
             options.design_components,
@@ -38035,6 +38346,7 @@ mod tests {
         assert!(directives.contains("Layout profile: executive_brief."), "{directives}");
         assert!(directives.contains("decision-ready headings"), "{directives}");
         assert!(directives.contains("Design template: executive_update."), "{directives}");
+        assert!(directives.contains("Design theme: minimal_mono."), "{directives}");
         assert!(directives.contains("Design profile: technical."), "{directives}");
         assert!(directives.contains("implementation details"), "{directives}");
         assert!(directives.contains("Component: kpi_grid."), "{directives}");
@@ -38050,6 +38362,7 @@ mod tests {
             "tone": "friendly",
             "layout_profile": "marketing_site",
             "design_template": "cinematic",
+            "design_theme": "neon",
             "design_profile": "cinematic",
             "design_components": ["hero", "kpi_grid"],
             "sections": ["Valida"]
@@ -38058,6 +38371,7 @@ mod tests {
         assert_eq!(ignored.tone, None);
         assert_eq!(ignored.layout_profile, None);
         assert_eq!(ignored.design_template, None);
+        assert_eq!(ignored.design_theme, None);
         assert_eq!(ignored.design_profile, None);
         assert_eq!(ignored.design_components, vec!["kpi_grid".to_string()]);
         assert_eq!(ignored.sections, vec!["Valida".to_string()]);

@@ -73,8 +73,13 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   corrente locale/verde: `design_template` condiviso (`startup_pitch`,
   `executive_update`, `project_plan`, `technical_brief`, `sales_proposal`) che
   espande in default profilo/componenti; gli argomenti espliciti restano
-  sovrani. Prossimo asse: theme tokens + QA visuale renderizzata. `make_research`
-  e `make_meeting` restano dopo questo asse.
+  sovrani. Sesta slice locale/verde: `design_theme` condiviso
+  (`clean_corporate`, `high_contrast`, `warm_editorial`, `minimal_mono`,
+  `soft_gradient`) entra negli schemi/workflow/prompt; lato deck materializza
+  token `theme` compatibili con `deck_render.py` e applica un primo guardrail QA
+  deterministico su titoli/bullet troppo lunghi prima del render. Prossimo asse:
+  QA visuale renderizzata su screenshot/PDF/HTML. `make_research` e
+  `make_meeting` restano dopo questo asse.
 - **WS2-3.1 PASSATA in runtime (2026-06-23):** gli artifact scritti via
   Filesystem MCP dentro la root progetto vengono registrati come
   `memory_type="artifact"` + entity grafo `artifact` + embedding. Gate:
