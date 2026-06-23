@@ -12061,7 +12061,8 @@ fn make_deck_tool_schema() -> serde_json::Value {
                 "properties": {
                     "brief": { "type": "string", "description": "What the deck is about, plus any structure, sections or points the user specified — verbatim." },
                     "language": { "type": "string", "description": "Deck language code, e.g. 'it' or 'en'. Default: the user's language." },
-                    "slides": { "type": "integer", "description": "Desired number of slides (3-12). Default 6." }
+                    "slides": { "type": "integer", "description": "Desired number of slides (3-12). Default 6." },
+                    "design_profile": deliverable_design_profile_schema()
                 },
                 "required": ["brief"]
             }
@@ -12099,6 +12100,7 @@ fn make_document_tool_schema() -> serde_json::Value {
                         "description": "Explicit document layout profile requested by the user. Preserve explicit intent; omit when unspecified.",
                         "enum": ["standard", "one_page", "executive_brief", "detailed_report", "proposal"]
                     },
+                    "design_profile": deliverable_design_profile_schema(),
                     "sections": {
                         "type": "array",
                         "description": "Section headings explicitly requested by the user, in order. Do not invent this list when unspecified.",
@@ -12114,6 +12116,67 @@ fn make_document_tool_schema() -> serde_json::Value {
             }
         }
     })
+}
+
+fn deliverable_design_profile_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "string",
+        "description": "Shared deliverable design profile requested by the user. Applies across presentations and documents. Preserve explicit intent; omit when unspecified.",
+        "enum": DELIVERABLE_DESIGN_PROFILES
+    })
+}
+
+const DELIVERABLE_DESIGN_PROFILES: &[&str] = &[
+    "executive",
+    "sales_pitch",
+    "technical",
+    "editorial",
+    "minimal",
+];
+
+fn deliverable_design_profile(parsed: &serde_json::Value) -> Option<String> {
+    parsed
+        .get("design_profile")
+        .and_then(|value| value.as_str())
+        .map(|value| value.trim().to_ascii_lowercase())
+        .filter(|value| DELIVERABLE_DESIGN_PROFILES.contains(&value.as_str()))
+}
+
+fn deliverable_design_profile_directive(profile: Option<&str>, medium: &str) -> Option<String> {
+    let directive = match (profile, medium) {
+        (Some("executive"), "deck") => {
+            "Design profile: executive. Use restrained board-ready visuals, strong hierarchy, compact evidence, and decision-oriented slide titles."
+        }
+        (Some("executive"), "document") => {
+            "Design profile: executive. Use board-ready structure, compact evidence, short sections, and decision-oriented headings."
+        }
+        (Some("sales_pitch"), "deck") => {
+            "Design profile: sales_pitch. Lead with pain, value, proof and next action; use crisp benefit-led slide titles and persuasive pacing."
+        }
+        (Some("sales_pitch"), "document") => {
+            "Design profile: sales_pitch. Structure around client pain, value proposition, proof, scope, timeline and next action."
+        }
+        (Some("technical"), "deck") => {
+            "Design profile: technical. Prioritize architecture, constraints, tradeoffs, concrete metrics and implementation sequence."
+        }
+        (Some("technical"), "document") => {
+            "Design profile: technical. Prioritize precise terminology, architecture, constraints, tradeoffs, implementation details and verification."
+        }
+        (Some("editorial"), "deck") => {
+            "Design profile: editorial. Use narrative sequencing, magazine-like section rhythm, strong opening and memorable closing."
+        }
+        (Some("editorial"), "document") => {
+            "Design profile: editorial. Use a polished narrative flow, strong opening, readable section rhythm and concise transitions."
+        }
+        (Some("minimal"), "deck") => {
+            "Design profile: minimal. Use very sparse slides, short titles, few bullets, generous whitespace and no decorative complexity."
+        }
+        (Some("minimal"), "document") => {
+            "Design profile: minimal. Use short sections, plain structure, compact tables only when needed and no decorative prose."
+        }
+        _ => return None,
+    };
+    Some(directive.to_string())
 }
 
 /// Strict JSON schema for the deck CONTENT the model produces. Deliberately
@@ -12185,6 +12248,7 @@ async fn generate_deck_content(
     brand: &BrandKit,
     slides: usize,
     language: &str,
+    design_profile: Option<&str>,
 ) -> Result<serde_json::Value, String> {
     // Use the CURRENT turn's model (what the chat is actually running), NOT a
     // fresh orchestrator-role resolution. Hit the OpenAI-compat endpoint DIRECTLY
@@ -12209,6 +12273,8 @@ async fn generate_deck_content(
     } else {
         brand.organization.trim()
     };
+    let design_directive =
+        deliverable_design_profile_directive(design_profile, "deck").unwrap_or_default();
     let system = format!(
         "You are a senior presentation designer. Output ONLY JSON matching the schema. \
 Design a tight, on-brand deck of about {slides} slides in {lang}. Rules: the FIRST slide layout \
@@ -12216,6 +12282,7 @@ must be \"cover\" and the LAST \"closing\"; use \"section\" only as an occasiona
 other slide is \"bullets\". Headline titles of at most 6 words. At most 4 bullets per slide, \
 numbers over adjectives, one idea per slide. Write speaker `notes` for the substantive slides. \
 Set want_image=true on the cover and on AT MOST two of the most visual slides (false on the rest). \
+{design_directive} \
 Brand: organization «{org}», accent colour {accent}. Do NOT output colours, fonts, logos or file \
 names — textual content only. Return a JSON object with EXACTLY these top-level keys: \"title\" \
 (string), \"subtitle\" (string) and \"slides\" (array of slide objects). Do NOT wrap them under \
@@ -12318,6 +12385,7 @@ struct DocumentGenerationOptions {
     audience: Option<String>,
     tone: Option<String>,
     layout_profile: Option<String>,
+    design_profile: Option<String>,
     sections: Vec<String>,
 }
 
@@ -12368,6 +12436,7 @@ fn document_generation_options(parsed: &serde_json::Value) -> DocumentGeneration
         .and_then(|value| value.as_str())
         .map(|value| value.trim().to_ascii_lowercase())
         .filter(|value| allowed_layout_profiles.contains(&value.as_str()));
+    let design_profile = deliverable_design_profile(parsed);
     let audience = parsed
         .get("audience")
         .and_then(|value| value.as_str())
@@ -12390,6 +12459,7 @@ fn document_generation_options(parsed: &serde_json::Value) -> DocumentGeneration
         audience,
         tone,
         layout_profile,
+        design_profile,
         sections,
     }
 }
@@ -12422,6 +12492,11 @@ fn document_generation_directives(options: &DocumentGenerationOptions) -> String
         ),
         Some("standard") | None => {}
         Some(_) => {}
+    }
+    if let Some(directive) =
+        deliverable_design_profile_directive(options.design_profile.as_deref(), "document")
+    {
+        directives.push(directive);
     }
     if !options.sections.is_empty() {
         directives.push(format!(
@@ -16116,6 +16191,7 @@ available tools (for data from the web use the browser: browser_navigate on the 
                             .and_then(|v| v.as_u64())
                             .unwrap_or(6)
                             .clamp(3, 12) as usize;
+                        let design_profile = deliverable_design_profile(&parsed);
                         if brief.is_empty() {
                             "make_deck needs a 'brief' describing the presentation.".to_string()
                         } else {
@@ -16125,6 +16201,7 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                     "brief": brief.clone(),
                                     "language": language.clone(),
                                     "slides": slides,
+                                    "design_profile": design_profile.clone(),
                                 }),
                             );
                             let workflow_plan =
@@ -16145,6 +16222,7 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                                 "brief": brief.clone(),
                                                 "language": language.clone(),
                                                 "slides": slides,
+                                                "design_profile": design_profile.clone(),
                                             }),
                                         )
                                     }
@@ -16164,7 +16242,7 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                 .await
                                 .unwrap_or_default();
                             // 2) slide content — schema-enforced model call (the floor).
-                            match generate_deck_content(&state_owned.http, &base_url, &model, api_key.as_deref(), &brief, &brand, slides, &language).await {
+                            match generate_deck_content(&state_owned.http, &base_url, &model, api_key.as_deref(), &brief, &brand, slides, &language, design_profile.as_deref()).await {
                                 Err(e) => format!("Could not generate deck content: {e}"),
                                 Ok(mut deck) => {
                                     // 3) images for want_image slides (cap 3, cover first).
@@ -16352,6 +16430,7 @@ Absolutely NO text, NO words, NO letters, NO numbers, NO captions, NO logos."
                                 "audience": document_options.audience.clone(),
                                 "tone": document_options.tone.clone(),
                                 "layout_profile": document_options.layout_profile.clone(),
+                                "design_profile": document_options.design_profile.clone(),
                                 "sections": document_options.sections.clone(),
                             });
                             let workflow_plan = workflow_execution_plan(
@@ -36584,6 +36663,7 @@ mod tests {
                 "brief": "Quarterly results",
                 "language": "en",
                 "slides": 6,
+                "design_profile": "executive",
             }),
         );
 
@@ -36603,6 +36683,13 @@ mod tests {
                 .get("workflow_id")
                 .and_then(|value| value.as_str()),
             Some("make_deck"),
+        );
+        assert_eq!(
+            plan.steps[0]
+                .arguments
+                .pointer("/input/design_profile")
+                .and_then(|value| value.as_str()),
+            Some("executive"),
         );
     }
 
@@ -37063,12 +37150,47 @@ mod tests {
     }
 
     #[test]
+    fn deliverable_design_profile_schema_is_shared_by_deck_and_document() {
+        let deck_schema = super::make_deck_tool_schema();
+        let document_schema = super::make_document_tool_schema();
+        let expected = Some(vec![
+            "executive",
+            "sales_pitch",
+            "technical",
+            "editorial",
+            "minimal",
+        ]);
+        let deck_profiles = deck_schema
+            .pointer("/function/parameters/properties/design_profile/enum")
+            .and_then(|value| value.as_array())
+            .map(|values| {
+                values
+                    .iter()
+                    .filter_map(|value| value.as_str())
+                    .collect::<Vec<_>>()
+            });
+        let document_profiles = document_schema
+            .pointer("/function/parameters/properties/design_profile/enum")
+            .and_then(|value| value.as_array())
+            .map(|values| {
+                values
+                    .iter()
+                    .filter_map(|value| value.as_str())
+                    .collect::<Vec<_>>()
+            });
+
+        assert_eq!(deck_profiles, expected);
+        assert_eq!(document_profiles, expected);
+    }
+
+    #[test]
     fn make_document_generation_options_are_explicit_and_bounded() {
         let options = super::document_generation_options(&serde_json::json!({
             "document_type": "report",
             "audience": " PMI italiana ",
             "tone": "executive",
             "layout_profile": "executive_brief",
+            "design_profile": "technical",
             "sections": [
                 "Problema",
                 "Soluzione",
@@ -37081,6 +37203,7 @@ mod tests {
         assert_eq!(options.audience.as_deref(), Some("PMI italiana"));
         assert_eq!(options.tone.as_deref(), Some("executive"));
         assert_eq!(options.layout_profile.as_deref(), Some("executive_brief"));
+        assert_eq!(options.design_profile.as_deref(), Some("technical"));
         assert_eq!(
             options.sections,
             vec![
@@ -37096,6 +37219,8 @@ mod tests {
         assert!(directives.contains("Tone: executive."), "{directives}");
         assert!(directives.contains("Layout profile: executive_brief."), "{directives}");
         assert!(directives.contains("decision-ready headings"), "{directives}");
+        assert!(directives.contains("Design profile: technical."), "{directives}");
+        assert!(directives.contains("implementation details"), "{directives}");
         assert!(
             directives.contains("Required section order: Problema -> Soluzione -> Roadmap."),
             "{directives}"
@@ -37105,11 +37230,13 @@ mod tests {
             "document_type": "pitch",
             "tone": "friendly",
             "layout_profile": "marketing_site",
+            "design_profile": "cinematic",
             "sections": ["Valida"]
         }));
         assert_eq!(ignored.document_type, None);
         assert_eq!(ignored.tone, None);
         assert_eq!(ignored.layout_profile, None);
+        assert_eq!(ignored.design_profile, None);
         assert_eq!(ignored.sections, vec!["Valida".to_string()]);
     }
 

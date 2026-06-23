@@ -177,6 +177,11 @@ primo percorso locale verde:
     visuale comuni. Il modello sceglie struttura e blocchi dal registry; renderer
     deterministici producono `.docx`, `.pptx`, `.pdf`/HTML. Una gallery può
     esistere come UI/catalogo sopra questa grammatica, non come secondo sistema.
+46. WS7 first shared design contract — `make_document` e `make_deck` espongono lo
+    stesso `design_profile` dichiarativo (`executive`, `sales_pitch`,
+    `technical`, `editorial`, `minimal`), lo portano nel workflow e lo traducono
+    in direttive specifiche per documento o deck. È il primo pezzo di grammatica
+    condivisa; non è ancora template library completa né QA visuale.
 
 Prima di pubblicare/taggare resta prudente ripetere lo smoke manuale in-app su
 una automazione schedulata reale con il binario aggiornato. Il primo smoke ha
@@ -228,6 +233,8 @@ anche stili, grassetto, corsivo, liste numerate e sizing tabelle nel DOCX.
 `layout_profile` è ora dichiarativo dentro `make_document`. Scelta corrente:
 sviluppare WS7 come design system condiviso per documenti e presentazioni
 (`make_deck`/presentation inclusi): template e layout sono grammatica del
-registry, non keyword o nuovi tool ad hoc; `make_research` e `make_meeting`
-restano futuri.
+registry, non keyword o nuovi tool ad hoc. Prima slice locale/verde:
+`design_profile` condiviso fra `make_document` e `make_deck`; prossima slice:
+componenti/template dichiarativi reali e QA visuale. `make_research` e
+`make_meeting` restano futuri.
 Il contratto corrente della memoria è in [MEMORIA.md](MEMORIA.md).

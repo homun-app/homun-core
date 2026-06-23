@@ -151,6 +151,13 @@ modelli deboli/locali. Invarianti: monotonìa, limitatezza, identità non inferi
     `make_deck`/presentation. Una gallery può essere UI/catalogo, non un secondo
     sistema. Restano vietati routing keyword-based e nuovi `make_*` per ogni
     template.
+    **Prima slice design_profile (2026-06-23, locale/verde):** `make_document` e
+    `make_deck` espongono lo stesso `design_profile` (`executive`,
+    `sales_pitch`, `technical`, `editorial`, `minimal`), lo portano negli args
+    del workflow e lo traducono in direttive specifiche per documento/deck.
+    Test mirati: `deliverable_design_profile_schema_is_shared_by_deck_and_document`,
+    `make_document_generation_options_are_explicit_and_bounded`,
+    `make_deck_workflow_definition_projects_execution_plan`.
   - ☐ **Backlog deliberato:** `make_research` / `make_meeting` restano in fondo
     finché non è chiarito il contratto degli strumenti creati dall'harness.
 - ✅ **Fase 4 (2026-06-23, locale/verde)** — router workflow|agent + primo
@@ -699,7 +706,9 @@ ragionato il contratto degli strumenti `make_*` creati dall'harness. ADR 0011
 - 🟡 **7.1a** Portare documenti e presentazioni sullo stesso design system:
   template dichiarativi, layout archetype, componenti riusabili, theme tokens e
   controlli QA visuali condivisi da `make_document` e `make_deck`/presentation,
-  senza store paralleli e senza attivazioni euristiche.
+  senza store paralleli e senza attivazioni euristiche. Prima base locale/verde:
+  `design_profile` condiviso negli schemi e nei workflow; restano componenti,
+  template e QA visuale.
 - ☐ **7.1b (futuro)** Portare ricerca/meeting al livello del deck solo dopo il
   chiarimento sul contratto strumenti: `make_research` e `make_meeting` non sono
   essenziali per la prossima release.

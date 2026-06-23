@@ -61,8 +61,11 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   visuale sono grammatica comune; `make_document` e `make_deck` la consumano come
   capability del registry unico. Il modello compone narrativa e blocchi, il
   renderer deterministico produce `.docx`/`.pptx`/`.pdf`/HTML e la QA verifica
-  overflow, tabelle, immagini e leggibilità. `make_research` e `make_meeting`
-  restano dopo questo asse.
+  overflow, tabelle, immagini e leggibilità. Prima slice locale/verde:
+  `design_profile` condiviso (`executive`, `sales_pitch`, `technical`,
+  `editorial`, `minimal`) nello schema di `make_document` e `make_deck`,
+  propagato nei rispettivi workflow/prompt senza nuovi `make_*`. `make_research`
+  e `make_meeting` restano dopo questo asse.
 - **WS2-3.1 PASSATA in runtime (2026-06-23):** gli artifact scritti via
   Filesystem MCP dentro la root progetto vengono registrati come
   `memory_type="artifact"` + entity grafo `artifact` + embedding. Gate:
@@ -403,6 +406,15 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   griglia colonne, layout fixed, padding celle, proporzione 35/65 per tabelle a
   due colonne e header evidenziato. Test mirato:
   `markdown_to_docx_renders_pipe_tables`.
+- **Deliverable design profile locale/verde (2026-06-23):** primo contratto
+  condiviso del design system WS7: `make_document` e `make_deck` espongono lo
+  stesso `design_profile` (`executive`, `sales_pitch`, `technical`, `editorial`,
+  `minimal`). Il profilo entra nei workflow args e genera direttive specifiche
+  per documento o deck, senza creare template come nuovi tool e senza routing
+  keyword-based. Test mirati:
+  `deliverable_design_profile_schema_is_shared_by_deck_and_document`,
+  `make_document_generation_options_are_explicit_and_bounded`,
+  `make_deck_workflow_definition_projects_execution_plan`.
 - **Gate provider Z.ai/GLM risolto (test manuale utente, 2026-06-23):** Settings
   espone sia `Z.ai (GLM)` standard (`https://api.z.ai/api/paas/v4`) sia
   `Z.ai Coding (GLM)` (`https://api.z.ai/api/coding/paas/v4`); il preset coding
