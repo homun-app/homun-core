@@ -5748,6 +5748,45 @@ fn runtime_execution_plan(plan: &[serde_json::Value]) -> ExecutionPlan {
     }
 }
 
+fn execution_plan_steps(plan: &ExecutionPlan) -> Vec<serde_json::Value> {
+    plan.steps
+        .iter()
+        .map(|step| {
+            let title = step
+                .arguments
+                .get("title")
+                .and_then(|value| value.as_str())
+                .or(step.goal.as_deref())
+                .unwrap_or("")
+                .to_string();
+            serde_json::json!({
+                "id": step.step_id,
+                "title": title,
+                "status": step.arguments
+                    .get("status")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("todo"),
+                "detail": step.arguments
+                    .get("detail")
+                    .cloned()
+                    .unwrap_or(serde_json::Value::Null),
+                "done_criterion": step.arguments
+                    .get("done_criterion")
+                    .cloned()
+                    .unwrap_or(serde_json::Value::Null),
+                "depends_on": step.depends_on,
+            })
+        })
+        .collect()
+}
+
+fn merge_execution_plan(plan: &mut ExecutionPlan, sent: &[serde_json::Value]) -> Vec<usize> {
+    let mut steps = execution_plan_steps(plan);
+    let claims = merge_plan(&mut steps, sent);
+    *plan = runtime_execution_plan(&steps);
+    claims
+}
+
 fn runtime_plan_memory_matches(memory: &MemoryRecord, thread_key: &str) -> bool {
     memory.memory_type == "open_loop"
         && !matches!(memory.status, MemoryStatus::Deleted | MemoryStatus::Rejected | MemoryStatus::Stale)
@@ -12833,7 +12872,7 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
         // MERGES into this by id/title and can never reset a done step; F1 budget reset,
         // F2 verification, F5 next-step and the ‹‹PLAN›› marker all read THIS. Seeded from
         // the prior conversation (F4 resume). A step is `done` only after F2 verified it.
-        let mut plan: Vec<serde_json::Value> = resume_plan;
+        let mut plan: ExecutionPlan = runtime_execution_plan(&resume_plan);
         // F2 verification gate: the running evidence (tool name → result snippet) for the
         // CURRENT plan step, fed to the verifier when the model marks the step done, then
         // cleared. A chat model can claim "done" without doing the work; the gate checks.
@@ -14909,8 +14948,9 @@ an uncertain date.",
                         // MERGE the model's steps into the CANONICAL plan (never replace);
                         // returns the canonical indices newly claimed done (held `doing`
                         // until F2 verifies). See `merge_plan` for the anti-reset rule.
-                        let claims = merge_plan(&mut plan, &sent);
-                        if plan.is_empty() {
+                        let claims = merge_execution_plan(&mut plan, &sent);
+                        let mut plan_steps = execution_plan_steps(&plan);
+                        if plan_steps.is_empty() {
                             "Empty plan: provide at least one step with a title.".to_string()
                         } else {
                             // F2 gate: verify each newly-claimed-done step before it counts
@@ -14918,8 +14958,8 @@ an uncertain date.",
                             let verify = step_verification_enabled();
                             let mut rejection: Option<String> = None;
                             for i in claims {
-                                let title = plan_step_title(&plan[i]).to_string();
-                                let criterion = plan[i]
+                                let title = plan_step_title(&plan_steps[i]).to_string();
+                                let criterion = plan_steps[i]
                                     .get("done_criterion")
                                     .and_then(|v| v.as_str())
                                     .unwrap_or("")
@@ -14936,7 +14976,8 @@ an uncertain date.",
                                     (true, String::new())
                                 };
                                 if ok {
-                                    plan[i]["status"] = serde_json::json!("done");
+                                    plan_steps[i]["status"] = serde_json::json!("done");
+                                    plan = runtime_execution_plan(&plan_steps);
                                     progress_anchor_round = round; // F1: real progress
                                     step_evidence.clear();
                                     last_round_sig.clear();
@@ -14965,20 +15006,21 @@ an uncertain date.",
                             // Marker rendered from the CANONICAL plan — the single source of
                             // truth (verified state), not the model's raw claim. This is what
                             // the UI shows and what the next turn resumes from.
+                            plan_steps = execution_plan_steps(&plan);
                             let plan_mark =
-                                format!("‹‹PLAN››{}‹‹/PLAN››", build_plan_markdown(&plan));
+                                format!("‹‹PLAN››{}‹‹/PLAN››", build_plan_markdown(&plan_steps));
                             accumulated.push_str(&plan_mark);
                             let _ = emit_stream_event(&tx, GenerateStreamEvent::Delta { text: plan_mark })
                                 .await;
                             upsert_runtime_plan_memory_from_state(
                                 &state_owned,
                                 thread_id.as_deref(),
-                                &plan,
+                                &plan_steps,
                             );
-                            let done = plan_done_count(&plan);
+                            let done = plan_done_count(&plan_steps);
                             match rejection {
-                                Some(msg) => format!("⚠️ {msg} (done {done}/{})", plan.len()),
-                                None => format!("Plan updated: {done}/{} steps done.", plan.len()),
+                                Some(msg) => format!("⚠️ {msg} (done {done}/{})", plan_steps.len()),
+                                None => format!("Plan updated: {done}/{} steps done.", plan_steps.len()),
                             }
                         }
                     } else if name == "create_automation" {
@@ -15777,7 +15819,8 @@ Tell the user clearly; do NOT claim it's done."
             // have budget, nudge the model to keep going instead of ending the turn.
             // Bounded by MAX_PLAN_NUDGES (reset on progress) AND the per-step round budget.
             if !is_final_round && plan_nudges < MAX_PLAN_NUDGES {
-                if let Some(step) = plan_next_open(&plan) {
+                let plan_steps = execution_plan_steps(&plan);
+                if let Some(step) = plan_next_open(&plan_steps) {
                     plan_nudges += 1;
                     if !content.trim().is_empty() {
                         messages
@@ -15807,7 +15850,7 @@ Tell the user clearly; do NOT claim it's done."
                     )
                     .await;
                     continue;
-                } else if plan.is_empty()
+                } else if plan_steps.is_empty()
                     && turn_used_tools
                     && task_appears_incomplete(&state_owned.http, &memory_user_message, &content)
                         .await
@@ -34757,6 +34800,31 @@ mod tests {
         assert!(claims.is_empty());
         assert_eq!(plan.len(), 2);
         assert_eq!(plan[1]["depends_on"], serde_json::json!(["s1"]));
+    }
+
+    #[test]
+    fn merge_execution_plan_is_runtime_canonical_state() {
+        let seed = vec![serde_json::json!({
+            "id": "s1", "title": "Read docs", "status": "done", "detail": ""
+        })];
+        let mut plan = super::runtime_execution_plan(&seed);
+
+        let claims = super::merge_execution_plan(
+            &mut plan,
+            &[serde_json::json!({
+                "title": "Implement slice",
+                "status": "doing",
+                "depends_on": ["s1"]
+            })],
+        );
+        let steps = super::execution_plan_steps(&plan);
+
+        assert!(claims.is_empty());
+        assert_eq!(plan.steps.len(), 2);
+        assert_eq!(plan.steps[1].step_id, "s2");
+        assert_eq!(plan.steps[1].depends_on, vec!["s1".to_string()]);
+        assert_eq!(steps[1]["title"], "Implement slice");
+        assert_eq!(steps[1]["status"], "doing");
     }
 
     #[test]

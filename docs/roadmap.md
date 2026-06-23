@@ -61,6 +61,9 @@ primo percorso locale verde:
     `metadata.execution_plan` nel contratto `ExecutionPlan` del crate
     `orchestrator`; `update_plan` conserva `depends_on` espliciti dal flusso
     reale. Resta da promuovere `ExecutionPlan` a stato runtime primario.
+16. WS1-Fase 2 Slice 3b — il loop agente usa `ExecutionPlan` come stato runtime
+    canonico; lo snapshot `Vec<Value>` resta solo vista derivata per marker UI,
+    memoria/grafo e verifica step.
 
 Prima di pubblicare/taggare resta prudente ripetere lo smoke manuale in-app su
 una automazione schedulata reale con il binario aggiornato. Il primo smoke ha
@@ -68,7 +71,7 @@ trovato e corretto una falsa chiusura su piano non completato.
 
 ## Milestone
 
-1. Completare verifica allargata della nuova slice `ExecutionPlan` metadata.
+1. Completare verifica allargata della nuova slice `ExecutionPlan` runtime.
 2. WS1-Fase 2/3 — piano runtime-owned e workflow runner dichiarativo, così i
    deliverable futuri non riaprono fragilità cross-modello.
 3. WS7 — deliverable Manus-style (`make_document`, `make_research`,
@@ -82,8 +85,8 @@ collegarli al perché. Per questo WS7 non è più il prossimo step.
 
 ## Prossima azione
 
-WS1 ha ora write-back piano→memoria, prima materializzazione grafo piano/step e
-prima proiezione `ExecutionPlan` nei metadata canonici locali/verdi. Prossimo:
-verifica allargata della slice, poi promuovere `ExecutionPlan` a stato runtime
-primario e avviare il workflow runner dichiarativo. Il contratto corrente della
-memoria è in [MEMORIA.md](MEMORIA.md).
+WS1 ha ora write-back piano→memoria, prima materializzazione grafo piano/step,
+proiezione `ExecutionPlan` nei metadata canonici e `ExecutionPlan` come stato
+runtime primario del loop agente. Prossimo: workflow runner dichiarativo e
+`plan_propose` nel contratto. Il contratto corrente della memoria è in
+[MEMORIA.md](MEMORIA.md).

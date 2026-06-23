@@ -193,6 +193,12 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   `runtime_plan_memory_projects_execution_plan_contract`,
   `merge_plan_preserves_explicit_dependencies`,
   `runtime_plan_memory_materializes_plan_step_graph`.
+- **WS1-Fase 2 Slice 3b locale/verde:** il loop agente usa ora `ExecutionPlan`
+  come stato runtime canonico del piano; il vecchio `Vec<Value>` resta solo come
+  vista derivata per marker UI, memoria/grafo e verifica step. `merge_execution_plan`
+  applica le stesse regole monotone di `merge_plan` e rigenera il contratto
+  `ExecutionPlan`; la resume da marker rimane retrocompatibile. Test mirato:
+  `merge_execution_plan_is_runtime_canonical_state`.
 - **Nota aperta non bloccante:** durante i gate con tool il provider primario
   `glm-5.2` continua a rispondere `400 Bad Request` sul primo round con tool; il
   fallback a `kimi-k2.6:cloud` prosegue correttamente. Da riprendere come task

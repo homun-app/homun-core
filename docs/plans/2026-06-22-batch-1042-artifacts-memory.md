@@ -65,8 +65,13 @@ modelli deboli/locali. Invarianti: monotonìa, limitatezza, identità non inferi
     Test mirati: `runtime_plan_memory_projects_execution_plan_contract`,
     `merge_plan_preserves_explicit_dependencies`,
     `runtime_plan_memory_materializes_plan_step_graph`.
-  - ☐ **Slice 3b**: usare `ExecutionPlan` come stato runtime primario e ritirare
-    gradualmente il `Vec<Value>` canonico; includere `plan_propose` nel contratto.
+  - ✅ **Slice 3b (2026-06-23, locale/verde)**: `ExecutionPlan` è ora lo stato
+    runtime canonico del piano nel loop agente. Il `Vec<Value>` resta vista
+    derivata per marker UI, memoria/grafo e verifica step; `merge_execution_plan`
+    applica le regole monotone/sticky di `merge_plan` e rigenera il contratto.
+    La resume da marker resta retrocompatibile. Test mirato:
+    `merge_execution_plan_is_runtime_canonical_state`.
+  - ☐ **Slice 3c**: includere `plan_propose` nel contratto `ExecutionPlan`.
 - ☐ **Floor ovunque** — constrained decoding su **tutte** le emissioni di
   orchestrazione (tool call del loop principale, piano, verifica), locale+cloud. Oggi
   è imposto solo sul contenuto di `make_deck`; il planner OpenAI-compat declassa ancora.
