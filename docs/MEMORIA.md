@@ -73,6 +73,9 @@ Fatto:
 - primo eval/read path WS5.6 per provenance artifact: recall esplicito e RAG
   automatico leggono il grafo canonico e possono rispondere quali artifact
   esistono e da quale decisione/lavoro derivano, includendo il perché.
+- secondo eval/read path WS5.6 per stato workflow: recall esplicito e RAG
+  automatico leggono `goal`, `open_loop`, outcome/fact verificati, decisioni con
+  rationale e artifact provenance per rispondere “a che punto siamo e perché?”.
 
 Mancante:
 
@@ -84,7 +87,8 @@ Mancante:
   decisione/source-ref → artifact e il primo reader/eval sono locali/verdi; resta
   da alimentare con step/piano quando il write-back piano sarà persistito in
   memoria;
-- eval memoria come gate completo per stato workflow/open loop/outcome.
+- eval memoria come gate completo in-app/release; i reader headless per artifact
+  provenance e stato workflow sono locali/verdi.
 
 ## Prossimo blocco
 
@@ -140,8 +144,8 @@ Acceptance:
 3. WS5.5a — provenance artifact→producer/progetto/file: locale/verde.
 4. WS5.5b — provenance decisione/source-ref → artifact evidence-only: ✅ slice
    locale/verde.
-5. WS5.6 — eval memoria: ✅ prima slice artifact/provenance locale; resta stato
-   workflow/perché.
+5. WS5.6 — eval memoria: ✅ artifact/provenance e stato workflow/perché locali;
+   resta eventuale smoke in-app mirato.
 6. WS1-Fase 2/3 — piano runtime-owned e workflow runner con write-back memoria.
 7. WS7 — deliverable Manus-style, solo dopo queste fondamenta.
 

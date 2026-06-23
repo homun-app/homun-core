@@ -226,9 +226,14 @@ che fanno "ricordare il perché e sopravvivere". Caposaldo #8.
   MEMORY GRAPH` con artifact, producer, path, decisione/lavoro sorgente, rationale
   e alternative scartate. Test red/green:
   `cargo test -p local-first-desktop-gateway memory_eval_surfaces_artifact_provenance_and_decision_why -- --nocapture`.
-  **Resta:** coprire la domanda “a che punto è il workflow e perché?” con
-  open_loop/goal/outcome/piano e decidere se serve smoke in-app dopo il reader
-  headless.
+  **Seconda slice locale/verde:** il reader di recall/RAG copre anche “a che punto
+  è il workflow e perché?” con un blocco `WORKFLOW STATUS FROM CANONICAL MEMORY`,
+  composto da `goal`, `open_loop`, outcome/fact verificati, decisioni con rationale
+  e artifact provenance come evidenza. Test red/green:
+  `cargo test -p local-first-desktop-gateway memory_eval_surfaces_workflow_status_and_why -- --nocapture`.
+  **Resta:** decidere se serve smoke in-app mirato del reader memoria; piano/task
+  refs complete arrivano con WS1-F6 quando il piano runtime-owned farà write-back
+  memoria.
 
 > Nota: WS2-3.1 (artefatti→memoria) e WS1-F6 (piano→memoria) **alimentano** WS5 — sono
 > i nodi che rendono la memoria il cervello connesso. Stesso north-star.

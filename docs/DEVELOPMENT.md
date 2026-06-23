@@ -141,9 +141,15 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   mostrando producer, path, decisione sorgente, rationale e alternative scartate.
   Test red/green:
   `cargo test -p local-first-desktop-gateway memory_eval_surfaces_artifact_provenance_and_decision_why -- --nocapture`
-  (rosso iniziale: nessun contesto provenance). **Prossimo passo unico:** estendere
-  WS5.6 alla domanda “a che punto è il workflow e perché?” usando open_loop/goal/
-  outcome/piano, poi valutare un gate in-app se il reader headless resta verde.
+  (rosso iniziale: nessun contesto provenance). **WS5.6 seconda slice locale/verde:**
+  la domanda “a che punto è il workflow e perché?” riceve un blocco
+  `WORKFLOW STATUS FROM CANONICAL MEMORY` nel recall/RAG, composto da `goal`,
+  `open_loop`, outcome/fact verificati, decisioni con rationale e artifact
+  provenance come evidenza. Test red/green:
+  `cargo test -p local-first-desktop-gateway memory_eval_surfaces_workflow_status_and_why -- --nocapture`
+  (rosso iniziale: nessun contesto workflow). **Prossimo passo unico:** valutare
+  smoke in-app mirato del reader memoria o passare a WS1-Fase 2/3 piano runtime-owned
+  con write-back memoria, senza aprire WS7 prima delle fondamenta.
 - **Nota aperta non bloccante:** durante i gate con tool il provider primario
   `glm-5.2` continua a rispondere `400 Bad Request` sul primo round con tool; il
   fallback a `kimi-k2.6:cloud` prosegue correttamente. Da riprendere come task

@@ -8347,6 +8347,114 @@ fn artifact_provenance_context_for_query(
     ))
 }
 
+fn workflow_status_context_for_query(
+    facade: &MemoryFacade,
+    user: &MemoryUserId,
+    workspace: &MemoryWorkspaceId,
+    query: &str,
+) -> Option<String> {
+    let query_lc = query.to_ascii_lowercase();
+    let status_query = [
+        "workflow",
+        "stato",
+        "punto",
+        "perché",
+        "perche",
+        "why",
+        "next",
+        "prossimo",
+        "aperto",
+        "open loop",
+        "blocc",
+        "manca",
+        "resta",
+    ]
+    .iter()
+    .any(|needle| query_lc.contains(needle));
+    if !status_query {
+        return None;
+    }
+
+    let memories = facade.list_memories_for_ui(user, workspace).unwrap_or_default();
+    let live = |memory: &&MemoryRecord| {
+        matches!(memory.status, MemoryStatus::Confirmed | MemoryStatus::Candidate)
+            && memory.superseded_by.is_none()
+            && !memory.text.trim().is_empty()
+    };
+    let mut goals: Vec<&MemoryRecord> = memories
+        .iter()
+        .filter(live)
+        .filter(|memory| memory.memory_type == "goal")
+        .collect();
+    let mut open_loops: Vec<&MemoryRecord> = memories
+        .iter()
+        .filter(|memory| active_open_loop_record(memory))
+        .collect();
+    let mut decisions: Vec<&MemoryRecord> = memories
+        .iter()
+        .filter(live)
+        .filter(|memory| memory.memory_type == "decision")
+        .collect();
+    let mut outcomes: Vec<&MemoryRecord> = memories
+        .iter()
+        .filter(live)
+        .filter(|memory| {
+            memory.memory_type == "fact"
+                && memory
+                    .metadata
+                    .get("certainty")
+                    .and_then(|value| value.as_str())
+                    .is_some_and(|value| matches!(value, "committed" | "completed" | "verified"))
+        })
+        .collect();
+    goals.sort_by_key(|memory| std::cmp::Reverse(memory.text.chars().count()));
+    open_loops.sort_by_key(|memory| std::cmp::Reverse(memory.text.chars().count()));
+    decisions.sort_by_key(|memory| std::cmp::Reverse(memory.text.chars().count()));
+    outcomes.sort_by_key(|memory| std::cmp::Reverse(memory.text.chars().count()));
+
+    if goals.is_empty() && open_loops.is_empty() && decisions.is_empty() && outcomes.is_empty() {
+        return None;
+    }
+
+    let mut sections = Vec::new();
+    if !goals.is_empty() {
+        let mut lines = vec!["Objectives:".to_string()];
+        for goal in goals.into_iter().take(4) {
+            lines.push(format!("- {}", goal.text.trim()));
+        }
+        sections.push(lines.join("\n"));
+    }
+    if !open_loops.is_empty() {
+        let mut lines = vec!["Open loops / next work:".to_string()];
+        for open_loop in open_loops.into_iter().take(6) {
+            lines.push(format!("- {} (ref: {})", open_loop.text.trim(), open_loop.reference));
+        }
+        sections.push(lines.join("\n"));
+    }
+    if !outcomes.is_empty() {
+        let mut lines = vec!["Verified outcomes / current state:".to_string()];
+        for outcome in outcomes.into_iter().take(4) {
+            lines.push(format!("- {}", format_recall_entry(&outcome.text, &outcome.metadata)));
+        }
+        sections.push(lines.join("\n"));
+    }
+    if !decisions.is_empty() {
+        let mut lines = vec!["Recent decisions / why:".to_string()];
+        for decision in decisions.into_iter().take(6) {
+            lines.push(format!("- {}", format_recall_entry(&decision.text, &decision.metadata)));
+        }
+        sections.push(lines.join("\n"));
+    }
+    if let Some(provenance) = artifact_provenance_context_for_query(facade, user, workspace, query) {
+        sections.push(format!("Evidence artifacts:\n{provenance}"));
+    }
+
+    Some(format!(
+        "WORKFLOW STATUS FROM CANONICAL MEMORY:\n{}",
+        sections.join("\n\n")
+    ))
+}
+
 /// Decisions in memory that AFFECT a given file (matched by basename via FTS — the
 /// touched objects are stored as aliases). Returns a note to append to a file read so
 /// the agent recalls WHY a file is the way it is, instead of re-deriving it from the
@@ -8592,7 +8700,9 @@ async fn relevant_memory_for_prompt(state: &AppState, prompt: &str) -> Option<St
             lines.push(line);
         }
     }
-    if let Some(provenance) = artifact_provenance_context_for_query(&facade, &user, &active, query) {
+    if let Some(workflow) = workflow_status_context_for_query(&facade, &user, &active, query) {
+        lines.insert(0, workflow);
+    } else if let Some(provenance) = artifact_provenance_context_for_query(&facade, &user, &active, query) {
         lines.insert(0, provenance);
     }
     lines.truncate(10);
@@ -8662,7 +8772,9 @@ fn recall_memory(state: &AppState, query: &str) -> String {
     for (kind, text) in search(active.clone()) {
         lines.push(format!("- [{kind}] {text}"));
     }
-    if let Some(provenance) = artifact_provenance_context_for_query(&facade, &user, &active, query) {
+    if let Some(workflow) = workflow_status_context_for_query(&facade, &user, &active, query) {
+        lines.push(workflow);
+    } else if let Some(provenance) = artifact_provenance_context_for_query(&facade, &user, &active, query) {
         lines.push(provenance);
     }
     // Episodic memory (M4): past conversations — SCOPED to the active workspace via the
@@ -34929,6 +35041,107 @@ mod tests {
         assert!(context.contains("Create reports/report.pdf"), "{context}");
         assert!(context.contains("why: The review must survive a new chat"), "{context}");
         assert!(context.contains("Leave the result only in chat"), "{context}");
+    }
+
+    #[test]
+    fn memory_eval_surfaces_workflow_status_and_why() {
+        let facade = local_first_memory::MemoryFacade::new(
+            local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
+        );
+        let user = local_first_memory::UserId::new("local");
+        let workspace = local_first_memory::WorkspaceId::new("project");
+        let lifecycle = local_first_memory::MemoryLifecycleRequest {
+            actor_id: "test".to_string(),
+            user_id: user.clone(),
+            workspace_id: workspace.clone(),
+            purpose: "test".to_string(),
+        };
+        for (memory_type, text, metadata) in [
+            (
+                "goal",
+                "Homun must complete memory guardrails before adding new deliverable workflows.",
+                serde_json::json!({ "source": "test", "scope": "project" }),
+            ),
+            (
+                "open_loop",
+                "WS5.6 workflow status eval remains open: prove a new chat can recover what is next and why.",
+                serde_json::json!({ "source": "test", "scope": "project" }),
+            ),
+            (
+                "decision",
+                "Delay WS7 until memory can explain workflow state.",
+                serde_json::json!({
+                    "source": "record_decision",
+                    "scope": "project",
+                    "decision": {
+                        "rationale": "New deliverables would reopen fragility unless memory can recover state and why.",
+                        "alternatives": [
+                            {
+                                "option": "Start WS7 immediately",
+                                "rejected_because": "It would build on unverified memory foundations."
+                            }
+                        ]
+                    },
+                    "affects_labels": ["reports/status.md"],
+                }),
+            ),
+        ] {
+            let record = facade
+                .create_memory_candidate(local_first_memory::MemoryCreateRequest {
+                    request: lifecycle.clone(),
+                    memory_type: memory_type.to_string(),
+                    text: text.to_string(),
+                    aliases: Vec::new(),
+                    language_hints: Vec::new(),
+                    confidence: 1.0,
+                    privacy_domain: local_first_memory::PrivacyDomain::new("project"),
+                    sensitivity: local_first_memory::DataSensitivity::Internal,
+                    evidence_refs: Vec::new(),
+                    metadata,
+                })
+                .unwrap();
+            facade
+                .confirm_memory(&lifecycle, &record.reference, "test")
+                .unwrap();
+        }
+        super::upsert_artifact_memory_record(
+            &facade,
+            &user,
+            &workspace,
+            &lifecycle,
+            "project",
+            "thread-1",
+            "reports/status.md",
+            "Artifact reports/status.md (document) creato nel progetto.".to_string(),
+            serde_json::json!({
+                "source": "artifact_runtime",
+                "producer": "mcp_filesystem",
+                "thread_slug": "thread-1",
+                "name": "reports/status.md",
+                "artifact_type": "document",
+                "project_relative_path": "reports/status.md",
+                "project_path": "/tmp/project/reports/status.md",
+                "size_bytes": 456,
+            }),
+        )
+        .unwrap();
+
+        let context = super::workflow_status_context_for_query(
+            &facade,
+            &user,
+            &workspace,
+            "a che punto è il workflow e perché?",
+        )
+        .expect("workflow status context");
+
+        assert!(context.contains("WORKFLOW STATUS FROM CANONICAL MEMORY"), "{context}");
+        assert!(context.contains("Objectives"), "{context}");
+        assert!(context.contains("memory guardrails"), "{context}");
+        assert!(context.contains("Open loops"), "{context}");
+        assert!(context.contains("WS5.6 workflow status eval remains open"), "{context}");
+        assert!(context.contains("Recent decisions"), "{context}");
+        assert!(context.contains("why: New deliverables would reopen fragility"), "{context}");
+        assert!(context.contains("reports/status.md"), "{context}");
     }
 
     #[test]

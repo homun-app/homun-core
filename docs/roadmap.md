@@ -44,6 +44,9 @@ primo percorso locale verde:
 11. WS5.6 — prima slice eval/reader: recall esplicito e RAG automatico leggono la
     provenance artifact dal grafo canonico e possono rispondere quali artifact
     esistono e da quale decisione/lavoro derivano, includendo il perché.
+12. WS5.6 — seconda slice eval/reader: recall esplicito e RAG automatico leggono
+    `goal`, `open_loop`, outcome/fact verificati, decisioni con rationale e
+    artifact provenance per rispondere “a che punto siamo?” e “perché?”.
 
 Prima di pubblicare/taggare resta prudente un smoke manuale in-app su una
 automazione schedulata reale che compaia nel thread `scheduled`. Non è bloccante
@@ -51,8 +54,8 @@ per iniziare il consolidamento memoria in locale.
 
 ## Milestone
 
-1. WS5.6 — completare eval memoria sullo stato workflow: nuova chat deve
-   recuperare “a che punto siamo?” e “perché?” da open loop/goal/outcome/piano.
+1. Valutare se serve smoke in-app mirato del reader memoria WS5.6; se non serve,
+   passare a WS1-Fase 2/3.
 2. WS1-Fase 2/3 — piano runtime-owned e workflow runner dichiarativo, così i
    deliverable futuri non riaprono fragilità cross-modello.
 3. WS7 — deliverable Manus-style (`make_document`, `make_research`,
@@ -66,7 +69,7 @@ collegarli al perché. Per questo WS7 non è più il prossimo step.
 
 ## Prossima azione
 
-Proseguire con WS5.6 sulla domanda “a che punto è il workflow e perché?”. La
-domanda artifact/provenance ha ora un primo reader/eval headless verde: il RAG e
-`recall_memory` attraversano il grafo canonico per producer, path, decisione/lavoro
-sorgente e rationale. Il contratto corrente della memoria è in [MEMORIA.md](MEMORIA.md).
+WS5.6 ha ora due reader/eval headless verdi: artifact/provenance e stato workflow/
+perché. Il prossimo passo è decidere se fare uno smoke in-app mirato del reader
+memoria; altrimenti riprendere WS1-Fase 2/3 su piano runtime-owned e write-back
+memoria. Il contratto corrente della memoria è in [MEMORIA.md](MEMORIA.md).
