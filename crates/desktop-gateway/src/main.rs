@@ -5787,6 +5787,100 @@ fn merge_execution_plan(plan: &mut ExecutionPlan, sent: &[serde_json::Value]) ->
     claims
 }
 
+#[derive(Debug, Clone)]
+struct WorkflowStepDefinition {
+    id: &'static str,
+    title: &'static str,
+    depends_on: &'static [&'static str],
+}
+
+#[derive(Debug, Clone)]
+struct WorkflowDefinition {
+    id: &'static str,
+    tool_name: &'static str,
+    contract: &'static str,
+    steps: &'static [WorkflowStepDefinition],
+}
+
+const MAKE_DECK_WORKFLOW_STEPS: &[WorkflowStepDefinition] = &[
+    WorkflowStepDefinition {
+        id: "brand",
+        title: "Materialize brand kit",
+        depends_on: &[],
+    },
+    WorkflowStepDefinition {
+        id: "content",
+        title: "Generate schema-enforced slide content",
+        depends_on: &["brand"],
+    },
+    WorkflowStepDefinition {
+        id: "images",
+        title: "Generate requested slide images",
+        depends_on: &["content"],
+    },
+    WorkflowStepDefinition {
+        id: "deck_json",
+        title: "Write deck.json",
+        depends_on: &["content"],
+    },
+    WorkflowStepDefinition {
+        id: "render",
+        title: "Render deck artifacts",
+        depends_on: &["deck_json", "images"],
+    },
+    WorkflowStepDefinition {
+        id: "register_artifacts",
+        title: "Register deck artifacts in memory",
+        depends_on: &["render"],
+    },
+];
+
+fn make_deck_workflow_definition() -> WorkflowDefinition {
+    WorkflowDefinition {
+        id: "make_deck",
+        tool_name: "make_deck",
+        contract: "DeckWorkflow",
+        steps: MAKE_DECK_WORKFLOW_STEPS,
+    }
+}
+
+fn workflow_execution_plan(
+    definition: &WorkflowDefinition,
+    arguments: serde_json::Value,
+) -> ExecutionPlan {
+    ExecutionPlan {
+        route: OrchestratorRoute::MixedWorkflow,
+        direct_answer: None,
+        steps: definition
+            .steps
+            .iter()
+            .map(|step| PlanStep {
+                step_id: step.id.to_string(),
+                kind: PlanStepKind::DirectAnswer,
+                depends_on: step.depends_on.iter().map(|value| value.to_string()).collect(),
+                provider_id: None,
+                tool_name: Some(definition.tool_name.to_string()),
+                arguments: serde_json::json!({
+                    "workflow_id": definition.id,
+                    "step_title": step.title,
+                    "input": arguments,
+                }),
+                execution_policy: StepExecutionPolicy::Immediate,
+                risk_level: "low".to_string(),
+                expected_duration_seconds: 0,
+                agent_id: None,
+                goal: Some(step.title.to_string()),
+                contract: Some(definition.contract.to_string()),
+                allowed_actions: vec![],
+                requires_user_approval: None,
+                timeout_seconds: None,
+                max_tokens: None,
+            })
+            .collect(),
+        needs_more_tools: None,
+    }
+}
+
 fn runtime_plan_memory_matches(memory: &MemoryRecord, thread_key: &str) -> bool {
     memory.memory_type == "open_loop"
         && !matches!(memory.status, MemoryStatus::Deleted | MemoryStatus::Rejected | MemoryStatus::Stale)
@@ -14596,6 +14690,14 @@ available tools (for data from the web use the browser: browser_navigate on the 
                         if brief.is_empty() {
                             "make_deck needs a 'brief' describing the presentation.".to_string()
                         } else {
+                            let workflow_plan = workflow_execution_plan(
+                                &make_deck_workflow_definition(),
+                                serde_json::json!({
+                                    "brief": brief.clone(),
+                                    "language": language.clone(),
+                                    "slides": slides,
+                                }),
+                            );
                             let thread_slug = artifact_thread_slug(thread_id.as_deref());
                             let _ = emit_stream_event(
                                 &tx,
@@ -14745,7 +14847,13 @@ Absolutely NO text, NO words, NO letters, NO numbers, NO captions, NO logos."
                                         }
                                         if produced.contains(&"deck.pptx") {
                                             format!(
-                                                "Deck created: {} ({slide_count} slides, {made} images). The .pptx is editable; .html/.pdf are previews. The deck is DONE — give the user a one-line summary.",
+                                                "Deck created via workflow {}: {} ({slide_count} slides, {made} images). The .pptx is editable; .html/.pdf are previews. The deck is DONE — give the user a one-line summary.",
+                                                workflow_plan
+                                                    .steps
+                                                    .first()
+                                                    .and_then(|step| step.arguments.get("workflow_id"))
+                                                    .and_then(|value| value.as_str())
+                                                    .unwrap_or("make_deck"),
                                                 produced.join(", ")
                                             )
                                         } else {
@@ -34825,6 +34933,37 @@ mod tests {
         assert_eq!(plan.steps[1].depends_on, vec!["s1".to_string()]);
         assert_eq!(steps[1]["title"], "Implement slice");
         assert_eq!(steps[1]["status"], "doing");
+    }
+
+    #[test]
+    fn make_deck_workflow_definition_projects_execution_plan() {
+        let definition = super::make_deck_workflow_definition();
+        let plan = super::workflow_execution_plan(
+            &definition,
+            serde_json::json!({
+                "brief": "Quarterly results",
+                "language": "en",
+                "slides": 6,
+            }),
+        );
+
+        assert_eq!(definition.id, "make_deck");
+        assert_eq!(plan.route, local_first_orchestrator::OrchestratorRoute::MixedWorkflow);
+        assert_eq!(plan.steps.len(), 6);
+        assert_eq!(plan.steps[0].step_id, "brand");
+        assert_eq!(plan.steps[0].contract.as_deref(), Some("DeckWorkflow"));
+        assert_eq!(plan.steps[4].step_id, "render");
+        assert_eq!(
+            plan.steps[4].depends_on,
+            vec!["deck_json".to_string(), "images".to_string()],
+        );
+        assert_eq!(
+            plan.steps[5]
+                .arguments
+                .get("workflow_id")
+                .and_then(|value| value.as_str()),
+            Some("make_deck"),
+        );
     }
 
     #[test]

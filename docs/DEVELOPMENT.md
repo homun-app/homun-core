@@ -199,6 +199,12 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   applica le stesse regole monotone di `merge_plan` e rigenera il contratto
   `ExecutionPlan`; la resume da marker rimane retrocompatibile. Test mirato:
   `merge_execution_plan_is_runtime_canonical_state`.
+- **WS1-Fase 3a locale/verde:** primo workflow dichiarativo: `make_deck` ha una
+  `WorkflowDefinition` harness-owned (`brand → content → images/deck_json →
+  render → register_artifacts`) e viene proiettato in `ExecutionPlan` interno
+  con DAG/contratto `DeckWorkflow`. Il modello continua a vedere un solo tool
+  `make_deck`; l'orchestrazione resta dell'harness. Test mirato:
+  `make_deck_workflow_definition_projects_execution_plan`.
 - **Nota aperta non bloccante:** durante i gate con tool il provider primario
   `glm-5.2` continua a rispondere `400 Bad Request` sul primo round con tool; il
   fallback a `kimi-k2.6:cloud` prosegue correttamente. Da riprendere come task

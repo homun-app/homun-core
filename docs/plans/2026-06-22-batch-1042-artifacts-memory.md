@@ -75,8 +75,16 @@ modelli deboli/locali. Invarianti: monotonìa, limitatezza, identità non inferi
 - ☐ **Floor ovunque** — constrained decoding su **tutte** le emissioni di
   orchestrazione (tool call del loop principale, piano, verifica), locale+cloud. Oggi
   è imposto solo sul contenuto di `make_deck`; il planner OpenAI-compat declassa ancora.
-- ☐ **Fase 3** — skill **dichiarative** + workflow runner (un solo grafo; `make_deck`
+- 🟡 **Fase 3** — skill **dichiarative** + workflow runner (un solo grafo; `make_deck`
   è l'embrione di `create-presentations` come workflow).
+  - ✅ **Slice 3a (2026-06-23, locale/verde)**: `make_deck` ha una
+    `WorkflowDefinition` harness-owned (`brand → content → images/deck_json →
+    render → register_artifacts`) proiettata in `ExecutionPlan` con DAG e
+    contratto `DeckWorkflow`. Il modello vede ancora un solo tool, ma il runtime
+    ha una definizione dichiarativa verificabile. Test mirato:
+    `make_deck_workflow_definition_projects_execution_plan`.
+  - ☐ **Slice 3b**: estrarre il runner workflow generico dalla pipeline deck e
+    renderlo riusabile per `make_document` / `make_research` / `make_meeting`.
 - ☐ **Fase 4** — router workflow|agent + **scaffolding adattivo** (pavimento + manopole
   per tier; tier via seed registry + probe al primo uso + stretta a runtime sui
   fallimenti) + repair limitato.

@@ -90,6 +90,9 @@ Fatto:
   del crate `orchestrator`; `update_plan` accetta e conserva `depends_on`
   espliciti. Il loop agente usa ora `ExecutionPlan` come stato runtime canonico;
   il marker/UI resta compatibile come vista derivata dallo snapshot step corrente.
+- primo workflow dichiarativo WS1: `make_deck` ha una `WorkflowDefinition`
+  harness-owned proiettata in `ExecutionPlan` (`DeckWorkflow`), senza creare un
+  secondo store workflow.
 
 Mancante:
 
@@ -162,7 +165,7 @@ Acceptance:
    locale/verde.
 5. WS5.6 — eval memoria: ✅ artifact/provenance e stato workflow/perché locali;
    resta eventuale smoke in-app mirato.
-6. WS1-Fase 3 — avviare il workflow runner dichiarativo sullo stesso
+6. WS1-Fase 3 — estrarre il runner workflow generico riusabile sullo stesso
    `ExecutionPlan` + write-back memoria/grafo.
 7. WS7 — deliverable Manus-style, solo dopo queste fondamenta.
 
