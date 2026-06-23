@@ -3387,6 +3387,44 @@ async fn register_artifact_memory(
     }
 }
 
+async fn emit_rendered_deck_artifacts(
+    state: &AppState,
+    tx: &StreamSink,
+    accumulated: &mut String,
+    thread_id: Option<&str>,
+    thread_slug: &str,
+    producer: &str,
+) -> Vec<String> {
+    let host_dir = sandbox::artifacts_dir().join(thread_slug);
+    let mut produced = Vec::new();
+    for fname in ["deck.pptx", "deck.html", "deck.pdf"] {
+        if let Ok(meta) = std::fs::metadata(host_dir.join(fname)) {
+            if meta.len() == 0 {
+                continue;
+            }
+            let marker = serde_json::json!({
+                "name": fname, "thread": thread_slug, "size": meta.len(), "updated": false,
+            });
+            let m = format!("‹‹ARTIFACT››{marker}‹‹/ARTIFACT››");
+            accumulated.push_str(&m);
+            let _ = emit_stream_event(tx, GenerateStreamEvent::Delta { text: m }).await;
+            register_artifact_memory(
+                state,
+                thread_id,
+                thread_slug,
+                fname,
+                meta.len(),
+                false,
+                producer,
+                None,
+            )
+            .await;
+            produced.push(fname.to_string());
+        }
+    }
+    produced
+}
+
 fn remember_project_file_artifact_memory(
     state: &AppState,
     thread_id: Option<&str>,
@@ -13579,6 +13617,29 @@ any other key such as \"presentation\" or \"deck\", and add no extra top-level k
                     .unwrap_or_default()
                     .trim()
                     .to_string();
+                if content.is_empty() {
+                    let reasoning = json
+                        .get("choices")
+                        .and_then(|c| c.as_array())
+                        .and_then(|a| a.first())
+                        .and_then(|c| c.get("message"))
+                        .and_then(|m| {
+                            m.get("reasoning")
+                                .or_else(|| m.get("reasoning_content"))
+                                .or_else(|| m.get("thinking"))
+                        })
+                        .and_then(|c| c.as_str())
+                        .unwrap_or("")
+                        .trim();
+                    last_err = if reasoning.is_empty() {
+                        format!("deck content model «{model}» returned an empty content field")
+                    } else {
+                        format!(
+                            "deck content model «{model}» returned reasoning-only output and no JSON content; choose a non-thinking model/provider for make_deck"
+                        )
+                    };
+                    continue;
+                }
                 break;
             }
             Err(e) => last_err = format!("deck content provider unreachable: {e}"),
@@ -17652,45 +17713,26 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                     Err(e) => e,
                                 };
                                 sandbox_end(render_out.clone());
+                                // 3) emit an artifact marker for each file produced, even when
+                                // QA flags issues: the files exist and the user needs access to
+                                // inspect/fix them.
+                                let produced = emit_rendered_deck_artifacts(
+                                    &state_owned,
+                                    &tx,
+                                    &mut accumulated,
+                                    thread_id.as_deref(),
+                                    &thread_slug,
+                                    "render_deck",
+                                )
+                                .await;
                                 if let Some(error) = rendered_deck_qa_failure(&render_out) {
                                     format!(
-                                        "Deck render produced files, but visual QA failed before delivery: {error}. Renderer output:\n{}",
-                                        render_out.chars().take(1200).collect::<String>()
+                                        "Deck rendered with visual QA issues: {error}. Files available: {}. Renderer output:\n{}",
+                                        if produced.is_empty() { "none".to_string() } else { produced.join(", ") },
+                                        render_out.chars().take(1200).collect::<String>(),
                                     )
                                 } else {
-                                // 3) emit an artifact marker for each file produced.
-                                let host_dir = sandbox::artifacts_dir().join(&thread_slug);
-                                let mut produced: Vec<&str> = Vec::new();
-                                for fname in ["deck.pptx", "deck.html", "deck.pdf"] {
-                                    if let Ok(meta) = std::fs::metadata(host_dir.join(fname)) {
-                                        if meta.len() > 0 {
-                                            let marker = serde_json::json!({
-                                                "name": fname, "thread": thread_slug,
-                                                "size": meta.len(), "updated": false,
-                                            });
-                                            let m = format!("‹‹ARTIFACT››{marker}‹‹/ARTIFACT››");
-                                            accumulated.push_str(&m);
-                                            let _ = emit_stream_event(
-                                                &tx,
-                                                GenerateStreamEvent::Delta { text: m },
-                                            )
-                                            .await;
-                                            register_artifact_memory(
-                                                &state_owned,
-                                                thread_id.as_deref(),
-                                                &thread_slug,
-                                                fname,
-                                                meta.len(),
-                                                false,
-                                                "render_deck",
-                                                None,
-                                            )
-                                            .await;
-                                            produced.push(fname);
-                                        }
-                                    }
-                                }
-                                if produced.contains(&"deck.pptx") {
+                                if produced.iter().any(|fname| fname == "deck.pptx") {
                                     format!(
                                         "Deck rendered: {}. The .pptx is editable; .html/.pdf are previews. The deck is DONE — mark the plan complete and give the user a one-line summary.",
                                         produced.join(", ")
@@ -17964,45 +18006,31 @@ Absolutely NO text, NO words, NO letters, NO numbers, NO captions, NO logos."
                                             Err(e) => e,
                                         };
                                         sandbox_end(render_out.clone());
+                                        // 6) emit an artifact marker per produced file, even
+                                        // when QA flags issues: the generated files still need
+                                        // to be visible for review and iteration.
+                                        let produced = emit_rendered_deck_artifacts(
+                                            &state_owned,
+                                            &tx,
+                                            &mut accumulated,
+                                            thread_id.as_deref(),
+                                            &thread_slug,
+                                            "make_deck",
+                                        )
+                                        .await;
                                         if let Some(error) = rendered_deck_qa_failure(&render_out) {
                                             format!(
-                                                "Deck render produced files, but visual QA failed before delivery: {error}. Renderer output:\n{}",
-                                                render_out.chars().take(1200).collect::<String>()
+                                                "Deck created via workflow {} with visual QA issues: {error}. Files available: {}. The .pptx is editable; .html/.pdf are previews.",
+                                                workflow_plan
+                                                    .steps
+                                                    .first()
+                                                    .and_then(|step| step.arguments.get("workflow_id"))
+                                                    .and_then(|value| value.as_str())
+                                                    .unwrap_or("make_deck"),
+                                                if produced.is_empty() { "none".to_string() } else { produced.join(", ") },
                                             )
                                         } else {
-                                        // 6) emit an artifact marker per produced file.
-                                        let host_dir = sandbox::artifacts_dir().join(&thread_slug);
-                                        let mut produced: Vec<&str> = Vec::new();
-                                        for fname in ["deck.pptx", "deck.html", "deck.pdf"] {
-                                            if let Ok(meta) = std::fs::metadata(host_dir.join(fname)) {
-                                                if meta.len() > 0 {
-                                                    let marker = serde_json::json!({
-                                                        "name": fname, "thread": thread_slug,
-                                                        "size": meta.len(), "updated": false,
-                                                    });
-                                                    let m = format!("‹‹ARTIFACT››{marker}‹‹/ARTIFACT››");
-                                                    accumulated.push_str(&m);
-                                                    let _ = emit_stream_event(
-                                                        &tx,
-                                                        GenerateStreamEvent::Delta { text: m },
-                                                    )
-                                                    .await;
-                                                    register_artifact_memory(
-                                                        &state_owned,
-                                                        thread_id.as_deref(),
-                                                        &thread_slug,
-                                                        fname,
-                                                        meta.len(),
-                                                        false,
-                                                        "make_deck",
-                                                        None,
-                                                    )
-                                                    .await;
-                                                    produced.push(fname);
-                                                }
-                                            }
-                                        }
-                                        if produced.contains(&"deck.pptx") {
+                                        if produced.iter().any(|fname| fname == "deck.pptx") {
                                             format!(
                                                 "Deck created via workflow {}: {} ({slide_count} slides, {made} images). The .pptx is editable; .html/.pdf are previews. The deck is DONE — give the user a one-line summary.",
                                                 workflow_plan

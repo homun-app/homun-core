@@ -861,7 +861,12 @@ ragionato il contratto degli strumenti `make_*` creati dall'harness. ADR 0011
   manuali tipo `mcp__filesystem__create` dopo un errore `make_deck`.
   Chiarimento importante: i `template_ref` `monet/*` attuali sono seed locali
   del catalogo Homun; MCP Monet resta un adapter futuro, non una dipendenza
-  runtime della generazione.
+  runtime della generazione. **Correzione artifact post-QA (2026-06-23):** se
+  `deck-render` produce file ma `deck-qa` segnala problemi, il gateway emette
+  comunque le card artifact e registra memoria/provenance, accompagnandole con
+  warning QA. Verifica runtime: Ollama locale risponde, ma `kimi-k2.6:cloud`
+  via Ollama restituisce reasoning-only (`content` vuoto), quindi va trattato
+  come provider incompatibile per il JSON schema deck.
 - ☐ **7.1b (futuro)** Portare ricerca/meeting al livello del deck solo dopo il
   chiarimento sul contratto strumenti: `make_research` e `make_meeting` non sono
   essenziali per la prossima release.

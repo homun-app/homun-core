@@ -126,7 +126,12 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   lasciare che il modello aggiri il workflow dopo un errore provider. Nota
   esplicita: i `template_ref` `monet/*` attuali sono seed locali del catalogo
   Homun, non lookup MCP; se `make_deck` fallisce su `127.0.0.1:11434`, la causa
-  è il provider contenuti non raggiungibile, non il template.
+  è il provider contenuti non raggiungibile/incompatibile, non il template.
+  Smoke successivo: Ollama locale risponde, ma `kimi-k2.6:cloud` via Ollama
+  restituisce reasoning-only e `content` vuoto, quindi non è adatto al JSON
+  schema di `make_deck`; quando la QA deck segnala problemi dopo il render, i
+  file già scritti vengono comunque emessi come artifact visibili e registrati
+  in memoria, con warning QA invece di sparire.
   `make_research` e `make_meeting` restano dopo questo asse.
 - **WS2-3.1 PASSATA in runtime (2026-06-23):** gli artifact scritti via
   Filesystem MCP dentro la root progetto vengono registrati come
