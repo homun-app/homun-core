@@ -12074,17 +12074,17 @@ fn make_document_tool_schema() -> serde_json::Value {
         "type": "function",
         "function": {
             "name": "make_document",
-            "description": "Create a COMPLETE structured document artifact from a brief in ONE call. The engine drafts a polished Markdown document, writes it as a managed artifact, and registers it in memory. Use this for requests to write/create/draft a document, report, memo, meeting minutes or relazione. Do NOT create a separate plan and do NOT call create_artifact/write_file/shell for this workflow. Just call make_document with the brief; when it returns, the document is DONE.",
+            "description": "Create a COMPLETE structured document artifact from a brief in ONE call. The engine drafts a polished Markdown document, writes it as managed Markdown/PDF/DOCX artifacts, and registers them in memory. Use this for requests to write/create/draft a document, report, memo, meeting minutes or relazione. Do NOT create a separate plan and do NOT call create_artifact/write_file/shell for this workflow. Just call make_document with the brief; when it returns, the document is DONE.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "brief": { "type": "string", "description": "What the document must contain, including any sections, audience, tone, constraints or source material the user provided — verbatim." },
                     "language": { "type": "string", "description": "Document language code, e.g. 'it' or 'en'. Default: the user's language." },
-                    "name": { "type": "string", "description": "Artifact filename. If the user named the file, preserve that name exactly as a simple filename such as report.md or report.pdf. If no name was specified, choose a concise descriptive .md filename." },
+                    "name": { "type": "string", "description": "Artifact filename. If the user named the file, preserve that name exactly as a simple filename such as report.md, report.pdf or report.docx. If no name was specified, choose a concise descriptive .md filename." },
                     "formats": {
                         "type": "array",
-                        "description": "Output formats to materialize from the same Markdown source. Use ['md'] by default, ['pdf'] when the user asks for a PDF, or ['md','pdf'] when both source and PDF are requested.",
-                        "items": { "type": "string", "enum": ["md", "pdf"] }
+                        "description": "Output formats to materialize from the same Markdown source. Use ['md'] by default, ['pdf'] when the user asks for a PDF, ['docx'] when the user asks for an editable Word file, or combine them when multiple outputs are requested.",
+                        "items": { "type": "string", "enum": ["md", "pdf", "docx"] }
                     }
                 },
                 "required": ["brief", "name"]
@@ -12386,7 +12386,7 @@ fn document_artifact_name_with_extension(raw: Option<&str>, extension: &str) -> 
     let safe = safe.trim_matches('.').trim_matches('-').to_string();
     let safe = if safe.is_empty() { "document".to_string() } else { safe };
     let lower = safe.to_ascii_lowercase();
-    let stem = if lower.ends_with(".md") || lower.ends_with(".pdf") {
+    let stem = if lower.ends_with(".md") || lower.ends_with(".pdf") || lower.ends_with(".docx") {
         safe.rsplit_once('.')
             .map(|(stem, _)| stem)
             .unwrap_or(safe.as_str())
@@ -12409,11 +12409,11 @@ fn document_artifact_name_from_brief(brief: &str) -> Option<String> {
             )
         });
         let lower = raw.to_ascii_lowercase();
-        let extension = if let Some(pos) = lower.find(".md") {
-            Some((pos, "md"))
-        } else {
-            lower.find(".pdf").map(|pos| (pos, "pdf"))
-        };
+        let extension = lower
+            .find(".docx")
+            .map(|pos| (pos, "docx"))
+            .or_else(|| lower.find(".pdf").map(|pos| (pos, "pdf")))
+            .or_else(|| lower.find(".md").map(|pos| (pos, "md")));
         let Some((pos, extension)) = extension else {
             continue;
         };
@@ -12422,6 +12422,7 @@ fn document_artifact_name_from_brief(brief: &str) -> Option<String> {
         if !candidate
             .trim_end_matches(".md")
             .trim_end_matches(".pdf")
+            .trim_end_matches(".docx")
             .chars()
             .any(|ch| ch.is_ascii_alphanumeric())
         {
@@ -12440,6 +12441,17 @@ fn document_requested_pdf(brief: &str) -> bool {
             .any(|word| word == "pdf")
 }
 
+fn document_requested_docx(brief: &str) -> bool {
+    let normalized = brief.to_ascii_lowercase();
+    normalized.contains(".docx")
+        || normalized.split(|ch: char| !ch.is_ascii_alphanumeric()).any(|word| {
+            matches!(
+                word,
+                "docx" | "word" | "editable" | "editabile" | "modificabile"
+            )
+        })
+}
+
 fn document_output_formats(parsed: &serde_json::Value, name: &str, brief: &str) -> Vec<String> {
     let mut formats = Vec::new();
     if let Some(values) = parsed.get("formats").and_then(|value| value.as_array()) {
@@ -12448,19 +12460,116 @@ fn document_output_formats(parsed: &serde_json::Value, name: &str, brief: &str) 
                 continue;
             };
             let format = raw.trim().trim_start_matches('.').to_ascii_lowercase();
-            if matches!(format.as_str(), "md" | "pdf") && !formats.iter().any(|f| f == &format) {
+            if matches!(format.as_str(), "md" | "pdf" | "docx")
+                && !formats.iter().any(|f| f == &format)
+            {
                 formats.push(format);
             }
         }
     }
     if formats.is_empty() {
-        if name.to_ascii_lowercase().ends_with(".pdf") || document_requested_pdf(brief) {
+        let lower_name = name.to_ascii_lowercase();
+        if lower_name.ends_with(".docx") || document_requested_docx(brief) {
+            formats.push("docx".to_string());
+        } else if lower_name.ends_with(".pdf") || document_requested_pdf(brief) {
             formats.push("pdf".to_string());
         } else {
             formats.push("md".to_string());
         }
     }
     formats
+}
+
+fn xml_escape_text(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
+}
+
+fn markdown_line_to_docx_paragraph(line: &str) -> String {
+    let trimmed = line.trim();
+    let (style, text) = if let Some(text) = trimmed.strip_prefix("# ") {
+        (Some("Heading1"), text.trim())
+    } else if let Some(text) = trimmed.strip_prefix("## ") {
+        (Some("Heading2"), text.trim())
+    } else if let Some(text) = trimmed.strip_prefix("### ") {
+        (Some("Heading3"), text.trim())
+    } else if let Some(text) = trimmed.strip_prefix("- ").or_else(|| trimmed.strip_prefix("* ")) {
+        (Some("ListParagraph"), text.trim())
+    } else {
+        (None, trimmed)
+    };
+    let style_xml = style
+        .map(|style| format!(r#"<w:pPr><w:pStyle w:val="{style}"/></w:pPr>"#))
+        .unwrap_or_default();
+    format!(
+        r#"<w:p>{style_xml}<w:r><w:t>{}</w:t></w:r></w:p>"#,
+        xml_escape_text(text)
+    )
+}
+
+fn markdown_to_docx(title: &str, markdown: &str) -> Result<Vec<u8>, String> {
+    let mut document_body = String::new();
+    let mut saw_content = false;
+    for line in markdown.lines() {
+        if line.trim().is_empty() {
+            document_body.push_str("<w:p/>");
+            continue;
+        }
+        saw_content = true;
+        document_body.push_str(&markdown_line_to_docx_paragraph(line));
+    }
+    if !saw_content {
+        document_body.push_str(&markdown_line_to_docx_paragraph(title));
+    }
+    let document_xml = format!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+<w:body>{document_body}<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/></w:sectPr></w:body>
+</w:document>"#
+    );
+    let content_types = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+<Default Extension="xml" ContentType="application/xml"/>
+<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+</Types>"#;
+    let rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>"#;
+    let mut cursor = std::io::Cursor::new(Vec::new());
+    {
+        let mut writer = zip::ZipWriter::new(&mut cursor);
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+        writer
+            .start_file("[Content_Types].xml", options)
+            .map_err(|error| error.to_string())?;
+        std::io::Write::write_all(&mut writer, content_types.as_bytes())
+            .map_err(|error| error.to_string())?;
+        writer
+            .add_directory("_rels/", options)
+            .map_err(|error| error.to_string())?;
+        writer
+            .start_file("_rels/.rels", options)
+            .map_err(|error| error.to_string())?;
+        std::io::Write::write_all(&mut writer, rels.as_bytes())
+            .map_err(|error| error.to_string())?;
+        writer
+            .add_directory("word/", options)
+            .map_err(|error| error.to_string())?;
+        writer
+            .start_file("word/document.xml", options)
+            .map_err(|error| error.to_string())?;
+        std::io::Write::write_all(&mut writer, document_xml.as_bytes())
+            .map_err(|error| error.to_string())?;
+        writer.finish().map_err(|error| error.to_string())?;
+    }
+    Ok(cursor.into_inner())
 }
 
 fn generate_image_tool_schema() -> serde_json::Value {
@@ -15851,6 +15960,13 @@ Absolutely NO text, NO words, NO letters, NO numbers, NO captions, NO logos."
                                                     .trim_end_matches(".PDF");
                                                 let bytes = pdf_render::markdown_to_pdf(title, &markdown_w)
                                                     .map_err(|e| format!("PDF render failed: {e}"))?;
+                                                write_artifact_bytes(&slug_w, &fname_w, &bytes)
+                                            } else if format == "docx" {
+                                                let title = fname_w
+                                                    .trim_end_matches(".docx")
+                                                    .trim_end_matches(".DOCX");
+                                                let bytes = markdown_to_docx(title, &markdown_w)
+                                                    .map_err(|e| format!("DOCX render failed: {e}"))?;
                                                 write_artifact_bytes(&slug_w, &fname_w, &bytes)
                                             } else {
                                                 write_text_artifact(&slug_w, &fname_w, &markdown_w)
@@ -36319,7 +36435,7 @@ mod tests {
                         .filter_map(|value| value.as_str())
                         .collect::<Vec<_>>()
                 }),
-            Some(vec!["md", "pdf"]),
+            Some(vec!["md", "pdf", "docx"]),
         );
     }
 
@@ -36349,6 +36465,57 @@ mod tests {
             super::document_output_formats(&serde_json::json!({}), "brief-finale.md", "Genera anche un PDF"),
             vec!["pdf".to_string()],
         );
+    }
+
+    #[test]
+    fn make_document_formats_support_editable_docx_outputs() {
+        assert_eq!(
+            super::document_artifact_name_with_extension(Some("brief finale.docx"), "md"),
+            "brief-finale.md",
+        );
+        assert_eq!(
+            super::document_artifact_name_with_extension(Some("brief finale.md"), "docx"),
+            "brief-finale.docx",
+        );
+        assert_eq!(
+            super::document_artifact_name_from_brief(
+                "Scrivi un documento Word chiamato homun-brief.docx",
+            )
+            .as_deref(),
+            Some("homun-brief.docx"),
+        );
+        assert_eq!(
+            super::document_output_formats(
+                &serde_json::json!({"formats": ["md", "docx", "pdf"]}),
+                "brief-finale.md",
+                "Scrivi un documento",
+            ),
+            vec!["md".to_string(), "docx".to_string(), "pdf".to_string()],
+        );
+        assert_eq!(
+            super::document_output_formats(
+                &serde_json::json!({}),
+                "brief-finale.md",
+                "Genera un documento editabile Word",
+            ),
+            vec!["docx".to_string()],
+        );
+    }
+
+    #[test]
+    fn markdown_to_docx_writes_valid_word_package() {
+        let bytes = super::markdown_to_docx("brief", "# Titolo\n\n- Punto & valore").unwrap();
+        let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+        let mut document = String::new();
+        std::io::Read::read_to_string(
+            &mut archive.by_name("word/document.xml").unwrap(),
+            &mut document,
+        )
+        .unwrap();
+
+        assert!(document.contains("Titolo"), "{document}");
+        assert!(document.contains("Punto &amp; valore"), "{document}");
+        assert!(archive.by_name("[Content_Types].xml").is_ok());
     }
 
     #[test]

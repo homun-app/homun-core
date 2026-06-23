@@ -318,6 +318,14 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   `native_atomic_registry_maps_pdf_atomic_to_real_tool_schema`. **Prossimo passo
   unico:** aggiungere un atomico PDF dedicato se serve UX più guidata; altrimenti
   passare a DOCX/editabile per `make_document`.
+- **make_document DOCX locale/verde (2026-06-23):** lo stesso workflow ora
+  materializza anche artifact `.docx` editabili dalla sorgente Markdown canonica,
+  via pacchetto OOXML minimale generato in-process con `zip` già presente.
+  `formats` accetta `md`/`pdf`/`docx`; richieste “Word/editabile/modificabile” o
+  file `.docx` selezionano il formato DOCX. Test mirati:
+  `make_document_formats_support_editable_docx_outputs`,
+  `markdown_to_docx_writes_valid_word_package`,
+  `make_document_tool_requires_artifact_name`.
 - **Gate provider Z.ai/GLM risolto (test manuale utente, 2026-06-23):** Settings
   espone sia `Z.ai (GLM)` standard (`https://api.z.ai/api/paas/v4`) sia
   `Z.ai Coding (GLM)` (`https://api.z.ai/api/coding/paas/v4`); il preset coding

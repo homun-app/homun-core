@@ -120,12 +120,17 @@ modelli deboli/locali. Invarianti: monotonìa, limitatezza, identità non inferi
     `workflow_router_prunes_alternative_tools_for_document_workflow`,
     `make_document_tool_requires_artifact_name`,
     `make_document_formats_preserve_explicit_pdf_outputs`,
+    `make_document_formats_support_editable_docx_outputs`,
+    `markdown_to_docx_writes_valid_word_package`,
     `artifact_memories_do_not_participate_in_semantic_dedup`,
     `static_workflow_plan_validation_is_async_runtime_safe`,
     `artifact_provenance_context_surfaces_make_document_workflow`.
-  - 🟡 **Prossime slice make_document:** DOCX/editabile e controlli più espliciti
-    su struttura/stile, ma solo dopo il registry unico: i workflow devono entrare
-    da capability retrieval/decisione strutturata, non da keyword sparse.
+    **Slice DOCX (2026-06-23, locale/verde):** `make_document` accetta anche
+    `formats=["docx"]` e richieste Word/editabili; materializza un pacchetto
+    OOXML `.docx` minimale dalla stessa sorgente Markdown, senza nuova dipendenza
+    e con artifact gestito registrato come gli altri formati.
+  - 🟡 **Prossime slice make_document:** controlli più espliciti su struttura/stile
+    e possibile smoke reale DOCX in-app.
   - ☐ **Backlog deliberato:** `make_research` / `make_meeting` restano in fondo
     finché non è chiarito il contratto degli strumenti creati dall'harness.
 - ✅ **Fase 4 (2026-06-23, locale/verde)** — router workflow|agent + primo
