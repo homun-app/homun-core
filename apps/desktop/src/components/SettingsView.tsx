@@ -1214,6 +1214,7 @@ const PROVIDER_PRESETS: Array<{
   },
   { id: "custom", label: "Custom", baseUrl: "", kind: "openai_compat" },
 ];
+type ProviderPreset = (typeof PROVIDER_PRESETS)[number];
 
 /// LLM concurrency control: how many inference requests the ResourceGovernor lets
 /// run in parallel. Auto follows locality (loopback 1, cloud 4); the user can force
@@ -1411,7 +1412,7 @@ function RuntimePane({
 
   // Open the add/configure modal pre-filled from a catalog preset (clicking a
   // greyed, not-yet-configured provider tile).
-  const openAddPreset = (p: (typeof PROVIDER_PRESETS)[number]) => {
+  const openAddPreset = (p: ProviderPreset) => {
     setPresetId(p.id);
     setLabel(p.label);
     setBaseUrl(p.baseUrl);
@@ -1428,6 +1429,7 @@ function RuntimePane({
   };
 
   const preset = PROVIDER_PRESETS.find((p) => p.id === presetId) ?? PROVIDER_PRESETS[0];
+  const isCustomPreset = preset.id === "custom";
   const modalProvider = modal && modal !== "add" ? providers.find((p) => p.id === modal) : undefined;
 
   // Per-role options: the image-generation role lists ONLY image-modality models
@@ -1472,7 +1474,7 @@ function RuntimePane({
     metaText: string;
     configured: boolean;
     view?: ProviderView;
-    preset?: (typeof PROVIDER_PRESETS)[number];
+    preset?: ProviderPreset;
   }> = [];
   const matched = new Set<string>();
   const metaFor = (p: ProviderView) =>
@@ -1642,30 +1644,17 @@ function RuntimePane({
                 {modal === "add" && (
                   <>
                     <div className="mdl-detail-head">
-                      <h3>{t("settings.addProvider")}</h3>
+                      <h3>
+                        {isCustomPreset
+                          ? t("settings.addCustomProvider")
+                          : t("settings.configureProviderName", { name: preset.label })}
+                      </h3>
                     </div>
                     <p className="mdl-detail-sub">
-                      {t("settings.addProviderDesc")}
+                      {isCustomPreset
+                        ? t("settings.addProviderDesc")
+                        : t("settings.configureProviderDesc", { name: preset.label })}
                     </p>
-                    <div className="mdl-field">
-                      <label>{t("settings.type")}</label>
-                      <select
-                        className="set-input"
-                        value={presetId}
-                        onChange={(event) => {
-                          const next = PROVIDER_PRESETS.find((p) => p.id === event.target.value);
-                          setPresetId(event.target.value);
-                          if (next && next.id !== "custom") {
-                            setBaseUrl(next.baseUrl);
-                            if (!label) setLabel(next.label);
-                          }
-                        }}
-                      >
-                        {PROVIDER_PRESETS.map((p) => (
-                          <option key={p.id} value={p.id}>{p.label}</option>
-                        ))}
-                      </select>
-                    </div>
                     <div className="mdl-field">
                       <label>{t("contacts.name")}</label>
                       <input className="set-input" placeholder={preset.label} value={label} onChange={(e) => setLabel(e.target.value)} />
@@ -1688,6 +1677,7 @@ function RuntimePane({
                           "add",
                           async () => {
                             const result = await coreBridge.upsertProvider({
+                              ...(isCustomPreset ? {} : { id: preset.id }),
                               label: (label || preset.label).trim(),
                               kind: preset.kind,
                               base_url: baseUrl.trim(),
@@ -1710,7 +1700,11 @@ function RuntimePane({
                         )
                       }
                     >
-                      {busy === "add" ? "Saving…" : "Add provider"}
+                      {busy === "add"
+                        ? t("settings.saving")
+                        : isCustomPreset
+                          ? t("settings.addProvider")
+                          : t("settings.providerConfigure")}
                     </button>
                   </>
                 )}
