@@ -50,44 +50,48 @@ primo percorso locale verde:
 12. WS5.6 — seconda slice eval/reader: recall esplicito e RAG automatico leggono
     `goal`, `open_loop`, outcome/fact verificati, decisioni con rationale e
     artifact provenance per rispondere “a che punto siamo?” e “perché?”.
-13. WS1-Fase 2 — prima slice piano→memoria: ogni `update_plan` / `step_advance`
+13. WS5.6 — gate release memoria: un test unico pre-release verifica in una
+    nuova chat simulata artifact/provenance/decisione e workflow status/perché,
+    inclusi producer/workflow, path gestito, rationale, alternative scartate,
+    goal/open-loop e outcome verificato.
+14. WS1-Fase 2 — prima slice piano→memoria: ogni `update_plan` / `step_advance`
     aggiorna un solo `open_loop` canonico `source="runtime_plan"` per thread,
     con prossimo step e conteggi; a completamento il record viene marcato stale e
     `stato-lavori.md` è rigenerato come vista derivata.
-14. WS1-Fase 2 — grafo piano/step: lo stesso write-back materializza entity piano
+15. WS1-Fase 2 — grafo piano/step: lo stesso write-back materializza entity piano
     e step nel grafo canonico, con relazioni `describes`, `relates_to`/`has_step`
     e `depends_on` quando esplicito.
-15. WS1-Fase 2 Slice 3a — il write-back canonico del piano include anche
+16. WS1-Fase 2 Slice 3a — il write-back canonico del piano include anche
     `metadata.execution_plan` nel contratto `ExecutionPlan` del crate
     `orchestrator`; `update_plan` conserva `depends_on` espliciti dal flusso
     reale. Resta da promuovere `ExecutionPlan` a stato runtime primario.
-16. WS1-Fase 2 Slice 3b — il loop agente usa `ExecutionPlan` come stato runtime
+17. WS1-Fase 2 Slice 3b — il loop agente usa `ExecutionPlan` come stato runtime
     canonico; lo snapshot `Vec<Value>` resta solo vista derivata per marker UI,
     memoria/grafo e verifica step.
-17. WS1-Fase 3a — `make_deck` ha una `WorkflowDefinition` harness-owned
+18. WS1-Fase 3a — `make_deck` ha una `WorkflowDefinition` harness-owned
     proiettata in `ExecutionPlan` con DAG e contratto `DeckWorkflow`; il modello
     continua a vedere un solo tool.
-18. WS1-Fase 3c — `ExecutionPlan` include `plan_propose` come contratto
+19. WS1-Fase 3c — `ExecutionPlan` include `plan_propose` come contratto
     strutturato per piani da approvare prima dell'esecuzione.
-19. WS1-Fase 3b/F5 — `OrchestratorBrain::run_plan` esegue workflow
+20. WS1-Fase 3b/F5 — `OrchestratorBrain::run_plan` esegue workflow
     dichiarativi già costruiti dall'harness usando gli stessi provider,
     task-runtime, dipendenze e subagent path dei piani planner-generated.
-20. WS1-Fase 6a — il loop principale scrive outcome per-step come `fact`
+21. WS1-Fase 6a — il loop principale scrive outcome per-step come `fact`
     confermate `source="runtime_plan_step"` nel `MemoryFacade` canonico, con
     criterio ed evidenze della verifica; il piano resta l'unico `open_loop`.
-21. WS1-Fase 6b — gli outcome completati dei task `subagent.*` riusano lo
+22. WS1-Fase 6b — gli outcome completati dei task `subagent.*` riusano lo
     stesso write-back per-step, con evidence redatta `source="subagent_task"`.
-22. WS1-Fase 3d — `make_deck` passa la propria `WorkflowDefinition` /
+23. WS1-Fase 3d — `make_deck` passa la propria `WorkflowDefinition` /
     `ExecutionPlan` attraverso `OrchestratorBrain::run_plan` prima della
     pipeline deterministica, senza planner LLM e senza store parallelo.
-23. WS1-Fase 4 — router workflow|agent harness-owned: deck/presentation/slide/pptx
+24. WS1-Fase 4 — router workflow|agent harness-owned: deck/presentation/slide/pptx
     vanno a `make_deck` con scaffolding `maximum`; richieste generiche restano
     nel loop agente.
-24. Post-smoke v0.1.1045 — fix locale su due regressioni osservate nello smoke
+25. Post-smoke v0.1.1045 — fix locale su due regressioni osservate nello smoke
     deck reale: il composer non è più ridimensionabile manualmente fino a
     espandere la chat, e il recall artifact/provenance ora espone `managed_path`,
     workflow `make_deck`/`DeckWorkflow` e outcome `runtime_plan_step`.
-25. WS1 generalizzazione deliverable — `make_document` ha ora una
+26. WS1 generalizzazione deliverable — `make_document` ha ora una
     `WorkflowDefinition` harness-owned (`DocumentWorkflow`) proiettata in
     `ExecutionPlan`, passa da `OrchestratorBrain::run_plan`, viene instradato dal
     router workflow|agent per richieste esplicite di scrittura documenti/report e
@@ -95,51 +99,51 @@ primo percorso locale verde:
     il percorso è async-safe nel runtime Tokio, il toolset viene ristretto al
     workflow anche dopo MCP/Composio injection e il nome artifact esplicito viene
     preservato (`homun-smoke-document.md`).
-26. WS1/WS7 document focus — `make_document` viene arricchito prima di creare
+27. WS1/WS7 document focus — `make_document` viene arricchito prima di creare
     altri strumenti: supporta formati `md`/`pdf` dallo stesso Markdown canonico e
     registra ogni artifact prodotto in memoria/provenance con producer
     `make_document`. `make_research` e `make_meeting` sono spostati alla fine.
-27. WS1-Fase 4b — nuova visione capability registry: i workflow `make_*` non
+28. WS1-Fase 4b — nuova visione capability registry: i workflow `make_*` non
     devono più vivere come keyword sparse o tool sempre esposti. Workflow nativi,
     MCP, skills/addon, connector tools e strumenti atomici entrano in un registry
     unico interrogabile; il router recupera candidati semanticamente, sceglie con
     decisione strutturata e carica nel toolset live solo le capability minime.
-28. WS1-Fase 4b prima slice — `make_deck` e `make_document` sono ora entry di un
+29. WS1-Fase 4b prima slice — `make_deck` e `make_document` sono ora entry di un
     registry nativo condiviso da router e `find_capability`: “pitch per Homun”
     recupera `make_deck` senza keyword `slide`/`pptx`, i `make_*` non vengono
     duplicati nel corpus deferred, e il workflow scelto resta nel live toolset
     anche dopo lo split core/deferred.
-29. WS1-Fase 4b seconda slice — il router produce una decisione strutturata
+30. WS1-Fase 4b seconda slice — il router produce una decisione strutturata
     interna (`Workflow`/`AtomicTool`/`AgentLoop`) con ragione e alternative. Prima
     conflict policy: creazione report PDF usa `make_document`; estrazione,
     unione o conversione PDF restano operazioni atomiche e non attivano
     `make_document`.
-30. WS1-Fase 4b terza slice — il loop agente usa la stessa decisione strutturata
+31. WS1-Fase 4b terza slice — il loop agente usa la stessa decisione strutturata
     per system prompt, route workflow e trace runtime: la scelta viene emessa come
     `ACT` e aggiunta a `tool_trace`, quindi resta auditabile e disponibile al
     learning post-turn senza store paralleli.
-31. WS1-Fase 4b quarta slice — `pdf_atomic` è una capability atomica nativa nel
+32. WS1-Fase 4b quarta slice — `pdf_atomic` è una capability atomica nativa nel
     registry/corpus e mappa a un tool reale (`run_in_sandbox`) per operazioni su
     PDF esistenti; la route atomica carica quel tool nel live toolset e non
     attiva `make_document`.
-32. WS1/WS7 document focus — `make_document` ora materializza anche `.docx`
+33. WS1/WS7 document focus — `make_document` ora materializza anche `.docx`
     editabile dalla stessa sorgente Markdown canonica, oltre a `md`/`pdf`, con
     package OOXML generato in-process e registrazione artifact/memoria invariata.
-33. WS1/WS7 document focus — `make_document` ora accetta struttura/stile
+34. WS1/WS7 document focus — `make_document` ora accetta struttura/stile
     espliciti (`document_type`, `audience`, `tone`, `sections`) nello stesso
     schema tool; il workflow li usa come contratto di generazione solo se
     dichiarati, senza attivazioni euristiche o nuovi registry paralleli.
-34. WS1/WS7 document focus — il renderer DOCX di `make_document` traduce le
+35. WS1/WS7 document focus — il renderer DOCX di `make_document` traduce le
     tabelle pipe Markdown in tabelle Word reali (`w:tbl`) con escaping XML,
     mantenendo sorgente Markdown canonica e registrazione artifact invariata.
-35. WS1/WS7 document focus — feedback smoke reale DOCX: il file era valido ma
+36. WS1/WS7 document focus — feedback smoke reale DOCX: il file era valido ma
     troppo grezzo. Il renderer ora include `styles.xml`, converte bold/italic
     Markdown in run Word, promuove il primo titolo e gestisce liste numerate.
-36. WS1/WS7 document focus — secondo feedback smoke DOCX: tabelle leggibili ma
+37. WS1/WS7 document focus — secondo feedback smoke DOCX: tabelle leggibili ma
     non adattate alla pagina. Il renderer ora emette tabelle full-width con
     `tblGrid`, layout fixed, celle percentuali, padding e proporzione 35/65 per
     tabelle a due colonne.
-37. WS1/WS7 document focus — `make_document` ha un `layout_profile` dichiarativo
+38. WS1/WS7 document focus — `make_document` ha un `layout_profile` dichiarativo
     nello stesso schema tool (`standard`, `one_page`, `executive_brief`,
     `detailed_report`, `proposal`); il profilo diventa direttiva di generazione
     esplicita, non un nuovo workflow e non una euristica di routing.

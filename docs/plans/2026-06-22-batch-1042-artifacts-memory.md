@@ -387,8 +387,15 @@ che fanno "ricordare il perché e sopravvivere". Caposaldo #8.
   composto da `goal`, `open_loop`, outcome/fact verificati, decisioni con rationale
   e artifact provenance come evidenza. Test red/green:
   `cargo test -p local-first-desktop-gateway memory_eval_surfaces_workflow_status_and_why -- --nocapture`.
-  **Resta:** decidere se serve smoke in-app mirato del reader memoria; piano/task
-  refs complete ora possono appoggiarsi al grafo piano materializzato da WS1.
+  **Gate release locale/verde:** aggiunto un test unico da checklist pre-release
+  che copre entrambe le domande target su una nuova chat simulata:
+  `cargo test -p local-first-desktop-gateway memory_guardrail_release_gate -- --nocapture`.
+  Verifica artifact/provenance/decisione, `make_document`/`DocumentWorkflow`,
+  path gestito, decision rationale/alternative, goal/open-loop e outcome
+  verificato.
+  **Resta:** smoke in-app mirato del reader memoria quando si vuole validare il
+  comportamento con dati reali; piano/task refs complete ora possono appoggiarsi
+  al grafo piano materializzato da WS1.
 
 > Nota: WS2-3.1 (artefatti→memoria) e WS1-F6 (piano→memoria) **alimentano** WS5 — sono
 > i nodi che rendono la memoria il cervello connesso. Stesso north-star.

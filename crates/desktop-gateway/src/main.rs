@@ -38492,6 +38492,151 @@ mod tests {
     }
 
     #[test]
+    fn memory_guardrail_release_gate_covers_artifact_and_workflow_recall() {
+        let facade = local_first_memory::MemoryFacade::new(
+            local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
+        );
+        let user = local_first_memory::UserId::new("local");
+        let workspace = local_first_memory::WorkspaceId::new("project");
+        let lifecycle = local_first_memory::MemoryLifecycleRequest {
+            actor_id: "release-gate".to_string(),
+            user_id: user.clone(),
+            workspace_id: workspace.clone(),
+            purpose: "release_memory_guardrail".to_string(),
+        };
+
+        for (memory_type, text, aliases, metadata) in [
+            (
+                "goal",
+                "Ship Homun only when artifact provenance and workflow status survive a new chat.",
+                Vec::<String>::new(),
+                serde_json::json!({ "source": "release_gate", "scope": "project" }),
+            ),
+            (
+                "open_loop",
+                "Next release gate: prove a fresh chat can explain existing artifacts, current workflow state, and why.",
+                Vec::<String>::new(),
+                serde_json::json!({ "source": "release_gate", "scope": "project" }),
+            ),
+            (
+                "decision",
+                "Use make_document for the board brief artifact.",
+                vec!["board-brief.docx".to_string()],
+                serde_json::json!({
+                    "source": "record_decision",
+                    "scope": "project",
+                    "decision": {
+                        "rationale": "The board needs an editable governed deliverable, not a chat-only answer.",
+                        "alternatives": [
+                            {
+                                "option": "Leave the board brief in chat",
+                                "rejected_because": "It would not be exportable, governed, or recoverable."
+                            }
+                        ]
+                    },
+                    "affects_labels": ["board-brief.docx"],
+                }),
+            ),
+            (
+                "fact",
+                "Runtime plan step completed: make_document produced board-brief.docx.",
+                Vec::<String>::new(),
+                serde_json::json!({
+                    "source": "runtime_plan_step",
+                    "thread_id": "thread-board",
+                    "step_id": "materialize_docx",
+                    "status": "done",
+                    "certainty": "verified",
+                    "done_criterion": "board-brief.docx exists as a managed artifact"
+                }),
+            ),
+        ] {
+            let record = facade
+                .create_memory_candidate(local_first_memory::MemoryCreateRequest {
+                    request: lifecycle.clone(),
+                    memory_type: memory_type.to_string(),
+                    text: text.to_string(),
+                    aliases,
+                    language_hints: Vec::new(),
+                    confidence: 1.0,
+                    privacy_domain: local_first_memory::PrivacyDomain::new("project"),
+                    sensitivity: local_first_memory::DataSensitivity::Internal,
+                    evidence_refs: Vec::new(),
+                    metadata,
+                })
+                .unwrap();
+            facade
+                .confirm_memory(&lifecycle, &record.reference, "release gate seed")
+                .unwrap();
+        }
+
+        super::upsert_artifact_memory_record(
+            &facade,
+            &user,
+            &workspace,
+            &lifecycle,
+            "project",
+            "thread-board",
+            "board-brief.docx",
+            "Artifact board-brief.docx (document) creato nel thread thread-board.".to_string(),
+            serde_json::json!({
+                "source": "artifact_runtime",
+                "producer": "make_document",
+                "thread_slug": "thread-board",
+                "name": "board-brief.docx",
+                "artifact_type": "document",
+                "path_ref": "thread-board/board-brief.docx",
+                "managed_path": "/Users/fabio/.homun/artifacts/thread-board/board-brief.docx",
+                "size_bytes": 1234,
+            }),
+        )
+        .unwrap();
+
+        let artifact_context = super::artifact_provenance_context_for_query(
+            &facade,
+            &user,
+            &workspace,
+            "quali artifact esistono per il progetto e da quale decisione o workflow derivano?",
+        )
+        .expect("artifact provenance release gate context");
+        for expected in [
+            "ARTIFACT PROVENANCE FROM CANONICAL MEMORY GRAPH",
+            "board-brief.docx",
+            "produced by make_document",
+            "derives from workflow make_document / DocumentWorkflow",
+            "Use make_document for the board brief artifact.",
+            "why: The board needs an editable governed deliverable",
+            "Leave the board brief in chat",
+            "local managed path",
+        ] {
+            assert!(artifact_context.contains(expected), "missing {expected:?}: {artifact_context}");
+        }
+
+        let status_context = super::workflow_status_context_for_query(
+            &facade,
+            &user,
+            &workspace,
+            "a che punto è il workflow e perché?",
+        )
+        .expect("workflow status release gate context");
+        for expected in [
+            "WORKFLOW STATUS FROM CANONICAL MEMORY",
+            "Objectives",
+            "artifact provenance and workflow status survive a new chat",
+            "Open loops / next work",
+            "fresh chat can explain existing artifacts",
+            "Verified outcomes / current state",
+            "make_document produced board-brief.docx",
+            "Recent decisions / why",
+            "why: The board needs an editable governed deliverable",
+            "Evidence artifacts",
+            "board-brief.docx",
+        ] {
+            assert!(status_context.contains(expected), "missing {expected:?}: {status_context}");
+        }
+    }
+
+    #[test]
     fn reassemble_streamed_content_and_tool_calls() {
         // Plain content split across two SSE deltas + a finish_reason.
         let sse = "data: {\"choices\":[{\"delta\":{\"content\":\"Ciao \"}}]}\n\

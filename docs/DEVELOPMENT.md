@@ -151,7 +151,13 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   `open_loop`, outcome/fact verificati, decisioni con rationale e artifact
   provenance come evidenza. Test red/green:
   `cargo test -p local-first-desktop-gateway memory_eval_surfaces_workflow_status_and_why -- --nocapture`
-  (rosso iniziale: nessun contesto workflow). **WS1-Fase 2 write-back memoria
+  (rosso iniziale: nessun contesto workflow). **WS5.6 gate release locale/verde:**
+  aggiunto un gate unico nominabile che simula una nuova chat e verifica insieme
+  artifact/provenance/decisione e workflow status/perché, inclusi producer
+  `make_document`, `DocumentWorkflow`, path gestito, decision rationale,
+  alternativa scartata, goal/open-loop e outcome verificato. Comando:
+  `cargo test -p local-first-desktop-gateway memory_guardrail_release_gate -- --nocapture`.
+  **WS1-Fase 2 write-back memoria
   locale/verde:** ogni `update_plan` / `step_advance` materializza lo stato del
   piano runtime-owned come unico `open_loop` canonico `source="runtime_plan"` per
   thread; aggiorna in-place, rigenera `stato-lavori.md` come proiezione derivata
