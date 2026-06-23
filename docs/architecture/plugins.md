@@ -77,7 +77,9 @@ duplicati nel corpus deferred generico. La decisione interna è strutturata
 conflitto distingue creazione report PDF (`make_document`) da operazioni atomiche
 PDF come estrazione, unione o conversione (`pdf_atomic`). Il loop agente usa la
 stessa decisione per system prompt, route workflow e trace runtime (`ACT` +
-`tool_trace`). Resta da collegare `AtomicTool` al registry reale di atomici/MCP.
+`tool_trace`). `pdf_atomic` è ora una capability atomica nativa nel registry e
+mappa a `run_in_sandbox`; un tool PDF dedicato resta opzionale se serve uno
+schema più guidato.
 
 ## Esecuzione contenuta (ADR 0009/0010)
 

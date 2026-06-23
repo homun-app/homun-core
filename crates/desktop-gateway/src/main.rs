@@ -5823,6 +5823,15 @@ struct NativeWorkflowCapability {
     schema: fn() -> serde_json::Value,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct NativeAtomicCapability {
+    key: &'static str,
+    tool_name: &'static str,
+    description: &'static str,
+    route_text: &'static str,
+    schema: fn() -> serde_json::Value,
+}
+
 const MAKE_DECK_WORKFLOW_STEPS: &[WorkflowStepDefinition] = &[
     WorkflowStepDefinition {
         id: "brand",
@@ -5939,6 +5948,39 @@ fn native_workflow_capability_entries() -> Vec<CapabilityEntry> {
                 capability.contract,
                 capability.description,
                 capability.route_text
+            ),
+            schema: Some((capability.schema)()),
+            is_skill: false,
+        })
+        .collect()
+}
+
+fn native_atomic_capabilities() -> &'static [NativeAtomicCapability] {
+    &[NativeAtomicCapability {
+        key: "pdf_atomic",
+        tool_name: "run_in_sandbox",
+        description: "Inspect, extract, merge, split, compress or convert existing PDF files as an atomic file operation.",
+        route_text: "pdf_atomic PDF extract estrai read leggi merge unisci combine combina split dividi convert converti compress comprimi text testo pages pagine images immagini existing file existing document",
+        schema: run_in_sandbox_tool_schema,
+    }]
+}
+
+fn native_atomic_by_key(key: &str) -> Option<NativeAtomicCapability> {
+    native_atomic_capabilities()
+        .iter()
+        .copied()
+        .find(|capability| capability.key == key)
+}
+
+fn native_atomic_capability_entries() -> Vec<CapabilityEntry> {
+    native_atomic_capabilities()
+        .iter()
+        .map(|capability| CapabilityEntry {
+            key: capability.key.to_string(),
+            desc: capability.description.to_string(),
+            text: format!(
+                "{} {} {} {}",
+                capability.key, capability.tool_name, capability.description, capability.route_text
             ),
             schema: Some((capability.schema)()),
             is_skill: false,
@@ -13513,12 +13555,21 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
                 .map(|name| CORE_TOOL_NAMES.contains(&name))
                 .unwrap_or(false)
         });
-    if let WorkflowRouteDecision::Workflow { tool_name, .. } = &workflow_route {
-        if let Some(capability) = native_workflow_by_tool_name(tool_name) {
-            base_tools.push((capability.schema)());
+    match &capability_route {
+        CapabilityRouteDecision::Workflow { tool_name, .. } => {
+            if let Some(capability) = native_workflow_by_tool_name(tool_name) {
+                base_tools.push((capability.schema)());
+            }
         }
-    } else {
-        base_tools.push(find_capability_tool_schema());
+        CapabilityRouteDecision::AtomicTool { capability_key, .. } => {
+            if let Some(capability) = native_atomic_by_key(capability_key) {
+                base_tools.push((capability.schema)());
+            }
+            base_tools.push(find_capability_tool_schema());
+        }
+        CapabilityRouteDecision::AgentLoop { .. } => {
+            base_tools.push(find_capability_tool_schema());
+        }
     }
     // MCP servers are installed deliberately and are few, so their tools go STRAIGHT
     // into the live tool set (not deferred behind find_capability) when the count is
@@ -13584,6 +13635,7 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
     }
     if !read_only {
         capability_corpus.extend(native_workflow_capability_entries());
+        capability_corpus.extend(native_atomic_capability_entries());
     }
     if has_skills {
         for (id, sname, sdesc) in &enabled_skills {
@@ -36163,6 +36215,23 @@ mod tests {
         assert!(instruction.contains("Do not call end-to-end deliverable workflows"), "{instruction}");
         assert!(instruction.contains("`make_document`"), "{instruction}");
         assert!(trace.contains("capability route: atomic pdf_atomic"), "{trace}");
+    }
+
+    #[test]
+    fn native_atomic_registry_maps_pdf_atomic_to_real_tool_schema() {
+        let corpus = super::native_atomic_capability_entries();
+        let ranked = super::bm25_rank(&corpus, "unisci questi PDF", 1);
+        let entry = ranked.first().expect("pdf atomic entry");
+        let tool_name = entry
+            .schema
+            .as_ref()
+            .and_then(|schema| schema.pointer("/function/name"))
+            .and_then(|value| value.as_str());
+
+        assert_eq!(entry.key, "pdf_atomic");
+        assert_eq!(tool_name, Some("run_in_sandbox"));
+        assert!(entry.text.contains("merge"));
+        assert!(entry.text.contains("converti"));
     }
 
     #[test]

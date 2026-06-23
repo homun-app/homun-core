@@ -165,9 +165,14 @@ modelli deboli/locali. Invarianti: monotonìa, limitatezza, identità non inferi
     workflow, ed emette una trace line come `ACT` + `tool_trace` con ragione e
     alternative. Questo rende auditabile perché il turno ha scelto workflow o
     atomico e alimenta il learning post-turn senza store paralleli.
-  - 🟡 Collegare `AtomicTool` al registry reale degli atomici/MCP: oggi
-    `pdf_atomic` è una policy guardrail con istruzione e trace; resta mappare la
-    decisione agli strumenti PDF effettivamente disponibili/scoperti.
+  - ✅ **Quarta slice registry atomici (2026-06-23, locale/verde):** aggiunta
+    `NativeAtomicCapability`; `pdf_atomic` entra nel corpus `find_capability` ed
+    è mappato a schema tool reale `run_in_sandbox` per operazioni PDF su file
+    esistenti. Una route atomica carica `run_in_sandbox` nel live toolset e
+    mantiene `find_capability`, senza attivare workflow deliverable.
+  - 🟡 Possibile step futuro: atomico PDF dedicato con schema più guidato
+    (input/output files, operazione), se `run_in_sandbox` risulta troppo generico
+    nello smoke.
 - 🟡 **Fase 5** — convergenza con `OrchestratorBrain` (completa [ADR 0008](../decisions/0008-orchestrator-brain-single-planner.md)).
   - ✅ `run_plan` porta i workflow dichiarativi dentro lo stesso Brain senza planner
     LLM; resta applicarlo a tutte le pipeline deliverable e al router.

@@ -309,10 +309,15 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   evento `ACT` e viene aggiunta a `tool_trace`, quindi entra nel learning/audit
   del turno con il perché. L'istruzione atomica impedisce esplicitamente
   `make_document` per operazioni PDF atomiche. Test mirato:
-  `capability_router_atomic_instruction_blocks_deliverable_workflow`. **Prossimo
-  passo unico:** collegare `AtomicTool(pdf_atomic)` al registry reale degli
-  atomici/MCP invece di tenerlo solo come policy guardrail, poi proseguire con
-  DOCX o nuovi workflow.
+  `capability_router_atomic_instruction_blocks_deliverable_workflow`. **Quarta
+  slice locale/verde:** aggiunto registry nativo degli atomici; `pdf_atomic`
+  entra nel corpus `find_capability` ed è mappato a uno schema tool reale
+  (`run_in_sandbox`) per operazioni PDF su file esistenti. Quando la route
+  atomica viene scelta, `run_in_sandbox` viene caricato nel live toolset insieme
+  a `find_capability`, senza esporre `make_document`. Test mirato:
+  `native_atomic_registry_maps_pdf_atomic_to_real_tool_schema`. **Prossimo passo
+  unico:** aggiungere un atomico PDF dedicato se serve UX più guidata; altrimenti
+  passare a DOCX/editabile per `make_document`.
 - **Gate provider Z.ai/GLM risolto (test manuale utente, 2026-06-23):** Settings
   espone sia `Z.ai (GLM)` standard (`https://api.z.ai/api/paas/v4`) sia
   `Z.ai Coding (GLM)` (`https://api.z.ai/api/coding/paas/v4`); il preset coding
