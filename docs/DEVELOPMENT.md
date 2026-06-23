@@ -317,7 +317,8 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   a `find_capability`, senza esporre `make_document`. Test mirato:
   `native_atomic_registry_maps_pdf_atomic_to_real_tool_schema`. **Prossimo passo
   unico:** aggiungere un atomico PDF dedicato se serve UX più guidata; altrimenti
-  passare a DOCX/editabile per `make_document`.
+  proseguire con smoke reale DOCX e template/layout dichiarativi dentro
+  `make_document`.
 - **make_document DOCX locale/verde (2026-06-23):** lo stesso workflow ora
   materializza anche artifact `.docx` editabili dalla sorgente Markdown canonica,
   via pacchetto OOXML minimale generato in-process con `zip` già presente.
