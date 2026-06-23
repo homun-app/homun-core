@@ -333,6 +333,11 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   ignorati; le sezioni restano ordinate e limitate. Test mirati:
   `make_document_tool_requires_artifact_name`,
   `make_document_generation_options_are_explicit_and_bounded`.
+- **make_document DOCX table rendering locale/verde (2026-06-23):** il renderer
+  OOXML minimale ora converte le tabelle pipe Markdown in `<w:tbl>` Word reali
+  invece di salvarle come paragrafi grezzi; conserva escaping XML e scarta la
+  riga separatore Markdown. Test mirato:
+  `markdown_to_docx_renders_pipe_tables`.
 - **Gate provider Z.ai/GLM risolto (test manuale utente, 2026-06-23):** Settings
   espone sia `Z.ai (GLM)` standard (`https://api.z.ai/api/paas/v4`) sia
   `Z.ai Coding (GLM)` (`https://api.z.ai/api/coding/paas/v4`); il preset coding

@@ -123,6 +123,7 @@ modelli deboli/locali. Invarianti: monotonìa, limitatezza, identità non inferi
     `make_document_formats_preserve_explicit_pdf_outputs`,
     `make_document_formats_support_editable_docx_outputs`,
     `markdown_to_docx_writes_valid_word_package`,
+    `markdown_to_docx_renders_pipe_tables`,
     `artifact_memories_do_not_participate_in_semantic_dedup`,
     `static_workflow_plan_validation_is_async_runtime_safe`,
     `artifact_provenance_context_surfaces_make_document_workflow`.
@@ -134,6 +135,9 @@ modelli deboli/locali. Invarianti: monotonìa, limitatezza, identità non inferi
     `document_type`, `audience`, `tone` e `sections`; il workflow li traduce in
     direttive di generazione solo se esplicitamente passati, senza euristiche
     fragili e senza registry paralleli.
+    **Slice DOCX tables (2026-06-23, locale/verde):** il renderer OOXML converte
+    tabelle pipe Markdown in tabelle Word reali (`w:tbl`) con escaping XML,
+    mantenendo la stessa registrazione artifact/memoria.
   - 🟡 **Prossime slice make_document:** smoke reale DOCX in-app e poi controlli
     più ricchi su template/layout solo se restano dentro il registry unico.
   - ☐ **Backlog deliberato:** `make_research` / `make_meeting` restano in fondo

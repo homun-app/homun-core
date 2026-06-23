@@ -12623,16 +12623,85 @@ fn markdown_line_to_docx_paragraph(line: &str) -> String {
     )
 }
 
+fn markdown_table_cells(line: &str) -> Option<Vec<String>> {
+    let trimmed = line.trim();
+    if !trimmed.contains('|') {
+        return None;
+    }
+    let inner = trimmed.trim_matches('|');
+    let cells = inner
+        .split('|')
+        .map(|cell| cell.trim().to_string())
+        .collect::<Vec<_>>();
+    if cells.len() < 2 {
+        None
+    } else {
+        Some(cells)
+    }
+}
+
+fn markdown_table_separator(line: &str) -> bool {
+    let Some(cells) = markdown_table_cells(line) else {
+        return false;
+    };
+    cells.iter().all(|cell| {
+        let compact = cell.replace(':', "").replace('-', "");
+        compact.trim().is_empty() && cell.chars().filter(|ch| *ch == '-').count() >= 3
+    })
+}
+
+fn markdown_table_to_docx(rows: &[Vec<String>]) -> String {
+    let mut out = String::from(
+        r#"<w:tbl><w:tblPr><w:tblStyle w:val="TableGrid"/><w:tblW w:w="0" w:type="auto"/><w:tblBorders><w:top w:val="single" w:sz="4" w:space="0" w:color="auto"/><w:left w:val="single" w:sz="4" w:space="0" w:color="auto"/><w:bottom w:val="single" w:sz="4" w:space="0" w:color="auto"/><w:right w:val="single" w:sz="4" w:space="0" w:color="auto"/><w:insideH w:val="single" w:sz="4" w:space="0" w:color="auto"/><w:insideV w:val="single" w:sz="4" w:space="0" w:color="auto"/></w:tblBorders></w:tblPr>"#,
+    );
+    for row in rows {
+        out.push_str("<w:tr>");
+        for cell in row {
+            out.push_str(&format!(
+                r#"<w:tc><w:tcPr><w:tcW w:w="0" w:type="auto"/></w:tcPr><w:p><w:r><w:t>{}</w:t></w:r></w:p></w:tc>"#,
+                xml_escape_text(cell)
+            ));
+        }
+        out.push_str("</w:tr>");
+    }
+    out.push_str("</w:tbl>");
+    out
+}
+
 fn markdown_to_docx(title: &str, markdown: &str) -> Result<Vec<u8>, String> {
     let mut document_body = String::new();
     let mut saw_content = false;
-    for line in markdown.lines() {
+    let lines = markdown.lines().collect::<Vec<_>>();
+    let mut i = 0;
+    while i < lines.len() {
+        let line = lines[i];
         if line.trim().is_empty() {
             document_body.push_str("<w:p/>");
+            i += 1;
             continue;
+        }
+        if let Some(header) = markdown_table_cells(line) {
+            if i + 1 < lines.len() && markdown_table_separator(lines[i + 1]) {
+                let mut rows = vec![header];
+                i += 2;
+                while i < lines.len() {
+                    let Some(row) = markdown_table_cells(lines[i]) else {
+                        break;
+                    };
+                    if markdown_table_separator(lines[i]) {
+                        break;
+                    }
+                    rows.push(row);
+                    i += 1;
+                }
+                saw_content = true;
+                document_body.push_str(&markdown_table_to_docx(&rows));
+                continue;
+            }
         }
         saw_content = true;
         document_body.push_str(&markdown_line_to_docx_paragraph(line));
+        i += 1;
     }
     if !saw_content {
         document_body.push_str(&markdown_line_to_docx_paragraph(title));
@@ -36702,6 +36771,32 @@ mod tests {
         assert!(document.contains("Titolo"), "{document}");
         assert!(document.contains("Punto &amp; valore"), "{document}");
         assert!(archive.by_name("[Content_Types].xml").is_ok());
+    }
+
+    #[test]
+    fn markdown_to_docx_renders_pipe_tables() {
+        let markdown = "\
+# Report
+
+| Metrica | Valore |
+| --- | ---: |
+| ARR | 120 < 150 |
+| Margine | 42% |
+";
+        let bytes = super::markdown_to_docx("report", markdown).unwrap();
+        let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+        let mut document = String::new();
+        std::io::Read::read_to_string(
+            &mut archive.by_name("word/document.xml").unwrap(),
+            &mut document,
+        )
+        .unwrap();
+
+        assert!(document.contains("<w:tbl>"), "{document}");
+        assert!(document.contains("<w:tr>"), "{document}");
+        assert!(document.contains("Metrica"), "{document}");
+        assert!(document.contains("120 &lt; 150"), "{document}");
+        assert!(!document.contains("---:"), "{document}");
     }
 
     #[test]

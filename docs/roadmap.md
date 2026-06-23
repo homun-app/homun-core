@@ -129,6 +129,9 @@ primo percorso locale verde:
     espliciti (`document_type`, `audience`, `tone`, `sections`) nello stesso
     schema tool; il workflow li usa come contratto di generazione solo se
     dichiarati, senza attivazioni euristiche o nuovi registry paralleli.
+34. WS1/WS7 document focus — il renderer DOCX di `make_document` traduce le
+    tabelle pipe Markdown in tabelle Word reali (`w:tbl`) con escaping XML,
+    mantenendo sorgente Markdown canonica e registrazione artifact invariata.
 
 Prima di pubblicare/taggare resta prudente ripetere lo smoke manuale in-app su
 una automazione schedulata reale con il binario aggiornato. Il primo smoke ha
@@ -167,7 +170,8 @@ corpus `find_capability`; la decisione strutturata ora distingue workflow,
 atomici PDF e agent loop con ragione esplicita; il loop agente emette la route
 come `ACT` e la aggiunge al `tool_trace` del turno. `pdf_atomic` ora è una
 capability atomica nativa mappata a `run_in_sandbox`. `make_document` supporta
-anche output `.docx` editabile e parametri espliciti di struttura/stile. Scelta
-corrente: smoke reale DOCX in-app e poi template/layout dichiarativi solo dentro
-il registry unico; `make_research` e `make_meeting` restano futuri.
+anche output `.docx` editabile, parametri espliciti di struttura/stile e tabelle
+Word generate da Markdown. Scelta corrente: smoke reale DOCX in-app e poi
+template/layout dichiarativi solo dentro il registry unico; `make_research` e
+`make_meeting` restano futuri.
 Il contratto corrente della memoria è in [MEMORIA.md](MEMORIA.md).
