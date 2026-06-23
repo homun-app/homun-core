@@ -143,11 +143,17 @@ modelli deboli/locali. Invarianti: monotonìa, limitatezza, identità non inferi
   Le keyword restano solo prefilter/fallback/guardrail, non verità di routing.
   Esempio target: “voglio creare un pitch per Homun” deve recuperare `make_deck`
   dal registry anche senza `slide`/`pptx`.
-  - ☐ Estrarre `WorkflowRegistry`/`CapabilityRegistry` per `make_deck` e
-    `make_document` includendo schema tool, descrizione semantica, workflow
-    definition, output formats, policy provenance/lifecycle e route hints.
-  - ☐ Far confluire nel corpus `find_capability` anche i workflow nativi, senza
-    esporli tutti nel prompt.
+  - ✅ **Prima slice registry nativo (2026-06-23, locale/verde):** `make_deck` e
+    `make_document` hanno entry `NativeWorkflowCapability` con schema tool,
+    descrizione semantica e route text condivisi da router e corpus. Il routing
+    non usa più l'array keyword deck/document: recupera via BM25 sul registry
+    nativo. Gate: “Voglio creare un pitch per Homun” seleziona `make_deck` senza
+    `slide`/`pptx`; una richiesta generica resta `AgentLoop`.
+  - ✅ Far confluire nel corpus `find_capability` anche i workflow nativi, senza
+    esporli tutti nel prompt: i `make_*` vengono saltati dal corpus deferred
+    generico e reinseriti tramite registry nativo; quando il router sceglie un
+    workflow, il tool selezionato viene caricato esplicitamente nel live toolset
+    e `find_capability` non viene esposto.
   - ☐ Aggiungere un router/judge strutturato che sceglie 0/1 workflow o tool
     atomico e spiega la decisione nei log.
   - ☐ Prunare il toolset live in base alla decisione: un workflow end-to-end vince

@@ -283,10 +283,21 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   connector tools e strumenti atomici devono convergere in un registry unico
   interrogabile; il turno recupera capability candidate, sceglie con decisione
   strutturata e carica nel toolset live solo il minimo necessario. Le keyword
-  restano solo prefilter/fallback/guardrail. **Prossimo passo unico:** estrarre
-  `WorkflowRegistry`/`CapabilityRegistry` per `make_deck` e `make_document` e
-  collegarlo a `find_capability`/router prima di aggiungere DOCX o nuovi
-  `make_research`/`make_meeting`.
+  restano solo prefilter/fallback/guardrail. **Prima slice locale/verde:**
+  `make_deck` e `make_document` sono entry di un registry nativo condiviso dal
+  router e dal corpus `find_capability`; “Voglio creare un pitch per Homun”
+  recupera `make_deck` senza parole `slide`/`pptx`, e quando il registry sceglie
+  un workflow il toolset live viene ristretto al solo tool selezionato anche dopo
+  lo split core/deferred. Test mirati:
+  `workflow_registry_routes_pitch_to_deck_without_slide_keywords`,
+  `workflow_registry_contributes_native_workflows_to_capability_corpus`,
+  `workflow_router_sends_deck_requests_to_max_scaffolding_workflow`,
+  `workflow_router_sends_document_requests_to_document_workflow`,
+  `workflow_router_prunes_alternative_tools_for_document_workflow`,
+  `workflow_router_keeps_generic_requests_on_agent_loop`. **Prossimo passo
+  unico:** promuovere la decisione a router/judge strutturato con logging del
+  perché e conflict policy workflow-vs-atomico/MCP prima di aggiungere DOCX o
+  nuovi `make_research`/`make_meeting`.
 - **Gate provider Z.ai/GLM risolto (test manuale utente, 2026-06-23):** Settings
   espone sia `Z.ai (GLM)` standard (`https://api.z.ai/api/paas/v4`) sia
   `Z.ai Coding (GLM)` (`https://api.z.ai/api/coding/paas/v4`); il preset coding

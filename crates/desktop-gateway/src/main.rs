@@ -5812,6 +5812,17 @@ struct WorkflowDefinition {
     steps: &'static [WorkflowStepDefinition],
 }
 
+#[derive(Debug, Clone, Copy)]
+struct NativeWorkflowCapability {
+    workflow_id: &'static str,
+    tool_name: &'static str,
+    contract: &'static str,
+    scaffolding_tier: &'static str,
+    description: &'static str,
+    route_text: &'static str,
+    schema: fn() -> serde_json::Value,
+}
+
 const MAKE_DECK_WORKFLOW_STEPS: &[WorkflowStepDefinition] = &[
     WorkflowStepDefinition {
         id: "brand",
@@ -5884,6 +5895,55 @@ fn make_document_workflow_definition() -> WorkflowDefinition {
         contract: "DocumentWorkflow",
         steps: MAKE_DOCUMENT_WORKFLOW_STEPS,
     }
+}
+
+fn native_workflow_capabilities() -> &'static [NativeWorkflowCapability] {
+    &[
+        NativeWorkflowCapability {
+            workflow_id: "make_deck",
+            tool_name: "make_deck",
+            contract: "DeckWorkflow",
+            scaffolding_tier: "maximum",
+            description: "Create an editable presentation deck, pitch deck, sales deck or slide deck from a brief.",
+            route_text: "make_deck DeckWorkflow presentation presentazione deck slide slides ppt pptx pitch sales deck investor deck proposta commerciale crea creare prepara genera presentare raccontare illustrare PMI clienti investitori",
+            schema: make_deck_tool_schema,
+        },
+        NativeWorkflowCapability {
+            workflow_id: "make_document",
+            tool_name: "make_document",
+            contract: "DocumentWorkflow",
+            scaffolding_tier: "document",
+            description: "Create a structured document, report, memo, meeting minutes or relazione from a brief.",
+            route_text: "make_document DocumentWorkflow document documento docx markdown report relazione memo verbale meeting minutes write create make draft prepare scrivi crea genera prepara redigi rapporto documento operativo testo strutturato",
+            schema: make_document_tool_schema,
+        },
+    ]
+}
+
+fn native_workflow_by_tool_name(tool_name: &str) -> Option<NativeWorkflowCapability> {
+    native_workflow_capabilities()
+        .iter()
+        .copied()
+        .find(|capability| capability.tool_name == tool_name)
+}
+
+fn native_workflow_capability_entries() -> Vec<CapabilityEntry> {
+    native_workflow_capabilities()
+        .iter()
+        .map(|capability| CapabilityEntry {
+            key: capability.tool_name.to_string(),
+            desc: capability.description.to_string(),
+            text: format!(
+                "{} {} {} {}",
+                capability.tool_name,
+                capability.contract,
+                capability.description,
+                capability.route_text
+            ),
+            schema: Some((capability.schema)()),
+            is_skill: false,
+        })
+        .collect()
 }
 
 fn workflow_execution_plan(
@@ -5981,63 +6041,18 @@ enum WorkflowRouteDecision {
 }
 
 fn route_workflow_or_agent(prompt: &str) -> WorkflowRouteDecision {
-    let normalized = prompt.to_ascii_lowercase();
-    let asks_for_deck = [
-        "deck",
-        "presentation",
-        "presentazione",
-        "slide",
-        "slides",
-        "ppt",
-        "pptx",
-    ]
-    .iter()
-    .any(|needle| normalized.contains(needle));
-    if asks_for_deck {
-        WorkflowRouteDecision::Workflow {
-            workflow_id: "make_deck",
-            tool_name: "make_deck",
-            scaffolding_tier: "maximum",
-        }
-    } else if asks_for_document_workflow(&normalized) {
-        WorkflowRouteDecision::Workflow {
-            workflow_id: "make_document",
-            tool_name: "make_document",
-            scaffolding_tier: "document",
-        }
-    } else {
-        WorkflowRouteDecision::AgentLoop
+    let entries = native_workflow_capability_entries();
+    let Some(entry) = bm25_rank(&entries, prompt, 1).into_iter().next() else {
+        return WorkflowRouteDecision::AgentLoop;
+    };
+    if let Some(capability) = native_workflow_by_tool_name(&entry.key) {
+        return WorkflowRouteDecision::Workflow {
+            workflow_id: capability.workflow_id,
+            tool_name: capability.tool_name,
+            scaffolding_tier: capability.scaffolding_tier,
+        };
     }
-}
-
-fn asks_for_document_workflow(normalized_prompt: &str) -> bool {
-    let has_action = [
-        "write",
-        "create",
-        "make",
-        "draft",
-        "prepare",
-        "scrivi",
-        "crea",
-        "genera",
-        "prepara",
-        "redigi",
-    ]
-    .iter()
-    .any(|needle| normalized_prompt.contains(needle));
-    let has_document = [
-        "document",
-        "documento",
-        "docx",
-        "markdown",
-        "report",
-        "relazione",
-        "memo",
-        "verbale",
-    ]
-    .iter()
-    .any(|needle| normalized_prompt.contains(needle));
-    has_action && has_document
+    WorkflowRouteDecision::AgentLoop
 }
 
 #[cfg(test)]
@@ -11851,7 +11866,7 @@ fn make_deck_tool_schema() -> serde_json::Value {
         "type": "function",
         "function": {
             "name": "make_deck",
-            "description": "Create a COMPLETE on-brand, editable presentation (.pptx + HTML/PDF preview) from a brief in ONE call. The engine does EVERYTHING deterministically — brand, slide content, images, render. Use this for ANY request to make slides / a deck / a presentation. Do NOT plan, do NOT call get_brand_kit/generate_image/render_deck/update_plan, do NOT write files or use the shell. Just call make_deck with the brief; when it returns, the deck is DONE — give the user a one-line summary.",
+            "description": "Create a COMPLETE on-brand, editable presentation (.pptx + HTML/PDF preview) from a brief in ONE call. The engine does EVERYTHING deterministically — brand, slide content, images, render. Use this for ANY request to make slides / a deck / a presentation / a pitch. Do NOT plan, do NOT call get_brand_kit/generate_image/render_deck/update_plan, do NOT write files or use the shell. Just call make_deck with the brief; when it returns, the deck is DONE — give the user a one-line summary.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -13352,7 +13367,11 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
                 .map(|name| CORE_TOOL_NAMES.contains(&name))
                 .unwrap_or(false)
         });
-    if !matches!(workflow_route, WorkflowRouteDecision::Workflow { .. }) {
+    if let WorkflowRouteDecision::Workflow { tool_name, .. } = &workflow_route {
+        if let Some(capability) = native_workflow_by_tool_name(tool_name) {
+            base_tools.push((capability.schema)());
+        }
+    } else {
         base_tools.push(find_capability_tool_schema());
     }
     // MCP servers are installed deliberately and are few, so their tools go STRAIGHT
@@ -13400,6 +13419,9 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
         if name.is_empty() {
             continue;
         }
+        if native_workflow_by_tool_name(&name).is_some() {
+            continue;
+        }
         let desc = schema
             .pointer("/function/description")
             .and_then(|v| v.as_str())
@@ -13413,6 +13435,9 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
             schema: Some(schema),
             is_skill: false,
         });
+    }
+    if !read_only {
+        capability_corpus.extend(native_workflow_capability_entries());
     }
     if has_skills {
         for (id, sname, sdesc) in &enabled_skills {
@@ -35911,6 +35936,32 @@ mod tests {
     }
 
     #[test]
+    fn workflow_registry_routes_pitch_to_deck_without_slide_keywords() {
+        let decision = super::route_workflow_or_agent("Voglio creare un pitch per Homun");
+
+        assert_eq!(
+            decision,
+            super::WorkflowRouteDecision::Workflow {
+                workflow_id: "make_deck",
+                tool_name: "make_deck",
+                scaffolding_tier: "maximum",
+            },
+        );
+    }
+
+    #[test]
+    fn workflow_registry_contributes_native_workflows_to_capability_corpus() {
+        let corpus = super::native_workflow_capability_entries();
+        let corpus_keys: Vec<&str> = corpus.iter().map(|entry| entry.key.as_str()).collect();
+        let ranked = super::bm25_rank(&corpus, "creare un pitch per Homun", 2);
+        let keys: Vec<&str> = ranked.iter().map(|entry| entry.key.as_str()).collect();
+
+        assert!(corpus_keys.contains(&"make_deck"));
+        assert!(corpus_keys.contains(&"make_document"));
+        assert_eq!(keys.first().copied(), Some("make_deck"));
+    }
+
+    #[test]
     fn workflow_router_sends_document_requests_to_document_workflow() {
         let decision = super::route_workflow_or_agent(
             "Scrivi un documento operativo per onboarding clienti",
@@ -36033,6 +36084,10 @@ mod tests {
             super::WorkflowRouteDecision::AgentLoop,
         );
         assert!(super::workflow_router_instruction("spiegami il codice del gateway").is_none());
+        assert_eq!(
+            super::route_workflow_or_agent("cos'è Homun e cosa può fare?"),
+            super::WorkflowRouteDecision::AgentLoop,
+        );
     }
 
     #[test]

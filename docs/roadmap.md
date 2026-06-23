@@ -104,6 +104,11 @@ primo percorso locale verde:
     MCP, skills/addon, connector tools e strumenti atomici entrano in un registry
     unico interrogabile; il router recupera candidati semanticamente, sceglie con
     decisione strutturata e carica nel toolset live solo le capability minime.
+28. WS1-Fase 4b prima slice — `make_deck` e `make_document` sono ora entry di un
+    registry nativo condiviso da router e `find_capability`: “pitch per Homun”
+    recupera `make_deck` senza keyword `slide`/`pptx`, i `make_*` non vengono
+    duplicati nel corpus deferred, e il workflow scelto resta nel live toolset
+    anche dopo lo split core/deferred.
 
 Prima di pubblicare/taggare resta prudente ripetere lo smoke manuale in-app su
 una automazione schedulata reale con il binario aggiornato. Il primo smoke ha
@@ -114,8 +119,8 @@ trovato e corretto una falsa chiusura su piano non completato.
 1. Completare verifica allargata della nuova slice `ExecutionPlan` runtime.
 2. WS1-Fase 2/3 — piano runtime-owned e workflow runner dichiarativo, così i
    deliverable futuri non riaprono fragilità cross-modello.
-3. WS1-Fase 4b — capability registry unico/retrieval router prima di aggiungere
-   altri `make_*`.
+3. WS1-Fase 4b — completare il router/judge strutturato e la conflict policy
+   workflow-vs-tool atomico/MCP prima di aggiungere altri `make_*`.
 4. WS7 — deliverable Manus-style: prima consolidare `make_document`; solo dopo
    ragionare su `make_research` e `make_meeting`.
 
@@ -135,8 +140,10 @@ entra ora nel Brain con `run_plan` prima della pipeline deterministica.
 Il router workflow/agent instrada i deck a scaffolding massimo. Il primo smoke
 release ha corretto composer e recall provenance/status. La prima
 generalizzazione documenti è locale/verde su `make_document` e ha superato smoke
-API reale con artifact gestito + memoria/provenance canonica. Scelta corrente:
-prima estrarre un capability registry unico e sostituire il routing keyword-based
-dei `make_*` con retrieval + decisione strutturata. Solo dopo proseguire con
+API reale con artifact gestito + memoria/provenance canonica. Il primo registry
+nativo dei workflow `make_deck`/`make_document` è locale/verde e alimenta router
+e corpus `find_capability`. Scelta corrente: promuovere la selezione a
+router/judge strutturato con logging del perché e policy di conflitto tra
+workflow end-to-end e strumenti atomici/MCP. Solo dopo proseguire con
 DOCX/editabile e nuovi workflow; `make_research` e `make_meeting` restano futuri.
 Il contratto corrente della memoria è in [MEMORIA.md](MEMORIA.md).
