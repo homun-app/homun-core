@@ -130,6 +130,7 @@ const SECTION_TITLES: Record<SettingsSectionId, string> = {
   runtime: "settings.runtime",
   privacy: "settings.privacy",
   memory: "nav.memory",
+  artifacts: "settings.artifacts",
   contacts: "nav.contacts",
   channels: "settings.channels",
   connections: "settings.connectors",
@@ -203,6 +204,7 @@ export function SettingsView({ section, sub, onPluginsChanged }: SettingsViewPro
         )}
         {section === "privacy" && <PrivacyPane />}
         {section === "memory" && <MemoryView embedded />}
+        {section === "artifacts" && <ArtifactsPane />}
         {section === "contacts" && <ContactsView />}
         {section === "channels" && <ChannelsPane />}
         {section === "connections" && (
@@ -4374,6 +4376,13 @@ function ComputerPane({ computer }: { computer: ContainedComputerLive | null }) 
       </div>
       {closedNote && <p className="set-hint">{closedNote}</p>}
 
+    </>
+  );
+}
+
+function ArtifactsPane() {
+  return (
+    <>
       <ArtifactsCard />
       <DestinationsCard />
     </>

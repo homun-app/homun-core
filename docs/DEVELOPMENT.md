@@ -84,8 +84,8 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   restart Electron da HEAD: `GET /api/artifacts/usage` include il gruppo
   `memory:workspace_0d46c4470d97422298ece7ee7f0b74c6` con
   `artifact-memory-gate-5.md`, `source=memory`, `reference` e `project_path`.
-  **Gate in-app/Settings PASSATO:** la card “Generated files (artifacts)” nel
-  pane Local computer mostra il gruppo `memory:workspace_...` con
+  **Gate in-app/Settings PASSATO:** la surface dedicata “Artifacts” mostra il
+  gruppo `memory:workspace_...` con
   `artifact-memory-gate-5.md`; un artifact usa-e-getta
   `settings-delete-gate-fe0f6585.md` è stato rimosso dalla UI, il file è sparito
   dal filesystem, la memoria è passata a `status=deleted` e sono presenti i
@@ -93,8 +93,11 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   cancellato via API ha preservato il file artifact managed finché non è stato
   pulito esplicitamente via API artifact. Copy Settings aggiornata: cancellare
   conversazioni non elimina deliverable.
-- **Prossimo passo unico:** completare WS2-3.2 con export ZIP e filtri
-  progetto/tipo/orfani nella surface centralizzata; poi passare a WS5.5/5.6.
+- **Decisione UI:** gli artifact/deliverable non stanno più sotto Local
+  computer: hanno una voce Settings dedicata “Artifacts”. Local computer resta
+  per runtime tecnico (Docker, noVNC, sessioni browser). **Prossimo passo
+  unico:** completare WS2-3.2 con export ZIP e filtri progetto/tipo/orfani nella
+  surface centralizzata; poi passare a WS5.5/5.6.
 - **Nota aperta non bloccante:** durante i gate con tool il provider primario
   `glm-5.2` continua a rispondere `400 Bad Request` sul primo round con tool; il
   fallback a `kimi-k2.6:cloud` prosegue correttamente. Da riprendere come task

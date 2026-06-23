@@ -102,7 +102,9 @@ tutto passa dal motore di memoria.
   export ZIP, filtri/progetto/tipo/orfani. Smoke runtime non distruttivo:
   `GET /api/artifacts/usage` su nuova build include `artifact-memory-gate-5.md`
   nel gruppo `memory:workspace_...`. Gate UI Settings passato: il gruppo memoria
-  è visibile nella card Artifacts del pane Local computer.
+  è visibile nella surface dedicata Artifacts. La surface è stata spostata fuori
+  da Local computer perché i deliverable sono output di prodotto, non runtime
+  tecnico.
 - 🟡 **3.3 — lifecycle + cancellazione con memoria:** `delete_chat_thread` **non**
   cancella più gli artefatti: la chat è storia conversazionale, il deliverable ha
   lifecycle proprio. `DELETE /api/artifacts/memory?reference=...` rimuove il file

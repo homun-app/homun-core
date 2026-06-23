@@ -25,6 +25,7 @@ primo slice locale verde:
    `/api/artifacts/usage`; delete chat non cancella deliverable; delete esplicito
    memoria rimuove file in root autorizzate e tombstona memoria/entity. Gate
    in-app Settings passato con artifact usa-e-getta; chat delete preserva file.
+   La surface è dedicata “Artifacts”, non più dentro Local computer.
 
 Prima di pubblicare/taggare resta prudente un smoke manuale in-app su una
 automazione schedulata reale che compaia nel thread `scheduled`. Non è bloccante
@@ -50,7 +51,7 @@ collegarli al perché. Per questo WS7 non è più il prossimo step.
 ## Prossima azione
 
 Proseguire WS2-3.2: aggiungere export ZIP e filtri progetto/tipo/orfani nella
-surface Artifacts centralizzata. Il gate lifecycle/delete è già passato in-app:
+surface dedicata Artifacts. Il gate lifecycle/delete è già passato in-app:
 artifact memoria visibile, delete esplicito rimuove file + memoria/entity, delete
 chat preserva deliverable. Il contratto corrente della memoria è in
 [MEMORIA.md](MEMORIA.md).

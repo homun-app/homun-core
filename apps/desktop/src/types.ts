@@ -20,6 +20,7 @@ export type SettingsSectionId =
   | "runtime"
   | "privacy"
   | "memory"
+  | "artifacts"
   | "contacts"
   | "channels"
   | "connections"

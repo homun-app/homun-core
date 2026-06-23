@@ -674,6 +674,7 @@
     "channels": "Channels",
     "skills": "Skills",
     "addon": "Addons",
+    "artifacts": "Artifacts",
     "computer": "Local computer",
     "activeProviderModel": "Active provider model",
     "strengthsDesc": "Description (what it excels at)",
