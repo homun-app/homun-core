@@ -5624,6 +5624,142 @@ fn plan_next_open(plan: &[serde_json::Value]) -> Option<String> {
         .filter(|t| !t.is_empty())
 }
 
+fn runtime_plan_thread_key(thread_id: Option<&str>) -> String {
+    thread_id
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .unwrap_or("__no_thread__")
+        .to_string()
+}
+
+fn runtime_plan_memory_text(plan: &[serde_json::Value]) -> Option<String> {
+    if plan.is_empty() {
+        return None;
+    }
+    let done = plan_done_count(plan);
+    let total = plan.len();
+    let next = plan_next_open(plan);
+    let mut parts = vec![format!("Runtime plan state: {done}/{total} steps done.")];
+    match next {
+        Some(step) => parts.push(format!("Next step: {step}.")),
+        None => parts.push("No open step remains.".to_string()),
+    }
+    Some(parts.join(" "))
+}
+
+fn runtime_plan_memory_metadata(thread_id: Option<&str>, plan: &[serde_json::Value]) -> serde_json::Value {
+    serde_json::json!({
+        "source": "runtime_plan",
+        "thread_id": runtime_plan_thread_key(thread_id),
+        "status": if plan_next_open(plan).is_some() { "open" } else { "complete" },
+        "done_count": plan_done_count(plan),
+        "total_count": plan.len(),
+        "next_step": plan_next_open(plan),
+        "steps": plan,
+    })
+}
+
+fn runtime_plan_memory_matches(memory: &MemoryRecord, thread_key: &str) -> bool {
+    memory.memory_type == "open_loop"
+        && !matches!(memory.status, MemoryStatus::Deleted | MemoryStatus::Rejected | MemoryStatus::Stale)
+        && memory.metadata.get("source").and_then(|v| v.as_str()) == Some("runtime_plan")
+        && memory.metadata.get("thread_id").and_then(|v| v.as_str()) == Some(thread_key)
+}
+
+fn upsert_runtime_plan_memory(
+    facade: &MemoryFacade,
+    user: &MemoryUserId,
+    workspace: &MemoryWorkspaceId,
+    lifecycle: &MemoryLifecycleRequest,
+    thread_id: Option<&str>,
+    plan: &[serde_json::Value],
+) -> Result<Option<MemoryRef>, String> {
+    let Some(text) = runtime_plan_memory_text(plan) else {
+        return Ok(None);
+    };
+    let thread_key = runtime_plan_thread_key(thread_id);
+    let complete = plan_next_open(plan).is_none();
+    let metadata = runtime_plan_memory_metadata(thread_id, plan);
+    let existing = facade
+        .list_memories_for_ui(user, workspace)
+        .unwrap_or_default()
+        .into_iter()
+        .find(|memory| runtime_plan_memory_matches(memory, &thread_key));
+
+    match existing {
+        Some(existing) => {
+            let record = facade
+                .update_memory(
+                    lifecycle,
+                    &existing.reference,
+                    MemoryUpdatePatch {
+                        text: Some(text),
+                        aliases: None,
+                        language_hints: None,
+                        confidence: Some(1.0),
+                        privacy_domain: Some(PrivacyDomain::new("work")),
+                        sensitivity: Some(MemoryDataSensitivity::Internal),
+                        metadata: Some(metadata),
+                        last_seen_at: None,
+                    },
+                )
+                .map_err(|error| error.to_string())?;
+            if complete {
+                facade
+                    .mark_memory_stale(lifecycle, &record.reference, "runtime plan completed")
+                    .map_err(|error| error.to_string())?;
+            } else {
+                facade
+                    .confirm_memory(lifecycle, &record.reference, "runtime plan updated")
+                    .map_err(|error| error.to_string())?;
+            }
+            Ok(Some(record.reference))
+        }
+        None if complete => Ok(None),
+        None => {
+            let record = facade
+                .create_memory_candidate(MemoryCreateRequest {
+                    request: lifecycle.clone(),
+                    memory_type: "open_loop".to_string(),
+                    text,
+                    aliases: Vec::new(),
+                    language_hints: Vec::new(),
+                    confidence: 1.0,
+                    privacy_domain: PrivacyDomain::new("work"),
+                    sensitivity: MemoryDataSensitivity::Internal,
+                    evidence_refs: Vec::new(),
+                    metadata,
+                })
+                .map_err(|error| error.to_string())?;
+            facade
+                .confirm_memory(lifecycle, &record.reference, "runtime plan opened")
+                .map_err(|error| error.to_string())?;
+            Ok(Some(record.reference))
+        }
+    }
+}
+
+fn upsert_runtime_plan_memory_from_state(
+    state: &AppState,
+    thread_id: Option<&str>,
+    plan: &[serde_json::Value],
+) {
+    let Ok(facade) = lock_memory_facade(state) else {
+        return;
+    };
+    let user = gateway_memory_user_id();
+    let workspace = gateway_memory_workspace_id();
+    let lifecycle = MemoryLifecycleRequest {
+        actor_id: "runtime-plan".to_string(),
+        user_id: user.clone(),
+        workspace_id: workspace.clone(),
+        purpose: "sync_runtime_plan".to_string(),
+    };
+    if upsert_runtime_plan_memory(&facade, &user, &workspace, &lifecycle, thread_id, plan).is_ok() {
+        rebuild_status_wiki(&facade, &user, &workspace);
+    }
+}
+
 /// Merge the model's sent steps into the CANONICAL plan (never replace). Match an
 /// existing step by title (case-insensitive): a canonical `done` is STICKY — re-sending
 /// it as todo/doing can't reopen it (this is what stops the regenerate loop); a NEW
@@ -14550,6 +14686,11 @@ an uncertain date.",
                             accumulated.push_str(&plan_mark);
                             let _ = emit_stream_event(&tx, GenerateStreamEvent::Delta { text: plan_mark })
                                 .await;
+                            upsert_runtime_plan_memory_from_state(
+                                &state_owned,
+                                thread_id.as_deref(),
+                                &plan,
+                            );
                             let done = plan_done_count(&plan);
                             match rejection {
                                 Some(msg) => format!("⚠️ {msg} (done {done}/{})", plan.len()),
@@ -34295,6 +34436,121 @@ mod tests {
         assert_eq!(parsed[1]["title"], "Beta");
         assert_eq!(plan_step_status(&parsed[1]), "doing");
         assert_eq!(plan_done_count(&parsed), 1);
+    }
+
+    #[test]
+    fn runtime_plan_memory_upserts_single_open_loop() {
+        let facade = local_first_memory::MemoryFacade::new(
+            local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
+        );
+        let user = local_first_memory::UserId::new("local");
+        let workspace = local_first_memory::WorkspaceId::new("project");
+        let lifecycle = local_first_memory::MemoryLifecycleRequest {
+            actor_id: "test".to_string(),
+            user_id: user.clone(),
+            workspace_id: workspace.clone(),
+            purpose: "test".to_string(),
+        };
+        let plan = vec![
+            serde_json::json!({"id":"s1","title":"Read docs","status":"done","detail":""}),
+            serde_json::json!({"id":"s2","title":"Implement slice","status":"doing","detail":""}),
+        ];
+
+        let first = super::upsert_runtime_plan_memory(
+            &facade,
+            &user,
+            &workspace,
+            &lifecycle,
+            Some("thread-1"),
+            &plan,
+        )
+        .unwrap()
+        .expect("created");
+        let updated_plan = vec![
+            serde_json::json!({"id":"s1","title":"Read docs","status":"done","detail":""}),
+            serde_json::json!({"id":"s2","title":"Implement slice","status":"done","detail":""}),
+            serde_json::json!({"id":"s3","title":"Run tests","status":"doing","detail":""}),
+        ];
+        let second = super::upsert_runtime_plan_memory(
+            &facade,
+            &user,
+            &workspace,
+            &lifecycle,
+            Some("thread-1"),
+            &updated_plan,
+        )
+        .unwrap()
+        .expect("updated");
+
+        assert_eq!(first, second, "runtime plan memory must update in place");
+        let memories = facade.list_memories_for_ui(&user, &workspace).unwrap();
+        let plan_memories: Vec<_> = memories
+            .iter()
+            .filter(|memory| memory.metadata.get("source").and_then(|v| v.as_str()) == Some("runtime_plan"))
+            .collect();
+        assert_eq!(plan_memories.len(), 1);
+        let memory = plan_memories[0];
+        assert_eq!(memory.memory_type, "open_loop");
+        assert_eq!(memory.status, local_first_memory::MemoryStatus::Confirmed);
+        assert!(memory.text.contains("2/3 steps done"), "{}", memory.text);
+        assert!(memory.text.contains("Next step: Run tests"), "{}", memory.text);
+        assert_eq!(memory.metadata.get("thread_id").and_then(|v| v.as_str()), Some("thread-1"));
+        assert_eq!(memory.metadata.get("next_step").and_then(|v| v.as_str()), Some("Run tests"));
+    }
+
+    #[test]
+    fn runtime_plan_memory_is_staled_when_complete() {
+        let facade = local_first_memory::MemoryFacade::new(
+            local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
+        );
+        let user = local_first_memory::UserId::new("local");
+        let workspace = local_first_memory::WorkspaceId::new("project");
+        let lifecycle = local_first_memory::MemoryLifecycleRequest {
+            actor_id: "test".to_string(),
+            user_id: user.clone(),
+            workspace_id: workspace.clone(),
+            purpose: "test".to_string(),
+        };
+        let open = vec![
+            serde_json::json!({"id":"s1","title":"Read docs","status":"done","detail":""}),
+            serde_json::json!({"id":"s2","title":"Run tests","status":"doing","detail":""}),
+        ];
+        let complete = vec![
+            serde_json::json!({"id":"s1","title":"Read docs","status":"done","detail":""}),
+            serde_json::json!({"id":"s2","title":"Run tests","status":"done","detail":""}),
+        ];
+
+        let reference = super::upsert_runtime_plan_memory(
+            &facade,
+            &user,
+            &workspace,
+            &lifecycle,
+            Some("thread-2"),
+            &open,
+        )
+        .unwrap()
+        .expect("created");
+        let completed = super::upsert_runtime_plan_memory(
+            &facade,
+            &user,
+            &workspace,
+            &lifecycle,
+            Some("thread-2"),
+            &complete,
+        )
+        .unwrap()
+        .expect("updated");
+
+        assert_eq!(reference, completed);
+        let memory = facade
+            .list_memories_for_ui(&user, &workspace)
+            .unwrap()
+            .into_iter()
+            .find(|memory| memory.reference == reference)
+            .expect("plan memory");
+        assert_eq!(memory.status, local_first_memory::MemoryStatus::Stale);
+        assert_eq!(memory.metadata.get("status").and_then(|v| v.as_str()), Some("complete"));
+        assert!(!super::active_open_loop_record(&memory));
     }
 
     #[test]

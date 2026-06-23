@@ -147,9 +147,18 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   `open_loop`, outcome/fact verificati, decisioni con rationale e artifact
   provenance come evidenza. Test red/green:
   `cargo test -p local-first-desktop-gateway memory_eval_surfaces_workflow_status_and_why -- --nocapture`
-  (rosso iniziale: nessun contesto workflow). **Prossimo passo unico:** valutare
-  smoke in-app mirato del reader memoria o passare a WS1-Fase 2/3 piano runtime-owned
-  con write-back memoria, senza aprire WS7 prima delle fondamenta.
+  (rosso iniziale: nessun contesto workflow). **WS1-Fase 2 write-back memoria
+  locale/verde:** ogni `update_plan` / `step_advance` materializza lo stato del
+  piano runtime-owned come unico `open_loop` canonico `source="runtime_plan"` per
+  thread; aggiorna in-place, rigenera `stato-lavori.md` come proiezione derivata
+  e marca stale il record quando non restano step aperti. Test mirati:
+  `cargo test -p local-first-desktop-gateway runtime_plan_memory -- --nocapture`.
+  Gate locale allargato: `cargo test -p local-first-desktop-gateway -- --nocapture`
+  = 182 passati, 1 ignorato; `cargo test -p local-first-memory -- --nocapture` =
+  verde; `npm run build` desktop = verde; `git diff --check` pulito. **Prossimo
+  passo unico:** scegliere tra smoke in-app del piano/memoria o proseguire verso
+  `ExecutionPlan`/workflow runner dichiarativo, senza aprire WS7 prima delle
+  fondamenta.
 - **Nota aperta non bloccante:** durante i gate con tool il provider primario
   `glm-5.2` continua a rispondere `400 Bad Request` sul primo round con tool; il
   fallback a `kimi-k2.6:cloud` prosegue correttamente. Da riprendere come task

@@ -41,6 +41,13 @@ modelli deboli/locali. Invarianti: monotonìa, limitatezza, identità non inferi
     `pending_confirm` che rompe a :13518, *prima* del guard di 2.5 a :13524) → vedi 6.1b.
     La tengo (corretta + low-risk), ma **in-app non verificata** (il suo caso non è stato
     esercitato). `turn_used_tools` la tiene fuori dalla chat pura; `make_deck` esente.
+  - ✅ **Slice 2.6 (2026-06-23, locale/verde)**: il piano runtime-owned ora fa write-back
+    nella memoria canonica. Ogni `update_plan` / `step_advance` crea o aggiorna **in-place**
+    un solo `open_loop` `source="runtime_plan"` per thread, con `done_count`, `total_count`,
+    `next_step` e snapshot steps nei metadata; quando il piano è completo il record viene
+    marcato stale. `stato-lavori.md` resta una proiezione derivata rigenerata dal
+    `MemoryFacade`, non uno store parallelo. Test:
+    `cargo test -p local-first-desktop-gateway runtime_plan_memory -- --nocapture`.
   - ☐ **Slice 3**: convergere sull'`ExecutionPlan` del crate `orchestrator` (DAG
     `depends_on`, `plan_propose`) e ritirare il `Vec<Value>` canonico.
 - ☐ **Floor ovunque** — constrained decoding su **tutte** le emissioni di
@@ -532,8 +539,8 @@ proprio — versioning, canali, scaricabili dal **sito Homun**, auto-aggiornabil
    lifecycle/delete sono cablati e passati in-app.
 3. **WS5.5 / WS5.6** — catena di provenienza decisione → artefatto → codice →
    esito, più eval memoria come guardrail.
-4. **WS1-Fase 2** — gestione piano (`ExecutionPlan`+`step_id`); il piano scrive
-   in memoria.
+4. **WS1-Fase 2** — gestione piano (`ExecutionPlan`+`step_id`); primo write-back
+   piano→memoria locale/verde, resta convergere sul tipo `ExecutionPlan`.
 6. **WS1-Fase 3** — skill dichiarative + workflow runner.
 7. **WS7** — ecosistema deliverable (`make_*` per documenti/ricerca/meeting),
    volutamente dopo memoria/artefatti/engine baseline.

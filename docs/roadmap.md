@@ -47,6 +47,10 @@ primo percorso locale verde:
 12. WS5.6 — seconda slice eval/reader: recall esplicito e RAG automatico leggono
     `goal`, `open_loop`, outcome/fact verificati, decisioni con rationale e
     artifact provenance per rispondere “a che punto siamo?” e “perché?”.
+13. WS1-Fase 2 — prima slice piano→memoria: ogni `update_plan` / `step_advance`
+    aggiorna un solo `open_loop` canonico `source="runtime_plan"` per thread,
+    con prossimo step e conteggi; a completamento il record viene marcato stale e
+    `stato-lavori.md` è rigenerato come vista derivata.
 
 Prima di pubblicare/taggare resta prudente un smoke manuale in-app su una
 automazione schedulata reale che compaia nel thread `scheduled`. Non è bloccante
@@ -54,8 +58,8 @@ per iniziare il consolidamento memoria in locale.
 
 ## Milestone
 
-1. Valutare se serve smoke in-app mirato del reader memoria WS5.6; se non serve,
-   passare a WS1-Fase 2/3.
+1. Valutare uno smoke in-app mirato piano/memoria oppure proseguire direttamente
+   verso `ExecutionPlan`/workflow runner dichiarativo.
 2. WS1-Fase 2/3 — piano runtime-owned e workflow runner dichiarativo, così i
    deliverable futuri non riaprono fragilità cross-modello.
 3. WS7 — deliverable Manus-style (`make_document`, `make_research`,
@@ -69,7 +73,8 @@ collegarli al perché. Per questo WS7 non è più il prossimo step.
 
 ## Prossima azione
 
-WS5.6 ha ora due reader/eval headless verdi: artifact/provenance e stato workflow/
-perché. Il prossimo passo è decidere se fare uno smoke in-app mirato del reader
-memoria; altrimenti riprendere WS1-Fase 2/3 su piano runtime-owned e write-back
-memoria. Il contratto corrente della memoria è in [MEMORIA.md](MEMORIA.md).
+WS1 ha ora una prima slice locale verde di write-back piano→memoria, verificata
+con gateway full, memory crate, build desktop e `git diff --check`. Prossimo:
+decidere se fare smoke in-app piano/memoria o proseguire verso `ExecutionPlan`/
+workflow runner dichiarativo. Il contratto corrente della memoria è in
+[MEMORIA.md](MEMORIA.md).

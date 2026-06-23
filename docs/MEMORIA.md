@@ -76,17 +76,22 @@ Fatto:
 - secondo eval/read path WS5.6 per stato workflow: recall esplicito e RAG
   automatico leggono `goal`, `open_loop`, outcome/fact verificati, decisioni con
   rationale e artifact provenance per rispondere “a che punto siamo e perché?”.
+- prima slice WS1 piano→memoria: il piano runtime-owned materializza un solo
+  `open_loop` canonico `source="runtime_plan"` per thread, aggiornato in-place da
+  `update_plan` / `step_advance` con conteggi, prossimo step e snapshot degli step;
+  quando non restano step aperti il record viene marcato stale. `stato-lavori.md`
+  viene rigenerato dal `MemoryFacade` come vista derivata.
 
 Mancante:
 
 - convergenza/mirroring dei read-model graph-like, in particolare relazioni
   contatti, nel grafo canonico memoria;
 - graphification estesa oltre il codice: artifact, piano, decisioni, outcome e loop
-  aperti devono diventare nodi/archi causali, non solo righe testuali;
+  aperti devono diventare nodi/archi causali; il piano ora ha il primo write-back
+  SQL canonico come `open_loop`, ma non ancora un grafo step-level completo;
 - provenance completa decisione/piano → artifact → codice → esito: la slice
-  decisione/source-ref → artifact e il primo reader/eval sono locali/verdi; resta
-  da alimentare con step/piano quando il write-back piano sarà persistito in
-  memoria;
+  decisione/source-ref → artifact e i reader/eval sono locali/verdi; il piano ora
+  scrive stato in memoria, resta collegare step/piano al grafo causale completo;
 - eval memoria come gate completo in-app/release; i reader headless per artifact
   provenance e stato workflow sono locali/verdi.
 
