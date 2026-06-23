@@ -133,9 +133,9 @@ modelli deboli/locali. Invarianti: monotonìa, limitatezza, identità non inferi
     OOXML `.docx` minimale dalla stessa sorgente Markdown, senza nuova dipendenza
     e con artifact gestito registrato come gli altri formati.
     **Slice struttura/stile (2026-06-23, locale/verde):** lo stesso tool espone
-    `document_type`, `audience`, `tone` e `sections`; il workflow li traduce in
-    direttive di generazione solo se esplicitamente passati, senza euristiche
-    fragili e senza registry paralleli.
+    `document_type`, `audience`, `tone`, `layout_profile` e `sections`; il
+    workflow li traduce in direttive di generazione solo se esplicitamente
+    passati, senza euristiche fragili e senza registry paralleli.
     **Slice DOCX tables (2026-06-23, locale/verde):** il renderer OOXML converte
     tabelle pipe Markdown in tabelle Word reali (`w:tbl`) con escaping XML,
     mantenendo la stessa registrazione artifact/memoria.
@@ -145,8 +145,9 @@ modelli deboli/locali. Invarianti: monotonìa, limitatezza, identità non inferi
     **Smoke fix DOCX table sizing (2026-06-23, locale/verde):** dopo il secondo
     smoke reale, le tabelle Word sono full-width con `tblGrid`, layout fixed,
     celle percentuali e proporzione 35/65 per tabelle a due colonne.
-  - 🟡 **Prossime slice make_document:** smoke reale DOCX in-app e poi controlli
-    più ricchi su template/layout solo se restano dentro il registry unico.
+  - 🟡 **Prossime slice make_document:** smoke reale del nuovo `layout_profile`
+    quando serve una prossima release; poi eventuali template più ricchi solo se
+    restano dentro il registry unico.
   - ☐ **Backlog deliberato:** `make_research` / `make_meeting` restano in fondo
     finché non è chiarito il contratto degli strumenti creati dall'harness.
 - ✅ **Fase 4 (2026-06-23, locale/verde)** — router workflow|agent + primo

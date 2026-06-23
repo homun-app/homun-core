@@ -12092,6 +12092,11 @@ fn make_document_tool_schema() -> serde_json::Value {
                         "description": "Writing tone requested by the user. Preserve explicit intent; omit when unspecified.",
                         "enum": ["professional", "concise", "executive", "technical", "operational"]
                     },
+                    "layout_profile": {
+                        "type": "string",
+                        "description": "Explicit document layout profile requested by the user. Preserve explicit intent; omit when unspecified.",
+                        "enum": ["standard", "one_page", "executive_brief", "detailed_report", "proposal"]
+                    },
                     "sections": {
                         "type": "array",
                         "description": "Section headings explicitly requested by the user, in order. Do not invent this list when unspecified.",
@@ -12310,6 +12315,7 @@ struct DocumentGenerationOptions {
     document_type: Option<String>,
     audience: Option<String>,
     tone: Option<String>,
+    layout_profile: Option<String>,
     sections: Vec<String>,
 }
 
@@ -12338,6 +12344,13 @@ fn document_generation_options(parsed: &serde_json::Value) -> DocumentGeneration
         "technical",
         "operational",
     ];
+    let allowed_layout_profiles = [
+        "standard",
+        "one_page",
+        "executive_brief",
+        "detailed_report",
+        "proposal",
+    ];
     let document_type = parsed
         .get("document_type")
         .and_then(|value| value.as_str())
@@ -12348,6 +12361,11 @@ fn document_generation_options(parsed: &serde_json::Value) -> DocumentGeneration
         .and_then(|value| value.as_str())
         .map(|value| value.trim().to_ascii_lowercase())
         .filter(|value| allowed_tones.contains(&value.as_str()));
+    let layout_profile = parsed
+        .get("layout_profile")
+        .and_then(|value| value.as_str())
+        .map(|value| value.trim().to_ascii_lowercase())
+        .filter(|value| allowed_layout_profiles.contains(&value.as_str()));
     let audience = parsed
         .get("audience")
         .and_then(|value| value.as_str())
@@ -12369,6 +12387,7 @@ fn document_generation_options(parsed: &serde_json::Value) -> DocumentGeneration
         document_type,
         audience,
         tone,
+        layout_profile,
         sections,
     }
 }
@@ -12385,6 +12404,22 @@ fn document_generation_directives(options: &DocumentGenerationOptions) -> String
     }
     if let Some(tone) = options.tone.as_deref() {
         directives.push(format!("Tone: {tone}."));
+    }
+    match options.layout_profile.as_deref() {
+        Some("one_page") => directives.push(
+            "Layout profile: one_page. Keep the document to one concise page, with short paragraphs and one compact table at most.".to_string(),
+        ),
+        Some("executive_brief") => directives.push(
+            "Layout profile: executive_brief. Lead with an executive summary, use decision-ready headings, and keep each section compact.".to_string(),
+        ),
+        Some("detailed_report") => directives.push(
+            "Layout profile: detailed_report. Include deeper analysis, evidence-oriented subsections, and tables where useful.".to_string(),
+        ),
+        Some("proposal") => directives.push(
+            "Layout profile: proposal. Structure around client problem, proposed solution, value, scope, timeline, and next action.".to_string(),
+        ),
+        Some("standard") | None => {}
+        Some(_) => {}
     }
     if !options.sections.is_empty() {
         directives.push(format!(
@@ -16215,6 +16250,7 @@ Absolutely NO text, NO words, NO letters, NO numbers, NO captions, NO logos."
                                 "document_type": document_options.document_type.clone(),
                                 "audience": document_options.audience.clone(),
                                 "tone": document_options.tone.clone(),
+                                "layout_profile": document_options.layout_profile.clone(),
                                 "sections": document_options.sections.clone(),
                             });
                             let workflow_plan = workflow_execution_plan(
@@ -36771,6 +36807,24 @@ mod tests {
                 "meeting_minutes",
             ]),
         );
+        assert_eq!(
+            schema
+                .pointer("/function/parameters/properties/layout_profile/enum")
+                .and_then(|value| value.as_array())
+                .map(|values| {
+                    values
+                        .iter()
+                        .filter_map(|value| value.as_str())
+                        .collect::<Vec<_>>()
+                }),
+            Some(vec![
+                "standard",
+                "one_page",
+                "executive_brief",
+                "detailed_report",
+                "proposal",
+            ]),
+        );
         assert!(schema
             .pointer("/function/parameters/properties/sections/items/type")
             .and_then(|value| value.as_str())
@@ -36783,6 +36837,7 @@ mod tests {
             "document_type": "report",
             "audience": " PMI italiana ",
             "tone": "executive",
+            "layout_profile": "executive_brief",
             "sections": [
                 "Problema",
                 "Soluzione",
@@ -36794,6 +36849,7 @@ mod tests {
         assert_eq!(options.document_type.as_deref(), Some("report"));
         assert_eq!(options.audience.as_deref(), Some("PMI italiana"));
         assert_eq!(options.tone.as_deref(), Some("executive"));
+        assert_eq!(options.layout_profile.as_deref(), Some("executive_brief"));
         assert_eq!(
             options.sections,
             vec![
@@ -36807,6 +36863,8 @@ mod tests {
         assert!(directives.contains("Document type: report."), "{directives}");
         assert!(directives.contains("Audience: PMI italiana."), "{directives}");
         assert!(directives.contains("Tone: executive."), "{directives}");
+        assert!(directives.contains("Layout profile: executive_brief."), "{directives}");
+        assert!(directives.contains("decision-ready headings"), "{directives}");
         assert!(
             directives.contains("Required section order: Problema -> Soluzione -> Roadmap."),
             "{directives}"
@@ -36815,10 +36873,12 @@ mod tests {
         let ignored = super::document_generation_options(&serde_json::json!({
             "document_type": "pitch",
             "tone": "friendly",
+            "layout_profile": "marketing_site",
             "sections": ["Valida"]
         }));
         assert_eq!(ignored.document_type, None);
         assert_eq!(ignored.tone, None);
+        assert_eq!(ignored.layout_profile, None);
         assert_eq!(ignored.sections, vec!["Valida".to_string()]);
     }
 

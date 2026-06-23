@@ -139,6 +139,10 @@ primo percorso locale verde:
     non adattate alla pagina. Il renderer ora emette tabelle full-width con
     `tblGrid`, layout fixed, celle percentuali, padding e proporzione 35/65 per
     tabelle a due colonne.
+37. WS1/WS7 document focus — `make_document` ha un `layout_profile` dichiarativo
+    nello stesso schema tool (`standard`, `one_page`, `executive_brief`,
+    `detailed_report`, `proposal`); il profilo diventa direttiva di generazione
+    esplicita, non un nuovo workflow e non una euristica di routing.
 
 Prima di pubblicare/taggare resta prudente ripetere lo smoke manuale in-app su
 una automazione schedulata reale con il binario aggiornato. Il primo smoke ha
@@ -149,9 +153,9 @@ trovato e corretto una falsa chiusura su piano non completato.
 1. Completare verifica allargata della nuova slice `ExecutionPlan` runtime.
 2. WS1-Fase 2/3 — piano runtime-owned e workflow runner dichiarativo, così i
    deliverable futuri non riaprono fragilità cross-modello.
-3. WS1/WS7 document focus — smoke reale DOCX in-app e poi eventuali template o
-   layout dichiarativi dentro `make_document`, prima di aggiungere altri
-   `make_*`.
+3. WS1/WS7 document focus — smoke reale del nuovo `layout_profile` quando serve
+   la prossima release, poi eventuali template dichiarativi dentro
+   `make_document`, prima di aggiungere altri `make_*`.
 4. WS7 — deliverable Manus-style: prima consolidare `make_document`; solo dopo
    ragionare su `make_research` e `make_meeting`.
 
@@ -179,7 +183,8 @@ come `ACT` e la aggiunge al `tool_trace` del turno. `pdf_atomic` ora è una
 capability atomica nativa mappata a `run_in_sandbox`. `make_document` supporta
 anche output `.docx` editabile, parametri espliciti di struttura/stile e tabelle
 Word generate da Markdown; lo smoke reale ha corretto anche stili, grassetto,
-corsivo, liste numerate e sizing tabelle nel DOCX. Scelta corrente: ripetere
-smoke reale DOCX in-app e poi template/layout dichiarativi solo dentro il registry unico;
-`make_research` e `make_meeting` restano futuri.
+corsivo, liste numerate e sizing tabelle nel DOCX. `layout_profile` è ora
+dichiarativo dentro `make_document`. Scelta corrente: monitorare la release 1046
+già taggata e poi smoke del profilo layout su una prossima build; `make_research`
+e `make_meeting` restano futuri.
 Il contratto corrente della memoria è in [MEMORIA.md](MEMORIA.md).

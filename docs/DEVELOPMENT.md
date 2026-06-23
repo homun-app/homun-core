@@ -329,9 +329,12 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   `make_document_tool_requires_artifact_name`.
 - **make_document struttura/stile locale/verde (2026-06-23):** arricchito lo
   stesso tool, non introdotti nuovi `make_*`: `document_type`, `audience`,
-  `tone` e `sections` entrano nello schema come parametri espliciti e vengono
-  usati nel prompt solo se passati dal modello. Valori fuori vocabolario sono
-  ignorati; le sezioni restano ordinate e limitate. Test mirati:
+  `tone`, `layout_profile` e `sections` entrano nello schema come parametri
+  espliciti e vengono usati nel prompt solo se passati dal modello. Valori fuori
+  vocabolario sono ignorati; le sezioni restano ordinate e limitate.
+  `layout_profile` accetta `standard`, `one_page`, `executive_brief`,
+  `detailed_report`, `proposal` e traduce il profilo in direttive di struttura,
+  non in un nuovo workflow. Test mirati:
   `make_document_tool_requires_artifact_name`,
   `make_document_generation_options_are_explicit_and_bounded`.
 - **make_document DOCX table rendering locale/verde (2026-06-23):** il renderer
