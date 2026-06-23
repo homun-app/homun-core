@@ -839,6 +839,11 @@ ragionato il contratto degli strumenti `make_*` creati dall'harness. ADR 0011
   discovery/UI futura. Non cambiano i workflow e non diventano tool callable.
   Test mirati: `file_template_catalog_provider_loads_valid_manifest`,
   `file_template_catalog_provider_ignores_unsafe_preview_refs`.
+  **Quindicesima slice catalog API (2026-06-23, locale/verde):**
+  il catalogo template è disponibile read-only via `/api/templates/catalog` e
+  `coreBridge.templateCatalog()`. Il payload espone entry e metadati gallery
+  senza schema callable, mantenendo il registry come fonte unica. Test mirato:
+  `template_catalog_response_exposes_read_only_gallery_metadata`.
 - ☐ **7.1b (futuro)** Portare ricerca/meeting al livello del deck solo dopo il
   chiarimento sul contratto strumenti: `make_research` e `make_meeting` non sono
   essenziali per la prossima release.

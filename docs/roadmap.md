@@ -249,6 +249,10 @@ primo percorso locale verde:
     `tags`, `preview_ref`, `source_ref` e `license`, con riferimenti sanificati
     prima dell'indicizzazione. Questo prepara gallery/cataloghi visuali senza
     introdurre un secondo sistema di template o nuovi tool callable.
+60. WS7 template catalog API — il registry template è esposto read-only da
+    `/api/templates/catalog` e dal bridge desktop `coreBridge.templateCatalog()`.
+    La UI può costruire una gallery partendo dalla stessa fonte del routing,
+    senza duplicare cataloghi o trasformare template in tool.
 
 Prima di pubblicare/taggare resta prudente ripetere lo smoke manuale in-app su
 una automazione schedulata reale con il binario aggiornato. Il primo smoke ha
@@ -317,6 +321,7 @@ validato; undicesima slice: QA leggibilità deck su font-size/contrasto;
 dodicesima slice: QA Markdown per documenti prima di scrivere MD/PDF/DOCX.
 Tredicesima slice: catalogo seed `monet/*` ampliato a 11 template PMI.
 Quattordicesima slice: manifest con metadati sanificati per preview/gallery
-futura. Prossimo asse: UI/gallery e QA più profonda.
+futura. Quindicesima slice: API/bridge read-only del catalogo template.
+Prossimo asse: UI/gallery visuale e QA più profonda.
 `make_research` e `make_meeting` restano futuri.
 Il contratto corrente della memoria è in [MEMORIA.md](MEMORIA.md).

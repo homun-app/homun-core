@@ -1890,6 +1890,29 @@ export interface SkillsCatalogResponse {
   fetched_at: number;
 }
 
+export interface TemplateCatalogEntry {
+  provider: string;
+  id: string;
+  name: string;
+  kind: "presentation" | "document";
+  description: string;
+  use_cases: string[];
+  audience: string[];
+  design_template: string;
+  design_theme: string | null;
+  design_profile: string | null;
+  design_components: string[];
+  layout_archetypes: string[];
+  tags: string[];
+  preview_ref: string | null;
+  source_ref: string | null;
+  license: string | null;
+}
+
+export interface TemplateCatalogResponse {
+  templates: TemplateCatalogEntry[];
+}
+
 async function electronSkillsCatalog(
   query?: string,
   category?: string,
@@ -1899,6 +1922,10 @@ async function electronSkillsCatalog(
   if (category) params.set("category", category);
   const qs = params.toString();
   return gatewayGetJson<SkillsCatalogResponse>(`/api/skills/catalog${qs ? `?${qs}` : ""}`);
+}
+
+async function electronTemplateCatalog(): Promise<TemplateCatalogResponse> {
+  return gatewayGetJson<TemplateCatalogResponse>("/api/templates/catalog");
 }
 
 export interface CatalogPreview {
@@ -2057,6 +2084,7 @@ export const coreBridge = {
   installRegistrySkills: (repo: string, path: string) =>
     electronInstallRegistrySkills(repo, path),
   skillCatalog: (query?: string, category?: string) => electronSkillsCatalog(query, category),
+  templateCatalog: () => electronTemplateCatalog(),
   catalogPreview: (slug: string) => electronCatalogPreview(slug),
   catalogInstall: (slug: string) => electronCatalogInstall(slug),
   chatThreads: (workspace?: string) => chatApi.chatThreads(workspace),

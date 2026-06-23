@@ -366,6 +366,31 @@ struct CapabilitySnapshotResponse {
     policy: CapabilityPolicyResponse,
 }
 
+#[derive(Debug, Serialize)]
+struct TemplateCatalogEntryResponse {
+    provider: String,
+    id: String,
+    name: String,
+    kind: String,
+    description: String,
+    use_cases: Vec<String>,
+    audience: Vec<String>,
+    design_template: String,
+    design_theme: Option<String>,
+    design_profile: Option<String>,
+    design_components: Vec<String>,
+    layout_archetypes: Vec<String>,
+    tags: Vec<String>,
+    preview_ref: Option<String>,
+    source_ref: Option<String>,
+    license: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct TemplateCatalogResponse {
+    templates: Vec<TemplateCatalogEntryResponse>,
+}
+
 #[derive(Debug, serde::Deserialize)]
 struct RejectApprovalRequest {
     reason: String,
@@ -689,6 +714,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/skills/catalog/refresh", post(skill_catalog_refresh))
         .route("/api/skills/catalog/install", post(install_catalog_skill))
         .route("/api/skills/catalog/preview", get(preview_catalog_skill))
+        .route("/api/templates/catalog", get(template_catalog))
         .route("/api/skills/{id}", get(skill_detail))
         .route("/api/skills/{id}/enabled", post(set_skill_enabled))
         .route("/api/tasks/queue", get(task_queue))
@@ -6462,6 +6488,34 @@ fn template_catalog_by_id_from_entries(
 
 fn template_catalog_by_id(id: Option<&str>) -> Option<TemplateCatalogEntry> {
     template_catalog_by_id_from_entries(&template_catalog_entries(), id)
+}
+
+fn template_catalog_response_from_entries(
+    entries: Vec<TemplateCatalogEntry>,
+) -> TemplateCatalogResponse {
+    TemplateCatalogResponse {
+        templates: entries
+            .into_iter()
+            .map(|entry| TemplateCatalogEntryResponse {
+                provider: entry.provider,
+                id: entry.id,
+                name: entry.name,
+                kind: entry.kind,
+                description: entry.description,
+                use_cases: entry.use_cases,
+                audience: entry.audience,
+                design_template: entry.design_template,
+                design_theme: entry.design_theme,
+                design_profile: entry.design_profile,
+                design_components: entry.design_components,
+                layout_archetypes: entry.layout_archetypes,
+                tags: entry.tags,
+                preview_ref: entry.preview_ref,
+                source_ref: entry.source_ref,
+                license: entry.license,
+            })
+            .collect(),
+    }
 }
 
 fn template_catalog_capability_entries() -> Vec<CapabilityEntry> {
@@ -35318,6 +35372,10 @@ async fn capability_snapshot(
     Ok(Json(snapshot))
 }
 
+async fn template_catalog() -> Json<TemplateCatalogResponse> {
+    Json(template_catalog_response_from_entries(template_catalog_entries()))
+}
+
 fn task_queue_response_for_state(state: &AppState) -> Result<TaskQueueResponse, GatewayError> {
     let user = gateway_user_id();
     let workspace = gateway_workspace_id();
@@ -38690,6 +38748,37 @@ mod tests {
 
         assert_eq!(entry.preview_ref, None);
         assert_eq!(entry.source_ref, None);
+    }
+
+    #[test]
+    fn template_catalog_response_exposes_read_only_gallery_metadata() {
+        let response = super::template_catalog_response_from_entries(vec![super::TemplateCatalogEntry {
+            provider: "external".to_string(),
+            id: "external/gallery-template-01".to_string(),
+            name: "Gallery Template".to_string(),
+            kind: "presentation".to_string(),
+            description: "Template prepared for gallery preview.".to_string(),
+            use_cases: vec!["pitch".to_string()],
+            audience: vec!["clients".to_string()],
+            design_template: "startup_pitch".to_string(),
+            design_theme: Some("clean_corporate".to_string()),
+            design_profile: Some("sales_pitch".to_string()),
+            design_components: vec!["kpi_grid".to_string()],
+            layout_archetypes: vec!["cover".to_string()],
+            tags: vec!["premium".to_string()],
+            preview_ref: Some("assets/gallery-template.png".to_string()),
+            source_ref: Some("https://example.com/gallery-template".to_string()),
+            license: Some("commercial".to_string()),
+            route_text: "gallery template".to_string(),
+        }]);
+        let value = serde_json::to_value(&response).expect("json");
+        let first = &value["templates"][0];
+
+        assert_eq!(first["id"], "external/gallery-template-01");
+        assert_eq!(first["preview_ref"], "assets/gallery-template.png");
+        assert_eq!(first["tags"][0], "premium");
+        assert!(first.get("schema").is_none());
+        assert!(first.get("callable").is_none());
     }
 
     #[test]
