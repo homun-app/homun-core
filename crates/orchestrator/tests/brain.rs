@@ -4,8 +4,9 @@ use local_first_capabilities::{
     WorkspaceId,
 };
 use local_first_orchestrator::{
-    MemoryContextSnippet, OrchestratorBrain, OrchestratorBudgets, OrchestratorRequest,
-    OrchestratorRoute, StaticMemoryContextProvider, ToolSearchIndexStore,
+    ExecutionPlan, MemoryContextSnippet, OrchestratorBrain, OrchestratorBudgets,
+    OrchestratorRequest, OrchestratorRoute, PlanStep, PlanStepKind, StaticMemoryContextProvider,
+    StepExecutionPolicy, ToolSearchIndexStore,
 };
 use local_first_subagents::{
     GenerateJsonRequest, GenerateJsonResponse, JsonRuntime, RuntimeClientError, TokenMetrics,
@@ -325,6 +326,82 @@ fn brain_executes_read_and_draft_steps_immediately_but_queues_write_steps() {
     assert_eq!(tasks.len(), 1);
     assert_eq!(tasks[0].kind, "capability.calendar.calendar.send_update");
     assert_eq!(tasks[0].risk_level, "medium");
+}
+
+#[test]
+fn brain_runs_static_execution_plan_without_planner_roundtrip() {
+    let runtime = StubRuntime::new(vec![]);
+    let mut brain = brain(
+        runtime,
+        vec![
+            tool(
+                "calendar.search",
+                "Search calendar events",
+                ActionClass::Read,
+                CapabilityProviderKind::Native,
+            ),
+            tool(
+                "calendar.send_update",
+                "Send a calendar message to attendees",
+                ActionClass::WriteWithConfirmation,
+                CapabilityProviderKind::Native,
+            ),
+        ],
+    );
+    let plan = ExecutionPlan {
+        route: OrchestratorRoute::MixedWorkflow,
+        direct_answer: None,
+        plan_propose: None,
+        steps: vec![
+            PlanStep {
+                step_id: "read_calendar".to_string(),
+                kind: PlanStepKind::CapabilityCall,
+                depends_on: vec![],
+                provider_id: Some("calendar".to_string()),
+                tool_name: Some("calendar.search".to_string()),
+                arguments: serde_json::json!({"query": "standup"}),
+                execution_policy: StepExecutionPolicy::Immediate,
+                risk_level: "low".to_string(),
+                expected_duration_seconds: 2,
+                agent_id: None,
+                goal: None,
+                contract: None,
+                allowed_actions: vec![],
+                requires_user_approval: None,
+                timeout_seconds: None,
+                max_tokens: None,
+            },
+            PlanStep {
+                step_id: "send_message".to_string(),
+                kind: PlanStepKind::CapabilityCall,
+                depends_on: vec!["read_calendar".to_string()],
+                provider_id: Some("calendar".to_string()),
+                tool_name: Some("calendar.send_update".to_string()),
+                arguments: serde_json::json!({"body": "Confermato"}),
+                execution_policy: StepExecutionPolicy::Immediate,
+                risk_level: "medium".to_string(),
+                expected_duration_seconds: 2,
+                agent_id: None,
+                goal: None,
+                contract: None,
+                allowed_actions: vec![],
+                requires_user_approval: None,
+                timeout_seconds: None,
+                max_tokens: None,
+            },
+        ],
+        needs_more_tools: None,
+    };
+
+    let outcome = brain
+        .run_plan(request("workflow dichiarativo"), plan)
+        .unwrap();
+
+    assert!(brain.runtime().requests().is_empty(), "planner must not be called");
+    assert_eq!(outcome.audit.planner_rounds, 0);
+    assert_eq!(outcome.immediate_results.len(), 1);
+    assert_eq!(outcome.enqueued_tasks.len(), 1);
+    assert_eq!(outcome.enqueued_tasks[0].step_id, "send_message");
 }
 
 #[test]

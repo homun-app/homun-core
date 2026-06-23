@@ -98,6 +98,45 @@ impl<R: JsonRuntime, M: MemoryContextProvider> OrchestratorBrain<R, M> {
         Ok(plan)
     }
 
+    /// Executes a caller-provided [`ExecutionPlan`] through the same capability,
+    /// task-runtime and subagent paths used by planner-generated plans. This is
+    /// the declarative workflow entry point: the caller owns plan construction,
+    /// the Brain owns validation and materialization.
+    pub fn run_plan(
+        &mut self,
+        request: OrchestratorRequest,
+        plan: ExecutionPlan,
+    ) -> OrchestratorResult<OrchestratorOutcome> {
+        let access = self.capabilities.list_tools(&request.policy_context)?;
+        self.tool_index.rebuild_from_tools(&access.visible_tools)?;
+        let memory = self.memory.load_context(&request)?;
+        self.validate_plan(&plan, &access.visible_tools, request.budgets.max_steps)?;
+        let loaded_cards = access
+            .visible_tools
+            .iter()
+            .map(ToolCard::from_tool)
+            .collect();
+        let loaded_tools = access.visible_tools.clone();
+        self.execute_plan(
+            request,
+            plan,
+            memory,
+            access,
+            loaded_cards,
+            loaded_tools,
+            TokenMetrics {
+                prompt_tokens: 0,
+                generation_tokens: 0,
+                prompt_tps: 0.0,
+                generation_tps: 0.0,
+                peak_memory_gb: 0.0,
+                elapsed_seconds: 0.0,
+            },
+            0,
+            Vec::new(),
+        )
+    }
+
     fn run_inner(
         &mut self,
         request: OrchestratorRequest,
@@ -109,7 +148,32 @@ impl<R: JsonRuntime, M: MemoryContextProvider> OrchestratorBrain<R, M> {
         let (plan, metrics, planner_rounds, loaded_cards, loaded_tools, context_budget) =
             self.plan_with_retry(&request, &memory, &initial_cards, &initial_tools)?;
         self.validate_plan(&plan, &loaded_tools, request.budgets.max_steps)?;
+        self.execute_plan(
+            request,
+            plan,
+            memory,
+            access,
+            loaded_cards,
+            loaded_tools,
+            metrics,
+            planner_rounds,
+            context_budget,
+        )
+    }
 
+    #[allow(clippy::too_many_arguments)]
+    fn execute_plan(
+        &mut self,
+        request: OrchestratorRequest,
+        plan: ExecutionPlan,
+        memory: Vec<crate::MemoryContextSnippet>,
+        access: ToolAccessPlan,
+        loaded_cards: Vec<ToolCard>,
+        loaded_tools: Vec<CapabilityTool>,
+        metrics: TokenMetrics,
+        planner_rounds: usize,
+        context_budget: Vec<crate::ContextBudgetUsage>,
+    ) -> OrchestratorResult<OrchestratorOutcome> {
         let mut immediate_results = Vec::new();
         let mut enqueued_tasks = Vec::new();
         let mut enqueued_subagent_tasks = Vec::new();

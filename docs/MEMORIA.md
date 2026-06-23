@@ -96,6 +96,9 @@ Fatto:
 - `ExecutionPlan` include `plan_propose` come contratto strutturato per piani da
   approvare prima dell'esecuzione; resta dentro il contratto orchestrator, non in
   uno store separato.
+- `OrchestratorBrain::run_plan` esegue workflow dichiarativi già costruiti
+  dall'harness attraverso lo stesso Brain/task-runtime/subagent path dei piani
+  generati dal planner; non introduce un runner/store parallelo.
 
 Mancante:
 

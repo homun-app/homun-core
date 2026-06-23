@@ -87,12 +87,20 @@ modelli deboli/locali. Invarianti: monotonìa, limitatezza, identità non inferi
     contratto `DeckWorkflow`. Il modello vede ancora un solo tool, ma il runtime
     ha una definizione dichiarativa verificabile. Test mirato:
     `make_deck_workflow_definition_projects_execution_plan`.
-  - ☐ **Slice 3b**: estrarre il runner workflow generico dalla pipeline deck e
+  - ✅ **Slice 3b/F5 (2026-06-23, locale/verde)**: `OrchestratorBrain` espone
+    `run_plan(request, execution_plan)`, entrypoint per workflow dichiarativi già
+    costruiti dall'harness. Esegue/accoda gli step usando gli stessi provider,
+    policy, task-runtime, dipendenze e subagent path dei piani prodotti dal
+    planner, con `planner_rounds=0` e senza roundtrip LLM. Test mirato:
+    `brain_runs_static_execution_plan_without_planner_roundtrip`.
+  - ☐ **Slice 3d**: applicare `run_plan` alla pipeline deck end-to-end e poi
     renderlo riusabile per `make_document` / `make_research` / `make_meeting`.
 - ☐ **Fase 4** — router workflow|agent + **scaffolding adattivo** (pavimento + manopole
   per tier; tier via seed registry + probe al primo uso + stretta a runtime sui
   fallimenti) + repair limitato.
-- ☐ **Fase 5** — convergenza con `OrchestratorBrain` (completa [ADR 0008](../decisions/0008-orchestrator-brain-single-planner.md)).
+- 🟡 **Fase 5** — convergenza con `OrchestratorBrain` (completa [ADR 0008](../decisions/0008-orchestrator-brain-single-planner.md)).
+  - ✅ `run_plan` porta i workflow dichiarativi dentro lo stesso Brain senza planner
+    LLM; resta applicarlo a tutte le pipeline deliverable e al router.
 - ☐ **Fase 6** — memoria nel loop **per-step** sull'unico `MemoryFacade` (sub-agent inclusi).
 - ☐ **Sub-agent** — sub-agent a contesto isolato come tipo di nodo del grafo, recall/
   write-back attraverso il motore di memoria condiviso.

@@ -210,6 +210,12 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   `steps`) e lo schema/prompt planner lo accettano come campo top-level
   opzionale quando serve approvazione del piano prima dell'esecuzione. Test:
   `cargo test -p local-first-orchestrator -- --nocapture`.
+- **WS1-Fase 3b/F5 locale/verde:** `OrchestratorBrain` espone `run_plan(request,
+  execution_plan)`, entrypoint per workflow dichiarativi già costruiti
+  dall'harness. Esegue/accoda gli step usando gli stessi provider, policy,
+  task-runtime, dipendenze e subagent path dei piani generati dal planner, con
+  `planner_rounds=0` e senza roundtrip LLM. Test mirato:
+  `brain_runs_static_execution_plan_without_planner_roundtrip`.
 - **Nota aperta non bloccante:** durante i gate con tool il provider primario
   `glm-5.2` continua a rispondere `400 Bad Request` sul primo round con tool; il
   fallback a `kimi-k2.6:cloud` prosegue correttamente. Da riprendere come task
