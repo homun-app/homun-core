@@ -69,12 +69,14 @@ o guardrail di sicurezza. Non sono la verità primaria di routing. Esempi:
 - “estrai testo da questo PDF” → tool atomico/MCP PDF;
 - “unisci questi PDF” → tool atomico/MCP PDF, non `make_document`.
 
-Stato corrente (2026-06-23): prima slice locale/verde su workflow nativi. Le entry
-`make_deck` e `make_document` vivono in un registry nativo usato sia dal router
-workflow/agent sia dal corpus `find_capability`; i workflow non sono duplicati
-nel corpus deferred generico. Resta da aggiungere il judge strutturato con log
-del perché e policy esplicita quando un workflow end-to-end e un tool atomico/MCP
-sembrano entrambi candidati.
+Stato corrente (2026-06-23): prime slice locali/verdi su workflow nativi. Le
+entry `make_deck` e `make_document` vivono in un registry nativo usato sia dal
+router workflow/agent sia dal corpus `find_capability`; i workflow non sono
+duplicati nel corpus deferred generico. La decisione interna è strutturata
+(`Workflow`, `AtomicTool`, `AgentLoop`) e porta un `reason`: la prima policy di
+conflitto distingue creazione report PDF (`make_document`) da operazioni atomiche
+PDF come estrazione, unione o conversione (`pdf_atomic`). Resta da collegare
+questa decisione a logging/audit runtime e al registry reale di atomici/MCP.
 
 ## Esecuzione contenuta (ADR 0009/0010)
 

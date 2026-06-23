@@ -109,6 +109,11 @@ primo percorso locale verde:
     recupera `make_deck` senza keyword `slide`/`pptx`, i `make_*` non vengono
     duplicati nel corpus deferred, e il workflow scelto resta nel live toolset
     anche dopo lo split core/deferred.
+29. WS1-Fase 4b seconda slice — il router produce una decisione strutturata
+    interna (`Workflow`/`AtomicTool`/`AgentLoop`) con ragione e alternative. Prima
+    conflict policy: creazione report PDF usa `make_document`; estrazione,
+    unione o conversione PDF restano operazioni atomiche e non attivano
+    `make_document`.
 
 Prima di pubblicare/taggare resta prudente ripetere lo smoke manuale in-app su
 una automazione schedulata reale con il binario aggiornato. Il primo smoke ha
@@ -119,8 +124,8 @@ trovato e corretto una falsa chiusura su piano non completato.
 1. Completare verifica allargata della nuova slice `ExecutionPlan` runtime.
 2. WS1-Fase 2/3 — piano runtime-owned e workflow runner dichiarativo, così i
    deliverable futuri non riaprono fragilità cross-modello.
-3. WS1-Fase 4b — completare il router/judge strutturato e la conflict policy
-   workflow-vs-tool atomico/MCP prima di aggiungere altri `make_*`.
+3. WS1-Fase 4b — collegare la decisione strutturata a logging/audit runtime e al
+   registry reale degli atomici/MCP prima di aggiungere altri `make_*`.
 4. WS7 — deliverable Manus-style: prima consolidare `make_document`; solo dopo
    ragionare su `make_research` e `make_meeting`.
 
@@ -140,10 +145,11 @@ entra ora nel Brain con `run_plan` prima della pipeline deterministica.
 Il router workflow/agent instrada i deck a scaffolding massimo. Il primo smoke
 release ha corretto composer e recall provenance/status. La prima
 generalizzazione documenti è locale/verde su `make_document` e ha superato smoke
-API reale con artifact gestito + memoria/provenance canonica. Il primo registry
-nativo dei workflow `make_deck`/`make_document` è locale/verde e alimenta router
-e corpus `find_capability`. Scelta corrente: promuovere la selezione a
-router/judge strutturato con logging del perché e policy di conflitto tra
-workflow end-to-end e strumenti atomici/MCP. Solo dopo proseguire con
-DOCX/editabile e nuovi workflow; `make_research` e `make_meeting` restano futuri.
+API reale con artifact gestito + memoria/provenance canonica. Il registry nativo
+dei workflow `make_deck`/`make_document` è locale/verde e alimenta router e
+corpus `find_capability`; la decisione strutturata ora distingue workflow,
+atomici PDF e agent loop con ragione esplicita. Scelta corrente: collegare questa
+decisione a logging/audit runtime e al registry reale degli strumenti atomici/MCP.
+Solo dopo proseguire con DOCX/editabile e nuovi workflow; `make_research` e
+`make_meeting` restano futuri.
 Il contratto corrente della memoria è in [MEMORIA.md](MEMORIA.md).

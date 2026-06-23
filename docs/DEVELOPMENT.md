@@ -294,10 +294,18 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   `workflow_router_sends_deck_requests_to_max_scaffolding_workflow`,
   `workflow_router_sends_document_requests_to_document_workflow`,
   `workflow_router_prunes_alternative_tools_for_document_workflow`,
-  `workflow_router_keeps_generic_requests_on_agent_loop`. **Prossimo passo
-  unico:** promuovere la decisione a router/judge strutturato con logging del
-  perché e conflict policy workflow-vs-atomico/MCP prima di aggiungere DOCX o
-  nuovi `make_research`/`make_meeting`.
+  `workflow_router_keeps_generic_requests_on_agent_loop`. **Seconda slice
+  locale/verde:** introdotta `CapabilityRouteDecision` come decisione strutturata
+  interna (`Workflow`, `AtomicTool`, `AgentLoop`) con `reason` e alternative; la
+  conflict policy PDF distingue creazione deliverable da operazioni atomiche:
+  “crea un report PDF” resta `make_document`, mentre “estrai testo/unisci/converti
+  PDF” diventa `AtomicTool(pdf_atomic)` e quindi non attiva `make_document`.
+  Test mirati:
+  `capability_router_explains_native_workflow_selection`,
+  `capability_router_keeps_pdf_atomic_operations_out_of_make_document`,
+  `capability_router_keeps_report_pdf_as_document_creation_workflow`. **Prossimo
+  passo unico:** collegare la decisione strutturata a logging/audit runtime e al
+  registry completo degli atomici/MCP, poi proseguire con DOCX o nuovi workflow.
 - **Gate provider Z.ai/GLM risolto (test manuale utente, 2026-06-23):** Settings
   espone sia `Z.ai (GLM)` standard (`https://api.z.ai/api/paas/v4`) sia
   `Z.ai Coding (GLM)` (`https://api.z.ai/api/coding/paas/v4`); il preset coding

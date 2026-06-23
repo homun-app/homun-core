@@ -6040,19 +6040,107 @@ enum WorkflowRouteDecision {
     AgentLoop,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum CapabilityRouteDecision {
+    Workflow {
+        workflow_id: &'static str,
+        tool_name: &'static str,
+        scaffolding_tier: &'static str,
+        reason: String,
+        alternatives: Vec<String>,
+    },
+    AtomicTool {
+        capability_key: &'static str,
+        reason: String,
+    },
+    AgentLoop {
+        reason: String,
+    },
+}
+
 fn route_workflow_or_agent(prompt: &str) -> WorkflowRouteDecision {
+    match route_capability(prompt) {
+        CapabilityRouteDecision::Workflow {
+            workflow_id,
+            tool_name,
+            scaffolding_tier,
+            ..
+        } => WorkflowRouteDecision::Workflow {
+            workflow_id,
+            tool_name,
+            scaffolding_tier,
+        },
+        CapabilityRouteDecision::AtomicTool { .. } | CapabilityRouteDecision::AgentLoop { .. } => {
+            WorkflowRouteDecision::AgentLoop
+        }
+    }
+}
+
+fn route_capability(prompt: &str) -> CapabilityRouteDecision {
+    if let Some(reason) = atomic_pdf_operation_reason(prompt) {
+        return CapabilityRouteDecision::AtomicTool {
+            capability_key: "pdf_atomic",
+            reason,
+        };
+    }
+
     let entries = native_workflow_capability_entries();
     let Some(entry) = bm25_rank(&entries, prompt, 1).into_iter().next() else {
-        return WorkflowRouteDecision::AgentLoop;
+        return CapabilityRouteDecision::AgentLoop {
+            reason: "No native workflow candidate matched the request.".to_string(),
+        };
     };
     if let Some(capability) = native_workflow_by_tool_name(&entry.key) {
-        return WorkflowRouteDecision::Workflow {
+        let alternatives = entries
+            .iter()
+            .filter(|candidate| candidate.key != entry.key)
+            .map(|candidate| candidate.key.clone())
+            .collect();
+        return CapabilityRouteDecision::Workflow {
             workflow_id: capability.workflow_id,
             tool_name: capability.tool_name,
             scaffolding_tier: capability.scaffolding_tier,
+            reason: format!(
+                "Selected `{}` from the native workflow registry via BM25 over semantic route text.",
+                capability.tool_name
+            ),
+            alternatives,
         };
     }
-    WorkflowRouteDecision::AgentLoop
+    CapabilityRouteDecision::AgentLoop {
+        reason: "The best capability candidate was not a native workflow.".to_string(),
+    }
+}
+
+fn atomic_pdf_operation_reason(prompt: &str) -> Option<String> {
+    let tokens: std::collections::BTreeSet<String> = cap_tokenize(prompt).into_iter().collect();
+    let mentions_pdf = tokens.contains("pdf");
+    if !mentions_pdf {
+        return None;
+    }
+    let atomic_actions = [
+        "estrai",
+        "estrarre",
+        "extract",
+        "leggi",
+        "read",
+        "unisci",
+        "merge",
+        "combina",
+        "combine",
+        "converti",
+        "convert",
+        "comprimi",
+        "compress",
+        "split",
+        "dividi",
+    ];
+    let matched = atomic_actions
+        .iter()
+        .find(|action| tokens.contains(**action))?;
+    Some(format!(
+        "PDF action `{matched}` is an atomic document operation, not an end-to-end document creation workflow."
+    ))
 }
 
 #[cfg(test)]
@@ -35947,6 +36035,66 @@ mod tests {
                 scaffolding_tier: "maximum",
             },
         );
+    }
+
+    #[test]
+    fn capability_router_explains_native_workflow_selection() {
+        let decision = super::route_capability("Voglio creare un pitch per Homun");
+
+        match decision {
+            super::CapabilityRouteDecision::Workflow {
+                workflow_id,
+                tool_name,
+                reason,
+                alternatives,
+                ..
+            } => {
+                assert_eq!(workflow_id, "make_deck");
+                assert_eq!(tool_name, "make_deck");
+                assert!(reason.contains("native workflow registry"), "{reason}");
+                assert!(alternatives.contains(&"make_document".to_string()));
+            }
+            other => panic!("expected make_deck workflow decision, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn capability_router_keeps_pdf_atomic_operations_out_of_make_document() {
+        for prompt in [
+            "estrai testo da questo PDF",
+            "unisci questi PDF",
+            "converti questo PDF in immagini",
+        ] {
+            let decision = super::route_capability(prompt);
+            assert!(
+                matches!(
+                    decision,
+                    super::CapabilityRouteDecision::AtomicTool {
+                        capability_key: "pdf_atomic",
+                        ..
+                    }
+                ),
+                "{prompt}: {decision:?}"
+            );
+            assert_eq!(
+                super::route_workflow_or_agent(prompt),
+                super::WorkflowRouteDecision::AgentLoop,
+            );
+        }
+    }
+
+    #[test]
+    fn capability_router_keeps_report_pdf_as_document_creation_workflow() {
+        let decision = super::route_capability("crea un report PDF per il cliente");
+
+        assert!(matches!(
+            decision,
+            super::CapabilityRouteDecision::Workflow {
+                workflow_id: "make_document",
+                tool_name: "make_document",
+                ..
+            }
+        ));
     }
 
     #[test]

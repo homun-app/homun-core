@@ -154,11 +154,16 @@ modelli deboli/locali. Invarianti: monotonìa, limitatezza, identità non inferi
     generico e reinseriti tramite registry nativo; quando il router sceglie un
     workflow, il tool selezionato viene caricato esplicitamente nel live toolset
     e `find_capability` non viene esposto.
-  - ☐ Aggiungere un router/judge strutturato che sceglie 0/1 workflow o tool
-    atomico e spiega la decisione nei log.
-  - ☐ Prunare il toolset live in base alla decisione: un workflow end-to-end vince
-    sugli MCP concorrenti per creazione deliverable; MCP/atomici restano per
-    lettura, conversione, ispezione o operazioni specifiche.
+  - ✅ **Seconda slice decisione strutturata (2026-06-23, locale/verde):**
+    aggiunta `CapabilityRouteDecision` (`Workflow`, `AtomicTool`, `AgentLoop`)
+    con `reason` e alternative. La prima conflict policy esplicita copre PDF:
+    `crea un report PDF` resta workflow end-to-end `make_document`; `estrai
+    testo da questo PDF`, `unisci questi PDF`, `converti questo PDF...` sono
+    `AtomicTool(pdf_atomic)` e non attivano `make_document`.
+  - 🟡 Prunare/loggare il toolset live in base alla decisione completa: oggi un
+    workflow end-to-end viene già caricato come unico tool live; resta collegare
+    `AtomicTool` al registry reale degli atomici/MCP e registrare il perché nei
+    log/audit runtime.
 - 🟡 **Fase 5** — convergenza con `OrchestratorBrain` (completa [ADR 0008](../decisions/0008-orchestrator-brain-single-planner.md)).
   - ✅ `run_plan` porta i workflow dichiarativi dentro lo stesso Brain senza planner
     LLM; resta applicarlo a tutte le pipeline deliverable e al router.
