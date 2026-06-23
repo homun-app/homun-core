@@ -93,11 +93,19 @@ modelli deboli/locali. Invarianti: monotonìa, limitatezza, identità non inferi
     policy, task-runtime, dipendenze e subagent path dei piani prodotti dal
     planner, con `planner_rounds=0` e senza roundtrip LLM. Test mirato:
     `brain_runs_static_execution_plan_without_planner_roundtrip`.
-  - ☐ **Slice 3d**: applicare `run_plan` alla pipeline deck end-to-end e poi
-    renderlo riusabile per `make_document` / `make_research` / `make_meeting`.
-- ☐ **Fase 4** — router workflow|agent + **scaffolding adattivo** (pavimento + manopole
-  per tier; tier via seed registry + probe al primo uso + stretta a runtime sui
-  fallimenti) + repair limitato.
+  - ✅ **Slice 3d (2026-06-23, locale/verde)**: `make_deck` passa la propria
+    `WorkflowDefinition`/`ExecutionPlan` attraverso `OrchestratorBrain::run_plan`
+    prima della pipeline deterministica, senza planner LLM e senza store
+    workflow parallelo. Test mirato:
+    `make_deck_workflow_plan_runs_through_brain_without_planner`.
+  - ☐ Generalizzare lo stesso pattern per `make_document` / `make_research` /
+    `make_meeting`.
+- ✅ **Fase 4 (2026-06-23, locale/verde)** — router workflow|agent + primo
+  scaffolding adattivo: richieste deck/presentation/slide/pptx vengono
+  instradate dal runtime al workflow `make_deck` con scaffolding `maximum` e
+  instruction di sistema vincolante; richieste generiche restano nel loop agente.
+  Test mirati: `workflow_router_sends_deck_requests_to_max_scaffolding_workflow`,
+  `workflow_router_keeps_generic_requests_on_agent_loop`.
 - 🟡 **Fase 5** — convergenza con `OrchestratorBrain` (completa [ADR 0008](../decisions/0008-orchestrator-brain-single-planner.md)).
   - ✅ `run_plan` porta i workflow dichiarativi dentro lo stesso Brain senza planner
     LLM; resta applicarlo a tutte le pipeline deliverable e al router.

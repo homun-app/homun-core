@@ -77,6 +77,12 @@ primo percorso locale verde:
     criterio ed evidenze della verifica; il piano resta l'unico `open_loop`.
 21. WS1-Fase 6b — gli outcome completati dei task `subagent.*` riusano lo
     stesso write-back per-step, con evidence redatta `source="subagent_task"`.
+22. WS1-Fase 3d — `make_deck` passa la propria `WorkflowDefinition` /
+    `ExecutionPlan` attraverso `OrchestratorBrain::run_plan` prima della
+    pipeline deterministica, senza planner LLM e senza store parallelo.
+23. WS1-Fase 4 — router workflow|agent harness-owned: deck/presentation/slide/pptx
+    vanno a `make_deck` con scaffolding `maximum`; richieste generiche restano
+    nel loop agente.
 
 Prima di pubblicare/taggare resta prudente ripetere lo smoke manuale in-app su
 una automazione schedulata reale con il binario aggiornato. Il primo smoke ha
@@ -101,7 +107,8 @@ collegarli al perché. Per questo WS7 non è più il prossimo step.
 WS1 ha ora write-back piano→memoria, prima materializzazione grafo piano/step,
 proiezione `ExecutionPlan` nei metadata canonici, `ExecutionPlan` come stato
 runtime primario del loop agente, una prima `WorkflowDefinition` per `make_deck`
-e outcome per-step confermati nel loop principale e nei sub-agent. Prossimo:
-applicare `run_plan` alla pipeline deck end-to-end, poi generalizzare
-documenti/ricerca/meeting. Il contratto corrente della memoria è in
+e outcome per-step confermati nel loop principale e nei sub-agent. `make_deck`
+entra ora nel Brain con `run_plan` prima della pipeline deterministica.
+Il router workflow/agent instrada i deck a scaffolding massimo. Prossimo:
+generalizzare documenti/ricerca/meeting. Il contratto corrente della memoria è in
 [MEMORIA.md](MEMORIA.md).

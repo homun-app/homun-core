@@ -215,7 +215,11 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   dall'harness. Esegue/accoda gli step usando gli stessi provider, policy,
   task-runtime, dipendenze e subagent path dei piani generati dal planner, con
   `planner_rounds=0` e senza roundtrip LLM. Test mirato:
-  `brain_runs_static_execution_plan_without_planner_roundtrip`.
+  `brain_runs_static_execution_plan_without_planner_roundtrip`. **WS1-Fase 3d
+  locale/verde:** `make_deck` passa la sua `WorkflowDefinition`/`ExecutionPlan`
+  attraverso `OrchestratorBrain::run_plan` prima della pipeline deterministica;
+  nessun planner LLM e nessuno store workflow parallelo. Test mirato:
+  `make_deck_workflow_plan_runs_through_brain_without_planner`.
 - **WS1-Fase 6a locale/verde:** quando il loop principale verifica davvero uno
   step `done`, scrive una `fact` confermata nel `MemoryFacade` canonico con
   `source="runtime_plan_step"`, `thread_id`, `step_id`, criterio ed evidenze
@@ -228,6 +232,12 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   uguale al task id, `done_criterion` dal contratto sub-agent ed evidence redatta
   `source="subagent_task"`. Test mirato:
   `subagent_task_outcome_writes_runtime_plan_step_fact`.
+- **WS1-Fase 4 locale/verde:** introdotto router harness-owned
+  workflow|agent: richieste deck/presentation/slide/pptx vengono instradate al
+  workflow `make_deck` con scaffolding `maximum` e instruction di sistema
+  "call `make_deck` exactly once"; le richieste generiche restano nel normale
+  agent loop. Test mirati: `workflow_router_sends_deck_requests_to_max_scaffolding_workflow`,
+  `workflow_router_keeps_generic_requests_on_agent_loop`.
 - **Nota aperta non bloccante:** durante i gate con tool il provider primario
   `glm-5.2` continua a rispondere `400 Bad Request` sul primo round con tool; il
   fallback a `kimi-k2.6:cloud` prosegue correttamente. Da riprendere come task

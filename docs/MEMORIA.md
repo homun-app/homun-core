@@ -99,6 +99,13 @@ Fatto:
 - `OrchestratorBrain::run_plan` esegue workflow dichiarativi già costruiti
   dall'harness attraverso lo stesso Brain/task-runtime/subagent path dei piani
   generati dal planner; non introduce un runner/store parallelo.
+- `make_deck` passa la propria `WorkflowDefinition`/`ExecutionPlan` attraverso
+  `OrchestratorBrain::run_plan` prima della pipeline deterministica; il Brain è
+  il punto di ingresso contrattuale, non una seconda memoria o un secondo store.
+- router workflow|agent WS1-F4: il runtime instrada richieste
+  deck/presentation/slide/pptx al workflow `make_deck` con scaffolding
+  `maximum`; le altre richieste restano nel normale loop agente. Il router è
+  harness-owned e non crea un secondo grafo.
 - outcome per-step WS1-F6a: quando il loop principale verifica uno step `done`,
   scrive una `fact` confermata `source="runtime_plan_step"` nel `MemoryFacade`,
   con `thread_id`, `step_id`, criterio ed evidenze della verifica. Il piano
@@ -180,9 +187,9 @@ Acceptance:
    locale/verde.
 5. WS5.6 — eval memoria: ✅ artifact/provenance e stato workflow/perché locali;
    resta eventuale smoke in-app mirato.
-6. WS1-Fase 3 — estrarre il runner workflow generico riusabile sullo stesso
-   `ExecutionPlan` + write-back memoria/grafo.
-7. WS7 — deliverable Manus-style, solo dopo queste fondamenta.
+6. WS7 — generalizzare `make_document` / `make_research` / `make_meeting` sullo
+   stesso `ExecutionPlan` + write-back memoria/grafo.
+7. Smoke in-app su deck workflow dopo build release.
 
 ## File codice principali
 

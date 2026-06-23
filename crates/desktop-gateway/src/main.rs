@@ -5883,6 +5883,92 @@ fn workflow_execution_plan(
     }
 }
 
+fn run_static_workflow_plan_through_brain(
+    goal: &str,
+    plan: ExecutionPlan,
+) -> Result<ExecutionPlan, String> {
+    let router = build_browser_inference_router();
+    let mut brain = OrchestratorBrain::new(
+        router,
+        GatewayBrainMemory(None),
+        CapabilityFacade::new(CapabilityPolicy::default(), InMemoryCapabilityAudit::default()),
+        ToolSearchIndexStore::open_in_memory().map_err(|error| error.to_string())?,
+        TaskStore::open_in_memory().map_err(|error| error.to_string())?,
+    );
+    let user = gateway_capability_user_id();
+    let workspace = gateway_capability_workspace_id();
+    let request = OrchestratorRequest {
+        request_id: format!("static_workflow_{}", uuid::Uuid::new_v4().simple()),
+        policy_context: PolicyContext {
+            user_id: user,
+            workspace_id: workspace,
+            enabled_providers: Vec::new(),
+            privacy_domains: vec!["work".to_string()],
+            allowed_actions: vec![ActionClass::Read, ActionClass::Draft],
+            max_autonomy_level: 0,
+            allow_managed_cloud: false,
+        },
+        user_message: goal.to_string(),
+        conversation_summary: None,
+        attachments: Vec::new(),
+        budgets: brain_budgets_for_context_window(None),
+        language: effective_user_language(),
+    };
+    let outcome = brain
+        .run_plan(request, plan)
+        .map_err(|error| error.to_string())?;
+    Ok(outcome.plan)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum WorkflowRouteDecision {
+    Workflow {
+        workflow_id: &'static str,
+        tool_name: &'static str,
+        scaffolding_tier: &'static str,
+    },
+    AgentLoop,
+}
+
+fn route_workflow_or_agent(prompt: &str) -> WorkflowRouteDecision {
+    let normalized = prompt.to_ascii_lowercase();
+    let asks_for_deck = [
+        "deck",
+        "presentation",
+        "presentazione",
+        "slide",
+        "slides",
+        "ppt",
+        "pptx",
+    ]
+    .iter()
+    .any(|needle| normalized.contains(needle));
+    if asks_for_deck {
+        WorkflowRouteDecision::Workflow {
+            workflow_id: "make_deck",
+            tool_name: "make_deck",
+            scaffolding_tier: "maximum",
+        }
+    } else {
+        WorkflowRouteDecision::AgentLoop
+    }
+}
+
+fn workflow_router_instruction(prompt: &str) -> Option<String> {
+    match route_workflow_or_agent(prompt) {
+        WorkflowRouteDecision::Workflow {
+            workflow_id,
+            tool_name,
+            scaffolding_tier,
+        } => Some(format!(
+            "WORKFLOW ROUTER: this request is routed by the harness to workflow `{workflow_id}` \
+with `{scaffolding_tier}` scaffolding. Call `{tool_name}` exactly once with the user's brief; \
+do not create a separate plan, do not decompose it into lower-level tools, and do not use shell/file tools for this workflow."
+        )),
+        WorkflowRouteDecision::AgentLoop => None,
+    }
+}
+
 fn runtime_plan_memory_matches(memory: &MemoryRecord, thread_key: &str) -> bool {
     memory.memory_type == "open_loop"
         && !matches!(memory.status, MemoryStatus::Deleted | MemoryStatus::Rejected | MemoryStatus::Stale)
@@ -12760,6 +12846,10 @@ in-progress plan (some steps done, others not), CONTINUE it — re-emit the plan
 keeping the completed steps as done, and proceed from the first not-done step; do NOT restart \
 from scratch or re-propose."
     );
+    let system = match workflow_router_instruction(&request.prompt) {
+        Some(instruction) => format!("{system}\n\n{instruction}"),
+        None => system,
+    };
     let system = format!(
         "{system}\n\nFRESHNESS / VERIFICATION: your internal knowledge may be dated. For ANY \
 question whose answer depends on information that changes over time or that requires up-to-date \
@@ -14909,6 +14999,23 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                     "slides": slides,
                                 }),
                             );
+                            let workflow_plan =
+                                match run_static_workflow_plan_through_brain(&brief, workflow_plan) {
+                                    Ok(plan) => plan,
+                                    Err(error) => {
+                                        eprintln!(
+                                            "make_deck: static workflow plan validation failed: {error}"
+                                        );
+                                        workflow_execution_plan(
+                                            &make_deck_workflow_definition(),
+                                            serde_json::json!({
+                                                "brief": brief.clone(),
+                                                "language": language.clone(),
+                                                "slides": slides,
+                                            }),
+                                        )
+                                    }
+                                };
                             let thread_slug = artifact_thread_slug(thread_id.as_deref());
                             let _ = emit_stream_event(
                                 &tx,
@@ -35189,6 +35296,56 @@ mod tests {
                 .and_then(|value| value.as_str()),
             Some("make_deck"),
         );
+    }
+
+    #[test]
+    fn make_deck_workflow_plan_runs_through_brain_without_planner() {
+        let definition = super::make_deck_workflow_definition();
+        let plan = super::workflow_execution_plan(
+            &definition,
+            serde_json::json!({
+                "brief": "Quarterly results",
+                "language": "en",
+                "slides": 6,
+            }),
+        );
+
+        let validated =
+            super::run_static_workflow_plan_through_brain("Quarterly results", plan).unwrap();
+
+        assert_eq!(validated.route, local_first_orchestrator::OrchestratorRoute::MixedWorkflow);
+        assert_eq!(validated.steps.len(), 6);
+        assert_eq!(validated.steps[0].step_id, "brand");
+        assert_eq!(validated.steps[5].step_id, "register_artifacts");
+        assert_eq!(validated.steps[5].contract.as_deref(), Some("DeckWorkflow"));
+    }
+
+    #[test]
+    fn workflow_router_sends_deck_requests_to_max_scaffolding_workflow() {
+        let decision = super::route_workflow_or_agent(
+            "Crea una presentazione pptx per il meeting commerciale",
+        );
+
+        assert_eq!(
+            decision,
+            super::WorkflowRouteDecision::Workflow {
+                workflow_id: "make_deck",
+                tool_name: "make_deck",
+                scaffolding_tier: "maximum",
+            },
+        );
+        let instruction = super::workflow_router_instruction("Create a 6 slide deck")
+            .expect("workflow instruction");
+        assert!(instruction.contains("Call `make_deck` exactly once"), "{instruction}");
+    }
+
+    #[test]
+    fn workflow_router_keeps_generic_requests_on_agent_loop() {
+        assert_eq!(
+            super::route_workflow_or_agent("spiegami il codice del gateway"),
+            super::WorkflowRouteDecision::AgentLoop,
+        );
+        assert!(super::workflow_router_instruction("spiegami il codice del gateway").is_none());
     }
 
     #[test]
