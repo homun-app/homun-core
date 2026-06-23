@@ -435,6 +435,15 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   restano intatti e gli slide trasformati disattivano `want_image` per evitare
   conflitti visivi. Test mirato:
   `deck_design_components_materialize_renderer_supported_layouts`.
+- **Deliverable design components → document blocks locale/verde (2026-06-23):**
+  prima materializzazione fisica lato documenti: dopo il Markdown del modello,
+  `make_document` applica `design_components` usando il contenuto già generato
+  come sorgente e aggiunge blocchi Markdown renderizzabili (`Key metrics`,
+  `Timeline`, `Comparison`, `Key principle`, `Process steps`, `Risks and
+  mitigations`). I blocchi tabellari passano dal renderer DOCX come vere tabelle
+  Word, senza template paralleli e senza inventare dati esterni al documento.
+  Test mirati: `document_design_components_append_renderable_markdown_blocks`,
+  `document_design_components_render_as_docx_tables`.
 - **Gate provider Z.ai/GLM risolto (test manuale utente, 2026-06-23):** Settings
   espone sia `Z.ai (GLM)` standard (`https://api.z.ai/api/paas/v4`) sia
   `Z.ai Coding (GLM)` (`https://api.z.ai/api/coding/paas/v4`); il preset coding

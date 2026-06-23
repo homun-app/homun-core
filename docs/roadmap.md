@@ -192,6 +192,11 @@ primo percorso locale verde:
     `kpi_grid` usa layout `kpi`, `quote_callout` usa `quote`, gli altri componenti
     usano `two_column`, tutti già supportati da `deck_render.py`. Non ancora
     esteso al renderer DOCX e non ancora gallery/template library.
+49. WS7 document component materialization — in `make_document`, gli stessi
+    componenti dichiarativi ora vengono applicati al Markdown prima degli artifact:
+    sezioni/tabelle sono derivate dal contenuto generato e diventano vere tabelle
+    DOCX quando il formato richiesto è Word. Resta da fare QA visuale e template
+    library completa.
 
 Prima di pubblicare/taggare resta prudente ripetere lo smoke manuale in-app su
 una automazione schedulata reale con il binario aggiornato. Il primo smoke ha
@@ -247,6 +252,7 @@ registry, non keyword o nuovi tool ad hoc. Prima slice locale/verde:
 `design_profile` condiviso fra `make_document` e `make_deck`; seconda slice:
 `design_components` condiviso per KPI, timeline, confronti, callout, processi e
 rischi; terza slice: materializzazione fisica lato deck nei layout `kpi`,
-`quote` e `two_column`. Prossima slice: DOCX component rendering o QA visuale
-renderizzata. `make_research` e `make_meeting` restano futuri.
+`quote` e `two_column`; quarta slice: materializzazione lato documenti in
+blocchi/tabelle Markdown-DOCX. Prossima slice: QA visuale renderizzata o template
+library completa. `make_research` e `make_meeting` restano futuri.
 Il contratto corrente della memoria è in [MEMORIA.md](MEMORIA.md).

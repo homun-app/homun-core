@@ -12863,6 +12863,146 @@ an AI. The output must be ready to save as a deliverable artifact.{directives}"
     }
 }
 
+fn markdown_candidate_lines(markdown: &str) -> Vec<String> {
+    markdown
+        .lines()
+        .filter_map(|line| {
+            let trimmed = line.trim();
+            if trimmed.is_empty()
+                || trimmed.starts_with('|')
+                || trimmed.starts_with('#')
+                || markdown_table_separator(trimmed)
+            {
+                return None;
+            }
+            let cleaned = trimmed
+                .trim_start_matches("- ")
+                .trim_start_matches("* ")
+                .trim_start_matches(|ch: char| ch.is_ascii_digit() || ch == '.')
+                .trim()
+                .trim_matches('*')
+                .trim()
+                .to_string();
+            if cleaned.is_empty() {
+                None
+            } else {
+                Some(cleaned.chars().take(140).collect())
+            }
+        })
+        .take(24)
+        .collect()
+}
+
+fn markdown_has_heading(markdown: &str, heading: &str) -> bool {
+    let target = heading.trim().to_ascii_lowercase();
+    markdown.lines().any(|line| {
+        line.trim()
+            .trim_start_matches('#')
+            .trim()
+            .to_ascii_lowercase()
+            == target
+    })
+}
+
+fn component_line(lines: &[String], index: usize, fallback: &str) -> String {
+    lines
+        .get(index)
+        .cloned()
+        .unwrap_or_else(|| fallback.to_string())
+}
+
+fn document_component_block(component: &str, lines: &[String]) -> Option<String> {
+    match component {
+        "kpi_grid" => {
+            let metrics = lines
+                .iter()
+                .filter(|line| line.chars().any(|ch| ch.is_ascii_digit()))
+                .take(3)
+                .cloned()
+                .collect::<Vec<_>>();
+            let metrics = if metrics.is_empty() {
+                lines.iter().take(3).cloned().collect::<Vec<_>>()
+            } else {
+                metrics
+            };
+            if metrics.is_empty() {
+                return None;
+            }
+            let mut rows = String::from(
+                "## Key metrics\n\n| Metric | Value | Implication |\n| --- | --- | --- |\n",
+            );
+            for metric in metrics {
+                rows.push_str(&format!("| {} | - | - |\n", metric.replace('|', "/")));
+            }
+            Some(rows)
+        }
+        "timeline" => Some(format!(
+            "## Timeline\n\n| Phase | Detail | Outcome |\n| --- | --- | --- |\n| Now | {} | Current focus |\n| Next | {} | Next milestone |\n",
+            component_line(lines, 0, "Current phase").replace('|', "/"),
+            component_line(lines, 1, "Next phase").replace('|', "/"),
+        )),
+        "comparison_table" => Some(format!(
+            "## Comparison\n\n| Criteria | Option A | Option B |\n| --- | --- | --- |\n| Focus | {} | {} |\n| Tradeoff | {} | {} |\n",
+            component_line(lines, 0, "Primary option").replace('|', "/"),
+            component_line(lines, 1, "Alternative option").replace('|', "/"),
+            component_line(lines, 2, "Main benefit").replace('|', "/"),
+            component_line(lines, 3, "Main tradeoff").replace('|', "/"),
+        )),
+        "quote_callout" => Some(format!(
+            "## Key principle\n\n> {}\n",
+            component_line(lines, 0, "Keep the deliverable focused and actionable")
+        )),
+        "process_steps" => {
+            let steps = lines.iter().take(5).cloned().collect::<Vec<_>>();
+            if steps.is_empty() {
+                return None;
+            }
+            let mut block = String::from("## Process steps\n\n");
+            for (index, step) in steps.iter().enumerate() {
+                block.push_str(&format!("{}. {}\n", index + 1, step));
+            }
+            Some(block)
+        }
+        "risks_table" => Some(format!(
+            "## Risks and mitigations\n\n| Risk | Impact | Mitigation |\n| --- | --- | --- |\n| {} | - | {} |\n| {} | - | {} |\n",
+            component_line(lines, 0, "Execution risk").replace('|', "/"),
+            component_line(lines, 1, "Mitigation").replace('|', "/"),
+            component_line(lines, 2, "Adoption risk").replace('|', "/"),
+            component_line(lines, 3, "Owner follow-up").replace('|', "/"),
+        )),
+        _ => None,
+    }
+}
+
+fn apply_document_design_components(markdown: &str, components: &[String]) -> String {
+    if components.is_empty() {
+        return markdown.to_string();
+    }
+    let lines = markdown_candidate_lines(markdown);
+    let mut output = markdown.trim().to_string();
+    for component in components {
+        let heading = match component.as_str() {
+            "kpi_grid" => "Key metrics",
+            "timeline" => "Timeline",
+            "comparison_table" => "Comparison",
+            "quote_callout" => "Key principle",
+            "process_steps" => "Process steps",
+            "risks_table" => "Risks and mitigations",
+            _ => continue,
+        };
+        if markdown_has_heading(&output, heading) {
+            continue;
+        }
+        let Some(block) = document_component_block(component, &lines) else {
+            continue;
+        };
+        output.push_str("\n\n");
+        output.push_str(block.trim());
+    }
+    output.push('\n');
+    output
+}
+
 fn document_artifact_name(raw: Option<&str>) -> String {
     document_artifact_name_with_extension(raw, "md")
 }
@@ -16760,6 +16900,10 @@ Absolutely NO text, NO words, NO letters, NO numbers, NO captions, NO logos."
                             {
                                 Err(error) => format!("Could not generate document content: {error}"),
                                 Ok(markdown) => {
+                                    let markdown = apply_document_design_components(
+                                        &markdown,
+                                        &document_options.design_components,
+                                    );
                                     let mut produced = Vec::new();
                                     let mut artifact_error: Option<String> = None;
                                     for format in formats {
@@ -37551,6 +37695,47 @@ mod tests {
         assert_eq!(slides[3]["columns"][0]["title"], "Now");
         assert_eq!(slides[3]["columns"][1]["title"], "Next");
         assert_eq!(slides[4]["layout"], "closing");
+    }
+
+    #[test]
+    fn document_design_components_append_renderable_markdown_blocks() {
+        let markdown = "# Homun brief\n\nARR +42% from retained teams.\n\n- Ship document workflow\n- Improve deck quality\n- Reduce risk";
+        let components = vec![
+            "kpi_grid".to_string(),
+            "timeline".to_string(),
+            "quote_callout".to_string(),
+        ];
+
+        let augmented = super::apply_document_design_components(markdown, &components);
+
+        assert!(augmented.contains("## Key metrics"), "{augmented}");
+        assert!(augmented.contains("| Metric | Value | Implication |"), "{augmented}");
+        assert!(augmented.contains("ARR +42% from retained teams."), "{augmented}");
+        assert!(augmented.contains("## Timeline"), "{augmented}");
+        assert!(augmented.contains("| Phase | Detail | Outcome |"), "{augmented}");
+        assert!(augmented.contains("## Key principle"), "{augmented}");
+        assert!(augmented.contains("> ARR +42% from retained teams."), "{augmented}");
+    }
+
+    #[test]
+    fn document_design_components_render_as_docx_tables() {
+        let markdown = "# Homun brief\n\nARR +42% from retained teams.\n\n- Ship document workflow\n- Improve deck quality";
+        let augmented = super::apply_document_design_components(
+            markdown,
+            &["kpi_grid".to_string(), "risks_table".to_string()],
+        );
+        let bytes = super::markdown_to_docx("brief", &augmented).unwrap();
+        let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+        let mut document = String::new();
+        std::io::Read::read_to_string(
+            &mut archive.by_name("word/document.xml").unwrap(),
+            &mut document,
+        )
+        .unwrap();
+
+        assert!(document.contains("Key metrics"), "{document}");
+        assert!(document.contains("Risks and mitigations"), "{document}");
+        assert!(document.matches("<w:tbl>").count() >= 2, "{document}");
     }
 
     #[test]
