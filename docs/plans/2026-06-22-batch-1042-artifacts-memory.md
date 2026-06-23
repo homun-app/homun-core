@@ -866,7 +866,10 @@ ragionato il contratto degli strumenti `make_*` creati dall'harness. ADR 0011
   comunque le card artifact e registra memoria/provenance, accompagnandole con
   warning QA. Verifica runtime: Ollama locale risponde, ma `kimi-k2.6:cloud`
   via Ollama restituisce reasoning-only (`content` vuoto), quindi va trattato
-  come provider incompatibile per il JSON schema deck.
+  come provider incompatibile per il JSON schema deck. **Correzione active
+  streams (2026-06-23):** la sidebar non deve restare in stato working dopo un
+  evento `done/error`; `active_streams` ora tratta il terminal marker come fonte
+  sufficiente anche se il cleanup finale è ancora in post-processing.
 - ☐ **7.1b (futuro)** Portare ricerca/meeting al livello del deck solo dopo il
   chiarimento sul contratto strumenti: `make_research` e `make_meeting` non sono
   essenziali per la prossima release.

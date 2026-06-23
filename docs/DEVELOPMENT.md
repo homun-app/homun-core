@@ -131,7 +131,10 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   restituisce reasoning-only e `content` vuoto, quindi non è adatto al JSON
   schema di `make_deck`; quando la QA deck segnala problemi dopo il render, i
   file già scritti vengono comunque emessi come artifact visibili e registrati
-  in memoria, con warning QA invece di sparire.
+  in memoria, con warning QA invece di sparire. Correzione activity stream:
+  `/api/chat/active_streams` ora considera terminato qualunque stream che abbia
+  già emesso `done/error`, anche se il post-processing memoria è ancora lento,
+  evitando lampeggi sidebar fantasma quando si cambia chat.
   `make_research` e `make_meeting` restano dopo questo asse.
 - **WS2-3.1 PASSATA in runtime (2026-06-23):** gli artifact scritti via
   Filesystem MCP dentro la root progetto vengono registrati come

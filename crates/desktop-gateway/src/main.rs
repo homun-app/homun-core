@@ -24274,14 +24274,34 @@ fn stream_event_is_terminal(line: &str) -> bool {
     line.contains("\"type\":\"done\"") || line.contains("\"type\":\"error\"")
 }
 
+fn stream_entry_has_terminal_event(entry: &StreamEntry) -> bool {
+    entry
+        .lines
+        .lock()
+        .map(|lines| lines.iter().any(|line| stream_event_is_terminal(line)))
+        .unwrap_or(false)
+}
+
 /// Thread ids that currently have a live (not-yet-finished) in-flight generation.
 /// Lets the sidebar show the "working" dots on EVERY busy thread, including chats
-/// generating in the background while another is on screen. Read-only — finished
-/// entries are evicted by their own grace-window logic, not here.
+/// generating in the background while another is on screen. Finished entries are
+/// evicted by their own grace-window logic, but entries that already buffered a
+/// terminal event are marked finished here so the UI cannot show phantom work.
 fn active_stream_thread_ids() -> Vec<String> {
-    let Ok(map) = stream_registry().lock() else {
+    let Ok(mut map) = stream_registry().lock() else {
         return Vec::new();
     };
+    map.retain(|_, entry| {
+        if entry.finished.load(std::sync::atomic::Ordering::Relaxed) {
+            return true;
+        }
+        if stream_entry_has_terminal_event(entry) {
+            entry
+                .finished
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+        true
+    });
     let mut ids: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     for entry in map.values() {
         if entry.finished.load(std::sync::atomic::Ordering::Relaxed) {
@@ -39920,6 +39940,22 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             super::workflow_route_blocked_tool_message(&generic, "mcp__filesystem__create").is_none(),
             "generic agent-loop turns keep normal tools"
         );
+    }
+
+    #[test]
+    fn stream_entry_terminal_event_counts_as_finished_for_activity() {
+        let (tx, _) = tokio::sync::broadcast::channel::<String>(4);
+        let entry = super::StreamEntry {
+            lines: std::sync::Mutex::new(vec![
+                r#"{"type":"delta","text":"ok"}"#.to_string(),
+                r#"{"type":"done","text":"ok","metrics":{}}"#.to_string(),
+            ]),
+            tx,
+            finished: std::sync::atomic::AtomicBool::new(false),
+            thread_id: Some("thread-a".to_string()),
+        };
+
+        assert!(super::stream_entry_has_terminal_event(&entry));
     }
 
     #[test]
