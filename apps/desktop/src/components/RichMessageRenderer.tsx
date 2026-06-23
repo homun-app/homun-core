@@ -1,5 +1,5 @@
 import { Check, Copy } from "lucide-react";
-import { Fragment, useEffect, useId, useMemo, useState } from "react";
+import { Fragment, memo, useEffect, useId, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { jsx, jsxs } from "react/jsx-runtime";
 import ReactMarkdown from "react-markdown";
@@ -70,7 +70,7 @@ async function loadMermaid() {
   return mermaidLoader;
 }
 
-export default function RichMessageRenderer({
+function RichMessageRenderer({
   text,
   streaming = false,
 }: RichMessageRendererProps) {
@@ -95,6 +95,8 @@ export default function RichMessageRenderer({
     </div>
   );
 }
+
+export default memo(RichMessageRenderer);
 
 function normalizeMarkdownForRichRendering(text: string) {
   const lines = repairNestedMarkdownFences(text).split("\n");

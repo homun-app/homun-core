@@ -152,6 +152,9 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   documento strutturato con formato `docx` obbligatorio, supporta
   `HOMUN_EVAL_BASE` e stampa progressivamente; smoke locale `gemma4:latest 1`
   passato su deck/document/plan/decision/open_loop.
+  **WS4 chat perf:** `RichMessage` e il renderer markdown lazy sono memoizzati,
+  così polling/live state e sidebar non ricalcolano markdown pesante per messaggi
+  completati invariati.
   `make_research` e `make_meeting` restano dopo questo asse.
 - **WS2-3.1 PASSATA in runtime (2026-06-23):** gli artifact scritti via
   Filesystem MCP dentro la root progetto vengono registrati come

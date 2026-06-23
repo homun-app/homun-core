@@ -935,7 +935,9 @@ proprio — versioning, canali, scaricabili dal **sito Homun**, auto-aggiornabil
 - 🟡 **UI perf su chat pesanti** — il renderer arrivava al **99% CPU** (immagini grandi
   + log lunghi + piano gonfio): memoizzare i render pesanti + rallentare i polling
   quando idle. Prima slice: polling adattivo del dock Computer e contratto UI
-  anti-regressione; restano memoizzazione render pesanti e altri polling.
+  anti-regressione. Seconda slice: `RichMessage` e `RichMessageRenderer` sono
+  memoizzati, con contratto UI dedicato, per non ricalcolare markdown pesante sui
+  messaggi completati invariati; restano altri polling/render specifici.
 - ☐ **Seeder skill fragile** — una skill modificata a mano (hash desync) non viene più
   auto-aggiornata (ha tenuto `create-presentations` vecchia su disco fino al fix manuale)
   → irrobustire.

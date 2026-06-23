@@ -140,7 +140,9 @@ assertNotContains("src/lib/coreBridge.ts", removedShellGlobal, "frontend bridge 
 assertNotContains("src/lib/chatApi.ts", removedShellPackageScope, "chat API must not import removed shell packages");
 
 assertContains("src/components/RichMessage.tsx", "lazy(() => import(\"./RichMessageRenderer\")", "rich markdown renderer must be lazy loaded");
+assertContains("src/components/RichMessage.tsx", "memo(function RichMessage", "rich markdown messages must be memoized to avoid rerendering completed chat history");
 assertContains("src/components/RichMessage.tsx", "streaming={streaming}", "streaming messages must render live through the streaming-aware renderer");
+assertContains("src/components/RichMessageRenderer.tsx", "export default memo(RichMessageRenderer)", "rich markdown renderer must be memoized after lazy load");
 assertContains("src/components/RichMessageRenderer.tsx", "repairNestedMarkdownFences", "rich renderer must repair duplicated fenced code openers from local model output");
 assertContains("src/components/ChatView.tsx", "threadMessages.map", "chat transcript must use normal document flow in Electron");
 assertContains("src/styles.css", ".thread-message-list", "chat transcript must stack rows in normal flow");

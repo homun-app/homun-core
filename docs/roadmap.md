@@ -281,6 +281,9 @@ primo percorso locale verde:
 65. WS8 eval document flow — `scripts/eval_suite.py` copre anche output documento
     strutturato con `docx` obbligatorio, base URL configurabile via
     `HOMUN_EVAL_BASE` e progress flush; smoke `gemma4:latest 1` verde.
+66. WS4 markdown render perf — `RichMessage` e il renderer markdown lazy sono
+    memoizzati per evitare rerender dei messaggi completati invariati quando
+    cambiano polling, dock live o stato laterale.
 
 Prima di pubblicare/taggare resta prudente ripetere lo smoke manuale in-app su
 una automazione schedulata reale con il binario aggiornato. Il primo smoke ha

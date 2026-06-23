@@ -1,4 +1,4 @@
-import { lazy, Suspense } from "react";
+import { lazy, memo, Suspense } from "react";
 
 interface RichMessageProps {
   text: string;
@@ -31,7 +31,7 @@ const BROKEN_IMAGE_RE = /!\[[^\]]*\]\(\s*(?!https?:\/\/|data:|blob:)[^)]*\)/g;
 // closing tag, or to end-of-message when the model left it dangling.
 const LEAKED_TOOLCALL_RE = /<tool_call\b[\s\S]*?(?:<\/tool_call>|$)/gi;
 
-export function RichMessage({ text, streaming = false }: RichMessageProps) {
+export const RichMessage = memo(function RichMessage({ text, streaming = false }: RichMessageProps) {
   const withoutMarkers =
     text.includes("‹‹COMPOSIO_") ||
     text.includes("‹‹ACT››") ||
@@ -64,7 +64,7 @@ export function RichMessage({ text, streaming = false }: RichMessageProps) {
       <RichMessageRenderer text={clean} streaming={streaming} />
     </Suspense>
   );
-}
+});
 
 function PlainTextMessage({ text }: { text: string }) {
   const paragraphs = text.split(/\n{2,}/);
