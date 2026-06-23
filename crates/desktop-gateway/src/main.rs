@@ -12323,6 +12323,186 @@ fn extract_deck_object(v: &serde_json::Value) -> Option<serde_json::Value> {
     None
 }
 
+fn deck_slide_bullets(slide: &serde_json::Value) -> Vec<String> {
+    slide
+        .get("bullets")
+        .and_then(|value| value.as_array())
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(|value| value.as_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .take(8)
+                .map(ToString::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn deck_component_target_indices(deck: &serde_json::Value) -> Vec<usize> {
+    deck.get("slides")
+        .and_then(|value| value.as_array())
+        .map(|slides| {
+            slides
+                .iter()
+                .enumerate()
+                .filter_map(|(index, slide)| {
+                    let layout = slide
+                        .get("layout")
+                        .and_then(|value| value.as_str())
+                        .unwrap_or("bullets");
+                    if matches!(layout, "cover" | "closing" | "section") {
+                        None
+                    } else {
+                        Some(index)
+                    }
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn split_component_bullets(
+    bullets: &[String],
+    left_fallback: &str,
+    right_fallback: &str,
+) -> (Vec<String>, Vec<String>) {
+    let mut left = Vec::new();
+    let mut right = Vec::new();
+    for (index, bullet) in bullets.iter().enumerate() {
+        if index % 2 == 0 {
+            left.push(bullet.clone());
+        } else {
+            right.push(bullet.clone());
+        }
+    }
+    if left.is_empty() {
+        left.push(left_fallback.to_string());
+    }
+    if right.is_empty() {
+        right.push(right_fallback.to_string());
+    }
+    (left, right)
+}
+
+fn apply_deck_design_components(deck: &mut serde_json::Value, components: &[String]) {
+    let target_indices = deck_component_target_indices(deck);
+    if target_indices.is_empty() {
+        return;
+    }
+    let Some(slides) = deck.get_mut("slides").and_then(|value| value.as_array_mut()) else {
+        return;
+    };
+    let mut target_cursor = 0usize;
+    for component in components {
+        if target_cursor >= target_indices.len() {
+            break;
+        }
+        let index = target_indices[target_cursor];
+        target_cursor += 1;
+        let Some(slide) = slides.get_mut(index) else {
+            continue;
+        };
+        let bullets = deck_slide_bullets(slide);
+        match component.as_str() {
+            "kpi_grid" => {
+                let kpi = bullets
+                    .iter()
+                    .find(|bullet| bullet.chars().any(|char| char.is_ascii_digit()))
+                    .cloned()
+                    .or_else(|| bullets.first().cloned())
+                    .unwrap_or_else(|| {
+                        slide
+                            .get("title")
+                            .and_then(|value| value.as_str())
+                            .unwrap_or("Key metric")
+                            .to_string()
+                    });
+                let label = slide
+                    .get("title")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("Key metric")
+                    .to_string();
+                slide["layout"] = serde_json::json!("kpi");
+                slide["kpi"] = serde_json::json!(kpi);
+                slide["kpi_label"] = serde_json::json!(label);
+                slide["want_image"] = serde_json::json!(false);
+            }
+            "quote_callout" => {
+                let quote = slide
+                    .get("body")
+                    .and_then(|value| value.as_str())
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(ToString::to_string)
+                    .or_else(|| bullets.first().cloned())
+                    .unwrap_or_else(|| {
+                        slide
+                            .get("title")
+                            .and_then(|value| value.as_str())
+                            .unwrap_or("Key principle")
+                            .to_string()
+                    });
+                slide["layout"] = serde_json::json!("quote");
+                slide["quote"] = serde_json::json!(quote);
+                slide["author"] = serde_json::json!("");
+                slide["want_image"] = serde_json::json!(false);
+            }
+            "timeline" => {
+                let (left, right) =
+                    split_component_bullets(&bullets, "Current phase", "Next phase");
+                slide["layout"] = serde_json::json!("two_column");
+                slide["columns"] = serde_json::json!([
+                    { "title": "Now", "bullets": left },
+                    { "title": "Next", "bullets": right },
+                ]);
+                slide["want_image"] = serde_json::json!(false);
+            }
+            "comparison_table" => {
+                let (left, right) =
+                    split_component_bullets(&bullets, "Option A", "Option B");
+                slide["layout"] = serde_json::json!("two_column");
+                slide["columns"] = serde_json::json!([
+                    { "title": "Option A", "bullets": left },
+                    { "title": "Option B", "bullets": right },
+                ]);
+                slide["want_image"] = serde_json::json!(false);
+            }
+            "process_steps" => {
+                let midpoint = (bullets.len().max(2) + 1) / 2;
+                let first = bullets
+                    .iter()
+                    .take(midpoint)
+                    .cloned()
+                    .collect::<Vec<_>>();
+                let second = bullets
+                    .iter()
+                    .skip(midpoint)
+                    .cloned()
+                    .collect::<Vec<_>>();
+                slide["layout"] = serde_json::json!("two_column");
+                slide["columns"] = serde_json::json!([
+                    { "title": "Steps", "bullets": if first.is_empty() { vec!["Step 1".to_string()] } else { first } },
+                    { "title": "Outcomes", "bullets": if second.is_empty() { vec!["Expected outcome".to_string()] } else { second } },
+                ]);
+                slide["want_image"] = serde_json::json!(false);
+            }
+            "risks_table" => {
+                let (left, right) =
+                    split_component_bullets(&bullets, "Risk", "Mitigation");
+                slide["layout"] = serde_json::json!("two_column");
+                slide["columns"] = serde_json::json!([
+                    { "title": "Risks", "bullets": left },
+                    { "title": "Mitigations", "bullets": right },
+                ]);
+                slide["want_image"] = serde_json::json!(false);
+            }
+            _ => {}
+        }
+    }
+}
+
 /// Produce the deck CONTENT as schema-enforced JSON. Uses the orchestrator-role
 /// endpoint with `response_format: json_schema` (constrained decoding — the
 /// cross-model floor), degrading ONCE to `json_object` on a 400 (e.g.
@@ -16347,6 +16527,7 @@ available tools (for data from the web use the browser: browser_navigate on the 
                             match generate_deck_content(&state_owned.http, &base_url, &model, api_key.as_deref(), &brief, &brand, slides, &language, design_profile.as_deref(), &design_components).await {
                                 Err(e) => format!("Could not generate deck content: {e}"),
                                 Ok(mut deck) => {
+                                    apply_deck_design_components(&mut deck, &design_components);
                                     // 3) images for want_image slides (cap 3, cover first).
                                     let accent = brand.accent_color.clone();
                                     let mut made = 0usize;
@@ -37333,6 +37514,43 @@ mod tests {
 
         assert_eq!(deck_components, expected);
         assert_eq!(document_components, expected);
+    }
+
+    #[test]
+    fn deck_design_components_materialize_renderer_supported_layouts() {
+        let mut deck = serde_json::json!({
+            "title": "Homun",
+            "subtitle": "",
+            "slides": [
+                { "layout": "cover", "title": "Homun", "bullets": [], "notes": "", "want_image": true },
+                { "layout": "bullets", "title": "Traction", "bullets": ["ARR +42%", "NPS 61"], "notes": "", "want_image": true },
+                { "layout": "bullets", "title": "Principle", "bullets": ["Local-first is the product"], "notes": "", "want_image": true },
+                { "layout": "bullets", "title": "Roadmap", "bullets": ["Now: documents", "Next: decks"], "notes": "", "want_image": true },
+                { "layout": "closing", "title": "Next", "bullets": ["Approve"], "notes": "", "want_image": false }
+            ]
+        });
+        let components = vec![
+            "kpi_grid".to_string(),
+            "quote_callout".to_string(),
+            "timeline".to_string(),
+        ];
+
+        super::apply_deck_design_components(&mut deck, &components);
+        let slides = deck
+            .get("slides")
+            .and_then(|value| value.as_array())
+            .expect("slides");
+
+        assert_eq!(slides[0]["layout"], "cover");
+        assert_eq!(slides[1]["layout"], "kpi");
+        assert_eq!(slides[1]["kpi"], "ARR +42%");
+        assert_eq!(slides[1]["want_image"], false);
+        assert_eq!(slides[2]["layout"], "quote");
+        assert_eq!(slides[2]["quote"], "Local-first is the product");
+        assert_eq!(slides[3]["layout"], "two_column");
+        assert_eq!(slides[3]["columns"][0]["title"], "Now");
+        assert_eq!(slides[3]["columns"][1]["title"], "Next");
+        assert_eq!(slides[4]["layout"], "closing");
     }
 
     #[test]

@@ -187,6 +187,11 @@ primo percorso locale verde:
     `quote_callout`, `process_steps`, `risks_table`), deduplicato e bounded. È
     ancora composer contract: i layout fisici del renderer e la gallery template
     arrivano dopo.
+48. WS7 deck component materialization — in `make_deck`, i componenti dichiarativi
+    ora vengono applicati deterministicamente al deck JSON prima del render:
+    `kpi_grid` usa layout `kpi`, `quote_callout` usa `quote`, gli altri componenti
+    usano `two_column`, tutti già supportati da `deck_render.py`. Non ancora
+    esteso al renderer DOCX e non ancora gallery/template library.
 
 Prima di pubblicare/taggare resta prudente ripetere lo smoke manuale in-app su
 una automazione schedulata reale con il binario aggiornato. Il primo smoke ha
@@ -241,6 +246,7 @@ sviluppare WS7 come design system condiviso per documenti e presentazioni
 registry, non keyword o nuovi tool ad hoc. Prima slice locale/verde:
 `design_profile` condiviso fra `make_document` e `make_deck`; seconda slice:
 `design_components` condiviso per KPI, timeline, confronti, callout, processi e
-rischi. Prossima slice: layout fisici/template dichiarativi reali e QA visuale.
-`make_research` e `make_meeting` restano futuri.
+rischi; terza slice: materializzazione fisica lato deck nei layout `kpi`,
+`quote` e `two_column`. Prossima slice: DOCX component rendering o QA visuale
+renderizzata. `make_research` e `make_meeting` restano futuri.
 Il contratto corrente della memoria è in [MEMORIA.md](MEMORIA.md).

@@ -427,6 +427,14 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   `deliverable_design_components_schema_is_shared_by_deck_and_document`,
   `make_document_generation_options_are_explicit_and_bounded`,
   `make_deck_workflow_definition_projects_execution_plan`.
+- **Deliverable design components → deck layouts locale/verde (2026-06-23):**
+  prima materializzazione fisica lato presentazioni: dopo la generazione JSON,
+  `make_deck` applica deterministicamente `design_components` agli slide
+  intermedi e produce layout già supportati da `deck_render.py` (`kpi`, `quote`,
+  `two_column`) senza chiedere al modello di orchestrare layout. Cover/closing
+  restano intatti e gli slide trasformati disattivano `want_image` per evitare
+  conflitti visivi. Test mirato:
+  `deck_design_components_materialize_renderer_supported_layouts`.
 - **Gate provider Z.ai/GLM risolto (test manuale utente, 2026-06-23):** Settings
   espone sia `Z.ai (GLM)` standard (`https://api.z.ai/api/paas/v4`) sia
   `Z.ai Coding (GLM)` (`https://api.z.ai/api/coding/paas/v4`); il preset coding

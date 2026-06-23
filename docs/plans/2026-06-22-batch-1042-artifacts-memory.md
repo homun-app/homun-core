@@ -167,6 +167,13 @@ modelli deboli/locali. Invarianti: monotonìa, limitatezza, identità non inferi
     `deliverable_design_components_schema_is_shared_by_deck_and_document`,
     `make_document_generation_options_are_explicit_and_bounded`,
     `make_deck_workflow_definition_projects_execution_plan`.
+    **Terza slice deck layout materialization (2026-06-23, locale/verde):**
+    `make_deck` applica i componenti dopo il JSON del modello e prima del render:
+    `kpi_grid` → `kpi`, `quote_callout` → `quote`, timeline/comparison/processi/rischi
+    → `two_column`, tutti layout già supportati da `deck_render.py`. È una
+    trasformazione deterministica harness-owned; non cambia il renderer DOCX e
+    non introduce una gallery. Test mirato:
+    `deck_design_components_materialize_renderer_supported_layouts`.
   - ☐ **Backlog deliberato:** `make_research` / `make_meeting` restano in fondo
     finché non è chiarito il contratto degli strumenti creati dall'harness.
 - ✅ **Fase 4 (2026-06-23, locale/verde)** — router workflow|agent + primo
@@ -717,7 +724,8 @@ ragionato il contratto degli strumenti `make_*` creati dall'harness. ADR 0011
   controlli QA visuali condivisi da `make_document` e `make_deck`/presentation,
   senza store paralleli e senza attivazioni euristiche. Prima base locale/verde:
   `design_profile` e `design_components` condivisi negli schemi e nei workflow;
-  restano template/layout fisici e QA visuale.
+  lato deck i componenti arrivano già a layout fisici `deck_render.py`; restano
+  template completi, DOCX component rendering e QA visuale.
 - ☐ **7.1b (futuro)** Portare ricerca/meeting al livello del deck solo dopo il
   chiarimento sul contratto strumenti: `make_research` e `make_meeting` non sono
   essenziali per la prossima release.
