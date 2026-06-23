@@ -41,7 +41,10 @@ import {
   type ActiveModelInfo,
   type AllowedTool,
   type ArtifactDestination,
+  type ArtifactFileView,
+  type ArtifactThreadView,
   type ArtifactsUsage,
+  type ExportArtifactFileRequest,
   type ComposioToolkit,
   type ComposioToolkitAuth,
   type ComposioLinkInput,
@@ -4483,11 +4486,56 @@ function formatArtifactBytes(bytes: number) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+type ArtifactSourceFilter = "all" | "managed" | "memory";
+type ArtifactLinkFilter = "all" | "linked" | "orphan";
+
+function artifactFileKey(thread: string, file: ArtifactFileView) {
+  return `${thread}\u0000${file.source ?? "managed"}\u0000${file.reference ?? ""}\u0000${file.name}`;
+}
+
+function artifactFileType(file: ArtifactFileView) {
+  const ext = file.name.split(".").pop()?.trim().toLowerCase();
+  return ext && ext !== file.name.toLowerCase() ? ext : "file";
+}
+
+function artifactFileSource(file: ArtifactFileView): "managed" | "memory" {
+  return file.source === "memory" ? "memory" : "managed";
+}
+
+function artifactFileIsOrphan(file: ArtifactFileView) {
+  return artifactFileSource(file) === "managed" && !file.reference;
+}
+
+function artifactExportRequest(thread: ArtifactThreadView, file: ArtifactFileView): ExportArtifactFileRequest {
+  return {
+    thread: thread.thread,
+    name: file.name,
+    source: file.source ?? "managed",
+    reference: file.reference ?? undefined,
+  };
+}
+
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 function ArtifactsCard() {
   const { t } = useTranslation();
   const [usage, setUsage] = useState<ArtifactsUsage | null>(null);
   const [busy, setBusy] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [groupFilter, setGroupFilter] = useState("all");
+  const [sourceFilter, setSourceFilter] = useState<ArtifactSourceFilter>("all");
+  const [typeFilter, setTypeFilter] = useState("all");
+  const [linkFilter, setLinkFilter] = useState<ArtifactLinkFilter>("all");
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   const toggleExpanded = (thread: string) =>
     setExpanded((prev) => {
       const next = new Set(prev);
@@ -4517,7 +4565,7 @@ function ArtifactsCard() {
     }
   }
 
-  async function deleteArtifactFile(thread: ArtifactsUsage["threads"][number], file: ArtifactsUsage["threads"][number]["files"][number]) {
+  async function deleteArtifactFile(thread: ArtifactThreadView, file: ArtifactFileView) {
     if (file.source === "memory" && file.reference) {
       await coreBridge.deleteMemoryArtifact(file.reference);
       return;
@@ -4525,7 +4573,7 @@ function ArtifactsCard() {
     await coreBridge.deleteArtifactFile(thread.thread, file.name);
   }
 
-  async function deleteArtifactGroup(thread: ArtifactsUsage["threads"][number]) {
+  async function deleteArtifactGroup(thread: ArtifactThreadView) {
     const memoryFiles = thread.files.filter((file) => file.source === "memory" && file.reference);
     if (memoryFiles.length === thread.files.length && memoryFiles.length > 0) {
       for (const file of memoryFiles) {
@@ -4534,6 +4582,61 @@ function ArtifactsCard() {
       return;
     }
     await coreBridge.deleteArtifactThread(thread.thread);
+  }
+
+  const fileMatchesFilters = (thread: ArtifactThreadView, file: ArtifactFileView) => {
+    if (groupFilter !== "all" && thread.thread !== groupFilter) return false;
+    const source = artifactFileSource(file);
+    if (sourceFilter !== "all" && source !== sourceFilter) return false;
+    if (typeFilter !== "all" && artifactFileType(file) !== typeFilter) return false;
+    if (linkFilter === "linked" && artifactFileIsOrphan(file)) return false;
+    if (linkFilter === "orphan" && !artifactFileIsOrphan(file)) return false;
+    return true;
+  };
+
+  const visibleThreads = (usage?.threads ?? [])
+    .map((thread) => {
+      const files = thread.files.filter((file) => fileMatchesFilters(thread, file));
+      return {
+        ...thread,
+        files,
+        bytes: files.reduce((sum, file) => sum + file.size, 0),
+      };
+    })
+    .filter((thread) => thread.files.length > 0);
+  const visibleFiles = visibleThreads.flatMap((thread) =>
+    thread.files.map((file) => ({ thread, file })),
+  );
+  const selectedVisibleFiles = visibleFiles.filter(({ thread, file }) =>
+    selected.has(artifactFileKey(thread.thread, file)),
+  );
+  const exportableFiles = selectedVisibleFiles.length > 0 ? selectedVisibleFiles : visibleFiles;
+  const groupOptions = usage?.threads.map((thread) => thread.thread).sort((a, b) => a.localeCompare(b)) ?? [];
+  const typeOptions = Array.from(
+    new Set(
+      (usage?.threads ?? []).flatMap((thread) => thread.files.map((file) => artifactFileType(file))),
+    ),
+  ).sort((a, b) => a.localeCompare(b));
+  const selectedLabel =
+    selectedVisibleFiles.length > 0
+      ? `${selectedVisibleFiles.length} selected`
+      : `${visibleFiles.length} visible`;
+
+  function toggleSelected(thread: ArtifactThreadView, file: ArtifactFileView) {
+    const key = artifactFileKey(thread.thread, file);
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  async function exportArtifacts() {
+    const files = exportableFiles.map(({ thread, file }) => artifactExportRequest(thread, file));
+    const blob = await coreBridge.exportArtifacts(files);
+    const stamp = new Date().toISOString().slice(0, 10);
+    downloadBlob(blob, `homun-artifacts-${stamp}.zip`);
   }
 
   const hasArtifacts = (usage?.threads.length ?? 0) > 0;
@@ -4565,6 +4668,15 @@ function ArtifactsCard() {
             <span style={{ marginLeft: 6 }}>{t("chat.openFolder")}</span>
           </button>
           <button
+            className="set-btn"
+            type="button"
+            disabled={busy || exportableFiles.length === 0}
+            onClick={() => void run(exportArtifacts)}
+          >
+            <Download size={14} />
+            <span style={{ marginLeft: 6 }}>Export ZIP ({selectedLabel})</span>
+          </button>
+          <button
             className="set-btn danger"
             type="button"
             disabled={busy || !hasArtifacts}
@@ -4574,9 +4686,75 @@ function ArtifactsCard() {
             <span style={{ marginLeft: 6 }}>{t("settings.deleteAll")}</span>
           </button>
         </div>
+        {hasArtifacts && (
+          <div className="set-meter" style={{ marginTop: 8, gap: 8, flexWrap: "wrap" }}>
+            <label className="set-hint" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              Group
+              <select
+                value={groupFilter}
+                onChange={(event) => {
+                  setGroupFilter(event.target.value);
+                  setSelected(new Set());
+                }}
+              >
+                <option value="all">All</option>
+                {groupOptions.map((group) => (
+                  <option key={group} value={group}>
+                    {group}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="set-hint" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              Source
+              <select
+                value={sourceFilter}
+                onChange={(event) => {
+                  setSourceFilter(event.target.value as ArtifactSourceFilter);
+                  setSelected(new Set());
+                }}
+              >
+                <option value="all">All</option>
+                <option value="managed">Managed</option>
+                <option value="memory">Memory</option>
+              </select>
+            </label>
+            <label className="set-hint" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              Type
+              <select
+                value={typeFilter}
+                onChange={(event) => {
+                  setTypeFilter(event.target.value);
+                  setSelected(new Set());
+                }}
+              >
+                <option value="all">All</option>
+                {typeOptions.map((type) => (
+                  <option key={type} value={type}>
+                    {type}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="set-hint" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              Link
+              <select
+                value={linkFilter}
+                onChange={(event) => {
+                  setLinkFilter(event.target.value as ArtifactLinkFilter);
+                  setSelected(new Set());
+                }}
+              >
+                <option value="all">All</option>
+                <option value="linked">Memory-linked</option>
+                <option value="orphan">Orphans</option>
+              </select>
+            </label>
+          </div>
+        )}
         {hasArtifacts ? (
           <div className="set-rows" style={{ marginTop: 10 }}>
-            {usage!.threads.map((thread) => {
+            {visibleThreads.map((thread) => {
               const open = expanded.has(thread.thread);
               return (
                 <div key={thread.thread}>
@@ -4628,15 +4806,24 @@ function ArtifactsCard() {
                   {open && (
                     <div className="set-rows" style={{ paddingLeft: 22, marginTop: 4 }}>
                       {thread.files.map((file) => (
-                        <div className="set-row" key={file.name}>
-                          <div style={{ minWidth: 0 }}>
+                        <div className="set-row" key={artifactFileKey(thread.thread, file)}>
+                          <label style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, flex: 1 }}>
+                            <input
+                              type="checkbox"
+                              checked={selected.has(artifactFileKey(thread.thread, file))}
+                              onChange={() => toggleSelected(thread, file)}
+                              aria-label={`Select ${file.name}`}
+                            />
+                            <span style={{ minWidth: 0 }}>
                             <div className="rk" style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
                               {file.title || file.name}
                             </div>
                             <div className="rv">
-                              {file.project_relative_path || file.name} · {formatArtifactBytes(file.size)}
+                              {file.project_relative_path || file.name} · {artifactFileSource(file)} · {artifactFileType(file)} ·{" "}
+                              {artifactFileIsOrphan(file) ? "orphan" : "memory-linked"} · {formatArtifactBytes(file.size)}
                             </div>
-                          </div>
+                            </span>
+                          </label>
                           <button
                             className="set-btn"
                             type="button"
@@ -4654,6 +4841,9 @@ function ArtifactsCard() {
                 </div>
               );
             })}
+            {visibleThreads.length === 0 && (
+              <p className="set-hint">No files match the current artifact filters.</p>
+            )}
           </div>
         ) : (
           <p className="set-hint">{t("settings.noGeneratedFile")}</p>

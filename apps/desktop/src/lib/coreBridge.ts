@@ -1047,6 +1047,12 @@ export interface ArtifactsUsage {
   total_bytes: number;
   threads: ArtifactThreadView[];
 }
+export interface ExportArtifactFileRequest {
+  thread: string;
+  name: string;
+  source?: string | null;
+  reference?: string | null;
+}
 
 export interface MemoryArtifactView {
   reference: string;
@@ -1096,6 +1102,18 @@ async function electronRemoveArtifactDestination(path: string): Promise<Artifact
 
 async function electronArtifactsUsage(): Promise<ArtifactsUsage> {
   return gatewayGetJson<ArtifactsUsage>("/api/artifacts/usage");
+}
+
+async function electronExportArtifacts(files: ExportArtifactFileRequest[]): Promise<Blob> {
+  const response = await fetch(`${DESKTOP_GATEWAY_URL}/api/artifacts/export`, {
+    method: "POST",
+    headers: gatewayHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ files }),
+  });
+  if (!response.ok) {
+    throw new Error(`Export artifacts HTTP ${response.status}`);
+  }
+  return response.blob();
 }
 
 async function electronMemoryArtifacts(thread?: string): Promise<MemoryArtifactView[]> {
@@ -2265,6 +2283,7 @@ export const coreBridge = {
   consolidateMemory: (workspace?: string) => electronConsolidateMemory(workspace),
   artifactFolder: (thread: string) => electronArtifactFolder(thread),
   artifactsUsage: () => electronArtifactsUsage(),
+  exportArtifacts: (files: ExportArtifactFileRequest[]) => electronExportArtifacts(files),
   memoryArtifacts: (thread?: string) => electronMemoryArtifacts(thread),
   artifactDestinations: () => electronArtifactDestinations(),
   addArtifactDestination: (label: string, path: string) =>

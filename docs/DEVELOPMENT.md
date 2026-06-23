@@ -2,7 +2,7 @@
 
 > **Punto d'ingresso unico.** Da qui si parte e si torna. Questo file è SEMPRE
 > aggiornato: se cambia una scelta importante, si aggiorna qui (o nel doc linkato).
-> Ultimo aggiornamento: 2026-06-22.
+> Ultimo aggiornamento: 2026-06-23.
 
 ## North Star
 
@@ -95,9 +95,24 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   conversazioni non elimina deliverable.
 - **Decisione UI:** gli artifact/deliverable non stanno più sotto Local
   computer: hanno una voce Settings dedicata “Artifacts”. Local computer resta
-  per runtime tecnico (Docker, noVNC, sessioni browser). **Prossimo passo
-  unico:** completare WS2-3.2 con export ZIP e filtri progetto/tipo/orfani nella
-  surface centralizzata; poi passare a WS5.5/5.6.
+  per runtime tecnico (Docker, noVNC, sessioni browser).
+- **WS2-3.2c locale/verde:** la surface Settings → Artifacts ha filtri
+  gruppo/progetto, sorgente (`managed`/`memory`), tipo file e stato
+  `memory-linked`/`orphan`; supporta selezione multipla e export ZIP dei file
+  selezionati o, se nulla è selezionato, dei file visibili. Backend:
+  `POST /api/artifacts/export` crea un bundle ZIP; per artifact memoria rilegge
+  il `MemoryRef` canonico e valida root progetto/artifacts prima di leggere il
+  file, senza fidarsi di path inviati dal frontend. Test mirati:
+  `artifact_zip_entry_names_are_safe_and_unique`,
+  `managed_artifact_export_rejects_path_escape`; gateway completo `176 passati,
+  1 ignorato`; build desktop verde. Smoke runtime API passato su gateway da HEAD:
+  `/api/artifacts/export` ha prodotto `/tmp/homun-artifacts-gate.zip` con entry
+  `thread_1782105474_1782105474688595000/brand.json`. Gate in-app/DOM passato:
+  Settings → Artifacts mostra `Export ZIP`, filtri Group/Source/Type/Link e 12
+  file visibili; click su `Export ZIP (12 visible)` ha scaricato
+  `homun-artifacts-2026-06-23.zip`, valido, con managed artifact e
+  `memory-workspace_0d46c4470d97422298ece7ee7f0b74c6/artifact-memory-gate-5.md`.
+  **Prossimo passo unico:** passare a WS5.5/5.6.
 - **Nota aperta non bloccante:** durante i gate con tool il provider primario
   `glm-5.2` continua a rispondere `400 Bad Request` sul primo round con tool; il
   fallback a `kimi-k2.6:cloud` prosegue correttamente. Da riprendere come task

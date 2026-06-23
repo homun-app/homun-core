@@ -103,6 +103,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
     env, fs,
+    io::{Cursor, Write},
     net::SocketAddr,
     path::{Path as FsPath, PathBuf},
     process::Command,
@@ -611,6 +612,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/artifacts/versions", get(artifact_versions))
         .route("/api/artifacts/content", post(save_artifact_content))
         .route("/api/artifacts/usage", get(artifacts_usage))
+        .route("/api/artifacts/export", post(export_artifacts_zip))
         .route(
             "/api/artifacts/memory",
             get(memory_artifacts).delete(delete_memory_artifact),
@@ -18638,6 +18640,29 @@ struct ArtifactsUsage {
 }
 
 #[derive(Debug, Deserialize)]
+struct ExportArtifactsRequest {
+    #[serde(default)]
+    files: Vec<ExportArtifactFileRequest>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ExportArtifactFileRequest {
+    thread: String,
+    name: String,
+    #[serde(default)]
+    source: Option<String>,
+    #[serde(default)]
+    reference: Option<String>,
+}
+
+#[derive(Debug)]
+struct ExportArtifactFile {
+    group: String,
+    name: String,
+    bytes: Vec<u8>,
+}
+
+#[derive(Debug, Deserialize)]
 struct MemoryArtifactsQuery {
     #[serde(default)]
     thread: Option<String>,
@@ -18681,6 +18706,266 @@ fn artifact_memory_delete_path_allowed(
     path: &std::path::Path,
 ) -> bool {
     workspace_root.is_some_and(|root| path_within(root, path)) || path_within(managed_root, path)
+}
+
+fn artifact_file_name_for_zip(name: &str) -> String {
+    let candidate = std::path::Path::new(name)
+        .file_name()
+        .map(|value| value.to_string_lossy().to_string())
+        .unwrap_or_else(|| "artifact".to_string());
+    let cleaned: String = candidate
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-' | '_' | ' ') {
+                ch
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    let trimmed = cleaned.trim_matches(['.', ' ', '-']).trim();
+    if trimmed.is_empty() {
+        "artifact".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn artifact_zip_segment(value: &str) -> String {
+    let cleaned: String = value
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.') {
+                ch
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    let trimmed = cleaned.trim_matches(['.', '-']).trim();
+    if trimmed.is_empty() {
+        "artifacts".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn artifact_zip_entry_name(group: &str, name: &str) -> String {
+    format!(
+        "{}/{}",
+        artifact_zip_segment(group),
+        artifact_file_name_for_zip(name)
+    )
+}
+
+fn artifact_unique_zip_entry_name(
+    used: &mut std::collections::HashSet<String>,
+    group: &str,
+    name: &str,
+) -> String {
+    let base = artifact_zip_entry_name(group, name);
+    if used.insert(base.clone()) {
+        return base;
+    }
+    let safe_name = artifact_file_name_for_zip(name);
+    let (stem, ext) = safe_name
+        .rsplit_once('.')
+        .map(|(left, right)| (left.to_string(), format!(".{right}")))
+        .unwrap_or_else(|| (safe_name.clone(), String::new()));
+    for suffix in 2.. {
+        let candidate = artifact_zip_entry_name(group, &format!("{stem}-{suffix}{ext}"));
+        if used.insert(candidate.clone()) {
+            return candidate;
+        }
+    }
+    unreachable!("unbounded suffix loop must return");
+}
+
+fn validate_managed_artifact_request(file: &ExportArtifactFileRequest) -> Result<(), GatewayError> {
+    let forbidden = file.name.contains('/')
+        || file.name.contains('\\')
+        || file.name.contains("..")
+        || file.thread.contains('/')
+        || file.thread.contains('\\')
+        || file.thread.contains("..");
+    if forbidden {
+        return Err(GatewayError {
+            status: StatusCode::FORBIDDEN,
+            code: "bad_artifact_path",
+            message: "Invalid artifact path.".to_string(),
+        });
+    }
+    Ok(())
+}
+
+fn read_managed_artifact_for_export(
+    file: &ExportArtifactFileRequest,
+) -> Result<ExportArtifactFile, GatewayError> {
+    validate_managed_artifact_request(file)?;
+    let group = artifact_thread_slug(Some(&file.thread));
+    let dir = sandbox::artifacts_dir().join(&group);
+    let path = dir.join(&file.name);
+    if !path_within(&dir, &path) {
+        return Err(GatewayError {
+            status: StatusCode::FORBIDDEN,
+            code: "artifact_outside_dir",
+            message: "Path outside the artifact folder.".to_string(),
+        });
+    }
+    let bytes = fs::read(&path).map_err(|error| GatewayError {
+        status: StatusCode::NOT_FOUND,
+        code: "artifact_read",
+        message: error.to_string(),
+    })?;
+    Ok(ExportArtifactFile {
+        group,
+        name: file.name.clone(),
+        bytes,
+    })
+}
+
+fn read_memory_artifact_for_export(
+    state: &AppState,
+    file: &ExportArtifactFileRequest,
+) -> Result<ExportArtifactFile, GatewayError> {
+    let reference = file
+        .reference
+        .as_deref()
+        .ok_or_else(|| GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "artifact_missing_ref",
+            message: "memory artifact export requires a reference".to_string(),
+        })?
+        .parse::<MemoryRef>()
+        .map_err(|error| GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "artifact_bad_ref",
+            message: error,
+        })?;
+    let facade = lock_memory_facade(state)?;
+    let memory = facade
+        .list_memories_for_ui(&reference.user_id, &reference.workspace_id)
+        .unwrap_or_default()
+        .into_iter()
+        .find(|memory| memory.reference == reference)
+        .ok_or_else(|| GatewayError {
+            status: StatusCode::NOT_FOUND,
+            code: "artifact_not_found",
+            message: "artifact memory not found".to_string(),
+        })?;
+    if memory.memory_type != "artifact"
+        || !matches!(
+            memory.status,
+            MemoryStatus::Confirmed | MemoryStatus::Candidate
+        )
+    {
+        return Err(GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "artifact_bad_type",
+            message: "memory reference is not an active artifact".to_string(),
+        });
+    }
+    let metadata = memory.metadata;
+    let path = metadata
+        .get("project_path")
+        .and_then(|value| value.as_str())
+        .or_else(|| metadata.get("managed_path").and_then(|value| value.as_str()))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .ok_or_else(|| GatewayError {
+            status: StatusCode::NOT_FOUND,
+            code: "artifact_missing_path",
+            message: "artifact memory has no readable path".to_string(),
+        })?;
+    let workspace_root = workspace_root_for_memory_workspace(&reference.workspace_id);
+    let managed_root = sandbox::artifacts_dir();
+    if !artifact_memory_delete_path_allowed(workspace_root.as_deref(), &managed_root, &path) {
+        return Err(GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "artifact_path_outside_scope",
+            message: "artifact path is outside the authorized project/artifact roots".to_string(),
+        });
+    }
+    let bytes = fs::read(&path).map_err(|error| GatewayError {
+        status: StatusCode::NOT_FOUND,
+        code: "artifact_read",
+        message: error.to_string(),
+    })?;
+    let name = metadata
+        .get("project_relative_path")
+        .and_then(|value| value.as_str())
+        .or_else(|| metadata.get("name").and_then(|value| value.as_str()))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(&file.name)
+        .to_string();
+    Ok(ExportArtifactFile {
+        group: format!("memory-{}", reference.workspace_id.as_str()),
+        name,
+        bytes,
+    })
+}
+
+async fn export_artifacts_zip(
+    State(state): State<AppState>,
+    Json(request): Json<ExportArtifactsRequest>,
+) -> Result<Response, GatewayError> {
+    if request.files.is_empty() {
+        return Err(GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "artifact_export_empty",
+            message: "No artifacts selected for export.".to_string(),
+        });
+    }
+    let mut files = Vec::with_capacity(request.files.len());
+    for file in &request.files {
+        let exported = if file.source.as_deref() == Some("memory") {
+            read_memory_artifact_for_export(&state, file)?
+        } else {
+            read_managed_artifact_for_export(file)?
+        };
+        files.push(exported);
+    }
+    let bytes = tokio::task::spawn_blocking(move || -> Result<Vec<u8>, String> {
+        let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+        let mut used = std::collections::HashSet::new();
+        for file in files {
+            let entry = artifact_unique_zip_entry_name(&mut used, &file.group, &file.name);
+            writer
+                .start_file(entry, options)
+                .map_err(|error| error.to_string())?;
+            writer
+                .write_all(&file.bytes)
+                .map_err(|error| error.to_string())?;
+        }
+        writer
+            .finish()
+            .map(|cursor| cursor.into_inner())
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "artifact_export_join",
+        message: error.to_string(),
+    })?
+    .map_err(|error| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "artifact_export_zip",
+        message: error,
+    })?;
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "application/zip")
+        .header(
+            "content-disposition",
+            "attachment; filename=\"homun-artifacts.zip\"",
+        )
+        .body(Body::from(bytes))
+        .expect("valid artifact export response"))
 }
 
 /// Disk usage of generated artifacts, grouped per conversation — drives the
@@ -33516,6 +33801,33 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
         let _ = std::fs::remove_dir_all(&managed);
         let _ = std::fs::remove_file(&outside);
+    }
+
+    #[test]
+    fn artifact_zip_entry_names_are_safe_and_unique() {
+        let mut used = std::collections::HashSet::new();
+        let first =
+            super::artifact_unique_zip_entry_name(&mut used, "memory:test/homun", "../note.md");
+        let second =
+            super::artifact_unique_zip_entry_name(&mut used, "memory:test/homun", "../note.md");
+        let weird =
+            super::artifact_unique_zip_entry_name(&mut used, "../../", "résumé?.md");
+
+        assert_eq!(first, "memory-test-homun/note.md");
+        assert_eq!(second, "memory-test-homun/note-2.md");
+        assert!(!weird.contains(".."));
+        assert!(weird.starts_with("artifacts/"));
+    }
+
+    #[test]
+    fn managed_artifact_export_rejects_path_escape() {
+        let request = super::ExportArtifactFileRequest {
+            thread: "thread".to_string(),
+            name: "../secret.txt".to_string(),
+            source: Some("managed".to_string()),
+            reference: None,
+        };
+        assert!(super::validate_managed_artifact_request(&request).is_err());
     }
 
     #[test]

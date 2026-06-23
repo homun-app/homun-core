@@ -105,6 +105,20 @@ tutto passa dal motore di memoria.
   è visibile nella surface dedicata Artifacts. La surface è stata spostata fuori
   da Local computer perché i deliverable sono output di prodotto, non runtime
   tecnico.
+  **Slice 3.2c locale/verde:** aggiunto `POST /api/artifacts/export`, che produce
+  uno ZIP dai file visibili/selezionati nella UI. I file `managed` vengono letti
+  solo dalla cartella artifacts jailata; i file `memory` vengono risolti dal
+  `MemoryRef` canonico e validati contro root progetto/artifacts prima della
+  lettura. Settings → Artifacts ora offre filtri gruppo/progetto, sorgente,
+  tipo file e `memory-linked`/`orphan`, più selezione multipla. Test:
+  `cargo test -p local-first-desktop-gateway artifact_ -- --nocapture` e
+  `cargo test -p local-first-desktop-gateway -- --nocapture` (`176 passati, 1
+  ignorato`) e `npm run build` desktop verdi. Smoke runtime API passato:
+  `/api/artifacts/export` ha prodotto `/tmp/homun-artifacts-gate.zip` con entry
+  `thread_1782105474_1782105474688595000/brand.json`. Gate in-app/DOM passato:
+  la surface mostra `Export ZIP` e filtri Group/Source/Type/Link; click su
+  `Export ZIP (12 visible)` ha scaricato uno ZIP valido con artifact managed e
+  `memory-workspace_0d46c4470d97422298ece7ee7f0b74c6/artifact-memory-gate-5.md`.
 - 🟡 **3.3 — lifecycle + cancellazione con memoria:** `delete_chat_thread` **non**
   cancella più gli artefatti: la chat è storia conversazionale, il deliverable ha
   lifecycle proprio. `DELETE /api/artifacts/memory?reference=...` rimuove il file
