@@ -77,9 +77,13 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   (`clean_corporate`, `high_contrast`, `warm_editorial`, `minimal_mono`,
   `soft_gradient`) entra negli schemi/workflow/prompt; lato deck materializza
   token `theme` compatibili con `deck_render.py` e applica un primo guardrail QA
-  deterministico su titoli/bullet troppo lunghi prima del render. Prossimo asse:
-  QA visuale renderizzata su screenshot/PDF/HTML. `make_research` e
-  `make_meeting` restano dopo questo asse.
+  deterministico su titoli/bullet troppo lunghi prima del render. Settima slice
+  locale/verde: nuovo comando container `deck-qa` apre l'HTML renderizzato con
+  Chromium headless via DevTools Protocol e blocca la consegna se rileva
+  overflow slide, elementi fuori bounds o immagini non caricate; `make_deck` e
+  `render_deck` lo eseguono prima di registrare gli artifact. Prossimo asse:
+  estendere la QA visuale a contrasto/leggibilità e ai documenti. `make_research`
+  e `make_meeting` restano dopo questo asse.
 - **WS2-3.1 PASSATA in runtime (2026-06-23):** gli artifact scritti via
   Filesystem MCP dentro la root progetto vengono registrati come
   `memory_type="artifact"` + entity grafo `artifact` + embedding. Gate:

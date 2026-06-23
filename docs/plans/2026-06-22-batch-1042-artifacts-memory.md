@@ -207,6 +207,17 @@ modelli deboli/locali. Invarianti: monotonìa, limitatezza, identità non inferi
     `deck_quality_guardrails_bound_text_before_render`,
     `make_document_generation_options_are_explicit_and_bounded`,
     `make_deck_workflow_definition_projects_execution_plan`.
+    **Settima slice rendered deck QA (2026-06-23, locale/verde):** aggiunto
+    `deck-qa` nel contained computer. Il comando apre `deck.html` renderizzato
+    con Chromium headless e DevTools Protocol, misura layout reale e produce JSON
+    `ok/issues` per overflow slide, elementi fuori bounds e immagini non
+    caricate. `render_deck` e `make_deck` eseguono `deck-qa` dopo
+    `deck-render`/PDF e prima di emettere marker artifact o registrare memoria:
+    se la QA fallisce, i file non vengono dichiarati deliverable completati.
+    L'hash del contained computer include `deck_qa.py`, quindi il container viene
+    ricostruito quando cambia la QA. Gate locali: `py_compile`, test Rust
+    `rendered_deck_qa_failure_is_extracted_from_renderer_output`, smoke positivo
+    e negativo con Google Chrome locale.
   - ☐ **Backlog deliberato:** `make_research` / `make_meeting` restano in fondo
     finché non è chiarito il contratto degli strumenti creati dall'harness.
 - ✅ **Fase 4 (2026-06-23, locale/verde)** — router workflow|agent + primo
@@ -761,8 +772,9 @@ ragionato il contratto degli strumenti `make_*` creati dall'harness. ADR 0011
   documenti arrivano a blocchi/tabelle Markdown renderizzate in DOCX; i
   `design_template` condivisi espandono ora default profilo/componenti restando
   override-safe; `design_theme` condiviso materializza token renderer-compatible
-  lato deck e abilita un primo guardrail QA sui testi. Restano QA visuale
-  renderizzata, template library più ampia e controlli su immagini/leggibilità.
+  lato deck e abilita un primo guardrail QA sui testi; `deck-qa` verifica ora
+  l'HTML renderizzato prima della consegna. Restano contrasto/leggibilità più
+  avanzati, QA documenti e template library più ampia.
 - ☐ **7.1b (futuro)** Portare ricerca/meeting al livello del deck solo dopo il
   chiarimento sul contratto strumenti: `make_research` e `make_meeting` non sono
   essenziali per la prossima release.

@@ -63,9 +63,13 @@ RUN python3 -m venv /opt/deck-venv \
     && /opt/deck-venv/bin/pip install --no-cache-dir --upgrade pip \
     && /opt/deck-venv/bin/pip install --no-cache-dir python-pptx
 COPY deck_render.py /opt/deck/deck_render.py
+COPY deck_qa.py /opt/deck/deck_qa.py
 RUN printf '#!/bin/sh\nexec /opt/deck-venv/bin/python /opt/deck/deck_render.py "$@"\n' \
       > /usr/local/bin/deck-render \
+    && printf '#!/bin/sh\nexec python3 /opt/deck/deck_qa.py "$@"\n' \
+      > /usr/local/bin/deck-qa \
     && chmod +x /usr/local/bin/deck-render
+RUN chmod +x /usr/local/bin/deck-qa
 
 # Non-root runtime user; the container boundary is the sandbox (ADR 0010).
 # `.cache` is pre-created and owned by agent so a named volume mounted there

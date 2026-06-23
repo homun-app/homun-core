@@ -209,8 +209,15 @@ primo percorso locale verde:
     `warm_editorial`, `minimal_mono`, `soft_gradient`). Lato deck il tema viene
     materializzato in token renderer-compatible prima del render; il workflow
     applica anche un primo guardrail QA deterministico che rileva e corregge
-    titoli/bullet troppo lunghi. Resta da fare QA visuale vera su output
-    renderizzato e controlli immagini/leggibilità.
+    titoli/bullet troppo lunghi. Il primo floor era testuale; la slice seguente
+    porta la verifica sull'HTML renderizzato.
+52. WS7 rendered deck QA — il contained computer include `deck-qa`, comando
+    dependency-free che apre `deck.html` con Chromium headless e misura layout
+    reale via DevTools Protocol. `make_deck` e `render_deck` lo eseguono dopo il
+    render e prima della registrazione artifact/memoria: overflow slide, elementi
+    fuori bounds o immagini non caricate bloccano la consegna come deck
+    completato. Restano da estendere contrasto/leggibilità, screenshot/PDF più
+    profondi e QA documenti.
 
 Prima di pubblicare/taggare resta prudente ripetere lo smoke manuale in-app su
 una automazione schedulata reale con il binario aggiornato. Il primo smoke ha
@@ -269,7 +276,8 @@ rischi; terza slice: materializzazione fisica lato deck nei layout `kpi`,
 `quote` e `two_column`; quarta slice: materializzazione lato documenti in
 blocchi/tabelle Markdown-DOCX; quinta slice: `design_template` condiviso con
 default profilo/componenti override-safe; sesta slice: `design_theme` condiviso
-e primo guardrail QA testuale prima del render. Prossima slice: QA visuale
-renderizzata su screenshot/PDF/HTML o template library più ampia. `make_research`
-e `make_meeting` restano futuri.
+e primo guardrail QA testuale prima del render; settima slice: `deck-qa`
+renderizzato su HTML reale blocca overflow/immagini rotte prima della consegna.
+Prossima slice: contrasto/leggibilità, QA documenti o template library più ampia.
+`make_research` e `make_meeting` restano futuri.
 Il contratto corrente della memoria è in [MEMORIA.md](MEMORIA.md).

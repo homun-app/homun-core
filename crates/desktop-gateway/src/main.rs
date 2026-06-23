@@ -12784,6 +12784,41 @@ fn apply_deck_quality_guardrails(deck: &mut serde_json::Value) -> Vec<String> {
     issues
 }
 
+fn rendered_deck_qa_result(render_output: &str) -> Option<serde_json::Value> {
+    render_output.lines().find_map(|line| {
+        line.strip_prefix("DECK_QA_JSON:")
+            .and_then(|json| serde_json::from_str::<serde_json::Value>(json.trim()).ok())
+    })
+}
+
+fn rendered_deck_qa_failure(render_output: &str) -> Option<String> {
+    let qa = rendered_deck_qa_result(render_output)?;
+    if qa.get("ok").and_then(|value| value.as_bool()).unwrap_or(false) {
+        return None;
+    }
+    let issues = qa
+        .get("issues")
+        .and_then(|value| value.as_array())
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(|issue| {
+                    issue
+                        .get("message")
+                        .and_then(|value| value.as_str())
+                        .map(ToString::to_string)
+                })
+                .take(5)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    if issues.is_empty() {
+        Some("rendered deck QA failed without details".to_string())
+    } else {
+        Some(format!("rendered deck QA failed: {}", issues.join("; ")))
+    }
+}
+
 /// Produce the deck CONTENT as schema-enforced JSON. Uses the orchestrator-role
 /// endpoint with `response_format: json_schema` (constrained decoding — the
 /// cross-model floor), degrading ONCE to `json_object` on a 400 (e.g.
@@ -16833,7 +16868,10 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                 let cmd = format!(
                                     "cd '{container_out}' && deck-render deck.json --prefix deck && \
                                      chromium --headless --no-sandbox --disable-gpu \
-                                     --print-to-pdf=deck.pdf deck.html >/dev/null 2>&1; \
+                                     --print-to-pdf=deck.pdf deck.html >/dev/null 2>&1 && \
+                                     qa=$(deck-qa deck.html --json 2>&1); qa_code=$?; \
+                                     echo \"DECK_QA_JSON:$qa\"; \
+                                     if [ \"$qa_code\" -ne 0 ]; then exit \"$qa_code\"; fi; \
                                      ls -la deck.pptx deck.html deck.pdf 2>&1"
                                 );
                                 sandbox_begin(cmd.clone());
@@ -16847,6 +16885,12 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                     Err(e) => e,
                                 };
                                 sandbox_end(render_out.clone());
+                                if let Some(error) = rendered_deck_qa_failure(&render_out) {
+                                    format!(
+                                        "Deck render produced files, but visual QA failed before delivery: {error}. Renderer output:\n{}",
+                                        render_out.chars().take(1200).collect::<String>()
+                                    )
+                                } else {
                                 // 3) emit an artifact marker for each file produced.
                                 let host_dir = sandbox::artifacts_dir().join(&thread_slug);
                                 let mut produced: Vec<&str> = Vec::new();
@@ -16889,6 +16933,7 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                         "Deck render did NOT produce a .pptx. Renderer output:\n{}",
                                         render_out.chars().take(800).collect::<String>()
                                     )
+                                }
                                 }
                             }
                         }
@@ -17100,7 +17145,10 @@ Absolutely NO text, NO words, NO letters, NO numbers, NO captions, NO logos."
                                         let cmd = format!(
                                             "cd '{container_out}' && deck-render deck.json --prefix deck && \
                                              chromium --headless --no-sandbox --disable-gpu \
-                                             --print-to-pdf=deck.pdf deck.html >/dev/null 2>&1; \
+                                             --print-to-pdf=deck.pdf deck.html >/dev/null 2>&1 && \
+                                             qa=$(deck-qa deck.html --json 2>&1); qa_code=$?; \
+                                             echo \"DECK_QA_JSON:$qa\"; \
+                                             if [ \"$qa_code\" -ne 0 ]; then exit \"$qa_code\"; fi; \
                                              ls -la deck.pptx deck.html deck.pdf 2>&1"
                                         );
                                         sandbox_begin(cmd.clone());
@@ -17114,6 +17162,12 @@ Absolutely NO text, NO words, NO letters, NO numbers, NO captions, NO logos."
                                             Err(e) => e,
                                         };
                                         sandbox_end(render_out.clone());
+                                        if let Some(error) = rendered_deck_qa_failure(&render_out) {
+                                            format!(
+                                                "Deck render produced files, but visual QA failed before delivery: {error}. Renderer output:\n{}",
+                                                render_out.chars().take(1200).collect::<String>()
+                                            )
+                                        } else {
                                         // 6) emit an artifact marker per produced file.
                                         let host_dir = sandbox::artifacts_dir().join(&thread_slug);
                                         let mut produced: Vec<&str> = Vec::new();
@@ -17162,6 +17216,7 @@ Absolutely NO text, NO words, NO letters, NO numbers, NO captions, NO logos."
                                                 "Deck render did NOT produce a .pptx. Renderer output:\n{}",
                                                 render_out.chars().take(800).collect::<String>()
                                             )
+                                        }
                                         }
                                     }
                                 }
@@ -38248,6 +38303,22 @@ mod tests {
             slide["bullets"][0].as_str().unwrap().chars().count() <= 150,
             "{slide}"
         );
+    }
+
+    #[test]
+    fn rendered_deck_qa_failure_is_extracted_from_renderer_output() {
+        let output = r#"wrote deck.html
+DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"slide_overflow","message":"slide 1 overflows"},{"severity":"error","code":"image_not_loaded","message":"slide 1: image failed to load"}]}
+"#;
+
+        let failure = super::rendered_deck_qa_failure(output).expect("qa failure");
+
+        assert!(failure.contains("slide 1 overflows"), "{failure}");
+        assert!(failure.contains("image failed to load"), "{failure}");
+        assert!(super::rendered_deck_qa_failure(
+            r#"DECK_QA_JSON:{"ok":true,"slide_count":1,"issues":[]}"#
+        )
+        .is_none());
     }
 
     #[test]

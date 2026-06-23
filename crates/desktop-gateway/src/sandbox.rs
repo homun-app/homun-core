@@ -337,12 +337,12 @@ fn contained_computer_def_hash() -> Option<String> {
     if !dir.join("Dockerfile").is_file() {
         return None;
     }
-    // Hash ALL files baked into the image (everything COPY'd), so a renderer change
-    // (deck_render.py) triggers a rebuild too. MUST match up.sh's HASH_FILES list.
+    // Hash ALL files baked into the image (everything COPY'd), so a renderer/QA change
+    // (deck_render.py/deck_qa.py) triggers a rebuild too. MUST match up.sh's HASH_FILES list.
     let out = Command::new("bash")
         .arg("-c")
         .arg(
-            "cat Dockerfile entrypoint.sh deck_render.py whisper_server.py novnc-view.html 2>/dev/null | \
+            "cat Dockerfile entrypoint.sh deck_render.py deck_qa.py whisper_server.py novnc-view.html 2>/dev/null | \
              { command -v shasum >/dev/null 2>&1 && shasum -a 256 || sha256sum; } | cut -c1-16",
         )
         .current_dir(&dir)
