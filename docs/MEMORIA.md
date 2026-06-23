@@ -70,6 +70,9 @@ Fatto:
   collegate agli artifact solo quando la memoria porta prove strutturate
   (`affects_labels` o ref canoniche nei metadata artifact), materializzando archi
   `affects` / `derived_from` nel grafo canonico.
+- primo eval/read path WS5.6 per provenance artifact: recall esplicito e RAG
+  automatico leggono il grafo canonico e possono rispondere quali artifact
+  esistono e da quale decisione/lavoro derivano, includendo il perché.
 
 Mancante:
 
@@ -77,10 +80,11 @@ Mancante:
   contatti, nel grafo canonico memoria;
 - graphification estesa oltre il codice: artifact, piano, decisioni, outcome e loop
   aperti devono diventare nodi/archi causali, non solo righe testuali;
-- provenance completa decisione/piano → artifact → codice → esito: la prima slice
-  decisione/source-ref → artifact è locale/verde; resta da usarla negli eval e da
-  alimentare con step/piano quando il write-back piano sarà persistito in memoria;
-- eval memoria come gate.
+- provenance completa decisione/piano → artifact → codice → esito: la slice
+  decisione/source-ref → artifact e il primo reader/eval sono locali/verdi; resta
+  da alimentare con step/piano quando il write-back piano sarà persistito in
+  memoria;
+- eval memoria come gate completo per stato workflow/open loop/outcome.
 
 ## Prossimo blocco
 
@@ -136,7 +140,8 @@ Acceptance:
 3. WS5.5a — provenance artifact→producer/progetto/file: locale/verde.
 4. WS5.5b — provenance decisione/source-ref → artifact evidence-only: ✅ slice
    locale/verde.
-5. WS5.6 — eval memoria.
+5. WS5.6 — eval memoria: ✅ prima slice artifact/provenance locale; resta stato
+   workflow/perché.
 6. WS1-Fase 2/3 — piano runtime-owned e workflow runner con write-back memoria.
 7. WS7 — deliverable Manus-style, solo dopo queste fondamenta.
 

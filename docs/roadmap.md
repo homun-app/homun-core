@@ -41,6 +41,9 @@ primo percorso locale verde:
     `task_refs`, `source_memory_refs`, `derived_from_refs`) creano archi
     `affects` / `derived_from` nel grafo canonico. Nessun matching semantico o
     store parallelo.
+11. WS5.6 — prima slice eval/reader: recall esplicito e RAG automatico leggono la
+    provenance artifact dal grafo canonico e possono rispondere quali artifact
+    esistono e da quale decisione/lavoro derivano, includendo il perché.
 
 Prima di pubblicare/taggare resta prudente un smoke manuale in-app su una
 automazione schedulata reale che compaia nel thread `scheduled`. Non è bloccante
@@ -48,8 +51,8 @@ per iniziare il consolidamento memoria in locale.
 
 ## Milestone
 
-1. WS5.6 — aggiungere eval memoria sulla catena di provenienza: nuova chat deve
-   recuperare artifact, lavoro/decisione sorgente e perché.
+1. WS5.6 — completare eval memoria sullo stato workflow: nuova chat deve
+   recuperare “a che punto siamo?” e “perché?” da open loop/goal/outcome/piano.
 2. WS1-Fase 2/3 — piano runtime-owned e workflow runner dichiarativo, così i
    deliverable futuri non riaprono fragilità cross-modello.
 3. WS7 — deliverable Manus-style (`make_document`, `make_research`,
@@ -63,9 +66,7 @@ collegarli al perché. Per questo WS7 non è più il prossimo step.
 
 ## Prossima azione
 
-Proseguire con WS5.6: eval memoria sulla domanda “quali artifact per il progetto
-X e da quale decisione/lavoro derivano?” e “a che punto è il workflow e perché?”.
-Il gate lifecycle/delete/export degli artifact è passato in-app; WS5.5a/5.5b
-hanno iniziato la provenance graph canonica con producer/progetto/file e
-decisioni/source-ref evidence-only. Il contratto corrente della memoria è in
-[MEMORIA.md](MEMORIA.md).
+Proseguire con WS5.6 sulla domanda “a che punto è il workflow e perché?”. La
+domanda artifact/provenance ha ora un primo reader/eval headless verde: il RAG e
+`recall_memory` attraversano il grafo canonico per producer, path, decisione/lavoro
+sorgente e rationale. Il contratto corrente della memoria è in [MEMORIA.md](MEMORIA.md).

@@ -133,7 +133,17 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   source e alla memoria artifact. Nessuna inferenza semantica o store parallelo.
   Test mirati:
   `cargo test -p local-first-desktop-gateway artifact_memory_links_ -- --nocapture`.
-  **Prossimo passo unico:** WS5.6 eval memoria sulla catena artifact/provenance.
+  **WS5.6 prima slice locale/verde:** aggiunto un reader/eval headless della
+  provenance artifact: una nuova chat che chiede quali artifact esistono e da
+  quale decisione/lavoro derivano riceve un blocco `ARTIFACT PROVENANCE FROM
+  CANONICAL MEMORY GRAPH` nel recall esplicito e nel RAG automatico. Il reader
+  attraversa solo `memories`/`entities`/`relations` canoniche del `MemoryFacade`,
+  mostrando producer, path, decisione sorgente, rationale e alternative scartate.
+  Test red/green:
+  `cargo test -p local-first-desktop-gateway memory_eval_surfaces_artifact_provenance_and_decision_why -- --nocapture`
+  (rosso iniziale: nessun contesto provenance). **Prossimo passo unico:** estendere
+  WS5.6 alla domanda “a che punto è il workflow e perché?” usando open_loop/goal/
+  outcome/piano, poi valutare un gate in-app se il reader headless resta verde.
 - **Nota aperta non bloccante:** durante i gate con tool il provider primario
   `glm-5.2` continua a rispondere `400 Bad Request` sul primo round con tool; il
   fallback a `kimi-k2.6:cloud` prosegue correttamente. Da riprendere come task

@@ -8157,6 +8157,196 @@ fn format_recall_entry(summary: &str, metadata: &serde_json::Value) -> String {
     out
 }
 
+fn artifact_provenance_context_for_query(
+    facade: &MemoryFacade,
+    user: &MemoryUserId,
+    workspace: &MemoryWorkspaceId,
+    query: &str,
+) -> Option<String> {
+    let query_lc = query.to_ascii_lowercase();
+    let provenance_query = [
+        "artifact",
+        "artef",
+        "deliverable",
+        "provenance",
+        "provenienza",
+        "decision",
+        "decisione",
+        "deriv",
+        "why",
+        "perché",
+        "perche",
+        "lavoro",
+        "workflow",
+    ]
+    .iter()
+    .any(|needle| query_lc.contains(needle));
+    if !provenance_query {
+        return None;
+    }
+
+    let memories = facade.list_memories_for_ui(user, workspace).unwrap_or_default();
+    let memory_by_ref: std::collections::HashMap<String, MemoryRecord> = memories
+        .iter()
+        .cloned()
+        .map(|memory| (memory.reference.to_string(), memory))
+        .collect();
+    let artifact_memories: Vec<&MemoryRecord> = memories
+        .iter()
+        .filter(|memory| {
+            memory.memory_type == "artifact"
+                && matches!(memory.status, MemoryStatus::Confirmed | MemoryStatus::Candidate)
+        })
+        .collect();
+    if artifact_memories.is_empty() {
+        return None;
+    }
+
+    let entities = facade.list_entities_for_ui(user, workspace).unwrap_or_default();
+    let entity_by_ref: std::collections::HashMap<String, MemoryEntity> = entities
+        .iter()
+        .cloned()
+        .map(|entity| (entity.reference.to_string(), entity))
+        .collect();
+    let relations = facade.list_relations_for_ui(user, workspace).unwrap_or_default();
+    let artifact_entity_for_memory = |artifact: &MemoryRecord| -> Option<MemoryRef> {
+        relations
+            .iter()
+            .find(|relation| {
+                relation.relation_type == "describes"
+                    && relation.source_ref == artifact.reference
+                    && entity_by_ref
+                        .get(&relation.target_ref.to_string())
+                        .is_some_and(|entity| entity.entity_type == "artifact")
+            })
+            .map(|relation| relation.target_ref.clone())
+            .or_else(|| {
+                let thread_slug = artifact.metadata.get("thread_slug").and_then(|value| value.as_str())?;
+                let name = artifact.metadata.get("name").and_then(|value| value.as_str())?;
+                Some(MemoryRef::new(
+                    MemoryRefKind::Entity,
+                    user.clone(),
+                    workspace.clone(),
+                    format!("artifact:{thread_slug}:{name}"),
+                ))
+            })
+    };
+
+    let mut lines = Vec::new();
+    for artifact in artifact_memories {
+        let labels = artifact_provenance_labels(
+            artifact
+                .metadata
+                .get("name")
+                .and_then(|value| value.as_str())
+                .unwrap_or(&artifact.text),
+            &artifact.metadata,
+        );
+        let query_hits_artifact = labels.iter().any(|label| {
+            query_lc.contains(label)
+                || std::path::Path::new(label)
+                    .file_name()
+                    .and_then(|value| value.to_str())
+                    .is_some_and(|file_name| query_lc.contains(&file_name.to_ascii_lowercase()))
+        });
+        if !query_hits_artifact
+            && !["artifact", "artef", "deliverable", "provenance", "provenienza", "workflow"]
+                .iter()
+                .any(|needle| query_lc.contains(needle))
+        {
+            continue;
+        }
+
+        let Some(artifact_ref) = artifact_entity_for_memory(artifact) else {
+            continue;
+        };
+        let artifact_name = artifact
+            .metadata
+            .get("title")
+            .and_then(|value| value.as_str())
+            .or_else(|| artifact.metadata.get("name").and_then(|value| value.as_str()))
+            .unwrap_or_else(|| artifact.text.lines().next().unwrap_or("artifact"));
+        let mut detail = format!("- {artifact_name}");
+        if let Some(kind) = artifact.metadata.get("artifact_type").and_then(|value| value.as_str()) {
+            detail.push_str(&format!(" ({kind})"));
+        }
+        let mut path_bits = Vec::new();
+        if let Some(path) = artifact
+            .metadata
+            .get("project_relative_path")
+            .and_then(|value| value.as_str())
+        {
+            path_bits.push(format!("project path: {path}"));
+        }
+        if let Some(path) = artifact.metadata.get("path_ref").and_then(|value| value.as_str()) {
+            if !path_bits.iter().any(|bit| bit.contains(path)) {
+                path_bits.push(format!("ref: {path}"));
+            }
+        }
+        if !path_bits.is_empty() {
+            detail.push_str(&format!(" [{}]", path_bits.join("; ")));
+        }
+
+        let mut producers: Vec<String> = artifact
+            .metadata
+            .get("producer")
+            .and_then(|value| value.as_str())
+            .map(|value| vec![value.to_string()])
+            .unwrap_or_default();
+        let mut source_refs = std::collections::BTreeSet::new();
+        for relation in &relations {
+            if relation.target_ref == artifact_ref && relation.relation_type == "produced" {
+                if let Some(entity) = entity_by_ref.get(&relation.source_ref.to_string()) {
+                    producers.push(entity.name.clone());
+                }
+            }
+            if relation.target_ref == artifact_ref && relation.relation_type == "affects" {
+                source_refs.insert(relation.source_ref.to_string());
+            }
+            if relation.source_ref == artifact_ref && relation.relation_type == "derived_from" {
+                source_refs.insert(relation.target_ref.to_string());
+            }
+        }
+        producers.sort();
+        producers.dedup();
+        if !producers.is_empty() {
+            detail.push_str(&format!("; produced by {}", producers.join(", ")));
+        }
+
+        let mut source_lines = Vec::new();
+        for source_ref in source_refs {
+            if let Some(memory) = memory_by_ref.get(&source_ref) {
+                let label = if memory.memory_type == "decision" {
+                    "decision"
+                } else {
+                    memory.memory_type.as_str()
+                };
+                source_lines.push(format!(
+                    "{label}: {}",
+                    format_recall_entry(&memory.text, &memory.metadata)
+                ));
+            } else if let Some(entity) = entity_by_ref.get(&source_ref) {
+                source_lines.push(format!("{}: {}", entity.entity_type, entity.name));
+            } else {
+                source_lines.push(format!("source ref: {source_ref}"));
+            }
+        }
+        if !source_lines.is_empty() {
+            detail.push_str(&format!("; derived from {}", source_lines.join(" | ")));
+        }
+        lines.push(detail);
+    }
+    if lines.is_empty() {
+        return None;
+    }
+    lines.sort();
+    lines.dedup();
+    Some(format!(
+        "ARTIFACT PROVENANCE FROM CANONICAL MEMORY GRAPH:\n{}",
+        lines.into_iter().take(8).collect::<Vec<_>>().join("\n")
+    ))
+}
+
 /// Decisions in memory that AFFECT a given file (matched by basename via FTS — the
 /// touched objects are stored as aliases). Returns a note to append to a file read so
 /// the agent recalls WHY a file is the way it is, instead of re-deriving it from the
@@ -8402,6 +8592,9 @@ async fn relevant_memory_for_prompt(state: &AppState, prompt: &str) -> Option<St
             lines.push(line);
         }
     }
+    if let Some(provenance) = artifact_provenance_context_for_query(&facade, &user, &active, query) {
+        lines.insert(0, provenance);
+    }
     lines.truncate(10);
     if lines.is_empty() {
         return None;
@@ -8468,6 +8661,9 @@ fn recall_memory(state: &AppState, query: &str) -> String {
     let mut lines = Vec::new();
     for (kind, text) in search(active.clone()) {
         lines.push(format!("- [{kind}] {text}"));
+    }
+    if let Some(provenance) = artifact_provenance_context_for_query(&facade, &user, &active, query) {
+        lines.push(provenance);
     }
     // Episodic memory (M4): past conversations — SCOPED to the active workspace via the
     // episode's origin tag, so a project recalls only its own conversations.
@@ -34653,6 +34849,86 @@ mod tests {
         let meta2 = serde_json::json!({ "decision": { "rationale": "perché sì" } });
         let out2 = crate::format_recall_entry("Scelta X perché sì", &meta2);
         assert_eq!(out2.matches("perché sì").count(), 1);
+    }
+
+    #[test]
+    fn memory_eval_surfaces_artifact_provenance_and_decision_why() {
+        let facade = local_first_memory::MemoryFacade::new(
+            local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
+        );
+        let user = local_first_memory::UserId::new("local");
+        let workspace = local_first_memory::WorkspaceId::new("project");
+        let lifecycle = local_first_memory::MemoryLifecycleRequest {
+            actor_id: "test".to_string(),
+            user_id: user.clone(),
+            workspace_id: workspace.clone(),
+            purpose: "test".to_string(),
+        };
+        let decision = facade
+            .create_memory_candidate(local_first_memory::MemoryCreateRequest {
+                request: lifecycle.clone(),
+                memory_type: "decision".to_string(),
+                text: "Create reports/report.pdf as the durable review artifact.".to_string(),
+                aliases: vec!["reports/report.pdf".to_string()],
+                language_hints: Vec::new(),
+                confidence: 1.0,
+                privacy_domain: local_first_memory::PrivacyDomain::new("project"),
+                sensitivity: local_first_memory::DataSensitivity::Internal,
+                evidence_refs: Vec::new(),
+                metadata: serde_json::json!({
+                    "source": "record_decision",
+                    "scope": "project",
+                    "decision": {
+                        "rationale": "The review must survive a new chat and point to a concrete deliverable.",
+                        "alternatives": [
+                            {
+                                "option": "Leave the result only in chat",
+                                "rejected_because": "A chat transcript is not a governed deliverable."
+                            }
+                        ]
+                    },
+                    "affects_labels": ["reports/report.pdf"],
+                }),
+            })
+            .unwrap();
+        facade
+            .confirm_memory(&lifecycle, &decision.reference, "decision recorded")
+            .unwrap();
+        super::upsert_artifact_memory_record(
+            &facade,
+            &user,
+            &workspace,
+            &lifecycle,
+            "project",
+            "thread-1",
+            "reports/report.pdf",
+            "Artifact reports/report.pdf (pdf) creato nel progetto.".to_string(),
+            serde_json::json!({
+                "source": "artifact_runtime",
+                "producer": "mcp_filesystem",
+                "thread_slug": "thread-1",
+                "name": "reports/report.pdf",
+                "artifact_type": "pdf",
+                "project_relative_path": "reports/report.pdf",
+                "project_path": "/tmp/project/reports/report.pdf",
+                "size_bytes": 456,
+            }),
+        )
+        .unwrap();
+
+        let context = super::artifact_provenance_context_for_query(
+            &facade,
+            &user,
+            &workspace,
+            "quali artifact esistono per il progetto e da quale decisione derivano?",
+        )
+        .expect("provenance context");
+
+        assert!(context.contains("reports/report.pdf"), "{context}");
+        assert!(context.contains("mcp_filesystem"), "{context}");
+        assert!(context.contains("Create reports/report.pdf"), "{context}");
+        assert!(context.contains("why: The review must survive a new chat"), "{context}");
+        assert!(context.contains("Leave the result only in chat"), "{context}");
     }
 
     #[test]

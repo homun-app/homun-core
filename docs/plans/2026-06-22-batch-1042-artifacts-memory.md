@@ -215,11 +215,20 @@ che fanno "ricordare il perché e sopravvivere". Caposaldo #8.
   con evidence refs alla memoria sorgente e alla memoria artifact. Non fa matching
   semantico né inferisce relazioni probabili. Test:
   `cargo test -p local-first-desktop-gateway artifact_memory_links_ -- --nocapture`.
-  **Resta:** usare questi archi nell'eval WS5.6 e alimentare refs piano/task quando
-  WS1-F6 persisterà step/piano in memoria.
-- ☐ **5.6 Eval memoria** (guardrail): chat nuova → *"a che punto è il workflow e perché
+  **Resta:** alimentare refs piano/task quando WS1-F6 persisterà step/piano in
+  memoria.
+- 🟡 **5.6 Eval memoria** (guardrail): chat nuova → *"a che punto è il workflow e perché
   make_deck?"* / *"quali artefatti per il progetto X e da quale decisione?"* → deve
   rispondere. Anti-regressione, come l'eval del deck.
+  **Prima slice locale/verde:** il reader di recall/RAG attraversa la provenance
+  artifact nel grafo canonico (`describes`, `produced`, `affects`,
+  `derived_from`) e restituisce un blocco `ARTIFACT PROVENANCE FROM CANONICAL
+  MEMORY GRAPH` con artifact, producer, path, decisione/lavoro sorgente, rationale
+  e alternative scartate. Test red/green:
+  `cargo test -p local-first-desktop-gateway memory_eval_surfaces_artifact_provenance_and_decision_why -- --nocapture`.
+  **Resta:** coprire la domanda “a che punto è il workflow e perché?” con
+  open_loop/goal/outcome/piano e decidere se serve smoke in-app dopo il reader
+  headless.
 
 > Nota: WS2-3.1 (artefatti→memoria) e WS1-F6 (piano→memoria) **alimentano** WS5 — sono
 > i nodi che rendono la memoria il cervello connesso. Stesso north-star.
