@@ -43,6 +43,20 @@ function assertRepoContains(file, text, description) {
   }
 }
 
+function assertMatches(file, pattern, description) {
+  const source = read(file);
+  if (!pattern.test(source)) {
+    throw new Error(`${description}: expected ${file} to match ${pattern}`);
+  }
+}
+
+function assertNotMatches(file, pattern, description) {
+  const source = read(file);
+  if (pattern.test(source)) {
+    throw new Error(`${description}: expected ${file} not to match ${pattern}`);
+  }
+}
+
 assertContains("package.json", "electron:dev", "desktop app must run through Electron");
 assertContains("package.json", "package:prepare", "desktop package must prepare production-like Electron resources");
 assertContains("package.json", "package:smoke", "desktop package must support production-like smoke testing without Vite");
@@ -73,7 +87,16 @@ assertContains("src/components/ChatView.tsx", "composer-surface", "prompt compos
 assertContains("src/components/ChatView.tsx", "local-computer-card", "active task must expose a local computer activity card");
 assertContains("src/components/ChatView.tsx", "timelineCollapsed", "computer timeline must keep collapsed state");
 assertContains("src/components/ChatView.tsx", "computerCardCollapsed", "local computer card must be collapsible after answers");
-assertContains("src/components/ChatView.tsx", "visibleComputerSession.timeline.length > 0", "completed local computer activity must remain visible after task completion");
+assertMatches(
+  "src/components/ChatView.tsx",
+  /const showComputerActivity =\s*activeApprovels\.length > 0 \|\|\s*planStepRunning \|\|\s*smokeTestRunning \|\|\s*detailsOpen;/m,
+  "inline computer activity must be driven only by active approvals/runs or explicit details",
+);
+assertNotMatches(
+  "src/components/ChatView.tsx",
+  /const showComputerActivity =[\s\S]*visibleComputerSession\.(timeline|artifacts)\.length > 0[\s\S]*?;/m,
+  "completed computer timeline/artifacts must not reopen the inline Computer card",
+);
 assertContains("src/components/ChatView.tsx", "approval-scope-options", "approval UI must make temporary vs fixed scope explicit");
 
 assertContains("src/components/ChatView.tsx", "coreBridge.submitChatPromptStream", "composer must submit prompts through the local chat transport");
@@ -126,7 +149,12 @@ assertNotContains("src/components/ChatView.tsx", "useVirtualizer", "chat transcr
 assertNotContains("src/styles.css", ".virtual-message-row", "chat transcript must not use absolute virtual rows in the base Electron path");
 assertContains("src/components/ChatView.tsx", "streamingFrameRef", "chat streaming must throttle visible updates in Electron");
 assertContains("src/components/ChatView.tsx", "setOptimisticMessages", "chat streaming must keep visible text in the React message state");
-assertContains("src/components/ChatView.tsx", "<RichMessage text={displayMessage.text} streaming />", "streaming answers must render through the normal message component");
+assertContains("src/components/ChatView.tsx", "<AssistantMessageBody", "streaming answers must render through the normal message body component");
+assertMatches(
+  "src/components/ChatView.tsx",
+  /isStreamingMessage \? \([\s\S]*?<AssistantMessageBody[\s\S]*?\n\s+streaming\n[\s\S]*?\)/m,
+  "streaming answers must keep rich markdown/progress parsing enabled while streaming",
+);
 assertContains("src/components/ChatView.tsx", "streamingUserPinnedRef", "chat must keep new streaming responses visible");
 assertNotContains("src/components/ChatView.tsx", "STREAM_TYPEWRITER_INTERVAL_MS", "chat streaming must not use timer-based typewriter rendering");
 assertNotContains("src/components/ChatView.tsx", "streamingTextRef", "chat streaming must not bypass React with a manual DOM text node");

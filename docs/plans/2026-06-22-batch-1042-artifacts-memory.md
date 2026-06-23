@@ -880,7 +880,9 @@ ragionato il contratto degli strumenti `make_*` creati dall'harness. ADR 0011
   dock Computer per chat e solo quando browser/terminal sono running; il pannello
   inline Computer legacy non si apre più solo per timeline/artifact completati.
   La branch streaming usa `AssistantMessageBody`, quindi plan/progress/markdown
-  sono renderizzati progressivamente come nel messaggio finale.
+  sono renderizzati progressivamente come nel messaggio finale. **Guardrail WS4
+  aggiunto (2026-06-24):** `test:ui-contract` blocca la regressione del pannello
+  inline e il dock Computer passa a polling adattivo (600ms attivo, 2500ms idle).
 - ☐ **7.1b (futuro)** Portare ricerca/meeting al livello del deck solo dopo il
   chiarimento sul contratto strumenti: `make_research` e `make_meeting` non sono
   essenziali per la prossima release.
@@ -926,9 +928,10 @@ proprio — versioning, canali, scaricabili dal **sito Homun**, auto-aggiornabil
 
 ## WS4 — Qualità, affidabilità, UX
 
-- ☐ **UI perf su chat pesanti** — il renderer arrivava al **99% CPU** (immagini grandi
+- 🟡 **UI perf su chat pesanti** — il renderer arrivava al **99% CPU** (immagini grandi
   + log lunghi + piano gonfio): memoizzare i render pesanti + rallentare i polling
-  quando idle. (Il gonfiore-piano lo chiude WS1-Fase 2; questa è la parte UI.)
+  quando idle. Prima slice: polling adattivo del dock Computer e contratto UI
+  anti-regressione; restano memoizzazione render pesanti e altri polling.
 - ☐ **Seeder skill fragile** — una skill modificata a mano (hash desync) non viene più
   auto-aggiornata (ha tenuto `create-presentations` vecchia su disco fino al fix manuale)
   → irrobustire.

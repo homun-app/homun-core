@@ -32,23 +32,32 @@ export function ChatComputerPanel({ threadId }: { threadId: string }) {
   const [live, setLive] = useState<ContainedComputerLive | null>(null);
   // "bar" (collapsed, default) | "expanded" (live inline) | "full" (overlay)
   const [view, setView] = useState<"bar" | "expanded" | "full">("bar");
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     let cancelled = false;
+    const schedule = (delayMs: number) => {
+      if (pollRef.current) clearTimeout(pollRef.current);
+      pollRef.current = setTimeout(() => void poll(), delayMs);
+    };
     const poll = async () => {
       try {
         const value = await coreBridge.containedComputerLive();
-        if (!cancelled) setLive(value);
+        if (!cancelled) {
+          setLive(value);
+          schedule(isComputerLiveBusy(value) ? 600 : 2500);
+        }
       } catch {
-        if (!cancelled) setLive(IDLE);
+        if (!cancelled) {
+          setLive(IDLE);
+          schedule(2500);
+        }
       }
     };
     void poll();
-    pollRef.current = setInterval(() => void poll(), 600);
     return () => {
       cancelled = true;
-      if (pollRef.current) clearInterval(pollRef.current);
+      if (pollRef.current) clearTimeout(pollRef.current);
     };
   }, []);
 
@@ -198,6 +207,15 @@ export function ChatComputerPanel({ threadId }: { threadId: string }) {
         )}
       </div>
     </>
+  );
+}
+
+function isComputerLiveBusy(live: ContainedComputerLive | null): boolean {
+  const terminal = live?.terminal ?? [];
+  return Boolean(
+    (live?.active && live?.novnc_url) ||
+      live?.terminal_active ||
+      terminal.some((entry) => entry.running),
   );
 }
 

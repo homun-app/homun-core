@@ -274,6 +274,10 @@ primo percorso locale verde:
     browser/terminal running; il pannello inline Computer legacy non viene più
     riaperto da timeline/artifact già completati. Il rendering streaming riusa il
     parser finale per plan/progress/markdown progressivi.
+64. WS4 UI perf guard — il contratto UI verifica che il pannello Computer inline
+    non torni a dipendere da timeline/artifact completati e il dock live riduce
+    il polling quando idle (2500ms), mantenendolo veloce durante attività
+    browser/terminal (600ms).
 
 Prima di pubblicare/taggare resta prudente ripetere lo smoke manuale in-app su
 una automazione schedulata reale con il binario aggiornato. Il primo smoke ha
