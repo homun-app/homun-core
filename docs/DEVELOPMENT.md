@@ -348,7 +348,11 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   aggiunge al `tool_trace` una riga `capability discovery ... -> source:key`
   costruita dalle `CapabilityEntry` tipizzate, così la scelta registry entra
   nell'audit/memory extractor senza store paralleli. Test mirato:
-  `capability_discovery_trace_records_typed_sources`.
+  `capability_discovery_trace_records_typed_sources`. **Nona slice
+  locale/verde:** anche l'esecuzione di capability connesse viene tracciata come
+  `capability execution connector:TOOL` o `capability execution mcp:TOOL`,
+  inclusi i read connector come Gmail. Test mirato:
+  `connected_capability_execution_trace_records_source`.
 - **make_document DOCX locale/verde (2026-06-23):** lo stesso workflow ora
   materializza anche artifact `.docx` editabili dalla sorgente Markdown canonica,
   via pacchetto OOXML minimale generato in-process con `zip` già presente.

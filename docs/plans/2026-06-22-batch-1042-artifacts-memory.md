@@ -218,6 +218,12 @@ modelli deboli/locali. Invarianti: monotonìa, limitatezza, identità non inferi
     tipizzate. La scelta della capability entra così nel learning/audit del turno
     senza creare uno store parallelo. Test mirato:
     `capability_discovery_trace_records_typed_sources`.
+  - ✅ **Nona slice registry execution trace (2026-06-23, locale/verde):** le
+    capability connesse eseguite vengono tracciate come
+    `capability execution connector:TOOL` o `capability execution mcp:TOOL`,
+    includendo anche read connector come Gmail che prima non entravano nel trace
+    se non erano write. Test mirato:
+    `connected_capability_execution_trace_records_source`.
   - 🟡 Possibile step futuro: atomico PDF dedicato con schema più guidato
     (input/output files, operazione), se `run_in_sandbox` risulta troppo generico
     nello smoke.

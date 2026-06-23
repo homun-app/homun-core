@@ -13368,6 +13368,19 @@ fn capability_discovery_trace_line(intent: &str, entries: &[CapabilityEntry]) ->
     Some(format!("capability discovery `{intent}` -> {names}"))
 }
 
+fn connected_capability_execution_trace_line(
+    name: &str,
+    connector_index: &[(String, String, serde_json::Value)],
+) -> Option<String> {
+    if parse_mcp_chat_name(name).is_some() {
+        return Some(format!("capability execution mcp:{name}"));
+    }
+    if connector_index.iter().any(|(slug, _, _)| slug == name) {
+        return Some(format!("capability execution connector:{name}"));
+    }
+    None
+}
+
 /// Capable (OpenAI-compatible) chat path with NATIVE TOOL-CALLING. The model is
 /// given real tools and decides when to use them (no keyword routing). Tool
 /// rounds run non-streamed; the final assistant answer is emitted as Delta+Done
@@ -14850,9 +14863,13 @@ check/update the key in Settings → Model & Runtime.".to_string()
                     if tool_trace.len() < 20 {
                         if let Some(line) = summarize_tool_action(name, args_raw) {
                             tool_trace.push(line);
+                        } else if let Some(line) =
+                            connected_capability_execution_trace_line(name, &catalog_index)
+                        {
+                            tool_trace.push(line);
                         } else if composio_writes.contains(name) {
                             // A write on a connected service (Composio/MCP).
-                            tool_trace.push(format!("action on connected service: {name}"));
+                            tool_trace.push(format!("capability execution connector:{name}"));
                         }
                     }
 
@@ -36918,6 +36935,29 @@ mod tests {
         assert!(trace.contains("capability discovery `read unread gmail`"), "{trace}");
         assert!(trace.contains("connector:GMAIL_FETCH_EMAILS"), "{trace}");
         assert!(trace.contains("connector:GMAIL_SEND_EMAIL"), "{trace}");
+    }
+
+    #[test]
+    fn connected_capability_execution_trace_records_source() {
+        let index = vec![catalog_entry(
+            "GMAIL_FETCH_EMAILS",
+            "Fetch a list of email messages from Gmail",
+        )];
+
+        assert_eq!(
+            super::connected_capability_execution_trace_line("GMAIL_FETCH_EMAILS", &index)
+                .as_deref(),
+            Some("capability execution connector:GMAIL_FETCH_EMAILS"),
+        );
+        assert_eq!(
+            super::connected_capability_execution_trace_line(
+                "mcp__filesystem__read_file",
+                &index,
+            )
+            .as_deref(),
+            Some("capability execution mcp:mcp__filesystem__read_file"),
+        );
+        assert!(super::connected_capability_execution_trace_line("run_in_sandbox", &index).is_none());
     }
 
     #[test]
