@@ -6059,7 +6059,11 @@ enum CapabilityRouteDecision {
 }
 
 fn route_workflow_or_agent(prompt: &str) -> WorkflowRouteDecision {
-    match route_capability(prompt) {
+    workflow_route_from_capability(&route_capability(prompt))
+}
+
+fn workflow_route_from_capability(decision: &CapabilityRouteDecision) -> WorkflowRouteDecision {
+    match decision {
         CapabilityRouteDecision::Workflow {
             workflow_id,
             tool_name,
@@ -6161,6 +6165,59 @@ with `{scaffolding_tier}` scaffolding. Call `{tool_name}` exactly once with the 
 do not create a separate plan, do not decompose it into lower-level tools, and do not use shell/file tools for this workflow."
         )),
         WorkflowRouteDecision::AgentLoop => None,
+    }
+}
+
+fn capability_router_instruction_for_decision(
+    decision: &CapabilityRouteDecision,
+) -> Option<String> {
+    match decision {
+        CapabilityRouteDecision::Workflow {
+            workflow_id,
+            tool_name,
+            scaffolding_tier,
+            reason,
+            ..
+        } => Some(format!(
+            "CAPABILITY ROUTER: this request is routed by the harness to workflow `{workflow_id}` \
+with `{scaffolding_tier}` scaffolding. Reason: {reason} Call `{tool_name}` exactly once with the user's brief; \
+do not create a separate plan, do not decompose it into lower-level tools, and do not use shell/file tools for this workflow."
+        )),
+        CapabilityRouteDecision::AtomicTool {
+            capability_key,
+            reason,
+        } => Some(format!(
+            "CAPABILITY ROUTER: this request is classified as atomic capability `{capability_key}`. \
+Reason: {reason} Do not call end-to-end deliverable workflows such as `make_document` for this request. \
+Use the most specific atomic/tool capability available, or call `find_capability` if it is not already loaded."
+        )),
+        CapabilityRouteDecision::AgentLoop { .. } => None,
+    }
+}
+
+fn capability_route_trace_line(decision: &CapabilityRouteDecision) -> Option<String> {
+    match decision {
+        CapabilityRouteDecision::Workflow {
+            workflow_id,
+            tool_name,
+            reason,
+            alternatives,
+            ..
+        } => Some(format!(
+            "capability route: workflow {workflow_id}/{tool_name}; reason={reason}; alternatives={}",
+            if alternatives.is_empty() {
+                "none".to_string()
+            } else {
+                alternatives.join(",")
+            }
+        )),
+        CapabilityRouteDecision::AtomicTool {
+            capability_key,
+            reason,
+        } => Some(format!(
+            "capability route: atomic {capability_key}; reason={reason}"
+        )),
+        CapabilityRouteDecision::AgentLoop { .. } => None,
     }
 }
 
@@ -13283,8 +13340,9 @@ in-progress plan (some steps done, others not), CONTINUE it — re-emit the plan
 keeping the completed steps as done, and proceed from the first not-done step; do NOT restart \
 from scratch or re-propose."
     );
-    let workflow_route = route_workflow_or_agent(&request.prompt);
-    let system = match workflow_router_instruction_for_decision(&workflow_route) {
+    let capability_route = route_capability(&request.prompt);
+    let workflow_route = workflow_route_from_capability(&capability_route);
+    let system = match capability_router_instruction_for_decision(&capability_route) {
         Some(instruction) => format!("{system}\n\n{instruction}"),
         None => system,
     };
@@ -13694,6 +13752,7 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
         .find(|m| m.text.contains("‹‹PLAN››"))
         .map(|m| parse_plan_marker(&m.text))
         .unwrap_or_default();
+    let capability_route_for_runtime = capability_route.clone();
     tokio::spawn(async move {
         let mut accumulated = String::new();
         // Final answer text captured for post-turn memory extraction (M2).
@@ -13701,6 +13760,16 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
         // Consequential actions performed this turn (any domain) → fed to the
         // memory extractor so the "why" of each mutation is remembered.
         let mut tool_trace: Vec<String> = Vec::new();
+        if let Some(route_line) = capability_route_trace_line(&capability_route_for_runtime) {
+            tool_trace.push(route_line.clone());
+            let _ = emit_stream_event(
+                &tx,
+                GenerateStreamEvent::Delta {
+                    text: format!("‹‹ACT››🧭 {route_line}‹‹/ACT››"),
+                },
+            )
+            .await;
+        }
         // No-progress guard: if the model repeats the EXACT same tool calls round after
         // round, it's stuck (not making progress) → stop and synthesize, instead of
         // burning the whole round budget on a loop. This is what lets the budget be
@@ -36084,6 +36153,19 @@ mod tests {
     }
 
     #[test]
+    fn capability_router_atomic_instruction_blocks_deliverable_workflow() {
+        let decision = super::route_capability("estrai testo da questo PDF");
+        let instruction = super::capability_router_instruction_for_decision(&decision)
+            .expect("atomic routing instruction");
+        let trace = super::capability_route_trace_line(&decision).expect("trace line");
+
+        assert!(instruction.contains("atomic capability `pdf_atomic`"), "{instruction}");
+        assert!(instruction.contains("Do not call end-to-end deliverable workflows"), "{instruction}");
+        assert!(instruction.contains("`make_document`"), "{instruction}");
+        assert!(trace.contains("capability route: atomic pdf_atomic"), "{trace}");
+    }
+
+    #[test]
     fn capability_router_keeps_report_pdf_as_document_creation_workflow() {
         let decision = super::route_capability("crea un report PDF per il cliente");
 
@@ -36095,6 +36177,8 @@ mod tests {
                 ..
             }
         ));
+        let trace = super::capability_route_trace_line(&decision).expect("trace line");
+        assert!(trace.contains("workflow make_document/make_document"), "{trace}");
     }
 
     #[test]

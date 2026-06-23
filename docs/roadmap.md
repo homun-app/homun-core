@@ -114,6 +114,10 @@ primo percorso locale verde:
     conflict policy: creazione report PDF usa `make_document`; estrazione,
     unione o conversione PDF restano operazioni atomiche e non attivano
     `make_document`.
+30. WS1-Fase 4b terza slice — il loop agente usa la stessa decisione strutturata
+    per system prompt, route workflow e trace runtime: la scelta viene emessa come
+    `ACT` e aggiunta a `tool_trace`, quindi resta auditabile e disponibile al
+    learning post-turn senza store paralleli.
 
 Prima di pubblicare/taggare resta prudente ripetere lo smoke manuale in-app su
 una automazione schedulata reale con il binario aggiornato. Il primo smoke ha
@@ -124,8 +128,8 @@ trovato e corretto una falsa chiusura su piano non completato.
 1. Completare verifica allargata della nuova slice `ExecutionPlan` runtime.
 2. WS1-Fase 2/3 — piano runtime-owned e workflow runner dichiarativo, così i
    deliverable futuri non riaprono fragilità cross-modello.
-3. WS1-Fase 4b — collegare la decisione strutturata a logging/audit runtime e al
-   registry reale degli atomici/MCP prima di aggiungere altri `make_*`.
+3. WS1-Fase 4b — collegare `AtomicTool` al registry reale degli atomici/MCP prima
+   di aggiungere altri `make_*`.
 4. WS7 — deliverable Manus-style: prima consolidare `make_document`; solo dopo
    ragionare su `make_research` e `make_meeting`.
 
@@ -148,8 +152,9 @@ generalizzazione documenti è locale/verde su `make_document` e ha superato smok
 API reale con artifact gestito + memoria/provenance canonica. Il registry nativo
 dei workflow `make_deck`/`make_document` è locale/verde e alimenta router e
 corpus `find_capability`; la decisione strutturata ora distingue workflow,
-atomici PDF e agent loop con ragione esplicita. Scelta corrente: collegare questa
-decisione a logging/audit runtime e al registry reale degli strumenti atomici/MCP.
-Solo dopo proseguire con DOCX/editabile e nuovi workflow; `make_research` e
-`make_meeting` restano futuri.
+atomici PDF e agent loop con ragione esplicita; il loop agente emette la route
+come `ACT` e la aggiunge al `tool_trace` del turno. Scelta corrente: collegare
+`AtomicTool(pdf_atomic)` al registry reale degli strumenti atomici/MCP. Solo dopo
+proseguire con DOCX/editabile e nuovi workflow; `make_research` e `make_meeting`
+restano futuri.
 Il contratto corrente della memoria è in [MEMORIA.md](MEMORIA.md).

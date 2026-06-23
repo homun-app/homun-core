@@ -303,9 +303,16 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   Test mirati:
   `capability_router_explains_native_workflow_selection`,
   `capability_router_keeps_pdf_atomic_operations_out_of_make_document`,
-  `capability_router_keeps_report_pdf_as_document_creation_workflow`. **Prossimo
-  passo unico:** collegare la decisione strutturata a logging/audit runtime e al
-  registry completo degli atomici/MCP, poi proseguire con DOCX o nuovi workflow.
+  `capability_router_keeps_report_pdf_as_document_creation_workflow`. **Terza
+  slice locale/verde:** il loop agente usa una sola `CapabilityRouteDecision` per
+  costruire system prompt, route workflow e trace runtime; la scelta emette un
+  evento `ACT` e viene aggiunta a `tool_trace`, quindi entra nel learning/audit
+  del turno con il perché. L'istruzione atomica impedisce esplicitamente
+  `make_document` per operazioni PDF atomiche. Test mirato:
+  `capability_router_atomic_instruction_blocks_deliverable_workflow`. **Prossimo
+  passo unico:** collegare `AtomicTool(pdf_atomic)` al registry reale degli
+  atomici/MCP invece di tenerlo solo come policy guardrail, poi proseguire con
+  DOCX o nuovi workflow.
 - **Gate provider Z.ai/GLM risolto (test manuale utente, 2026-06-23):** Settings
   espone sia `Z.ai (GLM)` standard (`https://api.z.ai/api/paas/v4`) sia
   `Z.ai Coding (GLM)` (`https://api.z.ai/api/coding/paas/v4`); il preset coding

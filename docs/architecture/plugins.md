@@ -75,8 +75,9 @@ router workflow/agent sia dal corpus `find_capability`; i workflow non sono
 duplicati nel corpus deferred generico. La decisione interna è strutturata
 (`Workflow`, `AtomicTool`, `AgentLoop`) e porta un `reason`: la prima policy di
 conflitto distingue creazione report PDF (`make_document`) da operazioni atomiche
-PDF come estrazione, unione o conversione (`pdf_atomic`). Resta da collegare
-questa decisione a logging/audit runtime e al registry reale di atomici/MCP.
+PDF come estrazione, unione o conversione (`pdf_atomic`). Il loop agente usa la
+stessa decisione per system prompt, route workflow e trace runtime (`ACT` +
+`tool_trace`). Resta da collegare `AtomicTool` al registry reale di atomici/MCP.
 
 ## Esecuzione contenuta (ADR 0009/0010)
 
