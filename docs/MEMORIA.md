@@ -88,7 +88,11 @@ Fatto:
   toolset a `make_document` anche dopo injection MCP/Composio, il nome artifact
   esplicito viene preservato, e il gate API ha confermato memoria
   `artifact|confirmed`, entity artifact e relazione canonica
-  `tool:make_document --produced--> artifact`.
+  `tool:make_document --produced--> artifact`. Slice PDF: più artifact
+  documentali (`.md`/`.pdf`) derivano dalla stessa sorgente Markdown e vengono
+  registrati singolarmente nella memoria/provenance canonica con producer
+  `make_document`. Gli artifact sono esclusi dal dedup semantico distruttivo:
+  possono avere descrizioni simili, ma la loro identità canonica è path/thread/name.
 - prima slice WS1 piano→memoria: il piano runtime-owned materializza un solo
   `open_loop` canonico `source="runtime_plan"` per thread, aggiornato in-place da
   `update_plan` / `step_advance` con conteggi, prossimo step e snapshot degli step;

@@ -2504,9 +2504,14 @@ async fn backfill_embeddings(
             // already exists (a paraphrase the lexical Jaccard pre-filter missed),
             // drop this one instead of letting duplicates pile up. Soft-delete →
             // reversible. Same-type + high cosine keeps genuinely distinct facts safe.
-            let is_dup = seen.iter().any(|(rs, ty, v)| {
-                ty == &mtype && rs != &reference.to_string() && cosine(&vector, v) >= DEDUP_COSINE
-            });
+            // Artifact identity is not semantic: two deliverables can have similar
+            // descriptions but different thread/path/name lifecycle.
+            let is_dup = memory_type_participates_in_semantic_dedup(&mtype)
+                && seen.iter().any(|(rs, ty, v)| {
+                    ty == &mtype
+                        && rs != &reference.to_string()
+                        && cosine(&vector, v) >= DEDUP_COSINE
+                });
             if let Ok(facade) = lock_memory_facade(state) {
                 if is_dup {
                     let lifecycle = MemoryLifecycleRequest {
@@ -2523,6 +2528,10 @@ async fn backfill_embeddings(
             seen.push((reference.to_string(), mtype, vector));
         }
     }
+}
+
+fn memory_type_participates_in_semantic_dedup(memory_type: &str) -> bool {
+    !matches!(memory_type, "artifact")
 }
 
 /// Fills the required `privacy_domain`/`sensitivity` on an extracted item when the
@@ -11869,7 +11878,12 @@ fn make_document_tool_schema() -> serde_json::Value {
                 "properties": {
                     "brief": { "type": "string", "description": "What the document must contain, including any sections, audience, tone, constraints or source material the user provided — verbatim." },
                     "language": { "type": "string", "description": "Document language code, e.g. 'it' or 'en'. Default: the user's language." },
-                    "name": { "type": "string", "description": "Artifact filename. If the user named the file, preserve that name exactly as a simple Markdown filename such as report.md. If no name was specified, choose a concise descriptive .md filename." }
+                    "name": { "type": "string", "description": "Artifact filename. If the user named the file, preserve that name exactly as a simple filename such as report.md or report.pdf. If no name was specified, choose a concise descriptive .md filename." },
+                    "formats": {
+                        "type": "array",
+                        "description": "Output formats to materialize from the same Markdown source. Use ['md'] by default, ['pdf'] when the user asks for a PDF, or ['md','pdf'] when both source and PDF are requested.",
+                        "items": { "type": "string", "enum": ["md", "pdf"] }
+                    }
                 },
                 "required": ["brief", "name"]
             }
@@ -12145,12 +12159,19 @@ an AI. The output must be ready to save as a deliverable artifact."
 }
 
 fn document_artifact_name(raw: Option<&str>) -> String {
-    let candidate = raw.unwrap_or("document.md").trim();
-    let candidate = if candidate.is_empty() { "document.md" } else { candidate };
+    document_artifact_name_with_extension(raw, "md")
+}
+
+fn document_artifact_name_with_extension(raw: Option<&str>, extension: &str) -> String {
+    let extension = extension.trim_start_matches('.').to_ascii_lowercase();
+    let extension = if extension.is_empty() { "md".to_string() } else { extension };
+    let default = format!("document.{extension}");
+    let candidate = raw.unwrap_or(default.as_str()).trim();
+    let candidate = if candidate.is_empty() { default.as_str() } else { candidate };
     let basename = candidate
         .rsplit(['/', '\\'])
         .next()
-        .unwrap_or("document.md")
+        .unwrap_or(default.as_str())
         .trim();
     let mut safe = String::new();
     for ch in basename.chars() {
@@ -12162,11 +12183,19 @@ fn document_artifact_name(raw: Option<&str>) -> String {
     }
     let safe = safe.trim_matches('.').trim_matches('-').to_string();
     let safe = if safe.is_empty() { "document".to_string() } else { safe };
-    if safe.to_ascii_lowercase().ends_with(".md") {
-        safe
+    let lower = safe.to_ascii_lowercase();
+    let stem = if lower.ends_with(".md") || lower.ends_with(".pdf") {
+        safe.rsplit_once('.')
+            .map(|(stem, _)| stem)
+            .unwrap_or(safe.as_str())
+            .trim_matches('.')
+            .trim_matches('-')
+            .to_string()
     } else {
-        format!("{safe}.md")
-    }
+        safe
+    };
+    let stem = if stem.is_empty() { "document".to_string() } else { stem };
+    format!("{stem}.{extension}")
 }
 
 fn document_artifact_name_from_brief(brief: &str) -> Option<String> {
@@ -12178,21 +12207,58 @@ fn document_artifact_name_from_brief(brief: &str) -> Option<String> {
             )
         });
         let lower = raw.to_ascii_lowercase();
-        let Some(pos) = lower.find(".md") else {
+        let extension = if let Some(pos) = lower.find(".md") {
+            Some((pos, "md"))
+        } else {
+            lower.find(".pdf").map(|pos| (pos, "pdf"))
+        };
+        let Some((pos, extension)) = extension else {
             continue;
         };
-        let end = pos + ".md".len();
+        let end = pos + extension.len() + 1;
         let candidate = &raw[..end];
         if !candidate
             .trim_end_matches(".md")
+            .trim_end_matches(".pdf")
             .chars()
             .any(|ch| ch.is_ascii_alphanumeric())
         {
             continue;
         }
-        return Some(document_artifact_name(Some(candidate)));
+        return Some(document_artifact_name_with_extension(Some(candidate), extension));
     }
     None
+}
+
+fn document_requested_pdf(brief: &str) -> bool {
+    let normalized = brief.to_ascii_lowercase();
+    normalized.contains(".pdf")
+        || normalized
+            .split(|ch: char| !ch.is_ascii_alphanumeric())
+            .any(|word| word == "pdf")
+}
+
+fn document_output_formats(parsed: &serde_json::Value, name: &str, brief: &str) -> Vec<String> {
+    let mut formats = Vec::new();
+    if let Some(values) = parsed.get("formats").and_then(|value| value.as_array()) {
+        for value in values {
+            let Some(raw) = value.as_str() else {
+                continue;
+            };
+            let format = raw.trim().trim_start_matches('.').to_ascii_lowercase();
+            if matches!(format.as_str(), "md" | "pdf") && !formats.iter().any(|f| f == &format) {
+                formats.push(format);
+            }
+        }
+    }
+    if formats.is_empty() {
+        if name.to_ascii_lowercase().ends_with(".pdf") || document_requested_pdf(brief) {
+            formats.push("pdf".to_string());
+        } else {
+            formats.push("md".to_string());
+        }
+    }
+    formats
 }
 
 fn generate_image_tool_schema() -> serde_json::Value {
@@ -15484,6 +15550,7 @@ Absolutely NO text, NO words, NO letters, NO numbers, NO captions, NO logos."
                             .map(|value| document_artifact_name(Some(value)))
                             .or_else(|| document_artifact_name_from_brief(&brief))
                             .unwrap_or_else(|| document_artifact_name(None));
+                        let formats = document_output_formats(&parsed, &fname, &brief);
                         if brief.is_empty() {
                             "make_document needs a 'brief' describing the document.".to_string()
                         } else {
@@ -15491,6 +15558,7 @@ Absolutely NO text, NO words, NO letters, NO numbers, NO captions, NO logos."
                                 "brief": brief.clone(),
                                 "language": language.clone(),
                                 "name": fname.clone(),
+                                "formats": formats.clone(),
                             });
                             let workflow_plan = workflow_execution_plan(
                                 &make_document_workflow_definition(),
@@ -15534,56 +15602,81 @@ Absolutely NO text, NO words, NO letters, NO numbers, NO captions, NO logos."
                             {
                                 Err(error) => format!("Could not generate document content: {error}"),
                                 Ok(markdown) => {
-                                    let slug_w = thread_slug.clone();
-                                    let fname_w = fname.clone();
-                                    let result = tokio::task::spawn_blocking(move || {
-                                        write_text_artifact(&slug_w, &fname_w, &markdown)
-                                    })
-                                    .await
-                                    .unwrap_or_else(|error| Err(format!("Error: {error}")));
-                                    match result {
-                                        Ok((size, updated)) => {
-                                            let marker = serde_json::json!({
-                                                "name": fname,
-                                                "thread": thread_slug,
-                                                "size": size,
-                                                "updated": updated,
-                                            });
-                                            let artifact_mark =
-                                                format!("‹‹ARTIFACT››{marker}‹‹/ARTIFACT››");
-                                            accumulated.push_str(&artifact_mark);
-                                            let _ = emit_stream_event(
-                                                &tx,
-                                                GenerateStreamEvent::Delta { text: artifact_mark },
-                                            )
-                                            .await;
-                                            let artifact_name = marker
-                                                .get("name")
-                                                .and_then(|value| value.as_str())
-                                                .unwrap_or("document.md");
-                                            register_artifact_memory(
-                                                &state_owned,
-                                                thread_id.as_deref(),
-                                                &thread_slug,
-                                                artifact_name,
-                                                size,
-                                                updated,
-                                                "make_document",
-                                                None,
-                                            )
-                                            .await;
-                                            format!(
-                                                "Document created via workflow {}: {}. The document is DONE — give the user a one-line summary.",
-                                                workflow_plan
-                                                    .steps
-                                                    .first()
-                                                    .and_then(|step| step.arguments.get("workflow_id"))
+                                    let mut produced = Vec::new();
+                                    let mut artifact_error: Option<String> = None;
+                                    for format in formats {
+                                        let artifact_name =
+                                            document_artifact_name_with_extension(Some(&fname), &format);
+                                        let slug_w = thread_slug.clone();
+                                        let fname_w = artifact_name.clone();
+                                        let markdown_w = markdown.clone();
+                                        let result = tokio::task::spawn_blocking(move || {
+                                            if format == "pdf" {
+                                                let title = fname_w
+                                                    .trim_end_matches(".pdf")
+                                                    .trim_end_matches(".PDF");
+                                                let bytes = pdf_render::markdown_to_pdf(title, &markdown_w)
+                                                    .map_err(|e| format!("PDF render failed: {e}"))?;
+                                                write_artifact_bytes(&slug_w, &fname_w, &bytes)
+                                            } else {
+                                                write_text_artifact(&slug_w, &fname_w, &markdown_w)
+                                            }
+                                        })
+                                        .await
+                                        .unwrap_or_else(|error| Err(format!("Error: {error}")));
+                                        match result {
+                                            Ok((size, updated)) => {
+                                                let marker = serde_json::json!({
+                                                    "name": artifact_name,
+                                                    "thread": thread_slug,
+                                                    "size": size,
+                                                    "updated": updated,
+                                                });
+                                                let artifact_mark =
+                                                    format!("‹‹ARTIFACT››{marker}‹‹/ARTIFACT››");
+                                                accumulated.push_str(&artifact_mark);
+                                                let _ = emit_stream_event(
+                                                    &tx,
+                                                    GenerateStreamEvent::Delta { text: artifact_mark },
+                                                )
+                                                .await;
+                                                let artifact_name = marker
+                                                    .get("name")
                                                     .and_then(|value| value.as_str())
-                                                    .unwrap_or("make_document"),
-                                                artifact_name,
-                                            )
+                                                    .unwrap_or("document.md")
+                                                    .to_string();
+                                                register_artifact_memory(
+                                                    &state_owned,
+                                                    thread_id.as_deref(),
+                                                    &thread_slug,
+                                                    &artifact_name,
+                                                    size,
+                                                    updated,
+                                                    "make_document",
+                                                    None,
+                                                )
+                                                .await;
+                                                produced.push(artifact_name);
+                                            }
+                                            Err(error) => {
+                                                artifact_error = Some(error);
+                                                break;
+                                            }
                                         }
-                                        Err(error) => error,
+                                    }
+                                    if let Some(error) = artifact_error {
+                                        error
+                                    } else {
+                                        format!(
+                                            "Document created via workflow {}: {}. The document is DONE — give the user a one-line summary.",
+                                            workflow_plan
+                                                .steps
+                                                .first()
+                                                .and_then(|step| step.arguments.get("workflow_id"))
+                                                .and_then(|value| value.as_str())
+                                                .unwrap_or("make_document"),
+                                            produced.join(", "),
+                                        )
                                     }
                                 }
                             }
@@ -35845,6 +35938,13 @@ mod tests {
             .as_deref(),
             Some("homun-smoke-document.md"),
         );
+        assert_eq!(
+            super::document_artifact_name_from_brief(
+                "Crea un documento PDF chiamato homun-document-pdf-smoke.pdf: una nota operativa",
+            )
+            .as_deref(),
+            Some("homun-document-pdf-smoke.pdf"),
+        );
     }
 
     #[test]
@@ -35857,6 +35957,53 @@ mod tests {
 
         assert!(required.iter().any(|value| value.as_str() == Some("brief")));
         assert!(required.iter().any(|value| value.as_str() == Some("name")));
+        assert_eq!(
+            schema
+                .pointer("/function/parameters/properties/formats/items/enum")
+                .and_then(|value| value.as_array())
+                .map(|values| {
+                    values
+                        .iter()
+                        .filter_map(|value| value.as_str())
+                        .collect::<Vec<_>>()
+                }),
+            Some(vec!["md", "pdf"]),
+        );
+    }
+
+    #[test]
+    fn make_document_formats_preserve_explicit_pdf_outputs() {
+        let parsed = serde_json::json!({
+            "formats": ["md", "pdf", "pdf", "txt"],
+        });
+
+        assert_eq!(
+            super::document_artifact_name_with_extension(Some("brief finale.pdf"), "md"),
+            "brief-finale.md",
+        );
+        assert_eq!(
+            super::document_artifact_name_with_extension(Some("brief finale.md"), "pdf"),
+            "brief-finale.pdf",
+        );
+        assert_eq!(
+            super::document_output_formats(&parsed, "brief-finale.md", "Scrivi un documento"),
+            vec!["md".to_string(), "pdf".to_string()],
+        );
+        assert_eq!(
+            super::document_output_formats(&serde_json::json!({}), "brief-finale.pdf", "Scrivi un documento"),
+            vec!["pdf".to_string()],
+        );
+        assert_eq!(
+            super::document_output_formats(&serde_json::json!({}), "brief-finale.md", "Genera anche un PDF"),
+            vec!["pdf".to_string()],
+        );
+    }
+
+    #[test]
+    fn artifact_memories_do_not_participate_in_semantic_dedup() {
+        assert!(!super::memory_type_participates_in_semantic_dedup("artifact"));
+        assert!(super::memory_type_participates_in_semantic_dedup("decision"));
+        assert!(super::memory_type_participates_in_semantic_dedup("open_loop"));
     }
 
     #[test]

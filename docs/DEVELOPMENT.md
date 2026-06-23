@@ -261,11 +261,20 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   `homun-smoke-document.md` ha usato `make_document`, creato
   `/Users/fabio/.homun/artifacts/thread_1782222457104_348911810416083/homun-smoke-document.md`,
   memoria `artifact|confirmed`, entity artifact e relazione
-  `tool:make_document --produced--> artifact`. Il reader provenance collega
-  `make_document` a `DocumentWorkflow`. Test mirati:
+  `tool:make_document --produced--> artifact`. **Slice PDF locale/verde:** lo
+  stesso `make_document` accetta `formats=["md","pdf"]`, genera una sola sorgente
+  Markdown e materializza artifact gestiti `.md`/`.pdf`, entrambi registrati in
+  memoria/provenance con producer `make_document`. Gate PDF ha esposto un
+  guardrail memoria: gli artifact sono esclusi dal dedup semantico distruttivo,
+  perché la loro identità è `thread_slug + name/path`, non la descrizione testuale.
+  Il reader provenance collega `make_document` a `DocumentWorkflow`.
+  `make_research` e `make_meeting` sono volutamente spostati in coda: prima si
+  stabilizza il contratto degli strumenti `make_*` su documenti. Test mirati:
   `make_document_workflow`, `workflow_router_sends_document_requests_to_document_workflow`,
   `workflow_router_prunes_alternative_tools_for_document_workflow`,
   `make_document_tool_requires_artifact_name`,
+  `make_document_formats_preserve_explicit_pdf_outputs`,
+  `artifact_memories_do_not_participate_in_semantic_dedup`,
   `static_workflow_plan_validation_is_async_runtime_safe`,
   `artifact_provenance_context_surfaces_make_document_workflow`.
 - **Gate provider Z.ai/GLM risolto (test manuale utente, 2026-06-23):** Settings

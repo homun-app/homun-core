@@ -110,14 +110,23 @@ modelli deboli/locali. Invarianti: monotonìa, limitatezza, identità non inferi
     (`homun-smoke-document.md` non degrada più a `document.md`). Gate API passato
     su `thread_1782222457104_348911810416083`: artifact gestito, memoria
     `artifact|confirmed`, entity artifact e relazione `make_document produced`.
-    Test mirati: `make_document_workflow`,
+    **Slice PDF (2026-06-23, locale/verde):** `make_document` accetta
+    `formats=["md","pdf"]`, mantiene una sola sorgente Markdown e materializza
+    artifact `.md`/`.pdf` gestiti, ciascuno registrato nella memoria/provenance
+    canonica con producer `make_document`. Gli artifact sono esclusi dal dedup
+    semantico distruttivo: due deliverable simili restano entità distinte per
+    `thread_slug + name/path`. Test mirati: `make_document_workflow`,
     `workflow_router_sends_document_requests_to_document_workflow`,
     `workflow_router_prunes_alternative_tools_for_document_workflow`,
     `make_document_tool_requires_artifact_name`,
+    `make_document_formats_preserve_explicit_pdf_outputs`,
+    `artifact_memories_do_not_participate_in_semantic_dedup`,
     `static_workflow_plan_validation_is_async_runtime_safe`,
     `artifact_provenance_context_surfaces_make_document_workflow`.
-  - ☐ Generalizzare lo stesso pattern per `make_research` / `make_meeting` e
-    arricchire `make_document` con output DOCX/PDF quando serve.
+  - 🟡 **Prossime slice make_document:** DOCX/editabile e controlli più espliciti
+    su struttura/stile, prima di moltiplicare gli strumenti `make_*`.
+  - ☐ **Backlog deliberato:** `make_research` / `make_meeting` restano in fondo
+    finché non è chiarito il contratto degli strumenti creati dall'harness.
 - ✅ **Fase 4 (2026-06-23, locale/verde)** — router workflow|agent + primo
   scaffolding adattivo: richieste deck/presentation/slide/pptx vengono
   instradate dal runtime al workflow `make_deck` con scaffolding `maximum` e
@@ -561,12 +570,18 @@ cablato** nel flusso agente. ADR 0015.
 
 ## WS7 — Ecosistema deliverable (Manus)
 
-Solo il **deck** è affidabile cross-modello (`make_deck`). Le altre skill esistono
-(`create-documents`, `research-report`, `meeting-notes`) ma con la fragilità appena
-risolta per il deck. ADR 0011 (addon + contratto personalizzazione).
+`make_deck` è affidabile cross-modello; `make_document` è il secondo workflow
+stabilizzato e ora cresce per formati/controlli. `make_research` e
+`make_meeting` restano deliberatamente in coda: prima va ragionato il contratto
+degli strumenti `make_*` creati dall'harness. ADR 0011 (addon + contratto
+personalizzazione).
 
-- ☐ **7.1** Portare documenti/ricerca/meeting al livello del deck: **workflow
-  dichiarativi** (`make_*`) guidati dal runtime, contenuto schema-enforced.
+- 🟡 **7.1** Portare documenti al livello del deck: `make_document` dichiarativo
+  guidato dal runtime, con formati gestiti e contenuto sempre derivato da una
+  sorgente canonica.
+- ☐ **7.1b (futuro)** Portare ricerca/meeting al livello del deck solo dopo il
+  chiarimento sul contratto strumenti: `make_research` e `make_meeting` non sono
+  essenziali per la prossima release.
 - ☐ **7.2** Contratto di personalizzazione addon (zona bloccata + overlay-dato),
   3 origini (installati/scritti/generati).
 - ☐ **7.3** Deliverable come **entità di memoria** + provenienza (lega WS2/WS5).
@@ -637,8 +652,8 @@ proprio — versioning, canali, scaricabili dal **sito Homun**, auto-aggiornabil
    piano→memoria e grafo piano/step locali/verdi, resta convergere sul tipo
    `ExecutionPlan`.
 6. **WS1-Fase 3** — skill dichiarative + workflow runner.
-7. **WS7** — ecosistema deliverable (`make_*` per documenti/ricerca/meeting),
-   volutamente dopo memoria/artefatti/engine baseline.
+7. **WS7** — ecosistema deliverable: prima consolidare `make_document`; ricerca
+   e meeting restano alla fine.
 8. **WS8 completo + WS4** — eval come gate di release, perf/affidabilità/UX a
    regime.
 9. **WS9 + WS1-Fasi 4→6** — marketplace/plugin distribution, router+scaffolding

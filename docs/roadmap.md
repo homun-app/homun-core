@@ -95,6 +95,10 @@ primo percorso locale verde:
     il percorso è async-safe nel runtime Tokio, il toolset viene ristretto al
     workflow anche dopo MCP/Composio injection e il nome artifact esplicito viene
     preservato (`homun-smoke-document.md`).
+26. WS1/WS7 document focus — `make_document` viene arricchito prima di creare
+    altri strumenti: supporta formati `md`/`pdf` dallo stesso Markdown canonico e
+    registra ogni artifact prodotto in memoria/provenance con producer
+    `make_document`. `make_research` e `make_meeting` sono spostati alla fine.
 
 Prima di pubblicare/taggare resta prudente ripetere lo smoke manuale in-app su
 una automazione schedulata reale con il binario aggiornato. Il primo smoke ha
@@ -105,8 +109,8 @@ trovato e corretto una falsa chiusura su piano non completato.
 1. Completare verifica allargata della nuova slice `ExecutionPlan` runtime.
 2. WS1-Fase 2/3 — piano runtime-owned e workflow runner dichiarativo, così i
    deliverable futuri non riaprono fragilità cross-modello.
-3. WS7 — deliverable Manus-style (`make_document`, `make_research`,
-   `make_meeting`) solo dopo memoria/artefatti/engine baseline.
+3. WS7 — deliverable Manus-style: prima consolidare `make_document`; solo dopo
+   ragionare su `make_research` e `make_meeting`.
 
 ## Blocco noto
 
@@ -124,7 +128,8 @@ entra ora nel Brain con `run_plan` prima della pipeline deterministica.
 Il router workflow/agent instrada i deck a scaffolding massimo. Il primo smoke
 release ha corretto composer e recall provenance/status. La prima
 generalizzazione documenti è locale/verde su `make_document` e ha superato smoke
-API reale con artifact gestito + memoria/provenance canonica. Prossimo: gate
-allargato, poi scegliere la prossima slice WS1/WS7 da mettere nella 1046:
-`make_research`, `make_meeting` o arricchire `make_document` con DOCX/PDF. Il
-contratto corrente della memoria è in [MEMORIA.md](MEMORIA.md).
+API reale con artifact gestito + memoria/provenance canonica. Scelta corrente:
+arricchire `make_document` prima di moltiplicare gli strumenti; PDF è locale/
+verde, DOCX/editabile è la prossima slice naturale. `make_research` e
+`make_meeting` restano futuri. Il contratto corrente della memoria è in
+[MEMORIA.md](MEMORIA.md).
