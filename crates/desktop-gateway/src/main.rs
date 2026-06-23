@@ -2785,6 +2785,176 @@ fn upsert_memory_relation(
         .map_err(|error| error.to_string())
 }
 
+fn provenance_label(value: &serde_json::Value) -> Option<String> {
+    value.as_str().map(str::trim).filter(|value| !value.is_empty()).map(str::to_string)
+}
+
+fn provenance_normalized_label(value: &str) -> String {
+    value.trim().trim_matches('/').replace('\\', "/").to_ascii_lowercase()
+}
+
+fn artifact_provenance_labels(name: &str, metadata: &serde_json::Value) -> std::collections::HashSet<String> {
+    let mut labels = std::collections::HashSet::new();
+    let mut push = |value: &str| {
+        let normalized = provenance_normalized_label(value);
+        if !normalized.is_empty() {
+            labels.insert(normalized);
+        }
+    };
+    push(name);
+    for key in ["title", "path_ref", "project_relative_path", "managed_path", "project_path"] {
+        if let Some(value) = metadata.get(key).and_then(|value| value.as_str()) {
+            push(value);
+            if let Some(file_name) = std::path::Path::new(value).file_name().and_then(|value| value.to_str()) {
+                push(file_name);
+            }
+        }
+    }
+    labels
+}
+
+fn decision_affects_artifact(decision: &MemoryRecord, artifact_labels: &std::collections::HashSet<String>) -> bool {
+    let affected = decision
+        .metadata
+        .get("affects_labels")
+        .and_then(|value| value.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(provenance_label);
+    affected
+        .map(|label| provenance_normalized_label(&label))
+        .any(|label| artifact_labels.contains(&label))
+}
+
+fn explicit_artifact_source_refs(metadata: &serde_json::Value) -> Vec<MemoryRef> {
+    let mut refs = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for key in [
+        "decision_refs",
+        "plan_refs",
+        "task_refs",
+        "source_memory_refs",
+        "derived_from_refs",
+    ] {
+        let Some(value) = metadata.get(key) else { continue };
+        let values: Vec<&serde_json::Value> = if let Some(array) = value.as_array() {
+            array.iter().collect()
+        } else {
+            vec![value]
+        };
+        for value in values {
+            let Some(raw) = value.as_str().map(str::trim).filter(|value| !value.is_empty()) else {
+                continue;
+            };
+            let Ok(reference) = raw.parse::<MemoryRef>() else {
+                continue;
+            };
+            if seen.insert(reference.to_string()) {
+                refs.push(reference);
+            }
+        }
+    }
+    refs
+}
+
+fn upsert_artifact_evidence_provenance_graph(
+    facade: &MemoryFacade,
+    user: &MemoryUserId,
+    workspace: &MemoryWorkspaceId,
+    privacy_domain: &str,
+    artifact_ref: &MemoryRef,
+    memory_ref: &MemoryRef,
+    thread_slug: &str,
+    name: &str,
+    metadata: &serde_json::Value,
+) -> Result<(), String> {
+    let artifact_labels = artifact_provenance_labels(name, metadata);
+    let explicit_refs: std::collections::HashSet<String> = explicit_artifact_source_refs(metadata)
+        .into_iter()
+        .filter(|reference| reference.user_id == *user && reference.workspace_id == *workspace)
+        .map(|reference| reference.to_string())
+        .collect();
+    let decisions = facade
+        .list_memories_for_ui(user, workspace)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|memory| {
+            memory.memory_type == "decision"
+                && matches!(memory.status, MemoryStatus::Confirmed | MemoryStatus::Candidate)
+                && (decision_affects_artifact(memory, &artifact_labels)
+                    || explicit_refs.contains(&memory.reference.to_string()))
+        })
+        .collect::<Vec<_>>();
+    let decision_refs: std::collections::HashSet<String> =
+        decisions.iter().map(|decision| decision.reference.to_string()).collect();
+    for decision in decisions {
+        let decision_fragment = provenance_key_fragment(&decision.reference.key);
+        let artifact_fragment = provenance_key_fragment(name);
+        upsert_memory_relation(
+            facade,
+            user,
+            workspace,
+            privacy_domain,
+            format!("decision_affects_artifact:{decision_fragment}:{artifact_fragment}"),
+            decision.reference.clone(),
+            "affects",
+            artifact_ref.clone(),
+            vec![decision.reference.clone(), memory_ref.clone()],
+            serde_json::json!({
+                "source": "artifact_provenance",
+                "evidence": "decision_affects_label_or_ref",
+                "thread_slug": thread_slug,
+                "name": name,
+            }),
+        )?;
+        upsert_memory_relation(
+            facade,
+            user,
+            workspace,
+            privacy_domain,
+            format!("artifact_derived_from_decision:{artifact_fragment}:{decision_fragment}"),
+            artifact_ref.clone(),
+            "derived_from",
+            decision.reference.clone(),
+            vec![decision.reference.clone(), memory_ref.clone()],
+            serde_json::json!({
+                "source": "artifact_provenance",
+                "evidence": "decision_affects_label_or_ref",
+                "thread_slug": thread_slug,
+                "name": name,
+            }),
+        )?;
+    }
+    for source_ref in explicit_artifact_source_refs(metadata)
+        .into_iter()
+        .filter(|reference| reference.user_id == *user && reference.workspace_id == *workspace)
+    {
+        if source_ref == *memory_ref || decision_refs.contains(&source_ref.to_string()) {
+            continue;
+        }
+        let source_fragment = provenance_key_fragment(&source_ref.key);
+        let artifact_fragment = provenance_key_fragment(name);
+        upsert_memory_relation(
+            facade,
+            user,
+            workspace,
+            privacy_domain,
+            format!("artifact_derived_from_ref:{artifact_fragment}:{source_fragment}"),
+            artifact_ref.clone(),
+            "derived_from",
+            source_ref.clone(),
+            vec![source_ref.clone(), memory_ref.clone()],
+            serde_json::json!({
+                "source": "artifact_provenance",
+                "evidence": "explicit_metadata_ref",
+                "thread_slug": thread_slug,
+                "name": name,
+            }),
+        )?;
+    }
+    Ok(())
+}
+
 fn upsert_artifact_provenance_graph(
     facade: &MemoryFacade,
     user: &MemoryUserId,
@@ -2952,6 +3122,18 @@ fn upsert_artifact_provenance_graph(
             }),
         )?;
     }
+
+    upsert_artifact_evidence_provenance_graph(
+        facade,
+        user,
+        workspace,
+        privacy_domain,
+        artifact_ref,
+        memory_ref,
+        thread_slug,
+        name,
+        metadata,
+    )?;
 
     Ok(())
 }
@@ -33977,6 +34159,169 @@ mod tests {
         assert!(relations
             .iter()
             .any(|relation| relation.relation_type == "relates_to"));
+    }
+
+    #[test]
+    fn artifact_memory_links_explicit_decision_affects_to_provenance_graph() {
+        let facade = local_first_memory::MemoryFacade::new(
+            local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
+        );
+        let user = local_first_memory::UserId::new("local");
+        let workspace = local_first_memory::WorkspaceId::new("project");
+        let lifecycle = local_first_memory::MemoryLifecycleRequest {
+            actor_id: "test".to_string(),
+            user_id: user.clone(),
+            workspace_id: workspace.clone(),
+            purpose: "test".to_string(),
+        };
+        let decision = facade
+            .create_memory_candidate(local_first_memory::MemoryCreateRequest {
+                request: lifecycle.clone(),
+                memory_type: "decision".to_string(),
+                text: "Generate the report artifact because the review needs a durable deliverable."
+                    .to_string(),
+                aliases: vec!["reports/report.pdf".to_string()],
+                language_hints: Vec::new(),
+                confidence: 1.0,
+                privacy_domain: local_first_memory::PrivacyDomain::new("project"),
+                sensitivity: local_first_memory::DataSensitivity::Internal,
+                evidence_refs: Vec::new(),
+                metadata: serde_json::json!({
+                    "source": "record_decision",
+                    "scope": "project",
+                    "decision": {
+                        "rationale": "The review needs a durable deliverable.",
+                        "alternatives": []
+                    },
+                    "affects_labels": ["reports/report.pdf"],
+                }),
+            })
+            .unwrap();
+        facade
+            .confirm_memory(&lifecycle, &decision.reference, "decision recorded")
+            .unwrap();
+
+        let artifact_memory = super::upsert_artifact_memory_record(
+            &facade,
+            &user,
+            &workspace,
+            &lifecycle,
+            "project",
+            "thread-1",
+            "reports/report.pdf",
+            "Artifact reports/report.pdf (pdf) creato nel progetto.".to_string(),
+            serde_json::json!({
+                "source": "artifact_runtime",
+                "producer": "mcp_filesystem",
+                "thread_slug": "thread-1",
+                "name": "reports/report.pdf",
+                "artifact_type": "pdf",
+                "project_relative_path": "reports/report.pdf",
+                "project_path": "/tmp/project/reports/report.pdf",
+                "size_bytes": 456,
+            }),
+        )
+        .unwrap();
+
+        let relations = facade.list_relations_for_ui(&user, &workspace).unwrap();
+        let artifact_entity = local_first_memory::MemoryRef::new(
+            local_first_memory::MemoryRefKind::Entity,
+            user.clone(),
+            workspace.clone(),
+            "artifact:thread-1:reports/report.pdf",
+        );
+        assert!(relations.iter().any(|relation| {
+            relation.relation_type == "affects"
+                && relation.source_ref == decision.reference
+                && relation.target_ref == artifact_entity
+                && relation.evidence.contains(&decision.reference)
+                && relation.evidence.contains(&artifact_memory)
+        }));
+        assert!(relations.iter().any(|relation| {
+            relation.relation_type == "derived_from"
+                && relation.source_ref == artifact_entity
+                && relation.target_ref == decision.reference
+                && relation.metadata["evidence"] == serde_json::json!("decision_affects_label_or_ref")
+        }));
+    }
+
+    #[test]
+    fn artifact_memory_links_only_explicit_metadata_source_refs() {
+        let facade = local_first_memory::MemoryFacade::new(
+            local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
+        );
+        let user = local_first_memory::UserId::new("local");
+        let workspace = local_first_memory::WorkspaceId::new("project");
+        let lifecycle = local_first_memory::MemoryLifecycleRequest {
+            actor_id: "test".to_string(),
+            user_id: user.clone(),
+            workspace_id: workspace.clone(),
+            purpose: "test".to_string(),
+        };
+        let decision = facade
+            .create_memory_candidate(local_first_memory::MemoryCreateRequest {
+                request: lifecycle.clone(),
+                memory_type: "decision".to_string(),
+                text: "Use the generated data file because the workflow needs a checkpoint."
+                    .to_string(),
+                aliases: Vec::new(),
+                language_hints: Vec::new(),
+                confidence: 1.0,
+                privacy_domain: local_first_memory::PrivacyDomain::new("project"),
+                sensitivity: local_first_memory::DataSensitivity::Internal,
+                evidence_refs: Vec::new(),
+                metadata: serde_json::json!({
+                    "source": "record_decision",
+                    "scope": "project",
+                    "decision": {
+                        "rationale": "The workflow needs a checkpoint.",
+                        "alternatives": []
+                    }
+                }),
+            })
+            .unwrap();
+        facade
+            .confirm_memory(&lifecycle, &decision.reference, "decision recorded")
+            .unwrap();
+
+        super::upsert_artifact_memory_record(
+            &facade,
+            &user,
+            &workspace,
+            &lifecycle,
+            "project",
+            "thread-2",
+            "data/checkpoint.json",
+            "Artifact data/checkpoint.json (data) creato nel progetto.".to_string(),
+            serde_json::json!({
+                "source": "artifact_runtime",
+                "producer": "workflow",
+                "thread_slug": "thread-2",
+                "name": "data/checkpoint.json",
+                "artifact_type": "data",
+                "project_relative_path": "data/checkpoint.json",
+                "source_memory_refs": [decision.reference.to_string()],
+                "size_bytes": 42,
+            }),
+        )
+        .unwrap();
+
+        let relations = facade.list_relations_for_ui(&user, &workspace).unwrap();
+        assert!(relations.iter().any(|relation| {
+            relation.relation_type == "affects"
+                && relation.source_ref == decision.reference
+                && relation.metadata["evidence"] == serde_json::json!("decision_affects_label_or_ref")
+        }));
+        assert!(relations.iter().any(|relation| {
+            relation.relation_type == "derived_from"
+                && relation.target_ref == decision.reference
+                && relation.metadata["evidence"] == serde_json::json!("decision_affects_label_or_ref")
+        }));
+        assert!(!relations.iter().any(|relation| {
+            relation.relation_type == "derived_from"
+                && relation.target_ref == decision.reference
+                && relation.metadata["evidence"] == serde_json::json!("explicit_metadata_ref")
+        }));
     }
 
     #[test]

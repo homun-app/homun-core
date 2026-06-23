@@ -36,6 +36,11 @@ primo percorso locale verde:
    producer tool `produced` artifact, artifact `belongs_to_project` progetto e,
    per file in root progetto, artifact `relates_to` file. Il vocabolario memory
    include anche `rationale_for`, `produced`, `derived_from`.
+10. WS5.5b — prima slice evidence-only: decisioni con `affects_labels` espliciti
+    o metadata artifact con ref canoniche (`decision_refs`, `plan_refs`,
+    `task_refs`, `source_memory_refs`, `derived_from_refs`) creano archi
+    `affects` / `derived_from` nel grafo canonico. Nessun matching semantico o
+    store parallelo.
 
 Prima di pubblicare/taggare resta prudente un smoke manuale in-app su una
 automazione schedulata reale che compaia nel thread `scheduled`. Non è bloccante
@@ -43,8 +48,8 @@ per iniziare il consolidamento memoria in locale.
 
 ## Milestone
 
-1. WS5.5b/5.6 — collegare decisioni/piano agli artifact con evidenza esplicita,
-   poi aggiungere eval memoria sulla catena di provenienza.
+1. WS5.6 — aggiungere eval memoria sulla catena di provenienza: nuova chat deve
+   recuperare artifact, lavoro/decisione sorgente e perché.
 2. WS1-Fase 2/3 — piano runtime-owned e workflow runner dichiarativo, così i
    deliverable futuri non riaprono fragilità cross-modello.
 3. WS7 — deliverable Manus-style (`make_document`, `make_research`,
@@ -58,9 +63,9 @@ collegarli al perché. Per questo WS7 non è più il prossimo step.
 
 ## Prossima azione
 
-Proseguire con WS5.5b: collegare decisioni/piano agli artifact usando evidenza
-esplicita già presente in memoria/metadata, senza inferenze fragili. Subito dopo:
-WS5.6 eval memoria sulla domanda “quali artifact per il progetto X e da quale
-decisione/lavoro derivano?”. Il gate lifecycle/delete/export degli artifact è
-passato in-app e WS5.5a ha iniziato la provenance graph canonica. Il contratto
-corrente della memoria è in [MEMORIA.md](MEMORIA.md).
+Proseguire con WS5.6: eval memoria sulla domanda “quali artifact per il progetto
+X e da quale decisione/lavoro derivano?” e “a che punto è il workflow e perché?”.
+Il gate lifecycle/delete/export degli artifact è passato in-app; WS5.5a/5.5b
+hanno iniziato la provenance graph canonica con producer/progetto/file e
+decisioni/source-ref evidence-only. Il contratto corrente della memoria è in
+[MEMORIA.md](MEMORIA.md).

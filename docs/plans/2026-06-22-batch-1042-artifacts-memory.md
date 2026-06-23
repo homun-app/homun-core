@@ -205,8 +205,18 @@ che fanno "ricordare il perché e sopravvivere". Caposaldo #8.
   e `cargo test -p local-first-memory kind_tags_round_trip -- --nocapture` verdi;
   suite complete gateway (`176 passati, 1 ignorato`), suite completa memory e
   `npm run build` desktop verdi.
-  **Resta:** collegare decisioni/piano agli artifact con evidenza esplicita, poi
-  usare questi archi nell'eval WS5.6.
+  **Slice 5.5b locale/verde:** gli artifact memoria collegano decisioni/piano/lavoro
+  solo da evidenza strutturata già presente: `decision.affects_labels` che coincide
+  con un identificatore canonico dell'artifact (`name`, `title`, `path_ref`,
+  `project_relative_path`, path assoluto o basename), oppure ref esplicite nei
+  metadata artifact (`decision_refs`, `plan_refs`, `task_refs`,
+  `source_memory_refs`, `derived_from_refs`). Il grafo canonico materializza
+  `decision --affects--> artifact` e `artifact --derived_from--> decision/source_ref`,
+  con evidence refs alla memoria sorgente e alla memoria artifact. Non fa matching
+  semantico né inferisce relazioni probabili. Test:
+  `cargo test -p local-first-desktop-gateway artifact_memory_links_ -- --nocapture`.
+  **Resta:** usare questi archi nell'eval WS5.6 e alimentare refs piano/task quando
+  WS1-F6 persisterà step/piano in memoria.
 - ☐ **5.6 Eval memoria** (guardrail): chat nuova → *"a che punto è il workflow e perché
   make_deck?"* / *"quali artefatti per il progetto X e da quale decisione?"* → deve
   rispondere. Anti-regressione, come l'eval del deck.

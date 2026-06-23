@@ -123,8 +123,17 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   suite complete `cargo test -p local-first-desktop-gateway -- --nocapture`
   (`176 passati, 1 ignorato`), `cargo test -p local-first-memory -- --nocapture`
   e `npm run build` desktop verdi.
-  **Prossimo passo unico:** WS5.5b collegare decisioni/piano agli artifact senza
-  inferenze fragili, poi WS5.6 eval memoria.
+  **WS5.5b slice locale/verde:** gli artifact ora collegano decisioni/piano/lavoro
+  solo quando c'è evidenza esplicita: `affects_labels` di una memoria `decision`
+  che coincide con `name`/`title`/`path_ref`/`project_relative_path` dell'artifact,
+  oppure metadata artifact con ref canoniche (`decision_refs`, `plan_refs`,
+  `task_refs`, `source_memory_refs`, `derived_from_refs`). In quel caso il grafo
+  canonico materializza `decision --affects--> artifact` e
+  `artifact --derived_from--> decision/source_ref`, con evidence refs alla decisione/
+  source e alla memoria artifact. Nessuna inferenza semantica o store parallelo.
+  Test mirati:
+  `cargo test -p local-first-desktop-gateway artifact_memory_links_ -- --nocapture`.
+  **Prossimo passo unico:** WS5.6 eval memoria sulla catena artifact/provenance.
 - **Nota aperta non bloccante:** durante i gate con tool il provider primario
   `glm-5.2` continua a rispondere `400 Bad Request` sul primo round con tool; il
   fallback a `kimi-k2.6:cloud` prosegue correttamente. Da riprendere come task
