@@ -121,6 +121,8 @@ pub struct ExecutionPlan {
     #[serde(default)]
     pub direct_answer: Option<DirectAnswer>,
     #[serde(default)]
+    pub plan_propose: Option<PlanProposal>,
+    #[serde(default)]
     pub steps: Vec<PlanStep>,
     #[serde(default)]
     pub needs_more_tools: Option<ToolSearchRequest>,
@@ -149,6 +151,13 @@ pub struct DirectAnswer {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ToolSearchRequest {
     pub query: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PlanProposal {
+    pub summary: String,
+    #[serde(default)]
+    pub steps: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -380,5 +389,22 @@ mod plan_step_tests {
         }))
         .unwrap();
         assert_eq!(step.allowed_actions, vec![AllowedAction::Read, AllowedAction::Draft]);
+    }
+
+    #[test]
+    fn execution_plan_accepts_plan_propose_contract() {
+        let plan: ExecutionPlan = serde_json::from_value(serde_json::json!({
+            "route": "ask_clarification",
+            "plan_propose": {
+                "summary": "Build the report",
+                "steps": ["Gather sources", "Write report"]
+            },
+            "steps": []
+        }))
+        .unwrap();
+
+        let proposal = plan.plan_propose.expect("proposal");
+        assert_eq!(proposal.summary, "Build the report");
+        assert_eq!(proposal.steps, vec!["Gather sources", "Write report"]);
     }
 }

@@ -93,6 +93,9 @@ Fatto:
 - primo workflow dichiarativo WS1: `make_deck` ha una `WorkflowDefinition`
   harness-owned proiettata in `ExecutionPlan` (`DeckWorkflow`), senza creare un
   secondo store workflow.
+- `ExecutionPlan` include `plan_propose` come contratto strutturato per piani da
+  approvare prima dell'esecuzione; resta dentro il contratto orchestrator, non in
+  uno store separato.
 
 Mancante:
 

@@ -67,6 +67,8 @@ primo percorso locale verde:
 17. WS1-Fase 3a — `make_deck` ha una `WorkflowDefinition` harness-owned
     proiettata in `ExecutionPlan` con DAG e contratto `DeckWorkflow`; il modello
     continua a vedere un solo tool.
+18. WS1-Fase 3c — `ExecutionPlan` include `plan_propose` come contratto
+    strutturato per piani da approvare prima dell'esecuzione.
 
 Prima di pubblicare/taggare resta prudente ripetere lo smoke manuale in-app su
 una automazione schedulata reale con il binario aggiornato. Il primo smoke ha
@@ -91,5 +93,5 @@ collegarli al perché. Per questo WS7 non è più il prossimo step.
 WS1 ha ora write-back piano→memoria, prima materializzazione grafo piano/step,
 proiezione `ExecutionPlan` nei metadata canonici, `ExecutionPlan` come stato
 runtime primario del loop agente e una prima `WorkflowDefinition` per `make_deck`.
-Prossimo: runner workflow generico riusabile e `plan_propose` nel contratto. Il
-contratto corrente della memoria è in [MEMORIA.md](MEMORIA.md).
+Prossimo: runner workflow generico riusabile. Il contratto corrente della memoria
+è in [MEMORIA.md](MEMORIA.md).

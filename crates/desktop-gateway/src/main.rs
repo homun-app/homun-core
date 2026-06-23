@@ -5705,6 +5705,7 @@ fn runtime_execution_plan(plan: &[serde_json::Value]) -> ExecutionPlan {
     ExecutionPlan {
         route: OrchestratorRoute::MixedWorkflow,
         direct_answer: None,
+        plan_propose: None,
         steps: plan
             .iter()
             .enumerate()
@@ -5851,6 +5852,7 @@ fn workflow_execution_plan(
     ExecutionPlan {
         route: OrchestratorRoute::MixedWorkflow,
         direct_answer: None,
+        plan_propose: None,
         steps: definition
             .steps
             .iter()

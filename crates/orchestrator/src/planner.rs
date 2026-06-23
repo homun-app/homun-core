@@ -44,6 +44,7 @@ pub(crate) fn planner_prompt(
          OUTPUT FORMAT — return ONLY one JSON object with EXACTLY these top-level keys:\n\
          - \"route\": one of [direct_answer, memory_lookup, capability_call, subagent_workflow, mixed_workflow, ask_clarification, refuse, needs_more_tools]\n\
          - \"steps\": array of step objects (use [] for direct_answer/ask_clarification/refuse). Each step object MUST have: \"step_id\" (string), \"kind\" (capability_call|memory_lookup|subagent_task|direct_answer), \"depends_on\" (array of step_id), \"execution_policy\" (immediate|durable_task|ask_approval), \"risk_level\" (string), \"expected_duration_seconds\" (integer). A capability_call step adds \"provider_id\",\"tool_name\",\"arguments\". A subagent_task step adds \"agent_id\" (one of [PlannerAgent, MemoryAgent, ToolAgent, VisionAgent, RiskAgent, AutomationAgent, ReviewAgent]), \"goal\",\"contract\",\"allowed_actions\",\"requires_user_approval\",\"timeout_seconds\",\"max_tokens\".\n\
+         - optional \"plan_propose\": {{\"summary\",\"steps\"}} only when user approval of a plan is needed before execution.\n\
          - optional \"direct_answer\": {{\"answer\",\"reason\",\"confidence\"}} only when route=direct_answer.\n\
          - optional \"needs_more_tools\": {{\"query\"}} only when you need tools not yet loaded.\n\
          Do NOT put step fields at the top level; steps always go inside the \"steps\" array.\n\
@@ -133,6 +134,16 @@ pub(crate) fn planner_schema() -> serde_json::Value {
                 ]
             },
             "direct_answer": {"type": ["object", "null"]},
+            "plan_propose": {
+                "type": ["object", "null"],
+                "properties": {
+                    "summary": {"type": "string"},
+                    "steps": {
+                        "type": "array",
+                        "items": {"type": "string"}
+                    }
+                }
+            },
             "steps": {
                 "type": "array",
                 "items": {

@@ -205,6 +205,11 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   con DAG/contratto `DeckWorkflow`. Il modello continua a vedere un solo tool
   `make_deck`; l'orchestrazione resta dell'harness. Test mirato:
   `make_deck_workflow_definition_projects_execution_plan`.
+- **WS1-Fase 3c locale/verde:** il contratto `ExecutionPlan` del crate
+  `orchestrator` include ora `plan_propose: Option<PlanProposal>` (`summary`,
+  `steps`) e lo schema/prompt planner lo accettano come campo top-level
+  opzionale quando serve approvazione del piano prima dell'esecuzione. Test:
+  `cargo test -p local-first-orchestrator -- --nocapture`.
 - **Nota aperta non bloccante:** durante i gate con tool il provider primario
   `glm-5.2` continua a rispondere `400 Bad Request` sul primo round con tool; il
   fallback a `kimi-k2.6:cloud` prosegue correttamente. Da riprendere come task

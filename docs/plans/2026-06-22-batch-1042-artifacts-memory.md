@@ -71,7 +71,11 @@ modelli deboli/locali. Invarianti: monotonìa, limitatezza, identità non inferi
     applica le regole monotone/sticky di `merge_plan` e rigenera il contratto.
     La resume da marker resta retrocompatibile. Test mirato:
     `merge_execution_plan_is_runtime_canonical_state`.
-  - ☐ **Slice 3c**: includere `plan_propose` nel contratto `ExecutionPlan`.
+  - ✅ **Slice 3c (2026-06-23, locale/verde)**: `ExecutionPlan` include
+    `plan_propose: Option<PlanProposal>` (`summary`, `steps`) come campo
+    top-level opzionale; schema e prompt planner lo accettano quando serve
+    approvazione del piano prima dell'esecuzione. Test:
+    `cargo test -p local-first-orchestrator -- --nocapture`.
 - ☐ **Floor ovunque** — constrained decoding su **tutte** le emissioni di
   orchestrazione (tool call del loop principale, piano, verifica), locale+cloud. Oggi
   è imposto solo sul contenuto di `make_deck`; il planner OpenAI-compat declassa ancora.
