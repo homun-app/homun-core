@@ -61,8 +61,11 @@ Fatto:
 - write-back delle azioni proattive in memoria: `accepted|snoozed → open_loop`,
   `dismissed → decision`.
 - artifact surfaced dai produttori principali registrati nel `MemoryFacade` come
-  `memory_type="artifact"` + entity grafo `artifact` (locale/headless; gate in-app
-  pendente).
+  `memory_type="artifact"` + entity grafo `artifact`; gate lifecycle/delete/export
+  passato in-app;
+- provenance graph iniziale sugli artifact: producer tool `produced` artifact,
+  artifact `belongs_to_project` progetto, artifact `relates_to` file quando il
+  path relativo di progetto è noto.
 
 Mancante:
 
@@ -70,7 +73,7 @@ Mancante:
   contatti, nel grafo canonico memoria;
 - graphification estesa oltre il codice: artifact, piano, decisioni, outcome e loop
   aperti devono diventare nodi/archi causali, non solo righe testuali;
-- provenance completa decisione → artifact → codice → esito;
+- provenance completa decisione/piano → artifact → codice → esito;
 - eval memoria come gate.
 
 ## Prossimo blocco
@@ -124,10 +127,11 @@ Acceptance:
 1. WS2-3.1 — artifact come entità di memoria: locale/headless fatto, gate in-app
    + recall deliverable pendenti.
 2. WS2-3.2/3.3 — schermata Artifacts e lifecycle/delete.
-3. WS5.5 — provenance decisione → artifact → codice → esito.
-4. WS5.6 — eval memoria.
-5. WS1-Fase 2/3 — piano runtime-owned e workflow runner con write-back memoria.
-6. WS7 — deliverable Manus-style, solo dopo queste fondamenta.
+3. WS5.5a — provenance artifact→producer/progetto/file: locale/verde.
+4. WS5.5b — provenance decisione/piano → artifact → codice → esito.
+5. WS5.6 — eval memoria.
+6. WS1-Fase 2/3 — piano runtime-owned e workflow runner con write-back memoria.
+7. WS7 — deliverable Manus-style, solo dopo queste fondamenta.
 
 ## File codice principali
 

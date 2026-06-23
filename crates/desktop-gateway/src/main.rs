@@ -2732,6 +2732,230 @@ fn artifact_memory_matches(memory: &MemoryRecord, thread_slug: &str, name: &str)
             == Some(name)
 }
 
+fn provenance_key_fragment(value: &str) -> String {
+    let cleaned: String = value
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.') {
+                ch
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    let trimmed = cleaned.trim_matches(['.', '-']).trim();
+    if trimmed.is_empty() {
+        "unknown".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn upsert_memory_relation(
+    facade: &MemoryFacade,
+    user: &MemoryUserId,
+    workspace: &MemoryWorkspaceId,
+    privacy_domain: &str,
+    relation_key: String,
+    source_ref: MemoryRef,
+    relation_type: &str,
+    target_ref: MemoryRef,
+    evidence: Vec<MemoryRef>,
+    metadata: serde_json::Value,
+) -> Result<(), String> {
+    facade
+        .upsert_relation(&MemoryRelation {
+            reference: MemoryRef::new(
+                MemoryRefKind::Relation,
+                user.clone(),
+                workspace.clone(),
+                relation_key,
+            ),
+            user_id: user.clone(),
+            workspace_id: workspace.clone(),
+            source_ref,
+            relation_type: relation_type.to_string(),
+            target_ref,
+            confidence: 1.0,
+            privacy_domain: PrivacyDomain::new(privacy_domain),
+            sensitivity: MemoryDataSensitivity::Internal,
+            evidence,
+            metadata,
+        })
+        .map_err(|error| error.to_string())
+}
+
+fn upsert_artifact_provenance_graph(
+    facade: &MemoryFacade,
+    user: &MemoryUserId,
+    workspace: &MemoryWorkspaceId,
+    privacy_domain: &str,
+    artifact_ref: &MemoryRef,
+    memory_ref: &MemoryRef,
+    thread_slug: &str,
+    name: &str,
+    metadata: &serde_json::Value,
+) -> Result<(), String> {
+    let project_key = format!("project:{}", workspace.as_str());
+    let project_ref = MemoryRef::new(
+        MemoryRefKind::Entity,
+        user.clone(),
+        workspace.clone(),
+        project_key.clone(),
+    );
+    facade
+        .upsert_entity(&MemoryEntity {
+            reference: project_ref.clone(),
+            user_id: user.clone(),
+            workspace_id: workspace.clone(),
+            entity_type: "project".to_string(),
+            name: workspace.as_str().to_string(),
+            canonical_key: project_key,
+            aliases: vec![workspace.as_str().to_string()],
+            privacy_domain: PrivacyDomain::new(privacy_domain),
+            sensitivity: MemoryDataSensitivity::Internal,
+            metadata: serde_json::json!({
+                "source": "artifact_provenance",
+                "workspace": workspace.as_str(),
+            }),
+        })
+        .map_err(|error| error.to_string())?;
+    upsert_memory_relation(
+        facade,
+        user,
+        workspace,
+        privacy_domain,
+        format!(
+            "artifact_belongs_to_project:{}:{}",
+            provenance_key_fragment(thread_slug),
+            provenance_key_fragment(name)
+        ),
+        artifact_ref.clone(),
+        "belongs_to_project",
+        project_ref,
+        vec![memory_ref.clone()],
+        serde_json::json!({
+            "source": "artifact_provenance",
+            "thread_slug": thread_slug,
+            "name": name,
+        }),
+    )?;
+
+    if let Some(producer) = metadata
+        .get("producer")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        let producer_key = format!("tool:{producer}");
+        let producer_ref = MemoryRef::new(
+            MemoryRefKind::Entity,
+            user.clone(),
+            workspace.clone(),
+            producer_key.clone(),
+        );
+        facade
+            .upsert_entity(&MemoryEntity {
+                reference: producer_ref.clone(),
+                user_id: user.clone(),
+                workspace_id: workspace.clone(),
+                entity_type: "tool".to_string(),
+                name: producer.to_string(),
+                canonical_key: producer_key,
+                aliases: vec![producer.to_string()],
+                privacy_domain: PrivacyDomain::new(privacy_domain),
+                sensitivity: MemoryDataSensitivity::Internal,
+                metadata: serde_json::json!({
+                    "source": "artifact_provenance",
+                    "producer": producer,
+                }),
+            })
+            .map_err(|error| error.to_string())?;
+        upsert_memory_relation(
+            facade,
+            user,
+            workspace,
+            privacy_domain,
+            format!(
+                "artifact_produced:{}:{}:{}",
+                provenance_key_fragment(producer),
+                provenance_key_fragment(thread_slug),
+                provenance_key_fragment(name)
+            ),
+            producer_ref,
+            "produced",
+            artifact_ref.clone(),
+            vec![memory_ref.clone()],
+            serde_json::json!({
+                "source": "artifact_provenance",
+                "thread_slug": thread_slug,
+                "name": name,
+                "producer": producer,
+            }),
+        )?;
+    }
+
+    if let Some(relative_path) = metadata
+        .get("project_relative_path")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        let file_key = format!("file:{relative_path}");
+        let file_ref = MemoryRef::new(
+            MemoryRefKind::Entity,
+            user.clone(),
+            workspace.clone(),
+            file_key.clone(),
+        );
+        let file_name = std::path::Path::new(relative_path)
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or(relative_path);
+        facade
+            .upsert_entity(&MemoryEntity {
+                reference: file_ref.clone(),
+                user_id: user.clone(),
+                workspace_id: workspace.clone(),
+                entity_type: "file".to_string(),
+                name: relative_path.to_string(),
+                canonical_key: file_key,
+                aliases: vec![relative_path.to_string(), file_name.to_string()],
+                privacy_domain: PrivacyDomain::new(privacy_domain),
+                sensitivity: MemoryDataSensitivity::Internal,
+                metadata: serde_json::json!({
+                    "source": "artifact_provenance",
+                    "project_relative_path": relative_path,
+                    "project_path": metadata.get("project_path").cloned().unwrap_or(serde_json::Value::Null),
+                }),
+            })
+            .map_err(|error| error.to_string())?;
+        upsert_memory_relation(
+            facade,
+            user,
+            workspace,
+            privacy_domain,
+            format!(
+                "artifact_file:{}:{}",
+                provenance_key_fragment(thread_slug),
+                provenance_key_fragment(relative_path)
+            ),
+            artifact_ref.clone(),
+            "relates_to",
+            file_ref,
+            vec![memory_ref.clone()],
+            serde_json::json!({
+                "source": "artifact_provenance",
+                "thread_slug": thread_slug,
+                "name": name,
+                "project_relative_path": relative_path,
+            }),
+        )?;
+    }
+
+    Ok(())
+}
+
 fn upsert_artifact_memory_record(
     facade: &MemoryFacade,
     user: &MemoryUserId,
@@ -2818,7 +3042,7 @@ fn upsert_artifact_memory_record(
             workspace_id: workspace.clone(),
             source_ref: record.reference.clone(),
             relation_type: "describes".to_string(),
-            target_ref: entity_ref,
+            target_ref: entity_ref.clone(),
             confidence: 1.0,
             privacy_domain: PrivacyDomain::new(privacy_domain),
             sensitivity: MemoryDataSensitivity::Internal,
@@ -2830,6 +3054,17 @@ fn upsert_artifact_memory_record(
             }),
         })
         .map_err(|error| error.to_string())?;
+    upsert_artifact_provenance_graph(
+        facade,
+        user,
+        workspace,
+        privacy_domain,
+        &entity_ref,
+        &record.reference,
+        thread_slug,
+        name,
+        &metadata,
+    )?;
     Ok(record.reference)
 }
 
@@ -33675,6 +33910,7 @@ mod tests {
             "Artifact report.pdf (pdf) creato nel thread thread-1.".to_string(),
             serde_json::json!({
                 "source": "artifact_runtime",
+                "producer": "make_deck",
                 "thread_slug": "thread-1",
                 "name": "report.pdf",
                 "artifact_type": "pdf",
@@ -33693,9 +33929,12 @@ mod tests {
             "Artifact report.pdf (pdf) aggiornato nel thread thread-1.".to_string(),
             serde_json::json!({
                 "source": "artifact_runtime",
+                "producer": "make_deck",
                 "thread_slug": "thread-1",
                 "name": "report.pdf",
                 "artifact_type": "pdf",
+                "project_relative_path": "reports/report.pdf",
+                "project_path": "/tmp/project/reports/report.pdf",
                 "size_bytes": 456,
                 "updated": true,
             }),
@@ -33717,9 +33956,27 @@ mod tests {
         assert!(entities
             .iter()
             .any(|entity| entity.entity_type == "artifact" && entity.name == "report.pdf"));
+        assert!(entities
+            .iter()
+            .any(|entity| entity.entity_type == "project" && entity.name == "project"));
+        assert!(entities
+            .iter()
+            .any(|entity| entity.entity_type == "tool" && entity.name == "make_deck"));
+        assert!(entities
+            .iter()
+            .any(|entity| entity.entity_type == "file" && entity.name == "reports/report.pdf"));
         assert!(relations
             .iter()
             .any(|relation| relation.relation_type == "describes"));
+        assert!(relations
+            .iter()
+            .any(|relation| relation.relation_type == "belongs_to_project"));
+        assert!(relations
+            .iter()
+            .any(|relation| relation.relation_type == "produced"));
+        assert!(relations
+            .iter()
+            .any(|relation| relation.relation_type == "relates_to"));
     }
 
     #[test]

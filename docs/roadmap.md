@@ -32,6 +32,10 @@ primo percorso locale verde:
    gli artifact memoria e valida le root autorizzate prima di includerli nel
    bundle. Smoke API e click-download in-app passati con ZIP valido che include
    sia artifact managed sia artifact memoria.
+9. WS5.5a — gli artifact memoria ora materializzano provenance graph canonica:
+   producer tool `produced` artifact, artifact `belongs_to_project` progetto e,
+   per file in root progetto, artifact `relates_to` file. Il vocabolario memory
+   include anche `rationale_for`, `produced`, `derived_from`.
 
 Prima di pubblicare/taggare resta prudente un smoke manuale in-app su una
 automazione schedulata reale che compaia nel thread `scheduled`. Non è bloccante
@@ -39,8 +43,8 @@ per iniziare il consolidamento memoria in locale.
 
 ## Milestone
 
-1. WS5.5/5.6 — catena di provenienza decisione → artefatto → codice → esito,
-   più eval memoria.
+1. WS5.5b/5.6 — collegare decisioni/piano agli artifact con evidenza esplicita,
+   poi aggiungere eval memoria sulla catena di provenienza.
 2. WS1-Fase 2/3 — piano runtime-owned e workflow runner dichiarativo, così i
    deliverable futuri non riaprono fragilità cross-modello.
 3. WS7 — deliverable Manus-style (`make_document`, `make_research`,
@@ -54,8 +58,9 @@ collegarli al perché. Per questo WS7 non è più il prossimo step.
 
 ## Prossima azione
 
-Proseguire con WS5.5/5.6: catena di provenienza decisione → artefatto → codice
-→ esito, più eval memoria. Il gate lifecycle/delete/export degli artifact è
-passato in-app: artifact memoria visibile, delete esplicito rimuove file +
-memoria/entity, delete chat preserva deliverable, export ZIP include managed e
-memory artifact. Il contratto corrente della memoria è in [MEMORIA.md](MEMORIA.md).
+Proseguire con WS5.5b: collegare decisioni/piano agli artifact usando evidenza
+esplicita già presente in memoria/metadata, senza inferenze fragili. Subito dopo:
+WS5.6 eval memoria sulla domanda “quali artifact per il progetto X e da quale
+decisione/lavoro derivano?”. Il gate lifecycle/delete/export degli artifact è
+passato in-app e WS5.5a ha iniziato la provenance graph canonica. Il contratto
+corrente della memoria è in [MEMORIA.md](MEMORIA.md).

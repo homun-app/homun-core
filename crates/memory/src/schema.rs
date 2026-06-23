@@ -104,6 +104,9 @@ pub enum RelationKind {
     InformedBy,   // decision -> evidence
     AlternativeTo,
     Supersedes,   // mirrors MemoryRecord.supersedes for graph traversal
+    RationaleFor, // rationale/evidence -> decision/objective
+    Produced,     // tool/workflow/step -> artifact/outcome
+    DerivedFrom,  // artifact/outcome -> source artifact/file/step
     // Software edges
     Calls,
     Imports,
@@ -166,6 +169,9 @@ tag_enum!(RelationKind {
     InformedBy => "informed_by",
     AlternativeTo => "alternative_to",
     Supersedes => "supersedes",
+    RationaleFor => "rationale_for",
+    Produced => "produced",
+    DerivedFrom => "derived_from",
     Calls => "calls",
     Imports => "imports",
     DependsOn => "depends_on",
@@ -277,6 +283,9 @@ mod tests {
         }
         assert_eq!(EntityKind::from_tag("function"), Some(EntityKind::Function));
         assert_eq!(RelationKind::from_tag("decided_for"), Some(RelationKind::DecidedFor));
+        assert_eq!(RelationKind::from_tag("rationale_for"), Some(RelationKind::RationaleFor));
+        assert_eq!(RelationKind::from_tag("produced"), Some(RelationKind::Produced));
+        assert_eq!(RelationKind::from_tag("derived_from"), Some(RelationKind::DerivedFrom));
         assert_eq!(RelationKind::from_tag("nope"), None);
     }
 

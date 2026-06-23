@@ -193,8 +193,20 @@ che fanno "ricordare il perché e sopravvivere". Caposaldo #8.
     `metadata.closes_open_loop`, marcandolo `Stale` solo se c'è overlap con un
     loop reale. Test: `open_loop_dedup_supersedes_duplicate_records` e
     `open_loop_closure_marks_matching_loop_stale_only_with_overlap` verdi.
-- ☐ **5.5 Catena di provenienza** decisione → artefatto → codice → esito (unisce
+- 🟡 **5.5 Catena di provenienza** decisione → artefatto → codice → esito (unisce
   WS2-3.1 artefatti→memoria + WS1-F6 piano→memoria + codice già nel grafo).
+  **Slice 5.5a locale/verde:** ogni upsert di artifact memoria ora materializza
+  nel grafo canonico anche entity `project`, entity `tool` producer, entity `file`
+  quando `project_relative_path` è noto, e relazioni `produced`,
+  `belongs_to_project`, `relates_to`; resta una sola verità nel `MemoryFacade`,
+  niente store parallelo. Il vocabolario typed del crate memory include
+  `rationale_for`, `produced`, `derived_from`. Test:
+  `cargo test -p local-first-desktop-gateway artifact_memory_upsert_creates_single_record_and_graph_entity -- --nocapture`
+  e `cargo test -p local-first-memory kind_tags_round_trip -- --nocapture` verdi;
+  suite complete gateway (`176 passati, 1 ignorato`), suite completa memory e
+  `npm run build` desktop verdi.
+  **Resta:** collegare decisioni/piano agli artifact con evidenza esplicita, poi
+  usare questi archi nell'eval WS5.6.
 - ☐ **5.6 Eval memoria** (guardrail): chat nuova → *"a che punto è il workflow e perché
   make_deck?"* / *"quali artefatti per il progetto X e da quale decisione?"* → deve
   rispondere. Anti-regressione, come l'eval del deck.

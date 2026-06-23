@@ -112,7 +112,19 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   file visibili; click su `Export ZIP (12 visible)` ha scaricato
   `homun-artifacts-2026-06-23.zip`, valido, con managed artifact e
   `memory-workspace_0d46c4470d97422298ece7ee7f0b74c6/artifact-memory-gate-5.md`.
-  **Prossimo passo unico:** passare a WS5.5/5.6.
+- **WS5.5a locale/verde:** gli artifact registrati nel `MemoryFacade` ora
+  materializzano anche provenance graph canonica: entity `project`, entity
+  `tool` producer, entity `file` quando esiste `project_relative_path`, e
+  relazioni `produced`, `belongs_to_project`, `relates_to` oltre alla relazione
+  esistente memoria→artifact. Il vocabolario typed del crate memory riconosce
+  anche `rationale_for`, `produced`, `derived_from`. Test:
+  `cargo test -p local-first-desktop-gateway artifact_memory_upsert_creates_single_record_and_graph_entity -- --nocapture`
+  e `cargo test -p local-first-memory kind_tags_round_trip -- --nocapture` verdi;
+  suite complete `cargo test -p local-first-desktop-gateway -- --nocapture`
+  (`176 passati, 1 ignorato`), `cargo test -p local-first-memory -- --nocapture`
+  e `npm run build` desktop verdi.
+  **Prossimo passo unico:** WS5.5b collegare decisioni/piano agli artifact senza
+  inferenze fragili, poi WS5.6 eval memoria.
 - **Nota aperta non bloccante:** durante i gate con tool il provider primario
   `glm-5.2` continua a rispondere `400 Bad Request` sul primo round con tool; il
   fallback a `kimi-k2.6:cloud` prosegue correttamente. Da riprendere come task
