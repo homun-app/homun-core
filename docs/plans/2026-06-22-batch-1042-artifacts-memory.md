@@ -474,11 +474,14 @@ cablato** nel flusso agente. ADR 0015.
   **Post-smoke fix (2026-06-23):** lo smoke reale su scheduled automation ha
   mostrato un falso positivo: il runtime registrava `completed`/`ok=1` per una
   risposta non vuota che conteneva solo un `PLAN` ancora aperto (2/4) e testo di
-  progresso. `execute_proactive_prompt_task` ora classifica come incompleti il
-  fallback "No reply generated..." e i marker `PLAN` con step non completati,
-  producendo `completed=false`, `blocked_reason` ed evento
-  `proactive_prompt_incomplete` invece di una falsa chiusura. Test mirato:
-  `cargo test -p local-first-desktop-gateway proactive_prompt_plan_guard -- --nocapture`.
+  progresso. La gestione condivisa del piano (`plan_is_complete` /
+  `plan_incomplete_reason`) ora considera completo solo `done == total`; il
+  runner scheduled la usa tramite `agent_output_incomplete_reason`, classificando
+  come incompleti il fallback "No reply generated..." e i marker `PLAN` con step
+  non completati. Produce `completed=false`, `blocked_reason` ed evento
+  `proactive_prompt_incomplete` invece di una falsa chiusura. Test mirati:
+  `cargo test -p local-first-desktop-gateway plan_guard -- --nocapture` e
+  `cargo test -p local-first-desktop-gateway plan_completion_requires_every_step_done -- --nocapture`.
 
 ## WS7 — Ecosistema deliverable (Manus)
 

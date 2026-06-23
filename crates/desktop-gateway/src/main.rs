@@ -5624,6 +5624,23 @@ fn plan_next_open(plan: &[serde_json::Value]) -> Option<String> {
         .filter(|t| !t.is_empty())
 }
 
+fn plan_is_complete(plan: &[serde_json::Value]) -> bool {
+    !plan.is_empty() && plan_done_count(plan) == plan.len()
+}
+
+fn plan_incomplete_reason(plan: &[serde_json::Value]) -> Option<String> {
+    if plan.is_empty() || plan_is_complete(plan) {
+        return None;
+    }
+    let done = plan_done_count(plan);
+    let total = plan.len();
+    let next = plan_next_open(plan)
+        .unwrap_or_else(|| "blocked or unfinished step".to_string());
+    Some(format!(
+        "plan is incomplete ({done}/{total}); next step: {next}"
+    ))
+}
+
 fn runtime_plan_thread_key(thread_id: Option<&str>) -> String {
     thread_id
         .map(str::trim)
@@ -5640,9 +5657,15 @@ fn runtime_plan_memory_text(plan: &[serde_json::Value]) -> Option<String> {
     let total = plan.len();
     let next = plan_next_open(plan);
     let mut parts = vec![format!("Runtime plan state: {done}/{total} steps done.")];
-    match next {
-        Some(step) => parts.push(format!("Next step: {step}.")),
-        None => parts.push("No open step remains.".to_string()),
+    if plan_is_complete(plan) {
+        parts.push("Plan is complete.".to_string());
+    } else {
+        match next {
+            Some(step) => parts.push(format!("Next step: {step}.")),
+            None => {
+                parts.push("Plan is blocked or unfinished with no runnable next step.".to_string())
+            }
+        }
     }
     Some(parts.join(" "))
 }
@@ -5651,7 +5674,7 @@ fn runtime_plan_memory_metadata(thread_id: Option<&str>, plan: &[serde_json::Val
     serde_json::json!({
         "source": "runtime_plan",
         "thread_id": runtime_plan_thread_key(thread_id),
-        "status": if plan_next_open(plan).is_some() { "open" } else { "complete" },
+        "status": if plan_is_complete(plan) { "complete" } else { "open" },
         "done_count": plan_done_count(plan),
         "total_count": plan.len(),
         "next_step": plan_next_open(plan),
@@ -5854,7 +5877,7 @@ fn upsert_runtime_plan_memory(
         return Ok(None);
     };
     let thread_key = runtime_plan_thread_key(thread_id);
-    let complete = plan_next_open(plan).is_none();
+    let complete = plan_is_complete(plan);
     let metadata = runtime_plan_memory_metadata(thread_id, plan);
     let existing = facade
         .list_memories_for_ui(user, workspace)
@@ -22271,26 +22294,15 @@ fn execute_read_only_task(
     }
 }
 
-fn proactive_prompt_incomplete_reason(answer: &str) -> Option<String> {
+fn agent_output_incomplete_reason(answer: &str) -> Option<String> {
     let trimmed = answer.trim();
     if trimmed.is_empty() || trimmed == "No reply generated for the scheduled task." {
         return Some("scheduled task produced no final reply".to_string());
     }
 
     let plan = parse_plan_marker(trimmed);
-    if plan.is_empty() {
-        return None;
-    }
-    let done = plan_done_count(&plan);
-    let total = plan.len();
-    if done < total {
-        let next = plan_next_open(&plan)
-            .unwrap_or_else(|| "blocked or unfinished step".to_string());
-        return Some(format!(
-            "scheduled task stopped with an incomplete plan ({done}/{total}); next step: {next}"
-        ));
-    }
-    None
+    plan_incomplete_reason(&plan)
+        .map(|reason| format!("agent output stopped before finishing: {reason}"))
 }
 
 /// Executes a scheduled/recurring "proactive prompt": runs a full agent turn on
@@ -22351,7 +22363,7 @@ fn execute_proactive_prompt_task(
     let answer = tokio::runtime::Handle::current()
         .block_on(run_agent_turn(state, &thread_id, &goal, policy))
         .unwrap_or_else(|| "No reply generated for the scheduled task.".to_string());
-    let incomplete_reason = proactive_prompt_incomplete_reason(&answer);
+    let incomplete_reason = agent_output_incomplete_reason(&answer);
 
     if let Ok(store) = lock_store(state) {
         // The goal documents what the scheduled task was asked — keep it as a user bubble.
@@ -34023,6 +34035,8 @@ mod tests {
         merge_plan,
         parse_plan_marker,
         plan_done_count,
+        plan_incomplete_reason,
+        plan_is_complete,
         plan_next_open,
         plan_step_status,
         extract_source_urls,
@@ -34675,6 +34689,25 @@ mod tests {
         assert_eq!(parsed[1]["title"], "Beta");
         assert_eq!(plan_step_status(&parsed[1]), "doing");
         assert_eq!(plan_done_count(&parsed), 1);
+    }
+
+    #[test]
+    fn plan_completion_requires_every_step_done() {
+        let blocked = vec![
+            serde_json::json!({"id":"s1","title":"Alpha","status":"done","detail":""}),
+            serde_json::json!({"id":"s2","title":"Beta","status":"blocked","detail":"waiting"}),
+        ];
+        assert!(!plan_is_complete(&blocked));
+        let reason = plan_incomplete_reason(&blocked).expect("blocked plan is incomplete");
+        assert!(reason.contains("1/2"), "{reason}");
+        assert!(reason.contains("blocked or unfinished step"), "{reason}");
+
+        let complete = vec![
+            serde_json::json!({"id":"s1","title":"Alpha","status":"done","detail":""}),
+            serde_json::json!({"id":"s2","title":"Beta","status":"done","detail":""}),
+        ];
+        assert!(plan_is_complete(&complete));
+        assert!(plan_incomplete_reason(&complete).is_none());
     }
 
     #[test]
@@ -36936,32 +36969,32 @@ data: [DONE]\n";
     }
 
     #[test]
-    fn proactive_prompt_plan_guard_rejects_incomplete_plan_answer() {
+    fn agent_output_plan_guard_rejects_incomplete_plan_answer() {
         let answer = "‹‹PLAN››- [x] **Read sources** (`s1`): done\n\
 - [-] **Check standings** (`s2`): still running\n\
 - [ ] **Write briefing** (`s3`): pending‹‹/PLAN››\
 Sky Sport ha solo il menu. Vado direttamente alla pagina dei Mondiali.";
 
-        let reason = super::proactive_prompt_incomplete_reason(answer).expect("incomplete plan");
+        let reason = super::agent_output_incomplete_reason(answer).expect("incomplete plan");
 
-        assert!(reason.contains("incomplete plan"), "{reason}");
+        assert!(reason.contains("plan is incomplete"), "{reason}");
         assert!(reason.contains("1/3"), "{reason}");
         assert!(reason.contains("Check standings"), "{reason}");
     }
 
     #[test]
-    fn proactive_prompt_plan_guard_allows_completed_plan_answer() {
+    fn agent_output_plan_guard_allows_completed_plan_answer() {
         let answer = "‹‹PLAN››- [x] **Read sources** (`s1`): done\n\
 - [x] **Write briefing** (`s2`): done‹‹/PLAN››\
 \n\n## Briefing finale\nTutto completato.";
 
-        assert!(super::proactive_prompt_incomplete_reason(answer).is_none());
+        assert!(super::agent_output_incomplete_reason(answer).is_none());
     }
 
     #[test]
-    fn proactive_prompt_plan_guard_rejects_missing_reply() {
+    fn agent_output_plan_guard_rejects_missing_reply() {
         assert_eq!(
-            super::proactive_prompt_incomplete_reason("No reply generated for the scheduled task.")
+            super::agent_output_incomplete_reason("No reply generated for the scheduled task.")
                 .as_deref(),
             Some("scheduled task produced no final reply"),
         );

@@ -17,8 +17,9 @@ primo percorso locale verde:
 3. WS6.3 — scheduler/ricorrenza + proactive review: recurrence parity,
    scheduled/proactive prompt thread, card surface/dedup.
 4. WS6.4 — write-back delle azioni proattive in memoria (`open_loop`/`decision`).
-   Post-smoke scheduled automation: una risposta con solo piano intermedio non
-   viene più marcata come completata.
+   Post-smoke scheduled automation: la gestione condivisa del piano considera
+   completo solo `done == total`, quindi una risposta con solo piano intermedio
+   non viene più marcata come completata.
 5. WS2-3.1 — artifact come `memory_type="artifact"` + entity grafo + embedding,
    inclusi file in-place scritti via Filesystem MCP dentro root progetto.
 6. WS2-3.2a — il Workbench Artifacts legge anche gli artifact memoria e mostra
