@@ -101,10 +101,18 @@ Tutto è **scoped per `workspace_id` (progetto) + `user_id`**.
    **limitatezza** (un avanzamento non gonfia il piano), **identità non inferita**
    (l'id è del runtime, mai dedotto dal testo). Output strutturato imposto dove il
    backend lo supporta + parsing tollerante ovunque.
-7. **Comprensione senza keyword/regex; verità verificabile.** Il core non capisce le
+7. **Capability activation da registry unico, non keyword sparse.** Workflow nativi
+   (`make_*`), MCP, skills/addon, connector tools e strumenti atomici interni stanno
+   nello stesso registry logico interrogabile. Il turno fa retrieval/decisione
+   strutturata sulle capability e carica nel toolset live solo il set minimo
+   necessario. Euristiche/keyword locali sono ammesse solo come prefilter,
+   fallback offline o guardrail di sicurezza, **non** come verità primaria di
+   routing. Esempio: “voglio creare un pitch per Homun” deve poter recuperare
+   `make_deck` dal registry anche senza parole come `slide` o `pptx`.
+8. **Comprensione senza keyword/regex; verità verificabile.** Il core non capisce le
    richieste con regex/keyword (de-gemma/capable-first); la verifica è deterministica
    dove possibile.
-8. **La memoria cattura il PERCHÉ e i LOOP APERTI, non solo i fatti, e collega TUTTO
+9. **La memoria cattura il PERCHÉ e i LOOP APERTI, non solo i fatti, e collega TUTTO
    nel grafo** (codice, decisioni, artefatti, piano), con archi causali. Il lavoro
    incompiuto resta richiamabile finché non è chiuso. Obiettivo: un cervello che
    sopravvive alle chat e sa sempre il perché — **verificabile via eval**. Vedi

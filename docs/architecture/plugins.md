@@ -42,6 +42,33 @@ flowchart TD
 - **Plugin / Addon** (ADR 0011) = capability + Process Skill + contratto di
   personalizzazione (upgrade-safe: manutenzione centrale, overlay-dato dell'utente).
 
+## Capability Registry Unico
+
+La direzione SOTA per Homun non è “più tool nel prompt”, ma **un registry grande
+e un toolset live piccolo**. Tutto ciò che Homun sa fare entra nello stesso
+registry logico:
+
+- workflow nativi end-to-end (`make_deck`, `make_document`, futuri `make_*`);
+- MCP/Composio connector tools;
+- skill/addon installati o generati;
+- strumenti atomici interni (PDF, filesystem, browser, artifact, memoria).
+
+Il turno deve:
+
+1. interrogare semanticamente il registry per capability candidate;
+2. decidere in modo strutturato se usare un workflow end-to-end, un tool atomico,
+   una skill/addon, un piano o un chiarimento;
+3. loggare la scelta e il perché;
+4. esporre al modello solo le capability minime per quel turno.
+
+Le keyword/euristiche sono ammesse solo come prefilter economico, fallback offline
+o guardrail di sicurezza. Non sono la verità primaria di routing. Esempi:
+
+- “voglio creare un pitch per Homun” → recupera `make_deck` anche senza `slide`;
+- “crea un report PDF” → workflow `make_document`;
+- “estrai testo da questo PDF” → tool atomico/MCP PDF;
+- “unisci questi PDF” → tool atomico/MCP PDF, non `make_document`.
+
 ## Esecuzione contenuta (ADR 0009/0010)
 
 Le capability rischiose girano **contenute**: sandbox skill, `ShellCommandPolicy`,

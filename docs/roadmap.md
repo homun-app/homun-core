@@ -99,6 +99,11 @@ primo percorso locale verde:
     altri strumenti: supporta formati `md`/`pdf` dallo stesso Markdown canonico e
     registra ogni artifact prodotto in memoria/provenance con producer
     `make_document`. `make_research` e `make_meeting` sono spostati alla fine.
+27. WS1-Fase 4b — nuova visione capability registry: i workflow `make_*` non
+    devono più vivere come keyword sparse o tool sempre esposti. Workflow nativi,
+    MCP, skills/addon, connector tools e strumenti atomici entrano in un registry
+    unico interrogabile; il router recupera candidati semanticamente, sceglie con
+    decisione strutturata e carica nel toolset live solo le capability minime.
 
 Prima di pubblicare/taggare resta prudente ripetere lo smoke manuale in-app su
 una automazione schedulata reale con il binario aggiornato. Il primo smoke ha
@@ -109,7 +114,9 @@ trovato e corretto una falsa chiusura su piano non completato.
 1. Completare verifica allargata della nuova slice `ExecutionPlan` runtime.
 2. WS1-Fase 2/3 — piano runtime-owned e workflow runner dichiarativo, così i
    deliverable futuri non riaprono fragilità cross-modello.
-3. WS7 — deliverable Manus-style: prima consolidare `make_document`; solo dopo
+3. WS1-Fase 4b — capability registry unico/retrieval router prima di aggiungere
+   altri `make_*`.
+4. WS7 — deliverable Manus-style: prima consolidare `make_document`; solo dopo
    ragionare su `make_research` e `make_meeting`.
 
 ## Blocco noto
@@ -129,7 +136,7 @@ Il router workflow/agent instrada i deck a scaffolding massimo. Il primo smoke
 release ha corretto composer e recall provenance/status. La prima
 generalizzazione documenti è locale/verde su `make_document` e ha superato smoke
 API reale con artifact gestito + memoria/provenance canonica. Scelta corrente:
-arricchire `make_document` prima di moltiplicare gli strumenti; PDF è locale/
-verde, DOCX/editabile è la prossima slice naturale. `make_research` e
-`make_meeting` restano futuri. Il contratto corrente della memoria è in
-[MEMORIA.md](MEMORIA.md).
+prima estrarre un capability registry unico e sostituire il routing keyword-based
+dei `make_*` con retrieval + decisione strutturata. Solo dopo proseguire con
+DOCX/editabile e nuovi workflow; `make_research` e `make_meeting` restano futuri.
+Il contratto corrente della memoria è in [MEMORIA.md](MEMORIA.md).

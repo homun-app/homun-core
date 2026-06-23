@@ -124,7 +124,8 @@ modelli deboli/locali. Invarianti: monotonìa, limitatezza, identità non inferi
     `static_workflow_plan_validation_is_async_runtime_safe`,
     `artifact_provenance_context_surfaces_make_document_workflow`.
   - 🟡 **Prossime slice make_document:** DOCX/editabile e controlli più espliciti
-    su struttura/stile, prima di moltiplicare gli strumenti `make_*`.
+    su struttura/stile, ma solo dopo il registry unico: i workflow devono entrare
+    da capability retrieval/decisione strutturata, non da keyword sparse.
   - ☐ **Backlog deliberato:** `make_research` / `make_meeting` restano in fondo
     finché non è chiarito il contratto degli strumenti creati dall'harness.
 - ✅ **Fase 4 (2026-06-23, locale/verde)** — router workflow|agent + primo
@@ -133,6 +134,25 @@ modelli deboli/locali. Invarianti: monotonìa, limitatezza, identità non inferi
   instruction di sistema vincolante; richieste generiche restano nel loop agente.
   Test mirati: `workflow_router_sends_deck_requests_to_max_scaffolding_workflow`,
   `workflow_router_keeps_generic_requests_on_agent_loop`.
+- 🟡 **Fase 4b — Capability Registry unico (nuovo caposaldo, 2026-06-23).**
+  Obiettivo: sostituire il routing keyword-based dei `make_*` con un registry
+  unico interrogabile che contenga workflow nativi, MCP, skills/addon, connector
+  tools e strumenti atomici interni. Il turno fa retrieval delle capability
+  candidate, decisione strutturata (`workflow end-to-end` vs `tool atomico` vs
+  `skill/addon` vs chiarimento/piano), log della scelta e toolset live minimo.
+  Le keyword restano solo prefilter/fallback/guardrail, non verità di routing.
+  Esempio target: “voglio creare un pitch per Homun” deve recuperare `make_deck`
+  dal registry anche senza `slide`/`pptx`.
+  - ☐ Estrarre `WorkflowRegistry`/`CapabilityRegistry` per `make_deck` e
+    `make_document` includendo schema tool, descrizione semantica, workflow
+    definition, output formats, policy provenance/lifecycle e route hints.
+  - ☐ Far confluire nel corpus `find_capability` anche i workflow nativi, senza
+    esporli tutti nel prompt.
+  - ☐ Aggiungere un router/judge strutturato che sceglie 0/1 workflow o tool
+    atomico e spiega la decisione nei log.
+  - ☐ Prunare il toolset live in base alla decisione: un workflow end-to-end vince
+    sugli MCP concorrenti per creazione deliverable; MCP/atomici restano per
+    lettura, conversione, ispezione o operazioni specifiche.
 - 🟡 **Fase 5** — convergenza con `OrchestratorBrain` (completa [ADR 0008](../decisions/0008-orchestrator-brain-single-planner.md)).
   - ✅ `run_plan` porta i workflow dichiarativi dentro lo stesso Brain senza planner
     LLM; resta applicarlo a tutte le pipeline deliverable e al router.

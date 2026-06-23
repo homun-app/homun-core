@@ -22,8 +22,9 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
 4. Ciclo di vita dei **deliverable** ≠ chat; artefatti = entità di memoria.
 5. Un solo motore / grafo / store: convergere, non duplicare.
 6. Stato e control-flow di **codice**; il modello riempie slot vincolati (3 invarianti del piano).
-7. Niente keyword/regex; verità verificabile.
-8. La memoria cattura il **PERCHÉ** e i **loop aperti**, e collega TUTTO nel grafo (verificabile via eval).
+7. Capability activation da **registry unico**, non keyword sparse.
+8. Niente keyword/regex; verità verificabile.
+9. La memoria cattura il **PERCHÉ** e i **loop aperti**, e collega TUTTO nel grafo (verificabile via eval).
 
 ## Mappa della documentazione (una fonte per ogni cosa)
 
@@ -41,7 +42,7 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
 
 > Se il contesto si è compattato: rileggi QUESTO blocco + il
 > [backlog](plans/2026-06-22-batch-1042-artifacts-memory.md) (gli stati ☐/✅ = i loop
-> aperti) e sei di nuovo sul filo. Stesso principio della memoria di Homun (caposaldo #8).
+> aperti) e sei di nuovo sul filo. Stesso principio della memoria di Homun (caposaldo #9).
 
 ### Cruscotto operativo attuale
 
@@ -277,6 +278,15 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   `artifact_memories_do_not_participate_in_semantic_dedup`,
   `static_workflow_plan_validation_is_async_runtime_safe`,
   `artifact_provenance_context_surfaces_make_document_workflow`.
+- **Nuovo caposaldo capability registry (2026-06-23):** niente routing primario
+  basato su keyword sparse per i `make_*`. Workflow nativi, MCP, skills/addon,
+  connector tools e strumenti atomici devono convergere in un registry unico
+  interrogabile; il turno recupera capability candidate, sceglie con decisione
+  strutturata e carica nel toolset live solo il minimo necessario. Le keyword
+  restano solo prefilter/fallback/guardrail. **Prossimo passo unico:** estrarre
+  `WorkflowRegistry`/`CapabilityRegistry` per `make_deck` e `make_document` e
+  collegarlo a `find_capability`/router prima di aggiungere DOCX o nuovi
+  `make_research`/`make_meeting`.
 - **Gate provider Z.ai/GLM risolto (test manuale utente, 2026-06-23):** Settings
   espone sia `Z.ai (GLM)` standard (`https://api.z.ai/api/paas/v4`) sia
   `Z.ai Coding (GLM)` (`https://api.z.ai/api/coding/paas/v4`); il preset coding
