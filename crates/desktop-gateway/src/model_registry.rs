@@ -284,6 +284,10 @@ fn default_true() -> bool {
     true
 }
 
+pub fn canonical_provider_base_url(base_url: &str) -> String {
+    base_url.trim().trim_end_matches('/').to_string()
+}
+
 /// A configured provider plus its (cached) model catalog. The API key lives in
 /// the encrypted secret store, keyed by `id`, never in this struct.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -314,7 +318,7 @@ impl ProviderEntry {
             id,
             label,
             kind,
-            base_url: base_url.trim_end_matches('/').to_string(),
+            base_url: canonical_provider_base_url(&base_url),
             enabled: true,
             models: Vec::new(),
             active_model: None,
@@ -373,6 +377,12 @@ impl ProviderRegistry {
     /// Whether the user has forced the LLM concurrency limit (vs. locality inference).
     pub fn llm_concurrency_override(&self) -> Option<u32> {
         self.llm_concurrency_override.filter(|&n| n >= 1)
+    }
+
+    pub fn canonicalize_provider_base_urls(&mut self) {
+        for provider in &mut self.providers {
+            provider.base_url = canonical_provider_base_url(&provider.base_url);
+        }
     }
 }
 

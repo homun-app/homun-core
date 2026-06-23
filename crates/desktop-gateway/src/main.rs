@@ -9414,14 +9414,14 @@ fn persisted_inference_base_url() -> Option<String> {
     let path = inference_base_url_override_path()?;
     fs::read_to_string(path)
         .ok()
-        .map(|value| value.trim().to_string())
+        .map(|value| canonical_provider_base_url(&value))
         .filter(|value| !value.is_empty())
 }
 
 fn set_persisted_inference_base_url(url: &str) -> std::io::Result<()> {
     let path = inference_base_url_override_path()
         .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "no data dir"))?;
-    fs::write(path, url.trim())
+    fs::write(path, canonical_provider_base_url(url))
 }
 
 /// Secret reference for the user-configured inference provider API key.
@@ -9455,7 +9455,8 @@ fn set_persisted_inference_api_key(key: &str) -> Result<(), String> {
 // ── Provider registry (Phase 1: multi-provider inference) ──────────────────
 
 use model_registry::{
-    ProviderEntry, ProviderKind, ProviderRegistry, ResolvedRole, RoleBinding,
+    canonical_provider_base_url, ProviderEntry, ProviderKind, ProviderRegistry, ResolvedRole,
+    RoleBinding,
 };
 
 fn provider_registry_path() -> Option<PathBuf> {
@@ -9528,9 +9529,10 @@ fn delete_provider_api_key(provider_id: &str) {
 fn load_provider_registry() -> ProviderRegistry {
     if let Some(path) = provider_registry_path()
         && let Ok(contents) = fs::read_to_string(&path)
-        && let Ok(registry) = serde_json::from_str::<ProviderRegistry>(&contents)
+        && let Ok(mut registry) = serde_json::from_str::<ProviderRegistry>(&contents)
         && !registry.providers.is_empty()
     {
+        registry.canonicalize_provider_base_urls();
         return registry;
     }
     seed_registry_from_legacy()
@@ -16114,7 +16116,7 @@ async fn validate_llm_config(
         ),
         _ => (
             // openai_compat
-            format!("{}/models", request.base_url.trim_end_matches('/')),
+            format!("{}/models", canonical_provider_base_url(&request.base_url)),
             request
                 .api_key
                 .as_ref()
@@ -28341,7 +28343,7 @@ async fn upsert_provider(
         code: "provider_invalid",
         message: message.to_string(),
     };
-    let base_url = request.base_url.trim();
+    let base_url = canonical_provider_base_url(&request.base_url);
     if base_url.is_empty() {
         return Err(bad("base_url must not be empty"));
     }
@@ -28356,7 +28358,7 @@ async fn upsert_provider(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(|value| value.to_string())
-        .unwrap_or_else(|| base_url.to_string());
+        .unwrap_or_else(|| base_url.clone());
     let id = request
         .id
         .as_deref()
@@ -28366,7 +28368,7 @@ async fn upsert_provider(
         .unwrap_or_else(|| model_registry::slugify(&label));
 
     let mut registry = load_provider_registry();
-    let mut entry = ProviderEntry::new(id.clone(), label, kind, base_url.to_string());
+    let mut entry = ProviderEntry::new(id.clone(), label, kind, base_url);
     entry.active_model = request
         .active_model
         .as_deref()
@@ -35442,6 +35444,10 @@ data: [DONE]\n";
         assert_eq!(
             crate::chat_endpoint("https://api.z.ai/api/coding/paas/v4"),
             "https://api.z.ai/api/coding/paas/v4/chat/completions"
+        );
+        assert_eq!(
+            crate::chat_endpoint("https://api.z.ai/api/paas/v4"),
+            "https://api.z.ai/api/paas/v4/chat/completions"
         );
         // Message conversion: assistant tool_calls arguments STRING → OBJECT (native).
         let msgs = vec![serde_json::json!({
