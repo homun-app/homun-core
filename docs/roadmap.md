@@ -137,7 +137,8 @@ primo percorso locale verde:
 35. WS1-Fase 4b settima slice — la ricerca connector usa
     `search_connector_capability_entries` e restituisce direttamente entry
     `ConnectorTool` typed, mantenendo il set toolkit-aware; `find_capability`
-    consuma lo stesso shape per native/MCP/connector.
+    consuma lo stesso shape per native/MCP/connector. Smoke in-app passato:
+    discovery Gmail unread + lettura reale ultime 3 email non lette.
 36. WS1/WS7 document focus — `make_document` ora materializza anche `.docx`
     editabile dalla stessa sorgente Markdown canonica, oltre a `md`/`pdf`, con
     package OOXML generato in-process e registrazione artifact/memoria invariata.
@@ -199,7 +200,8 @@ come `ACT` e la aggiunge al `tool_trace` del turno. `pdf_atomic` ora è una
 capability atomica nativa mappata a `run_in_sandbox`. MCP e connector Composio
 parlano ora il contratto typed del registry (`McpTool`, `ConnectorTool`), e la
 ricerca connector restituisce direttamente entry typed mantenendo il set
-toolkit-aware per non perdere CRUD/perimeter. `make_document`
+toolkit-aware per non perdere CRUD/perimeter; smoke Gmail unread passato in app.
+`make_document`
 supporta anche output `.docx` editabile, parametri espliciti di struttura/stile e
 tabelle Word generate da Markdown; lo smoke reale ha corretto anche stili,
 grassetto, corsivo, liste numerate e sizing tabelle nel DOCX. `layout_profile` è

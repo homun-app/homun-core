@@ -210,6 +210,8 @@ modelli deboli/locali. Invarianti: monotonìa, limitatezza, identità non inferi
     `ConnectorTool` typed mantenendo il set toolkit-aware. `find_capability`
     consuma così lo stesso shape per native/MCP/connector. Test mirato:
     `connector_search_returns_typed_toolkit_entries`.
+    Gate in-app passato: discovery Gmail unread seleziona il connector Gmail;
+    esecuzione successiva legge realmente le ultime 3 email non lette via Gmail.
   - 🟡 Possibile step futuro: atomico PDF dedicato con schema più guidato
     (input/output files, operazione), se `run_in_sandbox` risulta troppo generico
     nello smoke.

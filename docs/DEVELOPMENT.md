@@ -341,9 +341,11 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   `search_connector_capability_entries`, che restituisce entry typed mantenendo
   il set toolkit-aware; `find_capability` consuma quindi lo stesso contratto per
   native/MCP/connector. Test mirato:
-  `connector_search_returns_typed_toolkit_entries`. **Prossimo passo unico:**
-  smoke in-app su un connector reale e, se serve, aggiungere trace runtime della
-  sorgente selezionata.
+  `connector_search_returns_typed_toolkit_entries`. **Smoke in-app passato
+  (2026-06-23):** prompt discovery Gmail unread → risposta con connector Gmail
+  scelto; prompt esecuzione “massimo 3 risultati” → lettura reale ultime 3 email
+  non lette via Gmail connector. **Prossimo passo unico:** aggiungere trace
+  runtime della sorgente/capability selezionata se serve più audit in UI.
 - **make_document DOCX locale/verde (2026-06-23):** lo stesso workflow ora
   materializza anche artifact `.docx` editabili dalla sorgente Markdown canonica,
   via pacchetto OOXML minimale generato in-process con `zip` già presente.
