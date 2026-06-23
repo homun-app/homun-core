@@ -13,5 +13,12 @@
   "removeLogo": "Rimuovi",
   "previewTitle": "La tua azienda",
   "save": "Salva brand kit",
-  "saved": "Salvato ✓"
+  "saved": "Salvato ✓",
+  "templatesEyebrow": "Catalogo template",
+  "templatesTitle": "Template deliverable",
+  "filter_all": "Tutti",
+  "filter_presentation": "Presentazioni",
+  "filter_document": "Documenti",
+  "copyTemplateRef": "Copia riferimento template",
+  "copied": "Copiato"
 }

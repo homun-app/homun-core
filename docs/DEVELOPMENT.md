@@ -110,9 +110,12 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   trasformare i template in tool o store paralleli. Quindicesima slice
   locale/verde: il catalogo template è esposto read-only da
   `/api/templates/catalog` e da `coreBridge.templateCatalog()`, così la UI può
-  costruire una gallery senza duplicare il registry. Prossimo asse: UI/gallery
-  visuale e QA ancora più profonda. `make_research` e `make_meeting` restano
-  dopo questo asse.
+  costruire una gallery senza duplicare il registry. Sedicesima slice
+  locale/verde: il plugin Presentations mostra una prima gallery template
+  filtrabile per presentazioni/documenti, con metadati `design_*` e copia del
+  `template_ref`; è alimentata dall'API catalogo, non da un elenco duplicato.
+  Prossimo asse: preview visuali reali e QA ancora più profonda.
+  `make_research` e `make_meeting` restano dopo questo asse.
 - **WS2-3.1 PASSATA in runtime (2026-06-23):** gli artifact scritti via
   Filesystem MCP dentro la root progetto vengono registrati come
   `memory_type="artifact"` + entity grafo `artifact` + embedding. Gate:

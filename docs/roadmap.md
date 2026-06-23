@@ -253,6 +253,10 @@ primo percorso locale verde:
     `/api/templates/catalog` e dal bridge desktop `coreBridge.templateCatalog()`.
     La UI può costruire una gallery partendo dalla stessa fonte del routing,
     senza duplicare cataloghi o trasformare template in tool.
+61. WS7 first template gallery — il plugin Presentations mostra una gallery
+    filtrabile alimentata da `coreBridge.templateCatalog()`, con metadati
+    `design_*` e copia del `template_ref`. È una superficie di selezione, non un
+    router euristico e non un catalogo duplicato.
 
 Prima di pubblicare/taggare resta prudente ripetere lo smoke manuale in-app su
 una automazione schedulata reale con il binario aggiornato. Il primo smoke ha
@@ -322,6 +326,7 @@ dodicesima slice: QA Markdown per documenti prima di scrivere MD/PDF/DOCX.
 Tredicesima slice: catalogo seed `monet/*` ampliato a 11 template PMI.
 Quattordicesima slice: manifest con metadati sanificati per preview/gallery
 futura. Quindicesima slice: API/bridge read-only del catalogo template.
-Prossimo asse: UI/gallery visuale e QA più profonda.
+Sedicesima slice: prima gallery UI nel plugin Presentations. Prossimo asse:
+preview visuali reali e QA più profonda.
 `make_research` e `make_meeting` restano futuri.
 Il contratto corrente della memoria è in [MEMORIA.md](MEMORIA.md).

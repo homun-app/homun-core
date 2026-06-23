@@ -9747,6 +9747,10 @@ body.resizing-drawer {
 }
 
 /* ── Brand Kit (Presentations plugin) ─────────────────────────────────────── */
+.presentations-panel {
+  display: grid;
+  gap: 28px;
+}
 .brandkit {
   padding: 4px 2px;
 }
@@ -9851,6 +9855,147 @@ body.resizing-drawer {
   margin-top: 18px;
   display: flex;
   justify-content: flex-end;
+}
+.template-gallery {
+  border-top: 1px solid var(--line);
+  padding-top: 24px;
+}
+.template-gallery-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-end;
+  margin-bottom: 14px;
+}
+.template-gallery-header h3 {
+  margin: 2px 0 0;
+  font-size: 1.15rem;
+}
+.template-gallery-tabs {
+  display: flex;
+  gap: 6px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.template-gallery-tabs button {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+}
+.template-gallery-tabs button.active {
+  background: var(--text);
+  color: var(--surface);
+}
+.template-gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+}
+.template-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  overflow: hidden;
+  display: flex;
+  min-height: 282px;
+  flex-direction: column;
+}
+.template-card-preview {
+  min-height: 96px;
+  padding: 16px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  color: #0f172a;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.82), rgba(255, 255, 255, 0.22)),
+    #dbeafe;
+}
+.template-card-preview[data-kind="document"] {
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.86), rgba(255, 255, 255, 0.28)),
+    #dcfce7;
+}
+.template-card-preview span {
+  text-transform: capitalize;
+  font-weight: 750;
+  font-size: 15px;
+}
+.template-card-body {
+  padding: 14px;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 10px;
+}
+.template-card-title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+.template-card-title-row h4 {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.25;
+}
+.template-card-title-row span {
+  flex: 0 0 auto;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 3px 6px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 750;
+}
+.template-card p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.template-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: auto;
+}
+.template-card-meta span {
+  border-radius: 6px;
+  background: var(--surface-muted);
+  color: var(--muted);
+  padding: 4px 6px;
+  font-size: 10px;
+  font-weight: 650;
+}
+.template-copy {
+  margin: 0 14px 14px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text);
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  justify-content: center;
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.template-copy:hover {
+  background: var(--surface-muted);
 }
 .auto-card-actions {
   display: flex;

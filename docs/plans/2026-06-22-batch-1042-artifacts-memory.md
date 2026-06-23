@@ -844,6 +844,12 @@ ragionato il contratto degli strumenti `make_*` creati dall'harness. ADR 0011
   `coreBridge.templateCatalog()`. Il payload espone entry e metadati gallery
   senza schema callable, mantenendo il registry come fonte unica. Test mirato:
   `template_catalog_response_exposes_read_only_gallery_metadata`.
+  **Sedicesima slice template gallery UI (2026-06-23, locale/verde):**
+  il plugin Presentations legge `coreBridge.templateCatalog()` e mostra una
+  gallery filtrabile `Tutti/Presentazioni/Documenti` con preview sintetica,
+  token `design_*` e copia del `template_ref`. La UI non duplica template e non
+  introduce routing euristico; usa solo il catalogo esposto dal gateway. Gate:
+  `npm run build`.
 - ☐ **7.1b (futuro)** Portare ricerca/meeting al livello del deck solo dopo il
   chiarimento sul contratto strumenti: `make_research` e `make_meeting` non sono
   essenziali per la prossima release.
