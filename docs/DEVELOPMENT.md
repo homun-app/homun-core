@@ -256,13 +256,11 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   Il reader provenance collega `make_document` a `DocumentWorkflow`. Test mirati:
   `make_document_workflow`, `workflow_router_sends_document_requests_to_document_workflow`,
   `artifact_provenance_context_surfaces_make_document_workflow`.
-- **Nota aperta non bloccante:** durante i gate con tool il provider primario
-  `glm-5.2` continua a rispondere `400 Bad Request` sul primo round con tool; il
-  fallback a `kimi-k2.6:cloud` prosegue correttamente. Da riprendere come task
-  router/provider, separato da WS2. Verifica config 2026-06-23: Settings espone
-  ora sia `Z.ai (GLM)` standard (`https://api.z.ai/api/paas/v4`) sia `Z.ai Coding
-  (GLM)` (`https://api.z.ai/api/coding/paas/v4`); il gate live deve selezionare il
-  preset coding per verificare se l'errore provider sparisce.
+- **Gate provider Z.ai/GLM risolto (test manuale utente, 2026-06-23):** Settings
+  espone sia `Z.ai (GLM)` standard (`https://api.z.ai/api/paas/v4`) sia
+  `Z.ai Coding (GLM)` (`https://api.z.ai/api/coding/paas/v4`); il preset coding
+  è stato riconfigurato/testato in app e l'errore precedente `400 Bad Request`
+  sul primo round con tool non è più attivo.
 - **Fatto e verificato localmente:** root automatica del progetto, bypass conferma
   solo per scritture Filesystem MCP dentro root; outside-root resta confirm-gated;
   routing Auto thread-aware + fallback orchestratore su `400` con tool; approval

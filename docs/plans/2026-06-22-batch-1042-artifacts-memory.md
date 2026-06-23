@@ -436,6 +436,11 @@ cablato** nel flusso agente. ADR 0015.
   finale chat sul path approvato e zero `path-b-gate/note.md` nel thread.
   **Path B approval/provenienza chiusa**; non usare più il direct endpoint per
   test di scrittura reali.
+  **Aggiornamento 2026-06-23:** gate provider Z.ai/GLM risolto da test manuale
+  utente dopo riconfigurazione: Settings mantiene distinti il preset standard
+  (`https://api.z.ai/api/paas/v4`) e il preset coding
+  (`https://api.z.ai/api/coding/paas/v4`); l'errore `400` precedente non è più
+  un blocco attivo.
 - ✅ **6.1c UX Telegram approval (2026-06-22):** slice locale implementata dopo
   Path B: il callback Telegram su codice valido invia subito “Ricevuto…
   verifico/avvio”; il thread app riceve status persistiti “Approvazione Telegram
