@@ -5834,6 +5834,7 @@ struct NativeAtomicCapability {
 
 #[derive(Debug, Clone, Copy)]
 struct TemplateCatalogEntry {
+    provider: &'static str,
     id: &'static str,
     name: &'static str,
     kind: &'static str,
@@ -5847,6 +5848,17 @@ struct TemplateCatalogEntry {
     layout_archetypes: &'static [&'static str],
     route_text: &'static str,
 }
+
+trait TemplateCatalogProvider {
+    fn provider_id(&self) -> &'static str;
+    fn entries(&self) -> Vec<TemplateCatalogEntry>;
+
+    fn get(&self, id: &str) -> Option<TemplateCatalogEntry> {
+        template_catalog_by_id_from_entries(&self.entries(), Some(id))
+    }
+}
+
+struct LocalTemplateCatalogProvider;
 
 const MAKE_DECK_WORKFLOW_STEPS: &[WorkflowStepDefinition] = &[
     WorkflowStepDefinition {
@@ -5972,9 +5984,10 @@ fn native_workflow_capability_entries() -> Vec<CapabilityEntry> {
         .collect()
 }
 
-fn template_catalog_entries() -> &'static [TemplateCatalogEntry] {
-    &[
+fn local_template_catalog_seed(provider: &'static str) -> Vec<TemplateCatalogEntry> {
+    vec![
         TemplateCatalogEntry {
+            provider,
             id: "monet/startup-pitch-clean-01",
             name: "Startup Pitch Clean",
             kind: "presentation",
@@ -5989,6 +6002,7 @@ fn template_catalog_entries() -> &'static [TemplateCatalogEntry] {
             route_text: "startup pitch fundraising product intro clean corporate investor customer proposta commerciale presentazione homun",
         },
         TemplateCatalogEntry {
+            provider,
             id: "monet/executive-update-board-01",
             name: "Executive Update Board",
             kind: "presentation",
@@ -6003,6 +6017,7 @@ fn template_catalog_entries() -> &'static [TemplateCatalogEntry] {
             route_text: "executive update board status management review KPI risks decisions leadership aggiornamento direzione CDA",
         },
         TemplateCatalogEntry {
+            provider,
             id: "monet/project-plan-technical-01",
             name: "Project Plan Technical",
             kind: "presentation",
@@ -6017,6 +6032,7 @@ fn template_catalog_entries() -> &'static [TemplateCatalogEntry] {
             route_text: "project plan technical roadmap implementation phases milestones risks PM engineering piano progetto tecnico roadmap",
         },
         TemplateCatalogEntry {
+            provider,
             id: "monet/sales-proposal-warm-01",
             name: "Sales Proposal Warm",
             kind: "document",
@@ -6031,6 +6047,7 @@ fn template_catalog_entries() -> &'static [TemplateCatalogEntry] {
             route_text: "sales proposal client commercial offer proposta commerciale preventivo cliente warm editorial documento",
         },
         TemplateCatalogEntry {
+            provider,
             id: "monet/technical-brief-minimal-01",
             name: "Technical Brief Minimal",
             kind: "document",
@@ -6047,22 +6064,55 @@ fn template_catalog_entries() -> &'static [TemplateCatalogEntry] {
     ]
 }
 
-fn template_catalog_by_id(id: Option<&str>) -> Option<TemplateCatalogEntry> {
-    let id = id?.trim();
-    template_catalog_entries()
+impl TemplateCatalogProvider for LocalTemplateCatalogProvider {
+    fn provider_id(&self) -> &'static str {
+        "local_seed"
+    }
+
+    fn entries(&self) -> Vec<TemplateCatalogEntry> {
+        local_template_catalog_seed(self.provider_id())
+    }
+}
+
+fn collect_template_catalog_entries(
+    providers: &[&dyn TemplateCatalogProvider],
+) -> Vec<TemplateCatalogEntry> {
+    providers
         .iter()
-        .copied()
-        .find(|entry| entry.id == id)
+        .flat_map(|provider| provider.entries())
+        .fold(Vec::<TemplateCatalogEntry>::new(), |mut acc, entry| {
+            if !acc.iter().any(|existing| existing.id == entry.id) {
+                acc.push(entry);
+            }
+            acc
+        })
+}
+
+fn template_catalog_entries() -> Vec<TemplateCatalogEntry> {
+    collect_template_catalog_entries(&[&LocalTemplateCatalogProvider])
+}
+
+fn template_catalog_by_id_from_entries(
+    entries: &[TemplateCatalogEntry],
+    id: Option<&str>,
+) -> Option<TemplateCatalogEntry> {
+    let id = id?.trim();
+    entries.iter().copied().find(|entry| entry.id == id)
+}
+
+fn template_catalog_by_id(id: Option<&str>) -> Option<TemplateCatalogEntry> {
+    template_catalog_by_id_from_entries(&template_catalog_entries(), id)
 }
 
 fn template_catalog_capability_entries() -> Vec<CapabilityEntry> {
     template_catalog_entries()
-        .iter()
+        .into_iter()
         .map(|entry| CapabilityEntry {
             key: entry.id.to_string(),
             desc: entry.description.to_string(),
             text: format!(
-                "template catalog {} {} {} {} {} {} {} {} {} {} {}",
+                "template catalog {} {} {} {} {} {} {} {} {} {} {} {}",
+                entry.provider,
                 entry.id,
                 entry.name,
                 entry.kind,
@@ -37991,6 +38041,95 @@ mod tests {
         assert!(entry.schema.is_none());
         assert!(!entry.is_skill);
         assert!(entry.text.contains("template catalog"));
+    }
+
+    #[test]
+    fn local_template_catalog_provider_exposes_seed_templates() {
+        let provider = super::LocalTemplateCatalogProvider;
+        let entries = super::TemplateCatalogProvider::entries(&provider);
+
+        assert!(entries
+            .iter()
+            .any(|entry| entry.id == "monet/startup-pitch-clean-01"));
+        assert!(entries.iter().all(|entry| entry.provider == "local_seed"));
+        assert_eq!(
+            super::TemplateCatalogProvider::get(&provider, "monet/sales-proposal-warm-01")
+                .map(|entry| entry.design_template),
+            Some("sales_proposal"),
+        );
+    }
+
+    #[test]
+    fn template_catalog_collects_multiple_providers_without_duplicate_ids() {
+        struct ExtraProvider;
+        impl super::TemplateCatalogProvider for ExtraProvider {
+            fn provider_id(&self) -> &'static str {
+                "extra"
+            }
+
+            fn entries(&self) -> Vec<super::TemplateCatalogEntry> {
+                vec![
+                    super::TemplateCatalogEntry {
+                        provider: "extra",
+                        id: "external/customer-case-study-01",
+                        name: "Customer Case Study",
+                        kind: "document",
+                        description: "Case study template for customer proof and outcomes.",
+                        use_cases: &["case study"],
+                        audience: &["customers"],
+                        design_template: "sales_proposal",
+                        design_theme: Some("clean_corporate"),
+                        design_profile: Some("sales_pitch"),
+                        design_components: &["quote_callout", "kpi_grid"],
+                        layout_archetypes: &["summary", "proof", "outcomes"],
+                        route_text: "case study customer proof outcomes",
+                    },
+                    super::TemplateCatalogEntry {
+                        provider: "extra",
+                        id: "monet/startup-pitch-clean-01",
+                        name: "Duplicate Startup Pitch",
+                        kind: "presentation",
+                        description: "Duplicate should not override first provider.",
+                        use_cases: &["duplicate"],
+                        audience: &["test"],
+                        design_template: "project_plan",
+                        design_theme: None,
+                        design_profile: None,
+                        design_components: &[],
+                        layout_archetypes: &[],
+                        route_text: "duplicate",
+                    },
+                ]
+            }
+        }
+
+        let catalog = super::collect_template_catalog_entries(&[
+            &super::LocalTemplateCatalogProvider,
+            &ExtraProvider,
+        ]);
+
+        assert_eq!(
+            catalog
+                .iter()
+                .filter(|entry| entry.id == "monet/startup-pitch-clean-01")
+                .count(),
+            1,
+        );
+        assert_eq!(
+            catalog
+                .iter()
+                .find(|entry| entry.id == "external/customer-case-study-01")
+                .map(|entry| entry.provider),
+            Some("extra"),
+        );
+        assert_eq!(
+            super::template_catalog_by_id_from_entries(
+                &catalog,
+                Some("external/customer-case-study-01")
+            )
+            .map(|entry| entry.design_template),
+            Some("sales_proposal"),
+        );
     }
 
     #[test]

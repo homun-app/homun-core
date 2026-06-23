@@ -224,6 +224,11 @@ primo percorso locale verde:
     risoluzione gateway verso `design_template`, `design_theme`,
     `design_profile` e `design_components` già supportati. Monet è catalogo/
     adapter di template, non secondo renderer/store e non un nuovo `make_*`.
+54. WS7 template provider contract — il seed `monet/*` è ora dietro a un
+    `TemplateCatalogProvider` interno e a un collector multi-provider deduplicato.
+    Questo è il punto di aggancio per MCP Monet, marketplace Homun o template
+    pack firmati: tutti pubblicano `template_ref` nel registry unico, mentre i
+    workflow esistenti continuano a renderizzare.
 
 Prima di pubblicare/taggare resta prudente ripetere lo smoke manuale in-app su
 una automazione schedulata reale con il binario aggiornato. Il primo smoke ha
@@ -285,7 +290,9 @@ default profilo/componenti override-safe; sesta slice: `design_theme` condiviso
 e primo guardrail QA testuale prima del render; settima slice: `deck-qa`
 renderizzato su HTML reale blocca overflow/immagini rotte prima della consegna;
 ottava slice: template catalog provider `monet/*` read-only nel registry, con
-`template_ref` risolto dai workflow esistenti. Prossima slice:
-contrasto/leggibilità, QA documenti o template library più ampia/adapter esterno.
+`template_ref` risolto dai workflow esistenti; nona slice: contract
+`TemplateCatalogProvider` interno per agganciare MCP/marketplace/template pack
+senza toccare i workflow. Prossima slice: contrasto/leggibilità, QA documenti o
+template library più ampia/adapter esterno.
 `make_research` e `make_meeting` restano futuri.
 Il contratto corrente della memoria è in [MEMORIA.md](MEMORIA.md).

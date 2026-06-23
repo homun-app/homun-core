@@ -787,7 +787,15 @@ ragionato il contratto degli strumenti `make_*` creati dall'harness. ADR 0011
   `make_document_generation_options_are_explicit_and_bounded`,
   `make_deck_workflow_definition_projects_execution_plan`. Restano
   contrasto/leggibilità più avanzati, QA documenti e template library più ampia
-  anche tramite catalogo esterno/adapter.
+  anche tramite catalogo esterno/adapter. **Nona slice provider contract
+  (2026-06-23, locale/verde):** il seed `monet/*` è stato spostato dietro un
+  `TemplateCatalogProvider` interno; `collect_template_catalog_entries` compone
+  provider multipli con dedup first-wins e `template_catalog_by_id_from_entries`
+  consente lookup stabile anche per provider futuri. Questo prepara MCP Monet,
+  marketplace o template pack firmati come adapter di catalogo, senza cambiare
+  i workflow e senza introdurre renderer/store paralleli. Test mirati:
+  `local_template_catalog_provider_exposes_seed_templates`,
+  `template_catalog_collects_multiple_providers_without_duplicate_ids`.
 - ☐ **7.1b (futuro)** Portare ricerca/meeting al livello del deck solo dopo il
   chiarimento sul contratto strumenti: `make_research` e `make_meeting` non sono
   essenziali per la prossima release.

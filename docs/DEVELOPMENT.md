@@ -87,9 +87,12 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   passa `template_ref` a `make_deck`/`make_document` e il gateway lo risolve in
   `design_template`/`design_theme`/`design_profile`/componenti già supportati.
   Monet resta catalogo/adapter di template, non secondo renderer/store né nuovo
-  sistema `make_*`. Prossimo asse: estendere la template library e la QA visuale
-  a contrasto/leggibilità e documenti. `make_research` e `make_meeting` restano
-  dopo questo asse.
+  sistema `make_*`. Nona slice locale/verde: il seed `monet/*` passa dietro a
+  un `TemplateCatalogProvider` interno con collector multi-provider deduplicato;
+  è il punto di aggancio futuro per MCP Monet, marketplace o template pack
+  firmati senza cambiare `make_deck`/`make_document`. Prossimo asse: estendere
+  la template library e la QA visuale a contrasto/leggibilità e documenti.
+  `make_research` e `make_meeting` restano dopo questo asse.
 - **WS2-3.1 PASSATA in runtime (2026-06-23):** gli artifact scritti via
   Filesystem MCP dentro la root progetto vengono registrati come
   `memory_type="artifact"` + entity grafo `artifact` + embedding. Gate:
