@@ -6019,6 +6019,93 @@ fn record_runtime_plan_step_outcome_from_state(
     }
 }
 
+fn record_subagent_task_step_outcome_memory(
+    facade: &MemoryFacade,
+    user: &MemoryUserId,
+    workspace: &MemoryWorkspaceId,
+    lifecycle: &MemoryLifecycleRequest,
+    thread_id: Option<&str>,
+    task: &TaskRecord,
+    outcome: &TaskExecutionOutcome,
+) -> Result<Option<MemoryRef>, String> {
+    if !task.kind.starts_with("subagent.") || !outcome.completed {
+        return Ok(None);
+    }
+    let title = task
+        .input_json
+        .get("goal")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or(task.kind.as_str());
+    let done_criterion = task
+        .input_json
+        .get("contract")
+        .and_then(Value::as_str)
+        .unwrap_or("sub-agent task completed");
+    let step = serde_json::json!({
+        "id": task.task_id.as_str(),
+        "title": title,
+        "status": "done",
+        "detail": {
+            "task_kind": task.kind.as_str(),
+            "summary": outcome.summary,
+        },
+        "done_criterion": done_criterion,
+    });
+    let evidence = vec![serde_json::json!({
+        "source": "subagent_task",
+        "task_id": task.task_id.as_str(),
+        "kind": task.kind.as_str(),
+        "checkpoint": outcome.checkpoint_redacted,
+    })
+    .to_string()];
+    record_runtime_plan_step_outcome(
+        facade,
+        user,
+        workspace,
+        lifecycle,
+        thread_id,
+        &step,
+        &evidence,
+    )
+    .map(Some)
+}
+
+fn record_subagent_task_step_outcome(
+    state: &AppState,
+    task: &TaskRecord,
+    outcome: &TaskExecutionOutcome,
+) {
+    let thread_id = lock_store(state)
+        .ok()
+        .and_then(|store| store.thread_by_task_id(task.task_id.as_str()).ok().flatten())
+        .map(|thread| thread.thread_id);
+    let Ok(facade) = lock_memory_facade(state) else {
+        return;
+    };
+    let user = gateway_memory_user_id();
+    let workspace = gateway_memory_workspace_id();
+    let lifecycle = MemoryLifecycleRequest {
+        actor_id: "runtime-plan".to_string(),
+        user_id: user.clone(),
+        workspace_id: workspace.clone(),
+        purpose: "subagent_plan_step_verified".to_string(),
+    };
+    if record_subagent_task_step_outcome_memory(
+        &facade,
+        &user,
+        &workspace,
+        &lifecycle,
+        thread_id.as_deref(),
+        task,
+        outcome,
+    )
+    .is_ok()
+    {
+        rebuild_status_wiki(&facade, &user, &workspace);
+    }
+}
+
 fn upsert_runtime_plan_graph(
     facade: &MemoryFacade,
     user: &MemoryUserId,
@@ -21681,6 +21768,7 @@ fn run_next_task_once(
     }
     append_task_observation_to_session(state, &task, &outcome)?;
     if outcome.completed {
+        record_subagent_task_step_outcome(state, &task, &outcome);
         mark_task_completed(state, &mut task)?;
         record_automation_run_for_task(state, &task, true, "");
         // Proactivity: a recurring task enqueues its next occurrence on completion.
@@ -35490,6 +35578,92 @@ mod tests {
                 .and_then(|items| items.first())
                 .and_then(|value| value.as_str()),
             Some("cargo test passed again"),
+        );
+    }
+
+    #[test]
+    fn subagent_task_outcome_writes_runtime_plan_step_fact() {
+        let facade = local_first_memory::MemoryFacade::new(
+            local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
+        );
+        let user = local_first_memory::UserId::new("local");
+        let workspace = local_first_memory::WorkspaceId::new("project");
+        let lifecycle = local_first_memory::MemoryLifecycleRequest {
+            actor_id: "test".to_string(),
+            user_id: user.clone(),
+            workspace_id: workspace.clone(),
+            purpose: "test".to_string(),
+        };
+        let task = local_first_task_runtime::TaskRecord::new(
+            "subtask-1",
+            local_first_task_runtime::UserId::new("local-user"),
+            local_first_task_runtime::WorkspaceId::new("local-workspace"),
+            "subagent.ReviewAgent",
+            "Review the draft",
+            serde_json::json!({
+                "goal": "Review the draft",
+                "contract": "SubagentReview",
+            }),
+        );
+        let outcome = super::TaskExecutionOutcome {
+            completed: true,
+            blocked_reason: None,
+            pending_approval: None,
+            summary: "Review complete".to_string(),
+            checkpoint_payload: serde_json::json!({"raw": "hidden"}),
+            checkpoint_redacted: serde_json::json!({
+                "kind": "executor_completed",
+                "tool": "subagent",
+            }),
+            chat_message: "Task completed.".to_string(),
+            surface: super::SurfaceKind::Logs,
+            event_kind: "computer_executor_completed".to_string(),
+            event_title: "Executor completed".to_string(),
+            event_subtitle: "subagent produced structured output.".to_string(),
+            event_payload: serde_json::json!({}),
+            artifacts: vec![],
+        };
+
+        let reference = super::record_subagent_task_step_outcome_memory(
+            &facade,
+            &user,
+            &workspace,
+            &lifecycle,
+            Some("thread-subagent"),
+            &task,
+            &outcome,
+        )
+        .unwrap()
+        .expect("subagent outcome fact");
+
+        let memory = facade
+            .list_memories_for_ui(&user, &workspace)
+            .unwrap()
+            .into_iter()
+            .find(|memory| memory.reference == reference)
+            .expect("outcome memory");
+        assert_eq!(memory.memory_type, "fact");
+        assert_eq!(memory.status, local_first_memory::MemoryStatus::Confirmed);
+        assert_eq!(
+            memory.metadata.get("source").and_then(|value| value.as_str()),
+            Some("runtime_plan_step"),
+        );
+        assert_eq!(
+            memory.metadata.get("thread_id").and_then(|value| value.as_str()),
+            Some("thread-subagent"),
+        );
+        assert_eq!(
+            memory.metadata.get("step_id").and_then(|value| value.as_str()),
+            Some("subtask-1"),
+        );
+        assert!(
+            memory
+                .metadata
+                .get("evidence")
+                .and_then(|value| value.as_array())
+                .and_then(|items| items.first())
+                .and_then(|value| value.as_str())
+                .is_some_and(|value| value.contains("subagent_task")),
         );
     }
 

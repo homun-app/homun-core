@@ -104,6 +104,10 @@ Fatto:
   con `thread_id`, `step_id`, criterio ed evidenze della verifica. Il piano
   resta il solo `open_loop` canonico runtime-owned; la `fact` è storico
   recuperabile e viene aggiornata in-place per lo stesso step.
+- outcome per-step sub-agent WS1-F6b: i task `subagent.*` completati riusano lo
+  stesso formato `runtime_plan_step`, usando il task id come `step_id`, il
+  contratto sub-agent come criterio e un'evidence redatta
+  `source="subagent_task"`.
 
 Mancante:
 
@@ -176,10 +180,9 @@ Acceptance:
    locale/verde.
 5. WS5.6 — eval memoria: ✅ artifact/provenance e stato workflow/perché locali;
    resta eventuale smoke in-app mirato.
-6. WS1-Fase 6 — completare write-back per-step anche per sub-agent.
-7. WS1-Fase 3 — estrarre il runner workflow generico riusabile sullo stesso
+6. WS1-Fase 3 — estrarre il runner workflow generico riusabile sullo stesso
    `ExecutionPlan` + write-back memoria/grafo.
-8. WS7 — deliverable Manus-style, solo dopo queste fondamenta.
+7. WS7 — deliverable Manus-style, solo dopo queste fondamenta.
 
 ## File codice principali
 

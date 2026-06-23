@@ -222,7 +222,12 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   usate dalla verifica. Il piano resta l'unico `open_loop` runtime-owned; la
   `fact` è l'outcome storico recuperabile e viene aggiornata in-place per lo
   stesso step. Test mirato:
-  `runtime_plan_step_outcome_writes_confirmed_fact_memory`.
+  `runtime_plan_step_outcome_writes_confirmed_fact_memory`. **WS1-Fase 6b
+  locale/verde:** gli outcome completati dei task `subagent.*` passano dallo
+  stesso helper e scrivono `fact` `source="runtime_plan_step"` con `step_id`
+  uguale al task id, `done_criterion` dal contratto sub-agent ed evidence redatta
+  `source="subagent_task"`. Test mirato:
+  `subagent_task_outcome_writes_runtime_plan_step_fact`.
 - **Nota aperta non bloccante:** durante i gate con tool il provider primario
   `glm-5.2` continua a rispondere `400 Bad Request` sul primo round con tool; il
   fallback a `kimi-k2.6:cloud` prosegue correttamente. Da riprendere come task

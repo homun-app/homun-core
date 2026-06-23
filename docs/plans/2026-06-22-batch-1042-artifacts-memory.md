@@ -101,13 +101,17 @@ modelli deboli/locali. Invarianti: monotonìa, limitatezza, identità non inferi
 - 🟡 **Fase 5** — convergenza con `OrchestratorBrain` (completa [ADR 0008](../decisions/0008-orchestrator-brain-single-planner.md)).
   - ✅ `run_plan` porta i workflow dichiarativi dentro lo stesso Brain senza planner
     LLM; resta applicarlo a tutte le pipeline deliverable e al router.
-- 🟡 **Fase 6** — memoria nel loop **per-step** sull'unico `MemoryFacade`.
+- ✅ **Fase 6** — memoria nel loop **per-step** sull'unico `MemoryFacade`.
   - ✅ **Slice 6a (2026-06-23, locale/verde)**: il loop principale scrive una
     `fact` confermata `source="runtime_plan_step"` quando uno step viene
     verificato `done`, con `thread_id`, `step_id`, criterio ed evidenze. Upsert
     in-place per lo stesso step; nessun workflow store parallelo. Test mirato:
     `runtime_plan_step_outcome_writes_confirmed_fact_memory`.
-  - ☐ **Slice 6b**: estendere lo stesso write-back per-step ai sub-agent.
+  - ✅ **Slice 6b (2026-06-23, locale/verde)**: gli outcome completati dei task
+    `subagent.*` riusano lo stesso formato `runtime_plan_step`, con `step_id`
+    dal task id, `done_criterion` dal contratto sub-agent ed evidence redatta
+    `source="subagent_task"`. Test mirato:
+    `subagent_task_outcome_writes_runtime_plan_step_fact`.
 - ☐ **Sub-agent** — sub-agent a contesto isolato come tipo di nodo del grafo, recall/
   write-back attraverso il motore di memoria condiviso.
 
