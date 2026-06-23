@@ -60,8 +60,9 @@ use local_first_capabilities::{
     WorkspaceId as CapabilityWorkspaceId,
 };
 use local_first_orchestrator::{
-    MemoryContextProvider, MemoryContextSnippet, OrchestratorBrain, OrchestratorBudgets,
-    OrchestratorRequest, OrchestratorResult, ToolSearchIndexStore,
+    ExecutionPlan, MemoryContextProvider, MemoryContextSnippet, OrchestratorBrain,
+    OrchestratorBudgets, OrchestratorRequest, OrchestratorResult, OrchestratorRoute, PlanStep,
+    PlanStepKind, StepExecutionPolicy, ToolSearchIndexStore,
 };
 use local_first_secrets::{
     DevelopmentSecretKeyProvider, EncryptedFileSecretStore, SecretMaterial, SecretRef, SecretStore,
@@ -5502,6 +5503,11 @@ for single-step requests.",
                                 "title": { "type": "string", "description": "What the step does (short, imperative)." },
                                 "status": { "type": "string", "enum": ["todo", "doing", "done", "blocked"], "description": "Current status of the step." },
                                 "detail": { "type": "string", "description": "Optional detail." },
+                                "depends_on": {
+                                    "type": "array",
+                                    "items": { "type": "string" },
+                                    "description": "Optional explicit dependencies by stable step id, e.g. [\"s1\"]. Do not infer dependencies; include only when the workflow requires this step to wait for another."
+                                },
                                 "done_criterion": { "type": "string", "description": "Optional but RECOMMENDED: the concrete, checkable condition that proves this step is complete (e.g. \"file report.pdf written\", \"search returned >=5 relevant sources\", \"deck rendered to PDF without errors\"). Used to verify completion before advancing." }
                             },
                             "required": ["title", "status"]
@@ -5624,6 +5630,18 @@ fn plan_next_open(plan: &[serde_json::Value]) -> Option<String> {
         .filter(|t| !t.is_empty())
 }
 
+fn plan_step_depends_on(step: &serde_json::Value) -> Vec<String> {
+    step.get("depends_on")
+        .and_then(|value| value.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
 fn plan_is_complete(plan: &[serde_json::Value]) -> bool {
     !plan.is_empty() && plan_done_count(plan) == plan.len()
 }
@@ -5679,7 +5697,55 @@ fn runtime_plan_memory_metadata(thread_id: Option<&str>, plan: &[serde_json::Val
         "total_count": plan.len(),
         "next_step": plan_next_open(plan),
         "steps": plan,
+        "execution_plan": runtime_execution_plan(plan),
     })
+}
+
+fn runtime_execution_plan(plan: &[serde_json::Value]) -> ExecutionPlan {
+    ExecutionPlan {
+        route: OrchestratorRoute::MixedWorkflow,
+        direct_answer: None,
+        steps: plan
+            .iter()
+            .enumerate()
+            .filter_map(|(index, step)| {
+                let title = plan_step_title(step).trim();
+                if title.is_empty() {
+                    return None;
+                }
+                let step_id = plan_step_id(step)
+                    .map(str::to_string)
+                    .unwrap_or_else(|| format!("s{}", index + 1));
+                Some(PlanStep {
+                    step_id,
+                    kind: PlanStepKind::DirectAnswer,
+                    depends_on: plan_step_depends_on(step),
+                    provider_id: None,
+                    tool_name: None,
+                    arguments: serde_json::json!({
+                        "title": title,
+                        "status": plan_step_status(step),
+                        "detail": step.get("detail").cloned().unwrap_or(serde_json::Value::Null),
+                        "done_criterion": step
+                            .get("done_criterion")
+                            .cloned()
+                            .unwrap_or(serde_json::Value::Null),
+                    }),
+                    execution_policy: StepExecutionPolicy::Immediate,
+                    risk_level: "low".to_string(),
+                    expected_duration_seconds: 0,
+                    agent_id: None,
+                    goal: Some(title.to_string()),
+                    contract: Some("runtime_plan_step".to_string()),
+                    allowed_actions: vec![],
+                    requires_user_approval: None,
+                    timeout_seconds: None,
+                    max_tokens: None,
+                })
+            })
+            .collect(),
+        needs_more_tools: None,
+    }
 }
 
 fn runtime_plan_memory_matches(memory: &MemoryRecord, thread_key: &str) -> bool {
@@ -5727,10 +5793,11 @@ fn upsert_runtime_plan_graph(
                 "source": "runtime_plan",
                 "kind": "runtime_plan",
                 "thread_id": thread_key,
-                "status": if plan_next_open(plan).is_some() { "open" } else { "complete" },
+                "status": if plan_is_complete(plan) { "complete" } else { "open" },
                 "done_count": plan_done_count(plan),
                 "total_count": plan.len(),
                 "next_step": plan_next_open(plan),
+                "execution_plan": runtime_execution_plan(plan),
             }),
         })
         .map_err(|error| error.to_string())?;
@@ -5826,16 +5893,9 @@ fn upsert_runtime_plan_graph(
             }),
         )?;
 
-        let dependencies = step
-            .get("depends_on")
-            .and_then(|value| value.as_array())
-            .into_iter()
-            .flatten()
-            .filter_map(|value| value.as_str())
-            .map(str::trim)
-            .filter(|value| !value.is_empty());
+        let dependencies = plan_step_depends_on(step);
         for dependency_id in dependencies {
-            let Some(dependency_ref) = step_refs.get(dependency_id) else {
+            let Some(dependency_ref) = step_refs.get(&dependency_id) else {
                 continue;
             };
             upsert_memory_relation(
@@ -5847,7 +5907,7 @@ fn upsert_runtime_plan_graph(
                     "runtime_plan_step_depends:{}:{}:{}",
                     provenance_key_fragment(thread_key),
                     provenance_key_fragment(step_id),
-                    provenance_key_fragment(dependency_id)
+                    provenance_key_fragment(&dependency_id)
                 ),
                 step_ref.clone(),
                 "depends_on",
@@ -6019,6 +6079,10 @@ fn merge_plan(plan: &mut Vec<serde_json::Value>, sent: &[serde_json::Value]) -> 
                 if !detail.is_empty() {
                     plan[i]["detail"] = serde_json::json!(detail);
                 }
+                let depends_on = plan_step_depends_on(s);
+                if !depends_on.is_empty() {
+                    plan[i]["depends_on"] = serde_json::json!(depends_on);
+                }
             }
             None => {
                 if title.is_empty() {
@@ -6031,6 +6095,7 @@ fn merge_plan(plan: &mut Vec<serde_json::Value>, sent: &[serde_json::Value]) -> 
                 plan.push(serde_json::json!({
                     "id": id, "title": title, "status": status, "detail": detail,
                     "done_criterion": s.get("done_criterion").and_then(|v| v.as_str()).unwrap_or(""),
+                    "depends_on": plan_step_depends_on(s),
                 }));
                 if new_status == "done" {
                     claims.push(plan.len() - 1);
@@ -34676,6 +34741,25 @@ mod tests {
     }
 
     #[test]
+    fn merge_plan_preserves_explicit_dependencies() {
+        let mut plan = vec![serde_json::json!({
+            "id": "s1", "title": "Read docs", "status": "done", "detail": ""
+        })];
+        let claims = merge_plan(
+            &mut plan,
+            &[serde_json::json!({
+                "title": "Implement slice",
+                "status": "doing",
+                "depends_on": ["s1"]
+            })],
+        );
+
+        assert!(claims.is_empty());
+        assert_eq!(plan.len(), 2);
+        assert_eq!(plan[1]["depends_on"], serde_json::json!(["s1"]));
+    }
+
+    #[test]
     fn plan_marker_round_trips() {
         let plan = vec![
             serde_json::json!({"id":"s1","title":"Alpha","status":"done","detail":"d1"}),
@@ -34906,6 +34990,80 @@ mod tests {
                 && relation.target_ref == step_one.reference
                 && relation.relation_type == "depends_on"
         }));
+    }
+
+    #[test]
+    fn runtime_plan_memory_projects_execution_plan_contract() {
+        let facade = local_first_memory::MemoryFacade::new(
+            local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
+        );
+        let user = local_first_memory::UserId::new("local");
+        let workspace = local_first_memory::WorkspaceId::new("project");
+        let lifecycle = local_first_memory::MemoryLifecycleRequest {
+            actor_id: "test".to_string(),
+            user_id: user.clone(),
+            workspace_id: workspace.clone(),
+            purpose: "test".to_string(),
+        };
+        let plan = vec![
+            serde_json::json!({
+                "id":"s1",
+                "title":"Read docs",
+                "status":"done",
+                "detail":"source docs",
+                "done_criterion":"docs read"
+            }),
+            serde_json::json!({
+                "id":"s2",
+                "title":"Implement slice",
+                "status":"doing",
+                "detail":"code path",
+                "depends_on":["s1"]
+            }),
+        ];
+
+        let memory_ref = super::upsert_runtime_plan_memory(
+            &facade,
+            &user,
+            &workspace,
+            &lifecycle,
+            Some("thread-contract"),
+            &plan,
+        )
+        .unwrap()
+        .expect("created");
+
+        let memory = facade
+            .list_memories_for_ui(&user, &workspace)
+            .unwrap()
+            .into_iter()
+            .find(|memory| memory.reference == memory_ref)
+            .expect("plan memory");
+        let execution_plan = memory
+            .metadata
+            .get("execution_plan")
+            .expect("execution plan metadata");
+        assert_eq!(
+            execution_plan.get("route").and_then(|value| value.as_str()),
+            Some("mixed_workflow"),
+        );
+        let steps = execution_plan
+            .get("steps")
+            .and_then(|value| value.as_array())
+            .expect("execution plan steps");
+        assert_eq!(steps.len(), 2);
+        assert_eq!(
+            steps[0].get("step_id").and_then(|value| value.as_str()),
+            Some("s1"),
+        );
+        assert_eq!(
+            steps[0].get("goal").and_then(|value| value.as_str()),
+            Some("Read docs"),
+        );
+        assert_eq!(
+            steps[1].get("depends_on").and_then(|value| value.as_array()).map(|items| items.len()),
+            Some(1),
+        );
     }
 
     #[test]

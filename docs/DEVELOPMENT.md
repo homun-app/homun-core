@@ -182,6 +182,17 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   il runner scheduled. Test mirati:
   `cargo test -p local-first-desktop-gateway plan_guard -- --nocapture` e
   `cargo test -p local-first-desktop-gateway plan_completion_requires_every_step_done -- --nocapture`.
+- **WS1-Fase 2 Slice 3a locale/verde:** prima convergenza verso il contratto
+  `ExecutionPlan` del crate `orchestrator` senza introdurre un workflow store
+  parallelo: il piano runtime resta compatibile con marker/UI `Vec<Value>`, ma
+  il write-back canonico aggiunge `metadata.execution_plan` serializzato come
+  `ExecutionPlan` (`route=mixed_workflow`, step con `step_id`, `depends_on`,
+  `goal`, `contract=runtime_plan_step`). `update_plan` ora accetta
+  `depends_on` espliciti e `merge_plan` li conserva, così la DAG non esiste solo
+  nei test costruiti a mano. Test mirati:
+  `runtime_plan_memory_projects_execution_plan_contract`,
+  `merge_plan_preserves_explicit_dependencies`,
+  `runtime_plan_memory_materializes_plan_step_graph`.
 - **Nota aperta non bloccante:** durante i gate con tool il provider primario
   `glm-5.2` continua a rispondere `400 Bad Request` sul primo round con tool; il
   fallback a `kimi-k2.6:cloud` prosegue correttamente. Da riprendere come task

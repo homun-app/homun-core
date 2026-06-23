@@ -55,8 +55,18 @@ modelli deboli/locali. Invarianti: monotonìa, limitatezza, identità non inferi
     step→step `depends_on` quando il piano porta `depends_on` espliciti. Resta
     dentro `MemoryFacade`, nessun workflow store parallelo. Test mirato:
     `runtime_plan_memory_materializes_plan_step_graph`.
-  - ☐ **Slice 3**: convergere sull'`ExecutionPlan` del crate `orchestrator` (DAG
-    `depends_on`, `plan_propose`) e ritirare il `Vec<Value>` canonico.
+  - 🟡 **Slice 3a (2026-06-23, locale/verde)**: prima convergenza verso
+    l'`ExecutionPlan` del crate `orchestrator` senza store paralleli: il piano
+    runtime-owned resta compatibile con marker/UI `Vec<Value>`, ma il write-back
+    canonico salva anche `metadata.execution_plan` serializzato come
+    `ExecutionPlan` (`route=mixed_workflow`, step con `step_id`, `depends_on`,
+    `goal`, `contract=runtime_plan_step`). `update_plan` accetta `depends_on`
+    espliciti e `merge_plan` li conserva, quindi la DAG arriva dal flusso reale.
+    Test mirati: `runtime_plan_memory_projects_execution_plan_contract`,
+    `merge_plan_preserves_explicit_dependencies`,
+    `runtime_plan_memory_materializes_plan_step_graph`.
+  - ☐ **Slice 3b**: usare `ExecutionPlan` come stato runtime primario e ritirare
+    gradualmente il `Vec<Value>` canonico; includere `plan_propose` nel contratto.
 - ☐ **Floor ovunque** — constrained decoding su **tutte** le emissioni di
   orchestrazione (tool call del loop principale, piano, verifica), locale+cloud. Oggi
   è imposto solo sul contenuto di `make_deck`; il planner OpenAI-compat declassa ancora.

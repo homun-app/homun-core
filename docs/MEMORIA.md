@@ -85,6 +85,10 @@ Fatto:
   nel grafo canonico (`metadata.kind="runtime_plan"` /
   `metadata.kind="runtime_plan_step"`), con relazioni `describes`, `relates_to`
   (`kind="has_step"`) e `depends_on` per dipendenze esplicite tra step.
+- prima convergenza WS1 verso `ExecutionPlan`: lo stesso `open_loop`
+  `source="runtime_plan"` salva anche `metadata.execution_plan` nel contratto
+  del crate `orchestrator`; `update_plan` accetta e conserva `depends_on`
+  espliciti. Il marker/UI resta compatibile con lo snapshot step corrente.
 
 Mancante:
 
@@ -92,7 +96,8 @@ Mancante:
   contatti, nel grafo canonico memoria;
 - graphification estesa oltre il codice: artifact, piano, decisioni, outcome e loop
   aperti devono diventare nodi/archi causali; il piano ora ha write-back SQL e
-  grafo step-level iniziale, ma non ancora il runner `ExecutionPlan` completo;
+  grafo step-level iniziale più proiezione `ExecutionPlan`, ma non ancora il
+  runner `ExecutionPlan` completo;
 - provenance completa decisione/piano → artifact → codice → esito: la slice
   decisione/source-ref → artifact e i reader/eval sono locali/verdi; il piano ora
   scrive stato e step nel grafo, resta collegare artifact/esiti a step/piano con
@@ -156,8 +161,8 @@ Acceptance:
    locale/verde.
 5. WS5.6 — eval memoria: ✅ artifact/provenance e stato workflow/perché locali;
    resta eventuale smoke in-app mirato.
-6. WS1-Fase 2/3 — piano runtime-owned e workflow runner con write-back memoria e
-   grafo step-level.
+6. WS1-Fase 2/3 — promuovere `ExecutionPlan` a stato runtime primario e avviare
+   il workflow runner dichiarativo sullo stesso write-back memoria/grafo.
 7. WS7 — deliverable Manus-style, solo dopo queste fondamenta.
 
 ## File codice principali
