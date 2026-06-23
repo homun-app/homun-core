@@ -15,12 +15,13 @@ Usage:
 Exit 0 only if every check passes all runs. Wire into pre-release later (WS8.3).
 """
 import json
+import os
 import sys
 import time
 import urllib.error
 import urllib.request
 
-BASE = "http://127.0.0.1:11434/v1/chat/completions"
+BASE = os.environ.get("HOMUN_EVAL_BASE", "http://127.0.0.1:11434/v1/chat/completions")
 
 
 def post(model, system, user, schema):
@@ -107,6 +108,46 @@ def v_deck(d):
     return True, f"{len(deck['slides'])} slides"
 
 
+DOCUMENT_SCHEMA = {
+    "type": "object", "additionalProperties": False,
+    "required": ["title", "document_type", "sections", "formats"],
+    "properties": {
+        "title": {"type": "string"},
+        "document_type": {"type": "string", "enum": ["memo", "report", "proposal", "brief"]},
+        "sections": {"type": "array", "items": {
+            "type": "object", "additionalProperties": False,
+            "required": ["heading", "purpose", "bullets"],
+            "properties": {
+                "heading": {"type": "string"},
+                "purpose": {"type": "string"},
+                "bullets": {"type": "array", "items": {"type": "string"}},
+            }}},
+        "formats": {"type": "array", "items": {"type": "string", "enum": ["md", "pdf", "docx"]}},
+    },
+}
+
+
+def v_document(d):
+    doc = find_with(d, "sections")
+    if not doc:
+        return False, "no document"
+    sections = doc.get("sections")
+    if not isinstance(sections, list) or len(sections) < 3:
+        return False, "too few sections"
+    formats = doc.get("formats")
+    if not isinstance(formats, list) or "docx" not in formats:
+        return False, "missing docx"
+    for i, section in enumerate(sections):
+        if not isinstance(section, dict):
+            return False, f"section {i} bad"
+        if not isinstance(section.get("heading"), str) or not section["heading"].strip():
+            return False, f"section {i} no heading"
+        bullets = section.get("bullets")
+        if not isinstance(bullets, list) or not bullets:
+            return False, f"section {i} no bullets"
+    return True, f"{len(sections)} sections + {','.join(formats)}"
+
+
 PLAN_SCHEMA = {
     "type": "object", "additionalProperties": False, "required": ["steps"],
     "properties": {"steps": {"type": "array", "items": {
@@ -180,6 +221,11 @@ CHECKS = [
     ("deck", DECK_SCHEMA,
      "You are a presentation designer. Output ONLY JSON matching the schema, in the language of the brief.",
      "Crea una presentazione di 4 slide su Homun (assistente local-first).", v_deck),
+    ("document", DOCUMENT_SCHEMA,
+     "You are a senior business writer. Output ONLY JSON matching the schema. The formats array MUST include docx.",
+     "Prepara la struttura di un documento professionale su Homun per una PMI italiana: problema, soluzione, "
+     "sicurezza local-first e prossimi passi. Deve poter diventare DOCX.",
+     v_document),
     ("plan", PLAN_SCHEMA,
      "You are a planner. Output ONLY JSON matching the schema: an ordered list of concrete steps "
      "with a status and a checkable done_criterion.",
@@ -200,7 +246,7 @@ CHECKS = [
 def main():
     model = sys.argv[1] if len(sys.argv) > 1 else "gemma4:latest"
     runs = int(sys.argv[2]) if len(sys.argv) > 2 else 3
-    print(f"== eval suite :: model={model} :: runs={runs} :: {BASE}")
+    print(f"== eval suite :: model={model} :: runs={runs} :: {BASE}", flush=True)
     all_ok = True
     for name, schema, system, user, validate in CHECKS:
         passed = 0
@@ -221,8 +267,8 @@ def main():
         mark = "PASS" if passed == runs else "FAIL"
         if passed != runs:
             all_ok = False
-        print(f"  [{mark}] {name:14} {passed}/{runs}  :: {last}")
-    print(f"== {'ALL GREEN' if all_ok else 'FAILURES'} ==")
+        print(f"  [{mark}] {name:14} {passed}/{runs}  :: {last}", flush=True)
+    print(f"== {'ALL GREEN' if all_ok else 'FAILURES'} ==", flush=True)
     sys.exit(0 if all_ok else 1)
 
 

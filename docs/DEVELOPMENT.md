@@ -148,6 +148,10 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   solo a fine risposta. Guardrail successivo: `test:ui-contract` copre questo
   contratto e il dock Computer usa polling adattivo (600ms durante attività,
   2500ms da idle) per ridurre il carico sulle chat pesanti.
+  **WS8 eval locale:** `scripts/eval_suite.py` ora include anche il flusso
+  documento strutturato con formato `docx` obbligatorio, supporta
+  `HOMUN_EVAL_BASE` e stampa progressivamente; smoke locale `gemma4:latest 1`
+  passato su deck/document/plan/decision/open_loop.
   `make_research` e `make_meeting` restano dopo questo asse.
 - **WS2-3.1 PASSATA in runtime (2026-06-23):** gli artifact scritti via
   Filesystem MCP dentro la root progetto vengono registrati come

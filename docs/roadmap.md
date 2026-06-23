@@ -278,6 +278,9 @@ primo percorso locale verde:
     non torni a dipendere da timeline/artifact completati e il dock live riduce
     il polling quando idle (2500ms), mantenendolo veloce durante attività
     browser/terminal (600ms).
+65. WS8 eval document flow — `scripts/eval_suite.py` copre anche output documento
+    strutturato con `docx` obbligatorio, base URL configurabile via
+    `HOMUN_EVAL_BASE` e progress flush; smoke `gemma4:latest 1` verde.
 
 Prima di pubblicare/taggare resta prudente ripetere lo smoke manuale in-app su
 una automazione schedulata reale con il binario aggiornato. Il primo smoke ha

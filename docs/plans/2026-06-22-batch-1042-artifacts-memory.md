@@ -897,8 +897,12 @@ Il caposaldo #2 ("funziona sul tier locale") oggi è verificato solo sul deck
 
 - 🟡 **8.1** Suite di eval sui **flussi chiave** sul **modello locale di base**.
   *Seed fatto:* `scripts/eval_suite.py` (deck · piano · decisione-con-perché —
-  structured-output a livello modello). Da estendere: flussi via gateway (tool-call
-  emission, render end-to-end) + documento/ricerca quando esistono (WS7).
+  structured-output a livello modello). **Slice 2026-06-24 locale/verde:** aggiunto
+  check documento strutturato con `docx` obbligatorio, `HOMUN_EVAL_BASE` per
+  cambiare endpoint e flush progressivo durante run lunghi; smoke
+  `python3 scripts/eval_suite.py gemma4:latest 1` passato su
+  deck/document/plan/decision/open_loop. Da estendere: flussi via gateway
+  (tool-call emission, render end-to-end) + ricerca/meeting quando esistono (WS7).
 - ☐ **8.2** Eval memoria (= WS5.6): chat nuova → "stato + perché" → deve rispondere.
 - ☐ **8.3** Gate pre-release: nessuna pubblicazione se la suite non è verde sul tier base.
 
