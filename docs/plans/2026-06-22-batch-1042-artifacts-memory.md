@@ -855,6 +855,10 @@ ragionato il contratto degli strumenti `make_*` creati dall'harness. ADR 0011
   dal provider locale Ollama, la UI lo etichetta `☁ via local` invece di cloud
   generico; se Ollama locale non risponde il workflow fallisce correttamente
   prima del render. La binding remota va fatta sul provider cloud effettivo.
+  **Correzione workflow guardrail (2026-06-23):** durante una route workflow
+  one-call il gateway rifiuta tool diversi dal workflow selezionato, anche se
+  arrivano da MCP/connector caricati dopo il pruning. Questo impedisce fallback
+  manuali tipo `mcp__filesystem__create` dopo un errore `make_deck`.
 - ☐ **7.1b (futuro)** Portare ricerca/meeting al livello del deck solo dopo il
   chiarimento sul contratto strumenti: `make_research` e `make_meeting` non sono
   essenziali per la prossima release.

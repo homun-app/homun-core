@@ -120,7 +120,10 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   Correzione UX post-smoke: il menu modelli distingue ora i modelli cloud
   instradati tramite endpoint locale Ollama (`☁ via local`) dai provider cloud
   diretti; in quel caso serve Ollama locale acceso oppure una binding sul
-  provider remoto effettivo.
+  provider remoto effettivo. Correzione runtime successiva: quando il router
+  instrada a un workflow one-call (`make_deck`/`make_document`), il gateway
+  blocca tool fallback non ammessi (shell/filesystem/MCP create) invece di
+  lasciare che il modello aggiri il workflow dopo un errore provider.
   `make_research` e `make_meeting` restano dopo questo asse.
 - **WS2-3.1 PASSATA in runtime (2026-06-23):** gli artifact scritti via
   Filesystem MCP dentro la root progetto vengono registrati come

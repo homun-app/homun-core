@@ -6873,6 +6873,26 @@ fn prune_tools_for_workflow_route(
     }
 }
 
+fn workflow_route_blocked_tool_message(
+    route: &CapabilityRouteDecision,
+    tool_name: &str,
+) -> Option<String> {
+    match route {
+        CapabilityRouteDecision::Workflow {
+            workflow_id,
+            tool_name: workflow_tool,
+            ..
+        } if tool_name != *workflow_tool => Some(format!(
+            "WORKFLOW_ROUTE_BLOCKED_TOOL: this turn is routed to workflow `{workflow_id}`. \
+Tool `{tool_name}` is not allowed here. Do not create files manually, do not use shell/filesystem \
+fallbacks, and do not decompose the workflow. Use `{workflow_tool}` exactly once; if `{workflow_tool}` \
+already failed because the provider is unavailable, stop and tell the user to choose a reachable \
+provider or start the required local service."
+        )),
+        _ => None,
+    }
+}
+
 fn runtime_plan_memory_matches(memory: &MemoryRecord, thread_key: &str) -> bool {
     memory.memory_type == "open_loop"
         && !matches!(memory.status, MemoryStatus::Deleted | MemoryStatus::Rejected | MemoryStatus::Stale)
@@ -16408,6 +16428,17 @@ check/update the key in Settings → Model & Runtime.".to_string()
                         .and_then(|a| a.as_str())
                         .unwrap_or("{}");
                     let call_id = call.get("id").and_then(|i| i.as_str()).unwrap_or("").to_string();
+
+                    if let Some(blocked) =
+                        workflow_route_blocked_tool_message(&capability_route_for_runtime, name)
+                    {
+                        messages.push(serde_json::json!({
+                            "role": "tool",
+                            "tool_call_id": call_id,
+                            "content": blocked,
+                        }));
+                        continue;
+                    }
 
                     // Record consequential actions (any domain) for decision memory.
                     if tool_trace.len() < 20 {
@@ -39794,6 +39825,29 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             .filter_map(|schema| schema.pointer("/function/name").and_then(|value| value.as_str()))
             .collect();
         assert_eq!(names, vec!["make_document"]);
+    }
+
+    #[test]
+    fn workflow_route_blocks_manual_tool_fallbacks() {
+        let route = super::route_capability(
+            "Crea una presentazione pitch per Homun usando il template_ref monet/startup-pitch-clean-01",
+        );
+
+        assert!(
+            super::workflow_route_blocked_tool_message(&route, "make_deck").is_none(),
+            "workflow tool must remain allowed"
+        );
+        let blocked =
+            super::workflow_route_blocked_tool_message(&route, "mcp__filesystem__create")
+                .expect("filesystem fallback must be blocked");
+        assert!(blocked.contains("WORKFLOW_ROUTE_BLOCKED_TOOL"), "{blocked}");
+        assert!(blocked.contains("make_deck"), "{blocked}");
+
+        let generic = super::route_capability("spiegami cosa può fare Homun");
+        assert!(
+            super::workflow_route_blocked_tool_message(&generic, "mcp__filesystem__create").is_none(),
+            "generic agent-loop turns keep normal tools"
+        );
     }
 
     #[test]

@@ -259,6 +259,11 @@ primo percorso locale verde:
     router euristico e non un catalogo duplicato; finché non esistono asset
     `preview_ref` reali, mostra il contratto/layout invece di finte preview
     grafiche.
+62. WS7 workflow guardrail — durante una route workflow one-call il gateway
+    blocca tool fallback non ammessi (shell/filesystem/MCP create) invece di
+    permettere al modello di aggirare `make_deck`/`make_document` dopo un errore
+    provider. Se il provider non risponde, il workflow si ferma e chiede una
+    binding/provider raggiungibile.
 
 Prima di pubblicare/taggare resta prudente ripetere lo smoke manuale in-app su
 una automazione schedulata reale con il binario aggiornato. Il primo smoke ha
