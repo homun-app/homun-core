@@ -13082,6 +13082,7 @@ enum CapabilitySource {
     NativeAtomic,
     Skill,
     McpTool,
+    ConnectorTool,
 }
 
 #[derive(Clone)]
@@ -13114,6 +13115,7 @@ fn capability_entry_from_tool_schema(
         CapabilitySource::NativeAtomic => "native atomic tool",
         CapabilitySource::Skill => "skill",
         CapabilitySource::McpTool => "mcp connected tool",
+        CapabilitySource::ConnectorTool => "connector tool",
     };
     Some(CapabilityEntry {
         key: name.clone(),
@@ -13131,6 +13133,14 @@ fn mcp_capability_entries(schemas: &[serde_json::Value]) -> Vec<CapabilityEntry>
         .cloned()
         .filter_map(|schema| capability_entry_from_tool_schema(schema, CapabilitySource::McpTool))
         .collect()
+}
+
+fn connector_capability_entry(slug: String, schema: serde_json::Value) -> Option<CapabilityEntry> {
+    let mut entry = capability_entry_from_tool_schema(schema, CapabilitySource::ConnectorTool)?;
+    // Composio's slug is the dispatch key. Keep it authoritative even if a malformed
+    // schema carries a different function name.
+    entry.key = slug;
+    Some(entry)
 }
 
 fn cap_tokenize(s: &str) -> Vec<String> {
@@ -14139,7 +14149,8 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
     }
     // Connectors are NOT flattened into the BM25 corpus: they're searched via the
     // toolkit-aware `search_composio_catalog` inside find_capability (returns a service's
-    // full CRUD set together, so the model picks the right verb).
+    // full CRUD set together, so the model picks the right verb). The hits are still
+    // converted to typed `CapabilityEntry` values before being surfaced.
     // Attachments (persistent): ingest NEW files off-runtime, PERSIST them on the
     // thread, then load the thread's FULL set so a file stays usable across turns
     // (no re-attach). A manifest lists the available files so the model uses their
@@ -16756,6 +16767,7 @@ an uncertain date.",
                                     CapabilitySource::NativeAtomic => "atomic",
                                     CapabilitySource::NativeTool => "tool",
                                     CapabilitySource::Skill => "skill",
+                                    CapabilitySource::ConnectorTool => "connector",
                                 };
                                 lines.push(format!("- {label} «{}»: {}", entry.key, entry.desc));
                             }
@@ -16779,17 +16791,15 @@ an uncertain date.",
                                 if !can_see_contacts && tool_touches_contacts(&slug) {
                                     continue;
                                 }
-                                if loaded_tools.insert(slug.clone()) {
-                                    tool_schemas.push(schema.clone());
+                                let Some(entry) = connector_capability_entry(slug, schema) else {
+                                    continue;
+                                };
+                                if loaded_tools.insert(entry.key.clone()) {
+                                    if let Some(schema) = &entry.schema {
+                                        tool_schemas.push(schema.clone());
+                                    }
                                 }
-                                let desc = schema
-                                    .pointer("/function/description")
-                                    .and_then(|d| d.as_str())
-                                    .unwrap_or("")
-                                    .chars()
-                                    .take(140)
-                                    .collect::<String>();
-                                lines.push(format!("- {slug}: {desc}"));
+                                lines.push(format!("- connector «{}»: {}", entry.key, entry.desc));
                             }
                         }
                         if lines.is_empty() {
@@ -36807,6 +36817,33 @@ mod tests {
                 .and_then(|schema| schema.pointer("/function/name"))
                 .and_then(|value| value.as_str()),
             Some("mcp__filesystem__read_file"),
+        );
+    }
+
+    #[test]
+    fn connector_hits_are_typed_capability_entries() {
+        let schema = serde_json::json!({
+            "type": "function",
+            "function": {
+                "name": "GMAIL_SEND_EMAIL",
+                "description": "Send an email message via Gmail.",
+                "parameters": { "type": "object", "properties": {} }
+            }
+        });
+        let entry = super::connector_capability_entry("GMAIL_SEND_EMAIL".to_string(), schema)
+            .expect("connector capability entry");
+
+        assert_eq!(entry.key, "GMAIL_SEND_EMAIL");
+        assert_eq!(entry.source, super::CapabilitySource::ConnectorTool);
+        assert!(!entry.is_skill);
+        assert!(entry.text.contains("connector tool"), "{}", entry.text);
+        assert_eq!(
+            entry
+                .schema
+                .as_ref()
+                .and_then(|schema| schema.pointer("/function/name"))
+                .and_then(|value| value.as_str()),
+            Some("GMAIL_SEND_EMAIL"),
         );
     }
 

@@ -198,6 +198,12 @@ modelli deboli/locali. Invarianti: monotonìa, limitatezza, identità non inferi
     fallback oltre `MCP_ALWAYS_LOAD_MAX` e rimuove un altro ramo parallelo tra
     registry nativo e catalogo MCP. Test mirato:
     `mcp_tools_contribute_typed_entries_to_capability_corpus`.
+  - ✅ **Sesta slice registry connector typed (2026-06-23, locale/verde):** i
+    risultati Composio/connector dentro `find_capability` restano toolkit-aware
+    (per non perdere CRUD completo e perimeter read/write), ma vengono convertiti
+    in `CapabilityEntry` con source `ConnectorTool` prima di essere caricati nel
+    live toolset e mostrati al modello. Test mirato:
+    `connector_hits_are_typed_capability_entries`.
   - 🟡 Possibile step futuro: atomico PDF dedicato con schema più guidato
     (input/output files, operazione), se `run_in_sandbox` risulta troppo generico
     nello smoke.

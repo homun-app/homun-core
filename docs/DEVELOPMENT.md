@@ -331,6 +331,15 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   sono più solo schema live/anonimo: quando superano l'always-load cap possono
   essere recuperati dallo stesso registry e attivati con lo stesso meccanismo.
   Test mirato: `mcp_tools_contribute_typed_entries_to_capability_corpus`.
+- **Capability registry connector locale/verde (2026-06-23):** i risultati
+  Composio/connector recuperati da `find_capability` restano toolkit-aware
+  (servono CRUD completi e perimeter read/write), ma non sono più output
+  speciale fuori tipo: vengono convertiti in `CapabilityEntry` con source
+  `ConnectorTool` e mostrati come `connector «TOOL»: ...`. Test mirato:
+  `connector_hits_are_typed_capability_entries`. **Prossimo passo unico:**
+  rendere questa sorgente interrogabile/auditabile nello stesso contratto del
+  registry senza perdere la ricerca toolkit-aware, poi fare smoke in-app su un
+  connector reale.
 - **make_document DOCX locale/verde (2026-06-23):** lo stesso workflow ora
   materializza anche artifact `.docx` editabili dalla sorgente Markdown canonica,
   via pacchetto OOXML minimale generato in-process con `zip` già presente.

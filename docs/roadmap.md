@@ -130,24 +130,28 @@ primo percorso locale verde:
     `find_capability` come `McpTool` tipizzati, con schema attivabile nello
     stesso live toolset; quando non sono always-loaded non vivono più in un ramo
     parallelo fuori registry.
-34. WS1/WS7 document focus — `make_document` ora materializza anche `.docx`
+34. WS1-Fase 4b sesta slice — i tool Composio/connector recuperati da
+    `find_capability` restano toolkit-aware ma vengono convertiti in
+    `CapabilityEntry` source `ConnectorTool`; anche questa sorgente ora parla il
+    contratto typed del registry invece di emettere righe speciali fuori tipo.
+35. WS1/WS7 document focus — `make_document` ora materializza anche `.docx`
     editabile dalla stessa sorgente Markdown canonica, oltre a `md`/`pdf`, con
     package OOXML generato in-process e registrazione artifact/memoria invariata.
-35. WS1/WS7 document focus — `make_document` ora accetta struttura/stile
+36. WS1/WS7 document focus — `make_document` ora accetta struttura/stile
     espliciti (`document_type`, `audience`, `tone`, `sections`) nello stesso
     schema tool; il workflow li usa come contratto di generazione solo se
     dichiarati, senza attivazioni euristiche o nuovi registry paralleli.
-36. WS1/WS7 document focus — il renderer DOCX di `make_document` traduce le
+37. WS1/WS7 document focus — il renderer DOCX di `make_document` traduce le
     tabelle pipe Markdown in tabelle Word reali (`w:tbl`) con escaping XML,
     mantenendo sorgente Markdown canonica e registrazione artifact invariata.
-37. WS1/WS7 document focus — feedback smoke reale DOCX: il file era valido ma
+38. WS1/WS7 document focus — feedback smoke reale DOCX: il file era valido ma
     troppo grezzo. Il renderer ora include `styles.xml`, converte bold/italic
     Markdown in run Word, promuove il primo titolo e gestisce liste numerate.
-38. WS1/WS7 document focus — secondo feedback smoke DOCX: tabelle leggibili ma
+39. WS1/WS7 document focus — secondo feedback smoke DOCX: tabelle leggibili ma
     non adattate alla pagina. Il renderer ora emette tabelle full-width con
     `tblGrid`, layout fixed, celle percentuali, padding e proporzione 35/65 per
     tabelle a due colonne.
-39. WS1/WS7 document focus — `make_document` ha un `layout_profile` dichiarativo
+40. WS1/WS7 document focus — `make_document` ha un `layout_profile` dichiarativo
     nello stesso schema tool (`standard`, `one_page`, `executive_brief`,
     `detailed_report`, `proposal`); il profilo diventa direttiva di generazione
     esplicita, non un nuovo workflow e non una euristica di routing.
@@ -188,11 +192,13 @@ dei workflow `make_deck`/`make_document` è locale/verde e alimenta router e
 corpus `find_capability`; la decisione strutturata ora distingue workflow,
 atomici PDF e agent loop con ragione esplicita; il loop agente emette la route
 come `ACT` e la aggiunge al `tool_trace` del turno. `pdf_atomic` ora è una
-capability atomica nativa mappata a `run_in_sandbox`. `make_document` supporta
-anche output `.docx` editabile, parametri espliciti di struttura/stile e tabelle
-Word generate da Markdown; lo smoke reale ha corretto anche stili, grassetto,
-corsivo, liste numerate e sizing tabelle nel DOCX. `layout_profile` è ora
-dichiarativo dentro `make_document`. Scelta corrente: monitorare la release 1046
-già taggata e poi smoke del profilo layout su una prossima build; `make_research`
-e `make_meeting` restano futuri.
+capability atomica nativa mappata a `run_in_sandbox`. MCP e connector Composio
+parlano ora il contratto typed del registry (`McpTool`, `ConnectorTool`), con i
+connector ancora toolkit-aware per non perdere CRUD/perimeter. `make_document`
+supporta anche output `.docx` editabile, parametri espliciti di struttura/stile e
+tabelle Word generate da Markdown; lo smoke reale ha corretto anche stili,
+grassetto, corsivo, liste numerate e sizing tabelle nel DOCX. `layout_profile` è
+ora dichiarativo dentro `make_document`. Scelta corrente: proseguire sulla
+unificazione registry/discovery e poi smoke del profilo layout su una prossima
+build; `make_research` e `make_meeting` restano futuri.
 Il contratto corrente della memoria è in [MEMORIA.md](MEMORIA.md).
