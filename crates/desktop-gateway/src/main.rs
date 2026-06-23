@@ -611,6 +611,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/artifacts/versions", get(artifact_versions))
         .route("/api/artifacts/content", post(save_artifact_content))
         .route("/api/artifacts/usage", get(artifacts_usage))
+        .route("/api/artifacts/memory", get(memory_artifacts))
         .route("/api/artifacts/thread", delete(delete_artifact_thread))
         .route("/api/artifacts/clear", post(clear_artifacts))
         .route(
@@ -2918,6 +2919,162 @@ async fn register_artifact_memory(
     ) {
         backfill_embeddings(state, &user, &workspace, 4).await;
     }
+}
+
+fn remember_project_file_artifact_memory(
+    state: &AppState,
+    thread_id: Option<&str>,
+    relative_path: &str,
+    size_bytes: u64,
+    producer: &str,
+) -> Result<(MemoryUserId, MemoryWorkspaceId, MemoryRef), String> {
+    let relative_path = relative_path.trim();
+    if relative_path.is_empty() {
+        return Err("empty project artifact path".to_string());
+    }
+    let root = project_root_for_thread(state, thread_id)
+        .ok_or_else(|| "project root unavailable".to_string())?;
+    let project_path = jail_in_root(&root, relative_path)?;
+    let user = gateway_memory_user_id();
+    let workspace = gateway_memory_workspace_id();
+    let privacy_domain = if workspace.as_str() == PERSONAL_WORKSPACE {
+        "personal"
+    } else {
+        "project"
+    };
+    let kind = artifact_memory_kind(relative_path);
+    let title = std::path::Path::new(relative_path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(relative_path);
+    let thread_slug = artifact_thread_slug(Some(&format!("project-{}", workspace.as_str())));
+    let text = format!("Artifact {relative_path} ({kind}) creato o aggiornato nel progetto.");
+    let metadata = serde_json::json!({
+        "source": "artifact_runtime",
+        "producer": producer,
+        "thread_id": thread_id,
+        "thread_slug": thread_slug,
+        "name": relative_path,
+        "title": title,
+        "artifact_type": kind,
+        "path_ref": relative_path,
+        "project_relative_path": relative_path,
+        "managed_path": null,
+        "project_path": project_path.to_string_lossy().to_string(),
+        "size_bytes": size_bytes,
+        "updated": true,
+        "lifecycle_status": "active",
+    });
+    let lifecycle = MemoryLifecycleRequest {
+        actor_id: "artifact-runtime".to_string(),
+        user_id: user.clone(),
+        workspace_id: workspace.clone(),
+        purpose: "project_file_written".to_string(),
+    };
+    let facade = lock_memory_facade(state).map_err(|error| error.message)?;
+    let reference = upsert_artifact_memory_record(
+        &facade,
+        &user,
+        &workspace,
+        &lifecycle,
+        privacy_domain,
+        &thread_slug,
+        relative_path,
+        text,
+        metadata,
+    )?;
+    Ok((user, workspace, reference))
+}
+
+async fn register_project_file_artifact_memory(
+    state: &AppState,
+    thread_id: Option<&str>,
+    relative_path: &str,
+    size_bytes: u64,
+    producer: &str,
+) {
+    if let Ok((user, workspace, _reference)) =
+        remember_project_file_artifact_memory(state, thread_id, relative_path, size_bytes, producer)
+    {
+        backfill_embeddings(state, &user, &workspace, 4).await;
+    }
+}
+
+fn mcp_filesystem_project_relative_path(
+    state: &AppState,
+    thread_id: Option<&str>,
+    mcp_provider: &str,
+    mcp_tool: &str,
+    args: &serde_json::Value,
+) -> Option<String> {
+    let root = project_root_for_thread(state, thread_id)?;
+    mcp_filesystem_project_relative_path_for_root(&root, mcp_provider, mcp_tool, args)
+}
+
+fn mcp_filesystem_project_relative_path_for_root(
+    root: &std::path::Path,
+    mcp_provider: &str,
+    mcp_tool: &str,
+    args: &serde_json::Value,
+) -> Option<String> {
+    let provider_slug = mcp_provider.strip_prefix("mcp:").unwrap_or(mcp_provider);
+    if provider_slug != "filesystem" {
+        return None;
+    }
+    if !matches!(
+        mcp_tool,
+        "create" | "insert" | "str_replace" | "write" | "write_file"
+    ) {
+        return None;
+    }
+    let raw_path = args.get("path").and_then(|value| value.as_str())?.trim();
+    if raw_path.is_empty() {
+        return None;
+    }
+    let path = if raw_path.starts_with('/') || raw_path.starts_with('~') {
+        fs_expand_abs(raw_path)?
+    } else {
+        jail_in_root(root, raw_path).ok()?
+    };
+    if !path_within(root, &path) {
+        return None;
+    }
+    path.strip_prefix(root)
+        .ok()
+        .map(|relative| relative.to_string_lossy().replace('\\', "/"))
+        .filter(|relative| !relative.trim().is_empty())
+}
+
+async fn register_mcp_filesystem_artifact_memory(
+    state: &AppState,
+    thread_id: Option<&str>,
+    mcp_provider: &str,
+    mcp_tool: &str,
+    args: &serde_json::Value,
+) {
+    let Some(relative_path) =
+        mcp_filesystem_project_relative_path(state, thread_id, mcp_provider, mcp_tool, args)
+    else {
+        return;
+    };
+    let size = project_root_for_thread(state, thread_id)
+        .and_then(|root| jail_in_root(&root, &relative_path).ok())
+        .and_then(|path| std::fs::metadata(path).ok())
+        .map(|metadata| metadata.len())
+        .or_else(|| {
+            args.get("content")
+                .and_then(|value| value.as_str())
+                .map(|content| content.len() as u64)
+        })
+        .unwrap_or_default();
+    register_project_file_artifact_memory(
+        state,
+        thread_id,
+        &relative_path,
+        size,
+        "mcp_filesystem",
+    )
+    .await;
 }
 
 /// Persists extracted entities + relations into the graph (M3b), 2-pass so a
@@ -13867,11 +14024,24 @@ loaded with use_skill):\n{}",
                         .await;
                         let st = state_owned.clone();
                         let tid = thread_id.clone();
-                        tokio::task::spawn_blocking(move || {
+                        let path_for_memory = path.clone();
+                        let content_len = content.len() as u64;
+                        let result = tokio::task::spawn_blocking(move || {
                             write_project_file(&st, tid.as_deref(), &path, &content)
                         })
                         .await
-                        .unwrap_or_else(|e| format!("Error: {e}"))
+                        .unwrap_or_else(|e| format!("Error: {e}"));
+                        if result.starts_with("✅ Wrote ") {
+                            register_project_file_artifact_memory(
+                                &state_owned,
+                                thread_id.as_deref(),
+                                &path_for_memory,
+                                content_len,
+                                "write_file",
+                            )
+                            .await;
+                        }
+                        result
                     } else if name == "edit_file" {
                         let args_val: serde_json::Value =
                             serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
@@ -14208,6 +14378,7 @@ confirmation card in the interface. Do NOT say it was executed."
                             let st = state_owned.clone();
                             let prov = mcp_provider.clone();
                             let tool = mcp_tool.clone();
+                            let args_for_artifact = args_val.clone();
                             let args = args_val;
                             let mcp_started = std::time::Instant::now();
                             let exec = tokio::task::spawn_blocking(move || {
@@ -14254,6 +14425,16 @@ Connectors → MCP; do NOT claim it's done.",
                                 run_err,
                                 mcp_started.elapsed(),
                             );
+                            if run_ok {
+                                register_mcp_filesystem_artifact_memory(
+                                    &state_owned,
+                                    thread_id.as_deref(),
+                                    mcp_provider.as_str(),
+                                    &mcp_tool,
+                                    &args_for_artifact,
+                                )
+                                .await;
+                            }
                             mcp_result
                         }
                     } else if !name.is_empty() {
@@ -18435,6 +18616,29 @@ struct ArtifactsUsage {
     threads: Vec<ArtifactThreadView>,
 }
 
+#[derive(Debug, Deserialize)]
+struct MemoryArtifactsQuery {
+    #[serde(default)]
+    thread: Option<String>,
+    #[serde(default)]
+    workspace: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct MemoryArtifactView {
+    reference: String,
+    name: String,
+    title: String,
+    artifact_type: String,
+    source: String,
+    project_relative_path: Option<String>,
+    project_path: Option<String>,
+    managed_path: Option<String>,
+    size: u64,
+    updated: bool,
+    thread: String,
+}
+
 /// Disk usage of generated artifacts, grouped per conversation — drives the
 /// management/cleanup view so the folder can't silently fill the disk.
 async fn artifacts_usage() -> Json<ArtifactsUsage> {
@@ -18476,6 +18680,125 @@ async fn artifacts_usage() -> Json<ArtifactsUsage> {
         total_bytes: total,
         threads,
     })
+}
+
+/// Project artifact catalog backed by memory. Complements the older marker-driven
+/// chat panel: files written in-place via `write_file` or Filesystem MCP do not
+/// emit a managed `‹‹ARTIFACT››` card, but WS2-3.1 records them as
+/// `memory_type="artifact"` with a project path.
+async fn memory_artifacts(
+    State(state): State<AppState>,
+    Query(query): Query<MemoryArtifactsQuery>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let user = gateway_memory_user_id();
+    let workspace =
+        if let Some(thread_id) = query.thread.as_deref().filter(|value| !value.trim().is_empty()) {
+            lock_store(&state)
+                .ok()
+                .and_then(|store| store.workspace_for_thread(thread_id).ok())
+                .filter(|value| !value.trim().is_empty())
+                .map(MemoryWorkspaceId::new)
+                .unwrap_or_else(gateway_memory_workspace_id)
+        } else if let Some(workspace) = query.workspace.filter(|value| !value.trim().is_empty()) {
+            MemoryWorkspaceId::new(workspace)
+        } else {
+            gateway_memory_workspace_id()
+        };
+    let facade = lock_memory_facade(&state)?;
+    let mut artifacts: Vec<MemoryArtifactView> = facade
+        .list_memories_for_ui(&user, &workspace)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|memory| {
+            memory.memory_type == "artifact"
+                && matches!(
+                    memory.status,
+                    MemoryStatus::Confirmed | MemoryStatus::Candidate
+                )
+        })
+        .filter_map(|memory| {
+            let metadata = &memory.metadata;
+            let name = metadata
+                .get("name")
+                .and_then(|value| value.as_str())
+                .or_else(|| {
+                    metadata
+                        .get("project_relative_path")
+                        .and_then(|value| value.as_str())
+                })
+                .map(str::trim)
+                .filter(|value| !value.is_empty())?
+                .to_string();
+            let project_path = metadata
+                .get("project_path")
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string);
+            let managed_path = metadata
+                .get("managed_path")
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string);
+            let path_exists = project_path
+                .as_deref()
+                .or(managed_path.as_deref())
+                .map(|path| std::path::Path::new(path).is_file())
+                .unwrap_or(true);
+            if !path_exists {
+                return None;
+            }
+            let fs_size = project_path
+                .as_deref()
+                .or(managed_path.as_deref())
+                .and_then(|path| std::fs::metadata(path).ok())
+                .map(|metadata| metadata.len());
+            let size = fs_size
+                .or_else(|| metadata.get("size_bytes").and_then(|value| value.as_u64()))
+                .unwrap_or_default();
+            Some(MemoryArtifactView {
+                reference: memory.reference.to_string(),
+                title: metadata
+                    .get("title")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or(&name)
+                    .to_string(),
+                artifact_type: metadata
+                    .get("artifact_type")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("file")
+                    .to_string(),
+                source: metadata
+                    .get("producer")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("memory")
+                    .to_string(),
+                project_relative_path: metadata
+                    .get("project_relative_path")
+                    .and_then(|value| value.as_str())
+                    .map(str::to_string),
+                project_path,
+                managed_path,
+                size,
+                updated: metadata
+                    .get("updated")
+                    .and_then(|value| value.as_bool())
+                    .unwrap_or(false),
+                thread: metadata
+                    .get("thread_slug")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                name,
+            })
+        })
+        .collect();
+    artifacts.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(Json(serde_json::json!({
+        "workspace": workspace.as_str(),
+        "artifacts": artifacts,
+    })))
 }
 
 fn ok_json() -> Json<serde_json::Value> {
@@ -32898,6 +33221,31 @@ mod tests {
         assert!(relations
             .iter()
             .any(|relation| relation.relation_type == "describes"));
+    }
+
+    #[test]
+    fn mcp_filesystem_artifact_detection_accepts_namespaced_provider() {
+        let root = std::env::temp_dir().join(format!(
+            "homun-artifact-memory-test-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("artifact-memory-gate.md");
+        std::fs::write(&path, "test memoria artifact").unwrap();
+        let args = serde_json::json!({
+            "path": path.to_string_lossy().to_string(),
+            "content": "test memoria artifact",
+        });
+
+        let detected = super::mcp_filesystem_project_relative_path_for_root(
+            &root,
+            "mcp:filesystem",
+            "create",
+            &args,
+        );
+
+        assert_eq!(detected.as_deref(), Some("artifact-memory-gate.md"));
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

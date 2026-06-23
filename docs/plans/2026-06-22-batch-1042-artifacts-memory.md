@@ -61,7 +61,7 @@ modelli deboli/locali. Invarianti: monotonìa, limitatezza, identità non inferi
 Gli artefatti sono i **deliverable** (valore del prodotto); ciclo di vita ≠ chat;
 tutto passa dal motore di memoria.
 
-- 🟡 **3.1 — chiudere il BUCO (prerequisito):** artefatti come **entità di memoria**
+- ✅ **3.1 — chiudere il BUCO (prerequisito):** artefatti come **entità di memoria**
   (`title/type/project/path/thread/created_at` + embedding) via il `MemoryFacade`
   condiviso → recall del deliverable ("rifammi il deck del consiglio").
   **Slice locale/headless:** i produttori artifact principali (`run_in_sandbox`,
@@ -69,12 +69,33 @@ tutto passa dal motore di memoria.
   ogni artifact surfaced come `memory_type="artifact"` + entity grafo `artifact`,
   metadata canonici (`thread_slug`, `name`, `artifact_type`, `path_ref`,
   `managed_path`, `project_path`, `size_bytes`) e backfill embedding immediato.
-  Test: `artifact_memory_upsert_creates_single_record_and_graph_entity` verde.
-  Resta gate in-app + recall esplicito del deliverable.
-- ☐ **3.2 — schermata Artefatti centralizzata** (Settings): selettore progetto
+  Dopo il primo gate in-app fallito, anche `write_file` registra i file di
+  progetto come artifact memoria/entity: se il modello interpreta "artifact" come
+  file in-place, il deliverable entra comunque nella memoria. Il secondo gate ha
+  mostrato che il ramo reale era `mcp__filesystem__create` workspace-scoped:
+  anche quelle scritture dentro root progetto ora registrano artifact memoria/entity.
+  Il terzo gate ha esposto la forma provider reale `mcp:filesystem`; il filtro è
+  stato normalizzato e coperto da test. Gate runtime passato il 2026-06-23 dopo
+  restart reale del gateway: `artifact-memory-gate-5.md` è stato creato via
+  `mcp__filesystem__create`, registrato come `memory_type="artifact"` nello
+  scope progetto, entity grafo `artifact`, embedding presente e recall esplicito
+  riuscito. Nota: il pannello Artifacts non mostra ancora questi file perché oggi
+  legge solo gli artifact surfaced/chat-managed; la surface passa a 3.2. Test:
+  `artifact_memory_upsert_creates_single_record_and_graph_entity` e
+  `mcp_filesystem_artifact_detection_accepts_namespaced_provider` verdi.
+- 🟡 **3.2 — schermata Artefatti centralizzata** (Settings): selettore progetto
   (workspace) + filtri (progetto/tipo/orfani) + multi-selezione + **Esporta ZIP**
   (cross-OS, salva in cartella) + **Elimina**. Dati: `artifacts_usage` arricchito con
   titolo/progetto/flag orfano.
+  **Slice 3.2a locale/verde:** `/api/artifacts/memory?thread=...` espone gli
+  artifact registrati in memoria nello scope del thread/progetto; il Workbench
+  Artifacts fonde artifact chat-managed e artifact memoria, con preview/download
+  dei file di progetto via `fsFile` jailato. Gate endpoint: restituisce
+  `artifact-memory-gate-5.md` con `project_relative_path`, `project_path`,
+  `size=24`, `source=mcp_filesystem`. Gate visuale DOM/in-app: badge Workbench
+  `1`, tab Artifacts mostra `artifact-memory-gate-5.md` e preview
+  `test memoria artifact 5`.
+  **Resta:** Settings/export/delete.
 - ☐ **3.3 — lifecycle + cancellazione con memoria:** `delete_chat_thread` **non**
   cancella più gli artefatti (oggi sì, `main.rs:1526`) → preserva + `meta.json`
   (titolo/progetto/data); la cancellazione dalla schermata elimina **file + entità di
@@ -441,13 +462,11 @@ proprio — versioning, canali, scaricabili dal **sito Homun**, auto-aggiornabil
 1. **WS6 locale consolidata/committata** — publish/tag solo su comando. Prima
    del publish resta consigliato uno smoke manuale in-app su scheduled
    automation reale nel thread `scheduled`.
-2. **WS2-3.1 — artefatti come entità di memoria** via `MemoryFacade` condiviso:
-   prerequisito per recall dei deliverable e per la provenienza.
-3. **WS2-3.2 / 3.3** — schermata Artifacts centralizzata + lifecycle/delete
+2. **WS2-3.2b / 3.3** — schermata centralizzata + lifecycle/delete
    coerente con memoria; cancellare chat non deve cancellare deliverable.
-4. **WS5.5 / WS5.6** — catena di provenienza decisione → artefatto → codice →
+3. **WS5.5 / WS5.6** — catena di provenienza decisione → artefatto → codice →
    esito, più eval memoria come guardrail.
-5. **WS1-Fase 2** — gestione piano (`ExecutionPlan`+`step_id`); il piano scrive
+4. **WS1-Fase 2** — gestione piano (`ExecutionPlan`+`step_id`); il piano scrive
    in memoria.
 6. **WS1-Fase 3** — skill dichiarative + workflow runner.
 7. **WS7** — ecosistema deliverable (`make_*` per documenti/ricerca/meeting),

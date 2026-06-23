@@ -1043,6 +1043,20 @@ export interface ArtifactsUsage {
   threads: ArtifactThreadView[];
 }
 
+export interface MemoryArtifactView {
+  reference: string;
+  name: string;
+  title: string;
+  artifact_type: string;
+  source: string;
+  project_relative_path?: string | null;
+  project_path?: string | null;
+  managed_path?: string | null;
+  size: number;
+  updated: boolean;
+  thread: string;
+}
+
 export interface ArtifactDestination {
   label: string;
   path: string;
@@ -1077,6 +1091,14 @@ async function electronRemoveArtifactDestination(path: string): Promise<Artifact
 
 async function electronArtifactsUsage(): Promise<ArtifactsUsage> {
   return gatewayGetJson<ArtifactsUsage>("/api/artifacts/usage");
+}
+
+async function electronMemoryArtifacts(thread?: string): Promise<MemoryArtifactView[]> {
+  const suffix = thread ? `?thread=${encodeURIComponent(thread)}` : "";
+  const { artifacts } = await gatewayGetJson<{ artifacts: MemoryArtifactView[] }>(
+    `/api/artifacts/memory${suffix}`,
+  );
+  return artifacts ?? [];
 }
 
 async function electronDeleteArtifactFile(thread: string, name: string): Promise<void> {
@@ -2231,6 +2253,7 @@ export const coreBridge = {
   consolidateMemory: (workspace?: string) => electronConsolidateMemory(workspace),
   artifactFolder: (thread: string) => electronArtifactFolder(thread),
   artifactsUsage: () => electronArtifactsUsage(),
+  memoryArtifacts: (thread?: string) => electronMemoryArtifacts(thread),
   artifactDestinations: () => electronArtifactDestinations(),
   addArtifactDestination: (label: string, path: string) =>
     electronAddArtifactDestination(label, path),

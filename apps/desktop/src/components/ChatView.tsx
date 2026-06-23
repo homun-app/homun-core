@@ -86,6 +86,7 @@ import {
   type FsEntry,
   type FsFilePayload,
   type McpRegistryServer,
+  type MemoryArtifactView,
   type MemoryGraph,
   type MemoryGraphEdge,
   type MemoryGraphNode,
@@ -232,6 +233,7 @@ export function ChatView({
   const [panelMenuOpen, setPanelMenuOpen] = useState(false);
   const [workbenchTab, setWorkbenchTab] = useState<WorkbenchTab>("files");
   const [artifactsInitial, setArtifactsInitial] = useState<string | null>(null);
+  const [memoryArtifacts, setMemoryArtifacts] = useState<MemoryArtifactView[]>([]);
   // Is this thread a project? Reliable context signal (not keyword-detection) that gates
   // the "Save as goal" message action + the Obiettivi tab. `goalSeed` pre-fills
   // the Obiettivi compose when promoting a chat message to a goal.
@@ -301,6 +303,29 @@ export function ChatView({
     }
     return out;
   }, [threadMessages]);
+  const workbenchArtifacts = useMemo(() => {
+    const seen = new Set<string>();
+    const out: ParsedArtifact[] = [];
+    for (const artifact of conversationArtifacts) {
+      seen.add(artifact.name);
+      out.push(artifact);
+    }
+    for (const artifact of memoryArtifacts) {
+      const displayName = artifact.project_relative_path || artifact.name;
+      if (!displayName || seen.has(displayName)) continue;
+      seen.add(displayName);
+      out.push({
+        name: displayName,
+        thread: thread.threadId,
+        size: artifact.size,
+        updated: artifact.updated,
+        source: "project",
+        projectPath: artifact.project_path ?? undefined,
+        projectRelativePath: artifact.project_relative_path ?? displayName,
+      });
+    }
+    return out;
+  }, [conversationArtifacts, memoryArtifacts, thread.threadId]);
   // The agent's operational plan for this conversation (latest update_plan), shown
   // in the Workbench "Piano" panel.
   const conversationPlan = useMemo(() => latestPlanMarkdown(threadMessages), [threadMessages]);
@@ -1138,6 +1163,21 @@ export function ChatView({
     };
   }, [thread.threadId]);
 
+  useEffect(() => {
+    let cancelled = false;
+    void coreBridge
+      .memoryArtifacts(thread.threadId)
+      .then((items) => {
+        if (!cancelled) setMemoryArtifacts(items);
+      })
+      .catch(() => {
+        if (!cancelled) setMemoryArtifacts([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [thread.threadId, threadMessages]);
+
   // Promote a chat message to a project objective: hand the text off to the Obiettivi
   // panel's compose (open Workbench → Obiettivi tab, pre-filled) so the user trims and
   // confirms with the polished UI — never auto-saving long prose verbatim.
@@ -1623,8 +1663,8 @@ export function ChatView({
         >
           <PanelRight size={18} />
           {!artifactsOpen && <ChevronDown size={12} className="workbench-toggle-caret" />}
-          {conversationArtifacts.length > 0 && (
-            <span className="top-action-count">{conversationArtifacts.length}</span>
+          {workbenchArtifacts.length > 0 && (
+            <span className="top-action-count">{workbenchArtifacts.length}</span>
           )}
         </button>
         {panelMenuOpen && (
@@ -2039,7 +2079,7 @@ export function ChatView({
         tab={workbenchTab}
         onTab={setWorkbenchTab}
         onClose={() => setArtifactsOpen(false)}
-        artifacts={conversationArtifacts}
+        artifacts={workbenchArtifacts}
         artifactsInitial={artifactsInitial}
         uploadedFiles={uploadedFiles}
         threadId={thread.threadId}
@@ -2928,6 +2968,10 @@ interface ParsedArtifact {
   size: number;
   /** True when this emission overwrote an existing file (a new version). */
   updated?: boolean;
+  /** Managed artifacts live in Homun's artifact folder; project artifacts live in the project root. */
+  source?: "managed" | "project";
+  projectPath?: string;
+  projectRelativePath?: string;
 }
 
 function parseArtifacts(text: string): ParsedArtifact[] {
@@ -2978,6 +3022,10 @@ function artifactTypeIcon(name: string) {
 
 async function openArtifactFolder(artifact: ParsedArtifact) {
   try {
+    if (artifact.source === "project" && artifact.projectPath) {
+      await coreBridge.revealPath(artifact.projectPath);
+      return;
+    }
     const path = await coreBridge.artifactFolder(artifact.thread);
     await coreBridge.revealPath(path);
   } catch {
@@ -3037,7 +3085,7 @@ function ArtifactCardRow({
   const isImage = ARTIFACT_IMAGE_EXT.includes(artifactExt(artifact.name));
 
   useEffect(() => {
-    if (!artifact.updated) return;
+    if (!artifact.updated || artifact.source === "project") return;
     let cancelled = false;
     void (async () => {
       try {
@@ -3148,7 +3196,10 @@ function artifactExt(name: string): string {
 
 async function triggerArtifactDownload(artifact: ParsedArtifact, version?: number) {
   try {
-    const blob = await coreBridge.downloadArtifact(artifact.thread, artifact.name, version);
+    const blob =
+      artifact.source === "project"
+        ? await projectArtifactBlob(artifact)
+        : await coreBridge.downloadArtifact(artifact.thread, artifact.name, version);
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
@@ -3160,6 +3211,15 @@ async function triggerArtifactDownload(artifact: ParsedArtifact, version?: numbe
   } catch {
     /* ignore */
   }
+}
+
+async function projectArtifactBlob(artifact: ParsedArtifact): Promise<Blob> {
+  const path = artifact.projectPath || artifact.projectRelativePath || artifact.name;
+  const payload = await coreBridge.fsFile(path, artifact.thread);
+  if (!payload.authorized || payload.binary || payload.error) {
+    throw new Error(payload.error ?? "project artifact unavailable");
+  }
+  return new Blob([payload.text], { type: "text/plain;charset=utf-8" });
 }
 
 type ArtifactPreview =
@@ -3176,6 +3236,17 @@ async function buildArtifactPreview(
   version?: number,
 ): Promise<ArtifactPreview> {
   const ext = artifactExt(artifact.name);
+  if (artifact.source === "project") {
+    const path = artifact.projectPath || artifact.projectRelativePath || artifact.name;
+    const payload = await coreBridge.fsFile(path, artifact.thread);
+    if (!payload.authorized || payload.error) return { kind: "error", ext };
+    if (payload.binary) return { kind: "binary", ext };
+    if (ext === "md" || ext === "markdown") return { kind: "markdown", text: payload.text, ext };
+    if (ext === "csv") return { kind: "csv", text: payload.text, ext };
+    if (ARTIFACT_CODE_EXT.has(ext)) return { kind: "code", text: payload.text, ext };
+    if (ext === "txt" || ext === "log" || ext === "") return { kind: "text", text: payload.text, ext };
+    return { kind: "text", text: payload.text, ext };
+  }
   const blob = await coreBridge.downloadArtifact(artifact.thread, artifact.name, version);
   if (ARTIFACT_IMAGE_EXT.includes(ext)) return { kind: "image", url: URL.createObjectURL(blob), ext };
   if (ext === "pdf") {
@@ -3215,10 +3286,12 @@ function InlineArtifactPreview({ artifact }: { artifact: ParsedArtifact }) {
     let cancelled = false;
     void (async () => {
       let count = 0;
-      try {
-        count = await coreBridge.artifactVersions(artifact.thread, artifact.name);
-      } catch {
-        /* no versions */
+      if (artifact.source !== "project") {
+        try {
+          count = await coreBridge.artifactVersions(artifact.thread, artifact.name);
+        } catch {
+          /* no versions */
+        }
       }
       try {
         const next = await buildArtifactPreview(artifact);
@@ -4479,10 +4552,12 @@ function ArtifactsPanel({
     const ext = artifactExt(selected.name);
     void (async () => {
       let count = 0;
-      try {
-        count = await coreBridge.artifactVersions(selected.thread, selected.name);
-      } catch {
-        /* no versions */
+      if (selected.source !== "project") {
+        try {
+          count = await coreBridge.artifactVersions(selected.thread, selected.name);
+        } catch {
+          /* no versions */
+        }
       }
       if (cancelled) return;
       setVersions(count);
@@ -4507,16 +4582,17 @@ function ArtifactsPanel({
   }, [selected, reloadKey]);
 
   const editableKind =
-    preview?.kind === "markdown" ||
-    preview?.kind === "code" ||
-    preview?.kind === "text" ||
-    preview?.kind === "csv";
+    selected?.source !== "project" &&
+    (preview?.kind === "markdown" ||
+      preview?.kind === "code" ||
+      preview?.kind === "text" ||
+      preview?.kind === "csv");
   const textKind = preview?.kind === "code" || preview?.kind === "text";
   const canDiff = textKind && versions > 0 && slot > 0;
 
   // Load the diff between the shown version and the previous one when requested.
   useEffect(() => {
-    if (!showDiff || !selected || slot <= 0) {
+    if (!showDiff || !selected || selected.source === "project" || slot <= 0) {
       setDiffData(null);
       return;
     }

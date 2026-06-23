@@ -37,7 +37,7 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
 | **Prodotto / distribuzione / self-host** | [PRODUCT_LOOP.md](PRODUCT_LOOP.md) · [distribution.md](distribution.md) · [self-host.md](self-host.md) · [release-macos.md](release-macos.md) |
 | **Storico** (changelog, vecchi piani, snapshot) | [archive/](archive/) — non più "corrente", solo memoria storica |
 
-## Stato esecuzione — "SEI QUI" (aggiornato 2026-06-22, anti-compattazione)
+## Stato esecuzione — "SEI QUI" (aggiornato 2026-06-23, anti-compattazione)
 
 > Se il contesto si è compattato: rileggi QUESTO blocco + il
 > [backlog](plans/2026-06-22-batch-1042-artifacts-memory.md) (gli stati ☐/✅ = i loop
@@ -51,6 +51,34 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   un ultimo smoke manuale in-app su automazione schedulata reale nel thread
   `scheduled` prima di pubblicare/taggare.
   Il contratto operativo corrente della memoria è [MEMORIA.md](MEMORIA.md).
+- **WS2-3.1 PASSATA in runtime (2026-06-23):** gli artifact scritti via
+  Filesystem MCP dentro la root progetto vengono registrati come
+  `memory_type="artifact"` + entity grafo `artifact` + embedding. Gate:
+  `artifact-memory-gate-5.md` creato in `/Users/fabio/Desktop/test-homun`,
+  `tool_runs.id=57` (`mcp__filesystem__create`, `ok=1`), memoria
+  `artifact|confirmed` nello scope
+  `workspace_0d46c4470d97422298ece7ee7f0b74c6`, entity `artifact` e 1 embedding.
+  Recall esplicito: un nuovo turno ha recuperato `artifact-memory-gate-5.md`.
+  Nota operativa: il gate precedente su `artifact-memory-gate-4.md` era falso
+  negativo perché il gateway in esecuzione era partito alle 23:06, prima della
+  build delle 23:13; dopo modifiche gateway serve restart reale del processo.
+- **WS2-3.2a locale/verde:** aggiunto `/api/artifacts/memory?thread=...`, che
+  legge `memory_type="artifact"` nello scope del thread/progetto e restituisce
+  artifact con `project_path`, `project_relative_path`, tipo e dimensione. Il
+  Workbench Artifacts ora fonde i marker chat-managed con gli artifact memoria:
+  i file creati in-place via Filesystem MCP diventano visibili nel pannello e
+  vengono previewati/scaricati via `fsFile`, restando jailati alla root progetto.
+  Gate endpoint: `artifact-memory-gate-5.md` restituito per
+  `thread_1782197059_1782197059045808000`. Gate visuale DOM/in-app: badge
+  Workbench `1`, tab Artifacts mostra `artifact-memory-gate-5.md` e preview
+  `test memoria artifact 5`.
+- **Prossimo passo unico:** WS2-3.2b/3.3 — lifecycle coerente: schermata
+  centralizzata, esporta ZIP, delete esplicito da memoria, e cancellazione chat
+  che non elimina deliverable.
+- **Nota aperta non bloccante:** durante i gate con tool il provider primario
+  `glm-5.2` continua a rispondere `400 Bad Request` sul primo round con tool; il
+  fallback a `kimi-k2.6:cloud` prosegue correttamente. Da riprendere come task
+  router/provider, separato da WS2.
 - **Fatto e verificato localmente:** root automatica del progetto, bypass conferma
   solo per scritture Filesystem MCP dentro root; outside-root resta confirm-gated;
   routing Auto thread-aware + fallback orchestratore su `400` con tool; approval
@@ -117,12 +145,9 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   Verifiche locali: gateway **161 passati, 1 ignorato**,
   `cargo build -p local-first-desktop-gateway` verde, `npm run build`
   desktop verde, `git diff --check` pulito.
-- **Prossimo passo unico:** riavviare Electron da HEAD e fare un micro-gate
-  Telegram con path nuovo verificando: ricezione notifica Telegram iniziale,
-  messaggio Telegram immediato dopo tap/reply, due status nel thread, finale
-  corretto del resume, `remote_approvals.dispatched_at IS NOT NULL` e
-  `remote_approvals.status='executed'`. Non riusare `FC2026`: è la riga di
-  prova creata prima del fix ed è rimasta pending/non inviata.
+- **WS6 nota finale:** il micro-gate Telegram post-restart è passato; `FC2026`
+  resta solo una riga di prova precedente al fix, pending/non inviata, da non
+  riusare come prova di regressione.
 - **Gate fallito pre-riavvio (18:17):** nuovo tentativo
   `path-b-telegram-ux-2.md` ha creato `approval_e14399953a6c4dd6a5f9a7c7d1214114`
   / codice `E14399`, ma resta `pending` con `dispatched_at=NULL` e nel thread
@@ -387,8 +412,8 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   finale chat sul path approvato e zero `path-b-gate/note.md` nel thread.
   **Path B approval/provenienza chiusa**; non usare più endpoint grezzi per test
   di scrittura reali.
-- **Coda aggiornata:** WS2-3.1 gate in-app (artefatti come entità memoria) ·
-  WS2-3.2/3.3 (schermata/lifecycle artefatti) · WS5.5/5.6 (provenienza + eval
+- **Coda aggiornata:** WS2-3.2b/3.3 (schermata/lifecycle artefatti) ·
+  WS5.5/5.6 (provenienza + eval
   memoria) · WS1-Fase 2/3 (piano/workflow runner) · WS7 per ultimo nel blocco
   prodotto, quando memoria e deliverable lifecycle sono solidi.
 - **WS5.4b locale/verde:** `/api/memory/wiki` proietta `stato-lavori.md` dagli
@@ -399,11 +424,28 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   filtrano `superseded_by`. La chiusura avviene con evidenza esplicita:
   l'estrattore emette `metadata.closes_open_loop`, il runtime verifica overlap
   con un loop attivo e marca quel loop `Stale`.
-- **WS2-3.1 locale/headless:** i produttori artifact principali registrano ogni
+- **WS2-3.1 chiusa:** i produttori artifact principali registrano ogni
   artifact surfaced nel `MemoryFacade` come `memory_type="artifact"` + entity
   grafo `artifact`, con metadata path/thread/tipo/dimensione e backfill embedding
   immediato. Test mirato `artifact_memory_upsert_creates_single_record_and_graph_entity`
-  verde. **Prossimo gate:** creare un artifact in-app e verificare DB/recall.
+  verde. **Gate in-app 2026-06-22 inizialmente fallito:** prompt "crea un artifact
+  artifact-memory-gate.md..." ha usato `write_file`, quindi ha creato un semplice
+  file di progetto e solo un episodio in memoria, non `memory_type="artifact"`.
+  **Fix locale:** anche `write_file` registra il file di progetto come artifact
+  memoria/entity con embedding. **Gate 2 fallito:** il tool effettivo era
+  `mcp__filesystem__create` workspace-scoped, non `write_file` (prova:
+  `tool_runs` righe 53/54). **Fix locale successivo:** anche le scritture
+  `mcp__filesystem__create|insert|write|write_file` dentro root progetto
+  registrano artifact memoria/entity con embedding. **Gate 3 fallito:** il filtro
+  cercava provider `filesystem`, ma `parse_mcp_chat_name` produce `mcp:filesystem`;
+  il tool ha scritto il file ma il write-back artifact è stato saltato. **Fix
+  locale successivo:** normalizzato il provider `mcp:*` e aggiunto test
+  `mcp_filesystem_artifact_detection_accepts_namespaced_provider`. **Gate
+  runtime PASSATO dopo restart gateway:** `artifact-memory-gate-5.md` creato via
+  `mcp__filesystem__create`; prove in filesystem, `tool_runs`, `memories`,
+  `entities` e `memory_embeddings`; recall esplicito include il file. Il pannello
+  Artifacts è ancora vuoto perché oggi legge solo artifact surfaced/chat-managed:
+  diventa il lavoro di WS2-3.2.
 - **Regole operative:** build LOCAL, verde a ogni passo, doc aggiornati nello stesso turno,
   **publish solo su comando utente**, **niente trailer Co-Authored-By** ([[homun-no-claude-coauthor]]).
 - **Sfondo:** Motore cross-modello Fase 1 ✅ v1041 (deck verificato vero-locale, gemma4:latest).
