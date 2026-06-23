@@ -947,6 +947,9 @@ proprio — versioning, canali, scaricabili dal **sito Homun**, auto-aggiornabil
   includono `managed_path` e le card chat mostrano una riga path compatta sotto
   ogni artifact managed; resta invariato il download/preview e la memoria
   canonica resta la fonte per provenance/lifecycle.
+- ✅ **Computer owner hardening (2026-06-24):** il dock live richiede `thread_id`
+  esplicito quando c'è attività browser/terminal; `thread_id=null` non può più
+  rendere un'attività visibile in tutte le chat. Contratto UI aggiornato.
 - ☐ **Seeder skill fragile** — una skill modificata a mano (hash desync) non viene più
   auto-aggiornata (ha tenuto `create-presentations` vecchia su disco fino al fix manuale)
   → irrobustire.

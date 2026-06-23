@@ -87,6 +87,8 @@ assertContains("src/components/ChatView.tsx", "composer-surface", "prompt compos
 assertContains("src/components/ChatView.tsx", "local-computer-card", "active task must expose a local computer activity card");
 assertContains("src/components/ChatView.tsx", "timelineCollapsed", "computer timeline must keep collapsed state");
 assertContains("src/components/ChatView.tsx", "computerCardCollapsed", "local computer card must be collapsible after answers");
+assertContains("src/components/ChatComputerPanel.tsx", "const hasLiveActivity = browserActive || hasTerminal", "live computer ownership must be evaluated only while activity is visible");
+assertContains("src/components/ChatComputerPanel.tsx", "const ownedByThisThread = !hasLiveActivity || live?.thread_id === threadId", "live computer activity must not appear across chats without a matching owner");
 assertMatches(
   "src/components/ChatView.tsx",
   /const showComputerActivity =\s*activeApprovels\.length > 0 \|\|\s*planStepRunning \|\|\s*smokeTestRunning \|\|\s*detailsOpen;/m,

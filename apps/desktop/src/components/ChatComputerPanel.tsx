@@ -74,7 +74,8 @@ export function ChatComputerPanel({ threadId }: { threadId: string }) {
   const terminal = live?.terminal ?? [];
   const terminalRunning = Boolean(live?.terminal_active || terminal.some((entry) => entry.running));
   const hasTerminal = terminal.length > 0 && terminalRunning;
-  const ownedByThisThread = !live?.thread_id || live.thread_id === threadId;
+  const hasLiveActivity = browserActive || hasTerminal;
+  const ownedByThisThread = !hasLiveActivity || live?.thread_id === threadId;
   if (!ownedByThisThread) return null;
 
   // Terminal-only mode: CLI skill running/ran, no browser GUI to show. Render a

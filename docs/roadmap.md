@@ -290,6 +290,9 @@ primo percorso locale verde:
 68. Artifact location UX — i marker dei workflow managed includono `managed_path`
     e le card chat mostrano il path compatto del deliverable, riducendo la
     confusione su dove siano stati creati i file.
+69. Computer owner hardening — attività live browser/terminal senza `thread_id`
+    esplicito non vengono più mostrate in tutte le chat; il null owner è ammesso
+    solo da idle.
 
 Prima di pubblicare/taggare resta prudente ripetere lo smoke manuale in-app su
 una automazione schedulata reale con il binario aggiornato. Il primo smoke ha
