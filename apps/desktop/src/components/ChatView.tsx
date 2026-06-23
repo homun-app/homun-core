@@ -2882,6 +2882,8 @@ const GOAL_PROPOSE_RE = /‹‹GOAL_PROPOSE››([\s\S]*?)(?:‹‹\/GOAL_PROPO
 const UNCLOSED_PROPOSE_RE = /‹‹(?:PLAN_PROPOSE|GOAL_PROPOSE)››[\s\S]*$/;
 const COMPOSIO_MARKERS_RE =
   /‹‹(?:COMPOSIO_(?:CONFIRM|DONE|RECONNECT)|MCP_CONFIRM|FS_AUTHORIZE|CONNECT_SUGGEST|CHOICES|PLAN_PROPOSE|GOAL_PROPOSE|PLAN)››[\s\S]*?‹‹\/(?:COMPOSIO_(?:CONFIRM|DONE|RECONNECT)|MCP_CONFIRM|FS_AUTHORIZE|CONNECT_SUGGEST|CHOICES|PLAN_PROPOSE|GOAL_PROPOSE|PLAN)››/g;
+const PROPOSE_MARKERS_VISIBLE_RE =
+  /‹‹(?:PLAN_PROPOSE|GOAL_PROPOSE)››[\s\S]*?(?:‹‹\/(?:PLAN_PROPOSE|GOAL_PROPOSE)››|$)/g;
 
 /** One clickable suggestion in an in-chat connect-card. */
 interface ConnectSuggestItem {
@@ -5103,6 +5105,9 @@ function parseComposioConfirm(text: string): {
   const reconnectSlug = reconnectMatch ? reconnectMatch[1].trim() : null;
   const visible = text
     .replace(COMPOSIO_MARKERS_RE, "")
+    // Proposal markers are parsed into cards above. Strip them from prose even when a
+    // provider leaves a malformed/unterminated close after an error path.
+    .replace(PROPOSE_MARKERS_VISIBLE_RE, "")
     // Also drop an UNCLOSED plan/goal marker (model didn't emit its proper close): its
     // JSON payload is for a card, never prose.
     .replace(UNCLOSED_PROPOSE_RE, "")
@@ -7638,13 +7643,29 @@ function Composer({
                                 <span className="composer-model-name">{modelId}</span>
                                 {(() => {
                                   const cloud = modelIsCloud(group.base_url, modelId);
+                                  const base = (group.base_url ?? "").toLowerCase();
+                                  const localEndpoint =
+                                    base.includes("127.0.0.1") ||
+                                    base.includes("localhost") ||
+                                    base.includes("0.0.0.0");
+                                  const localProxyCloud = cloud && localEndpoint;
                                   return (
                                     <span
-                                      className={`composer-model-loc ${cloud ? "cloud" : "local"}`}
-                                      title={cloud ? "Runs in the cloud" : "Runs on this machine"}
-                                      aria-label={cloud ? "cloud" : "local"}
+                                      className={`composer-model-loc ${cloud ? "cloud" : "local"}${
+                                        localProxyCloud ? " proxy" : ""
+                                      }`}
+                                      title={
+                                        localProxyCloud
+                                          ? "Cloud model routed through local Ollama"
+                                          : cloud
+                                            ? "Runs in the cloud"
+                                            : "Runs on this machine"
+                                      }
+                                      aria-label={
+                                        localProxyCloud ? "cloud via local Ollama" : cloud ? "cloud" : "local"
+                                      }
                                     >
-                                      {cloud ? "☁️" : "💻"}
+                                      {localProxyCloud ? "☁ via local" : cloud ? "☁️" : "💻"}
                                     </span>
                                   );
                                 })()}

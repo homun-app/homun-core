@@ -846,10 +846,15 @@ ragionato il contratto degli strumenti `make_*` creati dall'harness. ADR 0011
   `template_catalog_response_exposes_read_only_gallery_metadata`.
   **Sedicesima slice template gallery UI (2026-06-23, locale/verde):**
   il plugin Presentations legge `coreBridge.templateCatalog()` e mostra una
-  gallery filtrabile `Tutti/Presentazioni/Documenti` con preview sintetica,
-  token `design_*` e copia del `template_ref`. La UI non duplica template e non
-  introduce routing euristico; usa solo il catalogo esposto dal gateway. Gate:
+  gallery filtrabile `Tutti/Presentazioni/Documenti` con token `design_*`,
+  layout archetype e copia del `template_ref`. La UI non duplica template e non
+  introduce routing euristico; usa solo il catalogo esposto dal gateway. La
+  card non finge una preview grafica quando manca un `preview_ref` reale. Gate:
   `npm run build`.
+  **Correzione smoke provider (2026-06-23):** quando un modello `*:cloud` passa
+  dal provider locale Ollama, la UI lo etichetta `☁ via local` invece di cloud
+  generico; se Ollama locale non risponde il workflow fallisce correttamente
+  prima del render. La binding remota va fatta sul provider cloud effettivo.
 - ☐ **7.1b (futuro)** Portare ricerca/meeting al livello del deck solo dopo il
   chiarimento sul contratto strumenti: `make_research` e `make_meeting` non sono
   essenziali per la prossima release.

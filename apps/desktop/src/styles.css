@@ -9908,27 +9908,48 @@ body.resizing-drawer {
   min-height: 282px;
   flex-direction: column;
 }
-.template-card-preview {
-  min-height: 96px;
-  padding: 16px;
+.template-card-contract {
+  min-height: 112px;
+  padding: 14px;
   display: flex;
-  align-items: flex-end;
+  flex-direction: column;
   justify-content: space-between;
-  gap: 12px;
-  color: #0f172a;
+  gap: 10px;
+  border-bottom: 1px solid var(--line);
   background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.82), rgba(255, 255, 255, 0.22)),
-    #dbeafe;
+    linear-gradient(var(--line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line) 1px, transparent 1px),
+    var(--surface-muted);
+  background-size: 24px 24px;
 }
-.template-card-preview[data-kind="document"] {
-  background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.86), rgba(255, 255, 255, 0.28)),
-    #dcfce7;
-}
-.template-card-preview span {
-  text-transform: capitalize;
+.template-contract-topline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 11px;
   font-weight: 750;
+  text-transform: uppercase;
+}
+.template-card-contract strong {
+  text-transform: capitalize;
   font-size: 15px;
+  line-height: 1.2;
+}
+.template-layout-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.template-layout-list span {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--muted);
+  padding: 3px 6px;
+  font-size: 10px;
+  font-weight: 650;
 }
 .template-card-body {
   padding: 14px;

@@ -250,13 +250,21 @@ function TemplateCatalogGallery() {
       <div className="template-gallery-grid">
         {visible.map((entry) => (
           <article className="template-card" key={entry.id}>
-            <div className="template-card-preview" data-kind={entry.kind}>
-              {entry.kind === "presentation" ? (
-                <Presentation size={18} aria-hidden />
-              ) : (
-                <FileText size={18} aria-hidden />
-              )}
-              <span>{entry.design_template.replaceAll("_", " ")}</span>
+            <div className="template-card-contract">
+              <div className="template-contract-topline">
+                {entry.kind === "presentation" ? (
+                  <Presentation size={18} aria-hidden />
+                ) : (
+                  <FileText size={18} aria-hidden />
+                )}
+                <span>{entry.kind === "presentation" ? "Presentation" : "Document"}</span>
+              </div>
+              <strong>{entry.design_template.replaceAll("_", " ")}</strong>
+              <div className="template-layout-list">
+                {entry.layout_archetypes.slice(0, 4).map((layout) => (
+                  <span key={layout}>{layout}</span>
+                ))}
+              </div>
             </div>
             <div className="template-card-body">
               <div className="template-card-title-row">

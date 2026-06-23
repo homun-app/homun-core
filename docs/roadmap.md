@@ -256,7 +256,9 @@ primo percorso locale verde:
 61. WS7 first template gallery — il plugin Presentations mostra una gallery
     filtrabile alimentata da `coreBridge.templateCatalog()`, con metadati
     `design_*` e copia del `template_ref`. È una superficie di selezione, non un
-    router euristico e non un catalogo duplicato.
+    router euristico e non un catalogo duplicato; finché non esistono asset
+    `preview_ref` reali, mostra il contratto/layout invece di finte preview
+    grafiche.
 
 Prima di pubblicare/taggare resta prudente ripetere lo smoke manuale in-app su
 una automazione schedulata reale con il binario aggiornato. Il primo smoke ha

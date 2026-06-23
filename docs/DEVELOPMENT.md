@@ -112,9 +112,15 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   `/api/templates/catalog` e da `coreBridge.templateCatalog()`, così la UI può
   costruire una gallery senza duplicare il registry. Sedicesima slice
   locale/verde: il plugin Presentations mostra una prima gallery template
-  filtrabile per presentazioni/documenti, con metadati `design_*` e copia del
-  `template_ref`; è alimentata dall'API catalogo, non da un elenco duplicato.
-  Prossimo asse: preview visuali reali e QA ancora più profonda.
+  filtrabile per presentazioni/documenti, con metadati `design_*`, layout
+  archetype e copia del `template_ref`; è alimentata dall'API catalogo, non da
+  un elenco duplicato. Non mostra finte preview grafiche: finché non ci sono
+  asset `preview_ref` reali, resta una contract gallery. Prossimo asse: preview
+  visuali reali e QA ancora più profonda.
+  Correzione UX post-smoke: il menu modelli distingue ora i modelli cloud
+  instradati tramite endpoint locale Ollama (`☁ via local`) dai provider cloud
+  diretti; in quel caso serve Ollama locale acceso oppure una binding sul
+  provider remoto effettivo.
   `make_research` e `make_meeting` restano dopo questo asse.
 - **WS2-3.1 PASSATA in runtime (2026-06-23):** gli artifact scritti via
   Filesystem MCP dentro la root progetto vengono registrati come
