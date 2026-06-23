@@ -773,8 +773,21 @@ ragionato il contratto degli strumenti `make_*` creati dall'harness. ADR 0011
   `design_template` condivisi espandono ora default profilo/componenti restando
   override-safe; `design_theme` condiviso materializza token renderer-compatible
   lato deck e abilita un primo guardrail QA sui testi; `deck-qa` verifica ora
-  l'HTML renderizzato prima della consegna. Restano contrasto/leggibilità più
-  avanzati, QA documenti e template library più ampia.
+  l'HTML renderizzato prima della consegna. **Ottava slice template catalog
+  provider (2026-06-23, locale/verde):** aggiunto un primo catalogo read-only
+  seed `monet/*` dentro il registry unico. Le entry sono capability cercabili
+  ma non tool callable; espongono `template_ref` e vengono risolte dal gateway
+  nei token condivisi `design_template`, `design_theme`, `design_profile` e
+  `design_components` consumati da `make_deck`/`make_document`. Espliciti
+  `design_*` restano sovrani; niente store paralleli, niente renderer Monet,
+  niente nuovo `make_*` per template. Test mirati:
+  `template_catalog_entries_are_searchable_but_not_callable`,
+  `template_catalog_ref_resolves_deck_design_defaults`,
+  `make_deck_and_document_accept_template_ref`,
+  `make_document_generation_options_are_explicit_and_bounded`,
+  `make_deck_workflow_definition_projects_execution_plan`. Restano
+  contrasto/leggibilità più avanzati, QA documenti e template library più ampia
+  anche tramite catalogo esterno/adapter.
 - ☐ **7.1b (futuro)** Portare ricerca/meeting al livello del deck solo dopo il
   chiarimento sul contratto strumenti: `make_research` e `make_meeting` non sono
   essenziali per la prossima release.

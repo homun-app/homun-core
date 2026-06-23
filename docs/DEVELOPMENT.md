@@ -81,9 +81,15 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   locale/verde: nuovo comando container `deck-qa` apre l'HTML renderizzato con
   Chromium headless via DevTools Protocol e blocca la consegna se rileva
   overflow slide, elementi fuori bounds o immagini non caricate; `make_deck` e
-  `render_deck` lo eseguono prima di registrare gli artifact. Prossimo asse:
-  estendere la QA visuale a contrasto/leggibilità e ai documenti. `make_research`
-  e `make_meeting` restano dopo questo asse.
+  `render_deck` lo eseguono prima di registrare gli artifact. Ottava slice
+  locale/verde: primo template catalog provider read-only nel registry
+  (`monet/*` seed), cercabile da `find_capability` ma non callable; il modello
+  passa `template_ref` a `make_deck`/`make_document` e il gateway lo risolve in
+  `design_template`/`design_theme`/`design_profile`/componenti già supportati.
+  Monet resta catalogo/adapter di template, non secondo renderer/store né nuovo
+  sistema `make_*`. Prossimo asse: estendere la template library e la QA visuale
+  a contrasto/leggibilità e documenti. `make_research` e `make_meeting` restano
+  dopo questo asse.
 - **WS2-3.1 PASSATA in runtime (2026-06-23):** gli artifact scritti via
   Filesystem MCP dentro la root progetto vengono registrati come
   `memory_type="artifact"` + entity grafo `artifact` + embedding. Gate:

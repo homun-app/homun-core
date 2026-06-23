@@ -117,7 +117,9 @@ Tutto è **scoped per `workspace_id` (progetto) + `user_id`**.
    verifica overflow, tabelle, immagini e leggibilità. `make_deck` e
    `make_document` sono capability/plugin che usano questa grammatica comune, non
    sistemi separati; aggiungere un template non deve creare un nuovo `make_*` né
-   un routing euristico parallelo.
+   un routing euristico parallelo. Cataloghi esterni tipo Monet sono provider/
+   adapter di `template_ref` dentro il registry unico, non renderer o store
+   paralleli.
 9. **Comprensione senza keyword/regex; verità verificabile.** Il core non capisce le
    richieste con regex/keyword (de-gemma/capable-first); la verifica è deterministica
    dove possibile.

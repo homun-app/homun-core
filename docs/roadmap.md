@@ -218,6 +218,12 @@ primo percorso locale verde:
     fuori bounds o immagini non caricate bloccano la consegna come deck
     completato. Restano da estendere contrasto/leggibilità, screenshot/PDF più
     profondi e QA documenti.
+53. WS7 template catalog provider — primo catalogo read-only seed `monet/*`
+    dentro il registry unico: entry cercabili da capability discovery ma non
+    callable, `template_ref` nello schema di `make_deck`/`make_document`, e
+    risoluzione gateway verso `design_template`, `design_theme`,
+    `design_profile` e `design_components` già supportati. Monet è catalogo/
+    adapter di template, non secondo renderer/store e non un nuovo `make_*`.
 
 Prima di pubblicare/taggare resta prudente ripetere lo smoke manuale in-app su
 una automazione schedulata reale con il binario aggiornato. Il primo smoke ha
@@ -277,7 +283,9 @@ rischi; terza slice: materializzazione fisica lato deck nei layout `kpi`,
 blocchi/tabelle Markdown-DOCX; quinta slice: `design_template` condiviso con
 default profilo/componenti override-safe; sesta slice: `design_theme` condiviso
 e primo guardrail QA testuale prima del render; settima slice: `deck-qa`
-renderizzato su HTML reale blocca overflow/immagini rotte prima della consegna.
-Prossima slice: contrasto/leggibilità, QA documenti o template library più ampia.
+renderizzato su HTML reale blocca overflow/immagini rotte prima della consegna;
+ottava slice: template catalog provider `monet/*` read-only nel registry, con
+`template_ref` risolto dai workflow esistenti. Prossima slice:
+contrasto/leggibilità, QA documenti o template library più ampia/adapter esterno.
 `make_research` e `make_meeting` restano futuri.
 Il contratto corrente della memoria è in [MEMORIA.md](MEMORIA.md).

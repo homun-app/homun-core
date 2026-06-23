@@ -5832,6 +5832,22 @@ struct NativeAtomicCapability {
     schema: fn() -> serde_json::Value,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct TemplateCatalogEntry {
+    id: &'static str,
+    name: &'static str,
+    kind: &'static str,
+    description: &'static str,
+    use_cases: &'static [&'static str],
+    audience: &'static [&'static str],
+    design_template: &'static str,
+    design_theme: Option<&'static str>,
+    design_profile: Option<&'static str>,
+    design_components: &'static [&'static str],
+    layout_archetypes: &'static [&'static str],
+    route_text: &'static str,
+}
+
 const MAKE_DECK_WORKFLOW_STEPS: &[WorkflowStepDefinition] = &[
     WorkflowStepDefinition {
         id: "brand",
@@ -5952,6 +5968,116 @@ fn native_workflow_capability_entries() -> Vec<CapabilityEntry> {
             schema: Some((capability.schema)()),
             is_skill: false,
             source: CapabilitySource::NativeWorkflow,
+        })
+        .collect()
+}
+
+fn template_catalog_entries() -> &'static [TemplateCatalogEntry] {
+    &[
+        TemplateCatalogEntry {
+            id: "monet/startup-pitch-clean-01",
+            name: "Startup Pitch Clean",
+            kind: "presentation",
+            description: "Clean startup pitch deck template for product intro, fundraising or customer pitch.",
+            use_cases: &["pitch", "fundraising", "product intro"],
+            audience: &["investors", "executives", "customers"],
+            design_template: "startup_pitch",
+            design_theme: Some("clean_corporate"),
+            design_profile: Some("sales_pitch"),
+            design_components: &["kpi_grid", "timeline", "quote_callout"],
+            layout_archetypes: &["cover", "problem", "solution", "traction", "roadmap", "closing"],
+            route_text: "startup pitch fundraising product intro clean corporate investor customer proposta commerciale presentazione homun",
+        },
+        TemplateCatalogEntry {
+            id: "monet/executive-update-board-01",
+            name: "Executive Update Board",
+            kind: "presentation",
+            description: "Board-ready executive update with metrics, risks, decisions and next steps.",
+            use_cases: &["board update", "status update", "management review"],
+            audience: &["board", "executives", "leadership"],
+            design_template: "executive_update",
+            design_theme: Some("high_contrast"),
+            design_profile: Some("executive"),
+            design_components: &["kpi_grid", "risks_table", "timeline"],
+            layout_archetypes: &["cover", "status", "metrics", "risks", "decisions", "next steps"],
+            route_text: "executive update board status management review KPI risks decisions leadership aggiornamento direzione CDA",
+        },
+        TemplateCatalogEntry {
+            id: "monet/project-plan-technical-01",
+            name: "Project Plan Technical",
+            kind: "presentation",
+            description: "Technical project plan template with phases, process steps, risks and milestones.",
+            use_cases: &["project plan", "technical roadmap", "implementation plan"],
+            audience: &["engineering", "product", "PM"],
+            design_template: "project_plan",
+            design_theme: Some("minimal_mono"),
+            design_profile: Some("technical"),
+            design_components: &["process_steps", "timeline", "risks_table"],
+            layout_archetypes: &["cover", "objective", "phases", "architecture", "risks", "milestones"],
+            route_text: "project plan technical roadmap implementation phases milestones risks PM engineering piano progetto tecnico roadmap",
+        },
+        TemplateCatalogEntry {
+            id: "monet/sales-proposal-warm-01",
+            name: "Sales Proposal Warm",
+            kind: "document",
+            description: "Warm sales proposal document template for a client problem, solution, scope and next action.",
+            use_cases: &["sales proposal", "client proposal", "commercial offer"],
+            audience: &["clients", "buyers", "executives"],
+            design_template: "sales_proposal",
+            design_theme: Some("warm_editorial"),
+            design_profile: Some("sales_pitch"),
+            design_components: &["comparison_table", "timeline", "kpi_grid"],
+            layout_archetypes: &["summary", "problem", "solution", "scope", "timeline", "next action"],
+            route_text: "sales proposal client commercial offer proposta commerciale preventivo cliente warm editorial documento",
+        },
+        TemplateCatalogEntry {
+            id: "monet/technical-brief-minimal-01",
+            name: "Technical Brief Minimal",
+            kind: "document",
+            description: "Minimal technical brief template for architecture, tradeoffs, rollout and verification.",
+            use_cases: &["technical brief", "architecture brief", "implementation note"],
+            audience: &["engineering", "technical leadership", "product"],
+            design_template: "technical_brief",
+            design_theme: Some("minimal_mono"),
+            design_profile: Some("technical"),
+            design_components: &["process_steps", "comparison_table", "risks_table"],
+            layout_archetypes: &["summary", "architecture", "tradeoffs", "implementation", "verification"],
+            route_text: "technical brief architecture implementation tradeoffs verification engineering documento tecnico architettura",
+        },
+    ]
+}
+
+fn template_catalog_by_id(id: Option<&str>) -> Option<TemplateCatalogEntry> {
+    let id = id?.trim();
+    template_catalog_entries()
+        .iter()
+        .copied()
+        .find(|entry| entry.id == id)
+}
+
+fn template_catalog_capability_entries() -> Vec<CapabilityEntry> {
+    template_catalog_entries()
+        .iter()
+        .map(|entry| CapabilityEntry {
+            key: entry.id.to_string(),
+            desc: entry.description.to_string(),
+            text: format!(
+                "template catalog {} {} {} {} {} {} {} {} {} {} {}",
+                entry.id,
+                entry.name,
+                entry.kind,
+                entry.description,
+                entry.use_cases.join(" "),
+                entry.audience.join(" "),
+                entry.layout_archetypes.join(" "),
+                entry.design_template,
+                entry.design_theme.unwrap_or(""),
+                entry.design_profile.unwrap_or(""),
+                entry.route_text
+            ),
+            schema: None,
+            is_skill: false,
+            source: CapabilitySource::TemplateCatalog,
         })
         .collect()
 }
@@ -12062,6 +12188,7 @@ fn make_deck_tool_schema() -> serde_json::Value {
                     "brief": { "type": "string", "description": "What the deck is about, plus any structure, sections or points the user specified — verbatim." },
                     "language": { "type": "string", "description": "Deck language code, e.g. 'it' or 'en'. Default: the user's language." },
                     "slides": { "type": "integer", "description": "Desired number of slides (3-12). Default 6." },
+                    "template_ref": { "type": "string", "description": "Optional template catalog reference selected from capability discovery, e.g. monet/startup-pitch-clean-01. It is resolved by the harness into design_* defaults; explicit design_* args override or extend it." },
                     "design_template": deliverable_design_template_schema(),
                     "design_theme": deliverable_design_theme_schema(),
                     "design_profile": deliverable_design_profile_schema(),
@@ -12087,6 +12214,7 @@ fn make_document_tool_schema() -> serde_json::Value {
                     "brief": { "type": "string", "description": "What the document must contain, including any sections, audience, tone, constraints or source material the user provided — verbatim." },
                     "language": { "type": "string", "description": "Document language code, e.g. 'it' or 'en'. Default: the user's language." },
                     "name": { "type": "string", "description": "Artifact filename. If the user named the file, preserve that name exactly as a simple filename such as report.md, report.pdf or report.docx. If no name was specified, choose a concise descriptive .md filename." },
+                    "template_ref": { "type": "string", "description": "Optional template catalog reference selected from capability discovery, e.g. monet/sales-proposal-warm-01. It is resolved by the harness into design_* defaults; explicit design_* args override or extend it." },
                     "document_type": {
                         "type": "string",
                         "description": "Document shape requested by the user. Preserve explicit intent; do not infer from weak hints.",
@@ -12198,6 +12326,15 @@ fn deliverable_design_template(parsed: &serde_json::Value) -> Option<String> {
         .filter(|value| DELIVERABLE_DESIGN_TEMPLATES.contains(&value.as_str()))
 }
 
+fn deliverable_template_ref(parsed: &serde_json::Value) -> Option<String> {
+    parsed
+        .get("template_ref")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.chars().take(160).collect())
+}
+
 fn deliverable_design_theme(parsed: &serde_json::Value) -> Option<String> {
     parsed
         .get("design_theme")
@@ -12256,10 +12393,26 @@ fn resolved_deliverable_design_components(
     parsed: &serde_json::Value,
     template: Option<&str>,
 ) -> Vec<String> {
+    resolved_deliverable_design_components_with_catalog(parsed, template, &[])
+}
+
+fn resolved_deliverable_design_components_with_catalog(
+    parsed: &serde_json::Value,
+    template: Option<&str>,
+    catalog_components: &[&str],
+) -> Vec<String> {
     let (_, defaults) = deliverable_template_defaults(template);
     defaults
         .into_iter()
         .map(|value| value.to_string())
+        .chain(
+            catalog_components
+                .iter()
+                .copied()
+                .map(str::trim)
+                .map(str::to_ascii_lowercase)
+                .filter(|value| DELIVERABLE_DESIGN_COMPONENTS.contains(&value.as_str())),
+        )
         .chain(deliverable_design_components(parsed))
         .fold(Vec::<String>::new(), |mut acc, value| {
             if acc.len() < 6 && !acc.iter().any(|existing| existing == &value) {
@@ -12977,6 +13130,7 @@ any other key such as \"presentation\" or \"deck\", and add no extra top-level k
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 struct DocumentGenerationOptions {
+    template_ref: Option<String>,
     document_type: Option<String>,
     audience: Option<String>,
     tone: Option<String>,
@@ -13035,11 +13189,27 @@ fn document_generation_options(parsed: &serde_json::Value) -> DocumentGeneration
         .and_then(|value| value.as_str())
         .map(|value| value.trim().to_ascii_lowercase())
         .filter(|value| allowed_layout_profiles.contains(&value.as_str()));
-    let design_template = deliverable_design_template(parsed);
-    let design_theme = deliverable_design_theme(parsed);
-    let design_profile = resolved_deliverable_design_profile(parsed, design_template.as_deref());
-    let design_components =
-        resolved_deliverable_design_components(parsed, design_template.as_deref());
+    let requested_template_ref = deliverable_template_ref(parsed);
+    let catalog_template = template_catalog_by_id(requested_template_ref.as_deref());
+    let template_ref = catalog_template.map(|entry| entry.id.to_string());
+    let design_template = deliverable_design_template(parsed)
+        .or_else(|| catalog_template.map(|entry| entry.design_template.to_string()));
+    let design_theme = deliverable_design_theme(parsed).or_else(|| {
+        catalog_template.and_then(|entry| entry.design_theme.map(str::to_string))
+    });
+    let design_profile = deliverable_design_profile(parsed)
+        .or_else(|| catalog_template.and_then(|entry| entry.design_profile.map(str::to_string)))
+        .or_else(|| {
+            let (profile, _) = deliverable_template_defaults(design_template.as_deref());
+            profile.map(String::from)
+        });
+    let design_components = resolved_deliverable_design_components_with_catalog(
+        parsed,
+        design_template.as_deref(),
+        catalog_template
+            .map(|entry| entry.design_components)
+            .unwrap_or(&[]),
+    );
     let audience = parsed
         .get("audience")
         .and_then(|value| value.as_str())
@@ -13058,6 +13228,7 @@ fn document_generation_options(parsed: &serde_json::Value) -> DocumentGeneration
         .unwrap_or_default();
 
     DocumentGenerationOptions {
+        template_ref,
         document_type,
         audience,
         tone,
@@ -13072,6 +13243,9 @@ fn document_generation_options(parsed: &serde_json::Value) -> DocumentGeneration
 
 fn document_generation_directives(options: &DocumentGenerationOptions) -> String {
     let mut directives = Vec::new();
+    if let Some(template_ref) = options.template_ref.as_deref() {
+        directives.push(format!("Template reference: {template_ref}."));
+    }
     if let Some(document_type) = options.document_type.as_deref() {
         if document_type != "generic" {
             directives.push(format!("Document type: {document_type}."));
@@ -13915,6 +14089,7 @@ enum CapabilitySource {
     NativeTool,
     NativeWorkflow,
     NativeAtomic,
+    TemplateCatalog,
     Skill,
     McpTool,
     ConnectorTool,
@@ -13948,6 +14123,7 @@ fn capability_entry_from_tool_schema(
         CapabilitySource::NativeTool => "native tool",
         CapabilitySource::NativeWorkflow => "native workflow",
         CapabilitySource::NativeAtomic => "native atomic tool",
+        CapabilitySource::TemplateCatalog => "template catalog",
         CapabilitySource::Skill => "skill",
         CapabilitySource::McpTool => "mcp connected tool",
         CapabilitySource::ConnectorTool => "connector tool",
@@ -14182,6 +14358,7 @@ fn capability_source_label(source: CapabilitySource) -> &'static str {
         CapabilitySource::McpTool => "mcp",
         CapabilitySource::NativeWorkflow => "workflow",
         CapabilitySource::NativeAtomic => "atomic",
+        CapabilitySource::TemplateCatalog => "template",
         CapabilitySource::NativeTool => "tool",
         CapabilitySource::Skill => "skill",
         CapabilitySource::ConnectorTool => "connector",
@@ -15018,6 +15195,7 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
     if !read_only {
         capability_corpus.extend(native_workflow_capability_entries());
         capability_corpus.extend(native_atomic_capability_entries());
+        capability_corpus.extend(template_catalog_capability_entries());
     }
     capability_corpus.extend(mcp_capability_entries(&mcp_catalog.schemas));
     if has_skills {
@@ -16961,13 +17139,36 @@ available tools (for data from the web use the browser: browser_navigate on the 
                             .and_then(|v| v.as_u64())
                             .unwrap_or(6)
                             .clamp(3, 12) as usize;
-                        let design_template = deliverable_design_template(&parsed);
-                        let design_theme = deliverable_design_theme(&parsed);
+                        let requested_template_ref = deliverable_template_ref(&parsed);
+                        let catalog_template =
+                            template_catalog_by_id(requested_template_ref.as_deref());
+                        let template_ref = catalog_template.map(|entry| entry.id.to_string());
+                        let design_template = deliverable_design_template(&parsed)
+                            .or_else(|| {
+                                catalog_template.map(|entry| entry.design_template.to_string())
+                            });
+                        let design_theme = deliverable_design_theme(&parsed).or_else(|| {
+                            catalog_template
+                                .and_then(|entry| entry.design_theme.map(str::to_string))
+                        });
                         let design_profile =
-                            resolved_deliverable_design_profile(&parsed, design_template.as_deref());
-                        let design_components = resolved_deliverable_design_components(
+                            deliverable_design_profile(&parsed)
+                                .or_else(|| {
+                                    catalog_template.and_then(|entry| {
+                                        entry.design_profile.map(str::to_string)
+                                    })
+                                })
+                                .or_else(|| {
+                                    let (profile, _) =
+                                        deliverable_template_defaults(design_template.as_deref());
+                                    profile.map(String::from)
+                                });
+                        let design_components = resolved_deliverable_design_components_with_catalog(
                             &parsed,
                             design_template.as_deref(),
+                            catalog_template
+                                .map(|entry| entry.design_components)
+                                .unwrap_or(&[]),
                         );
                         if brief.is_empty() {
                             "make_deck needs a 'brief' describing the presentation.".to_string()
@@ -16978,6 +17179,7 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                     "brief": brief.clone(),
                                     "language": language.clone(),
                                     "slides": slides,
+                                    "template_ref": template_ref.clone(),
                                     "design_template": design_template.clone(),
                                     "design_theme": design_theme.clone(),
                                     "design_profile": design_profile.clone(),
@@ -17002,6 +17204,7 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                                 "brief": brief.clone(),
                                                 "language": language.clone(),
                                                 "slides": slides,
+                                                "template_ref": template_ref.clone(),
                                                 "design_template": design_template.clone(),
                                                 "design_theme": design_theme.clone(),
                                                 "design_profile": design_profile.clone(),
@@ -17253,6 +17456,7 @@ Absolutely NO text, NO words, NO letters, NO numbers, NO captions, NO logos."
                                 "language": language.clone(),
                                 "name": fname.clone(),
                                 "formats": formats.clone(),
+                                "template_ref": document_options.template_ref.clone(),
                                 "document_type": document_options.document_type.clone(),
                                 "audience": document_options.audience.clone(),
                                 "tone": document_options.tone.clone(),
@@ -17723,6 +17927,12 @@ an uncertain date.",
                             if entry.is_skill {
                                 lines.push(format!(
                                     "- skill «{}»: {} → load it with use_skill(\"{}\")",
+                                    entry.key, entry.desc, entry.key
+                                ));
+                                discovered_entries.push(entry.clone());
+                            } else if entry.source == CapabilitySource::TemplateCatalog {
+                                lines.push(format!(
+                                    "- template «{}»: {} → pass template_ref=\"{}\" to make_deck/make_document",
                                     entry.key, entry.desc, entry.key
                                 ));
                                 discovered_entries.push(entry.clone());
@@ -37497,6 +37707,7 @@ mod tests {
                 "brief": "Quarterly results",
                 "language": "en",
                 "slides": 6,
+                "template_ref": "monet/executive-update-board-01",
                 "design_template": "executive_update",
                 "design_theme": "high_contrast",
                 "design_profile": "executive",
@@ -37520,6 +37731,13 @@ mod tests {
                 .get("workflow_id")
                 .and_then(|value| value.as_str()),
             Some("make_deck"),
+        );
+        assert_eq!(
+            plan.steps[0]
+                .arguments
+                .pointer("/input/template_ref")
+                .and_then(|value| value.as_str()),
+            Some("monet/executive-update-board-01"),
         );
         assert_eq!(
             plan.steps[0]
@@ -37760,6 +37978,19 @@ mod tests {
         assert_eq!(tool_name, Some("run_in_sandbox"));
         assert!(entry.text.contains("merge"));
         assert!(entry.text.contains("converti"));
+    }
+
+    #[test]
+    fn template_catalog_entries_are_searchable_but_not_callable() {
+        let corpus = super::template_catalog_capability_entries();
+        let ranked = super::bm25_rank(&corpus, "startup pitch investor", 3);
+        let entry = ranked.first().expect("template catalog entry");
+
+        assert_eq!(entry.key, "monet/startup-pitch-clean-01");
+        assert_eq!(entry.source, super::CapabilitySource::TemplateCatalog);
+        assert!(entry.schema.is_none());
+        assert!(!entry.is_skill);
+        assert!(entry.text.contains("template catalog"));
     }
 
     #[test]
@@ -38014,6 +38245,25 @@ mod tests {
     }
 
     #[test]
+    fn make_deck_and_document_accept_template_ref() {
+        let deck_schema = super::make_deck_tool_schema();
+        let document_schema = super::make_document_tool_schema();
+
+        assert_eq!(
+            deck_schema
+                .pointer("/function/parameters/properties/template_ref/type")
+                .and_then(|value| value.as_str()),
+            Some("string"),
+        );
+        assert_eq!(
+            document_schema
+                .pointer("/function/parameters/properties/template_ref/type")
+                .and_then(|value| value.as_str()),
+            Some("string"),
+        );
+    }
+
+    #[test]
     fn deliverable_design_profile_schema_is_shared_by_deck_and_document() {
         let deck_schema = super::make_deck_tool_schema();
         let document_schema = super::make_document_tool_schema();
@@ -38162,6 +38412,47 @@ mod tests {
                 "timeline".to_string(),
                 "quote_callout".to_string(),
                 "risks_table".to_string(),
+            ],
+        );
+    }
+
+    #[test]
+    fn template_catalog_ref_resolves_deck_design_defaults() {
+        let parsed = serde_json::json!({
+            "template_ref": "monet/startup-pitch-clean-01",
+        });
+        let template_ref = super::deliverable_template_ref(&parsed);
+        let catalog_template = super::template_catalog_by_id(template_ref.as_deref());
+        let design_template = super::deliverable_design_template(&parsed)
+            .or_else(|| catalog_template.map(|entry| entry.design_template.to_string()));
+        let design_theme = super::deliverable_design_theme(&parsed).or_else(|| {
+            catalog_template.and_then(|entry| entry.design_theme.map(str::to_string))
+        });
+        let design_profile = super::deliverable_design_profile(&parsed)
+            .or_else(|| catalog_template.and_then(|entry| entry.design_profile.map(str::to_string)))
+            .or_else(|| {
+                let (profile, _) =
+                    super::deliverable_template_defaults(design_template.as_deref());
+                profile.map(String::from)
+            });
+        let design_components = super::resolved_deliverable_design_components_with_catalog(
+            &parsed,
+            design_template.as_deref(),
+            catalog_template
+                .map(|entry| entry.design_components)
+                .unwrap_or(&[]),
+        );
+
+        assert_eq!(template_ref.as_deref(), Some("monet/startup-pitch-clean-01"));
+        assert_eq!(design_template.as_deref(), Some("startup_pitch"));
+        assert_eq!(design_theme.as_deref(), Some("clean_corporate"));
+        assert_eq!(design_profile.as_deref(), Some("sales_pitch"));
+        assert_eq!(
+            design_components,
+            vec![
+                "kpi_grid".to_string(),
+                "timeline".to_string(),
+                "quote_callout".to_string(),
             ],
         );
     }
@@ -38365,6 +38656,7 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
     #[test]
     fn make_document_generation_options_are_explicit_and_bounded() {
         let options = super::document_generation_options(&serde_json::json!({
+            "template_ref": "monet/sales-proposal-warm-01",
             "document_type": "report",
             "audience": " PMI italiana ",
             "tone": "executive",
@@ -38386,6 +38678,10 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             ],
         }));
 
+        assert_eq!(
+            options.template_ref.as_deref(),
+            Some("monet/sales-proposal-warm-01"),
+        );
         assert_eq!(options.document_type.as_deref(), Some("report"));
         assert_eq!(options.audience.as_deref(), Some("PMI italiana"));
         assert_eq!(options.tone.as_deref(), Some("executive"));
@@ -38399,6 +38695,7 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
                 "kpi_grid".to_string(),
                 "risks_table".to_string(),
                 "timeline".to_string(),
+                "comparison_table".to_string(),
             ],
         );
         assert_eq!(
@@ -38411,6 +38708,10 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         );
 
         let directives = super::document_generation_directives(&options);
+        assert!(
+            directives.contains("Template reference: monet/sales-proposal-warm-01."),
+            "{directives}"
+        );
         assert!(directives.contains("Document type: report."), "{directives}");
         assert!(directives.contains("Audience: PMI italiana."), "{directives}");
         assert!(directives.contains("Tone: executive."), "{directives}");
@@ -38429,6 +38730,7 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         );
 
         let ignored = super::document_generation_options(&serde_json::json!({
+            "template_ref": "monet/unknown",
             "document_type": "pitch",
             "tone": "friendly",
             "layout_profile": "marketing_site",
@@ -38441,6 +38743,7 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         assert_eq!(ignored.document_type, None);
         assert_eq!(ignored.tone, None);
         assert_eq!(ignored.layout_profile, None);
+        assert_eq!(ignored.template_ref, None);
         assert_eq!(ignored.design_template, None);
         assert_eq!(ignored.design_theme, None);
         assert_eq!(ignored.design_profile, None);
