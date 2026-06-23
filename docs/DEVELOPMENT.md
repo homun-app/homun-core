@@ -90,9 +90,13 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   sistema `make_*`. Nona slice locale/verde: il seed `monet/*` passa dietro a
   un `TemplateCatalogProvider` interno con collector multi-provider deduplicato;
   è il punto di aggancio futuro per MCP Monet, marketplace o template pack
-  firmati senza cambiare `make_deck`/`make_document`. Prossimo asse: estendere
-  la template library e la QA visuale a contrasto/leggibilità e documenti.
-  `make_research` e `make_meeting` restano dopo questo asse.
+  firmati senza cambiare `make_deck`/`make_document`. Decima slice locale/verde:
+  `FileTemplateCatalogProvider` carica manifest JSON locali da
+  `HOMUN_TEMPLATE_CATALOG_PATH` o `~/.homun/template-catalog.json`, validando ID,
+  kind e token `design_*`; i cataloghi file aggiungono template al registry ma
+  non sovrascrivono i seed built-in. Prossimo asse: estendere la template
+  library e la QA visuale a contrasto/leggibilità e documenti. `make_research`
+  e `make_meeting` restano dopo questo asse.
 - **WS2-3.1 PASSATA in runtime (2026-06-23):** gli artifact scritti via
   Filesystem MCP dentro la root progetto vengono registrati come
   `memory_type="artifact"` + entity grafo `artifact` + embedding. Gate:

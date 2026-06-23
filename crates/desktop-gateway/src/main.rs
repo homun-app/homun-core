@@ -5832,25 +5832,25 @@ struct NativeAtomicCapability {
     schema: fn() -> serde_json::Value,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct TemplateCatalogEntry {
-    provider: &'static str,
-    id: &'static str,
-    name: &'static str,
-    kind: &'static str,
-    description: &'static str,
-    use_cases: &'static [&'static str],
-    audience: &'static [&'static str],
-    design_template: &'static str,
-    design_theme: Option<&'static str>,
-    design_profile: Option<&'static str>,
-    design_components: &'static [&'static str],
-    layout_archetypes: &'static [&'static str],
-    route_text: &'static str,
+    provider: String,
+    id: String,
+    name: String,
+    kind: String,
+    description: String,
+    use_cases: Vec<String>,
+    audience: Vec<String>,
+    design_template: String,
+    design_theme: Option<String>,
+    design_profile: Option<String>,
+    design_components: Vec<String>,
+    layout_archetypes: Vec<String>,
+    route_text: String,
 }
 
 trait TemplateCatalogProvider {
-    fn provider_id(&self) -> &'static str;
+    fn provider_id(&self) -> &str;
     fn entries(&self) -> Vec<TemplateCatalogEntry>;
 
     fn get(&self, id: &str) -> Option<TemplateCatalogEntry> {
@@ -5859,6 +5859,12 @@ trait TemplateCatalogProvider {
 }
 
 struct LocalTemplateCatalogProvider;
+
+#[derive(Debug, Clone)]
+struct FileTemplateCatalogProvider {
+    provider_id: String,
+    entries: Vec<TemplateCatalogEntry>,
+}
 
 const MAKE_DECK_WORKFLOW_STEPS: &[WorkflowStepDefinition] = &[
     WorkflowStepDefinition {
@@ -5984,94 +5990,299 @@ fn native_workflow_capability_entries() -> Vec<CapabilityEntry> {
         .collect()
 }
 
-fn local_template_catalog_seed(provider: &'static str) -> Vec<TemplateCatalogEntry> {
+fn template_catalog_entry(
+    provider: &str,
+    id: &str,
+    name: &str,
+    kind: &str,
+    description: &str,
+    use_cases: &[&str],
+    audience: &[&str],
+    design_template: &str,
+    design_theme: Option<&str>,
+    design_profile: Option<&str>,
+    design_components: &[&str],
+    layout_archetypes: &[&str],
+    route_text: &str,
+) -> TemplateCatalogEntry {
+    TemplateCatalogEntry {
+        provider: provider.to_string(),
+        id: id.to_string(),
+        name: name.to_string(),
+        kind: kind.to_string(),
+        description: description.to_string(),
+        use_cases: use_cases.iter().map(|value| value.to_string()).collect(),
+        audience: audience.iter().map(|value| value.to_string()).collect(),
+        design_template: design_template.to_string(),
+        design_theme: design_theme.map(str::to_string),
+        design_profile: design_profile.map(str::to_string),
+        design_components: design_components
+            .iter()
+            .map(|value| value.to_string())
+            .collect(),
+        layout_archetypes: layout_archetypes
+            .iter()
+            .map(|value| value.to_string())
+            .collect(),
+        route_text: route_text.to_string(),
+    }
+}
+
+fn local_template_catalog_seed(provider: &str) -> Vec<TemplateCatalogEntry> {
     vec![
-        TemplateCatalogEntry {
+        template_catalog_entry(
             provider,
-            id: "monet/startup-pitch-clean-01",
-            name: "Startup Pitch Clean",
-            kind: "presentation",
-            description: "Clean startup pitch deck template for product intro, fundraising or customer pitch.",
-            use_cases: &["pitch", "fundraising", "product intro"],
-            audience: &["investors", "executives", "customers"],
-            design_template: "startup_pitch",
-            design_theme: Some("clean_corporate"),
-            design_profile: Some("sales_pitch"),
-            design_components: &["kpi_grid", "timeline", "quote_callout"],
-            layout_archetypes: &["cover", "problem", "solution", "traction", "roadmap", "closing"],
-            route_text: "startup pitch fundraising product intro clean corporate investor customer proposta commerciale presentazione homun",
-        },
-        TemplateCatalogEntry {
+            "monet/startup-pitch-clean-01",
+            "Startup Pitch Clean",
+            "presentation",
+            "Clean startup pitch deck template for product intro, fundraising or customer pitch.",
+            &["pitch", "fundraising", "product intro"],
+            &["investors", "executives", "customers"],
+            "startup_pitch",
+            Some("clean_corporate"),
+            Some("sales_pitch"),
+            &["kpi_grid", "timeline", "quote_callout"],
+            &["cover", "problem", "solution", "traction", "roadmap", "closing"],
+            "startup pitch fundraising product intro clean corporate investor customer proposta commerciale presentazione homun",
+        ),
+        template_catalog_entry(
             provider,
-            id: "monet/executive-update-board-01",
-            name: "Executive Update Board",
-            kind: "presentation",
-            description: "Board-ready executive update with metrics, risks, decisions and next steps.",
-            use_cases: &["board update", "status update", "management review"],
-            audience: &["board", "executives", "leadership"],
-            design_template: "executive_update",
-            design_theme: Some("high_contrast"),
-            design_profile: Some("executive"),
-            design_components: &["kpi_grid", "risks_table", "timeline"],
-            layout_archetypes: &["cover", "status", "metrics", "risks", "decisions", "next steps"],
-            route_text: "executive update board status management review KPI risks decisions leadership aggiornamento direzione CDA",
-        },
-        TemplateCatalogEntry {
+            "monet/executive-update-board-01",
+            "Executive Update Board",
+            "presentation",
+            "Board-ready executive update with metrics, risks, decisions and next steps.",
+            &["board update", "status update", "management review"],
+            &["board", "executives", "leadership"],
+            "executive_update",
+            Some("high_contrast"),
+            Some("executive"),
+            &["kpi_grid", "risks_table", "timeline"],
+            &["cover", "status", "metrics", "risks", "decisions", "next steps"],
+            "executive update board status management review KPI risks decisions leadership aggiornamento direzione CDA",
+        ),
+        template_catalog_entry(
             provider,
-            id: "monet/project-plan-technical-01",
-            name: "Project Plan Technical",
-            kind: "presentation",
-            description: "Technical project plan template with phases, process steps, risks and milestones.",
-            use_cases: &["project plan", "technical roadmap", "implementation plan"],
-            audience: &["engineering", "product", "PM"],
-            design_template: "project_plan",
-            design_theme: Some("minimal_mono"),
-            design_profile: Some("technical"),
-            design_components: &["process_steps", "timeline", "risks_table"],
-            layout_archetypes: &["cover", "objective", "phases", "architecture", "risks", "milestones"],
-            route_text: "project plan technical roadmap implementation phases milestones risks PM engineering piano progetto tecnico roadmap",
-        },
-        TemplateCatalogEntry {
+            "monet/project-plan-technical-01",
+            "Project Plan Technical",
+            "presentation",
+            "Technical project plan template with phases, process steps, risks and milestones.",
+            &["project plan", "technical roadmap", "implementation plan"],
+            &["engineering", "product", "PM"],
+            "project_plan",
+            Some("minimal_mono"),
+            Some("technical"),
+            &["process_steps", "timeline", "risks_table"],
+            &["cover", "objective", "phases", "architecture", "risks", "milestones"],
+            "project plan technical roadmap implementation phases milestones risks PM engineering piano progetto tecnico roadmap",
+        ),
+        template_catalog_entry(
             provider,
-            id: "monet/sales-proposal-warm-01",
-            name: "Sales Proposal Warm",
-            kind: "document",
-            description: "Warm sales proposal document template for a client problem, solution, scope and next action.",
-            use_cases: &["sales proposal", "client proposal", "commercial offer"],
-            audience: &["clients", "buyers", "executives"],
-            design_template: "sales_proposal",
-            design_theme: Some("warm_editorial"),
-            design_profile: Some("sales_pitch"),
-            design_components: &["comparison_table", "timeline", "kpi_grid"],
-            layout_archetypes: &["summary", "problem", "solution", "scope", "timeline", "next action"],
-            route_text: "sales proposal client commercial offer proposta commerciale preventivo cliente warm editorial documento",
-        },
-        TemplateCatalogEntry {
+            "monet/sales-proposal-warm-01",
+            "Sales Proposal Warm",
+            "document",
+            "Warm sales proposal document template for a client problem, solution, scope and next action.",
+            &["sales proposal", "client proposal", "commercial offer"],
+            &["clients", "buyers", "executives"],
+            "sales_proposal",
+            Some("warm_editorial"),
+            Some("sales_pitch"),
+            &["comparison_table", "timeline", "kpi_grid"],
+            &["summary", "problem", "solution", "scope", "timeline", "next action"],
+            "sales proposal client commercial offer proposta commerciale preventivo cliente warm editorial documento",
+        ),
+        template_catalog_entry(
             provider,
-            id: "monet/technical-brief-minimal-01",
-            name: "Technical Brief Minimal",
-            kind: "document",
-            description: "Minimal technical brief template for architecture, tradeoffs, rollout and verification.",
-            use_cases: &["technical brief", "architecture brief", "implementation note"],
-            audience: &["engineering", "technical leadership", "product"],
-            design_template: "technical_brief",
-            design_theme: Some("minimal_mono"),
-            design_profile: Some("technical"),
-            design_components: &["process_steps", "comparison_table", "risks_table"],
-            layout_archetypes: &["summary", "architecture", "tradeoffs", "implementation", "verification"],
-            route_text: "technical brief architecture implementation tradeoffs verification engineering documento tecnico architettura",
-        },
+            "monet/technical-brief-minimal-01",
+            "Technical Brief Minimal",
+            "document",
+            "Minimal technical brief template for architecture, tradeoffs, rollout and verification.",
+            &["technical brief", "architecture brief", "implementation note"],
+            &["engineering", "technical leadership", "product"],
+            "technical_brief",
+            Some("minimal_mono"),
+            Some("technical"),
+            &["process_steps", "comparison_table", "risks_table"],
+            &["summary", "architecture", "tradeoffs", "implementation", "verification"],
+            "technical brief architecture implementation tradeoffs verification engineering documento tecnico architettura",
+        ),
     ]
 }
 
 impl TemplateCatalogProvider for LocalTemplateCatalogProvider {
-    fn provider_id(&self) -> &'static str {
+    fn provider_id(&self) -> &str {
         "local_seed"
     }
 
     fn entries(&self) -> Vec<TemplateCatalogEntry> {
         local_template_catalog_seed(self.provider_id())
     }
+}
+
+impl FileTemplateCatalogProvider {
+    fn from_json_str(raw: &str) -> Result<Self, String> {
+        let value: serde_json::Value = serde_json::from_str(raw)
+            .map_err(|error| format!("template catalog manifest is not valid JSON: {error}"))?;
+        let provider_id = clean_template_catalog_id(
+            value
+                .get("provider_id")
+                .and_then(|value| value.as_str())
+                .ok_or_else(|| "template catalog manifest missing provider_id".to_string())?,
+        )
+        .ok_or_else(|| "template catalog manifest provider_id is invalid".to_string())?;
+        let templates = value
+            .get("templates")
+            .and_then(|value| value.as_array())
+            .ok_or_else(|| "template catalog manifest missing templates array".to_string())?;
+        let entries = templates
+            .iter()
+            .filter_map(|template| parse_file_template_catalog_entry(&provider_id, template).ok())
+            .collect::<Vec<_>>();
+
+        Ok(Self {
+            provider_id,
+            entries,
+        })
+    }
+
+    fn from_path(path: &std::path::Path) -> Result<Self, String> {
+        let raw = std::fs::read_to_string(path)
+            .map_err(|error| format!("could not read template catalog {}: {error}", path.display()))?;
+        Self::from_json_str(&raw)
+    }
+}
+
+impl TemplateCatalogProvider for FileTemplateCatalogProvider {
+    fn provider_id(&self) -> &str {
+        &self.provider_id
+    }
+
+    fn entries(&self) -> Vec<TemplateCatalogEntry> {
+        self.entries.clone()
+    }
+}
+
+fn clean_template_catalog_id(value: &str) -> Option<String> {
+    let value = value.trim();
+    if value.is_empty()
+        || value.len() > 160
+        || value.starts_with('/')
+        || value.contains("..")
+        || !value
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '/' | '.'))
+    {
+        None
+    } else {
+        Some(value.to_string())
+    }
+}
+
+fn clean_template_catalog_text(value: Option<&serde_json::Value>, max_len: usize) -> Option<String> {
+    value
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.chars().take(max_len).collect())
+}
+
+fn clean_template_catalog_string_list(
+    value: Option<&serde_json::Value>,
+    max_items: usize,
+    max_len: usize,
+) -> Vec<String> {
+    value
+        .and_then(|value| value.as_array())
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(|value| value.as_str())
+                .filter_map(|value| {
+                    let value = value.trim();
+                    if value.is_empty() {
+                        None
+                    } else {
+                        Some(value.chars().take(max_len).collect::<String>())
+                    }
+                })
+                .fold(Vec::<String>::new(), |mut acc, value| {
+                    if acc.len() < max_items && !acc.iter().any(|existing| existing == &value) {
+                        acc.push(value);
+                    }
+                    acc
+                })
+        })
+        .unwrap_or_default()
+}
+
+fn parse_file_template_catalog_entry(
+    provider_id: &str,
+    value: &serde_json::Value,
+) -> Result<TemplateCatalogEntry, String> {
+    let id = clean_template_catalog_id(
+        value
+            .get("id")
+            .and_then(|value| value.as_str())
+            .ok_or_else(|| "template missing id".to_string())?,
+    )
+    .ok_or_else(|| "template id is invalid".to_string())?;
+    let name = clean_template_catalog_text(value.get("name"), 80)
+        .ok_or_else(|| "template missing name".to_string())?;
+    let kind = value
+        .get("kind")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|kind| matches!(*kind, "presentation" | "document"))
+        .ok_or_else(|| "template kind is invalid".to_string())?
+        .to_string();
+    let description = clean_template_catalog_text(value.get("description"), 240)
+        .ok_or_else(|| "template missing description".to_string())?;
+    let design_template = value
+        .get("design_template")
+        .and_then(|value| value.as_str())
+        .map(|value| value.trim().to_ascii_lowercase())
+        .filter(|value| DELIVERABLE_DESIGN_TEMPLATES.contains(&value.as_str()))
+        .ok_or_else(|| "template design_template is invalid".to_string())?;
+    let design_theme = value
+        .get("design_theme")
+        .and_then(|value| value.as_str())
+        .map(|value| value.trim().to_ascii_lowercase())
+        .filter(|value| DELIVERABLE_DESIGN_THEMES.contains(&value.as_str()));
+    let design_profile = value
+        .get("design_profile")
+        .and_then(|value| value.as_str())
+        .map(|value| value.trim().to_ascii_lowercase())
+        .filter(|value| DELIVERABLE_DESIGN_PROFILES.contains(&value.as_str()));
+    let design_components = clean_template_catalog_string_list(
+        value.get("design_components"),
+        6,
+        60,
+    )
+    .into_iter()
+    .map(|value| value.to_ascii_lowercase())
+    .filter(|value| DELIVERABLE_DESIGN_COMPONENTS.contains(&value.as_str()))
+    .collect::<Vec<_>>();
+    let route_text = clean_template_catalog_text(value.get("route_text"), 500)
+        .ok_or_else(|| "template missing route_text".to_string())?;
+
+    Ok(TemplateCatalogEntry {
+        provider: provider_id.to_string(),
+        id,
+        name,
+        kind,
+        description,
+        use_cases: clean_template_catalog_string_list(value.get("use_cases"), 12, 80),
+        audience: clean_template_catalog_string_list(value.get("audience"), 12, 80),
+        design_template,
+        design_theme,
+        design_profile,
+        design_components,
+        layout_archetypes: clean_template_catalog_string_list(
+            value.get("layout_archetypes"),
+            16,
+            80,
+        ),
+        route_text,
+    })
 }
 
 fn collect_template_catalog_entries(
@@ -6088,8 +6299,34 @@ fn collect_template_catalog_entries(
         })
 }
 
+fn template_catalog_file_path() -> Option<PathBuf> {
+    std::env::var("HOMUN_TEMPLATE_CATALOG_PATH")
+        .ok()
+        .map(std::path::PathBuf::from)
+        .or_else(|| gateway_data_dir().ok().map(|dir| dir.join("template-catalog.json")))
+}
+
+fn file_template_catalog_provider() -> Option<FileTemplateCatalogProvider> {
+    let path = template_catalog_file_path()?;
+    if !path.exists() {
+        return None;
+    }
+    match FileTemplateCatalogProvider::from_path(&path) {
+        Ok(provider) => Some(provider),
+        Err(error) => {
+            eprintln!("[template-catalog] ignoring {}: {error}", path.display());
+            None
+        }
+    }
+}
+
 fn template_catalog_entries() -> Vec<TemplateCatalogEntry> {
-    collect_template_catalog_entries(&[&LocalTemplateCatalogProvider])
+    let local = LocalTemplateCatalogProvider;
+    if let Some(file_provider) = file_template_catalog_provider() {
+        collect_template_catalog_entries(&[&local, &file_provider])
+    } else {
+        collect_template_catalog_entries(&[&local])
+    }
 }
 
 fn template_catalog_by_id_from_entries(
@@ -6097,7 +6334,7 @@ fn template_catalog_by_id_from_entries(
     id: Option<&str>,
 ) -> Option<TemplateCatalogEntry> {
     let id = id?.trim();
-    entries.iter().copied().find(|entry| entry.id == id)
+    entries.iter().find(|entry| entry.id == id).cloned()
 }
 
 fn template_catalog_by_id(id: Option<&str>) -> Option<TemplateCatalogEntry> {
@@ -6121,8 +6358,8 @@ fn template_catalog_capability_entries() -> Vec<CapabilityEntry> {
                 entry.audience.join(" "),
                 entry.layout_archetypes.join(" "),
                 entry.design_template,
-                entry.design_theme.unwrap_or(""),
-                entry.design_profile.unwrap_or(""),
+                entry.design_theme.as_deref().unwrap_or(""),
+                entry.design_profile.as_deref().unwrap_or(""),
                 entry.route_text
             ),
             schema: None,
@@ -12449,7 +12686,7 @@ fn resolved_deliverable_design_components(
 fn resolved_deliverable_design_components_with_catalog(
     parsed: &serde_json::Value,
     template: Option<&str>,
-    catalog_components: &[&str],
+    catalog_components: &[String],
 ) -> Vec<String> {
     let (_, defaults) = deliverable_template_defaults(template);
     defaults
@@ -12458,8 +12695,7 @@ fn resolved_deliverable_design_components_with_catalog(
         .chain(
             catalog_components
                 .iter()
-                .copied()
-                .map(str::trim)
+                .map(|value| value.trim())
                 .map(str::to_ascii_lowercase)
                 .filter(|value| DELIVERABLE_DESIGN_COMPONENTS.contains(&value.as_str())),
         )
@@ -13241,14 +13477,20 @@ fn document_generation_options(parsed: &serde_json::Value) -> DocumentGeneration
         .filter(|value| allowed_layout_profiles.contains(&value.as_str()));
     let requested_template_ref = deliverable_template_ref(parsed);
     let catalog_template = template_catalog_by_id(requested_template_ref.as_deref());
-    let template_ref = catalog_template.map(|entry| entry.id.to_string());
+    let template_ref = catalog_template.as_ref().map(|entry| entry.id.clone());
     let design_template = deliverable_design_template(parsed)
-        .or_else(|| catalog_template.map(|entry| entry.design_template.to_string()));
+        .or_else(|| catalog_template.as_ref().map(|entry| entry.design_template.clone()));
     let design_theme = deliverable_design_theme(parsed).or_else(|| {
-        catalog_template.and_then(|entry| entry.design_theme.map(str::to_string))
+        catalog_template
+            .as_ref()
+            .and_then(|entry| entry.design_theme.clone())
     });
     let design_profile = deliverable_design_profile(parsed)
-        .or_else(|| catalog_template.and_then(|entry| entry.design_profile.map(str::to_string)))
+        .or_else(|| {
+            catalog_template
+                .as_ref()
+                .and_then(|entry| entry.design_profile.clone())
+        })
         .or_else(|| {
             let (profile, _) = deliverable_template_defaults(design_template.as_deref());
             profile.map(String::from)
@@ -13257,7 +13499,8 @@ fn document_generation_options(parsed: &serde_json::Value) -> DocumentGeneration
         parsed,
         design_template.as_deref(),
         catalog_template
-            .map(|entry| entry.design_components)
+            .as_ref()
+            .map(|entry| entry.design_components.as_slice())
             .unwrap_or(&[]),
     );
     let audience = parsed
@@ -17192,21 +17435,24 @@ available tools (for data from the web use the browser: browser_navigate on the 
                         let requested_template_ref = deliverable_template_ref(&parsed);
                         let catalog_template =
                             template_catalog_by_id(requested_template_ref.as_deref());
-                        let template_ref = catalog_template.map(|entry| entry.id.to_string());
+                        let template_ref = catalog_template.as_ref().map(|entry| entry.id.clone());
                         let design_template = deliverable_design_template(&parsed)
                             .or_else(|| {
-                                catalog_template.map(|entry| entry.design_template.to_string())
+                                catalog_template
+                                    .as_ref()
+                                    .map(|entry| entry.design_template.clone())
                             });
                         let design_theme = deliverable_design_theme(&parsed).or_else(|| {
                             catalog_template
-                                .and_then(|entry| entry.design_theme.map(str::to_string))
+                                .as_ref()
+                                .and_then(|entry| entry.design_theme.clone())
                         });
                         let design_profile =
                             deliverable_design_profile(&parsed)
                                 .or_else(|| {
-                                    catalog_template.and_then(|entry| {
-                                        entry.design_profile.map(str::to_string)
-                                    })
+                                    catalog_template
+                                        .as_ref()
+                                        .and_then(|entry| entry.design_profile.clone())
                                 })
                                 .or_else(|| {
                                     let (profile, _) =
@@ -17217,7 +17463,8 @@ available tools (for data from the web use the browser: browser_navigate on the 
                             &parsed,
                             design_template.as_deref(),
                             catalog_template
-                                .map(|entry| entry.design_components)
+                                .as_ref()
+                                .map(|entry| entry.design_components.as_slice())
                                 .unwrap_or(&[]),
                         );
                         if brief.is_empty() {
@@ -38055,7 +38302,7 @@ mod tests {
         assert_eq!(
             super::TemplateCatalogProvider::get(&provider, "monet/sales-proposal-warm-01")
                 .map(|entry| entry.design_template),
-            Some("sales_proposal"),
+            Some("sales_proposal".to_string()),
         );
     }
 
@@ -38069,36 +38316,36 @@ mod tests {
 
             fn entries(&self) -> Vec<super::TemplateCatalogEntry> {
                 vec![
-                    super::TemplateCatalogEntry {
-                        provider: "extra",
-                        id: "external/customer-case-study-01",
-                        name: "Customer Case Study",
-                        kind: "document",
-                        description: "Case study template for customer proof and outcomes.",
-                        use_cases: &["case study"],
-                        audience: &["customers"],
-                        design_template: "sales_proposal",
-                        design_theme: Some("clean_corporate"),
-                        design_profile: Some("sales_pitch"),
-                        design_components: &["quote_callout", "kpi_grid"],
-                        layout_archetypes: &["summary", "proof", "outcomes"],
-                        route_text: "case study customer proof outcomes",
-                    },
-                    super::TemplateCatalogEntry {
-                        provider: "extra",
-                        id: "monet/startup-pitch-clean-01",
-                        name: "Duplicate Startup Pitch",
-                        kind: "presentation",
-                        description: "Duplicate should not override first provider.",
-                        use_cases: &["duplicate"],
-                        audience: &["test"],
-                        design_template: "project_plan",
-                        design_theme: None,
-                        design_profile: None,
-                        design_components: &[],
-                        layout_archetypes: &[],
-                        route_text: "duplicate",
-                    },
+                    super::template_catalog_entry(
+                        "extra",
+                        "external/customer-case-study-01",
+                        "Customer Case Study",
+                        "document",
+                        "Case study template for customer proof and outcomes.",
+                        &["case study"],
+                        &["customers"],
+                        "sales_proposal",
+                        Some("clean_corporate"),
+                        Some("sales_pitch"),
+                        &["quote_callout", "kpi_grid"],
+                        &["summary", "proof", "outcomes"],
+                        "case study customer proof outcomes",
+                    ),
+                    super::template_catalog_entry(
+                        "extra",
+                        "monet/startup-pitch-clean-01",
+                        "Duplicate Startup Pitch",
+                        "presentation",
+                        "Duplicate should not override first provider.",
+                        &["duplicate"],
+                        &["test"],
+                        "project_plan",
+                        None,
+                        None,
+                        &[],
+                        &[],
+                        "duplicate",
+                    ),
                 ]
             }
         }
@@ -38119,7 +38366,7 @@ mod tests {
             catalog
                 .iter()
                 .find(|entry| entry.id == "external/customer-case-study-01")
-                .map(|entry| entry.provider),
+                .map(|entry| entry.provider.as_str()),
             Some("extra"),
         );
         assert_eq!(
@@ -38128,7 +38375,107 @@ mod tests {
                 Some("external/customer-case-study-01")
             )
             .map(|entry| entry.design_template),
-            Some("sales_proposal"),
+            Some("sales_proposal".to_string()),
+        );
+    }
+
+    #[test]
+    fn file_template_catalog_provider_loads_valid_manifest() {
+        let manifest = serde_json::json!({
+            "provider_id": "monet_file",
+            "templates": [
+                {
+                    "id": "monet_file/investor-pitch-01",
+                    "name": "Investor Pitch",
+                    "kind": "presentation",
+                    "description": "Investor pitch template from a local catalog file.",
+                    "use_cases": ["fundraising", "pitch"],
+                    "audience": ["investors"],
+                    "design_template": "startup_pitch",
+                    "design_theme": "clean_corporate",
+                    "design_profile": "sales_pitch",
+                    "design_components": ["kpi_grid", "timeline", "unknown_component"],
+                    "layout_archetypes": ["cover", "traction", "ask"],
+                    "route_text": "investor pitch fundraising"
+                }
+            ]
+        });
+        let provider = super::FileTemplateCatalogProvider::from_json_str(
+            manifest.to_string().as_str(),
+        )
+        .expect("file provider");
+        let entries = super::TemplateCatalogProvider::entries(&provider);
+
+        assert_eq!(super::TemplateCatalogProvider::provider_id(&provider), "monet_file");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].id, "monet_file/investor-pitch-01");
+        assert_eq!(entries[0].provider, "monet_file");
+        assert_eq!(entries[0].design_template, "startup_pitch");
+        assert_eq!(entries[0].design_theme.as_deref(), Some("clean_corporate"));
+        assert_eq!(
+            entries[0].design_components,
+            vec!["kpi_grid".to_string(), "timeline".to_string()],
+        );
+    }
+
+    #[test]
+    fn file_template_catalog_provider_rejects_invalid_manifest_identity() {
+        let invalid = serde_json::json!({
+            "provider_id": "../bad provider",
+            "templates": [
+                {
+                    "id": "bad id",
+                    "name": "Bad",
+                    "kind": "presentation",
+                    "description": "Bad template.",
+                    "design_template": "unknown",
+                    "route_text": "bad"
+                }
+            ]
+        });
+
+        assert!(super::FileTemplateCatalogProvider::from_json_str(
+            invalid.to_string().as_str()
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn file_template_catalog_provider_loads_manifest_from_path() {
+        let path = std::env::temp_dir().join(format!(
+            "homun-template-catalog-{}-{}.json",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis()
+        ));
+        let manifest = serde_json::json!({
+            "provider_id": "file_path_catalog",
+            "templates": [
+                {
+                    "id": "file_path_catalog/project-plan-01",
+                    "name": "Project Plan",
+                    "kind": "presentation",
+                    "description": "Project plan from disk.",
+                    "design_template": "project_plan",
+                    "design_theme": "minimal_mono",
+                    "design_profile": "technical",
+                    "design_components": ["process_steps", "timeline"],
+                    "route_text": "project plan disk"
+                }
+            ]
+        });
+        std::fs::write(&path, manifest.to_string()).expect("write manifest");
+
+        let provider = super::FileTemplateCatalogProvider::from_path(&path).expect("provider");
+        let _ = std::fs::remove_file(&path);
+
+        assert_eq!(super::TemplateCatalogProvider::provider_id(&provider), "file_path_catalog");
+        assert_eq!(
+            super::TemplateCatalogProvider::get(&provider, "file_path_catalog/project-plan-01")
+                .map(|entry| entry.design_template),
+            Some("project_plan".to_string()),
         );
     }
 
@@ -38563,12 +38910,18 @@ mod tests {
         let template_ref = super::deliverable_template_ref(&parsed);
         let catalog_template = super::template_catalog_by_id(template_ref.as_deref());
         let design_template = super::deliverable_design_template(&parsed)
-            .or_else(|| catalog_template.map(|entry| entry.design_template.to_string()));
+            .or_else(|| catalog_template.as_ref().map(|entry| entry.design_template.clone()));
         let design_theme = super::deliverable_design_theme(&parsed).or_else(|| {
-            catalog_template.and_then(|entry| entry.design_theme.map(str::to_string))
+            catalog_template
+                .as_ref()
+                .and_then(|entry| entry.design_theme.clone())
         });
         let design_profile = super::deliverable_design_profile(&parsed)
-            .or_else(|| catalog_template.and_then(|entry| entry.design_profile.map(str::to_string)))
+            .or_else(|| {
+                catalog_template
+                    .as_ref()
+                    .and_then(|entry| entry.design_profile.clone())
+            })
             .or_else(|| {
                 let (profile, _) =
                     super::deliverable_template_defaults(design_template.as_deref());
@@ -38578,7 +38931,8 @@ mod tests {
             &parsed,
             design_template.as_deref(),
             catalog_template
-                .map(|entry| entry.design_components)
+                .as_ref()
+                .map(|entry| entry.design_components.as_slice())
                 .unwrap_or(&[]),
         );
 

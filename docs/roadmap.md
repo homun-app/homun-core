@@ -229,6 +229,10 @@ primo percorso locale verde:
     Questo è il punto di aggancio per MCP Monet, marketplace Homun o template
     pack firmati: tutti pubblicano `template_ref` nel registry unico, mentre i
     workflow esistenti continuano a renderizzare.
+55. WS7 file template catalog — aggiunto `FileTemplateCatalogProvider`: manifest
+    JSON locali caricabili da `HOMUN_TEMPLATE_CATALOG_PATH` o
+    `~/.homun/template-catalog.json`, validati contro il vocabolario `design_*`.
+    I file catalog estendono il registry ma non sovrascrivono i seed built-in.
 
 Prima di pubblicare/taggare resta prudente ripetere lo smoke manuale in-app su
 una automazione schedulata reale con il binario aggiornato. Il primo smoke ha
@@ -292,7 +296,8 @@ renderizzato su HTML reale blocca overflow/immagini rotte prima della consegna;
 ottava slice: template catalog provider `monet/*` read-only nel registry, con
 `template_ref` risolto dai workflow esistenti; nona slice: contract
 `TemplateCatalogProvider` interno per agganciare MCP/marketplace/template pack
-senza toccare i workflow. Prossima slice: contrasto/leggibilità, QA documenti o
-template library più ampia/adapter esterno.
+senza toccare i workflow; decima slice: manifest JSON locale caricabile e
+validato. Prossima slice: contrasto/leggibilità, QA documenti o template library
+più ampia/adapter esterno.
 `make_research` e `make_meeting` restano futuri.
 Il contratto corrente della memoria è in [MEMORIA.md](MEMORIA.md).

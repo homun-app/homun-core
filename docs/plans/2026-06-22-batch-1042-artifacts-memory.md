@@ -796,6 +796,16 @@ ragionato il contratto degli strumenti `make_*` creati dall'harness. ADR 0011
   i workflow e senza introdurre renderer/store paralleli. Test mirati:
   `local_template_catalog_provider_exposes_seed_templates`,
   `template_catalog_collects_multiple_providers_without_duplicate_ids`.
+  **Decima slice file catalog (2026-06-23, locale/verde):**
+  `FileTemplateCatalogProvider` carica manifest JSON locali da
+  `HOMUN_TEMPLATE_CATALOG_PATH` o `~/.homun/template-catalog.json`. Il parser
+  valida `provider_id`, `id`, `kind`, `design_template`, `design_theme`,
+  `design_profile` e `design_components`, scartando token fuori vocabolario; il
+  collector mantiene dedup first-wins, quindi un file catalog può aggiungere
+  template ma non rimpiazzare i seed built-in. Test mirati:
+  `file_template_catalog_provider_loads_valid_manifest`,
+  `file_template_catalog_provider_rejects_invalid_manifest_identity`,
+  `file_template_catalog_provider_loads_manifest_from_path`.
 - ☐ **7.1b (futuro)** Portare ricerca/meeting al livello del deck solo dopo il
   chiarimento sul contratto strumenti: `make_research` e `make_meeting` non sono
   essenziali per la prossima release.
