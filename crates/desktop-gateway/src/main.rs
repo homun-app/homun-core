@@ -13342,6 +13342,32 @@ fn search_connector_capability_entries(
         .collect()
 }
 
+fn capability_source_label(source: CapabilitySource) -> &'static str {
+    match source {
+        CapabilitySource::McpTool => "mcp",
+        CapabilitySource::NativeWorkflow => "workflow",
+        CapabilitySource::NativeAtomic => "atomic",
+        CapabilitySource::NativeTool => "tool",
+        CapabilitySource::Skill => "skill",
+        CapabilitySource::ConnectorTool => "connector",
+    }
+}
+
+fn capability_discovery_trace_line(intent: &str, entries: &[CapabilityEntry]) -> Option<String> {
+    if entries.is_empty() {
+        return None;
+    }
+    let names = entries
+        .iter()
+        .take(6)
+        .map(|entry| format!("{}:{}", capability_source_label(entry.source), entry.key))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let intent = intent.trim();
+    let intent = if intent.is_empty() { "(intent)" } else { intent };
+    Some(format!("capability discovery `{intent}` -> {names}"))
+}
+
 /// Capable (OpenAI-compatible) chat path with NATIVE TOOL-CALLING. The model is
 /// given real tools and decides when to use them (no keyword routing). Tool
 /// rounds run non-streamed; the final assistant answer is emitted as Delta+Done
@@ -16761,6 +16787,7 @@ an uncertain date.",
                         )
                         .await;
                         let mut lines = Vec::new();
+                        let mut discovered_entries: Vec<CapabilityEntry> = Vec::new();
                         // In-house tools + skills (BM25 over the unified corpus).
                         for entry in bm25_rank(&capability_corpus, &intent, 6) {
                             if entry.is_skill {
@@ -16768,19 +16795,14 @@ an uncertain date.",
                                     "- skill «{}»: {} → load it with use_skill(\"{}\")",
                                     entry.key, entry.desc, entry.key
                                 ));
+                                discovered_entries.push(entry.clone());
                             } else if let Some(schema) = &entry.schema {
                                 if loaded_tools.insert(entry.key.clone()) {
                                     tool_schemas.push(schema.clone());
                                 }
-                                let label = match entry.source {
-                                    CapabilitySource::McpTool => "mcp",
-                                    CapabilitySource::NativeWorkflow => "workflow",
-                                    CapabilitySource::NativeAtomic => "atomic",
-                                    CapabilitySource::NativeTool => "tool",
-                                    CapabilitySource::Skill => "skill",
-                                    CapabilitySource::ConnectorTool => "connector",
-                                };
+                                let label = capability_source_label(entry.source);
                                 lines.push(format!("- {label} «{}»: {}", entry.key, entry.desc));
+                                discovered_entries.push(entry.clone());
                             }
                         }
                         // Connected services (toolkit-aware): activate the matching toolkit's
@@ -16810,6 +16832,14 @@ an uncertain date.",
                                     }
                                 }
                                 lines.push(format!("- connector «{}»: {}", entry.key, entry.desc));
+                                discovered_entries.push(entry);
+                            }
+                        }
+                        if tool_trace.len() < 20 {
+                            if let Some(trace_line) =
+                                capability_discovery_trace_line(&intent, &discovered_entries)
+                            {
+                                tool_trace.push(trace_line);
                             }
                         }
                         if lines.is_empty() {
@@ -36873,6 +36903,21 @@ mod tests {
         assert!(!keys.contains(&"GOOGLECALENDAR_EVENTS_LIST"));
         assert!(hits.iter().all(|entry| entry.source == super::CapabilitySource::ConnectorTool));
         assert!(hits.iter().all(|entry| entry.schema.is_some()));
+    }
+
+    #[test]
+    fn capability_discovery_trace_records_typed_sources() {
+        let index = vec![
+            catalog_entry("GMAIL_FETCH_EMAILS", "Fetch a list of email messages from Gmail"),
+            catalog_entry("GMAIL_SEND_EMAIL", "Send an email message via Gmail"),
+        ];
+        let hits = super::search_connector_capability_entries(&index, "read unread gmail", 8);
+        let trace = super::capability_discovery_trace_line("read unread gmail", &hits)
+            .expect("trace line");
+
+        assert!(trace.contains("capability discovery `read unread gmail`"), "{trace}");
+        assert!(trace.contains("connector:GMAIL_FETCH_EMAILS"), "{trace}");
+        assert!(trace.contains("connector:GMAIL_SEND_EMAIL"), "{trace}");
     }
 
     #[test]

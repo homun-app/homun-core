@@ -344,8 +344,11 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   `connector_search_returns_typed_toolkit_entries`. **Smoke in-app passato
   (2026-06-23):** prompt discovery Gmail unread → risposta con connector Gmail
   scelto; prompt esecuzione “massimo 3 risultati” → lettura reale ultime 3 email
-  non lette via Gmail connector. **Prossimo passo unico:** aggiungere trace
-  runtime della sorgente/capability selezionata se serve più audit in UI.
+  non lette via Gmail connector. **Ottava slice locale/verde:** `find_capability`
+  aggiunge al `tool_trace` una riga `capability discovery ... -> source:key`
+  costruita dalle `CapabilityEntry` tipizzate, così la scelta registry entra
+  nell'audit/memory extractor senza store paralleli. Test mirato:
+  `capability_discovery_trace_records_typed_sources`.
 - **make_document DOCX locale/verde (2026-06-23):** lo stesso workflow ora
   materializza anche artifact `.docx` editabili dalla sorgente Markdown canonica,
   via pacchetto OOXML minimale generato in-process con `zip` già presente.

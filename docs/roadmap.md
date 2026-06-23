@@ -139,24 +139,28 @@ primo percorso locale verde:
     `ConnectorTool` typed, mantenendo il set toolkit-aware; `find_capability`
     consuma lo stesso shape per native/MCP/connector. Smoke in-app passato:
     discovery Gmail unread + lettura reale ultime 3 email non lette.
-36. WS1/WS7 document focus — `make_document` ora materializza anche `.docx`
+36. WS1-Fase 4b ottava slice — `find_capability` aggiunge al `tool_trace` una
+    riga `capability discovery ... -> source:key` derivata dalle `CapabilityEntry`
+    tipizzate; la scelta registry entra nell'audit/learning del turno senza store
+    paralleli.
+37. WS1/WS7 document focus — `make_document` ora materializza anche `.docx`
     editabile dalla stessa sorgente Markdown canonica, oltre a `md`/`pdf`, con
     package OOXML generato in-process e registrazione artifact/memoria invariata.
-37. WS1/WS7 document focus — `make_document` ora accetta struttura/stile
+38. WS1/WS7 document focus — `make_document` ora accetta struttura/stile
     espliciti (`document_type`, `audience`, `tone`, `sections`) nello stesso
     schema tool; il workflow li usa come contratto di generazione solo se
     dichiarati, senza attivazioni euristiche o nuovi registry paralleli.
-38. WS1/WS7 document focus — il renderer DOCX di `make_document` traduce le
+39. WS1/WS7 document focus — il renderer DOCX di `make_document` traduce le
     tabelle pipe Markdown in tabelle Word reali (`w:tbl`) con escaping XML,
     mantenendo sorgente Markdown canonica e registrazione artifact invariata.
-39. WS1/WS7 document focus — feedback smoke reale DOCX: il file era valido ma
+40. WS1/WS7 document focus — feedback smoke reale DOCX: il file era valido ma
     troppo grezzo. Il renderer ora include `styles.xml`, converte bold/italic
     Markdown in run Word, promuove il primo titolo e gestisce liste numerate.
-40. WS1/WS7 document focus — secondo feedback smoke DOCX: tabelle leggibili ma
+41. WS1/WS7 document focus — secondo feedback smoke DOCX: tabelle leggibili ma
     non adattate alla pagina. Il renderer ora emette tabelle full-width con
     `tblGrid`, layout fixed, celle percentuali, padding e proporzione 35/65 per
     tabelle a due colonne.
-41. WS1/WS7 document focus — `make_document` ha un `layout_profile` dichiarativo
+42. WS1/WS7 document focus — `make_document` ha un `layout_profile` dichiarativo
     nello stesso schema tool (`standard`, `one_page`, `executive_brief`,
     `detailed_report`, `proposal`); il profilo diventa direttiva di generazione
     esplicita, non un nuovo workflow e non una euristica di routing.
@@ -201,6 +205,7 @@ capability atomica nativa mappata a `run_in_sandbox`. MCP e connector Composio
 parlano ora il contratto typed del registry (`McpTool`, `ConnectorTool`), e la
 ricerca connector restituisce direttamente entry typed mantenendo il set
 toolkit-aware per non perdere CRUD/perimeter; smoke Gmail unread passato in app.
+`find_capability` ora traccia la capability discovery nel `tool_trace`.
 `make_document`
 supporta anche output `.docx` editabile, parametri espliciti di struttura/stile e
 tabelle Word generate da Markdown; lo smoke reale ha corretto anche stili,

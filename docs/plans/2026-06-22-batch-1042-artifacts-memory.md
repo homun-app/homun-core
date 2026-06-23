@@ -212,6 +212,12 @@ modelli deboli/locali. Invarianti: monotonìa, limitatezza, identità non inferi
     `connector_search_returns_typed_toolkit_entries`.
     Gate in-app passato: discovery Gmail unread seleziona il connector Gmail;
     esecuzione successiva legge realmente le ultime 3 email non lette via Gmail.
+  - ✅ **Ottava slice registry trace/audit (2026-06-23, locale/verde):**
+    `find_capability` scrive nel `tool_trace` una riga
+    `capability discovery ... -> source:key` derivata dalle `CapabilityEntry`
+    tipizzate. La scelta della capability entra così nel learning/audit del turno
+    senza creare uno store parallelo. Test mirato:
+    `capability_discovery_trace_records_typed_sources`.
   - 🟡 Possibile step futuro: atomico PDF dedicato con schema più guidato
     (input/output files, operazione), se `run_in_sandbox` risulta troppo generico
     nello smoke.
