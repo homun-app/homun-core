@@ -125,6 +125,10 @@ primo percorso locale verde:
 32. WS1/WS7 document focus — `make_document` ora materializza anche `.docx`
     editabile dalla stessa sorgente Markdown canonica, oltre a `md`/`pdf`, con
     package OOXML generato in-process e registrazione artifact/memoria invariata.
+33. WS1/WS7 document focus — `make_document` ora accetta struttura/stile
+    espliciti (`document_type`, `audience`, `tone`, `sections`) nello stesso
+    schema tool; il workflow li usa come contratto di generazione solo se
+    dichiarati, senza attivazioni euristiche o nuovi registry paralleli.
 
 Prima di pubblicare/taggare resta prudente ripetere lo smoke manuale in-app su
 una automazione schedulata reale con il binario aggiornato. Il primo smoke ha
@@ -135,8 +139,9 @@ trovato e corretto una falsa chiusura su piano non completato.
 1. Completare verifica allargata della nuova slice `ExecutionPlan` runtime.
 2. WS1-Fase 2/3 — piano runtime-owned e workflow runner dichiarativo, così i
    deliverable futuri non riaprono fragilità cross-modello.
-3. WS1/WS7 document focus — smoke reale DOCX in-app e poi controlli più espliciti
-   su struttura/stile prima di aggiungere altri `make_*`.
+3. WS1/WS7 document focus — smoke reale DOCX in-app e poi eventuali template o
+   layout dichiarativi dentro `make_document`, prima di aggiungere altri
+   `make_*`.
 4. WS7 — deliverable Manus-style: prima consolidare `make_document`; solo dopo
    ragionare su `make_research` e `make_meeting`.
 
@@ -162,6 +167,7 @@ corpus `find_capability`; la decisione strutturata ora distingue workflow,
 atomici PDF e agent loop con ragione esplicita; il loop agente emette la route
 come `ACT` e la aggiunge al `tool_trace` del turno. `pdf_atomic` ora è una
 capability atomica nativa mappata a `run_in_sandbox`. `make_document` supporta
-anche output `.docx` editabile. Scelta corrente: smoke reale DOCX in-app e poi
-controlli struttura/stile; `make_research` e `make_meeting` restano futuri.
+anche output `.docx` editabile e parametri espliciti di struttura/stile. Scelta
+corrente: smoke reale DOCX in-app e poi template/layout dichiarativi solo dentro
+il registry unico; `make_research` e `make_meeting` restano futuri.
 Il contratto corrente della memoria è in [MEMORIA.md](MEMORIA.md).

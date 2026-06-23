@@ -326,6 +326,13 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   `make_document_formats_support_editable_docx_outputs`,
   `markdown_to_docx_writes_valid_word_package`,
   `make_document_tool_requires_artifact_name`.
+- **make_document struttura/stile locale/verde (2026-06-23):** arricchito lo
+  stesso tool, non introdotti nuovi `make_*`: `document_type`, `audience`,
+  `tone` e `sections` entrano nello schema come parametri espliciti e vengono
+  usati nel prompt solo se passati dal modello. Valori fuori vocabolario sono
+  ignorati; le sezioni restano ordinate e limitate. Test mirati:
+  `make_document_tool_requires_artifact_name`,
+  `make_document_generation_options_are_explicit_and_bounded`.
 - **Gate provider Z.ai/GLM risolto (test manuale utente, 2026-06-23):** Settings
   espone sia `Z.ai (GLM)` standard (`https://api.z.ai/api/paas/v4`) sia
   `Z.ai Coding (GLM)` (`https://api.z.ai/api/coding/paas/v4`); il preset coding

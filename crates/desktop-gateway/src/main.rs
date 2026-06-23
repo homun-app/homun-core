@@ -12081,6 +12081,22 @@ fn make_document_tool_schema() -> serde_json::Value {
                     "brief": { "type": "string", "description": "What the document must contain, including any sections, audience, tone, constraints or source material the user provided — verbatim." },
                     "language": { "type": "string", "description": "Document language code, e.g. 'it' or 'en'. Default: the user's language." },
                     "name": { "type": "string", "description": "Artifact filename. If the user named the file, preserve that name exactly as a simple filename such as report.md, report.pdf or report.docx. If no name was specified, choose a concise descriptive .md filename." },
+                    "document_type": {
+                        "type": "string",
+                        "description": "Document shape requested by the user. Preserve explicit intent; do not infer from weak hints.",
+                        "enum": ["generic", "report", "memo", "brief", "proposal", "meeting_minutes"]
+                    },
+                    "audience": { "type": "string", "description": "Primary audience when the user names one, e.g. CEO, client, PM, engineering team." },
+                    "tone": {
+                        "type": "string",
+                        "description": "Writing tone requested by the user. Preserve explicit intent; omit when unspecified.",
+                        "enum": ["professional", "concise", "executive", "technical", "operational"]
+                    },
+                    "sections": {
+                        "type": "array",
+                        "description": "Section headings explicitly requested by the user, in order. Do not invent this list when unspecified.",
+                        "items": { "type": "string" }
+                    },
                     "formats": {
                         "type": "array",
                         "description": "Output formats to materialize from the same Markdown source. Use ['md'] by default, ['pdf'] when the user asks for a PDF, ['docx'] when the user asks for an editable Word file, or combine them when multiple outputs are requested.",
@@ -12289,6 +12305,100 @@ any other key such as \"presentation\" or \"deck\", and add no extra top-level k
     Ok(serde_json::json!({ "title": title, "subtitle": subtitle, "slides": slides }))
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct DocumentGenerationOptions {
+    document_type: Option<String>,
+    audience: Option<String>,
+    tone: Option<String>,
+    sections: Vec<String>,
+}
+
+fn clean_document_option(value: &str) -> Option<String> {
+    let cleaned = value.trim();
+    if cleaned.is_empty() {
+        None
+    } else {
+        Some(cleaned.chars().take(120).collect())
+    }
+}
+
+fn document_generation_options(parsed: &serde_json::Value) -> DocumentGenerationOptions {
+    let allowed_types = [
+        "generic",
+        "report",
+        "memo",
+        "brief",
+        "proposal",
+        "meeting_minutes",
+    ];
+    let allowed_tones = [
+        "professional",
+        "concise",
+        "executive",
+        "technical",
+        "operational",
+    ];
+    let document_type = parsed
+        .get("document_type")
+        .and_then(|value| value.as_str())
+        .map(|value| value.trim().to_ascii_lowercase())
+        .filter(|value| allowed_types.contains(&value.as_str()));
+    let tone = parsed
+        .get("tone")
+        .and_then(|value| value.as_str())
+        .map(|value| value.trim().to_ascii_lowercase())
+        .filter(|value| allowed_tones.contains(&value.as_str()));
+    let audience = parsed
+        .get("audience")
+        .and_then(|value| value.as_str())
+        .and_then(clean_document_option);
+    let sections = parsed
+        .get("sections")
+        .and_then(|value| value.as_array())
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(|value| value.as_str())
+                .filter_map(clean_document_option)
+                .take(12)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    DocumentGenerationOptions {
+        document_type,
+        audience,
+        tone,
+        sections,
+    }
+}
+
+fn document_generation_directives(options: &DocumentGenerationOptions) -> String {
+    let mut directives = Vec::new();
+    if let Some(document_type) = options.document_type.as_deref() {
+        if document_type != "generic" {
+            directives.push(format!("Document type: {document_type}."));
+        }
+    }
+    if let Some(audience) = options.audience.as_deref() {
+        directives.push(format!("Audience: {audience}."));
+    }
+    if let Some(tone) = options.tone.as_deref() {
+        directives.push(format!("Tone: {tone}."));
+    }
+    if !options.sections.is_empty() {
+        directives.push(format!(
+            "Required section order: {}.",
+            options.sections.join(" -> ")
+        ));
+    }
+    if directives.is_empty() {
+        String::new()
+    } else {
+        format!(" Additional document contract: {}", directives.join(" "))
+    }
+}
+
 async fn generate_document_markdown(
     http: &reqwest::Client,
     base_url: &str,
@@ -12296,6 +12406,7 @@ async fn generate_document_markdown(
     api_key: Option<&str>,
     brief: &str,
     language: &str,
+    options: &DocumentGenerationOptions,
 ) -> Result<String, String> {
     let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
     let lang = if language.trim().is_empty() {
@@ -12303,11 +12414,12 @@ async fn generate_document_markdown(
     } else {
         format!("the language with code '{}'", language.trim())
     };
+    let directives = document_generation_directives(options);
     let system = format!(
         "You are a senior business writer. Produce ONLY a complete Markdown document in {lang}. \
 Use a clear title, concise executive opening, structured sections with headings, and concrete \
 bullets or tables when useful. Do not wrap the answer in code fences. Do not mention that you are \
-an AI. The output must be ready to save as a deliverable artifact."
+an AI. The output must be ready to save as a deliverable artifact.{directives}"
     );
     let body = serde_json::json!({
         "model": model,
@@ -15894,6 +16006,7 @@ Absolutely NO text, NO words, NO letters, NO numbers, NO captions, NO logos."
                             .or_else(|| document_artifact_name_from_brief(&brief))
                             .unwrap_or_else(|| document_artifact_name(None));
                         let formats = document_output_formats(&parsed, &fname, &brief);
+                        let document_options = document_generation_options(&parsed);
                         if brief.is_empty() {
                             "make_document needs a 'brief' describing the document.".to_string()
                         } else {
@@ -15902,6 +16015,10 @@ Absolutely NO text, NO words, NO letters, NO numbers, NO captions, NO logos."
                                 "language": language.clone(),
                                 "name": fname.clone(),
                                 "formats": formats.clone(),
+                                "document_type": document_options.document_type.clone(),
+                                "audience": document_options.audience.clone(),
+                                "tone": document_options.tone.clone(),
+                                "sections": document_options.sections.clone(),
                             });
                             let workflow_plan = workflow_execution_plan(
                                 &make_document_workflow_definition(),
@@ -15940,6 +16057,7 @@ Absolutely NO text, NO words, NO letters, NO numbers, NO captions, NO logos."
                                 api_key.as_deref(),
                                 &brief,
                                 &language,
+                                &document_options,
                             )
                             .await
                             {
@@ -36437,6 +36555,74 @@ mod tests {
                 }),
             Some(vec!["md", "pdf", "docx"]),
         );
+        assert_eq!(
+            schema
+                .pointer("/function/parameters/properties/document_type/enum")
+                .and_then(|value| value.as_array())
+                .map(|values| {
+                    values
+                        .iter()
+                        .filter_map(|value| value.as_str())
+                        .collect::<Vec<_>>()
+                }),
+            Some(vec![
+                "generic",
+                "report",
+                "memo",
+                "brief",
+                "proposal",
+                "meeting_minutes",
+            ]),
+        );
+        assert!(schema
+            .pointer("/function/parameters/properties/sections/items/type")
+            .and_then(|value| value.as_str())
+            == Some("string"));
+    }
+
+    #[test]
+    fn make_document_generation_options_are_explicit_and_bounded() {
+        let options = super::document_generation_options(&serde_json::json!({
+            "document_type": "report",
+            "audience": " PMI italiana ",
+            "tone": "executive",
+            "sections": [
+                "Problema",
+                "Soluzione",
+                "",
+                "Roadmap"
+            ],
+        }));
+
+        assert_eq!(options.document_type.as_deref(), Some("report"));
+        assert_eq!(options.audience.as_deref(), Some("PMI italiana"));
+        assert_eq!(options.tone.as_deref(), Some("executive"));
+        assert_eq!(
+            options.sections,
+            vec![
+                "Problema".to_string(),
+                "Soluzione".to_string(),
+                "Roadmap".to_string()
+            ],
+        );
+
+        let directives = super::document_generation_directives(&options);
+        assert!(directives.contains("Document type: report."), "{directives}");
+        assert!(directives.contains("Audience: PMI italiana."), "{directives}");
+        assert!(directives.contains("Tone: executive."), "{directives}");
+        assert!(
+            directives.contains("Required section order: Problema -> Soluzione -> Roadmap."),
+            "{directives}"
+        );
+
+        let ignored = super::document_generation_options(&serde_json::json!({
+            "document_type": "pitch",
+            "tone": "friendly",
+            "sections": ["Valida"]
+        }));
+        assert_eq!(ignored.document_type, None);
+        assert_eq!(ignored.tone, None);
+        assert_eq!(ignored.sections, vec!["Valida".to_string()]);
     }
 
     #[test]
