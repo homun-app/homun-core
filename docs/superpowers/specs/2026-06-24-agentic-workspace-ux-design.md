@@ -80,7 +80,8 @@ devono diventare pannelli permanenti dentro il corpo dei messaggi.
 
 La Workspace Island:
 
-- mostra stato sintetico (`Plan`, `Activity`, `Artifacts`, stato streaming);
+- mostra stato sintetico (`Plan`, `Activity`, `Artifacts`, `Files`, stato
+  streaming) solo quando quei dati esistono davvero;
 - resta una pill compatta nello stato chiuso;
 - al click la pill si trasforma in una card flottante nello stesso anchor, senza
   pulsanti esterni disallineati;
@@ -88,15 +89,14 @@ La Workspace Island:
 - il menu `...` permette `Auto expand`, `Always expanded` e `Always collapsed`;
 - la sezione `Progress` puo' comprimere/mostrare gli step completati, che restano
   barrati e meno prominenti rispetto al lavoro corrente;
-- `Artifacts` e il menu header possono aprire una Review sidebar stile Codex con
-  file, preview, versioni e diff; il menu header e' contestuale e deve mostrare
-  solo voci con dati gia' noti, mai l'intero set di tab disponibili;
+- `Plan`, `Activity`, `Artifacts` e `Files` sono righe azionabili: aprono il
+  Workbench laterale direttamente nella tab corretta. Non esiste un secondo
+  launcher nell'header della chat;
 - su una chat vuota o su un thread senza stato operativo reale l'isola non si
   renderizza; quando esiste, mostra solo sezioni con dati effettivi, mai righe a
   zero;
-- i controlli nell'header della chat devono restare fuori dalle regioni
-  `-webkit-app-region: drag` e sotto la titlebar nativa; se la Workspace Island
-  occupa lo stesso angolo, il menu si sposta invece di sovrapporsi;
+- l'header della chat resta titolo/drag: non ospita controlli operativi che
+  competono con titlebar nativa, Workspace Island o Workbench;
 - non apre il Workbench come effetto collaterale dei controlli di espansione;
 - resta per-thread: non mostra stato di un thread diverso;
 - puo' restare visibile come riepilogo leggero quando ci sono artifact o piano
@@ -108,17 +108,19 @@ del browser come oggi. Si espande per vedere il computer completo e scompare
 quando l'attivita' termina. I log finali possono restare in `Activity`, non come
 pannello computer persistente.
 
-### Destra futura: artifact/task inspector
+### Destra: Workbench inspector
 
-Una colonna destra stabile puo' essere valutata dopo la prima slice, ma non e'
-il primo intervento. Sarebbe utile per:
+Il Workbench laterale e' l'unico pannello grande a destra. Si apre da una riga
+reale della Workspace Island o da un artifact/link messaggio e deve:
 
-- dettagli artifact/versioni;
-- stato piano espanso;
-- template preview;
-- provenance e "perche'".
-
-Va introdotta solo se non appesantisce la chat.
+- partire sotto la titlebar/chrome Electron, cosi' close ed expand restano
+  cliccabili su macOS/Win/Linux;
+- riservare spazio alla chat quando e' aperto, invece di coprire la
+  conversazione;
+- mostrare solo tab aperte da dati o azioni reali: Review/Artifacts, Files,
+  Activity, Plan, Goals o Memory quando hanno contesto;
+- non duplicare la funzione della Workspace Island: l'isola e' stato + launcher,
+  il Workbench e' dettaglio/revisione.
 
 ## Prima slice UX
 

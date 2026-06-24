@@ -263,7 +263,6 @@ small {
 
 .drawer-bottom-trigger svg,
 .drawer-footer-action svg,
-.workbench-toggle svg,
 .drawer-search-action svg {
   pointer-events: none;
 }
@@ -1555,49 +1554,6 @@ body.resizing-drawer {
   box-shadow: inset 0 0 0 1px var(--line);
 }
 
-/* Borderless header icon: the lone Workbench toggle (no chrome, subtle hover). */
-.workbench-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  height: 32px;
-  padding: 0 6px;
-  border: none;
-  background: transparent;
-  color: var(--muted);
-  border-radius: 8px;
-  cursor: pointer;
-}
-.workbench-toggle:hover {
-  color: var(--text);
-  background: var(--surface-hover);
-}
-.workbench-toggle.active {
-  color: var(--text);
-}
-/* Caret next to the panel icon (mock): signals the dropdown; lighter than the icon. */
-.workbench-toggle-caret {
-  opacity: 0.65;
-}
-
-/* Panel view picker: the toggle opens this dropdown (mock interaction); each item
-   opens the docked panel at that view. */
-.panel-menu-wrap {
-  position: relative;
-  display: inline-flex;
-  -webkit-app-region: no-drag;
-}
-/* Pinned inside the conversation, below the native titlebar/drag strip. It must
-   not compete with window controls, so keep it under .window-chrome. */
-.panel-menu-wrap--corner {
-  position: absolute;
-  top: 54px;
-  right: 24px;
-  z-index: 35;
-}
-.panel-menu-wrap--corner.with-workspace-island {
-  top: 96px;
-}
 .panel-menu-backdrop {
   position: fixed;
   inset: 0;
@@ -3964,7 +3920,7 @@ body.resizing-drawer {
 /* Artifacts workspace — side panel that previews the conversation's files. */
 .artifacts-panel {
   position: absolute;
-  top: var(--window-drag-height, 0);
+  top: var(--window-chrome-height, 44px);
   right: 0;
   bottom: 0;
   width: clamp(640px, 64%, 980px);
@@ -3982,7 +3938,7 @@ body.resizing-drawer {
 /* ---- Workbench: docked right panel with tabs (Claude-Code style) ---------- */
 .workbench {
   position: absolute;
-  top: var(--window-drag-height, 0);
+  top: var(--window-chrome-height, 44px);
   right: 0;
   bottom: 0;
   width: clamp(380px, 34%, 540px);

@@ -98,15 +98,13 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   non duplicano piu' card tecniche dentro il corpo del messaggio. Il
   menu `...` dell'isola espone `Auto expand` / `Always expanded` /
   `Always collapsed`, persiste la preferenza locale e la card contiene una
-  sezione `Progress` con completed collassabili; l'header della chat espone un
-  menu workspace/review contestuale, non globale: appare solo se ci sono viste
-  con dati gia' noti (per esempio `Review` quando esistono artifact e `Plan`
-  quando esiste un piano), non elenca tab vuote e non apre pannelli senza
-  contenuto. Correzione post-smoke: l'isola non viene renderizzata su chat vuote
-  o thread senza stato operativo reale, non mostra righe `0`, e il menu
-  workspace/review dell'header sta sotto la titlebar nativa/drag strip Electron,
-  con offset quando la Workspace Island occupa lo stesso angolo. Il
-  `ChatComputerPanel` resta
+  sezione `Progress` con completed collassabili. Correzione post-smoke: il menu
+  workspace/review separato nell'header e' stato rimosso; la `WorkspaceIsland`
+  e' ora l'unico launcher operativo e apre il Workbench nella tab reale
+  (`Plan`, `Activity`, `Artifacts`, `Files`). L'isola non viene renderizzata su
+  chat vuote o thread senza stato operativo reale, non mostra righe `0`, e il
+  Workbench laterale parte sotto la titlebar/chrome Electron e riserva spazio
+  alla chat quando aperto, invece di sovrapporsi. Il `ChatComputerPanel` resta
   separato come `ComputerIsland` live: preview browser/terminal compatta sotto
   la workspace island, espandibile e visibile solo durante attivita' owner del
   thread. Gate locale: `npm run test:ui-contract`, `npm run build`, runtime

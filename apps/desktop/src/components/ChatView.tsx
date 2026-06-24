@@ -40,7 +40,6 @@ import {
   Monitor,
   MoreHorizontal,
   Paperclip,
-  PanelRight,
   Plus,
   Pause,
   Pencil,
@@ -237,7 +236,6 @@ export function ChatView({
   // "Artefatti" tab; File / Computer / Activity / Piano land in later phases.
   const [artifactsOpen, setArtifactsOpen] = useState(false);
   const [workbenchTab, setWorkbenchTab] = useState<WorkbenchTab>("files");
-  const [workbenchMenuOpen, setWorkbenchMenuOpen] = useState(false);
   const [artifactsInitial, setArtifactsInitial] = useState<string | null>(null);
   const [memoryArtifacts, setMemoryArtifacts] = useState<MemoryArtifactView[]>([]);
   // Is this thread a project? Reliable context signal (not keyword-detection) that gates
@@ -365,6 +363,8 @@ export function ChatView({
         if (view.key === "files") return uploadedFiles.length > 0;
         if (view.key === "activity") return conversationActivity.length > 0 || activeApprovels.length > 0;
         if (view.key === "plan") return workspacePlanSteps.length > 0;
+        if (view.key === "goals") return threadIsProject || Boolean(goalSeed);
+        if (view.key === "memoria") return threadIsProject;
         return false;
       }),
     [
@@ -373,15 +373,11 @@ export function ChatView({
       uploadedFiles.length,
       workbenchArtifacts.length,
       workspacePlanSteps.length,
+      goalSeed,
+      threadIsProject,
     ],
   );
-  const hasWorkbenchViews = availableWorkbenchViews.length > 0;
-  const hasWorkspaceIslandState =
-    promptSubmitting ||
-    Boolean(streamingAssistantId) ||
-    workspacePlanSteps.length > 0 ||
-    conversationActivity.length > 0 ||
-    workbenchArtifacts.length > 0;
+  const workbenchOpen = artifactsOpen;
   const visibleComputerSession = useMemo(
     () => ({
       ...computerSession,
@@ -397,7 +393,6 @@ export function ChatView({
 
   useEffect(() => {
     if (availableWorkbenchViews.some((view) => view.key === workbenchTab)) return;
-    setWorkbenchMenuOpen(false);
     if (artifactsOpen) {
       const next = availableWorkbenchViews[0]?.key;
       if (next) {
@@ -1683,7 +1678,7 @@ export function ChatView({
 
   return (
     <section
-      className={`chat-view active-task-layout${detailsOpen ? " panel-open" : ""}${
+      className={`chat-view active-task-layout${detailsOpen || workbenchOpen ? " panel-open" : ""}${
         threadMessages.length === 0 ? " is-empty" : ""
       }`}
       aria-labelledby="chat-title"
@@ -1695,68 +1690,21 @@ export function ChatView({
           </div>
         </div>
 
-        {hasWorkbenchViews && (
-        <div
-          className={`panel-menu-wrap panel-menu-wrap--corner${
-            hasWorkspaceIslandState ? " with-workspace-island" : ""
-          }`}
-        >
-          <button
-            type="button"
-            className={`workbench-toggle${artifactsOpen ? " active" : ""}`}
-            aria-haspopup="menu"
-            aria-expanded={workbenchMenuOpen}
-            aria-label="Open workspace tools"
-            title="Workspace tools"
-            onClick={() => setWorkbenchMenuOpen((value) => !value)}
-          >
-            <PanelRight size={17} />
-            <ChevronDown size={13} className="workbench-toggle-caret" />
-          </button>
-          {workbenchMenuOpen && (
-            <>
-              <button
-                type="button"
-                className="panel-menu-backdrop"
-                aria-label="Close workspace menu"
-                onClick={() => setWorkbenchMenuOpen(false)}
-              />
-              <div className="panel-menu" role="menu">
-                {availableWorkbenchViews.map(({ key, label, icon: Icon }) => (
-                  <button
-                    key={key}
-                    type="button"
-                    role="menuitem"
-                    className={`panel-menu-item${workbenchTab === key && artifactsOpen ? " active" : ""}`}
-                    onClick={() => {
-                      setWorkbenchTab(key);
-                      setArtifactsInitial(null);
-                      setArtifactsOpen(true);
-                      setWorkbenchMenuOpen(false);
-                    }}
-                  >
-                    <Icon size={15} />
-                    <span>{label}</span>
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
-        </div>
-        )}
       </header>
 
       <WorkspaceIsland
         activitySteps={conversationActivity}
         artifacts={workbenchArtifacts}
+        fileCount={uploadedFiles.length}
         planSteps={workspacePlanSteps}
         streaming={promptSubmitting || Boolean(streamingAssistantId)}
         status={streamStatus}
+        threadHasMessages={threadMessages.length > 0}
         onCaptureScreenshot={IS_DESKTOP ? () => void captureScreenshot() : undefined}
         onExportChat={() => void exportChatMarkdown()}
-        onOpenArtifacts={() => {
+        onOpenWorkbench={(tab) => {
           setArtifactsInitial(null);
-          setWorkbenchTab("artifacts");
+          setWorkbenchTab(tab);
           setArtifactsOpen(true);
         }}
       />
@@ -2146,21 +2094,25 @@ function loadWorkspaceIslandMode(): WorkspaceIslandMode {
 function WorkspaceIsland({
   activitySteps,
   artifacts,
+  fileCount,
   planSteps,
   streaming,
   status,
+  threadHasMessages,
   onCaptureScreenshot,
   onExportChat,
-  onOpenArtifacts,
+  onOpenWorkbench,
 }: {
   activitySteps: string[];
   artifacts: ParsedArtifact[];
+  fileCount: number;
   planSteps: PlanStep[];
   streaming: boolean;
   status: ChatStreamStatus | null;
+  threadHasMessages: boolean;
   onCaptureScreenshot?: () => void;
   onExportChat: () => void;
-  onOpenArtifacts: () => void;
+  onOpenWorkbench: (tab: WorkbenchTab) => void;
 }) {
   const { t } = useTranslation();
   const [mode, setModeState] = useState<WorkspaceIslandMode>(() => loadWorkspaceIslandMode());
@@ -2175,16 +2127,22 @@ function WorkspaceIsland({
   const latestActivity = activitySteps[activitySteps.length - 1] ?? null;
   const artifactsCount = artifacts.length;
   const hasWorkspaceState =
-    streaming ||
-    planSteps.length > 0 ||
-    activitySteps.length > 0 ||
-    artifactsCount > 0;
+    (threadHasMessages || streaming) &&
+    (streaming ||
+      planSteps.length > 0 ||
+      activitySteps.length > 0 ||
+      artifactsCount > 0 ||
+      fileCount > 0);
   const headline =
     blockedPlan?.title ??
     runningPlan?.title ??
     status?.title ??
     latestActivity ??
-    (artifactsCount > 0 ? `${artifactsCount} artifact` : t("chat.panel"));
+    (artifactsCount > 0
+      ? `${artifactsCount} artifact`
+      : fileCount > 0
+        ? `${fileCount} file`
+        : t("chat.panel"));
   const progressLabel =
     planSteps.length > 0
       ? `${doneCount}/${planSteps.length}`
@@ -2297,11 +2255,15 @@ function WorkspaceIsland({
           </div>
 
           {planSteps.length > 0 && (
-            <div className="wi-row">
+            <button
+              className="wi-row wi-row-button"
+              type="button"
+              onClick={() => onOpenWorkbench("plan")}
+            >
               <ListTodo size={14} />
               <span>Plan</span>
               <strong>{doneCount}/{planSteps.length}</strong>
-            </div>
+            </button>
           )}
           {planSteps.length > 0 && (
             <div className="wi-progress">
@@ -2345,11 +2307,15 @@ function WorkspaceIsland({
 
           {activitySteps.length > 0 && (
             <>
-              <div className="wi-row">
+              <button
+                className="wi-row wi-row-button"
+                type="button"
+                onClick={() => onOpenWorkbench("activity")}
+              >
                 <SquareTerminal size={14} />
                 <span>Activity</span>
                 <strong>{activitySteps.length}</strong>
-              </div>
+              </button>
               {latestActivity && <p className="wi-latest">{latestActivity}</p>}
             </>
           )}
@@ -2358,11 +2324,23 @@ function WorkspaceIsland({
             <button
               className="wi-row wi-row-button"
               type="button"
-              onClick={onOpenArtifacts}
+              onClick={() => onOpenWorkbench("artifacts")}
             >
               <FileText size={14} />
               <span>Artifacts</span>
               <strong>{artifactsCount}</strong>
+            </button>
+          )}
+
+          {fileCount > 0 && (
+            <button
+              className="wi-row wi-row-button"
+              type="button"
+              onClick={() => onOpenWorkbench("files")}
+            >
+              <FolderOpen size={14} />
+              <span>Files</span>
+              <strong>{fileCount}</strong>
             </button>
           )}
 
