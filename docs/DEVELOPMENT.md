@@ -115,8 +115,12 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   filtrabile per presentazioni/documenti, con metadati `design_*`, layout
   archetype e copia del `template_ref`; è alimentata dall'API catalogo, non da
   un elenco duplicato. Non mostra finte preview grafiche: finché non ci sono
-  asset `preview_ref` reali, resta una contract gallery. Prossimo asse: preview
-  visuali reali e QA ancora più profonda.
+  asset `preview_ref` reali, resta una contract gallery. Diciassettesima slice
+  locale/verde: i seed locali `monet/*` dichiarano ora `preview_ref`
+  `builtin:template-preview/*`; la UI materializza una preview compatta dai token
+  `design_theme`/layout/componenti già nel catalogo e mantiene il fallback
+  contract-only per cataloghi esterni senza preview. Prossimo asse: preview
+  asset/thumbnail reali per pack esterni e QA ancora più profonda.
   Correzione UX post-smoke: il menu modelli distingue ora i modelli cloud
   instradati tramite endpoint locale Ollama (`☁ via local`) dai provider cloud
   diretti; in quel caso serve Ollama locale acceso oppure una binding sul

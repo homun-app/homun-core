@@ -852,6 +852,14 @@ ragionato il contratto degli strumenti `make_*` creati dall'harness. ADR 0011
   introduce routing euristico; usa solo il catalogo esposto dal gateway. La
   card non finge una preview grafica quando manca un `preview_ref` reale. Gate:
   `npm run build`.
+  **Diciassettesima slice built-in preview (2026-06-24, locale/verde):**
+  i seed locali `monet/*` dichiarano `preview_ref` `builtin:template-preview/*`.
+  Il plugin Presentations materializza quelle preview dai token del catalogo
+  (`design_theme`, layout archetype, componenti) e mantiene il fallback
+  contract-only per cataloghi esterni senza preview. I template restano entry
+  read-only del registry unico, non tool callable né secondo renderer. Gate:
+  `cargo test -p local-first-desktop-gateway template_catalog -- --nocapture`,
+  `npm run test:ui-contract`, `npm run build`.
   **Correzione smoke provider (2026-06-23):** quando un modello `*:cloud` passa
   dal provider locale Ollama, la UI lo etichetta `☁ via local` invece di cloud
   generico; se Ollama locale non risponde il workflow fallisce correttamente

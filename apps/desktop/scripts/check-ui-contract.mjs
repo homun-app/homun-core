@@ -103,6 +103,9 @@ assertContains("src/components/ChatView.tsx", "approval-scope-options", "approva
 assertContains("src/components/SettingsView.tsx", "https://api.z.ai/api/paas/v4", "Z.ai standard preset must keep the standard GLM endpoint");
 assertContains("src/components/SettingsView.tsx", "https://api.z.ai/api/coding/paas/v4", "Z.ai coding preset must keep the coding GLM endpoint");
 assertContains("src/components/SettingsView.tsx", "v.id === p.id || normUrl(v.base_url) === normUrl(p.baseUrl)", "provider preset cards must match by stable id before URL fallback");
+assertContains("src/components/BrandKitPanel.tsx", "builtin:template-preview/", "template gallery must render built-in previews when the catalog declares preview_ref");
+assertContains("src/components/BrandKitPanel.tsx", "TemplateCardPreview", "template gallery cards must route preview rendering through a dedicated component");
+assertContains("src/components/BrandKitPanel.tsx", "template-card-contract", "template gallery must keep the metadata contract fallback for catalogs without preview_ref");
 
 assertContains("src/components/ChatView.tsx", "coreBridge.submitChatPromptStream", "composer must submit prompts through the local chat transport");
 assertContains("src/lib/coreBridge.ts", "submitBrowserRuntimeChatPromptStream", "Electron bridge must stream from the local Gemma runtime through Electron-safe transport");

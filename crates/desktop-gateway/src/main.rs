@@ -6105,9 +6105,21 @@ fn template_catalog_entry(
     }
 }
 
+fn template_catalog_builtin_preview_ref(id: &str) -> Option<String> {
+    let slug = id.strip_prefix("monet/")?;
+    clean_template_catalog_ref(Some(&serde_json::Value::String(format!(
+        "builtin:template-preview/{slug}"
+    ))))
+}
+
+fn with_builtin_template_preview(mut entry: TemplateCatalogEntry) -> TemplateCatalogEntry {
+    entry.preview_ref = template_catalog_builtin_preview_ref(&entry.id);
+    entry
+}
+
 fn local_template_catalog_seed(provider: &str) -> Vec<TemplateCatalogEntry> {
     vec![
-        template_catalog_entry(
+        with_builtin_template_preview(template_catalog_entry(
             provider,
             "monet/startup-pitch-clean-01",
             "Startup Pitch Clean",
@@ -6121,8 +6133,8 @@ fn local_template_catalog_seed(provider: &str) -> Vec<TemplateCatalogEntry> {
             &["kpi_grid", "timeline", "quote_callout"],
             &["cover", "problem", "solution", "traction", "roadmap", "closing"],
             "startup pitch fundraising product intro clean corporate investor customer proposta commerciale presentazione homun",
-        ),
-        template_catalog_entry(
+        )),
+        with_builtin_template_preview(template_catalog_entry(
             provider,
             "monet/executive-update-board-01",
             "Executive Update Board",
@@ -6136,8 +6148,8 @@ fn local_template_catalog_seed(provider: &str) -> Vec<TemplateCatalogEntry> {
             &["kpi_grid", "risks_table", "timeline"],
             &["cover", "status", "metrics", "risks", "decisions", "next steps"],
             "executive update board status management review KPI risks decisions leadership aggiornamento direzione CDA",
-        ),
-        template_catalog_entry(
+        )),
+        with_builtin_template_preview(template_catalog_entry(
             provider,
             "monet/project-plan-technical-01",
             "Project Plan Technical",
@@ -6151,8 +6163,8 @@ fn local_template_catalog_seed(provider: &str) -> Vec<TemplateCatalogEntry> {
             &["process_steps", "timeline", "risks_table"],
             &["cover", "objective", "phases", "architecture", "risks", "milestones"],
             "project plan technical roadmap implementation phases milestones risks PM engineering piano progetto tecnico roadmap",
-        ),
-        template_catalog_entry(
+        )),
+        with_builtin_template_preview(template_catalog_entry(
             provider,
             "monet/sales-proposal-warm-01",
             "Sales Proposal Warm",
@@ -6166,8 +6178,8 @@ fn local_template_catalog_seed(provider: &str) -> Vec<TemplateCatalogEntry> {
             &["comparison_table", "timeline", "kpi_grid"],
             &["summary", "problem", "solution", "scope", "timeline", "next action"],
             "sales proposal client commercial offer proposta commerciale preventivo cliente warm editorial documento",
-        ),
-        template_catalog_entry(
+        )),
+        with_builtin_template_preview(template_catalog_entry(
             provider,
             "monet/technical-brief-minimal-01",
             "Technical Brief Minimal",
@@ -6181,8 +6193,8 @@ fn local_template_catalog_seed(provider: &str) -> Vec<TemplateCatalogEntry> {
             &["process_steps", "comparison_table", "risks_table"],
             &["summary", "architecture", "tradeoffs", "implementation", "verification"],
             "technical brief architecture implementation tradeoffs verification engineering documento tecnico architettura",
-        ),
-        template_catalog_entry(
+        )),
+        with_builtin_template_preview(template_catalog_entry(
             provider,
             "monet/company-one-pager-clean-01",
             "Company One-Pager Clean",
@@ -6196,8 +6208,8 @@ fn local_template_catalog_seed(provider: &str) -> Vec<TemplateCatalogEntry> {
             &["kpi_grid", "quote_callout", "comparison_table"],
             &["headline", "company", "proof", "offer", "contact"],
             "one pager company overview partner brief investor customer azienda presentazione sintetica scheda commerciale",
-        ),
-        template_catalog_entry(
+        )),
+        with_builtin_template_preview(template_catalog_entry(
             provider,
             "monet/customer-case-study-proof-01",
             "Customer Case Study Proof",
@@ -6211,8 +6223,8 @@ fn local_template_catalog_seed(provider: &str) -> Vec<TemplateCatalogEntry> {
             &["quote_callout", "kpi_grid", "timeline"],
             &["customer", "challenge", "solution", "proof", "outcomes"],
             "customer case study proof success story risultati cliente caso studio metriche outcomes marketing vendite",
-        ),
-        template_catalog_entry(
+        )),
+        with_builtin_template_preview(template_catalog_entry(
             provider,
             "monet/meeting-minutes-executive-01",
             "Meeting Minutes Executive",
@@ -6226,8 +6238,8 @@ fn local_template_catalog_seed(provider: &str) -> Vec<TemplateCatalogEntry> {
             &["process_steps", "risks_table", "timeline"],
             &["context", "decisions", "actions", "risks", "follow-up"],
             "meeting minutes verbale riunione decisioni azioni action items owner follow up executive team",
-        ),
-        template_catalog_entry(
+        )),
+        with_builtin_template_preview(template_catalog_entry(
             provider,
             "monet/product-launch-plan-01",
             "Product Launch Plan",
@@ -6241,8 +6253,8 @@ fn local_template_catalog_seed(provider: &str) -> Vec<TemplateCatalogEntry> {
             &["timeline", "comparison_table", "kpi_grid", "risks_table"],
             &["cover", "positioning", "channels", "timeline", "metrics", "risks"],
             "product launch go to market lancio prodotto piano marketing sales canali timeline metriche rischi",
-        ),
-        template_catalog_entry(
+        )),
+        with_builtin_template_preview(template_catalog_entry(
             provider,
             "monet/incident-review-technical-01",
             "Incident Review Technical",
@@ -6256,8 +6268,8 @@ fn local_template_catalog_seed(provider: &str) -> Vec<TemplateCatalogEntry> {
             &["timeline", "process_steps", "risks_table"],
             &["summary", "impact", "timeline", "root cause", "remediation", "prevention"],
             "incident review postmortem root cause analysis RCA timeline remediation prevenzione incidente tecnico operations",
-        ),
-        template_catalog_entry(
+        )),
+        with_builtin_template_preview(template_catalog_entry(
             provider,
             "monet/product-roadmap-board-01",
             "Product Roadmap Board",
@@ -6271,7 +6283,7 @@ fn local_template_catalog_seed(provider: &str) -> Vec<TemplateCatalogEntry> {
             &["timeline", "kpi_grid", "risks_table"],
             &["cover", "priorities", "roadmap", "dependencies", "risks", "asks"],
             "product roadmap board release plan priorità rilasci dipendenze rischi richieste CDA prodotto engineering",
-        ),
+        )),
     ]
 }
 
@@ -38739,6 +38751,10 @@ mod tests {
             .iter()
             .any(|entry| entry.id == "monet/customer-case-study-proof-01"));
         assert!(entries.iter().all(|entry| entry.provider == "local_seed"));
+        assert!(entries.iter().all(|entry| entry
+            .preview_ref
+            .as_deref()
+            .is_some_and(|preview| preview.starts_with("builtin:template-preview/"))));
         assert_eq!(
             super::TemplateCatalogProvider::get(&provider, "monet/sales-proposal-warm-01")
                 .map(|entry| entry.design_template),

@@ -250,22 +250,7 @@ function TemplateCatalogGallery() {
       <div className="template-gallery-grid">
         {visible.map((entry) => (
           <article className="template-card" key={entry.id}>
-            <div className="template-card-contract">
-              <div className="template-contract-topline">
-                {entry.kind === "presentation" ? (
-                  <Presentation size={18} aria-hidden />
-                ) : (
-                  <FileText size={18} aria-hidden />
-                )}
-                <span>{entry.kind === "presentation" ? "Presentation" : "Document"}</span>
-              </div>
-              <strong>{entry.design_template.replaceAll("_", " ")}</strong>
-              <div className="template-layout-list">
-                {entry.layout_archetypes.slice(0, 4).map((layout) => (
-                  <span key={layout}>{layout}</span>
-                ))}
-              </div>
-            </div>
+            <TemplateCardPreview entry={entry} />
             <div className="template-card-body">
               <div className="template-card-title-row">
                 <h4>{entry.name}</h4>
@@ -294,4 +279,92 @@ function TemplateCatalogGallery() {
       </div>
     </section>
   );
+}
+
+function TemplateCardPreview({ entry }: { entry: TemplateCatalogEntry }) {
+  const canRenderBuiltin = entry.preview_ref?.startsWith("builtin:template-preview/");
+  const canRenderImage = entry.preview_ref
+    ? /^(https?:\/\/|\/)/.test(entry.preview_ref)
+    : false;
+
+  if (canRenderImage) {
+    return (
+      <div className="template-card-preview image-preview">
+        <img src={entry.preview_ref ?? ""} alt="" loading="lazy" />
+      </div>
+    );
+  }
+
+  if (!canRenderBuiltin) {
+    return (
+      <div className="template-card-contract">
+        <div className="template-contract-topline">
+          {entry.kind === "presentation" ? (
+            <Presentation size={18} aria-hidden />
+          ) : (
+            <FileText size={18} aria-hidden />
+          )}
+          <span>{entry.kind === "presentation" ? "Presentation" : "Document"}</span>
+        </div>
+        <strong>{entry.design_template.replaceAll("_", " ")}</strong>
+        <div className="template-layout-list">
+          {entry.layout_archetypes.slice(0, 4).map((layout) => (
+            <span key={layout}>{layout}</span>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  const theme = templateThemeClass(entry.design_theme);
+  const layouts = entry.layout_archetypes.slice(0, entry.kind === "presentation" ? 4 : 5);
+
+  return (
+    <div className={`template-card-preview ${theme}`}>
+      <div className="template-preview-chrome">
+        <span />
+        <span />
+        <span />
+      </div>
+      <div className="template-preview-canvas">
+        <div className="template-preview-header">
+          {entry.kind === "presentation" ? (
+            <Presentation size={15} aria-hidden />
+          ) : (
+            <FileText size={15} aria-hidden />
+          )}
+          <strong>{entry.name}</strong>
+        </div>
+        <div className="template-preview-title">{entry.design_template.replaceAll("_", " ")}</div>
+        <div className="template-preview-blocks">
+          {layouts.map((layout, index) => (
+            <div className={`template-preview-block block-${index % 4}`} key={`${entry.id}-${layout}`}>
+              <span>{layout}</span>
+            </div>
+          ))}
+        </div>
+        <div className="template-preview-components">
+          {entry.design_components.slice(0, 3).map((component) => (
+            <i key={component}>{component.replaceAll("_", " ")}</i>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function templateThemeClass(theme: string | null) {
+  switch (theme) {
+    case "high_contrast":
+      return "theme-high-contrast";
+    case "minimal_mono":
+      return "theme-minimal-mono";
+    case "warm_editorial":
+      return "theme-warm-editorial";
+    case "soft_gradient":
+      return "theme-soft-gradient";
+    case "clean_corporate":
+    default:
+      return "theme-clean-corporate";
+  }
 }

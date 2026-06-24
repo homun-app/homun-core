@@ -293,6 +293,12 @@ primo percorso locale verde:
 69. Computer owner hardening — attività live browser/terminal senza `thread_id`
     esplicito non vengono più mostrate in tutte le chat; il null owner è ammesso
     solo da idle.
+70. WS7 built-in template previews — i seed locali `monet/*` dichiarano
+    `preview_ref` `builtin:template-preview/*`; la gallery Presentations
+    materializza una preview compatta dai token del catalogo (`design_theme`,
+    layout archetype, componenti) invece di scegliere da sole card testuali. I
+    cataloghi esterni senza `preview_ref` restano sul fallback contract-only; il
+    registry rimane la fonte unica e i template non diventano tool callable.
 
 Prima di pubblicare/taggare resta prudente ripetere lo smoke manuale in-app su
 una automazione schedulata reale con il binario aggiornato. Il primo smoke ha
@@ -362,7 +368,9 @@ dodicesima slice: QA Markdown per documenti prima di scrivere MD/PDF/DOCX.
 Tredicesima slice: catalogo seed `monet/*` ampliato a 11 template PMI.
 Quattordicesima slice: manifest con metadati sanificati per preview/gallery
 futura. Quindicesima slice: API/bridge read-only del catalogo template.
-Sedicesima slice: prima gallery UI nel plugin Presentations. Prossimo asse:
-preview visuali reali e QA più profonda.
+Sedicesima slice: prima gallery UI nel plugin Presentations. Diciassettesima
+slice: preview built-in per i seed locali, renderizzate dalla gallery usando i
+token del catalogo. Prossimo asse: thumbnail/asset reali per pack esterni e QA
+più profonda.
 `make_research` e `make_meeting` restano futuri.
 Il contratto corrente della memoria è in [MEMORIA.md](MEMORIA.md).
