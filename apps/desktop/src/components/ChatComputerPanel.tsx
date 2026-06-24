@@ -70,17 +70,16 @@ export function ChatComputerPanel({ threadId }: { threadId: string }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [view]);
 
-  const browserActive = Boolean(live?.active && live?.novnc_url);
+  const browserRunning = Boolean(live?.active && live?.novnc_url);
   const terminal = live?.terminal ?? [];
   const terminalRunning = Boolean(live?.terminal_active || terminal.some((entry) => entry.running));
-  const hasTerminal = terminal.length > 0 && terminalRunning;
-  const hasLiveActivity = browserActive || hasTerminal;
-  const ownedByThisThread = !hasLiveActivity || live?.thread_id === threadId;
-  if (!ownedByThisThread) return null;
+  const hasLiveActivity = browserRunning || terminalRunning;
+  const ownedLiveActivity = hasLiveActivity && live?.thread_id === threadId;
+  if (!ownedLiveActivity) return null;
 
-  // Terminal-only mode: CLI skill running/ran, no browser GUI to show. Render a
-  // Manus-style terminal with the executed commands + their output.
-  if (!browserActive && hasTerminal) {
+  // Terminal-only mode: CLI skill running, no browser GUI to show. Completed
+  // command history belongs to the message/artifact surfaces, not the live dock.
+  if (!browserRunning && terminalRunning) {
     return (
       <TerminalDock
         entries={terminal}

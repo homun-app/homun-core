@@ -974,8 +974,13 @@ Principio fissato in
 Homun è un **workspace agentico operativo con chat al centro**, non una chat con
 feature laterali né una dashboard generica.
 
-- 🟡 **UX.1 Prima slice**: activity/computer ownership per-thread, lifecycle del
-  dock, plan/markdown progressivi e cleanup indicatori sidebar. Obiettivo:
+- ✅ **UX.1 Prima slice**: activity/computer ownership per-thread, lifecycle del
+  dock, plan/markdown progressivi e cleanup indicatori sidebar. Chiusura
+  2026-06-24 locale/gate: il gateway espone owner/terminal live solo durante
+  attività browser o terminale running; `ChatComputerPanel` mostra il dock solo
+  quando l'attività live appartiene al thread attivo; `test:ui-contract`
+  blocca regressioni su ownership, progressive plan/markdown e sidebar busy
+  basata solo su stream attivi o task queued/running. Obiettivo:
   quando un lavoro parte, l'utente deve capire a quale thread appartiene, quale
   capability sta usando, cosa aspetta, cosa ha prodotto e come riprenderlo.
 - ☐ **UX.2 Coerenza visuale leggera**: spaziature, densità, stati e gerarchia su

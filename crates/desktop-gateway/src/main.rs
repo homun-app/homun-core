@@ -37128,17 +37128,28 @@ async fn contained_computer_live(State(state): State<AppState>) -> Json<Containe
         }
     }
     let activity_state = current_browser_activity();
-    let terminal = current_sandbox_activity();
-    let terminal_active = terminal.iter().any(|entry| entry.running);
+    let raw_terminal = current_sandbox_activity();
+    let terminal_active = raw_terminal.iter().any(|entry| entry.running);
+    let terminal = if terminal_active {
+        raw_terminal.clone()
+    } else {
+        Vec::new()
+    };
     let owner_thread_id = activity_state
         .as_ref()
         .and_then(|state| state.thread_id.clone())
-        .or_else(|| current_sandbox_owner())
-        .or_else(|| terminal.iter().rev().find_map(|entry| entry.thread_id.clone()));
+        .or_else(|| {
+            if terminal_active {
+                current_sandbox_owner()
+                    .or_else(|| raw_terminal.iter().rev().find_map(|entry| entry.thread_id.clone()))
+            } else {
+                None
+            }
+        });
     Json(ContainedComputerLiveResponse {
         // The panel is useful for terminal activity even when the noVNC view is
         // not available, so report enabled when either surface has something.
-        enabled: novnc_url.is_some() || !terminal.is_empty(),
+        enabled: novnc_url.is_some() || terminal_active,
         thread_id: owner_thread_id,
         novnc_url,
         active: activity_state.is_some(),
@@ -41195,6 +41206,30 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         assert!(entry
             .finished
             .load(std::sync::atomic::Ordering::Relaxed));
+    }
+
+    #[test]
+    fn sandbox_terminal_owner_is_only_live_while_command_runs() {
+        super::sandbox_clear(Some("thread-live-owner".to_string()));
+        super::sandbox_begin("echo live".to_string(), Some("thread-live-owner".to_string()));
+
+        let running = super::current_sandbox_activity();
+        assert!(running.iter().any(|entry| entry.running));
+        assert_eq!(super::current_sandbox_owner().as_deref(), Some("thread-live-owner"));
+
+        super::sandbox_end("done".to_string());
+        let finished = super::current_sandbox_activity();
+        assert!(!finished.iter().any(|entry| entry.running));
+        let terminal_active = finished.iter().any(|entry| entry.running);
+        let live_owner = if terminal_active {
+            super::current_sandbox_owner()
+                .or_else(|| finished.iter().rev().find_map(|entry| entry.thread_id.clone()))
+        } else {
+            None
+        };
+        assert_eq!(live_owner, None);
+
+        super::sandbox_clear(None);
     }
 
     #[test]

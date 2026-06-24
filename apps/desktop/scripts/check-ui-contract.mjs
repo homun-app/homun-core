@@ -87,8 +87,10 @@ assertContains("src/components/ChatView.tsx", "composer-surface", "prompt compos
 assertContains("src/components/ChatView.tsx", "local-computer-card", "active task must expose a local computer activity card");
 assertContains("src/components/ChatView.tsx", "timelineCollapsed", "computer timeline must keep collapsed state");
 assertContains("src/components/ChatView.tsx", "computerCardCollapsed", "local computer card must be collapsible after answers");
-assertContains("src/components/ChatComputerPanel.tsx", "const hasLiveActivity = browserActive || hasTerminal", "live computer ownership must be evaluated only while activity is visible");
-assertContains("src/components/ChatComputerPanel.tsx", "const ownedByThisThread = !hasLiveActivity || live?.thread_id === threadId", "live computer activity must not appear across chats without a matching owner");
+assertContains("src/components/ChatComputerPanel.tsx", "const browserRunning = Boolean(live?.active && live?.novnc_url)", "live computer browser state must distinguish running activity from idle availability");
+assertContains("src/components/ChatComputerPanel.tsx", "const terminalRunning = Boolean(live?.terminal_active || terminal.some((entry) => entry.running))", "terminal dock must be driven by running terminal activity, not completed history");
+assertContains("src/components/ChatComputerPanel.tsx", "const ownedLiveActivity = hasLiveActivity && live?.thread_id === threadId", "live computer activity must not appear across chats without a matching owner");
+assertNotContains("src/components/ChatComputerPanel.tsx", "const ownedByThisThread = !hasLiveActivity", "idle global computer availability must not count as thread ownership");
 assertMatches(
   "src/components/ChatView.tsx",
   /const showComputerActivity =\s*activeApprovels\.length > 0 \|\|\s*planStepRunning \|\|\s*smokeTestRunning \|\|\s*detailsOpen;/m,
@@ -166,6 +168,9 @@ assertMatches(
   /isStreamingMessage \? \([\s\S]*?<AssistantMessageBody[\s\S]*?\n\s+streaming\n[\s\S]*?\)/m,
   "streaming answers must keep rich markdown/progress parsing enabled while streaming",
 );
+assertContains("src/components/ChatView.tsx", "{planSteps.length > 0 && <PlanProgressCard steps={planSteps} />}", "closed operational plan markers must render as progress cards during streaming");
+assertContains("src/components/ChatView.tsx", "{readable && <RichMessage text={readable} streaming={streaming} />}", "assistant markdown must stay progressive while the message streams");
+assertContains("src/components/ChatView.tsx", "{planPropose && !streaming && onChoose && (", "actionable plan proposal cards must wait for a completed non-streaming message");
 assertContains("src/components/ChatView.tsx", "streamingUserPinnedRef", "chat must keep new streaming responses visible");
 assertNotContains("src/components/ChatView.tsx", "STREAM_TYPEWRITER_INTERVAL_MS", "chat streaming must not use timer-based typewriter rendering");
 assertNotContains("src/components/ChatView.tsx", "streamingTextRef", "chat streaming must not bypass React with a manual DOM text node");
@@ -182,6 +187,9 @@ assertNotContains(
   "PLAN_PROPOSE››([\\s\\S]*?)(?:‹‹\\/PLAN_PROPOSE››|$)",
   "plan proposal cards must require a closed marker so truncated JSON is not accepted as an actionable plan",
 );
+assertContains("src/App.tsx", "const ids = new Set<string>(backgroundStreamIds)", "sidebar busy state must include durable background stream ids");
+assertContains("src/App.tsx", "if (streamingThreadId) ids.add(streamingThreadId)", "sidebar busy state must include the active visible stream");
+assertContains("src/App.tsx", "task.status === \"running\" || task.status === \"queued\"", "sidebar busy state must ignore completed or failed tasks");
 
 assertContains("src/types.ts", "\"learning\"", "auto-learning must be a first-class view");
 assertContains("src/components/LearningView.tsx", "learning-view", "auto-learning must have a dedicated page");

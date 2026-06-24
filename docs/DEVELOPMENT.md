@@ -69,12 +69,15 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   il floor di orchestrazione e' coperto sulle superfici core: planner schema
   chiuso, `update_plan`/`step_advance` strict, judge verifica step/bootstrap
   strict e UI che non accetta `PLAN_PROPOSE` tronchi come card azionabili.
-  **Prossimo passo unico:** implementare la prima slice della spec
+  **UX.1 locale/gate:** implementata la prima slice della spec
   [Homun Agentic Workspace UX Design](superpowers/specs/2026-06-24-agentic-workspace-ux-design.md):
-  ownership per-thread di activity/computer, lifecycle del dock, plan/markdown
-  progressivi e cleanup indicatori sidebar. Poi riprendere WS7 qualita'
-  deliverable, senza riaprire memoria/WS1/WS8 salvo regressioni o smoke in-app
-  prima release.
+  ownership per-thread di activity/computer, lifecycle del dock live, guardrail
+  su plan/markdown progressivi e cleanup indicatori sidebar. Il gateway non
+  espone piu' owner/terminal history come live quando i comandi sono conclusi;
+  `ChatComputerPanel` richiede attività running e owner uguale al thread attivo.
+  **Prossimo passo unico:** ragionare/implementare UX.2 coerenza visuale leggera
+  (sidebar/chat/dock) oppure tornare a WS7 qualita' deliverable, senza riaprire
+  memoria/WS1/WS8 salvo regressioni o smoke in-app prima release.
 - **Direzione WS7 aggiornata:** l'obiettivo deliverable non è una gallery statica
   clonata tool-per-tool, ma un **design system dichiarativo condiviso** per
   documenti e presentazioni/plugin: temi, layout, componenti, template e QA
