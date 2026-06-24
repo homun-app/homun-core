@@ -19,6 +19,9 @@ export const proattivitaPlugin: PluginManifest = {
   description: "proattivita:lead",
   navLabel: "proattivita:title",
   navIcon: Lightbulb,
+  navSection: "work",
+  promoted: true,
+  navOrder: 30,
   capabilities: [
     "suggestions.read",
     "suggestions.act",

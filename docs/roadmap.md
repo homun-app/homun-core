@@ -406,6 +406,12 @@ primo percorso locale verde e WS5 è chiusa localmente/gate:
     tramite `GET/POST /api/plugins/registry/cache`; il gateway può anche
     scaricarlo via `POST /api/plugins/registry/fetch` da HTTPS. Restano feed e
     package reali pubblicati sul sito Homun.
+91. UX.2 Linear-inspired sidebar — prima slice locale: la sidebar aperta usa
+    sezioni operative dense (`Work`, `Create`, `Workspace`, `More`) e separa i
+    thread recenti dalla navigazione primaria. Presentations e Proactivity
+    restano plugin/addon tecnici, ma sono promossi dal registry/manifest tramite
+    `navSection`, `promoted` e ordine, evitando hardcode e duplicazioni tra
+    registry e UI.
 
 Prima di pubblicare/taggare resta prudente ripetere lo smoke manuale in-app su
 una automazione schedulata reale con il binario aggiornato. Il primo smoke ha

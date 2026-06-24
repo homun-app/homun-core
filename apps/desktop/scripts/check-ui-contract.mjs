@@ -80,6 +80,12 @@ assertContains("src/styles.css", "-webkit-app-region: no-drag", "interactive con
 
 assertContains("src/components/Sidebar.tsx", "navigation-rail", "primary navigation must be rail-first");
 assertContains("src/components/Sidebar.tsx", "nav-drawer", "expanded navigation must be a drawer");
+assertContains("src/components/Sidebar.tsx", "linear-sidebar-nav", "expanded sidebar must use grouped Linear-style workspace navigation");
+assertContains("src/components/Sidebar.tsx", "data-nav-section={section}", "sidebar nav rows must expose registry-driven operational sections");
+assertContains("src/components/Sidebar.tsx", "data-promoted={item.promoted === true ? \"true\" : \"false\"}", "sidebar must preserve promoted addon metadata");
+assertContains("src/plugins/registry.tsx", "navSection?: \"work\" | \"create\" | \"workspace\" | \"more\"", "plugin manifest must declare sidebar placement by operational role");
+assertContains("src/plugins/presentations/index.tsx", "navSection: \"create\"", "presentations addon must be promoted into the create section");
+assertContains("src/plugins/proattivita/index.tsx", "navSection: \"work\"", "proactivity addon must be promoted into the work section");
 assertContains("src/components/Shell.tsx", "{!drawerOpen && !isSettings && (", "rail must only render when the drawer is closed and not in settings");
 assertContains("src/components/Shell.tsx", "{drawerOpen && !isSettings && (", "main drawer must render when open");
 assertContains("src/components/Sidebar.tsx", "drawer-persistent-actions", "open drawer must retain persistent actions");

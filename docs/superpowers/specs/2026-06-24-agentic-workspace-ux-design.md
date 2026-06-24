@@ -129,6 +129,22 @@ La prima slice deve essere piccola e verificabile, non un redesign globale:
    - Nessuno stravolgimento di navigazione finche' ownership/lifecycle non sono
      solidi.
 
+## Sidebar direction
+
+La sidebar aperta prende Linear come riferimento di pulizia: righe dense,
+sezioni semantiche e active state sobrio. La classificazione visibile non deve
+riflettere la natura tecnica degli addon, ma il loro ruolo operativo.
+
+- **Work**: attività operative e automazioni.
+- **Create**: capability creative/promosse, per esempio Presentations.
+- **Workspace**: risorse del workspace come Projects, Artifacts, Memory quando
+  hanno una superficie diretta.
+- **More**: addon, connector o strumenti abilitati ma non promossi.
+- **Recent**: thread/task recenti del workspace corrente.
+
+Gli addon dichiarano `navSection`, `promoted` e ordine nel manifest/registry. La
+sidebar usa questi metadata per promuovere una capability senza hardcode.
+
 ## Fuori scope per la prima slice
 
 - Redesign completo di Settings.

@@ -422,11 +422,11 @@ body.resizing-drawer {
      macOS traffic lights; explicit margins (not gap) set the vertical rhythm. */
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 8px;
   /* Top padding clears the macOS traffic lights with a comfortable gap (lights end
      ~y30) so the first row isn't tucked against them; the empty strip above the nav is
      the window-drag handle (buttons/links/inputs are no-drag via the global rule). */
-  padding: 52px 12px 10px;
+  padding: 52px 14px 10px;
   overflow: hidden;
   position: relative;
   -webkit-app-region: drag;
@@ -454,8 +454,46 @@ body.resizing-drawer {
   background: var(--surface-hover);
   color: var(--text);
 }
+.drawer-topbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 30px;
+  gap: 6px;
+  margin-bottom: 2px;
+}
+
+.drawer-search-action,
+.drawer-new-action {
+  min-height: 30px;
+  border: none;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.drawer-search-action {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 8px;
+  text-align: left;
+  font-size: var(--text-sm);
+}
+
+.drawer-new-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.drawer-search-action:hover,
+.drawer-new-action:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
 .drawer-nav {
-  margin-bottom: 12px;
+  margin-bottom: 2px;
 }
 
 .settings-drawer {
@@ -659,19 +697,33 @@ body.resizing-drawer {
 .workspace-switcher-folder-pick:hover { border-color: var(--blue); color: var(--text); }
 
 .drawer-nav,
-.drawer-section {
+.drawer-section,
+.drawer-nav-group {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 3px;
+}
+
+.linear-sidebar-nav {
+  gap: 10px;
+}
+
+.drawer-nav-group-label {
+  padding: 0 8px 2px;
+  color: var(--faint);
+  font-size: 12px;
+  font-weight: 520;
 }
 
 .drawer-nav-item {
-  min-height: 36px;
-  padding: 0 10px;
+  min-height: 28px;
+  padding: 0 8px;
   display: grid;
-  grid-template-columns: 20px minmax(0, 1fr) auto;
-  gap: 10px;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  gap: 8px;
   align-items: center;
+  border-radius: 7px;
+  font-size: var(--text-sm);
 }
 
 .drawer-nav-item span,
@@ -681,10 +733,9 @@ body.resizing-drawer {
   white-space: nowrap;
 }
 
-/* Nav rows (Cerca/Automazioni/Proattività) active = teal pill. */
 .drawer-nav-item.active {
-  background: var(--brand-soft);
-  color: var(--brand);
+  background: var(--surface-hover);
+  color: var(--text);
   font-weight: 600;
 }
 /* Active thread = subtle surface tint (the nav owns the brand accent). */
@@ -713,7 +764,7 @@ body.resizing-drawer {
   overflow: visible;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
   padding-right: 2px;
 }
 .drawer-chats {
@@ -772,8 +823,8 @@ body.resizing-drawer {
 }
 
 .drawer-link {
-  min-height: 32px;
-  padding: 0 10px;
+  min-height: 29px;
+  padding: 0 8px;
   font-size: var(--text-sm);
   display: grid;
   grid-template-columns: 15px minmax(0, 1fr) auto;
@@ -814,18 +865,16 @@ body.resizing-drawer {
   height: 13px;
 }
 
-/* "CHAT" mono eyebrow + inline new-chat (replaces the full-width button). */
 .drawer-chats-head {
   display: flex;
   align-items: center;
-  margin: 14px 0 4px;
-  padding: 0 6px 0 10px;
+  margin: 4px 0 2px;
+  padding: 0 6px 0 8px;
 }
 .drawer-eyebrow {
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
+  font-size: 12px;
+  letter-spacing: 0;
+  text-transform: none;
   color: var(--faint);
 }
 .drawer-eyebrow-add {
@@ -838,11 +887,12 @@ body.resizing-drawer {
   border: none;
   background: none;
   border-radius: var(--radius);
-  color: var(--brand);
+  color: var(--muted);
   cursor: pointer;
 }
 .drawer-eyebrow-add:hover {
-  background: var(--brand-soft);
+  background: var(--surface-hover);
+  color: var(--text);
 }
 .drawer-eyebrow-add:disabled {
   opacity: 0.5;
@@ -4249,12 +4299,12 @@ body.resizing-drawer {
   align-items: center;
   gap: var(--s2);
   width: 100%;
-  padding: 7px 10px;
+  padding: 7px 8px;
   border: none;
   border-radius: var(--radius-control);
   background: transparent;
   color: var(--text);
-  font-size: var(--text-sm);
+  font-size: 14px;
   font-weight: 600;
   cursor: pointer;
 }

@@ -720,7 +720,14 @@ export default function App() {
   );
   const composedNavItems: NavItem[] = [
     ...staticNavItems,
-    ...enabledPlugins.map((p) => ({ id: p.id as ViewId, label: t(p.navLabel), icon: p.navIcon })),
+    ...enabledPlugins.map((p) => ({
+      id: p.id as ViewId,
+      label: p.navLabel,
+      icon: p.navIcon,
+      navSection: p.navSection ?? "more",
+      promoted: p.promoted === true,
+      order: p.navOrder,
+    })),
   ];
   // The host capability surface handed to each plugin panel (ADR 0011 §6).
   const pluginHost: PluginHost = { openChat: handleOpenSuggestion };

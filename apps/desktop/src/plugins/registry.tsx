@@ -29,6 +29,11 @@ export interface PluginManifest {
   /// i18n key with namespace syntax — shown in the nav rail.
   navLabel: string;
   navIcon: LucideIcon;
+  /// Sidebar placement: plugins are technical addons, but the UI groups them by
+  /// operational role. Promoted plugins can appear with first-class navigation.
+  navSection?: "work" | "create" | "workspace" | "more";
+  promoted?: boolean;
+  navOrder?: number;
   // Declared capabilities (informational in path A; enforced at the bridge in B).
   capabilities: string[];
   Panel: ComponentType<PluginPanelProps>;

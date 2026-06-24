@@ -17,6 +17,9 @@ export const presentationsPlugin: PluginManifest = {
   description: "presentations:lead",
   navLabel: "presentations:nav",
   navIcon: Presentation,
+  navSection: "create",
+  promoted: true,
+  navOrder: 10,
   capabilities: ["artifacts.read", "artifacts.write", "images.generate"],
   Panel: () => <BrandKitPanel />,
   registerI18n: (i18n: I18n) => {

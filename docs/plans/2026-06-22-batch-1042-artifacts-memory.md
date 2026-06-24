@@ -983,8 +983,10 @@ feature laterali né una dashboard generica.
   basata solo su stream attivi o task queued/running. Obiettivo:
   quando un lavoro parte, l'utente deve capire a quale thread appartiene, quale
   capability sta usando, cosa aspetta, cosa ha prodotto e come riprenderlo.
-- ☐ **UX.2 Coerenza visuale leggera**: spaziature, densità, stati e gerarchia su
-  sidebar/chat/dock senza redesign invasivo.
+- 🟡 **UX.2 Coerenza visuale leggera**: spaziature, densità, stati e gerarchia su
+  sidebar/chat/dock senza redesign invasivo. Prima slice sidebar: ispirazione
+  Linear, nav raggruppata per ruolo operativo (`work`, `create`, `workspace`,
+  `more`) e plugin/addon promossi dal registry/manifest invece che hardcoded.
 - ☐ **UX.3 Superfici deliverable**: dopo UX.1, riallineare Artifacts e
   Presentations al modello workspace: artifact/versioni/provenance e template
   come output/capability di prima classe.

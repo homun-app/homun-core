@@ -43,6 +43,9 @@ export interface NavItem {
   label: string;
   icon: LucideIcon;
   badge?: string;
+  navSection?: "work" | "create" | "workspace" | "more";
+  promoted?: boolean;
+  order?: number;
 }
 
 export interface ChatMessage {

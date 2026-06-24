@@ -8,7 +8,6 @@ import {
   ChevronRight,
   FolderOpen,
   FolderPlus,
-  Info,
   PanelLeftClose,
   PanelLeftOpen,
   Pencil,
@@ -32,6 +31,29 @@ import { useNotificationCount } from "../lib/useNotificationCount";
 
 // The base personal workspace ("Predefinito"): always present, never a "project".
 const PERSONAL_WORKSPACE_ID = "local-workspace";
+const NAV_SECTION_LABELS: Record<NonNullable<NavItem["navSection"]>, string> = {
+  work: "Work",
+  create: "Create",
+  workspace: "Workspace",
+  more: "More",
+};
+
+function navSectionForItem(item: NavItem): NonNullable<NavItem["navSection"]> {
+  if (item.navSection) return item.navSection;
+  if (item.id === "automations" || item.id === "tasks") return "work";
+  if (item.id === "memory" || item.id === "connections" || item.id === "browser") return "workspace";
+  return "more";
+}
+
+function navOrder(item: NavItem): number {
+  if (typeof item.order === "number") return item.order;
+  if (item.id === "automations") return 20;
+  if (item.id === "tasks") return 10;
+  if (item.id === "memory") return 20;
+  if (item.id === "connections") return 30;
+  if (item.id === "browser") return 90;
+  return 50;
+}
 
 function toChatThread(thread: CoreChatThread): ChatThread {
   return {
@@ -439,7 +461,7 @@ function ProjectsNav({
       </div>
 
       <div className="drawer-chats-head">
-        <span className="drawer-eyebrow">{t("sidebar.chat")}</span>
+        <span className="drawer-eyebrow">Recent</span>
         <button
           className="drawer-eyebrow-add"
           type="button"
@@ -619,6 +641,14 @@ export function NavDrawer({
 
   const activeThreads = chatThreads.filter((thread) => thread.status === "active");
   const archivedThreads = chatThreads.filter((thread) => thread.status === "archived");
+  const groupedNavItems = (["work", "create", "workspace", "more"] as const)
+    .map((section) => ({
+      section,
+      items: navItems
+        .filter((item) => item.id !== "chat" && navSectionForItem(item) === section)
+        .sort((a, b) => navOrder(a) - navOrder(b)),
+    }))
+    .filter((group) => group.items.length > 0);
   return (
     <aside className="nav-drawer" aria-label={t("sidebar.mainMenu")}>
       <button
@@ -630,25 +660,45 @@ export function NavDrawer({
         <PanelLeftClose size={18} />
       </button>
 
-      <nav className="drawer-nav">
-        {navItems.map((item) => {
-          const Icon = item.icon;
-          const isSearch = item.id === "chat";
-          return (
-            <button
-              className={`drawer-nav-item ${
-                !isSearch && activeView === item.id ? "active" : ""
-              }`}
-              key={item.id}
-              type="button"
-              onClick={() => (isSearch ? onSearchChat() : onNavigate(item.id))}
-            >
-              {isSearch ? <Search size={17} /> : <Icon size={17} />}
-              <span>{isSearch ? t("sidebar.search") : t(item.label)}</span>
-              {item.badge && <em>{item.badge}</em>}
-            </button>
-          );
-        })}
+      <div className="drawer-topbar">
+        <button className="drawer-search-action" type="button" onClick={onSearchChat}>
+          <Search size={15} />
+          <span>{t("sidebar.search")}</span>
+        </button>
+        <button
+          className="drawer-new-action"
+          type="button"
+          onClick={onCreateteChatThread}
+          aria-label={t("sidebar.newChat")}
+          title={t("sidebar.newChat")}
+        >
+          <Plus size={15} />
+        </button>
+      </div>
+
+      <nav className="drawer-nav linear-sidebar-nav" aria-label="Workspace navigation">
+        {groupedNavItems.map(({ section, items }) => (
+          <section className="drawer-nav-group" key={section}>
+            <div className="drawer-nav-group-label">{NAV_SECTION_LABELS[section]}</div>
+            {items.map((item) => {
+              const Icon = item.icon;
+              return (
+                <button
+                  className={`drawer-nav-item ${activeView === item.id ? "active" : ""}`}
+                  key={item.id}
+                  type="button"
+                  data-nav-section={section}
+                  data-promoted={item.promoted === true ? "true" : "false"}
+                  onClick={() => onNavigate(item.id)}
+                >
+                  <Icon size={16} />
+                  <span>{t(item.label)}</span>
+                  {item.badge && <em>{item.badge}</em>}
+                </button>
+              );
+            })}
+          </section>
+        ))}
       </nav>
 
       <div className="drawer-scroll">
