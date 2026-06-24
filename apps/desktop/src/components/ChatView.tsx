@@ -1661,12 +1661,17 @@ export function ChatView({
 
       <WorkspaceIsland
         activitySteps={conversationActivity}
-        artifactsCount={workbenchArtifacts.length}
+        artifacts={workbenchArtifacts}
         planSteps={workspacePlanSteps}
         streaming={promptSubmitting || Boolean(streamingAssistantId)}
         status={streamStatus}
         onCaptureScreenshot={IS_DESKTOP ? () => void captureScreenshot() : undefined}
         onExportChat={() => void exportChatMarkdown()}
+        onOpenArtifact={(artifact) => {
+          setArtifactsInitial(artifact.name);
+          setWorkbenchTab("artifacts");
+          setArtifactsOpen(true);
+        }}
       />
 
       <div className="thread-scroll" aria-label={t("chat.activeThread")} ref={conversationRef}>
@@ -2053,32 +2058,36 @@ function loadWorkspaceIslandMode(): WorkspaceIslandMode {
 
 function WorkspaceIsland({
   activitySteps,
-  artifactsCount,
+  artifacts,
   planSteps,
   streaming,
   status,
   onCaptureScreenshot,
   onExportChat,
+  onOpenArtifact,
 }: {
   activitySteps: string[];
-  artifactsCount: number;
+  artifacts: ParsedArtifact[];
   planSteps: PlanStep[];
   streaming: boolean;
   status: ChatStreamStatus | null;
   onCaptureScreenshot?: () => void;
   onExportChat: () => void;
+  onOpenArtifact: (artifact: ParsedArtifact) => void;
 }) {
   const { t } = useTranslation();
   const [mode, setModeState] = useState<WorkspaceIslandMode>(() => loadWorkspaceIslandMode());
   const [expanded, setExpanded] = useState(() => loadWorkspaceIslandMode() === "expanded");
   const [menuOpen, setMenuOpen] = useState(false);
   const [completedExpanded, setCompletedExpanded] = useState(false);
+  const [artifactsExpanded, setArtifactsExpanded] = useState(false);
   const doneCount = planSteps.filter((step) => step.status === "done").length;
   const completedSteps = planSteps.filter((step) => step.status === "done");
   const openSteps = planSteps.filter((step) => step.status !== "done");
   const runningPlan = planSteps.find((step) => step.status === "doing");
   const blockedPlan = planSteps.find((step) => step.status === "blocked");
   const latestActivity = activitySteps[activitySteps.length - 1] ?? null;
+  const artifactsCount = artifacts.length;
   const headline =
     blockedPlan?.title ??
     runningPlan?.title ??
@@ -2246,11 +2255,29 @@ function WorkspaceIsland({
           </div>
           {latestActivity && <p className="wi-latest">{latestActivity}</p>}
 
-          <div className="wi-row">
-            <FileText size={14} />
+          <button
+            className="wi-row wi-row-button"
+            type="button"
+            disabled={artifactsCount === 0}
+            aria-expanded={artifactsExpanded}
+            onClick={() => setArtifactsExpanded((value) => !value)}
+          >
+            {artifactsExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
             <span>Artifacts</span>
             <strong>{artifactsCount}</strong>
-          </div>
+          </button>
+          {artifactsExpanded && artifactsCount > 0 && (
+            <ol className="wi-artifacts" aria-label="Thread artifacts">
+              {artifacts.slice(0, 6).map((artifact) => (
+                <li key={artifact.name}>
+                  <button type="button" onClick={() => onOpenArtifact(artifact)}>
+                    {artifactTypeIcon(artifact.name)}
+                    <span>{artifact.projectRelativePath || artifact.name}</span>
+                  </button>
+                </li>
+              ))}
+            </ol>
+          )}
 
           <div className="wi-actions">
             {onCaptureScreenshot && (

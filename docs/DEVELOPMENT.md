@@ -98,7 +98,9 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   non duplicano piu' card tecniche dentro il corpo del messaggio. Il
   menu `...` dell'isola espone `Auto expand` / `Always expanded` /
   `Always collapsed`, persiste la preferenza locale e la card contiene una
-  sezione `Progress` con completed collassabili. Il `ChatComputerPanel` resta
+  sezione `Progress` con completed collassabili; la riga `Artifacts` si espande
+  in un elenco compatto dei file e il click sul file apre l'inspector artifact
+  esistente. Il `ChatComputerPanel` resta
   separato come
   `ComputerIsland` live: preview browser/terminal compatta sotto la workspace
   island, espandibile e visibile solo durante attivita' owner del thread. Gate
