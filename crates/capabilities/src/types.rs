@@ -185,11 +185,73 @@ pub struct SkillManifest {
     pub permissions: SkillPermissions,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PluginChannel {
+    Stable,
+    Beta,
+}
+
+impl Default for PluginChannel {
+    fn default() -> Self {
+        Self::Stable
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PluginEntitlement {
+    Free,
+    Paid,
+}
+
+impl Default for PluginEntitlement {
+    fn default() -> Self {
+        Self::Free
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PluginCapabilityKind {
+    Panel,
+    Skill,
+    Workflow,
+    Connector,
+    TemplateCatalog,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PluginSignature {
+    pub algorithm: String,
+    pub public_key: String,
+    pub signature: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PluginCapabilityDeclaration {
+    pub id: String,
+    pub kind: PluginCapabilityKind,
+    pub description: String,
+    pub action: ActionClass,
+    pub privacy_domains: Vec<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PluginManifest {
     pub id: String,
     pub version: String,
+    #[serde(default)]
+    pub channel: PluginChannel,
+    #[serde(default)]
+    pub min_homun_version: Option<String>,
     pub display_name: String,
+    #[serde(default)]
+    pub entitlement: PluginEntitlement,
+    #[serde(default)]
+    pub signature: Option<PluginSignature>,
+    #[serde(default)]
+    pub capabilities: Vec<PluginCapabilityDeclaration>,
     pub skills: Vec<SkillManifest>,
 }
 
@@ -203,7 +265,12 @@ impl PluginManifest {
         Self {
             id: id.into(),
             version: version.into(),
+            channel: PluginChannel::Stable,
+            min_homun_version: None,
             display_name: display_name.into(),
+            entitlement: PluginEntitlement::Free,
+            signature: None,
+            capabilities: Vec::new(),
             skills,
         }
     }

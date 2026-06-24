@@ -1,6 +1,8 @@
 use local_first_capabilities::{
     ActionClass, CapabilityProviderKind, CapabilityTool, DataBoundary, ManagedProviderMetadata,
-    ProviderId, SkillManifest, SkillPermissions, SkillToolManifest, UserId, WorkspaceId,
+    PluginCapabilityDeclaration, PluginCapabilityKind, PluginChannel, PluginEntitlement,
+    PluginManifest, PluginSignature, ProviderId, SkillManifest, SkillPermissions,
+    SkillToolManifest, UserId, WorkspaceId,
 };
 
 #[test]
@@ -85,4 +87,82 @@ fn skill_manifest_declares_permissions_without_runtime_execution() {
     assert_eq!(decoded.tools[0].name, "github.list_issues");
     assert_eq!(decoded.permissions.network, vec!["api.github.com"]);
     assert_eq!(decoded.permissions.privacy_domains, vec!["work"]);
+}
+
+#[test]
+fn plugin_manifest_declares_distribution_and_capability_contract() {
+    let mut manifest = PluginManifest::new(
+        "presentations-pro",
+        "1.2.3",
+        "Presentations Pro",
+        vec![sample_skill_manifest()],
+    );
+    manifest.channel = PluginChannel::Beta;
+    manifest.min_homun_version = Some("0.1.1046".to_string());
+    manifest.entitlement = PluginEntitlement::Paid;
+    manifest.signature = Some(PluginSignature {
+        algorithm: "ed25519".to_string(),
+        public_key: "pk_live_test".to_string(),
+        signature: "sig_live_test".to_string(),
+    });
+    manifest.capabilities = vec![PluginCapabilityDeclaration {
+        id: "make_deck".to_string(),
+        kind: PluginCapabilityKind::Workflow,
+        description: "Create and render presentation decks".to_string(),
+        action: ActionClass::WriteWithConfirmation,
+        privacy_domains: vec!["project".to_string()],
+    }];
+
+    let encoded = serde_json::to_value(&manifest).unwrap();
+    let decoded: PluginManifest = serde_json::from_value(encoded.clone()).unwrap();
+
+    assert_eq!(encoded["channel"], "beta");
+    assert_eq!(encoded["entitlement"], "paid");
+    assert_eq!(encoded["min_homun_version"], "0.1.1046");
+    assert_eq!(encoded["signature"]["algorithm"], "ed25519");
+    assert_eq!(encoded["capabilities"][0]["kind"], "workflow");
+    assert_eq!(decoded.channel, PluginChannel::Beta);
+    assert_eq!(
+        decoded.capabilities[0].action,
+        ActionClass::WriteWithConfirmation
+    );
+}
+
+#[test]
+fn plugin_manifest_legacy_json_defaults_to_stable_free() {
+    let decoded: PluginManifest = serde_json::from_value(serde_json::json!({
+        "id": "legacy-plugin",
+        "version": "0.1.0",
+        "display_name": "Legacy Plugin",
+        "skills": [sample_skill_manifest()]
+    }))
+    .unwrap();
+
+    assert_eq!(decoded.channel, PluginChannel::Stable);
+    assert_eq!(decoded.entitlement, PluginEntitlement::Free);
+    assert_eq!(decoded.min_homun_version, None);
+    assert_eq!(decoded.signature, None);
+    assert!(decoded.capabilities.is_empty());
+}
+
+fn sample_skill_manifest() -> SkillManifest {
+    SkillManifest {
+        id: "deck-local".to_string(),
+        version: "1.2.3".to_string(),
+        description: "Deck generation tools".to_string(),
+        runtime: "process".to_string(),
+        tools: vec![SkillToolManifest {
+            name: "deck.render".to_string(),
+            description: "Render a deck".to_string(),
+            action: ActionClass::WriteWithConfirmation,
+            privacy_domains: vec!["project".to_string()],
+            sensitivity: "private".to_string(),
+            input_schema: serde_json::json!({"type": "object"}),
+        }],
+        permissions: SkillPermissions {
+            network: vec![],
+            filesystem: vec!["project".to_string()],
+            privacy_domains: vec!["project".to_string()],
+        },
+    }
 }

@@ -318,12 +318,16 @@ primo percorso locale verde:
     esplicito contro tipografia leggibile, riducendo il rischio di testo
     storpiato nelle immagini generate.
 75. WS8 pre-release base gate — `scripts/pre_release_gate.py` rende ripetibile il
-    gate locale prima di tag/build: gateway test completo, UI contract, build
-    desktop e syntax check eval. Gli eval modello/gateway si agganciano via env,
-    senza rendere fragile il gate deterministico.
+    gate locale prima di tag/build: capabilities, gateway test completo, UI
+    contract, build desktop e syntax check eval. Gli eval modello/gateway si
+    agganciano via env, senza rendere fragile il gate deterministico.
 76. WS8 memory eval closure — il requisito "nuova chat: stato + perché" è coperto
     dai gate WS5.6 (`memory_eval_*` e release gate memoria): artifact provenance,
     decision why e workflow status/why emergono dalla memoria canonica.
+77. WS9 plugin manifest contract — `PluginManifest` nel crate capabilities ora
+    porta i metadati distributivi necessari al marketplace: channel, compatibilità
+    Homun minima, entitlement, firma opzionale e capability dichiarate. I manifest
+    legacy restano validi come stable/free.
 
 Prima di pubblicare/taggare resta prudente ripetere lo smoke manuale in-app su
 una automazione schedulata reale con il binario aggiornato. Il primo smoke ha

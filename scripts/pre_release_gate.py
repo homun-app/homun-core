@@ -46,6 +46,10 @@ def truthy(value: str | None) -> bool:
 
 def build_plan(env: dict[str, str]) -> list[Step]:
     plan = [
+        Step(
+            "capability tests",
+            ["cargo", "test", "-p", "local-first-capabilities", "--", "--nocapture"],
+        ),
         Step("gateway tests", ["cargo", "test", "-p", "local-first-desktop-gateway", "--", "--nocapture"]),
         Step("ui contract", ["npm", "run", "test:ui-contract"], cwd=DESKTOP),
         Step("desktop build", ["npm", "run", "build"], cwd=DESKTOP),

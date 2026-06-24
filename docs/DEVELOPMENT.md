@@ -161,12 +161,13 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   `/api/templates/catalog` e `/api/capabilities/snapshot` come primi guardrail
   HTTP prima del render end-to-end. **WS8.3 pre-release gate locale/verde:**
   aggiunto `scripts/pre_release_gate.py`, che raccoglie i gate deterministici
-  (`cargo test -p local-first-desktop-gateway -- --nocapture`,
+  (`cargo test -p local-first-capabilities -- --nocapture`,
+  `cargo test -p local-first-desktop-gateway -- --nocapture`,
   `npm run test:ui-contract`, `npm run build`, `py_compile` della eval suite) e
   abilita gli eval modello/gateway solo via env (`HOMUN_RUN_MODEL_EVAL`,
-  `HOMUN_EVAL_GATEWAY_BASE`). Verifica: `python3 scripts/pre_release_gate.py`
-  verde con **255 test gateway passati, 1 ignorato**, UI contract e build desktop
-  verdi.
+  `HOMUN_EVAL_GATEWAY_BASE`). Verifica aggiornata: `python3 scripts/pre_release_gate.py`
+  verde con suite capabilities, **255 test gateway passati, 1 ignorato**, UI
+  contract e build desktop verdi.
   **WS4 chat perf:** `RichMessage` e il renderer markdown lazy sono memoizzati,
   così polling/live state e sidebar non ricalcolano markdown pesante per messaggi
   completati invariati.
@@ -191,6 +192,13 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   **WS4 deck image prompt:** il workflow deck non passa più il titolo slide
   esatto/quotato al provider immagini; usa temi/keyword e un divieto esplicito
   di tipografia per ridurre testo storpiato nelle immagini generate.
+  **WS9.1 plugin manifest contract locale/verde:** il contratto condiviso
+  `local-first-capabilities::PluginManifest` ora dichiara metadati distributivi
+  (`channel` stable/beta, `min_homun_version`, `entitlement` free/paid,
+  `signature`) e capability dichiarate (`panel`, `skill`, `workflow`,
+  `connector`, `template_catalog`). I manifest legacy deserializzano come
+  stable/free senza firma. Verifica: `cargo test -p local-first-capabilities -- --nocapture`
+  verde.
   `make_research` e `make_meeting` restano dopo questo asse.
 - **WS2-3.1 PASSATA in runtime (2026-06-23):** gli artifact scritti via
   Filesystem MCP dentro la root progetto vengono registrati come

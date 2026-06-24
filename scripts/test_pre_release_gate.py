@@ -10,6 +10,7 @@ class PreReleaseGateTests(unittest.TestCase):
 
         labels = [step.label for step in plan]
 
+        self.assertIn("capability tests", labels)
         self.assertIn("gateway tests", labels)
         self.assertIn("ui contract", labels)
         self.assertIn("desktop build", labels)
@@ -49,7 +50,7 @@ class PreReleaseGateTests(unittest.TestCase):
         ok = gate.run_plan(gate.build_plan({}), fake_run)
 
         self.assertFalse(ok)
-        self.assertEqual(calls, ["gateway tests", "ui contract"])
+        self.assertEqual(calls, ["capability tests", "gateway tests", "ui contract"])
 
 
 if __name__ == "__main__":

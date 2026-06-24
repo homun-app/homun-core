@@ -923,14 +923,14 @@ Il caposaldo #2 ("funziona sul tier locale") oggi è verificato solo sul deck
   `memory_eval_surfaces_workflow_status_and_why` e
   `memory_guardrail_release_gate_covers_artifact_and_workflow_recall`.
 - ✅ **8.3** Gate pre-release base: `scripts/pre_release_gate.py` esegue in un
-  comando i gate deterministici (`cargo test -p local-first-desktop-gateway -- --nocapture`,
-  `npm run test:ui-contract`, `npm run build`, `py_compile` eval suite) e si
-  ferma al primo fallimento. Gli eval modello/gateway restano opt-in con
-  `HOMUN_RUN_MODEL_EVAL` e `HOMUN_EVAL_GATEWAY_BASE`, così il gate locale non
-  dipende da runtime esterni. Verifica 2026-06-24: `python3 scripts/pre_release_gate.py`
-  verde (**255 gateway passati, 1 ignorato**, UI contract, build desktop,
-  eval syntax). Da estendere insieme a 8.1: tool-call emission + render
-  end-to-end.
+  comando i gate deterministici (`cargo test -p local-first-capabilities -- --nocapture`,
+  `cargo test -p local-first-desktop-gateway -- --nocapture`, `npm run test:ui-contract`,
+  `npm run build`, `py_compile` eval suite) e si ferma al primo fallimento. Gli
+  eval modello/gateway restano opt-in con `HOMUN_RUN_MODEL_EVAL` e
+  `HOMUN_EVAL_GATEWAY_BASE`, così il gate locale non dipende da runtime esterni.
+  Verifica 2026-06-24 aggiornata: `python3 scripts/pre_release_gate.py` verde
+  (capabilities, **255 gateway passati, 1 ignorato**, UI contract, build desktop,
+  eval syntax). Da estendere insieme a 8.1: tool-call emission + render end-to-end.
 
 ## WS9 — Distribuzione plugin & marketplace
 
@@ -939,8 +939,14 @@ proprio — versioning, canali, scaricabili dal **sito Homun**, auto-aggiornabil
 **a pagamento**. ADR 0011 (addon) + nuovo ADR dedicato (distribuzione & licensing).
 *"Predisporre la struttura ora, monetizzare dopo."*
 
-- ☐ **9.1 Manifest plugin**: `semver` + `channel` (stable/beta) + `min_homun_version`
-  (compat) + `entitlement` (free/paid) + firma + capability dichiarate (contratto ADR 0011).
+- ✅ **9.1 Manifest plugin contract**: `local-first-capabilities::PluginManifest`
+  include `semver`, `channel` (stable/beta), `min_homun_version`,
+  `entitlement` (free/paid), `signature` opzionale e capability dichiarate
+  (`panel`, `skill`, `workflow`, `connector`, `template_catalog`). Compatibilità
+  legacy: manifest senza i nuovi campi deserializzano stable/free senza firma.
+  Verifica 2026-06-24: `cargo test -p local-first-capabilities -- --nocapture`
+  verde. Restano in 9.2-9.4 registry remoto, pacchetti firmati e verifica
+  crittografica all'install/update.
 - ☐ **9.2 Registry/catalogo sul sito Homun**: indice JSON + pacchetti **firmati** (modello
   come l'auto-update dell'app: feed separato per i plugin).
 - ☐ **9.3 Plugin manager in-app**: installa da registry · beta opt-in per-plugin ·
