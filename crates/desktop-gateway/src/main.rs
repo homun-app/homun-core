@@ -3362,6 +3362,7 @@ fn remember_artifact_memory(
     updated: bool,
     producer: &str,
     delivered_to: Option<&str>,
+    extra_metadata: Option<&serde_json::Value>,
 ) -> Result<(MemoryUserId, MemoryWorkspaceId, MemoryRef), String> {
     if name.trim().is_empty() || name.contains('/') || name.contains('\\') || name.contains("..") {
         return Err("invalid artifact name".to_string());
@@ -3394,7 +3395,7 @@ fn remember_artifact_memory(
             thread_id.unwrap_or(thread_slug)
         )
     };
-    let metadata = serde_json::json!({
+    let mut metadata = serde_json::json!({
         "source": "artifact_runtime",
         "producer": producer,
         "thread_id": thread_id,
@@ -3409,6 +3410,7 @@ fn remember_artifact_memory(
         "updated": updated,
         "lifecycle_status": "active",
     });
+    merge_object_metadata(&mut metadata, extra_metadata);
     let lifecycle = MemoryLifecycleRequest {
         actor_id: "artifact-runtime".to_string(),
         user_id: user.clone(),
@@ -3440,6 +3442,31 @@ async fn register_artifact_memory(
     producer: &str,
     delivered_to: Option<&str>,
 ) {
+    register_artifact_memory_with_metadata(
+        state,
+        thread_id,
+        thread_slug,
+        name,
+        size_bytes,
+        updated,
+        producer,
+        delivered_to,
+        None,
+    )
+    .await;
+}
+
+async fn register_artifact_memory_with_metadata(
+    state: &AppState,
+    thread_id: Option<&str>,
+    thread_slug: &str,
+    name: &str,
+    size_bytes: u64,
+    updated: bool,
+    producer: &str,
+    delivered_to: Option<&str>,
+    extra_metadata: Option<&serde_json::Value>,
+) {
     if let Ok((user, workspace, _reference)) = remember_artifact_memory(
         state,
         thread_id,
@@ -3449,6 +3476,7 @@ async fn register_artifact_memory(
         updated,
         producer,
         delivered_to,
+        extra_metadata,
     ) {
         backfill_embeddings(state, &user, &workspace, 4).await;
     }
@@ -3461,6 +3489,7 @@ async fn emit_rendered_deck_artifacts(
     thread_id: Option<&str>,
     thread_slug: &str,
     producer: &str,
+    quality_metadata: Option<&serde_json::Value>,
 ) -> Vec<String> {
     let host_dir = sandbox::artifacts_dir().join(thread_slug);
     let mut produced = Vec::new();
@@ -3469,7 +3498,7 @@ async fn emit_rendered_deck_artifacts(
             if meta.len() == 0 {
                 continue;
             }
-            let marker = serde_json::json!({
+            let mut marker = serde_json::json!({
                 "name": fname,
                 "thread": thread_slug,
                 "size": meta.len(),
@@ -3477,10 +3506,11 @@ async fn emit_rendered_deck_artifacts(
                 "source": "managed",
                 "managed_path": host_dir.join(fname).to_string_lossy().to_string(),
             });
+            merge_object_metadata(&mut marker, quality_metadata);
             let m = format!("‹‹ARTIFACT››{marker}‹‹/ARTIFACT››");
             accumulated.push_str(&m);
             let _ = emit_stream_event(tx, GenerateStreamEvent::Delta { text: m }).await;
-            register_artifact_memory(
+            register_artifact_memory_with_metadata(
                 state,
                 thread_id,
                 thread_slug,
@@ -3489,6 +3519,7 @@ async fn emit_rendered_deck_artifacts(
                 false,
                 producer,
                 None,
+                quality_metadata,
             )
             .await;
             produced.push(fname.to_string());
@@ -13729,6 +13760,67 @@ fn rendered_deck_qa_failure(render_output: &str) -> Option<String> {
     }
 }
 
+fn deck_quality_metadata_from_qa_result(
+    qa: Option<&serde_json::Value>,
+) -> Option<serde_json::Value> {
+    let qa = qa?;
+    let status = if qa.get("ok").and_then(|value| value.as_bool()).unwrap_or(false) {
+        "passed"
+    } else {
+        "warning"
+    };
+    let mut metadata = serde_json::Map::new();
+    metadata.insert("quality_status".to_string(), serde_json::json!(status));
+    if let Some(slide_count) = qa.get("slide_count").and_then(|value| value.as_u64()) {
+        metadata.insert(
+            "quality_slide_count".to_string(),
+            serde_json::json!(slide_count),
+        );
+    }
+    let issues = qa
+        .get("issues")
+        .and_then(|value| value.as_array())
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(|issue| {
+                    let message = issue.get("message").and_then(|value| value.as_str())?;
+                    let code = issue
+                        .get("code")
+                        .and_then(|value| value.as_str())
+                        .unwrap_or("qa_issue");
+                    let severity = issue
+                        .get("severity")
+                        .and_then(|value| value.as_str())
+                        .unwrap_or("warning");
+                    Some(serde_json::json!({
+                        "severity": severity,
+                        "code": code,
+                        "message": message,
+                    }))
+                })
+                .take(10)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    if !issues.is_empty() {
+        metadata.insert("quality_issues".to_string(), serde_json::Value::Array(issues));
+    }
+    Some(serde_json::Value::Object(metadata))
+}
+
+fn merge_object_metadata(target: &mut serde_json::Value, extra: Option<&serde_json::Value>) {
+    let Some(extra) = extra.and_then(|value| value.as_object()) else {
+        return;
+    };
+    let Some(target) = target.as_object_mut() else {
+        return;
+    };
+    for (key, value) in extra {
+        target.insert(key.clone(), value.clone());
+    }
+}
+
 /// Produce the deck CONTENT as schema-enforced JSON. Uses the orchestrator-role
 /// endpoint with `response_format: json_schema` (constrained decoding — the
 /// cross-model floor), degrading ONCE to `json_object` on a 400 (e.g.
@@ -18028,6 +18120,9 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                 // 3) emit an artifact marker for each file produced, even when
                                 // QA flags issues: the files exist and the user needs access to
                                 // inspect/fix them.
+                                let qa_result = rendered_deck_qa_result(&render_out);
+                                let quality_metadata =
+                                    deck_quality_metadata_from_qa_result(qa_result.as_ref());
                                 let produced = emit_rendered_deck_artifacts(
                                     &state_owned,
                                     &tx,
@@ -18035,6 +18130,7 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                     thread_id.as_deref(),
                                     &thread_slug,
                                     "render_deck",
+                                    quality_metadata.as_ref(),
                                 )
                                 .await;
                                 if let Some(error) = rendered_deck_qa_failure(&render_out) {
@@ -18317,6 +18413,9 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                         // 6) emit an artifact marker per produced file, even
                                         // when QA flags issues: the generated files still need
                                         // to be visible for review and iteration.
+                                        let qa_result = rendered_deck_qa_result(&render_out);
+                                        let quality_metadata =
+                                            deck_quality_metadata_from_qa_result(qa_result.as_ref());
                                         let produced = emit_rendered_deck_artifacts(
                                             &state_owned,
                                             &tx,
@@ -18324,6 +18423,7 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                             thread_id.as_deref(),
                                             &thread_slug,
                                             "make_deck",
+                                            quality_metadata.as_ref(),
                                         )
                                         .await;
                                         if let Some(error) = rendered_deck_qa_failure(&render_out) {
@@ -41029,6 +41129,40 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             r#"DECK_QA_JSON:{"ok":true,"slide_count":1,"issues":[]}"#
         )
         .is_none());
+    }
+
+    #[test]
+    fn rendered_deck_qa_metadata_is_structured_for_artifacts() {
+        let qa = serde_json::json!({
+            "ok": false,
+            "slide_count": 1,
+            "issues": [
+                {
+                    "severity": "error",
+                    "code": "low_contrast",
+                    "message": "slide 1: p contrast ratio 2.1 is below 4.5",
+                    "raw": {"ignored": true}
+                }
+            ]
+        });
+
+        let metadata = super::deck_quality_metadata_from_qa_result(Some(&qa)).expect("metadata");
+
+        assert_eq!(metadata["quality_status"], serde_json::json!("warning"));
+        assert_eq!(metadata["quality_slide_count"], serde_json::json!(1));
+        assert_eq!(
+            metadata["quality_issues"][0]["code"],
+            serde_json::json!("low_contrast")
+        );
+        assert_eq!(
+            metadata["quality_issues"][0]["severity"],
+            serde_json::json!("error")
+        );
+        assert_eq!(
+            metadata["quality_issues"][0]["message"],
+            serde_json::json!("slide 1: p contrast ratio 2.1 is below 4.5")
+        );
+        assert!(metadata["quality_issues"][0].get("raw").is_none());
     }
 
     #[test]
