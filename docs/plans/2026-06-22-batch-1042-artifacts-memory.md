@@ -79,9 +79,16 @@ modelli deboli/locali. Invarianti: monotonìa, limitatezza, identità non inferi
     top-level opzionale; schema e prompt planner lo accettano quando serve
     approvazione del piano prima dell'esecuzione. Test:
     `cargo test -p local-first-orchestrator -- --nocapture`.
-- ☐ **Floor ovunque** — constrained decoding su **tutte** le emissioni di
-  orchestrazione (tool call del loop principale, piano, verifica), locale+cloud. Oggi
-  è imposto solo sul contenuto di `make_deck`; il planner OpenAI-compat declassa ancora.
+- ✅ **Floor ovunque (2026-06-24, locale/verde)** — le emissioni di
+  orchestrazione ora hanno contratti chiusi sulle superfici core: schema planner
+  `ExecutionPlan` con `additionalProperties:false`, tool `update_plan` /
+  `step_advance` strict e strict-compatible (`null` per opzionali), judge di
+  verifica step/bootstrap con `response_format: json_schema` strict, e UI che
+  non renderizza più `PLAN_PROPOSE`/`GOAL_PROPOSE` tronchi come card
+  azionabili. Test mirati:
+  `planner_schema_is_closed_for_constrained_orchestration`,
+  `orchestration_plan_tools_expose_strict_schemas`,
+  `orchestration_completion_judge_uses_strict_schema`, `npm run test:ui-contract`.
 - 🟡 **Fase 3** — skill **dichiarative** + workflow runner (un solo grafo; `make_deck`
   è l'embrione di `create-presentations` come workflow).
   - ✅ **Slice 3a (2026-06-23, locale/verde)**: `make_deck` ha una
@@ -322,8 +329,11 @@ modelli deboli/locali. Invarianti: monotonìa, limitatezza, identità non inferi
     dal task id, `done_criterion` dal contratto sub-agent ed evidence redatta
     `source="subagent_task"`. Test mirato:
     `subagent_task_outcome_writes_runtime_plan_step_fact`.
-- ☐ **Sub-agent** — sub-agent a contesto isolato come tipo di nodo del grafo, recall/
-  write-back attraverso il motore di memoria condiviso.
+- ☐ **Sub-agent avanzati (futuro, non bloccante WS1 core)** — sub-agent a
+  contesto isolato come tipo di nodo del grafo, recall/write-back attraverso il
+  motore di memoria condiviso. La base runtime e write-back degli outcome
+  `subagent.*` è già coperta da WS1-F6b; questa voce resta un'evoluzione di
+  prodotto, non una dipendenza per chiudere il motore piano/workflow corrente.
 
 ## WS2 — Artefatti & Memoria (sequenza obbligata)
 

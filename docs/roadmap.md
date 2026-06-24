@@ -157,123 +157,128 @@ primo percorso locale verde e WS5 è chiusa localmente/gate:
 38. WS1-Fase 4b nona slice — l'esecuzione di capability connesse entra nel
     `tool_trace` come `capability execution connector:TOOL` o
     `capability execution mcp:TOOL`, inclusi read connector come Gmail.
-39. Runtime chat bugfix — lo stream resume marker ora porta un `ownerId`: la
+39. WS1 floor ovunque — le emissioni di orchestrazione hanno contratti chiusi:
+    planner `ExecutionPlan` con schema chiuso, `update_plan`/`step_advance`
+    strict-compatible, judge verifica step/bootstrap con JSON schema strict e UI
+    che non accetta marker `PLAN_PROPOSE`/`GOAL_PROPOSE` tronchi come card
+    azionabili.
+40. Runtime chat bugfix — lo stream resume marker ora porta un `ownerId`: la
     stessa sessione JS non può auto-resumare e duplicare user/assistant, mentre il
     resume dopo vero reload resta disponibile. Gate in-app Gmail passato.
-40. WS1/WS7 document focus — `make_document` ora materializza anche `.docx`
+41. WS1/WS7 document focus — `make_document` ora materializza anche `.docx`
     editabile dalla stessa sorgente Markdown canonica, oltre a `md`/`pdf`, con
     package OOXML generato in-process e registrazione artifact/memoria invariata.
-41. WS1/WS7 document focus — `make_document` ora accetta struttura/stile
+42. WS1/WS7 document focus — `make_document` ora accetta struttura/stile
     espliciti (`document_type`, `audience`, `tone`, `sections`) nello stesso
     schema tool; il workflow li usa come contratto di generazione solo se
     dichiarati, senza attivazioni euristiche o nuovi registry paralleli.
-42. WS1/WS7 document focus — il renderer DOCX di `make_document` traduce le
+43. WS1/WS7 document focus — il renderer DOCX di `make_document` traduce le
     tabelle pipe Markdown in tabelle Word reali (`w:tbl`) con escaping XML,
     mantenendo sorgente Markdown canonica e registrazione artifact invariata.
-43. WS1/WS7 document focus — feedback smoke reale DOCX: il file era valido ma
+44. WS1/WS7 document focus — feedback smoke reale DOCX: il file era valido ma
     troppo grezzo. Il renderer ora include `styles.xml`, converte bold/italic
     Markdown in run Word, promuove il primo titolo e gestisce liste numerate.
-44. WS1/WS7 document focus — secondo feedback smoke DOCX: tabelle leggibili ma
+45. WS1/WS7 document focus — secondo feedback smoke DOCX: tabelle leggibili ma
     non adattate alla pagina. Il renderer ora emette tabelle full-width con
     `tblGrid`, layout fixed, celle percentuali, padding e proporzione 35/65 per
     tabelle a due colonne.
-45. WS1/WS7 document focus — `make_document` ha un `layout_profile` dichiarativo
+46. WS1/WS7 document focus — `make_document` ha un `layout_profile` dichiarativo
     nello stesso schema tool (`standard`, `one_page`, `executive_brief`,
     `detailed_report`, `proposal`); il profilo diventa direttiva di generazione
     esplicita, non un nuovo workflow e non una euristica di routing.
-46. WS7 direction — deliverable design system condiviso: documenti e
+47. WS7 direction — deliverable design system condiviso: documenti e
     presentazioni/plugin convergono su temi, layout, componenti, template e QA
     visuale comuni. Il modello sceglie struttura e blocchi dal registry; renderer
     deterministici producono `.docx`, `.pptx`, `.pdf`/HTML. Una gallery può
     esistere come UI/catalogo sopra questa grammatica, non come secondo sistema.
-47. WS7 first shared design contract — `make_document` e `make_deck` espongono lo
+48. WS7 first shared design contract — `make_document` e `make_deck` espongono lo
     stesso `design_profile` dichiarativo (`executive`, `sales_pitch`,
     `technical`, `editorial`, `minimal`), lo portano nel workflow e lo traducono
     in direttive specifiche per documento o deck. È il primo pezzo di grammatica
     condivisa; non è ancora template library completa né QA visuale.
-48. WS7 shared component contract — `make_document` e `make_deck` espongono anche
+49. WS7 shared component contract — `make_document` e `make_deck` espongono anche
     `design_components` condiviso (`kpi_grid`, `timeline`, `comparison_table`,
     `quote_callout`, `process_steps`, `risks_table`), deduplicato e bounded. È
     ancora composer contract: i layout fisici del renderer e la gallery template
     arrivano dopo.
-49. WS7 deck component materialization — in `make_deck`, i componenti dichiarativi
+50. WS7 deck component materialization — in `make_deck`, i componenti dichiarativi
     ora vengono applicati deterministicamente al deck JSON prima del render:
     `kpi_grid` usa layout `kpi`, `quote_callout` usa `quote`, gli altri componenti
     usano `two_column`, tutti già supportati da `deck_render.py`. Non ancora
     esteso al renderer DOCX e non ancora gallery/template library.
-50. WS7 document component materialization — in `make_document`, gli stessi
+51. WS7 document component materialization — in `make_document`, gli stessi
     componenti dichiarativi ora vengono applicati al Markdown prima degli artifact:
     sezioni/tabelle sono derivate dal contenuto generato e diventano vere tabelle
     DOCX quando il formato richiesto è Word. Resta da fare QA visuale e template
     library completa.
-51. WS7 shared template contract — `make_document` e `make_deck` espongono anche
+52. WS7 shared template contract — `make_document` e `make_deck` espongono anche
     `design_template` condiviso (`startup_pitch`, `executive_update`,
     `project_plan`, `technical_brief`, `sales_proposal`). Il template espande in
     default `design_profile` + `design_components`, ma gli argomenti espliciti
     restano sovrani; il workflow registra il template scelto e i prompt ricevono
     una direttiva medium-specific. Non è ancora la gallery visuale completa; i
     theme token e il primo floor QA arrivano nella slice successiva.
-52. WS7 shared theme tokens + QA floor — `make_document` e `make_deck`
+53. WS7 shared theme tokens + QA floor — `make_document` e `make_deck`
     espongono `design_theme` condiviso (`clean_corporate`, `high_contrast`,
     `warm_editorial`, `minimal_mono`, `soft_gradient`). Lato deck il tema viene
     materializzato in token renderer-compatible prima del render; il workflow
     applica anche un primo guardrail QA deterministico che rileva e corregge
     titoli/bullet troppo lunghi. Il primo floor era testuale; la slice seguente
     porta la verifica sull'HTML renderizzato.
-53. WS7 rendered deck QA — il contained computer include `deck-qa`, comando
+54. WS7 rendered deck QA — il contained computer include `deck-qa`, comando
     dependency-free che apre `deck.html` con Chromium headless e misura layout
     reale via DevTools Protocol. `make_deck` e `render_deck` lo eseguono dopo il
     render e prima della registrazione artifact/memoria: overflow slide, elementi
     fuori bounds o immagini non caricate bloccano la consegna come deck
     completato. Restano da estendere contrasto/leggibilità, screenshot/PDF più
     profondi e QA documenti.
-54. WS7 template catalog provider — primo catalogo read-only seed `monet/*`
+55. WS7 template catalog provider — primo catalogo read-only seed `monet/*`
     dentro il registry unico: entry cercabili da capability discovery ma non
     callable, `template_ref` nello schema di `make_deck`/`make_document`, e
     risoluzione gateway verso `design_template`, `design_theme`,
     `design_profile` e `design_components` già supportati. Monet è catalogo/
     adapter di template, non secondo renderer/store e non un nuovo `make_*`.
-55. WS7 template provider contract — il seed `monet/*` è ora dietro a un
+56. WS7 template provider contract — il seed `monet/*` è ora dietro a un
     `TemplateCatalogProvider` interno e a un collector multi-provider deduplicato.
     Questo è il punto di aggancio per MCP Monet, marketplace Homun o template
     pack firmati: tutti pubblicano `template_ref` nel registry unico, mentre i
     workflow esistenti continuano a renderizzare.
-56. WS7 file template catalog — aggiunto `FileTemplateCatalogProvider`: manifest
+57. WS7 file template catalog — aggiunto `FileTemplateCatalogProvider`: manifest
     JSON locali caricabili da `HOMUN_TEMPLATE_CATALOG_PATH` o
     `~/.homun/template-catalog.json`, validati contro il vocabolario `design_*`.
     I file catalog estendono il registry ma non sovrascrivono i seed built-in.
-57. WS7 deck legibility QA — `deck-qa` ora misura anche font-size e contrasto
+58. WS7 deck legibility QA — `deck-qa` ora misura anche font-size e contrasto
     sul DOM renderizzato. `text_too_small` e `low_contrast` entrano nel
     `DECK_QA_JSON` e bloccano consegna/registrazione del deck.
-58. WS7 document Markdown QA — `make_document` valida il Markdown prima della
+59. WS7 document Markdown QA — `make_document` valida il Markdown prima della
     scrittura degli artifact `.md`/`.pdf`/`.docx`: linee troppo lunghe, token
     non spezzabili e tabelle pipe con numero celle incoerente bloccano la
     consegna fragile con errore QA deterministico.
-59. WS7 expanded Monet seed catalog — il catalogo built-in `monet/*` copre ora
+60. WS7 expanded Monet seed catalog — il catalogo built-in `monet/*` copre ora
     11 template PMI: pitch, executive update, project plan, sales proposal,
     technical brief, one-pager, case study, meeting minutes, launch plan,
     incident review e product roadmap. Sono ancora capability di catalogo non
     callable, risolte nei token `design_*` già supportati.
-60. WS7 template manifest metadata — i manifest JSON esterni possono includere
+61. WS7 template manifest metadata — i manifest JSON esterni possono includere
     `tags`, `preview_ref`, `source_ref` e `license`, con riferimenti sanificati
     prima dell'indicizzazione. Questo prepara gallery/cataloghi visuali senza
     introdurre un secondo sistema di template o nuovi tool callable.
-61. WS7 template catalog API — il registry template è esposto read-only da
+62. WS7 template catalog API — il registry template è esposto read-only da
     `/api/templates/catalog` e dal bridge desktop `coreBridge.templateCatalog()`.
     La UI può costruire una gallery partendo dalla stessa fonte del routing,
     senza duplicare cataloghi o trasformare template in tool.
-62. WS7 first template gallery — il plugin Presentations mostra una gallery
+63. WS7 first template gallery — il plugin Presentations mostra una gallery
     filtrabile alimentata da `coreBridge.templateCatalog()`, con metadati
     `design_*` e copia del `template_ref`. È una superficie di selezione, non un
     router euristico e non un catalogo duplicato; finché non esistono asset
     `preview_ref` reali, mostra il contratto/layout invece di finte preview
     grafiche.
-63. WS7 workflow guardrail — durante una route workflow one-call il gateway
+64. WS7 workflow guardrail — durante una route workflow one-call il gateway
     blocca tool fallback non ammessi (shell/filesystem/MCP create) invece di
     permettere al modello di aggirare `make_deck`/`make_document` dopo un errore
     provider. Se il provider non risponde, il workflow si ferma e chiede una
     binding/provider raggiungibile.
-64. Runtime chat activity guard — gli stream chat marcano `finished` quando il
+65. Runtime chat activity guard — gli stream chat marcano `finished` quando il
     gateway emette `done/error`, non solo dopo il cleanup post-turn; gli stream
     senza eventi recenti vengono esclusi dal segnale sidebar per evitare pallini
     working infiniti dopo cambio chat. I resume marker frontend hanno TTL e i
@@ -283,90 +288,90 @@ primo percorso locale verde e WS5 è chiusa localmente/gate:
     browser/terminal running; il pannello inline Computer legacy non viene più
     riaperto da timeline/artifact già completati. Il rendering streaming riusa il
     parser finale per plan/progress/markdown progressivi.
-65. WS4 UI perf guard — il contratto UI verifica che il pannello Computer inline
+66. WS4 UI perf guard — il contratto UI verifica che il pannello Computer inline
     non torni a dipendere da timeline/artifact completati e il dock live riduce
     il polling quando idle (2500ms), mantenendolo veloce durante attività
     browser/terminal (600ms).
-66. WS8 eval document flow — `scripts/eval_suite.py` copre anche output documento
+67. WS8 eval document flow — `scripts/eval_suite.py` copre anche output documento
     strutturato con `docx` obbligatorio, base URL configurabile via
     `HOMUN_EVAL_BASE` e progress flush; smoke `gemma4:latest 1` verde.
-67. WS4 markdown render perf — `RichMessage` e il renderer markdown lazy sono
+68. WS4 markdown render perf — `RichMessage` e il renderer markdown lazy sono
     memoizzati per evitare rerender dei messaggi completati invariati quando
     cambiano polling, dock live o stato laterale.
-68. Provider settings robustness — le card provider matchano prima per id stabile
+69. Provider settings robustness — le card provider matchano prima per id stabile
     e solo poi per endpoint, preservando preset Z.ai standard/coding separati
     anche con configurazioni legacy o cambi URL.
-69. Artifact location UX — i marker dei workflow managed includono `managed_path`
+70. Artifact location UX — i marker dei workflow managed includono `managed_path`
     e le card chat mostrano il path compatto del deliverable, riducendo la
     confusione su dove siano stati creati i file.
-70. Computer owner hardening — attività live browser/terminal senza `thread_id`
+71. Computer owner hardening — attività live browser/terminal senza `thread_id`
     esplicito non vengono più mostrate in tutte le chat; il null owner è ammesso
     solo da idle.
-71. WS7 built-in template previews — i seed locali `monet/*` dichiarano
+72. WS7 built-in template previews — i seed locali `monet/*` dichiarano
     `preview_ref` `builtin:template-preview/*`; la gallery Presentations
     materializza una preview compatta dai token del catalogo (`design_theme`,
     layout archetype, componenti) invece di scegliere da sole card testuali. I
     cataloghi esterni senza `preview_ref` restano sul fallback contract-only; il
     registry rimane la fonte unica e i template non diventano tool callable.
-72. WS8 gateway contract eval — `scripts/eval_suite.py` può ora, se configurato
+73. WS8 gateway contract eval — `scripts/eval_suite.py` può ora, se configurato
     con `HOMUN_EVAL_GATEWAY_BASE` e token, verificare anche il gateway reale:
     `/api/templates/catalog` deve esporre template non-callable con preview
     built-in, e `/api/capabilities/snapshot` deve restare uno snapshot valido.
     È il primo strato HTTP del gate; il render end-to-end resta da aggiungere.
-73. WS4 default skill seeder hardening — il seeder delle skill bundled hasha ora
+74. WS4 default skill seeder hardening — il seeder delle skill bundled hasha ora
     l'intero tree (`SKILL.md`, script, asset), non solo il manifest. Gli update
     bundled arrivano su copie ancora stock; le skill davvero modificate
     dall'utente restano protette perché il tree su disco diverge dal record
     seeded.
-74. WS4 image role UX — Settings → Model per task segnala quando
+75. WS4 image role UX — Settings → Model per task segnala quando
     `image_generation` non ha modelli immagine disponibili. Il deck workflow può
     degradare senza immagini, ma l'utente vede prima che serve un provider
     image-capable o un refresh catalogo.
-75. WS4 deck image prompt mitigation — il workflow deck non invia più al modello
+76. WS4 deck image prompt mitigation — il workflow deck non invia più al modello
     immagine il titolo slide esatto/quotato. Usa keyword tematiche e un vincolo
     esplicito contro tipografia leggibile, riducendo il rischio di testo
     storpiato nelle immagini generate.
-76. WS8 pre-release base gate — `scripts/pre_release_gate.py` rende ripetibile il
+77. WS8 pre-release base gate — `scripts/pre_release_gate.py` rende ripetibile il
     gate locale prima di tag/build: capabilities, gateway test completo, UI
     contract, build desktop e syntax check eval. Gli eval modello/gateway si
     agganciano via env, senza rendere fragile il gate deterministico.
-77. WS8 memory eval closure — il requisito "nuova chat: stato + perché" è coperto
+78. WS8 memory eval closure — il requisito "nuova chat: stato + perché" è coperto
     dai gate WS5.6 (`memory_eval_*` e release gate memoria): artifact provenance,
     decision why e workflow status/why emergono dalla memoria canonica.
-78. WS9 plugin manifest contract — `PluginManifest` nel crate capabilities ora
+79. WS9 plugin manifest contract — `PluginManifest` nel crate capabilities ora
     porta i metadati distributivi necessari al marketplace: channel, compatibilità
     Homun minima, entitlement, firma opzionale e capability dichiarate. I manifest
     legacy restano validi come stable/free.
-79. WS9 plugin registry index contract — `PluginRegistryIndex` definisce il feed
+80. WS9 plugin registry index contract — `PluginRegistryIndex` definisce il feed
     JSON marketplace separato dai manifest installati: entry con URL manifest e
     package, digest SHA-256, firma, channel, compatibilità ed entitlement. È il
     contratto per sito/install manager; non scarica ancora pacchetti.
-80. WS9 package integrity policy — le entry registry validano forma del digest
+81. WS9 package integrity policy — le entry registry validano forma del digest
     `sha256`, algoritmo firma `ed25519` e confronto SHA-256 sui byte pacchetto.
     La verifica Ed25519 e il gate install-candidate coprono canale beta,
     compatibilità Homun, allowlist chiavi trusted, digest e firma; restano
     enforcement install/update e scan contenuto pacchetto.
-81. WS9 install/update policy — le entry registry ora espongono regole
+82. WS9 install/update policy — le entry registry ora espongono regole
     deterministiche per disponibilità canale (`stable` sempre, `beta` solo con
     opt-in), compatibilità minima Homun e confronto versioni semver. Il manager
     in-app deve ancora usare queste regole per fetch/install/update reali.
-82. WS9 `.hplugin` package manifest — il pacchetto plugin ha un manifest interno
+83. WS9 `.hplugin` package manifest — il pacchetto plugin ha un manifest interno
     dichiarativo (`PluginPackageManifest`) con file, digest e manifest path; la
     validazione rifiuta pacchetti vuoti, digest non SHA-256 e path assoluti o
     traversal. Il gateway ora ispeziona gli archive in memoria, verifica i digest
     dei file dichiarati, prepara i blob per `skill_security` e può scrivere in
     staging solo i file dichiarati, bloccando pacchetti critici. Restano
     endpoint/manager e attivazione atomica nel registry locale.
-83. WS9 ADR distribuzione/licensing — ADR 0017 formalizza registry hosted sul
+84. WS9 ADR distribuzione/licensing — ADR 0017 formalizza registry hosted sul
     sito Homun, verifica locale deterministica, beta opt-in, paid predisposto con
     token offline e pagamento/cloud rinviati.
-84. WS9 licensing offline contract — `PluginLicenseClaims` /
+85. WS9 licensing offline contract — `PluginLicenseClaims` /
     `PluginLicenseToken` verificano offline firma Ed25519, plugin target e
     scadenza. Il gateway persiste token verificati in
     `~/.homun/plugins/licenses.json` tramite `GET/PUT /api/plugins/licenses` e
     rifiuta token scaduti/non coerenti prima della scrittura. Restano re-check
     manager e account/payment cloud.
-85. WS9 install manager locale — il gateway installa `.hplugin` solo dopo
+86. WS9 install manager locale — il gateway installa `.hplugin` solo dopo
     verifica registry/signature/digest, staging sicuro, controllo
     `plugin_id/version` e rename atomico. Endpoint locale
     `/api/plugins/packages/install-local` disponibile per pacchetti già
@@ -382,7 +387,7 @@ primo percorso locale verde e WS5 è chiusa localmente/gate:
     /api/plugins/packages/update-from-registry` applica manualmente candidate
     piu' nuove per plugin gia' installati, riusando verifica/staging/swap
     dell'install manager. Resta update automatico.
-86. WS9 registry cache locale — `PluginRegistryIndex` marketplace può essere
+87. WS9 registry cache locale — `PluginRegistryIndex` marketplace può essere
     validato e salvato atomicamente in `~/.homun/plugins/registry-cache.json`
     tramite `GET/POST /api/plugins/registry/cache`; il gateway può anche
     scaricarlo via `POST /api/plugins/registry/fetch` da HTTPS. Restano feed e
@@ -394,13 +399,13 @@ trovato e corretto una falsa chiusura su piano non completato.
 
 ## Milestone
 
-2. Completare verifica allargata della nuova slice `ExecutionPlan` runtime.
-3. WS1-Fase 2/3 — piano runtime-owned e workflow runner dichiarativo, così i
+3. Completare verifica allargata della nuova slice `ExecutionPlan` runtime.
+4. WS1-Fase 2/3 — piano runtime-owned e workflow runner dichiarativo, così i
    deliverable futuri non riaprono fragilità cross-modello.
-4. WS1/WS7 deliverable design system — smoke reale del nuovo `layout_profile`
+5. WS1/WS7 deliverable design system — smoke reale del nuovo `layout_profile`
    quando serve la prossima release, poi introdurre template/componenti
    dichiarativi condivisi da `make_document` e `make_deck`/presentation.
-5. WS7 — deliverable Manus/Z.ai-style: prima qualità di documenti e
+6. WS7 — deliverable Manus/Z.ai-style: prima qualità di documenti e
    presentazioni tramite design system + composer + renderer + QA; solo dopo
    ragionare su `make_research` e `make_meeting`.
 
@@ -412,13 +417,16 @@ collegarli al perché. Per questo WS7 non è più il prossimo step.
 
 ## Prossima azione
 
-WS1 ha ora write-back piano→memoria, prima materializzazione grafo piano/step,
-proiezione `ExecutionPlan` nei metadata canonici, `ExecutionPlan` come stato
-runtime primario del loop agente, una prima `WorkflowDefinition` per `make_deck`
-e outcome per-step confermati nel loop principale e nei sub-agent. `make_deck`
-entra ora nel Brain con `run_plan` prima della pipeline deterministica.
-Il router workflow/agent instrada i deck a scaffolding massimo. Il primo smoke
-release ha corretto composer e recall provenance/status. La prima
+WS1 core e' chiusa localmente: ha write-back piano→memoria, prima
+materializzazione grafo piano/step, proiezione `ExecutionPlan` nei metadata
+canonici, `ExecutionPlan` come stato runtime primario del loop agente, workflow
+dichiarativi `make_deck`/`make_document`, outcome per-step confermati nel loop
+principale e nei sub-agent, registry unico per workflow/MCP/connector/atomici,
+guardrail workflow one-call e floor di orchestrazione sulle superfici planner,
+piano, verifica e card UI. `make_deck` entra nel Brain con `run_plan` prima
+della pipeline deterministica. Il router workflow/agent instrada i deck a
+scaffolding massimo. Il primo smoke release ha corretto composer e recall
+provenance/status. La prima
 generalizzazione documenti è locale/verde su `make_document` e ha superato smoke
 API reale con artifact gestito + memoria/provenance canonica. Il registry nativo
 dei workflow `make_deck`/`make_document` è locale/verde e alimenta router e

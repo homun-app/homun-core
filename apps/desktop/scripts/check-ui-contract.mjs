@@ -177,6 +177,11 @@ assertContains("src/components/ChatView.tsx", "reply-context-card", "composer mu
 assertContains("src/components/ChatView.tsx", "message-action-menu", "secondary message actions must stay behind a compact menu");
 assertContains("src/components/ChatView.tsx", "message-latency-summary", "message metrics must be visible without dominating the answer");
 assertContains("src/components/ChatView.tsx", "cancelStreamingRequestRef", "chat must allow users to stop a visible streaming response");
+assertNotContains(
+  "src/components/ChatView.tsx",
+  "PLAN_PROPOSE››([\\s\\S]*?)(?:‹‹\\/PLAN_PROPOSE››|$)",
+  "plan proposal cards must require a closed marker so truncated JSON is not accepted as an actionable plan",
+);
 
 assertContains("src/types.ts", "\"learning\"", "auto-learning must be a first-class view");
 assertContains("src/components/LearningView.tsx", "learning-view", "auto-learning must have a dedicated page");

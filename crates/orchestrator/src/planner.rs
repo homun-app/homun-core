@@ -118,6 +118,7 @@ fn context_budget_usage(label: &str, result: &CompressionResult) -> ContextBudge
 pub(crate) fn planner_schema() -> serde_json::Value {
     json!({
         "type": "object",
+        "additionalProperties": false,
         "required": ["route"],
         "properties": {
             "route": {
@@ -136,6 +137,7 @@ pub(crate) fn planner_schema() -> serde_json::Value {
             "direct_answer": {"type": ["object", "null"]},
             "plan_propose": {
                 "type": ["object", "null"],
+                "additionalProperties": false,
                 "properties": {
                     "summary": {"type": "string"},
                     "steps": {
@@ -148,6 +150,7 @@ pub(crate) fn planner_schema() -> serde_json::Value {
                 "type": "array",
                 "items": {
                     "type": "object",
+                    "additionalProperties": false,
                     "required": [
                         "step_id",
                         "kind",
@@ -212,7 +215,37 @@ pub(crate) fn planner_schema() -> serde_json::Value {
                     }
                 }
             },
-            "needs_more_tools": {"type": ["object", "null"]}
+            "needs_more_tools": {
+                "type": ["object", "null"],
+                "additionalProperties": false,
+                "properties": {
+                    "query": {"type": "string"}
+                }
+            }
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn planner_schema_is_closed_for_constrained_orchestration() {
+        let schema = super::planner_schema();
+        assert_eq!(
+            schema.pointer("/additionalProperties"),
+            Some(&serde_json::Value::Bool(false))
+        );
+        assert_eq!(
+            schema.pointer("/properties/plan_propose/additionalProperties"),
+            Some(&serde_json::Value::Bool(false))
+        );
+        assert_eq!(
+            schema.pointer("/properties/needs_more_tools/additionalProperties"),
+            Some(&serde_json::Value::Bool(false))
+        );
+        assert_eq!(
+            schema.pointer("/properties/steps/items/additionalProperties"),
+            Some(&serde_json::Value::Bool(false))
+        );
+    }
 }

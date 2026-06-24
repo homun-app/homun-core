@@ -2890,18 +2890,17 @@ const COMPOSIO_RECONNECT_RE = /‹‹COMPOSIO_RECONNECT››([\s\S]*?)‹‹\/C
 const CHOICES_RE = /‹‹CHOICES››([\s\S]*?)‹‹\/CHOICES››/;
 // Plan-mode: the model proposes a plan and STOPS; the card gates execution behind
 // Accetta / Edit (the answer becomes the next user message).
-// Tolerant of a MISSING close (`…|$`): some models open the marker but emit their native
-// tool-call end-token instead of `‹‹/…››`, leaving it unterminated. The JSON payload is
-// self-delimiting, so capture-to-end still parses correctly.
-const PLAN_PROPOSE_RE = /‹‹PLAN_PROPOSE››([\s\S]*?)(?:‹‹\/PLAN_PROPOSE››|$)/;
+// Require a closed marker before rendering an actionable plan card. During streaming an
+// incomplete marker is hidden from prose below, but it is not accepted as a proposal.
+const PLAN_PROPOSE_RE = /‹‹PLAN_PROPOSE››([\s\S]*?)‹‹\/PLAN_PROPOSE››/;
 // Goal-propose: the model proposes the project's objective(s); the card lets the user save.
-const GOAL_PROPOSE_RE = /‹‹GOAL_PROPOSE››([\s\S]*?)(?:‹‹\/GOAL_PROPOSE››|$)/;
+const GOAL_PROPOSE_RE = /‹‹GOAL_PROPOSE››([\s\S]*?)‹‹\/GOAL_PROPOSE››/;
 // Strips an UNCLOSED plan/goal marker (open present, no close) from the visible prose.
 const UNCLOSED_PROPOSE_RE = /‹‹(?:PLAN_PROPOSE|GOAL_PROPOSE)››[\s\S]*$/;
 const COMPOSIO_MARKERS_RE =
   /‹‹(?:COMPOSIO_(?:CONFIRM|DONE|RECONNECT)|MCP_CONFIRM|FS_AUTHORIZE|CONNECT_SUGGEST|CHOICES|PLAN_PROPOSE|GOAL_PROPOSE|PLAN)››[\s\S]*?‹‹\/(?:COMPOSIO_(?:CONFIRM|DONE|RECONNECT)|MCP_CONFIRM|FS_AUTHORIZE|CONNECT_SUGGEST|CHOICES|PLAN_PROPOSE|GOAL_PROPOSE|PLAN)››/g;
 const PROPOSE_MARKERS_VISIBLE_RE =
-  /‹‹(?:PLAN_PROPOSE|GOAL_PROPOSE)››[\s\S]*?(?:‹‹\/(?:PLAN_PROPOSE|GOAL_PROPOSE)››|$)/g;
+  /‹‹(?:PLAN_PROPOSE|GOAL_PROPOSE)››[\s\S]*?‹‹\/(?:PLAN_PROPOSE|GOAL_PROPOSE)››/g;
 
 /** One clickable suggestion in an in-chat connect-card. */
 interface ConnectSuggestItem {

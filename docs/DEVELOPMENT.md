@@ -64,8 +64,14 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   devono dichiarare se sono solo UX/ops o convergono nella memoria canonica.
   Gate di chiusura: `python3 scripts/pre_release_gate.py` verde, inclusi i test
   WS5.6 e il nuovo `local_store_tables_have_explicit_memory_boundary_audit`.
-  **Prossimo passo unico:** riprendere WS1 core secondo roadmap, senza riaprire
-  memoria salvo regressioni o smoke in-app prima release.
+  **WS1 core chiusa localmente:** oltre a piano→memoria/grafo, `ExecutionPlan`
+  runtime, workflow dichiarativi, registry unico e guardrail workflow, ora anche
+  il floor di orchestrazione e' coperto sulle superfici core: planner schema
+  chiuso, `update_plan`/`step_advance` strict, judge verifica step/bootstrap
+  strict e UI che non accetta `PLAN_PROPOSE` tronchi come card azionabili.
+  **Prossimo passo unico:** passare al prossimo asse roadmap (WS8/WS7/UX secondo
+  priorita' corrente) senza riaprire memoria/WS1 salvo regressioni o smoke in-app
+  prima release.
 - **Direzione WS7 aggiornata:** l'obiettivo deliverable non è una gallery statica
   clonata tool-per-tool, ma un **design system dichiarativo condiviso** per
   documenti e presentazioni/plugin: temi, layout, componenti, template e QA
@@ -455,6 +461,15 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   `steps`) e lo schema/prompt planner lo accettano come campo top-level
   opzionale quando serve approvazione del piano prima dell'esecuzione. Test:
   `cargo test -p local-first-orchestrator -- --nocapture`.
+- **WS1 floor ovunque locale/verde (2026-06-24):** le emissioni di
+  orchestrazione non dipendono piu' solo dal prompt: `planner_schema()` e'
+  chiuso (`additionalProperties:false`), `update_plan` e `step_advance` sono
+  function tools strict con opzionali nullable, i judge di verifica
+  step/bootstrap richiedono `response_format: json_schema` strict e la UI non
+  rende piu' marker `PLAN_PROPOSE`/`GOAL_PROPOSE` tronchi come card azionabili.
+  Test mirati: `planner_schema_is_closed_for_constrained_orchestration`,
+  `orchestration_plan_tools_expose_strict_schemas`,
+  `orchestration_completion_judge_uses_strict_schema`, `npm run test:ui-contract`.
 - **WS1-Fase 3b/F5 locale/verde:** `OrchestratorBrain` espone `run_plan(request,
   execution_plan)`, entrypoint per workflow dichiarativi già costruiti
   dall'harness. Esegue/accoda gli step usando gli stessi provider, policy,

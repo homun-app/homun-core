@@ -5634,27 +5634,30 @@ fn update_plan_tool_schema() -> serde_json::Value {
 follows progress. Call it at the START with ALL steps (status \"todo\", the first \"doing\") and UPDATE \
 IT as you proceed (move to \"done\" what you completed, set \"doing\" the current step). Do NOT use it \
 for single-step requests.",
+            "strict": true,
             "parameters": {
                 "type": "object",
+                "additionalProperties": false,
                 "properties": {
                     "steps": {
                         "type": "array",
                         "description": "The plan steps, in order.",
                         "items": {
                             "type": "object",
+                            "additionalProperties": false,
                             "properties": {
-                                "id": { "type": "string", "description": "When UPDATING an existing step, echo its id EXACTLY as shown in the plan (the `(`id`)` after the title, e.g. \"s2\"). This keeps the step stable even if you rephrase its title. OMIT for a brand-new step." },
+                                "id": { "type": ["string", "null"], "description": "When UPDATING an existing step, echo its id EXACTLY as shown in the plan (the `(`id`)` after the title, e.g. \"s2\"). This keeps the step stable even if you rephrase its title. Use null for a brand-new step." },
                                 "title": { "type": "string", "description": "What the step does (short, imperative)." },
                                 "status": { "type": "string", "enum": ["todo", "doing", "done", "blocked"], "description": "Current status of the step." },
-                                "detail": { "type": "string", "description": "Optional detail." },
+                                "detail": { "type": ["string", "null"], "description": "Optional detail." },
                                 "depends_on": {
-                                    "type": "array",
+                                    "type": ["array", "null"],
                                     "items": { "type": "string" },
-                                    "description": "Optional explicit dependencies by stable step id, e.g. [\"s1\"]. Do not infer dependencies; include only when the workflow requires this step to wait for another."
+                                    "description": "Optional explicit dependencies by stable step id, e.g. [\"s1\"]. Do not infer dependencies; include only when the workflow requires this step to wait for another. Use null when none."
                                 },
-                                "done_criterion": { "type": "string", "description": "Optional but RECOMMENDED: the concrete, checkable condition that proves this step is complete (e.g. \"file report.pdf written\", \"search returned >=5 relevant sources\", \"deck rendered to PDF without errors\"). Used to verify completion before advancing." }
+                                "done_criterion": { "type": ["string", "null"], "description": "Optional but RECOMMENDED: the concrete, checkable condition that proves this step is complete (e.g. \"file report.pdf written\", \"search returned >=5 relevant sources\", \"deck rendered to PDF without errors\"). Used to verify completion before advancing." }
                             },
-                            "required": ["title", "status"]
+                            "required": ["id", "title", "status", "detail", "depends_on", "done_criterion"]
                         }
                     }
                 },
@@ -5673,14 +5676,16 @@ fn step_advance_tool_schema() -> serde_json::Value {
         "function": {
             "name": "step_advance",
             "description": "Set a SINGLE plan step's new status by its id (e.g. move it to \"done\" when you finish it), WITHOUT re-sending the whole plan. This is the preferred way to report progress as you work; use update_plan only to CREATE or revise the plan. The id is shown in parentheses after each step's title in the Plan card.",
+            "strict": true,
             "parameters": {
                 "type": "object",
+                "additionalProperties": false,
                 "properties": {
                     "id": { "type": "string", "description": "The step id, EXACTLY as shown in the Plan card (e.g. \"s2\")." },
                     "status": { "type": "string", "enum": ["todo", "doing", "done", "blocked"], "description": "The step's new status." },
-                    "detail": { "type": "string", "description": "Optional updated detail." }
+                    "detail": { "type": ["string", "null"], "description": "Optional updated detail." }
                 },
-                "required": ["id", "status"]
+                "required": ["id", "status", "detail"]
             }
         }
     })
@@ -11457,6 +11462,29 @@ fn step_verification_enabled() -> bool {
     )
 }
 
+fn orchestration_completion_judge_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["complete", "reason"],
+        "properties": {
+            "complete": { "type": "boolean" },
+            "reason": { "type": "string" }
+        }
+    })
+}
+
+fn orchestration_judge_response_format(name: &str) -> serde_json::Value {
+    serde_json::json!({
+        "type": "json_schema",
+        "json_schema": {
+            "name": name,
+            "strict": true,
+            "schema": orchestration_completion_judge_schema()
+        }
+    })
+}
+
 /// F2 verification gate: an independent LLM-judge deciding whether a plan step is
 /// ACTUALLY complete, from the step title, its done-criterion, and the EVIDENCE (tool
 /// calls + results gathered while the step ran). Cheap, non-streaming, on the fast
@@ -11490,6 +11518,7 @@ failed or error-laden tool result is NOT complete. Reply with STRICT JSON only, 
         "model": model,
         "temperature": 0,
         "max_tokens": 200,
+        "response_format": orchestration_judge_response_format("step_completion"),
         "messages": [
             { "role": "system", "content": system },
             { "role": "user", "content": user },
@@ -11557,6 +11586,7 @@ request is COMPLETE. Reply with STRICT JSON only, no prose: \
         "model": model,
         "temperature": 0,
         "max_tokens": 200,
+        "response_format": orchestration_judge_response_format("task_completion"),
         "messages": [
             { "role": "system", "content": system },
             { "role": "user", "content": user },
@@ -39442,6 +39472,77 @@ mod tests {
         assert_eq!(
             step.arguments.get("detail").and_then(|value| value.as_str()),
             Some("Provider unavailable")
+        );
+    }
+
+    #[test]
+    fn orchestration_plan_tools_expose_strict_schemas() {
+        let update_plan = super::update_plan_tool_schema();
+        assert_eq!(
+            update_plan.pointer("/function/strict"),
+            Some(&serde_json::Value::Bool(true))
+        );
+        assert_eq!(
+            update_plan.pointer("/function/parameters/additionalProperties"),
+            Some(&serde_json::Value::Bool(false))
+        );
+        assert_eq!(
+            update_plan
+                .pointer("/function/parameters/properties/steps/items/additionalProperties"),
+            Some(&serde_json::Value::Bool(false))
+        );
+        assert_eq!(
+            update_plan.pointer("/function/parameters/properties/steps/items/required"),
+            Some(&serde_json::json!([
+                "id",
+                "title",
+                "status",
+                "detail",
+                "depends_on",
+                "done_criterion"
+            ]))
+        );
+        assert_eq!(
+            update_plan
+                .pointer("/function/parameters/properties/steps/items/properties/id/type"),
+            Some(&serde_json::json!(["string", "null"]))
+        );
+
+        let step_advance = super::step_advance_tool_schema();
+        assert_eq!(
+            step_advance.pointer("/function/strict"),
+            Some(&serde_json::Value::Bool(true))
+        );
+        assert_eq!(
+            step_advance.pointer("/function/parameters/additionalProperties"),
+            Some(&serde_json::Value::Bool(false))
+        );
+        assert_eq!(
+            step_advance.pointer("/function/parameters/required"),
+            Some(&serde_json::json!(["id", "status", "detail"]))
+        );
+    }
+
+    #[test]
+    fn orchestration_completion_judge_uses_strict_schema() {
+        let schema = super::orchestration_completion_judge_schema();
+        assert_eq!(
+            schema.pointer("/additionalProperties"),
+            Some(&serde_json::Value::Bool(false))
+        );
+        assert_eq!(
+            schema.pointer("/required"),
+            Some(&serde_json::json!(["complete", "reason"]))
+        );
+
+        let response_format = super::orchestration_judge_response_format("step_completion");
+        assert_eq!(
+            response_format.pointer("/json_schema/strict"),
+            Some(&serde_json::Value::Bool(true))
+        );
+        assert_eq!(
+            response_format.pointer("/json_schema/schema/additionalProperties"),
+            Some(&serde_json::Value::Bool(false))
         );
     }
 
