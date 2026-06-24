@@ -152,7 +152,10 @@ export function Shell({
               type="button"
               aria-label={t("sidebar.expandSidebar")}
               title={t("sidebar.expandSidebar")}
-              onClick={() => setTransientDrawerOpen(true)}
+              onClick={() => {
+                closeTransientDrawer();
+                onToggleDrawer();
+              }}
             >
               <PanelLeftOpen size={18} />
             </button>
