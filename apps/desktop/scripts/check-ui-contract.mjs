@@ -83,7 +83,10 @@ assertContains("src/components/Shell.tsx", "drawer-edge-hotspot", "collapsed sid
 assertContains("src/components/Shell.tsx", "drawer-floating-trigger", "collapsed sidebar must also expose a visible open icon");
 assertContains("src/components/Shell.tsx", "onToggleDrawer();", "visible collapsed sidebar opener must open the persistent drawer, not only the transient island");
 assertNotContains("src/components/Shell.tsx", "!transientDrawerOpen &&", "visible collapsed sidebar opener must remain clickable while the transient island is open");
-assertContains("src/styles.css", "left: calc(8px + min(var(--drawer-width, 292px), calc(100vw - 24px)) - 50px)", "collapsed sidebar opener must align with the floating drawer toggle");
+assertContains("src/styles.css", "--drawer-island-gap", "sidebar must be laid out as a floating island with stable margins");
+assertContains("src/styles.css", "--drawer-toggle-left", "sidebar toggle must sit beside the macOS traffic lights");
+assertContains("src/styles.css", ".app-shell.drawer-open:not(.settings-mode) > .nav-drawer", "open sidebar must use island styling without affecting Settings");
+assertContains("src/styles.css", "left: var(--drawer-toggle-left)", "collapsed sidebar opener must align beside the traffic lights");
 assertContains("src/styles.css", "z-index: 160", "collapsed sidebar opener must stay above the transient floating island");
 assertContains("src/styles.css", ".app-shell.drawer-closed .task-topbar", "closed sidebar content header must reserve space for the stable opener");
 assertContains("src/components/Shell.tsx", "drawer-floating-host", "collapsed sidebar must render as a transient floating island");

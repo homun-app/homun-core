@@ -191,6 +191,10 @@ small {
 }
 
 .app-shell {
+  --drawer-island-gap: 16px;
+  --drawer-island-top: 14px;
+  --drawer-island-bottom: 8px;
+  --drawer-toggle-left: 108px;
   height: 100vh;
   min-height: 0;
   position: relative;
@@ -215,11 +219,7 @@ small {
 }
 
 .app-shell.drawer-open::before {
-  background: linear-gradient(
-    to right,
-    #f7f7f8 0 var(--drawer-width, 292px),
-    var(--bg) var(--drawer-width, 292px)
-  );
+  background: var(--bg);
 }
 
 .app-shell button,
@@ -245,12 +245,16 @@ small {
 
 
 .app-shell.drawer-open {
-  grid-template-columns: var(--drawer-width, 292px) minmax(0, 1fr);
+  grid-template-columns: calc(var(--drawer-island-gap) + var(--drawer-width, 292px) + var(--drawer-island-gap)) minmax(0, 1fr);
+}
+
+.app-shell.drawer-open:not(.settings-mode) > .workspace {
+  grid-column: 2;
 }
 
 .drawer-edge-hotspot {
   position: fixed;
-  top: calc(var(--window-drag-height) + 88px);
+  top: calc(var(--window-drag-height) + 52px);
   bottom: 0;
   left: 0;
   z-index: 95;
@@ -281,14 +285,14 @@ small {
 
 .drawer-floating-trigger {
   position: fixed;
-  top: calc(var(--window-drag-height) + 48px);
-  left: calc(8px + min(var(--drawer-width, 292px), calc(100vw - 24px)) - 50px);
+  top: calc(var(--window-drag-height) + var(--drawer-island-top) + 8px);
+  left: var(--drawer-toggle-left);
   z-index: 160;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 38px;
-  height: 34px;
+  width: 30px;
+  height: 30px;
   border: none;
   border-radius: var(--radius-control);
   background: transparent;
@@ -305,21 +309,21 @@ small {
 
 .drawer-floating-host {
   position: fixed;
-  top: calc(var(--window-drag-height) + 8px);
-  bottom: 8px;
-  left: 8px;
+  top: calc(var(--window-drag-height) + var(--drawer-island-top));
+  bottom: var(--drawer-island-bottom);
+  left: var(--drawer-island-gap);
   z-index: 140;
-  width: min(var(--drawer-width, 292px), calc(100vw - 24px));
+  width: min(var(--drawer-width, 292px), calc(100vw - (var(--drawer-island-gap) * 2)));
   -webkit-app-region: no-drag;
 }
 
 /* Draggable splitter sitting on the drawer↔content boundary. */
 .drawer-resizer {
-  position: absolute;
-  top: var(--window-drag-height);
-  left: var(--drawer-width, 292px);
+  position: fixed;
+  top: calc(var(--window-drag-height) + var(--drawer-island-top));
+  left: calc(var(--drawer-island-gap) + var(--drawer-width, 292px) + 4px);
   width: 8px;
-  height: calc(100vh - var(--window-drag-height));
+  height: calc(100vh - var(--window-drag-height) - var(--drawer-island-top) - var(--drawer-island-bottom));
   transform: translateX(-4px);
   cursor: col-resize;
   z-index: 90;
@@ -495,6 +499,21 @@ body.resizing-drawer {
   -webkit-app-region: drag;
 }
 
+.app-shell.drawer-open:not(.settings-mode) > .nav-drawer {
+  position: fixed;
+  top: calc(var(--window-drag-height) + var(--drawer-island-top));
+  bottom: var(--drawer-island-bottom);
+  left: var(--drawer-island-gap);
+  z-index: 120;
+  width: min(var(--drawer-width, 292px), calc(100vw - (var(--drawer-island-gap) * 2)));
+  height: auto;
+  border: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
+  border-radius: 12px;
+  box-shadow:
+    0 24px 70px rgba(15, 23, 42, 0.12),
+    0 3px 14px rgba(15, 23, 42, 0.06);
+}
+
 .drawer-floating-host .nav-drawer {
   width: 100%;
   height: 100%;
@@ -502,7 +521,7 @@ body.resizing-drawer {
 
 .nav-drawer.floating-island {
   border: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
-  border-radius: 10px;
+  border-radius: 12px;
   box-shadow:
     0 24px 70px rgba(15, 23, 42, 0.18),
     0 3px 14px rgba(15, 23, 42, 0.08);
@@ -512,7 +531,7 @@ body.resizing-drawer {
 .drawer-collapse {
   position: absolute;
   top: 8px;
-  right: 16px;
+  left: calc(var(--drawer-toggle-left) - var(--drawer-island-gap));
   z-index: 5;
   display: inline-flex;
   align-items: center;
@@ -7573,11 +7592,11 @@ body.resizing-drawer {
 
 @media (max-width: 1120px) {
   .app-shell.drawer-open {
-    grid-template-columns: 260px minmax(0, 1fr);
+    grid-template-columns: calc(var(--drawer-island-gap) + min(var(--drawer-width, 292px), 260px) + var(--drawer-island-gap)) minmax(0, 1fr);
   }
 
   .app-shell.drawer-open::before {
-    background: linear-gradient(to right, #f7f7f8 0 260px, var(--bg) 260px);
+    background: var(--bg);
   }
 
   .active-task-layout {
