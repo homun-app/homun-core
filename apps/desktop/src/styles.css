@@ -282,7 +282,7 @@ small {
 .drawer-floating-trigger {
   position: fixed;
   top: 8px;
-  left: 96px;
+  left: calc(8px + min(var(--drawer-width, 292px), calc(100vw - 24px)) - 46px);
   z-index: 96;
   display: inline-flex;
   align-items: center;
@@ -298,8 +298,7 @@ small {
 }
 
 .drawer-floating-trigger:hover,
-.drawer-floating-trigger:focus-visible,
-.app-shell.drawer-transient-open .drawer-floating-trigger {
+.drawer-floating-trigger:focus-visible {
   background: var(--surface-hover);
   color: var(--text);
 }
@@ -1544,6 +1543,13 @@ body.resizing-drawer {
   margin-inline: calc(-1 * clamp(18px, 5vw, 72px));
   padding-inline: calc(clamp(18px, 5vw, 72px) + max(0px, (100% - 760px) / 2));
   -webkit-app-region: drag;
+}
+
+.app-shell.drawer-closed .task-topbar {
+  padding-left: max(
+    calc(clamp(18px, 5vw, 72px) + max(0px, (100% - 760px) / 2)),
+    calc(8px + min(var(--drawer-width, 292px), calc(100vw - 24px)) + 12px)
+  );
 }
 
 .task-title-area,
