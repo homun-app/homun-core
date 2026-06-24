@@ -100,7 +100,7 @@ assertContains("src/styles.css", ".window-drag-strip", "custom window chrome mus
 assertContains("src/styles.css", ".drawer-bottom-trigger", "collapsed sidebar opener must live outside the native titlebar/drag strip");
 assertContains("src/styles.css", "bottom: calc(var(--drawer-island-bottom) + 3px)", "collapsed sidebar opener must align with the sidebar footer zone");
 assertContains("src/styles.css", ".drawer-bottom-trigger svg", "sidebar toggle icon must not intercept pointer events from the button");
-assertContains("src/styles.css", ".app-shell.drawer-open:not(.settings-mode) > .nav-drawer", "open sidebar must use island styling without affecting Settings");
+assertContains("src/styles.css", ".app-shell.drawer-open > .nav-drawer", "open sidebar and Settings nav must use the same island styling");
 assertContains("src/components/Sidebar.tsx", "drawer-toggle-action", "expanded sidebar toggle must live in the persistent footer actions");
 assertContains("src/styles.css", "overflow-y: auto;\n  overflow-x: hidden;", "expanded project trees must scroll inside the sidebar middle region instead of covering footer actions");
 assertContains("src/styles.css", ".drawer-scroll::-webkit-scrollbar", "sidebar middle scrollbars must stay visually minimal");

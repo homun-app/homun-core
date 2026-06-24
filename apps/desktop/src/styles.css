@@ -313,7 +313,7 @@ small {
   grid-template-columns: calc(var(--drawer-island-gap) + var(--drawer-width, 292px) + var(--drawer-island-gap)) minmax(0, 1fr);
 }
 
-.app-shell.drawer-open:not(.settings-mode) > .workspace {
+.app-shell.drawer-open > .workspace {
   grid-column: 2;
 }
 
@@ -444,7 +444,7 @@ body.resizing-drawer {
   -webkit-app-region: drag;
 }
 
-.app-shell.drawer-open:not(.settings-mode) > .nav-drawer {
+.app-shell.drawer-open > .nav-drawer {
   position: fixed;
   top: calc(var(--window-drag-height) + var(--drawer-island-top));
   bottom: var(--drawer-island-bottom);

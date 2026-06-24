@@ -418,9 +418,9 @@ primo percorso locale verde e WS5 è chiusa localmente/gate:
     subito un titolo sintetico al posto del placeholder `New task`. La modalità
     chiusa abbandona la rail fissa e non usa hover sul bordo: si riapre solo
     dall'opener esplicito nel footer zone. L'isola persistente usa margini piu'
-    stretti per includere visivamente il semaforo macOS. La shell Electron
-    mantiene controlli finestra nativi; i toggle Homun restano fuori dalla
-    titlebar/drag strip.
+    stretti per includere visivamente il semaforo macOS; Settings usa la stessa
+    geometria a isola per la nav laterale. La shell Electron mantiene controlli
+    finestra nativi; i toggle Homun restano fuori dalla titlebar/drag strip.
 
 Prima di pubblicare/taggare resta prudente ripetere lo smoke manuale in-app su
 una automazione schedulata reale con il binario aggiornato. Il primo smoke ha

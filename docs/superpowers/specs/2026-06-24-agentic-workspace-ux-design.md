@@ -162,12 +162,17 @@ drag esplicite, lasciando i controlli interattivi fuori dalle regioni
 `-webkit-app-region: drag`. Su mobile/tablet la stessa superficie resta overlay
 esplicito, senza dipendere dall'hover.
 
+Settings usa la stessa geometria shell della sidebar persistente: contenitore a
+isola con margini, radius e ombra coerenti. Questo non implica un redesign
+completo delle pagine Settings; mantiene solo chrome e navigazione laterale
+allineati al resto dell'app.
+
 Gli addon dichiarano `navSection`, `promoted` e ordine nel manifest/registry. La
 sidebar usa questi metadata per promuovere una capability senza hardcode.
 
 ## Fuori scope per la prima slice
 
-- Redesign completo di Settings.
+- Redesign completo dei contenuti Settings.
 - Nuova colonna destra permanente.
 - Nuovo marketplace/plugin UI.
 - Template gallery definitiva.
