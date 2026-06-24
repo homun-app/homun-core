@@ -81,8 +81,11 @@ devono diventare pannelli permanenti dentro il corpo dei messaggi.
 La Workspace Island:
 
 - mostra stato sintetico (`Plan`, `Activity`, `Artifacts`, stato streaming);
-- espone in hover un riepilogo progressivo del piano e degli ultimi step;
-- al click apre il Workbench, di default sulla vista operativa `Activity`;
+- resta una pill compatta nello stato chiuso;
+- in hover mostra solo il controllo di espansione, non apre il pannello;
+- al click espande una card flottante con riepilogo progressivo del piano e
+  degli ultimi step;
+- le righe interne possono aprire il Workbench sulla vista corrispondente;
 - resta per-thread: non mostra stato di un thread diverso;
 - puo' restare visibile come riepilogo leggero quando ci sono artifact o piano
   utile, ma non deve lampeggiare o simulare lavoro attivo a task concluso.

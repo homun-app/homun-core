@@ -1661,7 +1661,6 @@ export function ChatView({
       <WorkspaceIsland
         activitySteps={conversationActivity}
         artifactsCount={workbenchArtifacts.length}
-        open={artifactsOpen}
         planSteps={workspacePlanSteps}
         streaming={promptSubmitting || Boolean(streamingAssistantId)}
         status={streamStatus}
@@ -1670,12 +1669,6 @@ export function ChatView({
         onOpenWorkbench={(tab) => {
           setWorkbenchTab(tab);
           setArtifactsOpen(true);
-        }}
-        onToggleWorkbench={() => {
-          setArtifactsOpen((value) => {
-            if (!value) setWorkbenchTab("activity");
-            return !value;
-          });
         }}
       />
 
@@ -2054,27 +2047,24 @@ function AssistantThinkingState({ status }: { status: ChatStreamStatus | null })
 function WorkspaceIsland({
   activitySteps,
   artifactsCount,
-  open,
   planSteps,
   streaming,
   status,
   onCaptureScreenshot,
   onExportChat,
   onOpenWorkbench,
-  onToggleWorkbench,
 }: {
   activitySteps: string[];
   artifactsCount: number;
-  open: boolean;
   planSteps: PlanStep[];
   streaming: boolean;
   status: ChatStreamStatus | null;
   onCaptureScreenshot?: () => void;
   onExportChat: () => void;
   onOpenWorkbench: (tab: WorkbenchTab) => void;
-  onToggleWorkbench: () => void;
 }) {
   const { t } = useTranslation();
+  const [expanded, setExpanded] = useState(false);
   const doneCount = planSteps.filter((step) => step.status === "done").length;
   const runningPlan = planSteps.find((step) => step.status === "doing");
   const blockedPlan = planSteps.find((step) => step.status === "blocked");
@@ -2095,30 +2085,47 @@ function WorkspaceIsland({
           : "";
 
   return (
-    <div className={`workspace-island${open ? " open" : ""}${streaming ? " live" : ""}`}>
+    <div className={`workspace-island${expanded ? " expanded" : ""}${streaming ? " live" : ""}`}>
+      <button
+        className="workspace-island-expand"
+        type="button"
+        title="Expand status"
+        aria-label="Expand status"
+        aria-expanded={expanded}
+        onClick={() => setExpanded((value) => !value)}
+      >
+        {expanded ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+      </button>
       <button
         className="workspace-island-pill"
         type="button"
-        title={open ? t("chat.closePanel") : t("chat.openPanel")}
-        aria-label={open ? t("chat.closePanel") : t("chat.openPanel")}
-        onClick={onToggleWorkbench}
+        title={expanded ? "Collapse status" : "Expand status"}
+        aria-label={expanded ? "Collapse status" : "Expand status"}
+        aria-expanded={expanded}
+        onClick={() => setExpanded((value) => !value)}
       >
         <span className="workspace-island-icon">
-          {streaming ? <Loader2 size={14} className="composer-spin" /> : <PanelRight size={14} />}
+          {streaming ? <Loader2 size={14} className="composer-spin" /> : <ListTodo size={14} />}
         </span>
         <span className="workspace-island-label">{headline}</span>
         {progressLabel && <span className="workspace-island-count">{progressLabel}</span>}
       </button>
 
-      <div className="workspace-island-popover" role="group" aria-label="Workspace status">
+      {expanded && (
+      <div className="workspace-island-panel" role="group" aria-label="Workspace status">
         <div className="wi-head">
           <span>
             <strong>Workspace</strong>
             <small>{streaming ? "live" : "thread"}</small>
           </span>
-          <button type="button" onClick={() => onOpenWorkbench("activity")} aria-label="Open activity">
-            <Maximize2 size={13} />
-          </button>
+          <span className="wi-head-actions">
+            <button type="button" aria-label="More status actions">
+              <MoreHorizontal size={14} />
+            </button>
+            <button type="button" onClick={() => onOpenWorkbench("activity")} aria-label="Open activity">
+              <Maximize2 size={13} />
+            </button>
+          </span>
         </div>
 
         <button className="wi-row" type="button" onClick={() => onOpenWorkbench("plan")}>
@@ -2163,6 +2170,7 @@ function WorkspaceIsland({
           </button>
         </div>
       </div>
+      )}
     </div>
   );
 }
