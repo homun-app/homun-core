@@ -58,37 +58,12 @@ export function Shell({
   const { t } = useTranslation();
   const isSettings = activeView === "settings";
   const [searchOpen, setSearchOpen] = useState(false);
-  const [transientDrawerOpen, setTransientDrawerOpen] = useState(false);
   const shellRef = useRef<HTMLDivElement>(null);
   const [drawerWidth, setDrawerWidth] = useState(readStoredDrawerWidth);
 
   function handleSelectSearchThread(threadId: string) {
     setSearchOpen(false);
     onSelectThread(threadId);
-  }
-
-  function closeTransientDrawer() {
-    setTransientDrawerOpen(false);
-  }
-
-  function handleTransientNavigate(view: ViewId) {
-    closeTransientDrawer();
-    onNavigate(view);
-  }
-
-  function handleTransientSelectThread(threadId: string) {
-    closeTransientDrawer();
-    onSelectThread(threadId);
-  }
-
-  function handleTransientSearch() {
-    closeTransientDrawer();
-    setSearchOpen(true);
-  }
-
-  function handleTransientCreateThread() {
-    closeTransientDrawer();
-    onCreateteChatThread();
   }
 
   function startResize(event: PointerEvent<HTMLDivElement>) {
@@ -130,7 +105,6 @@ export function Shell({
         // grid column when in settings.
         drawerOpen || isSettings ? "drawer-open" : "drawer-closed",
         isSettings ? "settings-mode" : "",
-        transientDrawerOpen && !drawerOpen && !isSettings ? "drawer-transient-open" : "",
       ]
         .filter(Boolean)
         .join(" ")}
@@ -140,52 +114,15 @@ export function Shell({
         <div className="window-drag-strip window-drag-strip--right" aria-hidden="true" />
       </div>
       {!drawerOpen && !isSettings && (
-        <>
-          <div
-            className="drawer-edge-hotspot"
-            aria-hidden="true"
-            onMouseEnter={() => setTransientDrawerOpen(true)}
-          />
-          <button
-            className="drawer-bottom-trigger"
-            type="button"
-            aria-label={t("sidebar.expandSidebar")}
-            title={t("sidebar.expandSidebar")}
-            onClick={() => {
-              closeTransientDrawer();
-              onToggleDrawer();
-            }}
-          >
-            <PanelLeftOpen size={18} />
-          </button>
-          {transientDrawerOpen && (
-            <div
-              className="drawer-floating-host"
-              onMouseLeave={closeTransientDrawer}
-            >
-              <NavDrawer
-                activeView={activeView}
-                activeThreadId={activeThreadId}
-                busyThreadIds={busyThreadIds}
-                chatThreads={chatThreads}
-                navItems={navItems}
-                onArchiveChatThread={onArchiveChatThread}
-                onCreateteChatThread={handleTransientCreateThread}
-                onDeleteChatThread={onDeleteChatThread}
-                onNavigate={handleTransientNavigate}
-                onSearchChat={handleTransientSearch}
-                onSelectThread={handleTransientSelectThread}
-                onSetChatThreadPinned={onSetChatThreadPinned}
-                onToggleDrawer={() => {
-                  closeTransientDrawer();
-                  onToggleDrawer();
-                }}
-                onUnarchiveChatThread={onUnarchiveChatThread}
-                presentation="floating"
-              />
-            </div>
-          )}
-        </>
+        <button
+          className="drawer-bottom-trigger"
+          type="button"
+          aria-label={t("sidebar.expandSidebar")}
+          title={t("sidebar.expandSidebar")}
+          onClick={onToggleDrawer}
+        >
+          <PanelLeftOpen size={18} />
+        </button>
       )}
       {drawerOpen && !isSettings && (
         <NavDrawer

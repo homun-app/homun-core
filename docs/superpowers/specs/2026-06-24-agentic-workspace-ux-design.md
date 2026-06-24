@@ -152,16 +152,15 @@ click di lettura. Il placeholder iniziale e' `New task` anche in locale italiano
 appena il primo prompt viene accettato, la sidebar deve mostrare un titolo breve
 sintetizzato dal contenuto invece delle prime parole grezze.
 
-Quando la sidebar e' chiusa su desktop, Homun non mostra una rail fissa. Il
-bordo sinistro diventa un hotspot discreto: hover/focus apre la stessa sidebar
-come isola floating con margine, bordo arrotondato e ombra leggera. Se l'utente
-seleziona una chat, un progetto o una voce di navigazione, l'isola si richiude;
-il controllo nel footer, accanto alle azioni persistenti, la pinna trasformandola
-nella sidebar persistente. Il toggle non vive nella titlebar: Electron mantiene
-i controlli nativi della finestra e la UI usa solo strip di drag esplicite,
-lasciando i controlli interattivi fuori dalle regioni `-webkit-app-region: drag`.
-Su mobile/tablet la stessa superficie resta overlay esplicito, senza dipendere
-dall'hover.
+Quando la sidebar e' chiusa su desktop, Homun non mostra una rail fissa e non
+apre la sidebar con hover sul bordo. L'utente usa un opener esplicito nel footer
+zone; la sidebar persistente resta una piccola isola con margine ridotto, bordo
+arrotondato e ombra leggera, abbastanza vicina al bordo da includere
+visivamente i controlli nativi macOS. Il toggle non vive nella titlebar:
+Electron mantiene i controlli nativi della finestra e la UI usa solo strip di
+drag esplicite, lasciando i controlli interattivi fuori dalle regioni
+`-webkit-app-region: drag`. Su mobile/tablet la stessa superficie resta overlay
+esplicito, senza dipendere dall'hover.
 
 Gli addon dichiarano `navSection`, `promoted` e ordine nel manifest/registry. La
 sidebar usa questi metadata per promuovere una capability senza hardcode.

@@ -625,7 +625,6 @@ interface NavDrawerProps {
   onSetChatThreadPinned: (threadId: string, pinned: boolean) => void;
   onToggleDrawer: () => void;
   onUnarchiveChatThread: (threadId: string) => void;
-  presentation?: "pinned" | "floating";
 }
 
 export function NavDrawer({
@@ -643,7 +642,6 @@ export function NavDrawer({
   onSetChatThreadPinned,
   onToggleDrawer,
   onUnarchiveChatThread,
-  presentation = "pinned",
 }: NavDrawerProps) {
   const { t } = useTranslation();
   const notifCount = useNotificationCount();
@@ -708,7 +706,7 @@ export function NavDrawer({
     }))
     .filter((group) => group.items.length > 0);
   return (
-    <aside className={`nav-drawer ${presentation === "floating" ? "floating-island" : ""}`} aria-label={t("sidebar.mainMenu")}>
+    <aside className="nav-drawer" aria-label={t("sidebar.mainMenu")}>
       <div className="drawer-topbar">
         <button className="drawer-search-action" type="button" onClick={onSearchChat}>
           <Search size={15} />
@@ -928,11 +926,11 @@ export function NavDrawer({
           <button
             className="drawer-footer-action drawer-toggle-action"
             type="button"
-            aria-label={presentation === "floating" ? t("sidebar.expandSidebar") : t("sidebar.collapseSidebar")}
-            title={presentation === "floating" ? t("sidebar.expandSidebar") : t("sidebar.collapseSidebar")}
+            aria-label={t("sidebar.collapseSidebar")}
+            title={t("sidebar.collapseSidebar")}
             onClick={onToggleDrawer}
           >
-            {presentation === "floating" ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+            <PanelLeftClose size={16} />
           </button>
         </div>
       </footer>

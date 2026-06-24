@@ -191,8 +191,8 @@ small {
 }
 
 .app-shell {
-  --drawer-island-gap: 16px;
-  --drawer-island-top: 14px;
+  --drawer-island-gap: 8px;
+  --drawer-island-top: 8px;
   --drawer-island-bottom: 8px;
   --window-chrome-height: 44px;
   height: 100vh;
@@ -315,47 +315,6 @@ small {
 
 .app-shell.drawer-open:not(.settings-mode) > .workspace {
   grid-column: 2;
-}
-
-.drawer-edge-hotspot {
-  position: fixed;
-  top: calc(var(--window-drag-height) + 52px);
-  bottom: 0;
-  left: 0;
-  z-index: 95;
-  width: 14px;
-  border: none;
-  background: transparent;
-  cursor: default;
-  -webkit-app-region: no-drag;
-}
-
-.drawer-edge-hotspot::after {
-  content: "";
-  position: absolute;
-  top: 18px;
-  bottom: 18px;
-  left: 4px;
-  width: 2px;
-  border-radius: 999px;
-  background: transparent;
-  transition: background 0.14s ease;
-}
-
-.drawer-edge-hotspot:hover::after,
-.drawer-edge-hotspot:focus-visible::after,
-.app-shell.drawer-transient-open .drawer-edge-hotspot::after {
-  background: color-mix(in srgb, var(--muted) 28%, transparent);
-}
-
-.drawer-floating-host {
-  position: fixed;
-  top: calc(var(--window-drag-height) + var(--drawer-island-top));
-  bottom: var(--drawer-island-bottom);
-  left: var(--drawer-island-gap);
-  z-index: 140;
-  width: min(var(--drawer-width, 292px), calc(100vw - (var(--drawer-island-gap) * 2)));
-  -webkit-app-region: no-drag;
 }
 
 /* Draggable splitter sitting on the drawer↔content boundary. */
@@ -498,19 +457,6 @@ body.resizing-drawer {
   box-shadow:
     0 24px 70px rgba(15, 23, 42, 0.12),
     0 3px 14px rgba(15, 23, 42, 0.06);
-}
-
-.drawer-floating-host .nav-drawer {
-  width: 100%;
-  height: 100%;
-}
-
-.nav-drawer.floating-island {
-  border: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
-  border-radius: 12px;
-  box-shadow:
-    0 24px 70px rgba(15, 23, 42, 0.18),
-    0 3px 14px rgba(15, 23, 42, 0.08);
 }
 
 .drawer-topbar {
@@ -7579,15 +7525,7 @@ body.resizing-drawer {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .drawer-floating-host {
-    top: var(--window-drag-height);
-    bottom: 0;
-    left: 0;
-    width: min(292px, 100vw);
-  }
-
-  .nav-drawer,
-  .nav-drawer.floating-island {
+  .nav-drawer {
     position: fixed;
     top: var(--window-drag-height);
     bottom: 0;
