@@ -71,20 +71,27 @@ La chat resta la superficie primaria:
 La chat non deve ospitare dock globali o stati di tool non appartenenti al thread
 attivo.
 
-### Dock contestuale: lavoro in corso
+### Workspace Island: lavoro in corso
 
-Il dock Computer/Activity/Plan deve essere contestuale, collassabile e con stato
-chiaro:
+La direzione aggiornata prende Zcode/Zed come riferimento: lo stato operativo
+vive in una piccola **Workspace Island** flottante, compatta di default e
+contestuale al thread. La chat resta pulita; piano, activity e artifact non
+devono diventare pannelli permanenti dentro il corpo dei messaggi.
 
-- appare appena una capability/tool execution parte;
-- mostra solo il lavoro del thread attivo, o segnala esplicitamente che un altro
-  thread sta lavorando;
-- si chiude o passa a stato completato quando il lavoro finisce;
-- distingue browser/computer, shell, filesystem, approvals, artifact generation;
-- non resta visibile come "Computer 2 commands" se non c'e' attivita' rilevante.
+La Workspace Island:
 
-Il dock puo' diventare laterale o bottom panel in una fase successiva, ma la
-prima slice deve sistemare proprieta', timing e stati prima del layout.
+- mostra stato sintetico (`Plan`, `Activity`, `Artifacts`, stato streaming);
+- espone in hover un riepilogo progressivo del piano e degli ultimi step;
+- al click apre il Workbench, di default sulla vista operativa `Activity`;
+- resta per-thread: non mostra stato di un thread diverso;
+- puo' restare visibile come riepilogo leggero quando ci sono artifact o piano
+  utile, ma non deve lampeggiare o simulare lavoro attivo a task concluso.
+
+Il computer e' una superficie separata: quando il browser/terminal locale e'
+live, compare una **Computer Island** sotto la Workspace Island, con mini preview
+del browser come oggi. Si espande per vedere il computer completo e scompare
+quando l'attivita' termina. I log finali possono restare in `Activity`, non come
+pannello computer persistente.
 
 ### Destra futura: artifact/task inspector
 

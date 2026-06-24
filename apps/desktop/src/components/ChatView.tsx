@@ -235,7 +235,6 @@ export function ChatView({
   // open/closed flag; `workbenchTab` is the active tab. Phase 1 ships the
   // "Artefatti" tab; File / Computer / Activity / Piano land in later phases.
   const [artifactsOpen, setArtifactsOpen] = useState(false);
-  const [panelMenuOpen, setPanelMenuOpen] = useState(false);
   const [workbenchTab, setWorkbenchTab] = useState<WorkbenchTab>("files");
   const [artifactsInitial, setArtifactsInitial] = useState<string | null>(null);
   const [memoryArtifacts, setMemoryArtifacts] = useState<MemoryArtifactView[]>([]);
@@ -334,6 +333,11 @@ export function ChatView({
   // The agent's operational plan for this conversation (latest update_plan), shown
   // in the Workbench "Piano" panel.
   const conversationPlan = useMemo(() => latestPlanMarkdown(threadMessages), [threadMessages]);
+  const conversationActivity = useMemo(() => latestActivitySteps(threadMessages), [threadMessages]);
+  const workspacePlanSteps = useMemo(
+    () => (conversationPlan ? parsePlanSteps(conversationPlan) : []),
+    [conversationPlan],
+  );
   // Files the user uploaded in THIS conversation (e.g. the patente PDF), derived
   // from message attachments — the chat-context "File" tab of the Workbench.
   const uploadedFiles = useMemo(() => {
@@ -919,7 +923,6 @@ export function ChatView({
       lines.push(`## ${who}`, "", strip(m.text ?? "") || "_(vuoto)_", "");
     }
     const ok = await copyText(lines.join("\n"));
-    setPanelMenuOpen(false);
     if (ok) {
       setChatExported(true);
       window.setTimeout(() => setChatExported(false), 1_800);
@@ -929,7 +932,6 @@ export function ChatView({
   // Capture the whole app window to a PNG and reveal it in Finder — the user can then
   // share the image to show the actual UI / pagination / a broken state.
   async function captureScreenshot() {
-    setPanelMenuOpen(false);
     await captureAppScreenshot();
   }
 
@@ -1656,86 +1658,26 @@ export function ChatView({
 
       </header>
 
-      {/* Panel toggle pinned to the top-right CORNER of the conversation (mock): opens a
-          dropdown of panel views. When the panel opens it docks over this corner (z-index),
-          so the panel's own header (title + fullscreen + close) takes over — no duplicate. */}
-      <div className="panel-menu-wrap panel-menu-wrap--corner">
-        <button
-          className={`workbench-toggle${artifactsOpen ? " active" : ""}`}
-          type="button"
-          title={artifactsOpen ? t("chat.closePanel") : t("chat.panel")}
-          aria-label={artifactsOpen ? t("chat.closePanel") : t("chat.openPanel")}
-          aria-expanded={panelMenuOpen}
-          onClick={() => {
-            // Toggle: open → close the panel; closed → open the view dropdown.
-            if (artifactsOpen) {
-              setArtifactsOpen(false);
-              setPanelMenuOpen(false);
-            } else {
-              setPanelMenuOpen((value) => !value);
-            }
-          }}
-        >
-          <PanelRight size={18} />
-          {!artifactsOpen && <ChevronDown size={12} className="workbench-toggle-caret" />}
-          {workbenchArtifacts.length > 0 && (
-            <span className="top-action-count">{workbenchArtifacts.length}</span>
-          )}
-        </button>
-        {panelMenuOpen && (
-          <>
-            <div
-              className="panel-menu-backdrop"
-              role="presentation"
-              onClick={() => setPanelMenuOpen(false)}
-            />
-            <div className="panel-menu" role="menu">
-              {PANEL_VIEWS.map((view) => {
-                const Icon = view.icon;
-                return (
-                  <button
-                    key={view.key}
-                    type="button"
-                    role="menuitem"
-                    className={`panel-menu-item${
-                      artifactsOpen && workbenchTab === view.key ? " active" : ""
-                    }`}
-                    onClick={() => {
-                      setWorkbenchTab(view.key);
-                      setArtifactsOpen(true);
-                      setPanelMenuOpen(false);
-                    }}
-                  >
-                    <Icon size={16} />
-                    <span>{view.label}</span>
-                  </button>
-                );
-              })}
-              <div className="panel-menu-sep" role="separator" />
-              {IS_DESKTOP && (
-                <button
-                  type="button"
-                  role="menuitem"
-                  className="panel-menu-item"
-                  onClick={() => void captureScreenshot()}
-                >
-                  <FileImage size={16} />
-                  <span>{t("chat.captureScreenshot")}</span>
-                </button>
-              )}
-              <button
-                type="button"
-                role="menuitem"
-                className="panel-menu-item"
-                onClick={() => void exportChatMarkdown()}
-              >
-                <Download size={16} />
-                <span>{chatExported ? t("chat.chatExported") : t("chat.exportChat")}</span>
-              </button>
-            </div>
-          </>
-        )}
-      </div>
+      <WorkspaceIsland
+        activitySteps={conversationActivity}
+        artifactsCount={workbenchArtifacts.length}
+        open={artifactsOpen}
+        planSteps={workspacePlanSteps}
+        streaming={promptSubmitting || Boolean(streamingAssistantId)}
+        status={streamStatus}
+        onCaptureScreenshot={IS_DESKTOP ? () => void captureScreenshot() : undefined}
+        onExportChat={() => void exportChatMarkdown()}
+        onOpenWorkbench={(tab) => {
+          setWorkbenchTab(tab);
+          setArtifactsOpen(true);
+        }}
+        onToggleWorkbench={() => {
+          setArtifactsOpen((value) => {
+            if (!value) setWorkbenchTab("activity");
+            return !value;
+          });
+        }}
+      />
 
       <div className="thread-scroll" aria-label={t("chat.activeThread")} ref={conversationRef}>
         <div className="thread-content">
@@ -2023,21 +1965,6 @@ export function ChatView({
             </article>
           )}
 
-          {showComputerActivity && (
-            <OperationalPlanPreview
-              collapsed={timelineCollapsed}
-              markdown={visibleComputerSession.operationalPlanMarkdown}
-            />
-          )}
-
-          {showComputerActivity && (
-            <InlineTimeline
-              collapsed={timelineCollapsed}
-              onToggle={() => setTimelineCollapsed((current) => !current)}
-              session={visibleComputerSession}
-            />
-          )}
-
           <InlineApprovelPanel
             approvals={activeApprovels}
             busyId={approvalBusyId}
@@ -2045,27 +1972,6 @@ export function ChatView({
             onApprove={onApproveApprovel}
             onReject={onRejectApprovel}
           />
-
-          {showComputerActivity && (
-            <LocalComputerCard
-              approvalsCount={activeApprovels.length}
-              collapsed={computerCardCollapsed}
-              smokeTestError={smokeTestError}
-              smokeTestRunning={smokeTestRunning}
-              planStepError={planStepError}
-              planStepRunning={planStepRunning}
-              previewDataUrl={previewDataUrl}
-              session={visibleComputerSession}
-              task={task}
-              onOpen={() => setDetailsOpen(true)}
-              onOpenTasks={onOpenTasks}
-              onRunPlanStep={runPromptPlanNextStep}
-              onRunSmokeTest={runLocalSmokeTest}
-              onToggleCollapsed={() =>
-                setComputerCardCollapsed((current) => !current)
-              }
-            />
-          )}
         </div>
       </div>
 
@@ -2141,6 +2047,122 @@ function AssistantThinkingState({ status }: { status: ChatStreamStatus | null })
         <i />
       </span>
       <span className="thinking-label">{status?.title ?? t("chat.thinking")}</span>
+    </div>
+  );
+}
+
+function WorkspaceIsland({
+  activitySteps,
+  artifactsCount,
+  open,
+  planSteps,
+  streaming,
+  status,
+  onCaptureScreenshot,
+  onExportChat,
+  onOpenWorkbench,
+  onToggleWorkbench,
+}: {
+  activitySteps: string[];
+  artifactsCount: number;
+  open: boolean;
+  planSteps: PlanStep[];
+  streaming: boolean;
+  status: ChatStreamStatus | null;
+  onCaptureScreenshot?: () => void;
+  onExportChat: () => void;
+  onOpenWorkbench: (tab: WorkbenchTab) => void;
+  onToggleWorkbench: () => void;
+}) {
+  const { t } = useTranslation();
+  const doneCount = planSteps.filter((step) => step.status === "done").length;
+  const runningPlan = planSteps.find((step) => step.status === "doing");
+  const blockedPlan = planSteps.find((step) => step.status === "blocked");
+  const latestActivity = activitySteps[activitySteps.length - 1] ?? null;
+  const headline =
+    blockedPlan?.title ??
+    runningPlan?.title ??
+    status?.title ??
+    latestActivity ??
+    (artifactsCount > 0 ? `${artifactsCount} artifact` : t("chat.panel"));
+  const progressLabel =
+    planSteps.length > 0
+      ? `${doneCount}/${planSteps.length}`
+      : streaming
+        ? status?.phase ?? "live"
+        : artifactsCount > 0
+          ? `${artifactsCount}`
+          : "";
+
+  return (
+    <div className={`workspace-island${open ? " open" : ""}${streaming ? " live" : ""}`}>
+      <button
+        className="workspace-island-pill"
+        type="button"
+        title={open ? t("chat.closePanel") : t("chat.openPanel")}
+        aria-label={open ? t("chat.closePanel") : t("chat.openPanel")}
+        onClick={onToggleWorkbench}
+      >
+        <span className="workspace-island-icon">
+          {streaming ? <Loader2 size={14} className="composer-spin" /> : <PanelRight size={14} />}
+        </span>
+        <span className="workspace-island-label">{headline}</span>
+        {progressLabel && <span className="workspace-island-count">{progressLabel}</span>}
+      </button>
+
+      <div className="workspace-island-popover" role="group" aria-label="Workspace status">
+        <div className="wi-head">
+          <span>
+            <strong>Workspace</strong>
+            <small>{streaming ? "live" : "thread"}</small>
+          </span>
+          <button type="button" onClick={() => onOpenWorkbench("activity")} aria-label="Open activity">
+            <Maximize2 size={13} />
+          </button>
+        </div>
+
+        <button className="wi-row" type="button" onClick={() => onOpenWorkbench("plan")}>
+          <ListTodo size={14} />
+          <span>Plan</span>
+          <strong>{planSteps.length > 0 ? `${doneCount}/${planSteps.length}` : "0"}</strong>
+        </button>
+        {planSteps.length > 0 && (
+          <ol className="wi-steps">
+            {planSteps.slice(0, 5).map((step, index) => (
+              <li key={`${index}-${step.title}`} className={step.status}>
+                <span>{step.status === "done" ? <Check size={12} /> : <span />}</span>
+                <em>{step.title}</em>
+              </li>
+            ))}
+          </ol>
+        )}
+
+        <button className="wi-row" type="button" onClick={() => onOpenWorkbench("activity")}>
+          <SquareTerminal size={14} />
+          <span>Activity</span>
+          <strong>{activitySteps.length}</strong>
+        </button>
+        {latestActivity && <p className="wi-latest">{latestActivity}</p>}
+
+        <button className="wi-row" type="button" onClick={() => onOpenWorkbench("artifacts")}>
+          <FileText size={14} />
+          <span>Artifacts</span>
+          <strong>{artifactsCount}</strong>
+        </button>
+
+        <div className="wi-actions">
+          {onCaptureScreenshot && (
+            <button type="button" onClick={onCaptureScreenshot}>
+              <FileImage size={13} />
+              <span>{t("chat.captureScreenshot")}</span>
+            </button>
+          )}
+          <button type="button" onClick={onExportChat}>
+            <Download size={13} />
+            <span>{t("chat.exportChat")}</span>
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -3031,6 +3053,15 @@ function latestPlanMarkdown(messages: { text?: string }[]): string | null {
     for (const match of text.matchAll(PLAN_RE)) latest = match[1].trim();
   }
   return latest && latest.length > 0 ? latest : null;
+}
+
+function latestActivitySteps(messages: { text?: string }[]): string[] {
+  let latest: string[] = [];
+  for (const message of messages) {
+    const steps = parseActivitySteps(message.text ?? "");
+    if (steps.length > 0) latest = steps;
+  }
+  return latest;
 }
 
 /** File-type icon (colored) by extension — like Claude Code's file list. */
@@ -5191,13 +5222,10 @@ function AssistantMessageBody({
     choices,
     planPropose,
     goalPropose,
-    planSteps,
   } = useMemo(() => parseComposioConfirm(text), [text]);
   const readable = useMemo(() => humanizeToolSlugs(visible), [visible]);
   return (
     <>
-      <MessageActivity text={text} />
-      {planSteps.length > 0 && <PlanProgressCard steps={planSteps} />}
       {readable && <RichMessage text={readable} streaming={streaming} />}
       {!streaming && onOpenArtifact && <MessageArtifacts text={text} onOpen={onOpenArtifact} />}
       {doneTool && !streaming && (

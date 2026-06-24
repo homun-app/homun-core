@@ -1642,6 +1642,264 @@ body.resizing-drawer {
   color: var(--brand);
 }
 
+/* Workspace Island — compact operational state, inspired by Zed/Zcode side
+   status panels: always lightweight, hover for progress, click opens Workbench. */
+.workspace-island {
+  position: absolute;
+  top: 58px;
+  right: 16px;
+  z-index: 32;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.workspace-island-pill,
+.workspace-island-popover {
+  pointer-events: auto;
+}
+
+.workspace-island-pill {
+  min-width: 0;
+  max-width: min(340px, calc(100vw - 380px));
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.94);
+  color: var(--text);
+  box-shadow: 0 10px 28px rgba(20, 22, 30, 0.12);
+  backdrop-filter: blur(14px);
+}
+
+.workspace-island-pill:hover,
+.workspace-island.open .workspace-island-pill {
+  background: #ffffff;
+  border-color: var(--line-strong);
+}
+
+.workspace-island-icon {
+  width: 20px;
+  height: 20px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 7px;
+  color: var(--brand);
+  background: var(--brand-soft);
+  flex: none;
+}
+
+.workspace-island-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.workspace-island-count {
+  margin-left: 2px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  color: var(--muted);
+  background: var(--surface-muted);
+  font-size: 11.5px;
+  font-weight: 650;
+  flex: none;
+}
+
+.workspace-island.live .workspace-island-count {
+  color: var(--green);
+  background: var(--green-soft);
+}
+
+.workspace-island-popover {
+  width: 320px;
+  max-height: min(520px, calc(100vh - 128px));
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.97);
+  box-shadow: 0 18px 52px rgba(20, 22, 30, 0.16);
+  backdrop-filter: blur(16px);
+  opacity: 0;
+  transform: translateY(-4px) scale(0.98);
+  transform-origin: top right;
+  pointer-events: none;
+  transition: opacity 0.12s ease, transform 0.12s ease;
+}
+
+.workspace-island:hover .workspace-island-popover,
+.workspace-island:focus-within .workspace-island-popover {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  pointer-events: auto;
+}
+
+.wi-head,
+.wi-row,
+.wi-actions {
+  display: flex;
+  align-items: center;
+}
+
+.wi-head {
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.wi-head > span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.wi-head strong {
+  font-size: 13px;
+}
+
+.wi-head small {
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.wi-head button {
+  width: 26px;
+  height: 26px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 8px;
+  color: var(--muted);
+  background: transparent;
+}
+
+.wi-head button:hover,
+.wi-row:hover,
+.wi-actions button:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+.wi-row {
+  width: 100%;
+  gap: 10px;
+  min-height: 34px;
+  padding: 0 8px;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  text-align: left;
+}
+
+.wi-row svg {
+  color: var(--muted);
+  flex: none;
+}
+
+.wi-row span {
+  flex: 1;
+}
+
+.wi-row strong {
+  color: var(--green);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.wi-steps {
+  margin: 4px 0 8px 24px;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.wi-steps li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.wi-steps li > span {
+  width: 14px;
+  height: 14px;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+}
+
+.wi-steps li > span > span {
+  width: 7px;
+  height: 7px;
+  border: 1.5px solid var(--line-strong);
+  border-radius: 50%;
+}
+
+.wi-steps li.done {
+  text-decoration: line-through;
+}
+
+.wi-steps li.done svg {
+  color: var(--green);
+}
+
+.wi-steps li.doing {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.wi-steps li.blocked {
+  color: var(--red);
+}
+
+.wi-steps em,
+.wi-latest {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-style: normal;
+}
+
+.wi-latest {
+  margin: 2px 8px 8px 32px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.wi-actions {
+  gap: 6px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.wi-actions button {
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .floating-menu {
   position: absolute;
   top: calc(100% + 8px);
@@ -6359,17 +6617,26 @@ body.resizing-drawer {
   color: var(--amber, #b7791f);
 }
 
-/* Computer dock — a bar pinned just above the prompt composer, matching its
-   exact width and centering so the two read as an aligned pair. */
+/* Computer Island — live, thread-owned browser/terminal preview. It sits under
+   Workspace Island and disappears when the contained computer is idle. */
 .cc-dock {
-  width: min(100%, 760px);
-  margin: 0 auto 8px;
+  position: absolute;
+  top: 102px;
+  right: 16px;
+  z-index: 31;
+  width: 320px;
+  max-width: calc(100% - 32px);
+  margin: 0;
   border: 1px solid var(--line);
-  border-radius: 16px;
-  background: var(--surface);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.97);
   overflow: hidden;
-  flex-shrink: 0;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  box-shadow: 0 18px 52px rgba(20, 22, 30, 0.16);
+  backdrop-filter: blur(16px);
+}
+
+.cc-dock.expanded {
+  width: min(620px, calc(100% - 32px));
 }
 
 .cc-dock.full {
@@ -6457,7 +6724,7 @@ body.resizing-drawer {
    negative top offset, desktop scales with width → clean mini preview. */
 .cc-thumb {
   position: relative;
-  width: 136px;
+  width: 124px;
   aspect-ratio: 1280 / 800;
   flex-shrink: 0;
   border-radius: 10px;

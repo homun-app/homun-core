@@ -421,6 +421,11 @@ primo percorso locale verde e WS5 è chiusa localmente/gate:
     stretti per includere visivamente il semaforo macOS; Settings usa la stessa
     geometria a isola per la nav laterale. La shell Electron mantiene controlli
     finestra nativi; i toggle Homun restano fuori dalla titlebar/drag strip.
+    Seconda slice chat/workspace: aggiunta `WorkspaceIsland` compatta stile
+    Zcode che riepiloga plan/activity/artifact per thread, apre il Workbench
+    su `Activity` e sposta i marker `PLAN`/`ACT` fuori dal corpo messaggio; il
+    computer resta una `ComputerIsland` separata con preview live ed espansione,
+    visibile solo durante attivita' owner del thread.
 
 Prima di pubblicare/taggare resta prudente ripetere lo smoke manuale in-app su
 una automazione schedulata reale con il binario aggiornato. Il primo smoke ha

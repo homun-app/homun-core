@@ -90,9 +90,18 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   persistenti, fuori dalla titlebar/drag strip, l'isola usa margini piu' stretti
   per includere visivamente il semaforo macOS e la shell Electron mantiene
   controlli finestra nativi. Gate runtime Electron: collapse e reopen da
-  footer/opener basso verificati. **Prossimo passo unico:** continuare su
-  micro-slice UX.2 chat/dock o tornare a WS7 qualita' deliverable senza riaprire
-  memoria/WS1/WS8 salvo regressioni.
+  footer/opener basso verificati. **UX.2 chat/workspace prima slice locale:**
+  introdotta `WorkspaceIsland` compatta stile Zcode per stato per-thread
+  (plan/activity/artifact), hover con riepilogo operativo e click verso
+  Workbench; i marker `PLAN`/`ACT` non duplicano piu' card tecniche dentro il
+  corpo del messaggio. Il `ChatComputerPanel` resta separato come
+  `ComputerIsland` live: preview browser/terminal compatta sotto la workspace
+  island, espandibile e visibile solo durante attivita' owner del thread. Gate
+  locale: `npm run test:ui-contract`, `npm run build`, runtime Electron su
+  thread con 3 artifact + plan 1/1. **Prossimo passo unico:** completare la
+  rifinitura UX.2 su progressive live-state/computer durante esecuzione reale,
+  poi tornare a WS7 qualita' deliverable senza riaprire memoria/WS1/WS8 salvo
+  regressioni.
 - **Direzione WS7 aggiornata:** l'obiettivo deliverable non è una gallery statica
   clonata tool-per-tool, ma un **design system dichiarativo condiviso** per
   documenti e presentazioni/plugin: temi, layout, componenti, template e QA
