@@ -256,7 +256,9 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   `py_compile` della eval suite) e abilita gli eval modello/gateway solo via env (`HOMUN_RUN_MODEL_EVAL`,
   `HOMUN_EVAL_GATEWAY_BASE`). Verifica aggiornata: `python3 scripts/pre_release_gate.py`
   verde con suite capabilities, orchestrator, gateway, UI
-  contract e build desktop verdi.
+  contract e build desktop verdi. Follow-up gate 2026-06-24: il summary dei
+  task mantiene il marker esplicito `[REDACTED]` quando la compattazione titolo
+  incontra token/segreti, senza ri-esporre il valore originale.
   **WS4 chat perf:** `RichMessage` e il renderer markdown lazy sono memoizzati,
   così polling/live state e sidebar non ricalcolano markdown pesante per messaggi
   completati invariati.

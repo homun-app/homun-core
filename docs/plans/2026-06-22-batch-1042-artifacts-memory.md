@@ -983,7 +983,9 @@ Il caposaldo #2 ("funziona sul tier locale") oggi è verificato solo sul deck
   `HOMUN_EVAL_GATEWAY_BASE`, così il gate locale non dipende da runtime esterni.
   Verifica 2026-06-24 aggiornata: `python3 scripts/pre_release_gate.py` verde
   (capabilities, orchestrator, gateway, UI contract, build desktop, unit test
-  eval/pre-release, eval syntax). **WS8 chiusa localmente/gate.**
+  eval/pre-release, eval syntax). Follow-up gate 2026-06-24: corretto il summary
+  dei task redatti, che ora preserva `[REDACTED]` dopo la compattazione del
+  titolo senza ri-esporre il valore segreto. **WS8 chiusa localmente/gate.**
 
 ## UX — Agentic workspace coherence
 

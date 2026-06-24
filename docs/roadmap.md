@@ -344,6 +344,8 @@ primo percorso locale verde e WS5 è chiusa localmente/gate:
     `local-first-orchestrator` e unit test Python della eval suite/pre-release;
     i validator gateway falliscono se `/api/templates/catalog` espone template
     callable o se `/api/capabilities/snapshot` perde il contratto minimo dei tool.
+    Follow-up gate: i task summary redatti preservano il marker `[REDACTED]`
+    anche dopo la compattazione del titolo.
 79. WS8 memory eval closure — il requisito "nuova chat: stato + perché" è coperto
     dai gate WS5.6 (`memory_eval_*` e release gate memoria): artifact provenance,
     decision why e workflow status/why emergono dalla memoria canonica.

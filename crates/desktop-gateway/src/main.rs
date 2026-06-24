@@ -37781,11 +37781,49 @@ fn task_goal_summary(goal: &str) -> String {
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ");
-    let compact = compact_thread_title(&redacted);
+    let compact = if redacted.contains("[REDACTED]") {
+        compact_redacted_task_goal_summary(&redacted)
+    } else {
+        compact_thread_title(&redacted)
+    };
     if compact.is_empty() {
         "Local task from chat".to_string()
     } else {
         compact
+    }
+}
+
+fn compact_redacted_task_goal_summary(redacted: &str) -> String {
+    const MAX_CHARS: usize = 44;
+
+    let marker_segment = redacted
+        .split_whitespace()
+        .find(|word| word.contains("[REDACTED]"))
+        .unwrap_or("[REDACTED]");
+    if marker_segment.chars().count() >= MAX_CHARS {
+        return marker_segment.chars().take(MAX_CHARS).collect();
+    }
+
+    let prefix = redacted
+        .find(marker_segment)
+        .map(|index| redacted[..index].trim())
+        .unwrap_or_default();
+    let compact_prefix = compact_thread_title(prefix);
+    let separator_chars = usize::from(!compact_prefix.is_empty());
+    let prefix_budget = MAX_CHARS
+        .saturating_sub(marker_segment.chars().count())
+        .saturating_sub(separator_chars);
+    let prefix = compact_prefix
+        .chars()
+        .take(prefix_budget)
+        .collect::<String>()
+        .trim()
+        .to_string();
+
+    if prefix.is_empty() {
+        marker_segment.to_string()
+    } else {
+        format!("{prefix} {marker_segment}")
     }
 }
 
