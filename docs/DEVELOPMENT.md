@@ -229,6 +229,9 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   **WS9.6 ADR locale:** ADR 0017 formalizza distribuzione, signing e licensing:
   registry hosted sul sito Homun, verifica locale deterministica, beta opt-in,
   paid predisposto con token offline e runtime sempre contenuto.
+  **WS9.5a licensing contract locale/verde:** `PluginLicenseToken` verifica
+  offline claim firmati Ed25519 su plugin target e scadenza, senza backend
+  pagamento. Verifica: suite capabilities verde.
   `make_research` e `make_meeting` restano dopo questo asse.
 - **WS2-3.1 PASSATA in runtime (2026-06-23):** gli artifact scritti via
   Filesystem MCP dentro la root progetto vengono registrati come

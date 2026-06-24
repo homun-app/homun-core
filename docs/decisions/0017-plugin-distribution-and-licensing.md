@@ -44,8 +44,10 @@ registry, bypass the approval model, or grant raw system access.
 
 5. **Paid is prepared locally; payment is later cloud.**
    `entitlement=paid` and offline-verifiable license tokens are part of the
-   contract. The actual account/payment workflow can require cloud/always-on
-   infrastructure later, but installed plugin execution remains local-first.
+   contract. License claims are verified locally with Ed25519 against the plugin
+   target and expiry. The actual account/payment workflow can require
+   cloud/always-on infrastructure later, but installed plugin execution remains
+   local-first.
 
 6. **Execution remains contained.**
    Package verification only says "this package is authentic and compatible".

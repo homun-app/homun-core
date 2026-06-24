@@ -447,6 +447,61 @@ fn is_sha256_digest(value: &str) -> bool {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PluginLicenseClaims {
+    pub plugin_id: String,
+    pub licensee: String,
+    pub entitlement: PluginEntitlement,
+    pub issued_at: i64,
+    pub expires_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PluginLicenseToken {
+    pub claims: PluginLicenseClaims,
+    pub signature: PluginSignature,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PluginLicenseValidationError {
+    Expired,
+    InvalidPublicKey,
+    InvalidSignature,
+    PluginMismatch,
+    SerializationFailed,
+    UnsupportedSignatureAlgorithm,
+}
+
+impl PluginLicenseToken {
+    pub fn verify_offline(
+        &self,
+        plugin_id: &str,
+        now_unix: i64,
+    ) -> Result<(), PluginLicenseValidationError> {
+        if self.claims.plugin_id != plugin_id {
+            return Err(PluginLicenseValidationError::PluginMismatch);
+        }
+        if self.claims.expires_at.is_some_and(|expires_at| now_unix > expires_at) {
+            return Err(PluginLicenseValidationError::Expired);
+        }
+        if self.signature.algorithm.to_ascii_lowercase() != "ed25519" {
+            return Err(PluginLicenseValidationError::UnsupportedSignatureAlgorithm);
+        }
+        let public_key = decode_fixed_hex::<32>(&self.signature.public_key)
+            .ok_or(PluginLicenseValidationError::InvalidPublicKey)?;
+        let signature_bytes = decode_fixed_hex::<64>(&self.signature.signature)
+            .ok_or(PluginLicenseValidationError::InvalidSignature)?;
+        let verifying_key = VerifyingKey::from_bytes(&public_key)
+            .map_err(|_| PluginLicenseValidationError::InvalidPublicKey)?;
+        let signature = Signature::from_bytes(&signature_bytes);
+        let payload = serde_json::to_vec(&self.claims)
+            .map_err(|_| PluginLicenseValidationError::SerializationFailed)?;
+        verifying_key
+            .verify(&payload, &signature)
+            .map_err(|_| PluginLicenseValidationError::InvalidSignature)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PluginManifest {
     pub id: String,
     pub version: String,

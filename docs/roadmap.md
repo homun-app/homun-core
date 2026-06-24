@@ -351,6 +351,9 @@ primo percorso locale verde:
 82. WS9 ADR distribuzione/licensing — ADR 0017 formalizza registry hosted sul
     sito Homun, verifica locale deterministica, beta opt-in, paid predisposto con
     token offline e pagamento/cloud rinviati.
+83. WS9 licensing offline contract — `PluginLicenseClaims` /
+    `PluginLicenseToken` verificano offline firma Ed25519, plugin target e
+    scadenza. Restano storage token, re-check manager e account/payment cloud.
 
 Prima di pubblicare/taggare resta prudente ripetere lo smoke manuale in-app su
 una automazione schedulata reale con il binario aggiornato. Il primo smoke ha

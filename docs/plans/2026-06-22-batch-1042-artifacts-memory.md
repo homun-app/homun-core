@@ -982,9 +982,13 @@ proprio — versioning, canali, scaricabili dal **sito Homun**, auto-aggiornabil
   `plugin_packages::tests::hplugin_archive_*` verdi. Restano: enforcement
   install/update, staging sotto directory manager definitiva e attivazione
   atomica nel registry locale.
-- ☐ **9.5 Licensing/paid (predisporre ora)**: campo `entitlement` nel manifest + **token
-  di licenza firmato** verificabile **offline** + ri-check periodico. Il paywall vero
-  (account + pagamenti, es. Stripe) è fase successiva e **lega cloud/always-on**.
+- 🟡 **9.5 Licensing/paid (predisporre ora)**: campo `entitlement` nel manifest
+  già presente; prima slice token offline fatta. `PluginLicenseClaims` /
+  `PluginLicenseToken` verificano firma Ed25519, plugin target e scadenza senza
+  backend pagamenti. Verifica 2026-06-24:
+  `plugin_license_token_verifies_offline_signature_and_expiry` e suite
+  capabilities verdi. Restano: storage locale dei token, ri-check periodico nel
+  manager, account/pagamenti cloud quando si attiva il paid reale.
 - ✅ **9.6 ADR** "distribuzione & licensing plugin": ADR 0017 accettata. Fissa
   registry hosted sul sito Homun, verifica locale deterministica, beta opt-in,
   licensing paid predisposto ma pagamento/cloud rinviato, e nessun secondo

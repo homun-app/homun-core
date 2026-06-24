@@ -2,9 +2,10 @@ use ed25519_dalek::{Signer, SigningKey};
 use local_first_capabilities::{
     ActionClass, CapabilityProviderKind, CapabilityTool, DataBoundary, ManagedProviderMetadata,
     PluginCapabilityDeclaration, PluginCapabilityKind, PluginChannel, PluginEntitlement,
-    PluginManifest, PluginPackageFile, PluginPackageManifest, PluginPackageValidationError,
-    PluginRegistryEntry, PluginRegistryIndex, PluginRegistryValidationError, PluginSignature,
-    ProviderId, SkillManifest, SkillPermissions, SkillToolManifest, UserId, WorkspaceId,
+    PluginLicenseClaims, PluginLicenseToken, PluginLicenseValidationError, PluginManifest,
+    PluginPackageFile, PluginPackageManifest, PluginPackageValidationError, PluginRegistryEntry,
+    PluginRegistryIndex, PluginRegistryValidationError, PluginSignature, ProviderId, SkillManifest,
+    SkillPermissions, SkillToolManifest, UserId, WorkspaceId,
 };
 
 #[test]
@@ -291,6 +292,38 @@ fn plugin_package_manifest_validates_safe_archive_layout() {
     assert_eq!(
         missing_manifest.validate_layout(),
         Err(PluginPackageValidationError::MissingManifest)
+    );
+}
+
+#[test]
+fn plugin_license_token_verifies_offline_signature_and_expiry() {
+    let signing_key = SigningKey::from_bytes(&[9; 32]);
+    let verifying_key = signing_key.verifying_key();
+    let claims = PluginLicenseClaims {
+        plugin_id: "presentations-pro".to_string(),
+        licensee: "user_1".to_string(),
+        entitlement: PluginEntitlement::Paid,
+        issued_at: 1_750_000_000,
+        expires_at: Some(1_900_000_000),
+    };
+    let signature = signing_key.sign(&serde_json::to_vec(&claims).unwrap());
+    let token = PluginLicenseToken {
+        claims,
+        signature: PluginSignature {
+            algorithm: "ed25519".to_string(),
+            public_key: hex_lower(verifying_key.as_bytes()),
+            signature: hex_lower(&signature.to_bytes()),
+        },
+    };
+
+    assert!(token.verify_offline("presentations-pro", 1_800_000_000).is_ok());
+    assert_eq!(
+        token.verify_offline("other-plugin", 1_800_000_000),
+        Err(PluginLicenseValidationError::PluginMismatch)
+    );
+    assert_eq!(
+        token.verify_offline("presentations-pro", 1_950_000_000),
+        Err(PluginLicenseValidationError::Expired)
     );
 }
 
