@@ -100,15 +100,17 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   `Always collapsed`, persiste la preferenza locale e la card contiene una
   sezione `Progress` con completed collassabili; l'header della chat espone il
   menu workspace/review a destra e `Artifacts` apre la Review sidebar stile
-  Codex, riusando preview/diff/versioni gia' presenti. Il `ChatComputerPanel` resta
-  separato come
-  `ComputerIsland` live: preview browser/terminal compatta sotto la workspace
-  island, espandibile e visibile solo durante attivita' owner del thread. Gate
-  locale: `npm run test:ui-contract`, `npm run build`, runtime Electron su
-  thread con 3 artifact + plan 1/1. **Prossimo passo unico:** completare la
-  rifinitura UX.2 su progressive live-state/computer durante esecuzione reale,
-  poi tornare a WS7 qualita' deliverable senza riaprire memoria/WS1/WS8 salvo
-  regressioni.
+  Codex, riusando preview/diff/versioni gia' presenti. Correzione post-smoke:
+  l'isola non viene renderizzata su chat vuote o thread senza stato operativo
+  reale, non mostra righe `0`, e il menu workspace/review dell'header e'
+  esplicitamente fuori dalla drag region Electron. Il `ChatComputerPanel` resta
+  separato come `ComputerIsland` live: preview browser/terminal compatta sotto
+  la workspace island, espandibile e visibile solo durante attivita' owner del
+  thread. Gate locale: `npm run test:ui-contract`, `npm run build`, runtime
+  Electron riavviato con gateway `local-first-desktop-gateway` in ascolto su
+  `127.0.0.1:18765`. **Prossimo passo unico:** completare la rifinitura UX.2 su
+  progressive live-state/computer durante esecuzione reale, poi tornare a WS7
+  qualita' deliverable senza riaprire memoria/WS1/WS8 salvo regressioni.
 - **Direzione WS7 aggiornata:** l'obiettivo deliverable non è una gallery statica
   clonata tool-per-tool, ma un **design system dichiarativo condiviso** per
   documenti e presentazioni/plugin: temi, layout, componenti, template e QA

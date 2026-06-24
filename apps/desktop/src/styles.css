@@ -1585,6 +1585,7 @@ body.resizing-drawer {
 .panel-menu-wrap {
   position: relative;
   display: inline-flex;
+  -webkit-app-region: no-drag;
 }
 /* Pinned to the top-right corner of the conversation, aligned with the title row.
    z-index sits BELOW the docked panel (40) so the panel covers it when open and its

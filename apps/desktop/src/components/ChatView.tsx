@@ -2131,6 +2131,11 @@ function WorkspaceIsland({
   const blockedPlan = planSteps.find((step) => step.status === "blocked");
   const latestActivity = activitySteps[activitySteps.length - 1] ?? null;
   const artifactsCount = artifacts.length;
+  const hasWorkspaceState =
+    streaming ||
+    planSteps.length > 0 ||
+    activitySteps.length > 0 ||
+    artifactsCount > 0;
   const headline =
     blockedPlan?.title ??
     runningPlan?.title ??
@@ -2179,6 +2184,8 @@ function WorkspaceIsland({
     { value: "expanded", label: "Always expanded" },
     { value: "collapsed", label: "Always collapsed" },
   ];
+
+  if (!hasWorkspaceState) return null;
 
   return (
     <div className={`workspace-island${expanded ? " expanded" : ""}${streaming ? " live" : ""}`}>
@@ -2246,11 +2253,13 @@ function WorkspaceIsland({
             )}
           </div>
 
-          <div className="wi-row">
-            <ListTodo size={14} />
-            <span>Plan</span>
-            <strong>{planSteps.length > 0 ? `${doneCount}/${planSteps.length}` : "0"}</strong>
-          </div>
+          {planSteps.length > 0 && (
+            <div className="wi-row">
+              <ListTodo size={14} />
+              <span>Plan</span>
+              <strong>{doneCount}/{planSteps.length}</strong>
+            </div>
+          )}
           {planSteps.length > 0 && (
             <div className="wi-progress">
               <div className="wi-progress-head">
@@ -2291,23 +2300,28 @@ function WorkspaceIsland({
             </div>
           )}
 
-          <div className="wi-row">
-            <SquareTerminal size={14} />
-            <span>Activity</span>
-            <strong>{activitySteps.length}</strong>
-          </div>
-          {latestActivity && <p className="wi-latest">{latestActivity}</p>}
+          {activitySteps.length > 0 && (
+            <>
+              <div className="wi-row">
+                <SquareTerminal size={14} />
+                <span>Activity</span>
+                <strong>{activitySteps.length}</strong>
+              </div>
+              {latestActivity && <p className="wi-latest">{latestActivity}</p>}
+            </>
+          )}
 
-          <button
-            className="wi-row wi-row-button"
-            type="button"
-            disabled={artifactsCount === 0}
-            onClick={onOpenArtifacts}
-          >
-            <FileText size={14} />
-            <span>Artifacts</span>
-            <strong>{artifactsCount}</strong>
-          </button>
+          {artifactsCount > 0 && (
+            <button
+              className="wi-row wi-row-button"
+              type="button"
+              onClick={onOpenArtifacts}
+            >
+              <FileText size={14} />
+              <span>Artifacts</span>
+              <strong>{artifactsCount}</strong>
+            </button>
+          )}
 
           <div className="wi-actions">
             {onCaptureScreenshot && (

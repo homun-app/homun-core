@@ -432,7 +432,10 @@ primo percorso locale verde e WS5 è chiusa localmente/gate:
     dentro l'isola.
     I marker `PLAN`/`ACT` escono dal corpo messaggio; il computer resta una
     `ComputerIsland` separata con preview live ed espansione, visibile solo
-    durante attivita' owner del thread.
+    durante attivita' owner del thread. Correzione post-smoke: l'isola ora
+    resta assente su chat vuote o thread senza stato operativo reale, non mostra
+    righe a zero e il menu workspace/review dell'header e' no-drag/cliccabile in
+    Electron.
 
 Prima di pubblicare/taggare resta prudente ripetere lo smoke manuale in-app su
 una automazione schedulata reale con il binario aggiornato. Il primo smoke ha
