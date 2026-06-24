@@ -698,6 +698,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             post(install_local_plugin_package),
         )
         .route(
+            "/api/plugins/packages/installed",
+            get(installed_plugin_packages),
+        )
+        .route(
             "/api/runtime/provider",
             get(runtime_provider).post(set_runtime_provider),
         )
@@ -20572,6 +20576,27 @@ async fn install_local_plugin_package(
         "files": installed.inspection.files,
         "security": installed.inspection.security,
         "installed_plugins": installed_registry.plugins,
+    })))
+}
+
+/// GET /api/plugins/packages/installed — read-only view of locally installed
+/// package-backed plugins. Missing registry is a clean empty state.
+async fn installed_plugin_packages() -> Result<Json<serde_json::Value>, GatewayError> {
+    let registry = plugin_packages::load_installed_plugin_registry(
+        &installed_plugin_registry_path().map_err(|e| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "plugin_registry_path_unavailable",
+            message: e.to_string(),
+        })?,
+    )
+    .map_err(|e| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "plugin_registry_read_failed",
+        message: e,
+    })?;
+    Ok(Json(serde_json::json!({
+        "schema_version": registry.schema_version,
+        "plugins": registry.plugins,
     })))
 }
 

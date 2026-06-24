@@ -972,8 +972,9 @@ proprio — versioning, canali, scaricabili dal **sito Homun**, auto-aggiornabil
   `POST /api/plugins/packages/install-local` per installare da path locale
   usando la stessa policy, sotto `~/.homun/plugins/installed`. 2026-06-24:
   aggiunto registry locale installati `~/.homun/plugins/installed.json`, scritto
-  atomicamente dall'endpoint install. Restano: UI manager, fetch/cache registry,
-  download pacchetti e auto-update reale.
+  atomicamente dall'endpoint install. 2026-06-24: aggiunto endpoint read-only
+  `GET /api/plugins/packages/installed`. Restano: UI manager, fetch/cache
+  registry, download pacchetti e auto-update reale.
 - 🟡 **9.4 Sicurezza**: prima slice integrity/policy fatta. `PluginRegistryEntry`
   valida digest `sha256:<64 hex>`, richiede algoritmo firma `ed25519`, confronta
   SHA-256 del pacchetto e verifica la firma Ed25519 sui byte pacchetto. Inoltre
@@ -990,9 +991,8 @@ proprio — versioning, canali, scaricabili dal **sito Homun**, auto-aggiornabil
   `plugin_packages::tests::hplugin_archive_*` verdi. 2026-06-24: enforcement
   locale install-time aggiunto con staging sotto root manager, mismatch
   `plugin_id/version` bloccante e attivazione atomica post-verifica. Verifica:
-  `plugin_packages::tests` verdi. Endpoint install locale collegato nel gateway
-  e registry installati locale aggiunto; restano UI e update su plugin già
-  installati.
+  `plugin_packages::tests` verdi. Endpoint install locale e lettura installati
+  collegati nel gateway; restano UI e update su plugin già installati.
 - 🟡 **9.5 Licensing/paid (predisporre ora)**: campo `entitlement` nel manifest
   già presente; prima slice token offline fatta. `PluginLicenseClaims` /
   `PluginLicenseToken` verificano firma Ed25519, plugin target e scadenza senza
