@@ -82,10 +82,10 @@ La Workspace Island:
 
 - mostra stato sintetico (`Plan`, `Activity`, `Artifacts`, stato streaming);
 - resta una pill compatta nello stato chiuso;
-- in hover mostra solo il controllo di espansione, non apre il pannello;
-- al click espande una card flottante con riepilogo progressivo del piano e
-  degli ultimi step;
-- le righe interne possono aprire il Workbench sulla vista corrispondente;
+- al click la pill si trasforma in una card flottante nello stesso anchor, senza
+  pulsanti esterni disallineati;
+- la card mostra riepilogo progressivo del piano e degli ultimi step;
+- non apre il Workbench come effetto collaterale dei controlli di espansione;
 - resta per-thread: non mostra stato di un thread diverso;
 - puo' restare visibile come riepilogo leggero quando ci sono artifact o piano
   utile, ma non deve lampeggiare o simulare lavoro attivo a task concluso.

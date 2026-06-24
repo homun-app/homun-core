@@ -1642,50 +1642,19 @@ body.resizing-drawer {
   color: var(--brand);
 }
 
-/* Workspace Island — compact operational state, inspired by Zed/Zcode side
-   status panels: always lightweight, hover for progress, click opens Workbench. */
+/* Workspace Island — compact operational state, inspired by Zed/Zcode status
+   panels: the pill expands in place into a lightweight thread card. */
 .workspace-island {
   position: absolute;
   top: 52px;
   right: 24px;
   z-index: 32;
-  display: flex;
-  align-items: flex-end;
-  gap: 6px;
   pointer-events: none;
 }
 
 .workspace-island-pill,
-.workspace-island-expand,
 .workspace-island-panel {
   pointer-events: auto;
-}
-
-.workspace-island-expand {
-  width: 28px;
-  height: 28px;
-  display: inline-grid;
-  place-items: center;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.96);
-  color: var(--muted);
-  box-shadow: 0 7px 18px rgba(20, 22, 30, 0.12);
-  opacity: 0;
-  transform: translateX(8px) scale(0.96);
-  transition: opacity 0.12s ease, transform 0.12s ease, color 0.12s ease;
-}
-
-.workspace-island:hover .workspace-island-expand,
-.workspace-island:focus-within .workspace-island-expand,
-.workspace-island.expanded .workspace-island-expand {
-  opacity: 1;
-  transform: translateX(0) scale(1);
-}
-
-.workspace-island-expand:hover {
-  color: var(--text);
-  background: #ffffff;
 }
 
 .workspace-island-pill {
@@ -1705,7 +1674,7 @@ body.resizing-drawer {
 }
 
 .workspace-island-pill:hover,
-.workspace-island.expanded .workspace-island-pill {
+.workspace-island-pill:focus-visible {
   background: #ffffff;
   border-color: var(--line-strong);
 }
@@ -1745,9 +1714,6 @@ body.resizing-drawer {
 }
 
 .workspace-island-panel {
-  position: absolute;
-  top: calc(100% + 8px);
-  right: 0;
   width: 320px;
   max-height: min(520px, calc(100vh - 128px));
   overflow: auto;
@@ -1807,7 +1773,6 @@ body.resizing-drawer {
 }
 
 .wi-head button:hover,
-.wi-row:hover,
 .wi-actions button:hover {
   color: var(--text);
   background: var(--surface-hover);

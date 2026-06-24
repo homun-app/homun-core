@@ -92,10 +92,11 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   controlli finestra nativi. Gate runtime Electron: collapse e reopen da
   footer/opener basso verificati. **UX.2 chat/workspace prima slice locale:**
   introdotta `WorkspaceIsland` compatta stile Zcode per stato per-thread
-  (plan/activity/artifact): lo stato chiuso e' una pill, l'hover mostra solo il
-  controllo expand e il click espande una card flottante; il Workbench resta
-  apribile dalle righe interne. I marker `PLAN`/`ACT` non duplicano piu' card
-  tecniche dentro il corpo del messaggio. Il `ChatComputerPanel` resta separato come
+  (plan/activity/artifact): lo stato chiuso e' una pill unica e il click la
+  trasforma in una card flottante nello stesso anchor, senza controlli esterni
+  disallineati e senza aprire accidentalmente il Workbench. I marker `PLAN`/`ACT`
+  non duplicano piu' card tecniche dentro il corpo del messaggio. Il
+  `ChatComputerPanel` resta separato come
   `ComputerIsland` live: preview browser/terminal compatta sotto la workspace
   island, espandibile e visibile solo durante attivita' owner del thread. Gate
   locale: `npm run test:ui-contract`, `npm run build`, runtime Electron su

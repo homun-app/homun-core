@@ -11,6 +11,7 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
   Copy,
   Bot,
   Braces,
@@ -1666,10 +1667,6 @@ export function ChatView({
         status={streamStatus}
         onCaptureScreenshot={IS_DESKTOP ? () => void captureScreenshot() : undefined}
         onExportChat={() => void exportChatMarkdown()}
-        onOpenWorkbench={(tab) => {
-          setWorkbenchTab(tab);
-          setArtifactsOpen(true);
-        }}
       />
 
       <div className="thread-scroll" aria-label={t("chat.activeThread")} ref={conversationRef}>
@@ -2052,7 +2049,6 @@ function WorkspaceIsland({
   status,
   onCaptureScreenshot,
   onExportChat,
-  onOpenWorkbench,
 }: {
   activitySteps: string[];
   artifactsCount: number;
@@ -2061,7 +2057,6 @@ function WorkspaceIsland({
   status: ChatStreamStatus | null;
   onCaptureScreenshot?: () => void;
   onExportChat: () => void;
-  onOpenWorkbench: (tab: WorkbenchTab) => void;
 }) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
@@ -2086,90 +2081,80 @@ function WorkspaceIsland({
 
   return (
     <div className={`workspace-island${expanded ? " expanded" : ""}${streaming ? " live" : ""}`}>
-      <button
-        className="workspace-island-expand"
-        type="button"
-        title="Expand status"
-        aria-label="Expand status"
-        aria-expanded={expanded}
-        onClick={() => setExpanded((value) => !value)}
-      >
-        {expanded ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
-      </button>
-      <button
-        className="workspace-island-pill"
-        type="button"
-        title={expanded ? "Collapse status" : "Expand status"}
-        aria-label={expanded ? "Collapse status" : "Expand status"}
-        aria-expanded={expanded}
-        onClick={() => setExpanded((value) => !value)}
-      >
-        <span className="workspace-island-icon">
-          {streaming ? <Loader2 size={14} className="composer-spin" /> : <ListTodo size={14} />}
-        </span>
-        <span className="workspace-island-label">{headline}</span>
-        {progressLabel && <span className="workspace-island-count">{progressLabel}</span>}
-      </button>
-
-      {expanded && (
-      <div className="workspace-island-panel" role="group" aria-label="Workspace status">
-        <div className="wi-head">
-          <span>
-            <strong>Workspace</strong>
-            <small>{streaming ? "live" : "thread"}</small>
+      {!expanded ? (
+        <button
+          className="workspace-island-pill"
+          type="button"
+          title="Expand status"
+          aria-label="Expand status"
+          aria-expanded={expanded}
+          onClick={() => setExpanded(true)}
+        >
+          <span className="workspace-island-icon">
+            {streaming ? <Loader2 size={14} className="composer-spin" /> : <ListTodo size={14} />}
           </span>
-          <span className="wi-head-actions">
-            <button type="button" aria-label="More status actions">
-              <MoreHorizontal size={14} />
-            </button>
-            <button type="button" onClick={() => onOpenWorkbench("activity")} aria-label="Open activity">
-              <Maximize2 size={13} />
-            </button>
-          </span>
-        </div>
-
-        <button className="wi-row" type="button" onClick={() => onOpenWorkbench("plan")}>
-          <ListTodo size={14} />
-          <span>Plan</span>
-          <strong>{planSteps.length > 0 ? `${doneCount}/${planSteps.length}` : "0"}</strong>
+          <span className="workspace-island-label">{headline}</span>
+          {progressLabel && <span className="workspace-island-count">{progressLabel}</span>}
         </button>
-        {planSteps.length > 0 && (
-          <ol className="wi-steps">
-            {planSteps.slice(0, 5).map((step, index) => (
-              <li key={`${index}-${step.title}`} className={step.status}>
-                <span>{step.status === "done" ? <Check size={12} /> : <span />}</span>
-                <em>{step.title}</em>
-              </li>
-            ))}
-          </ol>
-        )}
+      ) : (
+        <div className="workspace-island-panel" role="group" aria-label="Workspace status">
+          <div className="wi-head">
+            <span>
+              <strong>Workspace</strong>
+              <small>{streaming ? "live" : "thread"}</small>
+            </span>
+            <span className="wi-head-actions">
+              <button type="button" aria-label="More status actions">
+                <MoreHorizontal size={14} />
+              </button>
+              <button type="button" onClick={() => setExpanded(false)} aria-label="Collapse status">
+                <ChevronUp size={14} />
+              </button>
+            </span>
+          </div>
 
-        <button className="wi-row" type="button" onClick={() => onOpenWorkbench("activity")}>
-          <SquareTerminal size={14} />
-          <span>Activity</span>
-          <strong>{activitySteps.length}</strong>
-        </button>
-        {latestActivity && <p className="wi-latest">{latestActivity}</p>}
-
-        <button className="wi-row" type="button" onClick={() => onOpenWorkbench("artifacts")}>
-          <FileText size={14} />
-          <span>Artifacts</span>
-          <strong>{artifactsCount}</strong>
-        </button>
-
-        <div className="wi-actions">
-          {onCaptureScreenshot && (
-            <button type="button" onClick={onCaptureScreenshot}>
-              <FileImage size={13} />
-              <span>{t("chat.captureScreenshot")}</span>
-            </button>
+          <div className="wi-row">
+            <ListTodo size={14} />
+            <span>Plan</span>
+            <strong>{planSteps.length > 0 ? `${doneCount}/${planSteps.length}` : "0"}</strong>
+          </div>
+          {planSteps.length > 0 && (
+            <ol className="wi-steps">
+              {planSteps.slice(0, 5).map((step, index) => (
+                <li key={`${index}-${step.title}`} className={step.status}>
+                  <span>{step.status === "done" ? <Check size={12} /> : <span />}</span>
+                  <em>{step.title}</em>
+                </li>
+              ))}
+            </ol>
           )}
-          <button type="button" onClick={onExportChat}>
-            <Download size={13} />
-            <span>{t("chat.exportChat")}</span>
-          </button>
+
+          <div className="wi-row">
+            <SquareTerminal size={14} />
+            <span>Activity</span>
+            <strong>{activitySteps.length}</strong>
+          </div>
+          {latestActivity && <p className="wi-latest">{latestActivity}</p>}
+
+          <div className="wi-row">
+            <FileText size={14} />
+            <span>Artifacts</span>
+            <strong>{artifactsCount}</strong>
+          </div>
+
+          <div className="wi-actions">
+            {onCaptureScreenshot && (
+              <button type="button" onClick={onCaptureScreenshot}>
+                <FileImage size={13} />
+                <span>{t("chat.captureScreenshot")}</span>
+              </button>
+            )}
+            <button type="button" onClick={onExportChat}>
+              <Download size={13} />
+              <span>{t("chat.exportChat")}</span>
+            </button>
+          </div>
         </div>
-      </div>
       )}
     </div>
   );

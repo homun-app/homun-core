@@ -423,9 +423,9 @@ primo percorso locale verde e WS5 è chiusa localmente/gate:
     finestra nativi; i toggle Homun restano fuori dalla titlebar/drag strip.
     Seconda slice chat/workspace: aggiunta `WorkspaceIsland` compatta stile
     Zcode che riepiloga plan/activity/artifact per thread. Lo stato chiuso e'
-    una pill; l'hover mostra solo il controllo expand; il click espande una
-    card flottante e le righe interne possono aprire il Workbench. I marker
-    `PLAN`/`ACT` escono dal corpo messaggio; il computer resta una
+    una pill unica; il click trasforma il pill in una card flottante nello
+    stesso anchor, senza pulsanti esterni o aperture accidentali del Workbench.
+    I marker `PLAN`/`ACT` escono dal corpo messaggio; il computer resta una
     `ComputerIsland` separata con preview live ed espansione, visibile solo
     durante attivita' owner del thread.
 
