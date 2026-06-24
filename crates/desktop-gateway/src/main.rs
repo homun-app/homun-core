@@ -56,7 +56,7 @@ use local_first_capabilities::{
     CapabilityProviderGrant, CapabilityProviderKind, CapabilityRegistryStore, CapabilityResult,
     CapabilityTaskPayload, ComposioCapabilityProvider, ComposioProviderConfig, ComposioTransport,
     InMemoryCapabilityAudit, McpCapabilityProvider, McpStdioConfig, McpStdioTransport, McpToolPolicy,
-    McpTransport, PluginRegistryEntry,
+    McpTransport, PluginRegistryEntry, PluginRegistryIndex,
     PolicyContext, ProviderId as CapabilityProviderId, UserId as CapabilityUserId,
     WorkspaceId as CapabilityWorkspaceId,
 };
@@ -700,6 +700,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route(
             "/api/plugins/packages/installed",
             get(installed_plugin_packages),
+        )
+        .route(
+            "/api/plugins/registry/cache",
+            get(cached_plugin_registry).post(cache_plugin_registry),
         )
         .route(
             "/api/runtime/provider",
@@ -20490,6 +20494,13 @@ struct InstallLocalPluginPackageRequest {
     trusted_public_keys: Vec<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct CachePluginRegistryRequest {
+    #[serde(default)]
+    source_url: Option<String>,
+    registry: PluginRegistryIndex,
+}
+
 /// POST /api/plugins/packages/install-local — development/desktop install path
 /// for a downloaded `.hplugin`. The future marketplace flow will fetch the bytes
 /// first, then call the same install manager; this endpoint keeps the verified
@@ -20600,12 +20611,60 @@ async fn installed_plugin_packages() -> Result<Json<serde_json::Value>, GatewayE
     })))
 }
 
+/// GET/POST /api/plugins/registry/cache — local marketplace registry cache.
+/// Fetching from the Homun site can be layered on top of this without changing
+/// the UI contract.
+async fn cached_plugin_registry() -> Result<Json<serde_json::Value>, GatewayError> {
+    let cached = plugin_packages::load_cached_plugin_registry(
+        &cached_plugin_registry_path().map_err(|e| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "plugin_registry_cache_path_unavailable",
+            message: e.to_string(),
+        })?,
+    )
+    .map_err(|e| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "plugin_registry_cache_read_failed",
+        message: e,
+    })?;
+    Ok(Json(serde_json::json!({
+        "cached": cached,
+    })))
+}
+
+async fn cache_plugin_registry(
+    Json(request): Json<CachePluginRegistryRequest>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let cached = plugin_packages::save_cached_plugin_registry(
+        &cached_plugin_registry_path().map_err(|e| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "plugin_registry_cache_path_unavailable",
+            message: e.to_string(),
+        })?,
+        request.source_url,
+        request.registry,
+    )
+    .map_err(|e| GatewayError {
+        status: StatusCode::BAD_REQUEST,
+        code: "plugin_registry_cache_invalid",
+        message: e,
+    })?;
+    Ok(Json(serde_json::json!({
+        "ok": true,
+        "cached": cached,
+    })))
+}
+
 fn installed_plugin_packages_root() -> Result<PathBuf, std::io::Error> {
     Ok(gateway_data_dir()?.join("plugins").join("installed"))
 }
 
 fn installed_plugin_registry_path() -> Result<PathBuf, std::io::Error> {
     Ok(gateway_data_dir()?.join("plugins").join("installed.json"))
+}
+
+fn cached_plugin_registry_path() -> Result<PathBuf, std::io::Error> {
+    Ok(gateway_data_dir()?.join("plugins").join("registry-cache.json"))
 }
 
 pub(crate) fn weekday_it(w: jiff::civil::Weekday) -> &'static str {

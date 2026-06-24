@@ -957,8 +957,10 @@ proprio — versioning, canali, scaricabili dal **sito Homun**, auto-aggiornabil
   path, file relativi sicuri e digest `sha256`. Verifica:
   `plugin_package_manifest_validates_safe_archive_layout` e suite capabilities
   verdi.
-  Restano: pubblicare il feed sul sito Homun, packaging `.hplugin`, fetch/cache
-  locale e integrazione install/update.
+  2026-06-24: cache locale registry aggiunta (`CachedPluginRegistry` +
+  `GET/POST /api/plugins/registry/cache`) con validazione schema/entry e
+  scrittura atomica. Restano: pubblicare il feed sul sito Homun, packaging
+  `.hplugin`, fetch remoto dal sito e integrazione UI/update.
 - 🟡 **9.3 Plugin manager in-app**: prima slice policy fatta nel contratto
   capabilities. `PluginRegistryEntry` espone helper deterministici per canale
   stable/beta (`beta` solo con opt-in), compatibilità minima Homun e confronto
@@ -973,7 +975,7 @@ proprio — versioning, canali, scaricabili dal **sito Homun**, auto-aggiornabil
   usando la stessa policy, sotto `~/.homun/plugins/installed`. 2026-06-24:
   aggiunto registry locale installati `~/.homun/plugins/installed.json`, scritto
   atomicamente dall'endpoint install. 2026-06-24: aggiunto endpoint read-only
-  `GET /api/plugins/packages/installed`. Restano: UI manager, fetch/cache
+  `GET /api/plugins/packages/installed`. Restano: UI manager, fetch remoto
   registry, download pacchetti e auto-update reale.
 - 🟡 **9.4 Sicurezza**: prima slice integrity/policy fatta. `PluginRegistryEntry`
   valida digest `sha256:<64 hex>`, richiede algoritmo firma `ed25519`, confronta

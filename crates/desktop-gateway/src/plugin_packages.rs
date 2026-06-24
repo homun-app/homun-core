@@ -3,7 +3,9 @@ use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use local_first_capabilities::{PluginPackageFile, PluginPackageManifest, PluginRegistryEntry};
+use local_first_capabilities::{
+    PluginPackageFile, PluginPackageManifest, PluginRegistryEntry, PluginRegistryIndex,
+};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -47,6 +49,13 @@ pub struct InstalledPluginRecord {
 pub struct InstalledPluginRegistry {
     pub schema_version: u32,
     pub plugins: Vec<InstalledPluginRecord>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CachedPluginRegistry {
+    pub schema_version: u32,
+    pub source_url: Option<String>,
+    pub registry: PluginRegistryIndex,
 }
 
 impl Default for InstalledPluginRegistry {
@@ -233,17 +242,55 @@ pub fn upsert_installed_plugin_record(
         .plugins
         .sort_by(|left, right| left.plugin_id.cmp(&right.plugin_id));
 
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
-    let tmp_path = path.with_extension(format!("tmp-{}", uuid::Uuid::new_v4()));
-    let bytes = serde_json::to_vec_pretty(&registry).map_err(|e| e.to_string())?;
-    fs::write(&tmp_path, bytes).map_err(|e| e.to_string())?;
-    fs::rename(&tmp_path, path).map_err(|e| {
-        let _ = fs::remove_file(&tmp_path);
-        e.to_string()
-    })?;
+    write_json_atomically(path, &registry)?;
     Ok(registry)
+}
+
+pub fn load_cached_plugin_registry(path: &Path) -> Result<Option<CachedPluginRegistry>, String> {
+    if !path.exists() {
+        return Ok(None);
+    }
+    let bytes = fs::read(path).map_err(|e| e.to_string())?;
+    let cached: CachedPluginRegistry = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+    validate_cached_plugin_registry(&cached)?;
+    Ok(Some(cached))
+}
+
+pub fn save_cached_plugin_registry(
+    path: &Path,
+    source_url: Option<String>,
+    registry: PluginRegistryIndex,
+) -> Result<CachedPluginRegistry, String> {
+    let cached = CachedPluginRegistry {
+        schema_version: 1,
+        source_url,
+        registry,
+    };
+    validate_cached_plugin_registry(&cached)?;
+    write_json_atomically(path, &cached)?;
+    Ok(cached)
+}
+
+fn validate_cached_plugin_registry(cached: &CachedPluginRegistry) -> Result<(), String> {
+    if cached.schema_version != 1 {
+        return Err("unsupported cached plugin registry schema".to_string());
+    }
+    if cached.registry.schema_version != 1 {
+        return Err("unsupported plugin registry index schema".to_string());
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    for entry in &cached.registry.plugins {
+        if !is_safe_plugin_id(&entry.plugin_id) {
+            return Err("unsafe plugin id in registry".to_string());
+        }
+        if !seen.insert(entry.plugin_id.clone()) {
+            return Err("duplicate plugin id in registry".to_string());
+        }
+        entry
+            .validate_metadata()
+            .map_err(|e| format!("invalid plugin registry metadata: {e:?}"))?;
+    }
+    Ok(())
 }
 
 fn declared_digest_matches(declared: &PluginPackageFile, bytes: &[u8]) -> bool {
@@ -252,6 +299,20 @@ fn declared_digest_matches(declared: &PluginPackageFile, bytes: &[u8]) -> bool {
     };
     let actual = format!("{:x}", Sha256::digest(bytes));
     expected.eq_ignore_ascii_case(&actual)
+}
+
+fn write_json_atomically<T: Serialize>(path: &Path, value: &T) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let tmp_path = path.with_extension(format!("tmp-{}", uuid::Uuid::new_v4()));
+    let bytes = serde_json::to_vec_pretty(value).map_err(|e| e.to_string())?;
+    fs::write(&tmp_path, bytes).map_err(|e| e.to_string())?;
+    fs::rename(&tmp_path, path).map_err(|e| {
+        let _ = fs::remove_file(&tmp_path);
+        e.to_string()
+    })?;
+    Ok(())
 }
 
 fn is_safe_plugin_id(value: &str) -> bool {
@@ -448,6 +509,48 @@ mod tests {
         let _ = fs::remove_dir_all(root);
     }
 
+    #[test]
+    fn cached_plugin_registry_saves_loads_and_validates_entries() {
+        let root = test_dir("cached-registry");
+        let registry_path = root.join("registry-cache.json");
+        let index = sample_registry_index();
+
+        let cached = save_cached_plugin_registry(
+            &registry_path,
+            Some("https://homun.app/plugins/registry.json".to_string()),
+            index,
+        )
+        .unwrap();
+        let loaded = load_cached_plugin_registry(&registry_path)
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(cached, loaded);
+        assert_eq!(loaded.registry.plugins[0].plugin_id, "presentations-pro");
+        assert!(!fs::read_dir(&root).unwrap().any(|entry| {
+            entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .contains(".tmp-")
+        }));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn cached_plugin_registry_rejects_duplicate_plugin_ids() {
+        let root = test_dir("cached-registry-duplicate");
+        let registry_path = root.join("registry-cache.json");
+        let mut index = sample_registry_index();
+        index.plugins.push(index.plugins[0].clone());
+
+        let error = save_cached_plugin_registry(&registry_path, None, index).unwrap_err();
+
+        assert!(error.contains("duplicate"));
+        assert!(!registry_path.exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
     fn sample_archive(
         plugin_json: &[u8],
         skill: &[u8],
@@ -525,6 +628,33 @@ mod tests {
 
     fn hex_lower(bytes: &[u8]) -> String {
         bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+    }
+
+    fn sample_registry_index() -> PluginRegistryIndex {
+        PluginRegistryIndex {
+            schema_version: 1,
+            generated_at: "2026-06-24T00:00:00Z".to_string(),
+            plugins: vec![PluginRegistryEntry {
+                plugin_id: "presentations-pro".to_string(),
+                version: "1.2.3".to_string(),
+                channel: PluginChannel::Stable,
+                min_homun_version: Some("0.1.1046".to_string()),
+                entitlement: PluginEntitlement::Paid,
+                manifest_url: "https://homun.app/plugins/presentations-pro/manifest.json"
+                    .to_string(),
+                package_url:
+                    "https://homun.app/plugins/presentations-pro/presentations-pro-1.2.3.hplugin"
+                        .to_string(),
+                package_sha256:
+                    "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+                        .to_string(),
+                signature: PluginSignature {
+                    algorithm: "ed25519".to_string(),
+                    public_key: "pk_test".to_string(),
+                    signature: "sig_test".to_string(),
+                },
+            }],
+        }
     }
 
     fn test_dir(name: &str) -> std::path::PathBuf {

@@ -361,6 +361,10 @@ primo percorso locale verde:
     scaricati, con registry installati `~/.homun/plugins/installed.json`
     aggiornato atomicamente e letto da `/api/plugins/packages/installed`.
     Restano UI, fetch/cache feed e update automatico.
+85. WS9 registry cache locale — `PluginRegistryIndex` marketplace può essere
+    validato e salvato atomicamente in `~/.homun/plugins/registry-cache.json`
+    tramite `GET/POST /api/plugins/registry/cache`. Restano fetch remoto dal
+    sito Homun, packaging pubblicabile e UI manager.
 
 Prima di pubblicare/taggare resta prudente ripetere lo smoke manuale in-app su
 una automazione schedulata reale con il binario aggiornato. Il primo smoke ha
