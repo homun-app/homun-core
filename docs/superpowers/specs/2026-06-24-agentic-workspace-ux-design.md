@@ -108,7 +108,8 @@ Il computer e' una superficie separata: quando il browser/terminal locale e'
 live, compare una **Computer Island** sotto la Workspace Island, con mini preview
 del browser come oggi. Si espande per vedere il computer completo e scompare
 quando l'attivita' termina. I log finali possono restare in `Activity`, non come
-pannello computer persistente.
+pannello computer persistente. L'header dell'isola deve restare pulito:
+`Computer` + `LIVE` + controlli, senza mostrare prompt o activity text troncato.
 
 ### Composer e menu contestuali
 

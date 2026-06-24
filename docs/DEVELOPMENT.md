@@ -112,7 +112,9 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   capability mostrando `Improve prompt` solo quando esiste testo. Il
   `ChatComputerPanel` resta separato come `ComputerIsland` live: preview
   browser/terminal compatta sotto la workspace island, espandibile e visibile
-  solo durante attivita' owner del thread. Gate locale:
+  solo durante attivita' owner del thread. Il chrome dell'isola resta minimale:
+  header con `Computer` + `LIVE` e controlli, senza prompt/attivita' corrente
+  troncata accanto al titolo. Gate locale:
   `npm run test:ui-contract`, `npm run build`, runtime
   Electron riavviato con gateway `local-first-desktop-gateway` in ascolto su
   `127.0.0.1:18765`. **Prossimo passo unico:** completare la rifinitura UX.2 su

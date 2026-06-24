@@ -96,7 +96,6 @@ export function ChatComputerPanel({ threadId }: { threadId: string }) {
   // contained display, scaled to fit and proportioned, with no noVNC toolbar.
   const base = live.novnc_url.replace("/vnc.html", "/lfpa-view.html");
   const src = `${base}${base.includes("?") ? "&" : "?"}view_only=1`;
-  const activity = live.activity?.trim() || t("chat.working");
   const fullscreen = view === "full";
   const showStage = view === "expanded" || fullscreen;
   const steps = live.steps ?? [];
@@ -119,9 +118,6 @@ export function ChatComputerPanel({ threadId }: { threadId: string }) {
             <span className="cc-live">
               <i className="cc-live-dot" /> live
             </span>
-          </span>
-          <span className="cc-dock-activity" title={activity}>
-            {activity}
           </span>
           {showStage && (
             <button
@@ -241,11 +237,6 @@ function TerminalDock({
     }
   }, [entries, expanded]);
 
-  const last = entries[entries.length - 1];
-  const summary = running
-    ? last?.command ?? t("chat.executing")
-    : `${entries.length} ${entries.length === 1 ? t("chat.commandCount_one") : t("chat.commandCount_other")}`;
-
   return (
     <div className={`cc-dock ${expanded ? "expanded" : "bar"}`}>
       <header className="cc-dock-bar">
@@ -257,9 +248,6 @@ function TerminalDock({
               <i className="cc-live-dot" /> live
             </span>
           )}
-        </span>
-        <span className="cc-dock-activity" title={summary}>
-          {summary}
         </span>
         <button
           className="cc-icon-btn"

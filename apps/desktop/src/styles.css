@@ -6824,17 +6824,6 @@ body.resizing-drawer {
   font-weight: 600;
 }
 
-
-.cc-dock-activity {
-  flex: 1;
-  min-width: 0;
-  font-size: 12px;
-  color: var(--muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .cc-live {
   display: inline-flex;
   align-items: center;
