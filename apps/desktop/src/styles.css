@@ -775,16 +775,18 @@ body.resizing-drawer {
   background: var(--blue-soft);
 }
 
-/* Flexible middle region: a column whose ONLY scroller is .drawer-chats. overflow is
-   visible so the switcher dropdown can overlay the list without being clipped. */
+/* Flexible middle region: Personal/Projects/Archived scroll here, while the footer
+   actions stay pinned and never get covered by expanded project trees. */
 .drawer-scroll {
   flex: 1;
   min-height: 0;
-  overflow: visible;
+  overflow-y: auto;
+  overflow-x: hidden;
   display: flex;
   flex-direction: column;
   gap: 10px;
   padding-right: 2px;
+  overscroll-behavior: contain;
 }
 .drawer-chats {
   flex: 1;
