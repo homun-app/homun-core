@@ -3705,6 +3705,23 @@ function graphStyleKey(node: { kind: string; entity_type?: string }): string {
   return node.kind;
 }
 
+function normalizeGoalText(text: string): string {
+  return text.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+function dedupeGoalDrafts(drafts: string[], existingGoals: Set<string>): string[] {
+  const seen = new Set(existingGoals);
+  const out: string[] = [];
+  for (const draft of drafts) {
+    const clean = draft.trim();
+    const normalized = normalizeGoalText(clean);
+    if (!clean || seen.has(normalized)) continue;
+    seen.add(normalized);
+    out.push(clean);
+  }
+  return out;
+}
+
 /** Workbench "Obiettivi" tab: the LLM-free, user-driven goals manager. Shows current
  * goals + lets the user promote decisions to goals or add a custom one. Mutations hit
  * the gateway (which regenerates the injected project brief) then refetch. */
@@ -3735,15 +3752,45 @@ function GoalsPanel({
   // Assistant-proposed objectives (north star), editable before saving.
   const [drafts, setDrafts] = useState<string[] | null>(null);
   const [suggesting, setSuggesting] = useState(false);
+  const existingGoalTexts = useMemo(
+    () => new Set(data.goals.map((goal) => normalizeGoalText(goal.text))),
+    [data.goals],
+  );
+  useEffect(() => {
+    setDrafts((current) => (current ? dedupeGoalDrafts(current, existingGoalTexts) : current));
+  }, [existingGoalTexts]);
+
+  const consumeDraft = (text: string) => {
+    const normalized = normalizeGoalText(text);
+    setDrafts((current) =>
+      current ? current.filter((draft) => normalizeGoalText(draft) !== normalized) : current,
+    );
+  };
 
   const add = (text: string) => {
     const clean = text.trim();
     if (!clean) return;
+    const normalized = normalizeGoalText(clean);
+    if (existingGoalTexts.has(normalized)) {
+      setNewGoal("");
+      consumeDraft(clean);
+      return;
+    }
     setBusy(true);
     void coreBridge
       .addGoal(data.workspace, clean)
       .then(() => {
         setNewGoal("");
+        consumeDraft(clean);
+        onRefresh();
+      })
+      .finally(() => setBusy(false));
+  };
+  const deleteGoal = (g: ProjectGoalsData["goals"][number]) => {
+    setBusy(true);
+    void coreBridge
+      .decideMemory(g.reference, "delete")
+      .then(() => {
         onRefresh();
       })
       .finally(() => setBusy(false));
@@ -3752,7 +3799,7 @@ function GoalsPanel({
     setSuggesting(true);
     void coreBridge
       .suggestGoals(threadId)
-      .then((objs) => setDrafts(objs))
+      .then((objs) => setDrafts(dedupeGoalDrafts(objs, existingGoalTexts)))
       .finally(() => setSuggesting(false));
   };
   const promote = () => {
@@ -3789,6 +3836,16 @@ function GoalsPanel({
                 <Target size={12} />
               </span>
               <div>{g.text}</div>
+              <button
+                type="button"
+                className="goals-delete"
+                aria-label="Delete goal"
+                title="Delete goal"
+                disabled={busy}
+                onClick={() => deleteGoal(g)}
+              >
+                <X size={13} />
+              </button>
             </div>
           ))}
         </div>
@@ -3811,7 +3868,7 @@ function GoalsPanel({
         <button
           className="goals-btn goals-btn-accent"
           onClick={() => add(newGoal)}
-          disabled={busy || !newGoal.trim()}
+          disabled={busy || !newGoal.trim() || existingGoalTexts.has(normalizeGoalText(newGoal))}
         >
           {t("chat.addGoal")}
         </button>
@@ -3848,7 +3905,7 @@ function GoalsPanel({
                       <button
                         className="goals-btn goals-btn-sm"
                         onClick={() => add(d)}
-                        disabled={busy || !d.trim()}
+                        disabled={busy || !d.trim() || existingGoalTexts.has(normalizeGoalText(d))}
                       >
                         Add
                       </button>
@@ -4057,6 +4114,13 @@ export function MemoryGraphPanel({
       links: graph.edges.map((e) => ({ source: e.source, target: e.target, label: e.label })),
     };
   }, [graph]);
+  useEffect(() => {
+    if (mode !== "graph" || !graph || size.w <= 0 || size.h <= 0) return undefined;
+    const resizeFitTimer = window.setTimeout(() => {
+      fgRef.current?.zoomToFit(300, 60);
+    }, 80);
+    return () => window.clearTimeout(resizeFitTimer);
+  }, [graph, mode, size.h, size.w]);
 
   const selectedNode = selected ? nodeById.get(selected) ?? null : null;
   const selectedEdges = useMemo(() => {

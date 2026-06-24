@@ -261,6 +261,10 @@ assertContains("src/components/ChatView.tsx", "onImproveCode", "code responses m
 assertContains("src/components/ChatView.tsx", "reply-context-card", "composer must show the active reply context before submit");
 assertContains("src/components/ChatView.tsx", "message-action-menu", "secondary message actions must stay behind a compact menu");
 assertContains("src/components/ChatView.tsx", "message-latency-summary", "message metrics must be visible without dominating the answer");
+assertContains("src/components/ChatView.tsx", "normalizeGoalText", "goals manager must normalize goal text before comparing suggestions");
+assertContains("src/components/ChatView.tsx", "dedupeGoalDrafts", "goals manager must dedupe suggested goals against existing project goals");
+assertContains("src/components/ChatView.tsx", "decideMemory(g.reference, \"delete\")", "goals manager must allow deleting saved project goals");
+assertContains("src/components/ChatView.tsx", "resizeFitTimer", "memory graph must refit after the workbench/canvas changes size");
 assertNotContains("src/components/ChatView.tsx", "canCreateteTask={assistantTextMessage}", "message action menu must not advertise unverified task creation for every assistant text");
 assertNotContains("src/components/ChatView.tsx", "canCreateteAutomation={assistantTextMessage}", "message action menu must not advertise unverified automation creation for every assistant text");
 assertNotContains("src/components/ChatView.tsx", "\"Use a skill\"", "composer add menu must expose user-facing capabilities, not implementation terms");

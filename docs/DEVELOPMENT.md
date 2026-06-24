@@ -104,7 +104,10 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   (`Plan`, `Activity`, `Artifacts`, `Files`, `Goals`, `Memory`). `Goals` e
   `Memory` sono alimentate dai read model canonici (`/api/memory/goals` e
   `/api/memory/graph`) e compaiono solo quando esistono goal/memoria progetto
-  reali per il thread. L'isola non viene renderizzata su
+  reali per il thread; il pannello Goals permette delete esplicito, filtra
+  suggerimenti duplicati e consuma il suggerimento appena salvato. Il grafo
+  memoria rifitta il canvas quando il Workbench viene espanso. L'isola non
+  viene renderizzata su
   chat vuote o thread senza stato operativo reale, non mostra righe `0`, e il
   Workbench laterale parte sotto la titlebar/chrome Electron, riserva spazio
   alla chat quando aperto e usa la stessa grammatica a isola della shell

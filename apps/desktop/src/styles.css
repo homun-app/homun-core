@@ -4066,12 +4066,33 @@ body.resizing-drawer {
 }
 .goals-step {
   display: grid;
-  grid-template-columns: 22px minmax(0, 1fr);
+  grid-template-columns: 22px minmax(0, 1fr) auto;
   gap: 10px;
   align-items: start;
   font-size: 13px;
   line-height: 1.45;
   color: var(--text);
+}
+.goals-delete {
+  width: 24px;
+  height: 24px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--faint);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.goals-delete:hover:not(:disabled) {
+  color: var(--danger, #dc2626);
+  background: var(--surface-hover);
+  border-color: var(--line);
+}
+.goals-delete:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 .goals-empty {
   font-size: 13px;

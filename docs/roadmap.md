@@ -432,6 +432,9 @@ primo percorso locale verde e WS5 è chiusa localmente/gate:
     `Plan`, `Activity`, `Artifacts`, `Files`, `Goals` e `Memory` aprono il
     Workbench nella tab corretta quando i rispettivi read model hanno contenuto;
     `Goals` legge `/api/memory/goals`, `Memory` legge `/api/memory/graph`.
+    Il pannello Goals supporta delete esplicito e deduplica i suggerimenti
+    contro i goal esistenti, consumando il draft appena salvato; il grafo
+    memoria rifitta il canvas dopo resize/espansione Workbench.
     `Artifacts` apre la Review sidebar stile Codex con
     preview/diff/versioni, non una mini-lista dentro l'isola.
     I marker `PLAN`/`ACT` escono dal corpo messaggio; il computer resta una
