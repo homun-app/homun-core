@@ -19,6 +19,7 @@ mod mcp_registry;
 // so a remote browser on the cloud build can watch the agent's computer.
 mod novnc_proxy;
 mod pdf_render;
+mod plugin_packages;
 mod sandbox;
 mod task_registry;
 mod temporal;

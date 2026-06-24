@@ -344,7 +344,9 @@ primo percorso locale verde:
 81. WS9 `.hplugin` package manifest — il pacchetto plugin ha un manifest interno
     dichiarativo (`PluginPackageManifest`) con file, digest e manifest path; la
     validazione rifiuta pacchetti vuoti, digest non SHA-256 e path assoluti o
-    traversal. Restano builder/extractor ZIP e scan contenuto.
+    traversal. Il gateway ora ispeziona gli archive in memoria, verifica i digest
+    dei file dichiarati e prepara i blob per `skill_security`; restano
+    builder/extractor in staging e blocco install su scan critico.
 82. WS9 ADR distribuzione/licensing — ADR 0017 formalizza registry hosted sul
     sito Homun, verifica locale deterministica, beta opt-in, paid predisposto con
     token offline e pagamento/cloud rinviati.

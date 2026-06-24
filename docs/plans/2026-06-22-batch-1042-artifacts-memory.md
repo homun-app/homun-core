@@ -974,8 +974,12 @@ proprio — versioning, canali, scaricabili dal **sito Homun**, auto-aggiornabil
   2026-06-24: `plugin_registry_entry_validates_digest_and_signature_policy`,
   `plugin_registry_entry_verifies_ed25519_package_signature`,
   `plugin_registry_entry_verifies_install_candidate_policy` e suite capabilities
-  verdi. Restano: enforcement install/update, estrazione pacchetto in staging
-  contenuto (ADR 0009) + `skill_security` scan sul pacchetto estratto.
+  verdi. 2026-06-24: aggiunta ispezione gateway degli archive `.hplugin` in
+  memoria: legge `homun-package.json`, verifica digest dei file dichiarati e
+  produce blob testuali per `skill_security` senza attivare installazioni.
+  Verifica: `plugin_packages::tests::hplugin_archive_inspection_*` verdi.
+  Restano: enforcement install/update, estrazione pacchetto in staging contenuto
+  (ADR 0009) + blocco install se `skill_security` segnala criticità.
 - ☐ **9.5 Licensing/paid (predisporre ora)**: campo `entitlement` nel manifest + **token
   di licenza firmato** verificabile **offline** + ri-check periodico. Il paywall vero
   (account + pagamenti, es. Stripe) è fase successiva e **lega cloud/always-on**.

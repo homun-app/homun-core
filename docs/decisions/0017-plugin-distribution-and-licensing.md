@@ -50,8 +50,10 @@ registry, bypass the approval model, or grant raw system access.
 6. **Execution remains contained.**
    Package verification only says "this package is authentic and compatible".
    Runtime execution still goes through the capability host, permissions,
-   approval gates and ADR 0009 containment. Package extraction must happen in a
-   staging area and pass static security scan before activation.
+   approval gates and ADR 0009 containment. Package inspection reads
+   `homun-package.json`, verifies declared file digests, and feeds text blobs to
+   static security scan before activation; extraction must happen in a staging
+   area.
 
 ## Consequences
 
