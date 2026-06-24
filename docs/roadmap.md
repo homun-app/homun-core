@@ -436,7 +436,8 @@ primo percorso locale verde e WS5 è chiusa localmente/gate:
     contro i goal esistenti, consumando il draft appena salvato; il grafo
     memoria rifitta dopo resize/espansione Workbench aspettando il paint,
     riattivando la simulazione e dimensionando il `canvas` reale di
-    `ForceGraph2D`.
+    `ForceGraph2D`; la tab Memory riceve anche un segnale esplicito dal
+    Workbench quando cambiano docked/fullscreen/larghezza.
     `Artifacts` apre la Review sidebar stile Codex con
     preview/diff/versioni, non una mini-lista dentro l'isola.
     I marker `PLAN`/`ACT` escono dal corpo messaggio; il computer resta una

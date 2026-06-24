@@ -108,7 +108,9 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   suggerimenti duplicati e consuma il suggerimento appena salvato. Il grafo
   memoria rifitta dopo resize/espansione aspettando il paint del canvas reale
   `ForceGraph2D`, riattiva la simulazione e dimensiona il `canvas` invece di
-  targettare un SVG inesistente. L'isola non
+  targettare un SVG inesistente; il Workbench passa inoltre un segnale esplicito
+  docked/fullscreen/larghezza alla tab Memory, così il fit non dipende solo dal
+  ResizeObserver interno. L'isola non
   viene renderizzata su
   chat vuote o thread senza stato operativo reale, non mostra righe `0`, e il
   Workbench laterale parte sotto la titlebar/chrome Electron, riserva spazio

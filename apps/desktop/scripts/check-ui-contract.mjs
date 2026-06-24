@@ -265,6 +265,8 @@ assertContains("src/components/ChatView.tsx", "normalizeGoalText", "goals manage
 assertContains("src/components/ChatView.tsx", "dedupeGoalDrafts", "goals manager must dedupe suggested goals against existing project goals");
 assertContains("src/components/ChatView.tsx", "decideMemory(g.reference, \"delete\")", "goals manager must allow deleting saved project goals");
 assertContains("src/components/ChatView.tsx", "resizeFitTimer", "memory graph must refit after the workbench/canvas changes size");
+assertContains("src/components/ChatView.tsx", "layoutSignal", "memory graph must receive an explicit workbench layout signal");
+assertContains("src/components/ChatView.tsx", "layoutSignal={`${expanded ? \"expanded\" : \"docked\"}:${width}`}", "workbench must refit Memory when fullscreen or width changes");
 assertContains("src/components/ChatView.tsx", "requestAnimationFrame", "memory graph resize refit must wait for the resized canvas to paint");
 assertContains("src/components/ChatView.tsx", "d3ReheatSimulation", "memory graph resize refit must restart layout before fitting");
 assertContains("src/styles.css", ".memory-graph-canvas canvas", "memory graph must size the ForceGraph canvas, not only an svg");

@@ -98,7 +98,8 @@ La Workspace Island:
   esplicito, evitare duplicati tra suggerimenti e goal gia' salvati, e rimuovere
   un suggerimento quando viene salvato. Il grafo memoria deve rifittare dopo il
   paint quando il Workbench cambia dimensione, riattivare la simulazione e
-  dimensionare il `canvas` reale di `ForceGraph2D`. Non esiste un secondo launcher
+  dimensionare il `canvas` reale di `ForceGraph2D`; il Workbench deve passare un
+  segnale esplicito docked/fullscreen/larghezza alla tab Memory. Non esiste un secondo launcher
   nell'header della chat;
 - su una chat vuota o su un thread senza stato operativo reale l'isola non si
   renderizza; quando esiste, mostra solo sezioni con dati effettivi, mai righe a

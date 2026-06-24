@@ -3951,12 +3951,15 @@ export function MemoryGraphPanel({
   threadId,
   workspace,
   controlledMode,
+  layoutSignal,
 }: {
   threadId?: string;
   workspace?: string;
   /** When set, the parent drives graph/wiki (top-level tabs) and the internal
    *  toggle is hidden. */
   controlledMode?: "graph" | "wiki";
+  /** External geometry signal from the Workbench shell (fullscreen / dock width). */
+  layoutSignal?: string;
 }) {
   const { t } = useTranslation();
   const [graph, setGraph] = useState<MemoryGraph | null>(null);
@@ -4141,7 +4144,7 @@ export function MemoryGraphPanel({
       if (firstFrame) window.cancelAnimationFrame(firstFrame);
       if (secondFrame) window.cancelAnimationFrame(secondFrame);
     };
-  }, [fitMemoryGraph, graph, mode, size.h, size.w]);
+  }, [fitMemoryGraph, graph, layoutSignal, mode, size.h, size.w]);
 
   const selectedNode = selected ? nodeById.get(selected) ?? null : null;
   const selectedEdges = useMemo(() => {
@@ -4785,7 +4788,7 @@ function Workbench({
               <p>No artifacts yet. Files generated or created by the assistant appear here.</p>
             </div>
           ))}
-        {tab === "memoria" && <MemoryGraphPanel threadId={threadId} />}
+        {tab === "memoria" && <MemoryGraphPanel threadId={threadId} layoutSignal={`${expanded ? "expanded" : "docked"}:${width}`} />}
         {tab === "goals" && goalsData && (
           <GoalsPanel
             data={goalsData}
