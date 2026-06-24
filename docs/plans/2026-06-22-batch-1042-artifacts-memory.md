@@ -992,6 +992,8 @@ feature laterali né una dashboard generica.
   progetto non cambia workspace finché non si apre un suo thread; l'ordine chat
   segue l'ultima attività reale, non la sola apertura; `New task` resta il
   placeholder e viene sostituito subito da un titolo sintetico del primo prompt.
+  La modalità chiusa usa un hotspot sul bordo sinistro e riapre la stessa
+  sidebar come isola floating temporanea invece di mantenere una rail fissa.
 - ☐ **UX.3 Superfici deliverable**: dopo UX.1, riallineare Artifacts e
   Presentations al modello workspace: artifact/versioni/provenance e template
   come output/capability di prima classe.

@@ -415,7 +415,9 @@ primo percorso locale verde e WS5 è chiusa localmente/gate:
     registry e UI. La slice successiva rende Work/Create/Personal/Projects
     collapsabili in modo indipendente, permette di espandere progetti senza
     cambiare workspace, ordina le chat per ultima attività/messaggio e assegna
-    subito un titolo sintetico al posto del placeholder `New task`.
+    subito un titolo sintetico al posto del placeholder `New task`. La modalità
+    chiusa abbandona la rail fissa: un hotspot sul bordo apre la stessa sidebar
+    come isola floating temporanea, pinnabile a sidebar persistente.
 
 Prima di pubblicare/taggare resta prudente ripetere lo smoke manuale in-app su
 una automazione schedulata reale con il binario aggiornato. Il primo smoke ha

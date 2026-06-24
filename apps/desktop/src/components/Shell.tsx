@@ -3,7 +3,6 @@ import { useTranslation } from "react-i18next";
 import {
   ChatSearchModal,
   NavDrawer,
-  NavigationRail,
   SettingsDrawer,
 } from "./Sidebar";
 import type { ChatThread, NavItem, SettingsSectionId, ViewId } from "../types";
@@ -58,12 +57,37 @@ export function Shell({
   const { t } = useTranslation();
   const isSettings = activeView === "settings";
   const [searchOpen, setSearchOpen] = useState(false);
+  const [transientDrawerOpen, setTransientDrawerOpen] = useState(false);
   const shellRef = useRef<HTMLDivElement>(null);
   const [drawerWidth, setDrawerWidth] = useState(readStoredDrawerWidth);
 
   function handleSelectSearchThread(threadId: string) {
     setSearchOpen(false);
     onSelectThread(threadId);
+  }
+
+  function closeTransientDrawer() {
+    setTransientDrawerOpen(false);
+  }
+
+  function handleTransientNavigate(view: ViewId) {
+    closeTransientDrawer();
+    onNavigate(view);
+  }
+
+  function handleTransientSelectThread(threadId: string) {
+    closeTransientDrawer();
+    onSelectThread(threadId);
+  }
+
+  function handleTransientSearch() {
+    closeTransientDrawer();
+    setSearchOpen(true);
+  }
+
+  function handleTransientCreateThread() {
+    closeTransientDrawer();
+    onCreateteChatThread();
   }
 
   function startResize(event: PointerEvent<HTMLDivElement>) {
@@ -101,24 +125,54 @@ export function Shell({
       style={{ "--drawer-width": `${drawerWidth}px` } as CSSProperties}
       className={[
         "app-shell",
-        // Settings is always shown with its full sidebar open — it can't collapse to
-        // the icon rail — so force the open grid column when in settings.
+        // Settings is always shown with its full sidebar open, so force the open
+        // grid column when in settings.
         drawerOpen || isSettings ? "drawer-open" : "drawer-closed",
         isSettings ? "settings-mode" : "",
+        transientDrawerOpen && !drawerOpen && !isSettings ? "drawer-transient-open" : "",
       ]
         .filter(Boolean)
         .join(" ")}
     >
       {!drawerOpen && !isSettings && (
-        // Collapsed: the icon rail. Its top button is the expand toggle (a no-drag
-        // child of the drag rail), so no control floats over the content drag strip.
-        <NavigationRail
-          activeView={activeView}
-          navItems={navItems}
-          onNavigate={onNavigate}
-          onSearch={() => setSearchOpen(true)}
-          onToggleDrawer={onToggleDrawer}
-        />
+        <>
+          <button
+            className="drawer-edge-hotspot"
+            type="button"
+            aria-label={t("sidebar.expandSidebar")}
+            title={t("sidebar.expandSidebar")}
+            onMouseEnter={() => setTransientDrawerOpen(true)}
+            onFocus={() => setTransientDrawerOpen(true)}
+            onClick={() => setTransientDrawerOpen(true)}
+          />
+          {transientDrawerOpen && (
+            <div
+              className="drawer-floating-host"
+              onMouseLeave={closeTransientDrawer}
+            >
+              <NavDrawer
+                activeView={activeView}
+                activeThreadId={activeThreadId}
+                busyThreadIds={busyThreadIds}
+                chatThreads={chatThreads}
+                navItems={navItems}
+                onArchiveChatThread={onArchiveChatThread}
+                onCreateteChatThread={handleTransientCreateThread}
+                onDeleteChatThread={onDeleteChatThread}
+                onNavigate={handleTransientNavigate}
+                onSearchChat={handleTransientSearch}
+                onSelectThread={handleTransientSelectThread}
+                onSetChatThreadPinned={onSetChatThreadPinned}
+                onToggleDrawer={() => {
+                  closeTransientDrawer();
+                  onToggleDrawer();
+                }}
+                onUnarchiveChatThread={onUnarchiveChatThread}
+                presentation="floating"
+              />
+            </div>
+          )}
+        </>
       )}
       {drawerOpen && !isSettings && (
         <NavDrawer
