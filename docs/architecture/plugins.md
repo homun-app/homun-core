@@ -2,7 +2,8 @@
 
 > Diagramma vivo. Decisioni: [ADR 0011 (core agnostico + ecosistema addon)](../decisions/0011-agnostic-core-addon-ecosystem.md),
 > [ADR 0009 (capability execution containment)](../decisions/0009-capability-execution-containment.md),
-> [ADR 0013 (connector auth & routing)](../decisions/0013-connector-auth-and-capability-routing.md).
+> [ADR 0013 (connector auth & routing)](../decisions/0013-connector-auth-and-capability-routing.md),
+> [ADR 0017 (plugin distribution & licensing)](../decisions/0017-plugin-distribution-and-licensing.md).
 
 ## Principio
 

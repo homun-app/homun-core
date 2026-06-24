@@ -979,7 +979,10 @@ proprio — versioning, canali, scaricabili dal **sito Homun**, auto-aggiornabil
 - ☐ **9.5 Licensing/paid (predisporre ora)**: campo `entitlement` nel manifest + **token
   di licenza firmato** verificabile **offline** + ri-check periodico. Il paywall vero
   (account + pagamenti, es. Stripe) è fase successiva e **lega cloud/always-on**.
-- ☐ **9.6 ADR** "distribuzione & licensing plugin" (formalizza il contratto).
+- ✅ **9.6 ADR** "distribuzione & licensing plugin": ADR 0017 accettata. Fissa
+  registry hosted sul sito Homun, verifica locale deterministica, beta opt-in,
+  licensing paid predisposto ma pagamento/cloud rinviato, e nessun secondo
+  registry per template/skill/workflow.
 
 > Dipendenze: 9.1-9.4 sono local-first-compatibili e fattibili da subito; 9.5 (paid) ha
 > bisogno di **account + backend pagamenti** → arriva con cloud/always-on. WS9 poggia su

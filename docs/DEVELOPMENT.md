@@ -219,6 +219,9 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   contratto interno `PluginPackageManifest` con manifest path e file dichiarati;
   la validazione rifiuta pacchetti vuoti, digest non `sha256`, path assoluti o
   traversal `..`, e manifest mancanti. Verifica: suite capabilities verde.
+  **WS9.6 ADR locale:** ADR 0017 formalizza distribuzione, signing e licensing:
+  registry hosted sul sito Homun, verifica locale deterministica, beta opt-in,
+  paid predisposto con token offline e runtime sempre contenuto.
   `make_research` e `make_meeting` restano dopo questo asse.
 - **WS2-3.1 PASSATA in runtime (2026-06-23):** gli artifact scritti via
   Filesystem MCP dentro la root progetto vengono registrati come
