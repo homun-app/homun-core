@@ -102,6 +102,8 @@ assertContains("src/styles.css", "bottom: calc(var(--drawer-island-bottom) + 3px
 assertContains("src/styles.css", ".drawer-bottom-trigger svg", "sidebar toggle icon must not intercept pointer events from the button");
 assertContains("src/styles.css", ".app-shell.drawer-open > .nav-drawer", "open sidebar and Settings nav must use the same island styling");
 assertContains("src/components/Sidebar.tsx", "drawer-toggle-action", "expanded sidebar toggle must live in the persistent footer actions");
+assertNotContains("src/components/Sidebar.tsx", "drawer-new-action", "sidebar search row must not include a global new-chat plus button");
+assertNotContains("src/components/Sidebar.tsx", "the gear becomes a back-to-app arrow", "Settings nav must not keep a duplicate footer back action");
 assertContains("src/styles.css", "overflow-y: auto;\n  overflow-x: hidden;", "expanded project trees must scroll inside the sidebar middle region instead of covering footer actions");
 assertContains("src/styles.css", ".drawer-scroll::-webkit-scrollbar", "sidebar middle scrollbars must stay visually minimal");
 assertContains("src/styles.css", "z-index: 200", "custom window chrome must stay above the sidebar island");

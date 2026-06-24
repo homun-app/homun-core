@@ -264,8 +264,7 @@ small {
 .drawer-bottom-trigger svg,
 .drawer-footer-action svg,
 .workbench-toggle svg,
-.drawer-search-action svg,
-.drawer-new-action svg {
+.drawer-search-action svg {
   pointer-events: none;
 }
 
@@ -461,13 +460,11 @@ body.resizing-drawer {
 
 .drawer-topbar {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 30px;
-  gap: 6px;
+  grid-template-columns: minmax(0, 1fr);
   margin-bottom: 2px;
 }
 
-.drawer-search-action,
-.drawer-new-action {
+.drawer-search-action {
   min-height: 30px;
   border: none;
   border-radius: var(--radius-control);
@@ -485,14 +482,7 @@ body.resizing-drawer {
   font-size: var(--text-sm);
 }
 
-.drawer-new-action {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.drawer-search-action:hover,
-.drawer-new-action:hover {
+.drawer-search-action:hover {
   background: var(--surface-hover);
   color: var(--text);
 }
@@ -502,8 +492,8 @@ body.resizing-drawer {
 }
 
 .settings-drawer {
-  /* back · profile · nav · spacer(flex) · info-at-bottom */
-  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+  /* back · profile · nav · spacer(flex) */
+  grid-template-rows: auto auto auto minmax(0, 1fr);
 }
 
 .drawer-header,

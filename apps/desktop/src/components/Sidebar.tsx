@@ -712,15 +712,6 @@ export function NavDrawer({
           <Search size={15} />
           <span>{t("sidebar.search")}</span>
         </button>
-        <button
-          className="drawer-new-action"
-          type="button"
-          onClick={onCreateteChatThread}
-          aria-label={t("sidebar.newChat")}
-          title={t("sidebar.newChat")}
-        >
-          <Plus size={15} />
-        </button>
       </div>
 
       <nav className="drawer-nav linear-sidebar-nav" aria-label="Workspace navigation">
@@ -1049,22 +1040,6 @@ export function SettingsDrawer({
       </nav>
 
       <span className="set-nav-spacer" />
-
-      {/* Persistent footer — mirrors the main drawer's [bell + gear], but in Settings
-          the gear becomes a back-to-app arrow (you're already in Settings). */}
-      <footer className="drawer-footer">
-        <div className="drawer-persistent-actions" aria-label={t("sidebar.persistentActions")}>
-          <button
-            className="drawer-footer-action"
-            type="button"
-            aria-label={t("sidebar.backToApp")}
-            title={t("sidebar.backToApp")}
-            onClick={onBack}
-          >
-            <ArrowLeft size={16} />
-          </button>
-        </div>
-      </footer>
     </aside>
   );
 }
