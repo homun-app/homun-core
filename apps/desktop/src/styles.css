@@ -8288,6 +8288,12 @@ body.resizing-drawer {
 .mdl-row-top strong { font-size: 14px; }
 .mdl-row-meta { font-size: 11.5px; color: var(--muted); margin-left: auto; }
 .mdl-row-select { width: 230px; flex-shrink: 0; }
+.mdl-row-warning {
+  margin: 6px 0 0;
+  color: var(--warning, #9a6700);
+  font-size: 12px;
+  line-height: 1.35;
+}
 
 .mdl-models-head {
   display: flex;

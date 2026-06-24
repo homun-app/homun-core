@@ -309,6 +309,10 @@ primo percorso locale verde:
     bundled arrivano su copie ancora stock; le skill davvero modificate
     dall'utente restano protette perché il tree su disco diverge dal record
     seeded.
+73. WS4 image role UX — Settings → Model per task segnala quando
+    `image_generation` non ha modelli immagine disponibili. Il deck workflow può
+    degradare senza immagini, ma l'utente vede prima che serve un provider
+    image-capable o un refresh catalogo.
 
 Prima di pubblicare/taggare resta prudente ripetere lo smoke manuale in-app su
 una automazione schedulata reale con il binario aggiornato. Il primo smoke ha

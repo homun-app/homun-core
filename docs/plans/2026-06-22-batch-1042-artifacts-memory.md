@@ -969,7 +969,11 @@ proprio — versioning, canali, scaricabili dal **sito Homun**, auto-aggiornabil
   `skill_tree_hash_tracks_script_changes`.
 - ☐ **Immagini deck con testo storpiato** ("no text" ignorato) — limite del modello
   immagine; mitigare prompt o accettare.
-- ☐ **Ruolo immagine opzionale** — hint UI quando vuoto (deck senza immagini).
+- ✅ **Ruolo immagine opzionale (2026-06-24):** Settings → Model per task mostra
+  un hint quando `image_generation` non ha modelli immagine disponibili; i deck
+  possono comunque essere creati, ma l'utente vede che usciranno senza immagini
+  generate finché non abilita/aggiorna un provider image-capable. Contratto UI:
+  `imageRoleMissingHint`.
 - ☐ **Lentezza locale** — un 31B locale ~55s/chiamata; suggerire in UI un modello
   locale più piccolo (7-12B) per reattività, restando vero-locale.
 

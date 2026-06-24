@@ -178,6 +178,9 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   della skill (manifest, script e asset), non solo `SKILL.md`, così gli update
   bundled vengono applicati quando la copia utente è ancora stock e restano
   protetti quando l'utente ha davvero modificato la skill.
+  **WS4 image role UX:** Settings → Model per task mostra un hint quando il
+  ruolo `image_generation` non ha modelli immagine disponibili; i deck restano
+  generabili senza immagini, ma la causa è esplicita prima del workflow.
   `make_research` e `make_meeting` restano dopo questo asse.
 - **WS2-3.1 PASSATA in runtime (2026-06-23):** gli artifact scritti via
   Filesystem MCP dentro la root progetto vengono registrati come

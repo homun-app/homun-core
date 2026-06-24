@@ -764,6 +764,7 @@
     "notSaved": "Not saved.",
     "operationFailed": "Operation failed: {{message}}",
     "addProviderAndRefresh": "Add a provider and refresh its models.",
+    "imageRoleMissingHint": "No image-generation model is available. Decks will be created without generated images until you enable an image-capable provider or refresh its model catalog.",
     "stageSemantic": "semantic",
     "stageSingle": "single",
     "stageHeuristic": "heuristic",

@@ -1460,6 +1460,14 @@ function RuntimePane({
       </>
     );
   };
+  const hasModelOptionsForRole = (roleKey: string) => {
+    const wantImage = roleKey === "image_generation";
+    return providers.some((provider) =>
+      provider.models.some((model) =>
+        wantImage ? model.modality === "image" : model.modality !== "image",
+      ),
+    );
+  };
 
   // Every provider shown at once: the whole catalog plus any custom endpoints the
   // user added. A configured provider (matched to a preset by base URL, or a
@@ -1527,6 +1535,7 @@ function RuntimePane({
           ) : (
             roles.map((role) => {
               const value = role.auto ? "auto" : `${role.binding_provider_id}::${role.binding_model}`;
+              const missingImageRole = role.key === "image_generation" && !hasModelOptionsForRole(role.key);
               return (
                 <div className="mdl-row" key={role.key}>
                   <div className="mdl-row-main">
@@ -1537,6 +1546,9 @@ function RuntimePane({
                       </span>
                     </div>
                     <p className="mdl-detail-sub">{role.description}</p>
+                    {missingImageRole && (
+                      <p className="mdl-row-warning">{t("settings.imageRoleMissingHint")}</p>
+                    )}
                   </div>
                   <select
                     className="set-input mdl-row-select"
