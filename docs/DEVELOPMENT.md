@@ -127,9 +127,10 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   troncata accanto al titolo. Gate locale:
   `npm run test:ui-contract`, `npm run build`, runtime
   Electron riavviato con gateway `local-first-desktop-gateway` in ascolto su
-  `127.0.0.1:18765`. **Prossimo passo unico:** completare la rifinitura UX.2 su
-  progressive live-state/computer durante esecuzione reale, poi tornare a WS7
-  qualita' deliverable senza riaprire memoria/WS1/WS8 salvo regressioni.
+  `127.0.0.1:18765`. **Prossimo passo unico:** continuare WS7 sulla qualita'
+  deliverable con slice deterministiche e verificabili; UX.2 resta da rifinire
+  solo con review visuale dell'utente, senza riaprire memoria/WS1/WS8 salvo
+  regressioni.
 - **Direzione WS7 aggiornata:** l'obiettivo deliverable non è una gallery statica
   clonata tool-per-tool, ma un **design system dichiarativo condiviso** per
   documenti e presentazioni/plugin: temi, layout, componenti, template e QA
@@ -181,6 +182,11 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   `make_document` applica un guardrail QA deterministico al Markdown generato
   prima di scrivere artifact MD/PDF/DOCX: linee troppo lunghe, token non
   spezzabili e righe tabella con numero celle incoerente bloccano la consegna.
+  Follow-up WS7 documenti locale/verde: prima del fail-closed, `make_document`
+  prova una riparazione deterministica delle tabelle Markdown con celle
+  incoerenti, fondendo l'overflow nell'ultima colonna e riempiendo celle
+  mancanti con `-` senza inventare contenuto; se il QA successivo e' pulito,
+  il deliverable viene materializzato e l'attivita' segnala la correzione.
   Tredicesima slice locale/verde: il seed `monet/*` sale da 5 a 11 template
   PMI reali (one-pager, case study, verbale riunione, launch plan, incident
   review, product roadmap) sempre come entry catalogo non callable risolte nei

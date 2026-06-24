@@ -863,6 +863,14 @@ ragionato il contratto degli strumenti `make_*` creati dall'harness. ADR 0011
   `document_quality_guardrail_accepts_structured_markdown`,
   `document_quality_guardrail_flags_unrenderable_markdown`,
   `make_document_generation_options_are_explicit_and_bounded`.
+  **Follow-up WS7 document QA repair (2026-06-24, locale/verde):**
+  `make_document` prova una riparazione deterministica delle tabelle Markdown
+  prima del fail-closed: righe con troppe celle fondono l'overflow nell'ultima
+  colonna, righe con celle mancanti vengono riempite con `-`, poi il QA viene
+  rieseguito. Se restano problemi non correggibili, il workflow continua a
+  bloccare la consegna. Test mirati:
+  `document_quality_guardrails_normalize_table_cells_before_render`,
+  `cargo test -p local-first-desktop-gateway document_ -- --nocapture`.
   **Tredicesima slice template library (2026-06-23, locale/verde):**
   il seed `monet/*` passa da 5 a 11 template coprendo deliverable PMI comuni:
   company one-pager, customer case study, meeting minutes/verbale con azioni,

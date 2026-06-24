@@ -14384,6 +14384,90 @@ fn document_quality_issues(markdown: &str) -> Vec<String> {
     issues
 }
 
+fn document_table_row(cells: &[String]) -> String {
+    format!("| {} |", cells.join(" | "))
+}
+
+fn markdown_table_cells_for_repair(line: &str) -> Option<Vec<String>> {
+    let trimmed = line.trim();
+    if !trimmed.starts_with('|') || !trimmed.ends_with('|') {
+        return None;
+    }
+    Some(
+        trimmed
+            .trim_matches('|')
+            .split('|')
+            .map(|cell| cell.trim().to_string())
+            .collect(),
+    )
+}
+
+fn document_normalize_table_cells(mut cells: Vec<String>, expected: usize) -> Vec<String> {
+    if expected == 0 {
+        return cells;
+    }
+    if cells.len() > expected {
+        let overflow = cells.split_off(expected - 1);
+        cells.push(overflow.join(" / "));
+    }
+    while cells.len() < expected {
+        cells.push("-".to_string());
+    }
+    cells
+}
+
+fn normalize_document_tables(markdown: &str) -> String {
+    let lines = markdown.lines().collect::<Vec<_>>();
+    let mut output = Vec::with_capacity(lines.len());
+    let mut index = 0usize;
+    while index < lines.len() {
+        let line = lines[index];
+        let Some(header_cells) = markdown_table_cells(line) else {
+            output.push(line.to_string());
+            index += 1;
+            continue;
+        };
+        if index + 1 >= lines.len() || !markdown_table_separator(lines[index + 1]) {
+            output.push(line.to_string());
+            index += 1;
+            continue;
+        }
+        let expected = header_cells.len();
+        output.push(document_table_row(&header_cells));
+        output.push(document_table_row(&vec!["---".to_string(); expected]));
+        index += 2;
+        while index < lines.len() {
+            let Some(row_cells) = markdown_table_cells_for_repair(lines[index]) else {
+                break;
+            };
+            if markdown_table_separator(lines[index]) {
+                break;
+            }
+            let cells = document_normalize_table_cells(row_cells, expected);
+            output.push(document_table_row(&cells));
+            index += 1;
+        }
+    }
+    let mut normalized = output.join("\n");
+    if markdown.ends_with('\n') {
+        normalized.push('\n');
+    }
+    normalized
+}
+
+fn apply_document_quality_guardrails(markdown: &str) -> (String, Vec<String>) {
+    let issues = document_quality_issues(markdown);
+    let normalized = if issues
+        .iter()
+        .any(|issue| issue.contains("table row has"))
+    {
+        normalize_document_tables(markdown)
+    } else {
+        markdown.to_string()
+    };
+    (normalized, issues)
+}
+
 fn document_artifact_name(raw: Option<&str>) -> String {
     document_artifact_name_with_extension(raw, "md")
 }
@@ -18365,7 +18449,21 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                         &markdown,
                                         &document_options.design_components,
                                     );
+                                    let (markdown, repaired_issues) =
+                                        apply_document_quality_guardrails(&markdown);
                                     let quality_issues = document_quality_issues(&markdown);
+                                    if !repaired_issues.is_empty() && quality_issues.is_empty() {
+                                        let _ = emit_stream_event(
+                                            &tx,
+                                            GenerateStreamEvent::Delta {
+                                                text: format!(
+                                                    "‹‹ACT››🔎 Document QA repaired {} table-layout items‹‹/ACT››",
+                                                    repaired_issues.len()
+                                                ),
+                                            },
+                                        )
+                                        .await;
+                                    }
                                     if !quality_issues.is_empty() {
                                         let summary = quality_issues
                                             .iter()
@@ -40959,6 +41057,39 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             issues.iter().any(|issue| issue.contains("table row has 3 cells but expected 2")),
             "{issues:?}"
         );
+    }
+
+    #[test]
+    fn document_quality_guardrails_normalize_table_cells_before_render() {
+        let markdown = "\
+# Brief
+
+| Phase | Owner |
+| --- | --- |
+| Discovery | Product | extra context |
+| Build |
+";
+
+        let (normalized, issues) = super::apply_document_quality_guardrails(markdown);
+
+        assert!(
+            issues
+                .iter()
+                .any(|issue| issue.contains("table row has 3 cells but expected 2")),
+            "{issues:?}"
+        );
+        assert!(
+            issues
+                .iter()
+                .any(|issue| issue.contains("table row has 1 cells but expected 2")),
+            "{issues:?}"
+        );
+        assert!(
+            super::document_quality_issues(&normalized).is_empty(),
+            "{normalized}"
+        );
+        assert!(normalized.contains("| Discovery | Product / extra context |"), "{normalized}");
+        assert!(normalized.contains("| Build | - |"), "{normalized}");
     }
 
     #[test]

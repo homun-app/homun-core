@@ -255,7 +255,10 @@ primo percorso locale verde e WS5 è chiusa localmente/gate:
 59. WS7 document Markdown QA — `make_document` valida il Markdown prima della
     scrittura degli artifact `.md`/`.pdf`/`.docx`: linee troppo lunghe, token
     non spezzabili e tabelle pipe con numero celle incoerente bloccano la
-    consegna fragile con errore QA deterministico.
+    consegna fragile con errore QA deterministico. Follow-up: le tabelle con
+    celle incoerenti vengono prima normalizzate in modo deterministico
+    (overflow fuso nell'ultima colonna, celle mancanti riempite con `-`) e solo
+    gli errori residui bloccano il deliverable.
 60. WS7 expanded Monet seed catalog — il catalogo built-in `monet/*` copre ora
     11 template PMI: pitch, executive update, project plan, sales proposal,
     technical brief, one-pager, case study, meeting minutes, launch plan,
@@ -526,6 +529,8 @@ ottava slice: template catalog provider `monet/*` read-only nel registry, con
 senza toccare i workflow; decima slice: manifest JSON locale caricabile e
 validato; undicesima slice: QA leggibilità deck su font-size/contrasto;
 dodicesima slice: QA Markdown per documenti prima di scrivere MD/PDF/DOCX.
+Follow-up documenti: riparazione deterministica delle tabelle Markdown prima
+del fail-closed, senza inventare contenuto.
 Tredicesima slice: catalogo seed `monet/*` ampliato a 11 template PMI.
 Quattordicesima slice: manifest con metadati sanificati per preview/gallery
 futura. Quindicesima slice: API/bridge read-only del catalogo template.
