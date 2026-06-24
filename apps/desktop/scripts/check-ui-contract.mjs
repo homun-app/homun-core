@@ -82,7 +82,9 @@ assertContains("src/components/Sidebar.tsx", "nav-drawer", "expanded navigation 
 assertContains("src/components/Shell.tsx", "drawer-edge-hotspot", "collapsed sidebar must be opened from a left-edge hotspot");
 assertContains("src/components/Shell.tsx", "drawer-floating-trigger", "collapsed sidebar must also expose a visible open icon");
 assertContains("src/components/Shell.tsx", "onToggleDrawer();", "visible collapsed sidebar opener must open the persistent drawer, not only the transient island");
-assertContains("src/styles.css", "left: calc(8px + min(var(--drawer-width, 292px), calc(100vw - 24px)) - 46px)", "collapsed sidebar opener must align with the floating drawer toggle");
+assertNotContains("src/components/Shell.tsx", "!transientDrawerOpen &&", "visible collapsed sidebar opener must remain clickable while the transient island is open");
+assertContains("src/styles.css", "left: calc(8px + min(var(--drawer-width, 292px), calc(100vw - 24px)) - 50px)", "collapsed sidebar opener must align with the floating drawer toggle");
+assertContains("src/styles.css", "z-index: 160", "collapsed sidebar opener must stay above the transient floating island");
 assertContains("src/styles.css", ".app-shell.drawer-closed .task-topbar", "closed sidebar content header must reserve space for the stable opener");
 assertContains("src/components/Shell.tsx", "drawer-floating-host", "collapsed sidebar must render as a transient floating island");
 assertContains("src/components/Sidebar.tsx", "presentation?: \"pinned\" | \"floating\"", "drawer must support pinned and floating presentations");

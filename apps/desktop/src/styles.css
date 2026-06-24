@@ -250,7 +250,7 @@ small {
 
 .drawer-edge-hotspot {
   position: fixed;
-  top: var(--window-drag-height);
+  top: calc(var(--window-drag-height) + 88px);
   bottom: 0;
   left: 0;
   z-index: 95;
@@ -281,14 +281,14 @@ small {
 
 .drawer-floating-trigger {
   position: fixed;
-  top: 8px;
-  left: calc(8px + min(var(--drawer-width, 292px), calc(100vw - 24px)) - 46px);
-  z-index: 96;
+  top: calc(var(--window-drag-height) + 48px);
+  left: calc(8px + min(var(--drawer-width, 292px), calc(100vw - 24px)) - 50px);
+  z-index: 160;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 30px;
+  width: 38px;
+  height: 34px;
   border: none;
   border-radius: var(--radius-control);
   background: transparent;

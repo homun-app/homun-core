@@ -146,20 +146,18 @@ export function Shell({
             onFocus={() => setTransientDrawerOpen(true)}
             onClick={() => setTransientDrawerOpen(true)}
           />
-          {!transientDrawerOpen && (
-            <button
-              className="drawer-floating-trigger"
-              type="button"
-              aria-label={t("sidebar.expandSidebar")}
-              title={t("sidebar.expandSidebar")}
-              onClick={() => {
-                closeTransientDrawer();
-                onToggleDrawer();
-              }}
-            >
-              <PanelLeftOpen size={18} />
-            </button>
-          )}
+          <button
+            className="drawer-floating-trigger"
+            type="button"
+            aria-label={t("sidebar.expandSidebar")}
+            title={t("sidebar.expandSidebar")}
+            onClick={() => {
+              closeTransientDrawer();
+              onToggleDrawer();
+            }}
+          >
+            <PanelLeftOpen size={18} />
+          </button>
           {transientDrawerOpen && (
             <div
               className="drawer-floating-host"
