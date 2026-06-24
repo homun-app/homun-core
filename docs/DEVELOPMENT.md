@@ -242,8 +242,10 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   read-only degli installati, con stato vuoto pulito se il registry non esiste.
   **WS9.2c registry cache locale/verde:** `CachedPluginRegistry` valida e salva
   atomicamente un `PluginRegistryIndex` marketplace locale; il gateway espone
-  `GET/POST /api/plugins/registry/cache`. Restano fetch remoto dal sito Homun,
-  UI manager e update automatico.
+  `GET/POST /api/plugins/registry/cache`. **WS9.2d registry fetch locale/verde:**
+  `POST /api/plugins/registry/fetch` scarica un registry HTTPS, applica limite
+  dimensione, parse `PluginRegistryIndex` e salva nella stessa cache validata.
+  Restano feed/package reali sul sito Homun, UI manager e update automatico.
   **WS9.6 ADR locale:** ADR 0017 formalizza distribuzione, signing e licensing:
   registry hosted sul sito Homun, verifica locale deterministica, beta opt-in,
   paid predisposto con token offline e runtime sempre contenuto.

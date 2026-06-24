@@ -705,6 +705,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "/api/plugins/registry/cache",
             get(cached_plugin_registry).post(cache_plugin_registry),
         )
+        .route("/api/plugins/registry/fetch", post(fetch_plugin_registry))
         .route(
             "/api/runtime/provider",
             get(runtime_provider).post(set_runtime_provider),
@@ -20481,6 +20482,7 @@ async fn plugin_toggle(
 }
 
 const MAX_LOCAL_PLUGIN_PACKAGE_BYTES: u64 = 32 * 1024 * 1024;
+const MAX_PLUGIN_REGISTRY_INDEX_BYTES: u64 = 1024 * 1024;
 
 #[derive(Debug, Deserialize)]
 struct InstallLocalPluginPackageRequest {
@@ -20499,6 +20501,11 @@ struct CachePluginRegistryRequest {
     #[serde(default)]
     source_url: Option<String>,
     registry: PluginRegistryIndex,
+}
+
+#[derive(Debug, Deserialize)]
+struct FetchPluginRegistryRequest {
+    source_url: String,
 }
 
 /// POST /api/plugins/packages/install-local — development/desktop install path
@@ -20646,6 +20653,85 @@ async fn cache_plugin_registry(
     )
     .map_err(|e| GatewayError {
         status: StatusCode::BAD_REQUEST,
+        code: "plugin_registry_cache_invalid",
+        message: e,
+    })?;
+    Ok(Json(serde_json::json!({
+        "ok": true,
+        "cached": cached,
+    })))
+}
+
+async fn fetch_plugin_registry(
+    State(state): State<AppState>,
+    Json(request): Json<FetchPluginRegistryRequest>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let source_url = request.source_url.trim();
+    let parsed_url = source_url.parse::<reqwest::Url>().map_err(|e| GatewayError {
+        status: StatusCode::BAD_REQUEST,
+        code: "plugin_registry_url_invalid",
+        message: e.to_string(),
+    })?;
+    if parsed_url.scheme() != "https" {
+        return Err(GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "plugin_registry_url_insecure",
+            message: "Plugin registry fetch requires an https URL".to_string(),
+        });
+    }
+
+    let response = state
+        .http
+        .get(parsed_url.clone())
+        .send()
+        .await
+        .map_err(|e| GatewayError {
+            status: StatusCode::BAD_GATEWAY,
+            code: "plugin_registry_fetch_failed",
+            message: e.to_string(),
+        })?;
+    if !response.status().is_success() {
+        return Err(GatewayError {
+            status: StatusCode::BAD_GATEWAY,
+            code: "plugin_registry_fetch_status",
+            message: format!("Plugin registry returned HTTP {}", response.status()),
+        });
+    }
+    if response.content_length().unwrap_or(0) > MAX_PLUGIN_REGISTRY_INDEX_BYTES {
+        return Err(GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "plugin_registry_too_large",
+            message: "Plugin registry response is larger than the local cache limit".to_string(),
+        });
+    }
+    let bytes = response.bytes().await.map_err(|e| GatewayError {
+        status: StatusCode::BAD_GATEWAY,
+        code: "plugin_registry_read_failed",
+        message: e.to_string(),
+    })?;
+    if bytes.len() as u64 > MAX_PLUGIN_REGISTRY_INDEX_BYTES {
+        return Err(GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "plugin_registry_too_large",
+            message: "Plugin registry response is larger than the local cache limit".to_string(),
+        });
+    }
+    let registry: PluginRegistryIndex = serde_json::from_slice(&bytes).map_err(|e| GatewayError {
+        status: StatusCode::BAD_GATEWAY,
+        code: "plugin_registry_parse_failed",
+        message: e.to_string(),
+    })?;
+    let cached = plugin_packages::save_cached_plugin_registry(
+        &cached_plugin_registry_path().map_err(|e| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "plugin_registry_cache_path_unavailable",
+            message: e.to_string(),
+        })?,
+        Some(parsed_url.to_string()),
+        registry,
+    )
+    .map_err(|e| GatewayError {
+        status: StatusCode::BAD_GATEWAY,
         code: "plugin_registry_cache_invalid",
         message: e,
     })?;
