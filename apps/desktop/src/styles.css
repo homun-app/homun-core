@@ -194,7 +194,7 @@ small {
   --drawer-island-gap: 16px;
   --drawer-island-top: 14px;
   --drawer-island-bottom: 8px;
-  --drawer-toggle-left: 108px;
+  --window-chrome-height: 44px;
   height: 100vh;
   min-height: 0;
   position: relative;
@@ -202,6 +202,71 @@ small {
   grid-template-columns: minmax(0, 1fr);
   padding-top: var(--window-drag-height);
   background: var(--bg);
+}
+
+.window-chrome {
+  position: fixed;
+  inset: 0 0 auto 0;
+  z-index: 200;
+  height: var(--window-chrome-height);
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 0 16px;
+  background: transparent;
+  pointer-events: none;
+  -webkit-app-region: no-drag;
+}
+
+.window-drag-strip {
+  position: absolute;
+  top: 0;
+  height: var(--window-chrome-height);
+  pointer-events: auto;
+  -webkit-app-region: drag;
+}
+
+.window-drag-strip--center {
+  left: 16px;
+  right: 180px;
+}
+
+.window-drag-strip--right {
+  right: 0;
+  width: 132px;
+}
+
+.drawer-bottom-trigger {
+  position: fixed;
+  left: calc(var(--drawer-island-gap) + 4px);
+  bottom: calc(var(--drawer-island-bottom) + 3px);
+  z-index: 160;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  pointer-events: auto;
+  -webkit-app-region: no-drag;
+}
+
+.drawer-bottom-trigger:hover,
+.drawer-bottom-trigger:focus-visible {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.drawer-bottom-trigger svg,
+.drawer-footer-action svg,
+.workbench-toggle svg,
+.drawer-search-action svg,
+.drawer-new-action svg {
+  pointer-events: none;
 }
 
 .app-shell::before {
@@ -283,30 +348,6 @@ small {
   background: color-mix(in srgb, var(--muted) 28%, transparent);
 }
 
-.drawer-floating-trigger {
-  position: fixed;
-  top: calc(var(--window-drag-height) + var(--drawer-island-top) + 8px);
-  left: var(--drawer-toggle-left);
-  z-index: 160;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 30px;
-  border: none;
-  border-radius: var(--radius-control);
-  background: transparent;
-  color: var(--muted);
-  cursor: pointer;
-  -webkit-app-region: no-drag;
-}
-
-.drawer-floating-trigger:hover,
-.drawer-floating-trigger:focus-visible {
-  background: var(--surface-hover);
-  color: var(--text);
-}
-
 .drawer-floating-host {
   position: fixed;
   top: calc(var(--window-drag-height) + var(--drawer-island-top));
@@ -370,36 +411,6 @@ body.resizing-drawer {
   -webkit-app-region: drag;
 }
 
-.window-controls {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-}
-
-.window-controls.compact {
-  justify-content: center;
-  gap: 4px;
-}
-
-.control {
-  width: 11px;
-  height: 11px;
-  border-radius: 999px;
-  flex: 0 0 auto;
-}
-
-.control.red {
-  background: #ff5f57;
-}
-
-.control.yellow {
-  background: #ffbd2e;
-}
-
-.control.green {
-  background: #28c840;
-}
-
 .rail-logo,
 .rail-button,
 .icon-button,
@@ -419,31 +430,6 @@ body.resizing-drawer {
   height: 36px;
   border-radius: 999px;
   background: transparent;
-  color: var(--text);
-}
-
-/* Expand toggle shown when the sidebar is collapsed: lives on the CONTENT side, just
-   past the narrow rail and the traffic lights, on the lights' row. Keeps the collapsed
-   column slim. */
-.sidebar-expand {
-  position: absolute;
-  top: 8px;
-  left: 76px;
-  z-index: 85;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 30px;
-  border: none;
-  background: transparent;
-  color: var(--muted);
-  border-radius: var(--radius-control);
-  cursor: pointer;
-  -webkit-app-region: no-drag;
-}
-.sidebar-expand:hover {
-  background: var(--surface-hover);
   color: var(--text);
 }
 
@@ -527,28 +513,6 @@ body.resizing-drawer {
     0 3px 14px rgba(15, 23, 42, 0.08);
 }
 
-/* Collapse control: top-right, on the window-buttons line (out of the nav flow). */
-.drawer-collapse {
-  position: absolute;
-  top: 8px;
-  left: calc(var(--drawer-toggle-left) - var(--drawer-island-gap));
-  z-index: 5;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 30px;
-  border: none;
-  background: transparent;
-  color: var(--muted);
-  border-radius: var(--radius-control);
-  cursor: pointer;
-  -webkit-app-region: no-drag;
-}
-.drawer-collapse:hover {
-  background: var(--surface-hover);
-  color: var(--text);
-}
 .drawer-topbar {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 30px;
@@ -1320,6 +1284,7 @@ body.resizing-drawer {
   align-items: center;
   justify-content: flex-start;
   gap: 10px;
+  width: 100%;
   padding-inline: 2px;
 }
 
@@ -1337,6 +1302,10 @@ body.resizing-drawer {
 
 .drawer-footer-action:hover {
   background: var(--surface-hover);
+}
+
+.drawer-toggle-action {
+  margin-left: auto;
 }
 
 .back-button {
@@ -1556,19 +1525,12 @@ body.resizing-drawer {
      between the sidebar and the title). Break out of the layout's side padding with
      negative inline margins, then re-pad so the title + actions stay on the centered
      760 message column. The title/actions are no-drag children → they carve the drag
-     region reliably (same subtree). No control floats over this row: the expand toggle
-     now lives inside the rail. */
+     region reliably (same subtree). Sidebar open/close controls live in the footer
+     zone, so the titlebar remains a pure drag/header area. */
   width: auto;
   margin-inline: calc(-1 * clamp(18px, 5vw, 72px));
   padding-inline: calc(clamp(18px, 5vw, 72px) + max(0px, (100% - 760px) / 2));
   -webkit-app-region: drag;
-}
-
-.app-shell.drawer-closed .task-topbar {
-  padding-left: max(
-    calc(clamp(18px, 5vw, 72px) + max(0px, (100% - 760px) / 2)),
-    calc(8px + min(var(--drawer-width, 292px), calc(100vw - 24px)) + 12px)
-  );
 }
 
 .task-title-area,

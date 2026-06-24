@@ -135,19 +135,19 @@ export function Shell({
         .filter(Boolean)
         .join(" ")}
     >
+      <div className="window-chrome" aria-hidden="true">
+        <div className="window-drag-strip window-drag-strip--center" aria-hidden="true" />
+        <div className="window-drag-strip window-drag-strip--right" aria-hidden="true" />
+      </div>
       {!drawerOpen && !isSettings && (
         <>
-          <button
+          <div
             className="drawer-edge-hotspot"
-            type="button"
-            aria-label={t("sidebar.expandSidebar")}
-            title={t("sidebar.expandSidebar")}
+            aria-hidden="true"
             onMouseEnter={() => setTransientDrawerOpen(true)}
-            onFocus={() => setTransientDrawerOpen(true)}
-            onClick={() => setTransientDrawerOpen(true)}
           />
           <button
-            className="drawer-floating-trigger"
+            className="drawer-bottom-trigger"
             type="button"
             aria-label={t("sidebar.expandSidebar")}
             title={t("sidebar.expandSidebar")}

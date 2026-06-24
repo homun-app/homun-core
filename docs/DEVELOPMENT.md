@@ -86,11 +86,12 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   per semplice lettura, e il placeholder resta `New task` mentre il primo prompt
   genera subito un titolo sintetico. La modalità chiusa non mostra più una rail
   fissa: un hotspot sul bordo sinistro apre la stessa sidebar come isola
-  temporanea floating, richiusa alla selezione o al mouse-out; il controllo in
-  alto la pinna come sidebar persistente. **Prossimo passo unico:** verificare
-  in app l'isola collassata, poi continuare su micro-slice UX.2 chat/dock o
-  tornare a WS7 qualita' deliverable senza riaprire memoria/WS1/WS8 salvo
-  regressioni.
+  temporanea floating, richiusa alla selezione o al mouse-out; il toggle vive
+  nel footer delle azioni persistenti, fuori dalla titlebar/drag strip, e la
+  shell Electron mantiene controlli finestra nativi. Gate runtime Electron:
+  collapse e reopen da footer/opener basso verificati. **Prossimo passo unico:**
+  continuare su micro-slice UX.2 chat/dock o tornare a WS7 qualita' deliverable
+  senza riaprire memoria/WS1/WS8 salvo regressioni.
 - **Direzione WS7 aggiornata:** l'obiettivo deliverable non è una gallery statica
   clonata tool-per-tool, ma un **design system dichiarativo condiviso** per
   documenti e presentazioni/plugin: temi, layout, componenti, template e QA

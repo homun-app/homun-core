@@ -156,8 +156,11 @@ Quando la sidebar e' chiusa su desktop, Homun non mostra una rail fissa. Il
 bordo sinistro diventa un hotspot discreto: hover/focus apre la stessa sidebar
 come isola floating con margine, bordo arrotondato e ombra leggera. Se l'utente
 seleziona una chat, un progetto o una voce di navigazione, l'isola si richiude;
-il controllo in alto la pinna trasformandola nella sidebar persistente. Su
-mobile/tablet la stessa superficie resta overlay esplicito, senza dipendere
+il controllo nel footer, accanto alle azioni persistenti, la pinna trasformandola
+nella sidebar persistente. Il toggle non vive nella titlebar: Electron mantiene
+i controlli nativi della finestra e la UI usa solo strip di drag esplicite,
+lasciando i controlli interattivi fuori dalle regioni `-webkit-app-region: drag`.
+Su mobile/tablet la stessa superficie resta overlay esplicito, senza dipendere
 dall'hover.
 
 Gli addon dichiarano `navSection`, `promoted` e ordine nel manifest/registry. La

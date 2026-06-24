@@ -709,16 +709,6 @@ export function NavDrawer({
     .filter((group) => group.items.length > 0);
   return (
     <aside className={`nav-drawer ${presentation === "floating" ? "floating-island" : ""}`} aria-label={t("sidebar.mainMenu")}>
-      <button
-        className="drawer-collapse"
-        type="button"
-        aria-label={presentation === "floating" ? t("sidebar.expandSidebar") : t("sidebar.collapseSidebar")}
-        title={presentation === "floating" ? t("sidebar.expandSidebar") : t("sidebar.collapseSidebar")}
-        onClick={onToggleDrawer}
-      >
-        {presentation === "floating" ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
-      </button>
-
       <div className="drawer-topbar">
         <button className="drawer-search-action" type="button" onClick={onSearchChat}>
           <Search size={15} />
@@ -934,6 +924,15 @@ export function NavDrawer({
             onClick={() => onNavigate("settings")}
           >
             <Settings size={16} />
+          </button>
+          <button
+            className="drawer-footer-action drawer-toggle-action"
+            type="button"
+            aria-label={presentation === "floating" ? t("sidebar.expandSidebar") : t("sidebar.collapseSidebar")}
+            title={presentation === "floating" ? t("sidebar.expandSidebar") : t("sidebar.collapseSidebar")}
+            onClick={onToggleDrawer}
+          >
+            {presentation === "floating" ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
           </button>
         </div>
       </footer>

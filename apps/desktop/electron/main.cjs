@@ -348,8 +348,10 @@ function createWindow() {
     ...(iconPath ? { icon: iconPath } : {}),
     title: "Homun",
     backgroundColor: "#ffffff",
-    titleBarStyle: "hiddenInset",
-    trafficLightPosition: { x: 16, y: 16 },
+    titleBarStyle: "hidden",
+    ...(process.platform === "darwin"
+      ? { trafficLightPosition: { x: 16, y: 15 } }
+      : { titleBarOverlay: { height: 44, color: "#ffffff", symbolColor: "#5f6368" } }),
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,

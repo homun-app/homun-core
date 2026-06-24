@@ -417,7 +417,9 @@ primo percorso locale verde e WS5 è chiusa localmente/gate:
     cambiare workspace, ordina le chat per ultima attività/messaggio e assegna
     subito un titolo sintetico al posto del placeholder `New task`. La modalità
     chiusa abbandona la rail fissa: un hotspot sul bordo apre la stessa sidebar
-    come isola floating temporanea, pinnabile a sidebar persistente.
+    come isola floating temporanea, pinnabile a sidebar persistente dal footer
+    delle azioni persistenti. La shell Electron mantiene controlli finestra
+    nativi; i toggle Homun restano fuori dalla titlebar/drag strip.
 
 Prima di pubblicare/taggare resta prudente ripetere lo smoke manuale in-app su
 una automazione schedulata reale con il binario aggiornato. Il primo smoke ha
