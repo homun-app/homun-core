@@ -962,9 +962,11 @@ proprio — versioning, canali, scaricabili dal **sito Homun**, auto-aggiornabil
 - ✅ **Computer owner hardening (2026-06-24):** il dock live richiede `thread_id`
   esplicito quando c'è attività browser/terminal; `thread_id=null` non può più
   rendere un'attività visibile in tutte le chat. Contratto UI aggiornato.
-- ☐ **Seeder skill fragile** — una skill modificata a mano (hash desync) non viene più
-  auto-aggiornata (ha tenuto `create-presentations` vecchia su disco fino al fix manuale)
-  → irrobustire.
+- ✅ **Seeder skill fragile (2026-06-24):** il seed record delle default skills
+  hasha ora l'intero skill tree, non solo `SKILL.md`; cambi a script/asset
+  bundled aggiornano una skill non editata dall'utente e restano bloccati se il
+  tree su disco diverge dal record seeded. Test mirato:
+  `skill_tree_hash_tracks_script_changes`.
 - ☐ **Immagini deck con testo storpiato** ("no text" ignorato) — limite del modello
   immagine; mitigare prompt o accettare.
 - ☐ **Ruolo immagine opzionale** — hint UI quando vuoto (deck senza immagini).

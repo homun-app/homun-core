@@ -304,6 +304,11 @@ primo percorso locale verde:
     `/api/templates/catalog` deve esporre template non-callable con preview
     built-in, e `/api/capabilities/snapshot` deve restare uno snapshot valido.
     È il primo strato HTTP del gate; il render end-to-end resta da aggiungere.
+72. WS4 default skill seeder hardening — il seeder delle skill bundled hasha ora
+    l'intero tree (`SKILL.md`, script, asset), non solo il manifest. Gli update
+    bundled arrivano su copie ancora stock; le skill davvero modificate
+    dall'utente restano protette perché il tree su disco diverge dal record
+    seeded.
 
 Prima di pubblicare/taggare resta prudente ripetere lo smoke manuale in-app su
 una automazione schedulata reale con il binario aggiornato. Il primo smoke ha

@@ -30839,6 +30839,48 @@ fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::
     Ok(())
 }
 
+/// Non-cryptographic content hash of a whole skill tree (change detection only).
+/// Default skills include scripts/assets as well as SKILL.md; hashing only the
+/// manifest misses bundled implementation updates.
+fn skill_tree_hash(dir: &std::path::Path) -> Option<String> {
+    fn walk(
+        base: &std::path::Path,
+        dir: &std::path::Path,
+        out: &mut Vec<(String, Vec<u8>)>,
+    ) -> std::io::Result<()> {
+        let mut entries = fs::read_dir(dir)?.collect::<Result<Vec<_>, _>>()?;
+        entries.sort_by_key(|entry| entry.file_name());
+        for entry in entries {
+            let path = entry.path();
+            let file_type = entry.file_type()?;
+            if file_type.is_dir() {
+                walk(base, &path, out)?;
+            } else if file_type.is_file() {
+                let rel = path
+                    .strip_prefix(base)
+                    .map_err(|error| std::io::Error::other(error.to_string()))?
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                out.push((rel, fs::read(&path)?));
+            }
+        }
+        Ok(())
+    }
+
+    let mut files = Vec::new();
+    walk(dir, dir, &mut files).ok()?;
+    if !files.iter().any(|(path, _)| path == "SKILL.md") {
+        return None;
+    }
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    for (path, bytes) in files {
+        path.hash(&mut h);
+        bytes.hash(&mut h);
+    }
+    Some(format!("{:016x}", h.finish()))
+}
+
 /// Seeds the bundled default skills (HomunCoder methodology) into the user's skills
 /// dir so a fresh install ships the methodology by default. Non-destructive: only
 /// copies a skill whose id is ABSENT (never clobbers a user-edited one), and runs
@@ -30885,15 +30927,6 @@ fn seed_default_skills() {
         }
     }
 
-    // Non-cryptographic content hash of a skill's SKILL.md (change detection only).
-    let skill_hash = |dir: &std::path::Path| -> Option<String> {
-        let bytes = fs::read(dir.join("SKILL.md")).ok()?;
-        use std::hash::{Hash, Hasher};
-        let mut h = std::collections::hash_map::DefaultHasher::new();
-        bytes.hash(&mut h);
-        Some(format!("{:016x}", h.finish()))
-    };
-
     let mut copied = 0usize;
     let mut updated = 0usize;
     if let Ok(entries) = fs::read_dir(&src) {
@@ -30904,7 +30937,7 @@ fn seed_default_skills() {
             }
             let id = entry.file_name().to_string_lossy().to_string();
             let target = dest.join(entry.file_name());
-            let bundled = skill_hash(&from);
+            let bundled = skill_tree_hash(&from);
 
             if !target.exists() {
                 if seeded.contains_key(&id) {
@@ -30918,7 +30951,7 @@ fn seed_default_skills() {
             }
 
             // Target exists: push an updated default only if the user hasn't edited it.
-            let on_disk = skill_hash(&target);
+            let on_disk = skill_tree_hash(&target);
             let prev = seeded.get(&id).cloned().flatten();
             let unedited = match (&prev, &on_disk) {
                 (Some(p), Some(d)) => p == d, // matches what we seeded → not user-edited
@@ -41871,6 +41904,29 @@ data: [DONE]\n";
         );
         assert_eq!(skill_id_from_command("ls -la"), None);
         assert_eq!(skill_id_from_command("cat /home/agent/skills/"), None);
+    }
+
+    #[test]
+    fn skill_tree_hash_tracks_script_changes() {
+        let root = std::env::temp_dir().join(format!(
+            "homun-skill-hash-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis()
+        ));
+        let scripts = root.join("scripts");
+        std::fs::create_dir_all(&scripts).expect("scripts dir");
+        std::fs::write(root.join("SKILL.md"), "---\nname: demo\n---\n# Demo\n").expect("skill");
+        std::fs::write(scripts.join("run.sh"), "echo one\n").expect("script");
+
+        let first = super::skill_tree_hash(&root).expect("first hash");
+        std::fs::write(scripts.join("run.sh"), "echo two\n").expect("script update");
+        let second = super::skill_tree_hash(&root).expect("second hash");
+        let _ = std::fs::remove_dir_all(&root);
+
+        assert_ne!(first, second);
     }
 
     #[test]

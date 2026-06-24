@@ -174,6 +174,10 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   **Computer owner hardening:** il dock live non tratta più `thread_id=null`
   come visibile ovunque quando c'è attività browser/terminal; da idle resta
   neutro, ma un'attività live richiede owner esplicito uguale alla chat corrente.
+  **WS4 seeder skills:** il seeder delle default skills ora hasha l'intero tree
+  della skill (manifest, script e asset), non solo `SKILL.md`, così gli update
+  bundled vengono applicati quando la copia utente è ancora stock e restano
+  protetti quando l'utente ha davvero modificato la skill.
   `make_research` e `make_meeting` restano dopo questo asse.
 - **WS2-3.1 PASSATA in runtime (2026-06-23):** gli artifact scritti via
   Filesystem MCP dentro la root progetto vengono registrati come
