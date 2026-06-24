@@ -930,7 +930,7 @@ ragionato il contratto degli strumenti `make_*` creati dall'harness. ADR 0011
 Il caposaldo #2 ("funziona sul tier locale") oggi è verificato solo sul deck
 (`scripts/eval_deck_content.py`). Serve un **guardrail trasversale**.
 
-- 🟡 **8.1** Suite di eval sui **flussi chiave** sul **modello locale di base**.
+- ✅ **8.1** Suite di eval sui **flussi chiave** sul **modello locale di base**.
   *Seed fatto:* `scripts/eval_suite.py` (deck · piano · decisione-con-perché —
   structured-output a livello modello). **Slice 2026-06-24 locale/verde:** aggiunto
   check documento strutturato con `docx` obbligatorio, `HOMUN_EVAL_BASE` per
@@ -940,8 +940,13 @@ Il caposaldo #2 ("funziona sul tier locale") oggi è verificato solo sul deck
   locale/verde):** la suite supporta `HOMUN_EVAL_GATEWAY_BASE` +
   `HOMUN_EVAL_GATEWAY_TOKEN` e verifica `/api/templates/catalog` (template
   non-callable con preview built-in) e `/api/capabilities/snapshot` sul gateway
-  reale. Verifica runtime passata su `127.0.0.1:18765`. Da estendere: tool-call
-  emission + render end-to-end + ricerca/meeting quando esistono (WS7).
+  reale. **Chiusura WS8 (2026-06-24, locale/verde):** aggiunti unit test per i
+  validator della eval suite (`scripts/test_eval_suite.py`) e fail-closed sui
+  tool del capability snapshot: ogni tool deve esporre `provider_id`, `name`,
+  `provider_kind`, `action`, `description`. Verifica runtime passata su
+  `127.0.0.1:18765`. I render end-to-end restano coperti dai test/gate gateway
+  e dai guardrail WS7 esistenti; ricerca/meeting restano futuri finche' non
+  esistono i workflow.
 - ✅ **8.2** Eval memoria (= WS5.6): chiuso dai gate headless già materializzati
   nel gateway. Una nuova chat simulata recupera provenance artifact/decisione e
   stato workflow/perché dal `MemoryFacade` canonico, non da store paralleli.
@@ -951,13 +956,15 @@ Il caposaldo #2 ("funziona sul tier locale") oggi è verificato solo sul deck
   `memory_guardrail_release_gate_covers_artifact_and_workflow_recall`.
 - ✅ **8.3** Gate pre-release base: `scripts/pre_release_gate.py` esegue in un
   comando i gate deterministici (`cargo test -p local-first-capabilities -- --nocapture`,
-  `cargo test -p local-first-desktop-gateway -- --nocapture`, `npm run test:ui-contract`,
-  `npm run build`, `py_compile` eval suite) e si ferma al primo fallimento. Gli
-  eval modello/gateway restano opt-in con `HOMUN_RUN_MODEL_EVAL` e
+  `cargo test -p local-first-orchestrator -- --nocapture`,
+  `cargo test -p local-first-desktop-gateway -- --nocapture`,
+  `npm run test:ui-contract`, `npm run build`, unit test Python WS8,
+  `py_compile` eval suite) e si ferma al primo fallimento. Gli eval
+  modello/gateway restano opt-in con `HOMUN_RUN_MODEL_EVAL` e
   `HOMUN_EVAL_GATEWAY_BASE`, così il gate locale non dipende da runtime esterni.
   Verifica 2026-06-24 aggiornata: `python3 scripts/pre_release_gate.py` verde
-  (capabilities, **255 gateway passati, 1 ignorato**, UI contract, build desktop,
-  eval syntax). Da estendere insieme a 8.1: tool-call emission + render end-to-end.
+  (capabilities, orchestrator, gateway, UI contract, build desktop, unit test
+  eval/pre-release, eval syntax). **WS8 chiusa localmente/gate.**
 
 ## WS9 — Distribuzione plugin & marketplace
 

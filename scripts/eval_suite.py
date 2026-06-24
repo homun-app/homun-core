@@ -289,6 +289,17 @@ def v_gateway_capabilities(payload):
         return False, "missing connections array"
     if not isinstance(payload.get("tools"), list):
         return False, "missing tools array"
+    required_tool_fields = ("provider_id", "name", "provider_kind", "action", "description")
+    for index, tool in enumerate(payload["tools"]):
+        if not isinstance(tool, dict):
+            return False, f"tool contract {index}: not an object"
+        missing = [
+            field
+            for field in required_tool_fields
+            if not isinstance(tool.get(field), str) or not tool.get(field).strip()
+        ]
+        if missing:
+            return False, f"tool contract {index}: missing {','.join(missing)}"
     policy = payload.get("policy")
     if not isinstance(policy, dict) or not isinstance(policy.get("enabled_providers"), list):
         return False, "missing policy"

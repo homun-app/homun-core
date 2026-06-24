@@ -69,9 +69,10 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   il floor di orchestrazione e' coperto sulle superfici core: planner schema
   chiuso, `update_plan`/`step_advance` strict, judge verifica step/bootstrap
   strict e UI che non accetta `PLAN_PROPOSE` tronchi come card azionabili.
-  **Prossimo passo unico:** passare al prossimo asse roadmap (WS8/WS7/UX secondo
-  priorita' corrente) senza riaprire memoria/WS1 salvo regressioni o smoke in-app
-  prima release.
+  **Prossimo passo unico:** passare al blocco UX coherence/redesign leggero
+  (sidebar, activity/computer/plan rendering, coerenza Settings/Artifacts/
+  Presentations) prima di riprendere WS7 qualita' deliverable, senza riaprire
+  memoria/WS1/WS8 salvo regressioni o smoke in-app prima release.
 - **Direzione WS7 aggiornata:** l'obiettivo deliverable non è una gallery statica
   clonata tool-per-tool, ma un **design system dichiarativo condiviso** per
   documenti e presentazioni/plugin: temi, layout, componenti, template e QA
@@ -169,21 +170,24 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   solo a fine risposta. Guardrail successivo: `test:ui-contract` copre questo
   contratto e il dock Computer usa polling adattivo (600ms durante attività,
   2500ms da idle) per ridurre il carico sulle chat pesanti.
-  **WS8 eval locale:** `scripts/eval_suite.py` ora include anche il flusso
+  **WS8 chiusa localmente/gate:** `scripts/eval_suite.py` ora include anche il flusso
   documento strutturato con formato `docx` obbligatorio, supporta
   `HOMUN_EVAL_BASE` e stampa progressivamente; smoke locale `gemma4:latest 1`
-  passato su deck/document/plan/decision/open_loop. Slice successiva: la suite
-  può eseguire anche contract check opzionali sul gateway reale con
+  passato su deck/document/plan/decision/open_loop. La suite può eseguire anche
+  contract check opzionali sul gateway reale con
   `HOMUN_EVAL_GATEWAY_BASE`/`HOMUN_EVAL_GATEWAY_TOKEN`, validando
-  `/api/templates/catalog` e `/api/capabilities/snapshot` come primi guardrail
-  HTTP prima del render end-to-end. **WS8.3 pre-release gate locale/verde:**
+  `/api/templates/catalog` e `/api/capabilities/snapshot` come guardrail HTTP
+  prima del render end-to-end; i validator hanno unit test dedicati e il
+  capability snapshot fallisce se i tool non espongono il contratto minimo.
+  **WS8.3 pre-release gate locale/verde:**
   aggiunto `scripts/pre_release_gate.py`, che raccoglie i gate deterministici
   (`cargo test -p local-first-capabilities -- --nocapture`,
+  `cargo test -p local-first-orchestrator -- --nocapture`,
   `cargo test -p local-first-desktop-gateway -- --nocapture`,
-  `npm run test:ui-contract`, `npm run build`, `py_compile` della eval suite) e
-  abilita gli eval modello/gateway solo via env (`HOMUN_RUN_MODEL_EVAL`,
+  `npm run test:ui-contract`, `npm run build`, unit test Python WS8,
+  `py_compile` della eval suite) e abilita gli eval modello/gateway solo via env (`HOMUN_RUN_MODEL_EVAL`,
   `HOMUN_EVAL_GATEWAY_BASE`). Verifica aggiornata: `python3 scripts/pre_release_gate.py`
-  verde con suite capabilities, **255 test gateway passati, 1 ignorato**, UI
+  verde con suite capabilities, orchestrator, gateway, UI
   contract e build desktop verdi.
   **WS4 chat perf:** `RichMessage` e il renderer markdown lazy sono memoizzati,
   così polling/live state e sidebar non ricalcolano markdown pesante per messaggi

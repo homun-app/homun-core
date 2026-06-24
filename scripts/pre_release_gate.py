@@ -50,9 +50,11 @@ def build_plan(env: dict[str, str]) -> list[Step]:
             "capability tests",
             ["cargo", "test", "-p", "local-first-capabilities", "--", "--nocapture"],
         ),
+        Step("orchestrator tests", ["cargo", "test", "-p", "local-first-orchestrator", "--", "--nocapture"]),
         Step("gateway tests", ["cargo", "test", "-p", "local-first-desktop-gateway", "--", "--nocapture"]),
         Step("ui contract", ["npm", "run", "test:ui-contract"], cwd=DESKTOP),
         Step("desktop build", ["npm", "run", "build"], cwd=DESKTOP),
+        Step("eval unit tests", [PYTHON, "-m", "unittest", "scripts.test_eval_suite", "scripts.test_pre_release_gate", "-v"]),
         Step("eval syntax", [PYTHON, "-m", "py_compile", "scripts/eval_suite.py"]),
     ]
     if truthy(env.get("HOMUN_RUN_MODEL_EVAL")):
