@@ -356,8 +356,9 @@ primo percorso locale verde:
     scadenza. Restano storage token, re-check manager e account/payment cloud.
 84. WS9 install manager locale — il gateway installa `.hplugin` solo dopo
     verifica registry/signature/digest, staging sicuro, controllo
-    `plugin_id/version` e rename atomico. Restano endpoint/UI, fetch/cache feed
-    e update automatico.
+    `plugin_id/version` e rename atomico. Endpoint locale
+    `/api/plugins/packages/install-local` disponibile per pacchetti già
+    scaricati. Restano UI, fetch/cache feed e update automatico.
 
 Prima di pubblicare/taggare resta prudente ripetere lo smoke manuale in-app su
 una automazione schedulata reale con il binario aggiornato. Il primo smoke ha

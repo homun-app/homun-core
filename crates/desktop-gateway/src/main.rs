@@ -56,7 +56,7 @@ use local_first_capabilities::{
     CapabilityProviderGrant, CapabilityProviderKind, CapabilityRegistryStore, CapabilityResult,
     CapabilityTaskPayload, ComposioCapabilityProvider, ComposioProviderConfig, ComposioTransport,
     InMemoryCapabilityAudit, McpCapabilityProvider, McpStdioConfig, McpStdioTransport, McpToolPolicy,
-    McpTransport,
+    McpTransport, PluginRegistryEntry,
     PolicyContext, ProviderId as CapabilityProviderId, UserId as CapabilityUserId,
     WorkspaceId as CapabilityWorkspaceId,
 };
@@ -693,6 +693,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/plugins", get(plugins_list))
         .route("/api/brand-kit", get(brand_kit_get).put(brand_kit_put))
         .route("/api/plugins/{id}/toggle", post(plugin_toggle))
+        .route(
+            "/api/plugins/packages/install-local",
+            post(install_local_plugin_package),
+        )
         .route(
             "/api/runtime/provider",
             get(runtime_provider).post(set_runtime_provider),
@@ -20466,6 +20470,94 @@ async fn plugin_toggle(
         Some(enabled) => Json(serde_json::json!({ "id": id, "enabled": enabled })),
         None => Json(serde_json::json!({ "ok": false })),
     }
+}
+
+const MAX_LOCAL_PLUGIN_PACKAGE_BYTES: u64 = 32 * 1024 * 1024;
+
+#[derive(Debug, Deserialize)]
+struct InstallLocalPluginPackageRequest {
+    registry_entry: PluginRegistryEntry,
+    package_path: String,
+    #[serde(default)]
+    homun_version: Option<String>,
+    #[serde(default)]
+    beta_enabled: bool,
+    #[serde(default)]
+    trusted_public_keys: Vec<String>,
+}
+
+/// POST /api/plugins/packages/install-local — development/desktop install path
+/// for a downloaded `.hplugin`. The future marketplace flow will fetch the bytes
+/// first, then call the same install manager; this endpoint keeps the verified
+/// local install contract reachable before the UI manager exists.
+async fn install_local_plugin_package(
+    Json(request): Json<InstallLocalPluginPackageRequest>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let package_path = PathBuf::from(request.package_path.trim());
+    if !package_path.is_file() {
+        return Err(GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "plugin_package_missing",
+            message: "Plugin package path does not point to a file".to_string(),
+        });
+    }
+    let size = fs::metadata(&package_path)
+        .map_err(|e| GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "plugin_package_metadata_failed",
+            message: e.to_string(),
+        })?
+        .len();
+    if size > MAX_LOCAL_PLUGIN_PACKAGE_BYTES {
+        return Err(GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "plugin_package_too_large",
+            message: "Plugin package is larger than the local install limit".to_string(),
+        });
+    }
+
+    let archive = fs::read(&package_path).map_err(|e| GatewayError {
+        status: StatusCode::BAD_REQUEST,
+        code: "plugin_package_read_failed",
+        message: e.to_string(),
+    })?;
+    let install_root = installed_plugin_packages_root().map_err(|e| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "plugin_install_root_unavailable",
+        message: e.to_string(),
+    })?;
+    let homun_version = request
+        .homun_version
+        .as_deref()
+        .unwrap_or(env!("CARGO_PKG_VERSION"));
+    let installed = plugin_packages::install_hplugin_package(
+        &request.registry_entry,
+        &archive,
+        &install_root,
+        plugin_packages::PluginInstallOptions {
+            homun_version,
+            beta_enabled: request.beta_enabled,
+            trusted_public_keys: &request.trusted_public_keys,
+        },
+    )
+    .map_err(|e| GatewayError {
+        status: StatusCode::BAD_REQUEST,
+        code: "plugin_package_install_failed",
+        message: e,
+    })?;
+
+    Ok(Json(serde_json::json!({
+        "ok": true,
+        "plugin_id": installed.plugin_id,
+        "version": installed.version,
+        "install_dir": installed.install_dir,
+        "files": installed.inspection.files,
+        "security": installed.inspection.security,
+    })))
+}
+
+fn installed_plugin_packages_root() -> Result<PathBuf, std::io::Error> {
+    Ok(gateway_data_dir()?.join("plugins").join("installed"))
 }
 
 pub(crate) fn weekday_it(w: jiff::civil::Weekday) -> &'static str {

@@ -231,7 +231,11 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   l'archive, verifica che `plugin_id` e `version` del pacchetto coincidano con
   la entry registry e attiva con rename atomico solo dopo staging riuscito.
   Verifica: `cargo test -p local-first-desktop-gateway plugin_packages::tests -- --nocapture`
-  verde; restano API/UI manager, fetch/cache registry e update automatico.
+  verde. **WS9.3c install API locale/verde:** il gateway espone
+  `POST /api/plugins/packages/install-local`, che prende una `PluginRegistryEntry`
+  e un path locale `.hplugin`, applica lo stesso manager e installa sotto
+  `~/.homun/plugins/installed`; e' un ponte dev/desktop in attesa del download
+  dal feed. Restano UI manager, fetch/cache registry e update automatico.
   **WS9.6 ADR locale:** ADR 0017 formalizza distribuzione, signing e licensing:
   registry hosted sul sito Homun, verifica locale deterministica, beta opt-in,
   paid predisposto con token offline e runtime sempre contenuto.
