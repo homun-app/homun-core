@@ -706,6 +706,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             get(installed_plugin_packages),
         )
         .route(
+            "/api/plugins/packages/updates",
+            get(plugin_package_updates),
+        )
+        .route(
             "/api/plugins/trusted-keys",
             get(trusted_plugin_public_keys).put(set_trusted_plugin_public_keys),
         )
@@ -20753,6 +20757,58 @@ async fn installed_plugin_packages() -> Result<Json<serde_json::Value>, GatewayE
     Ok(Json(serde_json::json!({
         "schema_version": registry.schema_version,
         "plugins": registry.plugins,
+    })))
+}
+
+/// GET /api/plugins/packages/updates — deterministic read-only comparison
+/// between the cached marketplace registry and locally installed packages.
+async fn plugin_package_updates() -> Result<Json<serde_json::Value>, GatewayError> {
+    let installed = plugin_packages::load_installed_plugin_registry(
+        &installed_plugin_registry_path().map_err(|e| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "plugin_registry_path_unavailable",
+            message: e.to_string(),
+        })?,
+    )
+    .map_err(|e| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "plugin_registry_read_failed",
+        message: e,
+    })?;
+    let cached = plugin_packages::load_cached_plugin_registry(
+        &cached_plugin_registry_path().map_err(|e| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "plugin_registry_cache_path_unavailable",
+            message: e.to_string(),
+        })?,
+    )
+    .map_err(|e| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "plugin_registry_cache_read_failed",
+        message: e,
+    })?;
+    let mut updates = Vec::new();
+    if let Some(cached) = cached {
+        for installed_plugin in &installed.plugins {
+            if let Some(candidate) = cached
+                .registry
+                .plugins
+                .iter()
+                .find(|entry| {
+                    entry.plugin_id == installed_plugin.plugin_id
+                        && entry.is_newer_than(&installed_plugin.version)
+                })
+            {
+                updates.push(serde_json::json!({
+                    "plugin_id": installed_plugin.plugin_id,
+                    "installed_version": installed_plugin.version,
+                    "candidate": candidate,
+                }));
+            }
+        }
+    }
+    Ok(Json(serde_json::json!({
+        "updates": updates,
     })))
 }
 

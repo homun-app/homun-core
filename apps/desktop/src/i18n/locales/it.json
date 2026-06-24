@@ -977,6 +977,7 @@
     "addonsInstallPackage": "Installa",
     "addonsBetaOptIn": "Consenti plugin beta",
     "addonsBetaOptInHint": "Stable resta il default; i pacchetti beta richiedono questo opt-in locale esplicito.",
+    "addonsUpdateAvailable": "Update disponibile",
     "start": "Avvia",
     "stop": "Ferma",
     "starting": "Avvio…",

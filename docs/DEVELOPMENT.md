@@ -259,8 +259,11 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   chiave signer da una entry registry e installare package stable firmati.
   **WS9.3i beta opt-in locale/verde:** lo stesso trust store persiste
   `beta_enabled=false` di default; Settings -> Addons espone un toggle locale e
-  l'install beta resta bloccata finche' non e' attivo. Restano feed/package
-  reali sul sito Homun e update automatico.
+  l'install beta resta bloccata finche' non e' attivo. **WS9.3j update
+  detection locale/verde:** `GET /api/plugins/packages/updates` confronta
+  registry cache e installati, e Settings -> Addons mostra `Update available`
+  sulle candidate version piu' nuove. Restano feed/package reali sul sito Homun
+  e update automatico/install update.
   **WS9.6 ADR locale:** ADR 0017 formalizza distribuzione, signing e licensing:
   registry hosted sul sito Homun, verifica locale deterministica, beta opt-in,
   paid predisposto con token offline e runtime sempre contenuto.

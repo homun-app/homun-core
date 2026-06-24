@@ -1818,6 +1818,16 @@ export interface InstalledPluginPackagesView {
   plugins: InstalledPluginPackageView[];
 }
 
+export interface PluginPackageUpdateView {
+  plugin_id: string;
+  installed_version: string;
+  candidate: PluginRegistryEntryView;
+}
+
+export interface PluginPackageUpdatesView {
+  updates: PluginPackageUpdateView[];
+}
+
 export interface TrustedPluginPublicKeysView {
   schema_version: number;
   beta_enabled: boolean;
@@ -1869,6 +1879,14 @@ async function electronInstalledPluginPackages(): Promise<InstalledPluginPackage
     return await gatewayGetJson<InstalledPluginPackagesView>("/api/plugins/packages/installed");
   } catch {
     return { plugins: [] };
+  }
+}
+
+async function electronPluginPackageUpdates(): Promise<PluginPackageUpdatesView> {
+  try {
+    return await gatewayGetJson<PluginPackageUpdatesView>("/api/plugins/packages/updates");
+  } catch {
+    return { updates: [] };
   }
 }
 
@@ -2165,6 +2183,7 @@ export const coreBridge = {
   pluginRegistryCache: () => electronPluginRegistryCache(),
   fetchPluginRegistry: (sourceUrl: string) => electronFetchPluginRegistry(sourceUrl),
   installedPluginPackages: () => electronInstalledPluginPackages(),
+  pluginPackageUpdates: () => electronPluginPackageUpdates(),
   trustedPluginPublicKeys: () => electronTrustedPluginPublicKeys(),
   setTrustedPluginPublicKeys: (publicKeys: string[], betaEnabled: boolean) =>
     electronSetTrustedPluginPublicKeys(publicKeys, betaEnabled),

@@ -54,6 +54,7 @@ import {
   type CoreTelegramStatus,
   type CachedPluginRegistryView,
   type InstalledPluginPackagesView,
+  type PluginPackageUpdatesView,
   type TrustedPluginPublicKeysView,
   type LanguageInfo,
   type LlmConcurrencyView,
@@ -5586,6 +5587,7 @@ function AddonsPane({ onChanged }: { onChanged?: () => void }) {
   const [states, setStates] = useState<PluginState[]>([]);
   const [cache, setCache] = useState<CachedPluginRegistryView | null>(null);
   const [installed, setInstalled] = useState<InstalledPluginPackagesView>({ plugins: [] });
+  const [updates, setUpdates] = useState<PluginPackageUpdatesView>({ updates: [] });
   const [trustedKeys, setTrustedKeys] = useState<TrustedPluginPublicKeysView>({
     schema_version: 1,
     beta_enabled: false,
@@ -5600,13 +5602,15 @@ function AddonsPane({ onChanged }: { onChanged?: () => void }) {
     setLoadingRegistry(true);
     setRegistryError(null);
     try {
-      const [cached, installedPackages, trusted] = await Promise.all([
+      const [cached, installedPackages, updateCandidates, trusted] = await Promise.all([
         coreBridge.pluginRegistryCache(),
         coreBridge.installedPluginPackages(),
+        coreBridge.pluginPackageUpdates(),
         coreBridge.trustedPluginPublicKeys(),
       ]);
       setCache(cached);
       setInstalled(installedPackages);
+      setUpdates(updateCandidates);
       setTrustedKeys(trusted);
     } catch (error) {
       setRegistryError((error as Error).message);
@@ -5628,6 +5632,7 @@ function AddonsPane({ onChanged }: { onChanged?: () => void }) {
 
   const isEnabled = (id: string) => states.find((s) => s.id === id)?.enabled !== false;
   const installedById = new Map(installed.plugins.map((plugin) => [plugin.plugin_id, plugin]));
+  const updateById = new Map(updates.updates.map((update) => [update.plugin_id, update]));
   const trustedKeySet = new Set(trustedKeys.public_keys.map((key) => key.toLowerCase()));
 
   async function toggle(id: string) {
@@ -5652,6 +5657,7 @@ function AddonsPane({ onChanged }: { onChanged?: () => void }) {
       const cached = await coreBridge.fetchPluginRegistry(sourceUrl);
       setCache(cached);
       setInstalled(await coreBridge.installedPluginPackages());
+      setUpdates(await coreBridge.pluginPackageUpdates());
     } catch (error) {
       setRegistryError((error as Error).message);
     } finally {
@@ -5679,6 +5685,7 @@ function AddonsPane({ onChanged }: { onChanged?: () => void }) {
         beta_enabled: trustedKeys.beta_enabled,
       });
       setInstalled(installedPackages);
+      setUpdates(await coreBridge.pluginPackageUpdates());
     } catch (error) {
       setRegistryError((error as Error).message);
     } finally {
@@ -5773,6 +5780,7 @@ function AddonsPane({ onChanged }: { onChanged?: () => void }) {
           <div className="addon-list">
             {cache.registry.plugins.map((entry) => {
               const installedPlugin = installedById.get(entry.plugin_id);
+              const update = updateById.get(entry.plugin_id);
               const signerTrusted = trustedKeySet.has(entry.signature.public_key.toLowerCase());
               const installing = busy === entry.plugin_id;
               return (
@@ -5787,6 +5795,11 @@ function AddonsPane({ onChanged }: { onChanged?: () => void }) {
                       </span>
                       {installedPlugin && (
                         <span className="addon-badge on">{t("settings.addonsInstalled")}</span>
+                      )}
+                      {update?.candidate.version === entry.version && (
+                        <span className="addon-badge update">
+                          {t("settings.addonsUpdateAvailable")}
+                        </span>
                       )}
                     </div>
                     <p className="addon-row-desc">
