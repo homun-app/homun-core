@@ -242,6 +242,8 @@ export function ChatView({
   // the "Save as goal" message action + the Obiettivi tab. `goalSeed` pre-fills
   // the Obiettivi compose when promoting a chat message to a goal.
   const [threadIsProject, setThreadIsProject] = useState(false);
+  const [projectGoalCount, setProjectGoalCount] = useState(0);
+  const [projectMemoryCount, setProjectMemoryCount] = useState(0);
   const [goalSeed, setGoalSeed] = useState<string | null>(null);
   const [followUps, setFollowUps] = useState<string[]>([]);
   const [followUpsFor, setFollowUpsFor] = useState<string | null>(null);
@@ -363,8 +365,8 @@ export function ChatView({
         if (view.key === "files") return uploadedFiles.length > 0;
         if (view.key === "activity") return conversationActivity.length > 0 || activeApprovels.length > 0;
         if (view.key === "plan") return workspacePlanSteps.length > 0;
-        if (view.key === "goals") return threadIsProject || Boolean(goalSeed);
-        if (view.key === "memoria") return threadIsProject;
+        if (view.key === "goals") return projectGoalCount > 0 || Boolean(goalSeed);
+        if (view.key === "memoria") return projectMemoryCount > 0;
         return false;
       }),
     [
@@ -374,7 +376,8 @@ export function ChatView({
       workbenchArtifacts.length,
       workspacePlanSteps.length,
       goalSeed,
-      threadIsProject,
+      projectGoalCount,
+      projectMemoryCount,
     ],
   );
   const workbenchOpen = artifactsOpen;
@@ -1205,9 +1208,37 @@ export function ChatView({
   // Resolve once per thread whether it's a project (gates "Save as goal").
   useEffect(() => {
     let cancelled = false;
-    void coreBridge.projectGoals(thread.threadId).then((d) => {
-      if (!cancelled) setThreadIsProject(Boolean(d?.is_project));
-    });
+    setThreadIsProject(false);
+    setProjectGoalCount(0);
+    setProjectMemoryCount(0);
+    void coreBridge
+      .projectGoals(thread.threadId)
+      .then((d) => {
+        if (cancelled) return;
+        const isProject = Boolean(d?.is_project);
+        setThreadIsProject(isProject);
+        setProjectGoalCount(d?.goals.length ?? 0);
+        if (!isProject) {
+          setProjectMemoryCount(0);
+          return;
+        }
+        void coreBridge
+          .memoryGraph(thread.threadId)
+          .then((graph) => {
+            if (!cancelled) {
+              setProjectMemoryCount(Math.max(0, graph.nodes.length - 1));
+            }
+          })
+          .catch(() => {
+            if (!cancelled) setProjectMemoryCount(0);
+          });
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setThreadIsProject(false);
+        setProjectGoalCount(0);
+        setProjectMemoryCount(0);
+      });
     return () => {
       cancelled = true;
     };
@@ -1662,6 +1693,8 @@ export function ChatView({
         activitySteps={conversationActivity}
         artifacts={workbenchArtifacts}
         fileCount={uploadedFiles.length}
+        goalCount={projectGoalCount}
+        memoryCount={projectMemoryCount}
         planSteps={workspacePlanSteps}
         streaming={promptSubmitting || Boolean(streamingAssistantId)}
         status={streamStatus}
@@ -2055,6 +2088,8 @@ function WorkspaceIsland({
   activitySteps,
   artifacts,
   fileCount,
+  goalCount,
+  memoryCount,
   planSteps,
   streaming,
   status,
@@ -2066,6 +2101,8 @@ function WorkspaceIsland({
   activitySteps: string[];
   artifacts: ParsedArtifact[];
   fileCount: number;
+  goalCount: number;
+  memoryCount: number;
   planSteps: PlanStep[];
   streaming: boolean;
   status: ChatStreamStatus | null;
@@ -2092,7 +2129,9 @@ function WorkspaceIsland({
       planSteps.length > 0 ||
       activitySteps.length > 0 ||
       artifactsCount > 0 ||
-      fileCount > 0);
+      fileCount > 0 ||
+      goalCount > 0 ||
+      memoryCount > 0);
   const headline =
     blockedPlan?.title ??
     runningPlan?.title ??
@@ -2102,7 +2141,11 @@ function WorkspaceIsland({
       ? `${artifactsCount} artifact`
       : fileCount > 0
         ? `${fileCount} file`
-        : t("chat.panel"));
+        : goalCount > 0
+          ? `${goalCount} goal`
+          : memoryCount > 0
+            ? "Memory"
+            : t("chat.panel"));
   const progressLabel =
     planSteps.length > 0
       ? `${doneCount}/${planSteps.length}`
@@ -2110,7 +2153,11 @@ function WorkspaceIsland({
         ? status?.phase ?? "live"
         : artifactsCount > 0
           ? `${artifactsCount}`
-          : "";
+          : goalCount > 0
+            ? `${goalCount}`
+            : memoryCount > 0
+              ? `${memoryCount}`
+              : "";
 
   const setMode = (next: WorkspaceIslandMode) => {
     setModeState(next);
@@ -2138,7 +2185,18 @@ function WorkspaceIsland({
 
     const timer = window.setTimeout(() => setExpanded(false), 3200);
     return () => window.clearTimeout(timer);
-  }, [activitySteps.length, artifactsCount, blockedPlan, doneCount, mode, planSteps.length, streaming]);
+  }, [
+    activitySteps.length,
+    artifactsCount,
+    blockedPlan,
+    doneCount,
+    fileCount,
+    goalCount,
+    memoryCount,
+    mode,
+    planSteps.length,
+    streaming,
+  ]);
 
   const menuOptions: Array<{ value: WorkspaceIslandMode; label: string }> = [
     { value: "auto", label: "Auto expand" },
@@ -2301,6 +2359,30 @@ function WorkspaceIsland({
               <FolderOpen size={14} />
               <span>Files</span>
               <strong>{fileCount}</strong>
+            </button>
+          )}
+
+          {goalCount > 0 && (
+            <button
+              className="wi-row wi-row-button"
+              type="button"
+              onClick={() => onOpenWorkbench("goals")}
+            >
+              <Target size={14} />
+              <span>Goals</span>
+              <strong>{goalCount}</strong>
+            </button>
+          )}
+
+          {memoryCount > 0 && (
+            <button
+              className="wi-row wi-row-button"
+              type="button"
+              onClick={() => onOpenWorkbench("memoria")}
+            >
+              <Share2 size={14} />
+              <span>Memory</span>
+              <strong>{memoryCount}</strong>
             </button>
           )}
 

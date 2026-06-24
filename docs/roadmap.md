@@ -429,8 +429,10 @@ primo percorso locale verde e WS5 è chiusa localmente/gate:
     con preferenza locale; la card include `Progress` con completed collassabili.
     Correzione post-smoke: l'header chat non espone piu' un secondo menu
     workspace/review. La `WorkspaceIsland` e' l'unico launcher operativo:
-    `Plan`, `Activity`, `Artifacts` e `Files` aprono il Workbench nella tab
-    corretta; `Artifacts` apre la Review sidebar stile Codex con
+    `Plan`, `Activity`, `Artifacts`, `Files`, `Goals` e `Memory` aprono il
+    Workbench nella tab corretta quando i rispettivi read model hanno contenuto;
+    `Goals` legge `/api/memory/goals`, `Memory` legge `/api/memory/graph`.
+    `Artifacts` apre la Review sidebar stile Codex con
     preview/diff/versioni, non una mini-lista dentro l'isola.
     I marker `PLAN`/`ACT` escono dal corpo messaggio; il computer resta una
     `ComputerIsland` separata con preview live ed espansione, visibile solo

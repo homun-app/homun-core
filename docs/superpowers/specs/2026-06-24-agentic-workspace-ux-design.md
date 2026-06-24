@@ -91,9 +91,11 @@ La Workspace Island:
 - il menu `...` permette `Auto expand`, `Always expanded` e `Always collapsed`;
 - la sezione `Progress` puo' comprimere/mostrare gli step completati, che restano
   barrati e meno prominenti rispetto al lavoro corrente;
-- `Plan`, `Activity`, `Artifacts` e `Files` sono righe azionabili: aprono il
-  Workbench laterale direttamente nella tab corretta. Non esiste un secondo
-  launcher nell'header della chat;
+- `Plan`, `Activity`, `Artifacts`, `Files`, `Goals` e `Memory` sono righe
+  azionabili quando hanno dati reali: aprono il Workbench laterale direttamente
+  nella tab corretta. `Goals` deriva da `/api/memory/goals`, `Memory` dal grafo
+  canonico `/api/memory/graph`. Non esiste un secondo launcher nell'header della
+  chat;
 - su una chat vuota o su un thread senza stato operativo reale l'isola non si
   renderizza; quando esiste, mostra solo sezioni con dati effettivi, mai righe a
   zero;

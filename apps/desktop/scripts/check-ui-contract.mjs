@@ -230,6 +230,10 @@ assertContains("src/components/ChatView.tsx", "onOpenWorkbench={(tab) =>", "work
 assertContains("src/components/ChatView.tsx", "onClick={() => onOpenWorkbench(\"artifacts\")}", "workspace island artifact count must open the Review workbench");
 assertContains("src/components/ChatView.tsx", "onClick={() => onOpenWorkbench(\"plan\")}", "workspace island plan progress must open the Plan workbench");
 assertContains("src/components/ChatView.tsx", "onClick={() => onOpenWorkbench(\"activity\")}", "workspace island activity row must open the Activity workbench");
+assertContains("src/components/ChatView.tsx", "goalCount={projectGoalCount}", "workspace island must receive project goal state from the canonical goals read model");
+assertContains("src/components/ChatView.tsx", "memoryCount={projectMemoryCount}", "workspace island must receive project memory state from the canonical memory graph read model");
+assertContains("src/components/ChatView.tsx", "onClick={() => onOpenWorkbench(\"goals\")}", "workspace island goals row must open the Goals workbench");
+assertContains("src/components/ChatView.tsx", "onClick={() => onOpenWorkbench(\"memoria\")}", "workspace island memory row must open the Memory workbench");
 assertContains("src/components/ChatView.tsx", "onClick={() => onOpenWorkbench(\"files\")}", "workspace island files row must open the Files workbench");
 assertContains("src/components/ChatView.tsx", "detailsOpen || workbenchOpen ? \" panel-open\" : \"\"", "right-side panels must reserve layout space instead of covering the chat");
 assertContains("src/styles.css", "top: calc(var(--window-chrome-height, 44px) + 8px);", "workbench island must sit below native chrome with breathing room");

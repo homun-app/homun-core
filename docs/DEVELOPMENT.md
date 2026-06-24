@@ -101,7 +101,10 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   sezione `Progress` con completed collassabili. Correzione post-smoke: il menu
   workspace/review separato nell'header e' stato rimosso; la `WorkspaceIsland`
   e' ora l'unico launcher operativo e apre il Workbench nella tab reale
-  (`Plan`, `Activity`, `Artifacts`, `Files`). L'isola non viene renderizzata su
+  (`Plan`, `Activity`, `Artifacts`, `Files`, `Goals`, `Memory`). `Goals` e
+  `Memory` sono alimentate dai read model canonici (`/api/memory/goals` e
+  `/api/memory/graph`) e compaiono solo quando esistono goal/memoria progetto
+  reali per il thread. L'isola non viene renderizzata su
   chat vuote o thread senza stato operativo reale, non mostra righe `0`, e il
   Workbench laterale parte sotto la titlebar/chrome Electron, riserva spazio
   alla chat quando aperto e usa la stessa grammatica a isola della shell
