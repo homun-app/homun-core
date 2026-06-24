@@ -698,6 +698,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             post(install_local_plugin_package),
         )
         .route(
+            "/api/plugins/packages/install-from-registry",
+            post(install_plugin_package_from_registry),
+        )
+        .route(
             "/api/plugins/packages/installed",
             get(installed_plugin_packages),
         )
@@ -20508,6 +20512,17 @@ struct FetchPluginRegistryRequest {
     source_url: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct InstallPluginPackageFromRegistryRequest {
+    registry_entry: PluginRegistryEntry,
+    #[serde(default)]
+    homun_version: Option<String>,
+    #[serde(default)]
+    beta_enabled: bool,
+    #[serde(default)]
+    trusted_public_keys: Vec<String>,
+}
+
 /// POST /api/plugins/packages/install-local — development/desktop install path
 /// for a downloaded `.hplugin`. The future marketplace flow will fetch the bytes
 /// first, then call the same install manager; this endpoint keeps the verified
@@ -20543,23 +20558,110 @@ async fn install_local_plugin_package(
         code: "plugin_package_read_failed",
         message: e.to_string(),
     })?;
+    let homun_version = request
+        .homun_version
+        .as_deref()
+        .unwrap_or(env!("CARGO_PKG_VERSION"));
+    install_verified_plugin_archive(
+        &request.registry_entry,
+        &archive,
+        homun_version,
+        request.beta_enabled,
+        &request.trusted_public_keys,
+    )
+}
+
+async fn install_plugin_package_from_registry(
+    State(state): State<AppState>,
+    Json(request): Json<InstallPluginPackageFromRegistryRequest>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let package_url = request
+        .registry_entry
+        .package_url
+        .trim()
+        .parse::<reqwest::Url>()
+        .map_err(|e| GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "plugin_package_url_invalid",
+            message: e.to_string(),
+        })?;
+    if package_url.scheme() != "https" {
+        return Err(GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "plugin_package_url_insecure",
+            message: "Plugin package download requires an https URL".to_string(),
+        });
+    }
+
+    let response = state
+        .http
+        .get(package_url)
+        .send()
+        .await
+        .map_err(|e| GatewayError {
+            status: StatusCode::BAD_GATEWAY,
+            code: "plugin_package_download_failed",
+            message: e.to_string(),
+        })?;
+    if !response.status().is_success() {
+        return Err(GatewayError {
+            status: StatusCode::BAD_GATEWAY,
+            code: "plugin_package_download_status",
+            message: format!("Plugin package returned HTTP {}", response.status()),
+        });
+    }
+    if response.content_length().unwrap_or(0) > MAX_LOCAL_PLUGIN_PACKAGE_BYTES {
+        return Err(GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "plugin_package_too_large",
+            message: "Plugin package is larger than the local install limit".to_string(),
+        });
+    }
+    let archive = response.bytes().await.map_err(|e| GatewayError {
+        status: StatusCode::BAD_GATEWAY,
+        code: "plugin_package_download_read_failed",
+        message: e.to_string(),
+    })?;
+    if archive.len() as u64 > MAX_LOCAL_PLUGIN_PACKAGE_BYTES {
+        return Err(GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "plugin_package_too_large",
+            message: "Plugin package is larger than the local install limit".to_string(),
+        });
+    }
+    let homun_version = request
+        .homun_version
+        .as_deref()
+        .unwrap_or(env!("CARGO_PKG_VERSION"));
+    install_verified_plugin_archive(
+        &request.registry_entry,
+        &archive,
+        homun_version,
+        request.beta_enabled,
+        &request.trusted_public_keys,
+    )
+}
+
+fn install_verified_plugin_archive(
+    registry_entry: &PluginRegistryEntry,
+    archive: &[u8],
+    homun_version: &str,
+    beta_enabled: bool,
+    trusted_public_keys: &[String],
+) -> Result<Json<serde_json::Value>, GatewayError> {
     let install_root = installed_plugin_packages_root().map_err(|e| GatewayError {
         status: StatusCode::INTERNAL_SERVER_ERROR,
         code: "plugin_install_root_unavailable",
         message: e.to_string(),
     })?;
-    let homun_version = request
-        .homun_version
-        .as_deref()
-        .unwrap_or(env!("CARGO_PKG_VERSION"));
     let installed = plugin_packages::install_hplugin_package(
-        &request.registry_entry,
-        &archive,
+        registry_entry,
+        archive,
         &install_root,
         plugin_packages::PluginInstallOptions {
             homun_version,
-            beta_enabled: request.beta_enabled,
-            trusted_public_keys: &request.trusted_public_keys,
+            beta_enabled,
+            trusted_public_keys,
         },
     )
     .map_err(|e| GatewayError {
@@ -20577,7 +20679,7 @@ async fn install_local_plugin_package(
             plugin_id: installed.plugin_id.clone(),
             version: installed.version.clone(),
             install_dir: installed.install_dir.to_string_lossy().to_string(),
-            package_sha256: request.registry_entry.package_sha256.clone(),
+            package_sha256: registry_entry.package_sha256.clone(),
         },
     )
     .map_err(|e| GatewayError {

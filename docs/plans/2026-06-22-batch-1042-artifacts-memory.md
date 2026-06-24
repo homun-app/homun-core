@@ -978,7 +978,9 @@ proprio — versioning, canali, scaricabili dal **sito Homun**, auto-aggiornabil
   aggiunto registry locale installati `~/.homun/plugins/installed.json`, scritto
   atomicamente dall'endpoint install. 2026-06-24: aggiunto endpoint read-only
   `GET /api/plugins/packages/installed`. Fetch remoto registry backend aggiunto;
-  restano UI manager, download pacchetti e auto-update reale.
+  2026-06-24: aggiunto download/install pacchetto da `package_url` con
+  `POST /api/plugins/packages/install-from-registry`, riusando lo stesso install
+  manager verificato. Restano UI manager e auto-update reale.
 - 🟡 **9.4 Sicurezza**: prima slice integrity/policy fatta. `PluginRegistryEntry`
   valida digest `sha256:<64 hex>`, richiede algoritmo firma `ed25519`, confronta
   SHA-256 del pacchetto e verifica la firma Ed25519 sui byte pacchetto. Inoltre
