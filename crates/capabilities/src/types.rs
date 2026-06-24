@@ -1,3 +1,4 @@
+use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
@@ -254,6 +255,9 @@ pub struct PluginRegistryEntry {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PluginRegistryValidationError {
     InvalidPackageDigest,
+    InvalidPublicKey,
+    InvalidSignature,
+    PackageDigestMismatch,
     UnsupportedSignatureAlgorithm,
 }
 
@@ -278,6 +282,37 @@ impl PluginRegistryEntry {
         let actual = format!("{:x}", Sha256::digest(package_bytes));
         expected.eq_ignore_ascii_case(&actual)
     }
+
+    pub fn verify_package_signature(
+        &self,
+        package_bytes: &[u8],
+    ) -> Result<(), PluginRegistryValidationError> {
+        self.validate_metadata()?;
+        if !self.package_digest_matches(package_bytes) {
+            return Err(PluginRegistryValidationError::PackageDigestMismatch);
+        }
+        let public_key = decode_fixed_hex::<32>(&self.signature.public_key)
+            .ok_or(PluginRegistryValidationError::InvalidPublicKey)?;
+        let signature_bytes = decode_fixed_hex::<64>(&self.signature.signature)
+            .ok_or(PluginRegistryValidationError::InvalidSignature)?;
+        let verifying_key = VerifyingKey::from_bytes(&public_key)
+            .map_err(|_| PluginRegistryValidationError::InvalidPublicKey)?;
+        let signature = Signature::from_bytes(&signature_bytes);
+        verifying_key
+            .verify(package_bytes, &signature)
+            .map_err(|_| PluginRegistryValidationError::InvalidSignature)
+    }
+}
+
+fn decode_fixed_hex<const N: usize>(value: &str) -> Option<[u8; N]> {
+    if value.len() != N * 2 {
+        return None;
+    }
+    let mut out = [0_u8; N];
+    for index in 0..N {
+        out[index] = u8::from_str_radix(&value[index * 2..index * 2 + 2], 16).ok()?;
+    }
+    Some(out)
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -957,12 +957,13 @@ proprio — versioning, canali, scaricabili dal **sito Homun**, auto-aggiornabil
 - ☐ **9.3 Plugin manager in-app**: installa da registry · beta opt-in per-plugin ·
   controllo aggiornamenti + **auto-update** (confronto versioni).
 - 🟡 **9.4 Sicurezza**: prima slice integrity/policy fatta. `PluginRegistryEntry`
-  valida digest `sha256:<64 hex>`, richiede algoritmo firma `ed25519` e confronta
-  SHA-256 del pacchetto prima dell'install. Verifica 2026-06-24:
-  `plugin_registry_entry_validates_digest_and_signature_policy` e suite
-  capabilities verdi. Restano: verifica Ed25519 crittografica del payload,
-  enforcement install/update, `stable`=firmato, `beta`=opt-in, esecuzione
-  contenuta (ADR 0009) + `skill_security` scan.
+  valida digest `sha256:<64 hex>`, richiede algoritmo firma `ed25519`, confronta
+  SHA-256 del pacchetto e verifica la firma Ed25519 sui byte pacchetto. Verifica
+  2026-06-24: `plugin_registry_entry_validates_digest_and_signature_policy`,
+  `plugin_registry_entry_verifies_ed25519_package_signature` e suite capabilities
+  verdi. Restano: enforcement install/update, gestione chiavi trusted,
+  `stable`=firmato, `beta`=opt-in, esecuzione contenuta (ADR 0009) +
+  `skill_security` scan.
 - ☐ **9.5 Licensing/paid (predisporre ora)**: campo `entitlement` nel manifest + **token
   di licenza firmato** verificabile **offline** + ri-check periodico. Il paywall vero
   (account + pagamenti, es. Stripe) è fase successiva e **lega cloud/always-on**.

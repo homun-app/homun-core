@@ -205,9 +205,9 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   `package_sha256` e firma Ed25519 dichiarata. Verifica: suite capabilities
   verde. **WS9.4a package integrity policy locale/verde:** `PluginRegistryEntry`
   valida metadata install-time minimi (`sha256:<64 hex>`, algoritmo firma
-  `ed25519`) e confronta il digest SHA-256 del pacchetto prima dell'install.
-  Verifica: suite capabilities verde; resta la verifica Ed25519 crittografica
-  della firma e il collegamento a fetch/install.
+  `ed25519`), confronta il digest SHA-256 del pacchetto e verifica la firma
+  Ed25519 sui byte pacchetto. Verifica: suite capabilities verde; restano
+  collegamento a fetch/install, policy chiavi trusted e enforcement update.
   `make_research` e `make_meeting` restano dopo questo asse.
 - **WS2-3.1 PASSATA in runtime (2026-06-23):** gli artifact scritti via
   Filesystem MCP dentro la root progetto vengono registrati come

@@ -1,3 +1,4 @@
+use ed25519_dalek::{Signer, SigningKey};
 use local_first_capabilities::{
     ActionClass, CapabilityProviderKind, CapabilityTool, DataBoundary, ManagedProviderMetadata,
     PluginCapabilityDeclaration, PluginCapabilityKind, PluginChannel, PluginEntitlement,
@@ -157,7 +158,9 @@ fn plugin_registry_index_declares_signed_packages() {
             min_homun_version: Some("0.1.1046".to_string()),
             entitlement: PluginEntitlement::Paid,
             manifest_url: "https://homun.app/plugins/presentations-pro/manifest.json".to_string(),
-            package_url: "https://homun.app/plugins/presentations-pro/presentations-pro-1.2.3.hplugin".to_string(),
+            package_url:
+                "https://homun.app/plugins/presentations-pro/presentations-pro-1.2.3.hplugin"
+                    .to_string(),
             package_sha256: "sha256:abc123".to_string(),
             signature: PluginSignature {
                 algorithm: "ed25519".to_string(),
@@ -180,7 +183,8 @@ fn plugin_registry_index_declares_signed_packages() {
 #[test]
 fn plugin_registry_entry_validates_digest_and_signature_policy() {
     let mut entry = sample_registry_entry();
-    entry.package_sha256 = "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824".to_string();
+    entry.package_sha256 =
+        "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824".to_string();
 
     assert!(entry.validate_metadata().is_ok());
     assert!(entry.package_digest_matches(b"hello"));
@@ -188,6 +192,26 @@ fn plugin_registry_entry_validates_digest_and_signature_policy() {
 
     entry.signature.algorithm = "rsa".to_string();
     assert!(entry.validate_metadata().is_err());
+}
+
+#[test]
+fn plugin_registry_entry_verifies_ed25519_package_signature() {
+    let package = b"hello";
+    let signing_key = SigningKey::from_bytes(&[7; 32]);
+    let verifying_key = signing_key.verifying_key();
+    let signature = signing_key.sign(package);
+    let mut entry = sample_registry_entry();
+    entry.package_sha256 =
+        "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824".to_string();
+    entry.signature.public_key = hex_lower(verifying_key.as_bytes());
+    entry.signature.signature = hex_lower(&signature.to_bytes());
+
+    assert!(entry.verify_package_signature(package).is_ok());
+    assert!(entry.verify_package_signature(b"tampered").is_err());
+}
+
+fn hex_lower(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 fn sample_registry_entry() -> PluginRegistryEntry {
@@ -198,7 +222,8 @@ fn sample_registry_entry() -> PluginRegistryEntry {
         min_homun_version: Some("0.1.1046".to_string()),
         entitlement: PluginEntitlement::Paid,
         manifest_url: "https://homun.app/plugins/presentations-pro/manifest.json".to_string(),
-        package_url: "https://homun.app/plugins/presentations-pro/presentations-pro-1.2.3.hplugin".to_string(),
+        package_url: "https://homun.app/plugins/presentations-pro/presentations-pro-1.2.3.hplugin"
+            .to_string(),
         package_sha256: "sha256:abc123".to_string(),
         signature: PluginSignature {
             algorithm: "ed25519".to_string(),
