@@ -358,6 +358,30 @@ export function ChatView({
   const activeApprovels = approvals.filter((approval) =>
     approval.requestedBy.includes(computerSessionId),
   );
+  const availableWorkbenchViews = useMemo(
+    () =>
+      PANEL_VIEWS.filter((view) => {
+        if (view.key === "artifacts") return workbenchArtifacts.length > 0;
+        if (view.key === "files") return uploadedFiles.length > 0;
+        if (view.key === "activity") return conversationActivity.length > 0 || activeApprovels.length > 0;
+        if (view.key === "plan") return workspacePlanSteps.length > 0;
+        return false;
+      }),
+    [
+      activeApprovels.length,
+      conversationActivity.length,
+      uploadedFiles.length,
+      workbenchArtifacts.length,
+      workspacePlanSteps.length,
+    ],
+  );
+  const hasWorkbenchViews = availableWorkbenchViews.length > 0;
+  const hasWorkspaceIslandState =
+    promptSubmitting ||
+    Boolean(streamingAssistantId) ||
+    workspacePlanSteps.length > 0 ||
+    conversationActivity.length > 0 ||
+    workbenchArtifacts.length > 0;
   const visibleComputerSession = useMemo(
     () => ({
       ...computerSession,
@@ -370,6 +394,19 @@ export function ChatView({
     planStepRunning ||
     smokeTestRunning ||
     detailsOpen;
+
+  useEffect(() => {
+    if (availableWorkbenchViews.some((view) => view.key === workbenchTab)) return;
+    setWorkbenchMenuOpen(false);
+    if (artifactsOpen) {
+      const next = availableWorkbenchViews[0]?.key;
+      if (next) {
+        setWorkbenchTab(next);
+      } else {
+        setArtifactsOpen(false);
+      }
+    }
+  }, [artifactsOpen, availableWorkbenchViews, workbenchTab]);
 
   function scrollConversationToBottom(behavior: ScrollBehavior) {
     const node = conversationRef.current;
@@ -1658,7 +1695,12 @@ export function ChatView({
           </div>
         </div>
 
-        <div className="panel-menu-wrap panel-menu-wrap--corner">
+        {hasWorkbenchViews && (
+        <div
+          className={`panel-menu-wrap panel-menu-wrap--corner${
+            hasWorkspaceIslandState ? " with-workspace-island" : ""
+          }`}
+        >
           <button
             type="button"
             className={`workbench-toggle${artifactsOpen ? " active" : ""}`}
@@ -1680,7 +1722,7 @@ export function ChatView({
                 onClick={() => setWorkbenchMenuOpen(false)}
               />
               <div className="panel-menu" role="menu">
-                {PANEL_VIEWS.map(({ key, label, icon: Icon }) => (
+                {availableWorkbenchViews.map(({ key, label, icon: Icon }) => (
                   <button
                     key={key}
                     type="button"
@@ -1701,6 +1743,7 @@ export function ChatView({
             </>
           )}
         </div>
+        )}
       </header>
 
       <WorkspaceIsland

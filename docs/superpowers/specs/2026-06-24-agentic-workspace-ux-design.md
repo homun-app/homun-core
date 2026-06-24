@@ -88,15 +88,15 @@ La Workspace Island:
 - il menu `...` permette `Auto expand`, `Always expanded` e `Always collapsed`;
 - la sezione `Progress` puo' comprimere/mostrare gli step completati, che restano
   barrati e meno prominenti rispetto al lavoro corrente;
-- `Artifacts` e il menu header aprono una Review sidebar stile Codex con file,
-  preview, versioni e diff; il conteggio da solo non e' sufficiente e l'isola non
-  deve diventare un file browser;
+- `Artifacts` e il menu header possono aprire una Review sidebar stile Codex con
+  file, preview, versioni e diff; il menu header e' contestuale e deve mostrare
+  solo voci con dati gia' noti, mai l'intero set di tab disponibili;
 - su una chat vuota o su un thread senza stato operativo reale l'isola non si
   renderizza; quando esiste, mostra solo sezioni con dati effettivi, mai righe a
   zero;
 - i controlli nell'header della chat devono restare fuori dalle regioni
-  `-webkit-app-region: drag`, altrimenti in Electron possono sembrare visibili ma
-  non ricevere click reali;
+  `-webkit-app-region: drag` e sotto la titlebar nativa; se la Workspace Island
+  occupa lo stesso angolo, il menu si sposta invece di sovrapporsi;
 - non apre il Workbench come effetto collaterale dei controlli di espansione;
 - resta per-thread: non mostra stato di un thread diverso;
 - puo' restare visibile come riepilogo leggero quando ci sono artifact o piano

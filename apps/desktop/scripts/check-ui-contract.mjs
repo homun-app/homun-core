@@ -223,8 +223,15 @@ assertContains("src/components/ChatView.tsx", "Workspace island options", "works
 assertContains("src/components/ChatView.tsx", "wi-progress", "workspace island must render collapsible progress inside the island");
 assertContains("src/components/ChatView.tsx", "if (!hasWorkspaceState) return null", "workspace island must stay hidden when a thread has no real workspace state");
 assertContains("src/components/ChatView.tsx", "panel-menu-wrap--corner", "chat header must expose the right-side workspace/review menu");
+assertContains("src/components/ChatView.tsx", "availableWorkbenchViews", "chat workspace/review menu must derive visible entries from real thread state");
+assertContains("src/components/ChatView.tsx", "{hasWorkbenchViews && (", "chat workspace/review menu must stay hidden when it has no useful entries");
+assertContains("src/components/ChatView.tsx", "availableWorkbenchViews.map", "chat workspace/review menu must not list every workbench view unconditionally");
+assertContains("src/components/ChatView.tsx", "hasWorkspaceIslandState", "chat workspace/review menu must know when the workspace island already occupies the corner");
 assertContains("src/styles.css", ".panel-menu-wrap {\n  position: relative;\n  display: inline-flex;\n  -webkit-app-region: no-drag;", "chat header workspace/review menu must be clickable inside the Electron drag header");
-assertContains("src/styles.css", "z-index: 220;", "chat header workspace/review menu must sit above the Electron window drag strips");
+assertContains("src/styles.css", "top: 54px;", "chat header workspace/review menu must sit below the native titlebar area");
+assertContains("src/styles.css", ".panel-menu-wrap--corner.with-workspace-island", "chat workspace/review menu must offset when the workspace island is visible");
+assertContains("src/styles.css", ".panel-menu-backdrop {\n  position: fixed;\n  inset: 0;\n  z-index: 50;\n  padding: 0;\n  border: 0;\n  background: transparent;", "chat workspace/review menu backdrop must never visually cover the chat");
+assertNotContains("src/styles.css", "z-index: 220;", "chat header workspace/review menu must not overlay native window controls");
 assertContains("src/components/ChatView.tsx", "<ArtifactsPanel", "artifact review must use the rich preview/diff surface in the workbench");
 assertNotContains("src/components/ChatView.tsx", "{planSteps.length > 0 && <PlanProgressCard steps={planSteps} />}", "operational plan markers must not render duplicate inline cards inside the assistant answer");
 assertContains("src/components/ChatView.tsx", "{readable && <RichMessage text={readable} streaming={streaming} />}", "assistant markdown must stay progressive while the message streams");

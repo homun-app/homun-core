@@ -1587,19 +1587,25 @@ body.resizing-drawer {
   display: inline-flex;
   -webkit-app-region: no-drag;
 }
-/* Pinned to the top-right corner of the conversation, aligned with the title row.
-   This must sit above .window-drag-strip (z-index 200): otherwise Electron treats
-   real clicks on the visible control as window dragging. */
+/* Pinned inside the conversation, below the native titlebar/drag strip. It must
+   not compete with window controls, so keep it under .window-chrome. */
 .panel-menu-wrap--corner {
   position: absolute;
-  top: 13px;
-  right: 16px;
-  z-index: 220;
+  top: 54px;
+  right: 24px;
+  z-index: 35;
+}
+.panel-menu-wrap--corner.with-workspace-island {
+  top: 96px;
 }
 .panel-menu-backdrop {
   position: fixed;
   inset: 0;
   z-index: 50;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  appearance: none;
 }
 .panel-menu {
   position: absolute;

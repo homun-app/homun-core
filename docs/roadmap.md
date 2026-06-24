@@ -427,15 +427,17 @@ primo percorso locale verde e WS5 è chiusa localmente/gate:
     stesso anchor, senza pulsanti esterni o aperture accidentali del Workbench.
     Il menu `...` gestisce `Auto expand`, `Always expanded` e `Always collapsed`
     con preferenza locale; la card include `Progress` con completed collassabili.
-    L'header chat espone un menu workspace/review a destra e `Artifacts` apre la
-    Review sidebar stile Codex con preview/diff/versioni, non una mini-lista
-    dentro l'isola.
+    L'header chat espone un menu workspace/review contestuale: appare solo
+    quando esistono viste con dati gia' noti e non mostra tab vuote; `Artifacts`
+    apre la Review sidebar stile Codex con preview/diff/versioni, non una
+    mini-lista dentro l'isola.
     I marker `PLAN`/`ACT` escono dal corpo messaggio; il computer resta una
     `ComputerIsland` separata con preview live ed espansione, visibile solo
     durante attivita' owner del thread. Correzione post-smoke: l'isola ora
     resta assente su chat vuote o thread senza stato operativo reale, non mostra
-    righe a zero e il menu workspace/review dell'header e' no-drag/cliccabile in
-    Electron.
+    righe a zero e il menu workspace/review dell'header resta sotto la titlebar
+    nativa/drag strip, con offset quando la Workspace Island occupa lo stesso
+    angolo.
 
 Prima di pubblicare/taggare resta prudente ripetere lo smoke manuale in-app su
 una automazione schedulata reale con il binario aggiornato. Il primo smoke ha
