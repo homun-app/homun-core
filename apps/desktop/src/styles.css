@@ -10576,6 +10576,16 @@ body.resizing-drawer {
 }
 .addon-row-toggle { flex-shrink: 0; padding-top: 2px; }
 .addon-row-toggle.is-busy { opacity: 0.5; pointer-events: none; }
+.addon-row-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  flex: none;
+}
+.addon-row-actions .set-btn {
+  white-space: nowrap;
+}
 .addon-market-head {
   display: flex;
   align-items: flex-start;

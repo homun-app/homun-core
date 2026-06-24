@@ -58,6 +58,12 @@ pub struct CachedPluginRegistry {
     pub registry: PluginRegistryIndex,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TrustedPluginPublicKeys {
+    pub schema_version: u32,
+    pub public_keys: Vec<String>,
+}
+
 impl Default for InstalledPluginRegistry {
     fn default() -> Self {
         Self {
@@ -271,6 +277,46 @@ pub fn save_cached_plugin_registry(
     Ok(cached)
 }
 
+impl Default for TrustedPluginPublicKeys {
+    fn default() -> Self {
+        Self {
+            schema_version: 1,
+            public_keys: Vec::new(),
+        }
+    }
+}
+
+pub fn load_trusted_plugin_public_keys(path: &Path) -> Result<TrustedPluginPublicKeys, String> {
+    if !path.exists() {
+        return Ok(TrustedPluginPublicKeys::default());
+    }
+    let bytes = fs::read(path).map_err(|e| e.to_string())?;
+    let trusted: TrustedPluginPublicKeys =
+        serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+    validate_trusted_plugin_public_keys(&trusted)?;
+    Ok(trusted)
+}
+
+pub fn save_trusted_plugin_public_keys(
+    path: &Path,
+    public_keys: Vec<String>,
+) -> Result<TrustedPluginPublicKeys, String> {
+    let mut public_keys = public_keys
+        .into_iter()
+        .map(|key| key.trim().to_ascii_lowercase())
+        .filter(|key| !key.is_empty())
+        .collect::<Vec<_>>();
+    public_keys.sort();
+    public_keys.dedup();
+    let trusted = TrustedPluginPublicKeys {
+        schema_version: 1,
+        public_keys,
+    };
+    validate_trusted_plugin_public_keys(&trusted)?;
+    write_json_atomically(path, &trusted)?;
+    Ok(trusted)
+}
+
 fn validate_cached_plugin_registry(cached: &CachedPluginRegistry) -> Result<(), String> {
     if cached.schema_version != 1 {
         return Err("unsupported cached plugin registry schema".to_string());
@@ -289,6 +335,23 @@ fn validate_cached_plugin_registry(cached: &CachedPluginRegistry) -> Result<(), 
         entry
             .validate_metadata()
             .map_err(|e| format!("invalid plugin registry metadata: {e:?}"))?;
+    }
+    Ok(())
+}
+
+fn validate_trusted_plugin_public_keys(trusted: &TrustedPluginPublicKeys) -> Result<(), String> {
+    if trusted.schema_version != 1 {
+        return Err("unsupported trusted plugin keys schema".to_string());
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    for key in &trusted.public_keys {
+        let key = key.trim();
+        if key.len() != 64 || !key.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return Err("invalid trusted plugin public key".to_string());
+        }
+        if !seen.insert(key.to_ascii_lowercase()) {
+            return Err("duplicate trusted plugin public key".to_string());
+        }
     }
     Ok(())
 }
@@ -548,6 +611,37 @@ mod tests {
 
         assert!(error.contains("duplicate"));
         assert!(!registry_path.exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn trusted_plugin_public_keys_save_load_normalizes_and_dedups() {
+        let root = test_dir("trusted-plugin-keys");
+        let path = root.join("trusted-keys.json");
+        let key = "A".repeat(64);
+
+        let saved = save_trusted_plugin_public_keys(
+            &path,
+            vec![key.clone(), key.to_ascii_lowercase(), String::new()],
+        )
+        .unwrap();
+
+        assert_eq!(saved.public_keys, vec![key.to_ascii_lowercase()]);
+        assert_eq!(load_trusted_plugin_public_keys(&path).unwrap(), saved);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn trusted_plugin_public_keys_reject_invalid_keys() {
+        let root = test_dir("trusted-plugin-keys-invalid");
+        let path = root.join("trusted-keys.json");
+
+        let error =
+            save_trusted_plugin_public_keys(&path, vec!["not-a-public-key".to_string()])
+                .unwrap_err();
+
+        assert!(error.contains("invalid trusted plugin public key"));
+        assert!(!path.exists());
         let _ = fs::remove_dir_all(root);
     }
 

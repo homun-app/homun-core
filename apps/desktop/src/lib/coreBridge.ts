@@ -10,6 +10,7 @@ import {
 import {
   gatewayGetJson,
   gatewayPostJson,
+  gatewayPutJson,
   gatewayDeleteJson,
 } from "./gatewayHttp";
 
@@ -1817,6 +1818,11 @@ export interface InstalledPluginPackagesView {
   plugins: InstalledPluginPackageView[];
 }
 
+export interface TrustedPluginPublicKeysView {
+  schema_version: number;
+  public_keys: string[];
+}
+
 async function electronPlugins(): Promise<PluginState[]> {
   try {
     const payload = await gatewayGetJson<{ plugins: PluginState[] }>("/api/plugins");
@@ -1863,6 +1869,22 @@ async function electronInstalledPluginPackages(): Promise<InstalledPluginPackage
   } catch {
     return { plugins: [] };
   }
+}
+
+async function electronTrustedPluginPublicKeys(): Promise<TrustedPluginPublicKeysView> {
+  try {
+    return await gatewayGetJson<TrustedPluginPublicKeysView>("/api/plugins/trusted-keys");
+  } catch {
+    return { schema_version: 1, public_keys: [] };
+  }
+}
+
+async function electronSetTrustedPluginPublicKeys(
+  publicKeys: string[],
+): Promise<TrustedPluginPublicKeysView> {
+  return gatewayPutJson<TrustedPluginPublicKeysView>("/api/plugins/trusted-keys", {
+    public_keys: publicKeys,
+  });
 }
 
 async function electronInstallPluginPackageFromRegistry(input: {
@@ -2140,6 +2162,9 @@ export const coreBridge = {
   pluginRegistryCache: () => electronPluginRegistryCache(),
   fetchPluginRegistry: (sourceUrl: string) => electronFetchPluginRegistry(sourceUrl),
   installedPluginPackages: () => electronInstalledPluginPackages(),
+  trustedPluginPublicKeys: () => electronTrustedPluginPublicKeys(),
+  setTrustedPluginPublicKeys: (publicKeys: string[]) =>
+    electronSetTrustedPluginPublicKeys(publicKeys),
   installPluginPackageFromRegistry: (input: {
     registry_entry: PluginRegistryEntryView;
     beta_enabled?: boolean;

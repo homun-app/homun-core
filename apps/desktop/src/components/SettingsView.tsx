@@ -54,6 +54,7 @@ import {
   type CoreTelegramStatus,
   type CachedPluginRegistryView,
   type InstalledPluginPackagesView,
+  type TrustedPluginPublicKeysView,
   type LanguageInfo,
   type LlmConcurrencyView,
   type ProviderModelView,
@@ -5585,6 +5586,10 @@ function AddonsPane({ onChanged }: { onChanged?: () => void }) {
   const [states, setStates] = useState<PluginState[]>([]);
   const [cache, setCache] = useState<CachedPluginRegistryView | null>(null);
   const [installed, setInstalled] = useState<InstalledPluginPackagesView>({ plugins: [] });
+  const [trustedKeys, setTrustedKeys] = useState<TrustedPluginPublicKeysView>({
+    schema_version: 1,
+    public_keys: [],
+  });
   const [busy, setBusy] = useState<string | null>(null);
   const [loadingRegistry, setLoadingRegistry] = useState(false);
   const [registryUrl, setRegistryUrl] = useState("");
@@ -5594,12 +5599,14 @@ function AddonsPane({ onChanged }: { onChanged?: () => void }) {
     setLoadingRegistry(true);
     setRegistryError(null);
     try {
-      const [cached, installedPackages] = await Promise.all([
+      const [cached, installedPackages, trusted] = await Promise.all([
         coreBridge.pluginRegistryCache(),
         coreBridge.installedPluginPackages(),
+        coreBridge.trustedPluginPublicKeys(),
       ]);
       setCache(cached);
       setInstalled(installedPackages);
+      setTrustedKeys(trusted);
     } catch (error) {
       setRegistryError((error as Error).message);
     } finally {
@@ -5620,6 +5627,7 @@ function AddonsPane({ onChanged }: { onChanged?: () => void }) {
 
   const isEnabled = (id: string) => states.find((s) => s.id === id)?.enabled !== false;
   const installedById = new Map(installed.plugins.map((plugin) => [plugin.plugin_id, plugin]));
+  const trustedKeySet = new Set(trustedKeys.public_keys.map((key) => key.toLowerCase()));
 
   async function toggle(id: string) {
     setBusy(id);
@@ -5647,6 +5655,28 @@ function AddonsPane({ onChanged }: { onChanged?: () => void }) {
       setRegistryError((error as Error).message);
     } finally {
       setLoadingRegistry(false);
+    }
+  }
+
+  async function trustSigner(publicKey: string) {
+    const nextKeys = Array.from(new Set([...trustedKeys.public_keys, publicKey.toLowerCase()]));
+    const next = await coreBridge.setTrustedPluginPublicKeys(nextKeys);
+    setTrustedKeys(next);
+  }
+
+  async function installEntry(entry: NonNullable<CachedPluginRegistryView["registry"]["plugins"]>[number]) {
+    setBusy(entry.plugin_id);
+    setRegistryError(null);
+    try {
+      const installedPackages = await coreBridge.installPluginPackageFromRegistry({
+        registry_entry: entry,
+        beta_enabled: false,
+      });
+      setInstalled(installedPackages);
+    } catch (error) {
+      setRegistryError((error as Error).message);
+    } finally {
+      setBusy(null);
     }
   }
 
@@ -5730,6 +5760,8 @@ function AddonsPane({ onChanged }: { onChanged?: () => void }) {
           <div className="addon-list">
             {cache.registry.plugins.map((entry) => {
               const installedPlugin = installedById.get(entry.plugin_id);
+              const signerTrusted = trustedKeySet.has(entry.signature.public_key.toLowerCase());
+              const installing = busy === entry.plugin_id;
               return (
                 <div key={`${entry.plugin_id}@${entry.version}`} className="addon-row">
                   <div className="addon-row-main">
@@ -5757,6 +5789,29 @@ function AddonsPane({ onChanged }: { onChanged?: () => void }) {
                     </div>
                     {installedPlugin && (
                       <p className="addon-install-path">{installedPlugin.install_dir}</p>
+                    )}
+                  </div>
+                  <div className="addon-row-actions">
+                    {!signerTrusted ? (
+                      <button
+                        type="button"
+                        className="set-btn"
+                        disabled={loadingRegistry}
+                        onClick={() => void trustSigner(entry.signature.public_key)}
+                      >
+                        <ShieldCheck size={15} />
+                        <span>{t("settings.addonsTrustSigner")}</span>
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        className="set-btn primary"
+                        disabled={installing || Boolean(installedPlugin) || entry.channel === "beta"}
+                        onClick={() => void installEntry(entry)}
+                      >
+                        <Download size={15} />
+                        <span>{t("settings.addonsInstallPackage")}</span>
+                      </button>
                     )}
                   </div>
                 </div>

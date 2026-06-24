@@ -252,9 +252,13 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   read-only locale/verde:** Settings -> Addons mostra anche cache marketplace
   locale e pacchetti installati, leggendo `/api/plugins/registry/cache` e
   `/api/plugins/packages/installed`; puo' popolare la cache da URL HTTPS via
-  `/api/plugins/registry/fetch`. Install da UI rinviato alla gestione esplicita
-  delle chiavi trusted. Restano feed/package reali sul sito Homun, install UI
-  sicura e update automatico.
+  `/api/plugins/registry/fetch`. **WS9.3h trusted signer/install UI
+  locale/verde:** il gateway persiste `~/.homun/plugins/trusted-keys.json` via
+  `GET/PUT /api/plugins/trusted-keys`; l'install usa la allowlist locale quando
+  la richiesta non passa chiavi esplicite. Settings -> Addons puo' fidare una
+  chiave signer da una entry registry e installare package stable firmati.
+  Restano feed/package reali sul sito Homun, beta opt-in esplicito e update
+  automatico.
   **WS9.6 ADR locale:** ADR 0017 formalizza distribuzione, signing e licensing:
   registry hosted sul sito Homun, verifica locale deterministica, beta opt-in,
   paid predisposto con token offline e runtime sempre contenuto.

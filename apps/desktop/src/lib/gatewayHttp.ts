@@ -30,6 +30,18 @@ export async function gatewayPostJson<T>(path: string, body: unknown): Promise<T
   return response.json() as Promise<T>;
 }
 
+export async function gatewayPutJson<T>(path: string, body: unknown): Promise<T> {
+  const response = await fetch(`${DESKTOP_GATEWAY_URL}${path}`, {
+    method: "PUT",
+    headers: { ...gatewayHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    throw new Error(await gatewayErrorDetail(response));
+  }
+  return response.json() as Promise<T>;
+}
+
 export async function gatewayGetJson<T>(path: string): Promise<T> {
   const response = await fetch(`${DESKTOP_GATEWAY_URL}${path}`, {
     headers: gatewayHeaders(),

@@ -973,6 +973,8 @@
     "addonsInstalled": "Installed",
     "addonsRegistryUrl": "Plugin registry URL",
     "addonsFetchRegistry": "Fetch registry",
+    "addonsTrustSigner": "Trust signer",
+    "addonsInstallPackage": "Install",
     "start": "Start",
     "stop": "Stop",
     "starting": "Starting…",

@@ -706,6 +706,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             get(installed_plugin_packages),
         )
         .route(
+            "/api/plugins/trusted-keys",
+            get(trusted_plugin_public_keys).put(set_trusted_plugin_public_keys),
+        )
+        .route(
             "/api/plugins/registry/cache",
             get(cached_plugin_registry).post(cache_plugin_registry),
         )
@@ -20513,6 +20517,12 @@ struct FetchPluginRegistryRequest {
 }
 
 #[derive(Debug, Deserialize)]
+struct SetTrustedPluginPublicKeysRequest {
+    #[serde(default)]
+    public_keys: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
 struct InstallPluginPackageFromRegistryRequest {
     registry_entry: PluginRegistryEntry,
     #[serde(default)]
@@ -20649,6 +20659,24 @@ fn install_verified_plugin_archive(
     beta_enabled: bool,
     trusted_public_keys: &[String],
 ) -> Result<Json<serde_json::Value>, GatewayError> {
+    let local_trusted_keys;
+    let trusted_public_keys = if trusted_public_keys.is_empty() {
+        local_trusted_keys = plugin_packages::load_trusted_plugin_public_keys(
+            &trusted_plugin_public_keys_path().map_err(|e| GatewayError {
+                status: StatusCode::INTERNAL_SERVER_ERROR,
+                code: "plugin_trusted_keys_path_unavailable",
+                message: e.to_string(),
+            })?,
+        )
+        .map_err(|e| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "plugin_trusted_keys_read_failed",
+            message: e,
+        })?;
+        local_trusted_keys.public_keys.as_slice()
+    } else {
+        trusted_public_keys
+    };
     let install_root = installed_plugin_packages_root().map_err(|e| GatewayError {
         status: StatusCode::INTERNAL_SERVER_ERROR,
         code: "plugin_install_root_unavailable",
@@ -20695,7 +20723,10 @@ fn install_verified_plugin_archive(
         "install_dir": installed.install_dir,
         "files": installed.inspection.files,
         "security": installed.inspection.security,
-        "installed_plugins": installed_registry.plugins,
+        "installed_plugins": {
+            "schema_version": installed_registry.schema_version,
+            "plugins": installed_registry.plugins,
+        },
     })))
 }
 
@@ -20717,6 +20748,50 @@ async fn installed_plugin_packages() -> Result<Json<serde_json::Value>, GatewayE
     Ok(Json(serde_json::json!({
         "schema_version": registry.schema_version,
         "plugins": registry.plugins,
+    })))
+}
+
+/// GET/PUT /api/plugins/trusted-keys — local allowlist of Ed25519 public keys
+/// that are allowed to sign marketplace packages.
+async fn trusted_plugin_public_keys() -> Result<Json<serde_json::Value>, GatewayError> {
+    let trusted = plugin_packages::load_trusted_plugin_public_keys(
+        &trusted_plugin_public_keys_path().map_err(|e| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "plugin_trusted_keys_path_unavailable",
+            message: e.to_string(),
+        })?,
+    )
+    .map_err(|e| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "plugin_trusted_keys_read_failed",
+        message: e,
+    })?;
+    Ok(Json(serde_json::json!({
+        "schema_version": trusted.schema_version,
+        "public_keys": trusted.public_keys,
+    })))
+}
+
+async fn set_trusted_plugin_public_keys(
+    Json(request): Json<SetTrustedPluginPublicKeysRequest>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let trusted = plugin_packages::save_trusted_plugin_public_keys(
+        &trusted_plugin_public_keys_path().map_err(|e| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "plugin_trusted_keys_path_unavailable",
+            message: e.to_string(),
+        })?,
+        request.public_keys,
+    )
+    .map_err(|e| GatewayError {
+        status: StatusCode::BAD_REQUEST,
+        code: "plugin_trusted_keys_invalid",
+        message: e,
+    })?;
+    Ok(Json(serde_json::json!({
+        "ok": true,
+        "schema_version": trusted.schema_version,
+        "public_keys": trusted.public_keys,
     })))
 }
 
@@ -20853,6 +20928,10 @@ fn installed_plugin_registry_path() -> Result<PathBuf, std::io::Error> {
 
 fn cached_plugin_registry_path() -> Result<PathBuf, std::io::Error> {
     Ok(gateway_data_dir()?.join("plugins").join("registry-cache.json"))
+}
+
+fn trusted_plugin_public_keys_path() -> Result<PathBuf, std::io::Error> {
+    Ok(gateway_data_dir()?.join("plugins").join("trusted-keys.json"))
 }
 
 pub(crate) fn weekday_it(w: jiff::civil::Weekday) -> &'static str {

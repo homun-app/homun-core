@@ -982,7 +982,10 @@ proprio — versioning, canali, scaricabili dal **sito Homun**, auto-aggiornabil
   `POST /api/plugins/packages/install-from-registry`, riusando lo stesso install
   manager verificato. 2026-06-24: Settings -> Addons espone una prima UI
   manager per cache marketplace e pacchetti installati, con fetch registry da
-  URL HTTPS attraverso il backend. Restano install UI sicura e auto-update reale.
+  URL HTTPS attraverso il backend. 2026-06-24: aggiunto trust store locale
+  chiavi signer (`GET/PUT /api/plugins/trusted-keys`) e install UI per package
+  stable firmati da chiavi fidate. Restano beta opt-in esplicito e auto-update
+  reale.
 - 🟡 **9.4 Sicurezza**: prima slice integrity/policy fatta. `PluginRegistryEntry`
   valida digest `sha256:<64 hex>`, richiede algoritmo firma `ed25519`, confronta
   SHA-256 del pacchetto e verifica la firma Ed25519 sui byte pacchetto. Inoltre

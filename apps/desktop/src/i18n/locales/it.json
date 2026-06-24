@@ -973,6 +973,8 @@
     "addonsInstalled": "Installato",
     "addonsRegistryUrl": "URL registry plugin",
     "addonsFetchRegistry": "Scarica registry",
+    "addonsTrustSigner": "Fida chiave",
+    "addonsInstallPackage": "Installa",
     "start": "Avvia",
     "stop": "Ferma",
     "starting": "Avvio…",
