@@ -132,11 +132,17 @@ Fatto:
   stesso formato `runtime_plan_step`, usando il task id come `step_id`, il
   contratto sub-agent come criterio e un'evidence redatta
   `source="subagent_task"`.
+- primo audit read-model graph-like WS5.1a: `contact_relationships` resta una
+  tabella operativa per la rubrica, ma le relazioni con `entity_ref` espliciti
+  sono mirrorate nel grafo canonico come `MemoryRelation` deterministiche con
+  metadata `source="contact_relationships"`; la rimozione tombstona il ref
+  canonico. Non c'e' matching per nome.
 
 Mancante:
 
-- convergenza/mirroring dei read-model graph-like, in particolare relazioni
-  contatti, nel grafo canonico memoria;
+- completare l'audit degli altri eventuali read-model graph-like: le relazioni
+  contatti hanno il primo mirror canonico, ma altri read-model futuri devono
+  dichiarare se sono solo UX o convergere nel grafo memoria;
 - graphification estesa oltre il codice: artifact, piano, decisioni, outcome e loop
   aperti devono diventare nodi/archi causali; il piano ora ha write-back SQL e
   grafo step-level iniziale più stato/proiezione `ExecutionPlan`, ma non ancora

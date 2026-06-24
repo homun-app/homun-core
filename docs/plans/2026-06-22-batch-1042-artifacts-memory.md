@@ -423,6 +423,12 @@ che fanno "ricordare il perché e sopravvivere". Caposaldo #8.
   (`rationale_for`, `produced`, `derived_from`, `supersedes`, `blocks`). Include
   audit dei read-model graph-like (`contact_relationships`): se portano conoscenza
   semantica devono essere mirrorati/convergenti nel grafo canonico memoria.
+  **Slice 5.1a locale/verde:** `contact_relationships` resta read-model UX, ma
+  ogni relazione tra contatti con `entity_ref` esplicito viene mirrorata nel
+  grafo canonico come `MemoryRelation` deterministica (`source =
+  contact_relationships`, `read_model = contact_relationships`); la rimozione
+  tombstona il ref canonico. Nessun matching per nome o inferenza fragile.
+  Test: `cargo test -p local-first-desktop-gateway contact_relationship -- --nocapture`.
 - ✅ **5.2 Embeddare tutto** — `spawn_embedding_catchup` allo startup vettorizza ogni
   memoria mancante su **tutti** gli scope, loop fino a esaurimento (off critical path).
   Risolve il gap 391/555 (l'auto-consolidamento che faceva il backfill era OFF di

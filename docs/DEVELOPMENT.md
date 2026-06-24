@@ -55,6 +55,15 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   distingue piano completo (`done == total`) da piano aperto/bloccato; i
   proactive prompt usano quella guardia invece di schedulare un falso successo.
   Il contratto operativo corrente della memoria è [MEMORIA.md](MEMORIA.md).
+- **Slice corrente WS5.1a:** audit read-model graph-like. `contact_relationships`
+  resta tabella operativa/UX della rubrica, ma quando entrambe le estremita'
+  hanno un `entity_ref` esplicito la relazione viene mirrorata nel grafo
+  canonico tramite `MemoryFacade` come `MemoryRelation` deterministica
+  `source="contact_relationships"`; la rimozione tombstona lo stesso ref
+  canonico. Nessun matching per nome, nessuna inferenza probabilistica, nessuno
+  store parallelo. Gate mirati: `cargo test -p local-first-desktop-gateway
+  contact_relationship -- --nocapture`; gate allargati da rieseguire prima del
+  commit.
 - **Direzione WS7 aggiornata:** l'obiettivo deliverable non è una gallery statica
   clonata tool-per-tool, ma un **design system dichiarativo condiviso** per
   documenti e presentazioni/plugin: temi, layout, componenti, template e QA

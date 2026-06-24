@@ -178,6 +178,13 @@ pub struct StoredRelationship {
 }
 
 #[derive(Debug, Clone)]
+pub struct StoredRelationshipEdge {
+    pub from_contact_id: i64,
+    pub to_contact_id: i64,
+    pub relationship_type: String,
+}
+
+#[derive(Debug, Clone)]
 pub struct StoredContactIdentity {
     pub channel: String,
     pub identifier: String,
@@ -1684,6 +1691,23 @@ impl ChatStore {
         self.conn
             .execute("delete from contact_relationships where id = ?1", params![id])?;
         Ok(())
+    }
+
+    pub fn relationship_by_id(&self, id: i64) -> rusqlite::Result<Option<StoredRelationshipEdge>> {
+        self.conn
+            .query_row(
+                "select from_contact_id, to_contact_id, relationship_type
+                 from contact_relationships where id = ?1",
+                params![id],
+                |row| {
+                    Ok(StoredRelationshipEdge {
+                        from_contact_id: row.get(0)?,
+                        to_contact_id: row.get(1)?,
+                        relationship_type: row.get(2)?,
+                    })
+                },
+            )
+            .optional()
     }
 
     /// Both directions, with the other side's display name resolved.

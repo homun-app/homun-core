@@ -55,7 +55,10 @@ primo percorso locale verde:
 13. WS5.6 — gate release memoria: un test unico pre-release verifica in una
     nuova chat simulata artifact/provenance/decisione e workflow status/perché,
     inclusi producer/workflow, path gestito, rationale, alternative scartate,
-    goal/open-loop e outcome verificato.
+    goal/open-loop e outcome verificato. WS5.1a ha avviato anche l'audit
+    read-model graph-like: `contact_relationships` resta read-model UX ma viene
+    mirrorato nel grafo canonico quando entrambi i contatti hanno `entity_ref`
+    esplicito; la rimozione tombstona il ref canonico.
 14. WS1-Fase 2 — prima slice piano→memoria: ogni `update_plan` / `step_advance`
     aggiorna un solo `open_loop` canonico `source="runtime_plan"` per thread,
     con prossimo step e conteggi; a completamento il record viene marcato stale e

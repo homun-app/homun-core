@@ -76,6 +76,18 @@ impl MemoryFacade {
             .tombstone(reference, user_id, workspace_id, reason)?)
     }
 
+    pub fn tombstone_ref(
+        &self,
+        reference: &MemoryRef,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+        reason: &str,
+    ) -> MemoryResult<()> {
+        Ok(self
+            .store
+            .tombstone(reference, user_id, workspace_id, reason)?)
+    }
+
     pub fn link_evidence(&self, evidence: &MemoryEvidence) -> MemoryResult<()> {
         Ok(self.store.link_evidence(evidence)?)
     }
