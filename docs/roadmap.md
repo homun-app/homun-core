@@ -336,6 +336,10 @@ primo percorso locale verde:
     `sha256`, algoritmo firma `ed25519` e confronto SHA-256 sui byte pacchetto.
     La verifica Ed25519 sui byte pacchetto è coperta nel contratto capabilities;
     restano enforcement install/update e gestione chiavi trusted.
+80. WS9 install/update policy — le entry registry ora espongono regole
+    deterministiche per disponibilità canale (`stable` sempre, `beta` solo con
+    opt-in), compatibilità minima Homun e confronto versioni semver. Il manager
+    in-app deve ancora usare queste regole per fetch/install/update reali.
 
 Prima di pubblicare/taggare resta prudente ripetere lo smoke manuale in-app su
 una automazione schedulata reale con il binario aggiornato. Il primo smoke ha

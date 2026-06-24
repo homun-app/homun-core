@@ -210,6 +210,23 @@ fn plugin_registry_entry_verifies_ed25519_package_signature() {
     assert!(entry.verify_package_signature(b"tampered").is_err());
 }
 
+#[test]
+fn plugin_registry_entry_applies_install_and_update_policy() {
+    let mut entry = sample_registry_entry();
+
+    assert!(entry.is_available_for_channel_policy(false));
+    assert!(entry.is_compatible_with_homun("0.1.1046"));
+    assert!(entry.is_newer_than("1.2.2"));
+    assert!(!entry.is_newer_than("1.2.3"));
+
+    entry.channel = PluginChannel::Beta;
+    assert!(!entry.is_available_for_channel_policy(false));
+    assert!(entry.is_available_for_channel_policy(true));
+
+    entry.min_homun_version = Some("0.1.2000".to_string());
+    assert!(!entry.is_compatible_with_homun("0.1.1046"));
+}
+
 fn hex_lower(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }

@@ -3242,6 +3242,7 @@ dependencies = [
  "local-first-secrets",
  "local-first-task-runtime",
  "rusqlite",
+ "semver",
  "serde",
  "serde_json",
  "sha2",

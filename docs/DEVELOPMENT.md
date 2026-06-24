@@ -208,6 +208,11 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   `ed25519`), confronta il digest SHA-256 del pacchetto e verifica la firma
   Ed25519 sui byte pacchetto. Verifica: suite capabilities verde; restano
   collegamento a fetch/install, policy chiavi trusted e enforcement update.
+  **WS9.3a install/update policy locale/verde:** le entry registry espongono
+  helper deterministici per canale stable/beta, compatibilità minima Homun e
+  confronto versioni semver, così il futuro plugin manager non decide via
+  euristiche. Verifica: suite capabilities verde; restano UI manager, fetch
+  registry/package e applicazione effettiva della policy in install/update.
   `make_research` e `make_meeting` restano dopo questo asse.
 - **WS2-3.1 PASSATA in runtime (2026-06-23):** gli artifact scritti via
   Filesystem MCP dentro la root progetto vengono registrati come

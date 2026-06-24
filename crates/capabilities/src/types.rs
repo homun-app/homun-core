@@ -1,4 +1,5 @@
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+use semver::Version;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
@@ -302,6 +303,36 @@ impl PluginRegistryEntry {
             .verify(package_bytes, &signature)
             .map_err(|_| PluginRegistryValidationError::InvalidSignature)
     }
+
+    pub fn is_available_for_channel_policy(&self, beta_enabled: bool) -> bool {
+        match self.channel {
+            PluginChannel::Stable => true,
+            PluginChannel::Beta => beta_enabled,
+        }
+    }
+
+    pub fn is_compatible_with_homun(&self, homun_version: &str) -> bool {
+        let Some(min_version) = self.min_homun_version.as_deref() else {
+            return true;
+        };
+        let Some(current) = parse_plugin_semver(homun_version) else {
+            return false;
+        };
+        let Some(minimum) = parse_plugin_semver(min_version) else {
+            return false;
+        };
+        current >= minimum
+    }
+
+    pub fn is_newer_than(&self, installed_version: &str) -> bool {
+        let Some(candidate) = parse_plugin_semver(&self.version) else {
+            return false;
+        };
+        let Some(installed) = parse_plugin_semver(installed_version) else {
+            return false;
+        };
+        candidate > installed
+    }
 }
 
 fn decode_fixed_hex<const N: usize>(value: &str) -> Option<[u8; N]> {
@@ -313,6 +344,10 @@ fn decode_fixed_hex<const N: usize>(value: &str) -> Option<[u8; N]> {
         out[index] = u8::from_str_radix(&value[index * 2..index * 2 + 2], 16).ok()?;
     }
     Some(out)
+}
+
+fn parse_plugin_semver(value: &str) -> Option<Version> {
+    Version::parse(value.strip_prefix('v').unwrap_or(value)).ok()
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
