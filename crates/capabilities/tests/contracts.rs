@@ -2,8 +2,9 @@ use ed25519_dalek::{Signer, SigningKey};
 use local_first_capabilities::{
     ActionClass, CapabilityProviderKind, CapabilityTool, DataBoundary, ManagedProviderMetadata,
     PluginCapabilityDeclaration, PluginCapabilityKind, PluginChannel, PluginEntitlement,
-    PluginManifest, PluginRegistryEntry, PluginRegistryIndex, PluginSignature, ProviderId,
-    SkillManifest, SkillPermissions, SkillToolManifest, UserId, WorkspaceId,
+    PluginManifest, PluginRegistryEntry, PluginRegistryIndex, PluginRegistryValidationError,
+    PluginSignature, ProviderId, SkillManifest, SkillPermissions, SkillToolManifest, UserId,
+    WorkspaceId,
 };
 
 #[test]
@@ -225,6 +226,34 @@ fn plugin_registry_entry_applies_install_and_update_policy() {
 
     entry.min_homun_version = Some("0.1.2000".to_string());
     assert!(!entry.is_compatible_with_homun("0.1.1046"));
+}
+
+#[test]
+fn plugin_registry_entry_verifies_install_candidate_policy() {
+    let package = b"hello";
+    let signing_key = SigningKey::from_bytes(&[7; 32]);
+    let verifying_key = signing_key.verifying_key();
+    let signature = signing_key.sign(package);
+    let trusted_key = hex_lower(verifying_key.as_bytes());
+    let mut entry = sample_registry_entry();
+    entry.package_sha256 =
+        "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824".to_string();
+    entry.signature.public_key = trusted_key.clone();
+    entry.signature.signature = hex_lower(&signature.to_bytes());
+
+    assert!(entry
+        .verify_install_candidate(package, "0.1.1046", false, &[trusted_key.clone()])
+        .is_ok());
+    assert_eq!(
+        entry.verify_install_candidate(package, "0.1.1046", false, &[]),
+        Err(PluginRegistryValidationError::UntrustedPublicKey)
+    );
+
+    entry.channel = PluginChannel::Beta;
+    assert_eq!(
+        entry.verify_install_candidate(package, "0.1.1046", false, &[trusted_key]),
+        Err(PluginRegistryValidationError::BetaChannelDisabled)
+    );
 }
 
 fn hex_lower(bytes: &[u8]) -> String {

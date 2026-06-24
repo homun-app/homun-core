@@ -206,8 +206,10 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   verde. **WS9.4a package integrity policy locale/verde:** `PluginRegistryEntry`
   valida metadata install-time minimi (`sha256:<64 hex>`, algoritmo firma
   `ed25519`), confronta il digest SHA-256 del pacchetto e verifica la firma
-  Ed25519 sui byte pacchetto. Verifica: suite capabilities verde; restano
-  collegamento a fetch/install, policy chiavi trusted e enforcement update.
+  Ed25519 sui byte pacchetto; `verify_install_candidate()` applica in un solo
+  gate canale beta, compatibilità Homun, allowlist chiavi trusted, digest e
+  firma. Verifica: suite capabilities verde; restano collegamento a
+  fetch/install e enforcement update nel manager.
   **WS9.3a install/update policy locale/verde:** le entry registry espongono
   helper deterministici per canale stable/beta, compatibilità minima Homun e
   confronto versioni semver, così il futuro plugin manager non decide via

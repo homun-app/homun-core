@@ -334,8 +334,9 @@ primo percorso locale verde:
     contratto per sito/install manager; non scarica ancora pacchetti.
 79. WS9 package integrity policy — le entry registry validano forma del digest
     `sha256`, algoritmo firma `ed25519` e confronto SHA-256 sui byte pacchetto.
-    La verifica Ed25519 sui byte pacchetto è coperta nel contratto capabilities;
-    restano enforcement install/update e gestione chiavi trusted.
+    La verifica Ed25519 e il gate install-candidate coprono canale beta,
+    compatibilità Homun, allowlist chiavi trusted, digest e firma; restano
+    enforcement install/update e scan contenuto pacchetto.
 80. WS9 install/update policy — le entry registry ora espongono regole
     deterministiche per disponibilità canale (`stable` sempre, `beta` solo con
     opt-in), compatibilità minima Homun e confronto versioni semver. Il manager

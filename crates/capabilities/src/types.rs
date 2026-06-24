@@ -255,10 +255,13 @@ pub struct PluginRegistryEntry {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PluginRegistryValidationError {
+    BetaChannelDisabled,
+    IncompatibleHomunVersion,
     InvalidPackageDigest,
     InvalidPublicKey,
     InvalidSignature,
     PackageDigestMismatch,
+    UntrustedPublicKey,
     UnsupportedSignatureAlgorithm,
 }
 
@@ -302,6 +305,28 @@ impl PluginRegistryEntry {
         verifying_key
             .verify(package_bytes, &signature)
             .map_err(|_| PluginRegistryValidationError::InvalidSignature)
+    }
+
+    pub fn verify_install_candidate(
+        &self,
+        package_bytes: &[u8],
+        homun_version: &str,
+        beta_enabled: bool,
+        trusted_public_keys: &[String],
+    ) -> Result<(), PluginRegistryValidationError> {
+        if !self.is_available_for_channel_policy(beta_enabled) {
+            return Err(PluginRegistryValidationError::BetaChannelDisabled);
+        }
+        if !self.is_compatible_with_homun(homun_version) {
+            return Err(PluginRegistryValidationError::IncompatibleHomunVersion);
+        }
+        if !trusted_public_keys
+            .iter()
+            .any(|key| key.eq_ignore_ascii_case(&self.signature.public_key))
+        {
+            return Err(PluginRegistryValidationError::UntrustedPublicKey);
+        }
+        self.verify_package_signature(package_bytes)
     }
 
     pub fn is_available_for_channel_policy(&self, beta_enabled: bool) -> bool {

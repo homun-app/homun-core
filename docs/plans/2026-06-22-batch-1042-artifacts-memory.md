@@ -963,12 +963,14 @@ proprio — versioning, canali, scaricabili dal **sito Homun**, auto-aggiornabil
   auto-update reale.
 - 🟡 **9.4 Sicurezza**: prima slice integrity/policy fatta. `PluginRegistryEntry`
   valida digest `sha256:<64 hex>`, richiede algoritmo firma `ed25519`, confronta
-  SHA-256 del pacchetto e verifica la firma Ed25519 sui byte pacchetto. Verifica
+  SHA-256 del pacchetto e verifica la firma Ed25519 sui byte pacchetto. Inoltre
+  `verify_install_candidate()` applica in un gate unico canale beta,
+  compatibilità Homun, allowlist chiavi trusted, digest e firma. Verifica
   2026-06-24: `plugin_registry_entry_validates_digest_and_signature_policy`,
-  `plugin_registry_entry_verifies_ed25519_package_signature` e suite capabilities
-  verdi. Restano: enforcement install/update, gestione chiavi trusted,
-  `stable`=firmato, esecuzione contenuta (ADR 0009) +
-  `skill_security` scan.
+  `plugin_registry_entry_verifies_ed25519_package_signature`,
+  `plugin_registry_entry_verifies_install_candidate_policy` e suite capabilities
+  verdi. Restano: enforcement install/update, esecuzione contenuta (ADR 0009) +
+  `skill_security` scan sul pacchetto estratto.
 - ☐ **9.5 Licensing/paid (predisporre ora)**: campo `entitlement` nel manifest + **token
   di licenza firmato** verificabile **offline** + ri-check periodico. Il paywall vero
   (account + pagamenti, es. Stripe) è fase successiva e **lega cloud/always-on**.
