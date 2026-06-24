@@ -222,7 +222,10 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   **WS9.4b package inspection locale/verde:** il gateway ispeziona archive
   `.hplugin` in memoria, legge `homun-package.json`, verifica i digest dei file
   dichiarati e produce i blob testuali per `skill_security` senza attivare
-  installazioni. Verifica: test mirati gateway verdi.
+  installazioni. **WS9.4c package staging locale/verde:** lo stesso modulo può
+  scrivere in una directory di staging nuova solo i file dichiarati e blocca lo
+  staging se `skill_security` segnala criticità. Verifica: test mirati gateway
+  verdi.
   **WS9.6 ADR locale:** ADR 0017 formalizza distribuzione, signing e licensing:
   registry hosted sul sito Homun, verifica locale deterministica, beta opt-in,
   paid predisposto con token offline e runtime sempre contenuto.

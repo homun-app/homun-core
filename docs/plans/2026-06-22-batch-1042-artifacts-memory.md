@@ -977,9 +977,11 @@ proprio — versioning, canali, scaricabili dal **sito Homun**, auto-aggiornabil
   verdi. 2026-06-24: aggiunta ispezione gateway degli archive `.hplugin` in
   memoria: legge `homun-package.json`, verifica digest dei file dichiarati e
   produce blob testuali per `skill_security` senza attivare installazioni.
-  Verifica: `plugin_packages::tests::hplugin_archive_inspection_*` verdi.
-  Restano: enforcement install/update, estrazione pacchetto in staging contenuto
-  (ADR 0009) + blocco install se `skill_security` segnala criticità.
+  Lo stesso modulo scrive in staging solo file dichiarati e blocca lo staging se
+  `skill_security` segnala criticità. Verifica:
+  `plugin_packages::tests::hplugin_archive_*` verdi. Restano: enforcement
+  install/update, staging sotto directory manager definitiva e attivazione
+  atomica nel registry locale.
 - ☐ **9.5 Licensing/paid (predisporre ora)**: campo `entitlement` nel manifest + **token
   di licenza firmato** verificabile **offline** + ri-check periodico. Il paywall vero
   (account + pagamenti, es. Stripe) è fase successiva e **lega cloud/always-on**.

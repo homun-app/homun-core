@@ -345,8 +345,9 @@ primo percorso locale verde:
     dichiarativo (`PluginPackageManifest`) con file, digest e manifest path; la
     validazione rifiuta pacchetti vuoti, digest non SHA-256 e path assoluti o
     traversal. Il gateway ora ispeziona gli archive in memoria, verifica i digest
-    dei file dichiarati e prepara i blob per `skill_security`; restano
-    builder/extractor in staging e blocco install su scan critico.
+    dei file dichiarati, prepara i blob per `skill_security` e può scrivere in
+    staging solo i file dichiarati, bloccando pacchetti critici. Restano
+    endpoint/manager e attivazione atomica nel registry locale.
 82. WS9 ADR distribuzione/licensing — ADR 0017 formalizza registry hosted sul
     sito Homun, verifica locale deterministica, beta opt-in, paid predisposto con
     token offline e pagamento/cloud rinviati.

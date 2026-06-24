@@ -52,8 +52,8 @@ registry, bypass the approval model, or grant raw system access.
    Runtime execution still goes through the capability host, permissions,
    approval gates and ADR 0009 containment. Package inspection reads
    `homun-package.json`, verifies declared file digests, and feeds text blobs to
-   static security scan before activation; extraction must happen in a staging
-   area.
+   static security scan before activation; staging writes only declared files and
+   is blocked by critical scan findings.
 
 ## Consequences
 
