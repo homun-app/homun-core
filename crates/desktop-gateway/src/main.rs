@@ -718,6 +718,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             get(trusted_plugin_public_keys).put(set_trusted_plugin_public_keys),
         )
         .route(
+            "/api/plugins/licenses",
+            get(plugin_licenses).put(set_plugin_license),
+        )
+        .route(
             "/api/plugins/registry/cache",
             get(cached_plugin_registry).post(cache_plugin_registry),
         )
@@ -20533,6 +20537,11 @@ struct SetTrustedPluginPublicKeysRequest {
 }
 
 #[derive(Debug, Deserialize)]
+struct SetPluginLicenseRequest {
+    token: local_first_capabilities::PluginLicenseToken,
+}
+
+#[derive(Debug, Deserialize)]
 struct InstallPluginPackageFromRegistryRequest {
     registry_entry: PluginRegistryEntry,
     #[serde(default)]
@@ -20928,6 +20937,52 @@ async fn set_trusted_plugin_public_keys(
     })))
 }
 
+/// GET/PUT /api/plugins/licenses — local offline license token store. Tokens are
+/// accepted only after deterministic signature/plugin/expiry verification.
+async fn plugin_licenses() -> Result<Json<plugin_packages::PluginLicenseStore>, GatewayError> {
+    let store = plugin_packages::load_plugin_license_store(&plugin_license_store_path().map_err(
+        |e| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "plugin_license_store_path_unavailable",
+            message: e.to_string(),
+        },
+    )?)
+    .map_err(|e| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "plugin_license_store_read_failed",
+        message: e,
+    })?;
+    Ok(Json(store))
+}
+
+async fn set_plugin_license(
+    Json(request): Json<SetPluginLicenseRequest>,
+) -> Result<Json<plugin_packages::PluginLicenseStore>, GatewayError> {
+    let now_unix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "clock_unavailable",
+            message: e.to_string(),
+        })?
+        .as_secs() as i64;
+    let store = plugin_packages::upsert_verified_plugin_license(
+        &plugin_license_store_path().map_err(|e| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "plugin_license_store_path_unavailable",
+            message: e.to_string(),
+        })?,
+        request.token,
+        now_unix,
+    )
+    .map_err(|e| GatewayError {
+        status: StatusCode::BAD_REQUEST,
+        code: "plugin_license_rejected",
+        message: e,
+    })?;
+    Ok(Json(store))
+}
+
 /// GET/POST /api/plugins/registry/cache — local marketplace registry cache.
 /// Fetching from the Homun site can be layered on top of this without changing
 /// the UI contract.
@@ -21065,6 +21120,10 @@ fn cached_plugin_registry_path() -> Result<PathBuf, std::io::Error> {
 
 fn trusted_plugin_public_keys_path() -> Result<PathBuf, std::io::Error> {
     Ok(gateway_data_dir()?.join("plugins").join("trusted-keys.json"))
+}
+
+fn plugin_license_store_path() -> Result<PathBuf, std::io::Error> {
+    Ok(gateway_data_dir()?.join("plugins").join("licenses.json"))
 }
 
 pub(crate) fn weekday_it(w: jiff::civil::Weekday) -> &'static str {

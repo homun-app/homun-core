@@ -274,7 +274,10 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   paid predisposto con token offline e runtime sempre contenuto.
   **WS9.5a licensing contract locale/verde:** `PluginLicenseToken` verifica
   offline claim firmati Ed25519 su plugin target e scadenza, senza backend
-  pagamento. Verifica: suite capabilities verde.
+  pagamento. Verifica: suite capabilities verde. **WS9.5b license store
+  locale/verde:** il gateway espone `GET/PUT /api/plugins/licenses` e persiste
+  `~/.homun/plugins/licenses.json` solo dopo `verify_offline()`; token scaduti o
+  non coerenti col plugin vengono rifiutati prima della scrittura atomica.
   `make_research` e `make_meeting` restano dopo questo asse.
 - **WS2-3.1 PASSATA in runtime (2026-06-23):** gli artifact scritti via
   Filesystem MCP dentro la root progetto vengono registrati come

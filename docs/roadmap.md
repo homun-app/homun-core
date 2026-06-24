@@ -353,7 +353,10 @@ primo percorso locale verde:
     token offline e pagamento/cloud rinviati.
 83. WS9 licensing offline contract — `PluginLicenseClaims` /
     `PluginLicenseToken` verificano offline firma Ed25519, plugin target e
-    scadenza. Restano storage token, re-check manager e account/payment cloud.
+    scadenza. Il gateway persiste token verificati in
+    `~/.homun/plugins/licenses.json` tramite `GET/PUT /api/plugins/licenses` e
+    rifiuta token scaduti/non coerenti prima della scrittura. Restano re-check
+    manager e account/payment cloud.
 84. WS9 install manager locale — il gateway installa `.hplugin` solo dopo
     verifica registry/signature/digest, staging sicuro, controllo
     `plugin_id/version` e rename atomico. Endpoint locale

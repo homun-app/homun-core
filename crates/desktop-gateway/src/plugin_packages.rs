@@ -4,7 +4,8 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use local_first_capabilities::{
-    PluginPackageFile, PluginPackageManifest, PluginRegistryEntry, PluginRegistryIndex,
+    PluginLicenseToken, PluginPackageFile, PluginPackageManifest, PluginRegistryEntry,
+    PluginRegistryIndex,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -67,11 +68,33 @@ pub struct TrustedPluginPublicKeys {
     pub public_keys: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct StoredPluginLicense {
+    pub plugin_id: String,
+    pub token: PluginLicenseToken,
+    pub validated_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PluginLicenseStore {
+    pub schema_version: u32,
+    pub licenses: Vec<StoredPluginLicense>,
+}
+
 impl Default for InstalledPluginRegistry {
     fn default() -> Self {
         Self {
             schema_version: 1,
             plugins: Vec::new(),
+        }
+    }
+}
+
+impl Default for PluginLicenseStore {
+    fn default() -> Self {
+        Self {
+            schema_version: 1,
+            licenses: Vec::new(),
         }
     }
 }
@@ -341,6 +364,45 @@ pub fn save_trusted_plugin_public_keys(
     Ok(trusted)
 }
 
+pub fn load_plugin_license_store(path: &Path) -> Result<PluginLicenseStore, String> {
+    if !path.exists() {
+        return Ok(PluginLicenseStore::default());
+    }
+    let bytes = fs::read(path).map_err(|e| e.to_string())?;
+    let store: PluginLicenseStore = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+    validate_plugin_license_store(&store)?;
+    Ok(store)
+}
+
+pub fn upsert_verified_plugin_license(
+    path: &Path,
+    token: PluginLicenseToken,
+    now_unix: i64,
+) -> Result<PluginLicenseStore, String> {
+    let plugin_id = token.claims.plugin_id.clone();
+    if !is_safe_plugin_id(&plugin_id) {
+        return Err("unsafe licensed plugin id".to_string());
+    }
+    token
+        .verify_offline(&plugin_id, now_unix)
+        .map_err(|e| format!("plugin license rejected: {e:?}"))?;
+
+    let mut store = load_plugin_license_store(path)?;
+    store
+        .licenses
+        .retain(|license| license.plugin_id != plugin_id);
+    store.licenses.push(StoredPluginLicense {
+        plugin_id,
+        token,
+        validated_at: now_unix,
+    });
+    store
+        .licenses
+        .sort_by(|left, right| left.plugin_id.cmp(&right.plugin_id));
+    write_json_atomically(path, &store)?;
+    Ok(store)
+}
+
 fn validate_cached_plugin_registry(cached: &CachedPluginRegistry) -> Result<(), String> {
     if cached.schema_version != 1 {
         return Err("unsupported cached plugin registry schema".to_string());
@@ -375,6 +437,24 @@ fn validate_trusted_plugin_public_keys(trusted: &TrustedPluginPublicKeys) -> Res
         }
         if !seen.insert(key.to_ascii_lowercase()) {
             return Err("duplicate trusted plugin public key".to_string());
+        }
+    }
+    Ok(())
+}
+
+fn validate_plugin_license_store(store: &PluginLicenseStore) -> Result<(), String> {
+    if store.schema_version != 1 {
+        return Err("unsupported plugin license store schema".to_string());
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    for license in &store.licenses {
+        if !is_safe_plugin_id(&license.plugin_id)
+            || license.plugin_id != license.token.claims.plugin_id
+        {
+            return Err("invalid stored plugin license id".to_string());
+        }
+        if !seen.insert(license.plugin_id.clone()) {
+            return Err("duplicate stored plugin license".to_string());
         }
     }
     Ok(())
@@ -416,7 +496,10 @@ fn is_safe_plugin_id(value: &str) -> bool {
 mod tests {
     use super::*;
     use ed25519_dalek::{Signer, SigningKey};
-    use local_first_capabilities::{PluginChannel, PluginEntitlement, PluginSignature};
+    use local_first_capabilities::{
+        PluginChannel, PluginEntitlement, PluginLicenseClaims, PluginLicenseToken,
+        PluginSignature,
+    };
     use std::io::Write;
 
     #[test]
@@ -742,6 +825,34 @@ mod tests {
         let _ = fs::remove_dir_all(root);
     }
 
+    #[test]
+    fn plugin_license_store_upserts_only_verified_tokens() {
+        let root = test_dir("plugin-licenses");
+        let path = root.join("licenses.json");
+        let token = signed_license_token("presentations-pro", None);
+
+        let saved = upsert_verified_plugin_license(&path, token, 1_800_000_000).unwrap();
+
+        assert_eq!(saved.licenses.len(), 1);
+        assert_eq!(saved.licenses[0].plugin_id, "presentations-pro");
+        assert_eq!(saved.licenses[0].validated_at, 1_800_000_000);
+        assert_eq!(load_plugin_license_store(&path).unwrap(), saved);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn plugin_license_store_rejects_expired_tokens() {
+        let root = test_dir("plugin-licenses-expired");
+        let path = root.join("licenses.json");
+        let token = signed_license_token("presentations-pro", Some(1_700_000_000));
+
+        let error = upsert_verified_plugin_license(&path, token, 1_800_000_000).unwrap_err();
+
+        assert!(error.contains("Expired"));
+        assert!(!path.exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
     fn sample_archive(
         plugin_json: &[u8],
         skill: &[u8],
@@ -831,6 +942,28 @@ mod tests {
             },
             public_key,
         )
+    }
+
+    fn signed_license_token(plugin_id: &str, expires_at: Option<i64>) -> PluginLicenseToken {
+        let signing_key = SigningKey::from_bytes(&[8; 32]);
+        let verifying_key = signing_key.verifying_key();
+        let claims = PluginLicenseClaims {
+            plugin_id: plugin_id.to_string(),
+            licensee: "fabio@example.test".to_string(),
+            entitlement: PluginEntitlement::Paid,
+            issued_at: 1_700_000_000,
+            expires_at,
+        };
+        let payload = serde_json::to_vec(&claims).unwrap();
+        let signature = signing_key.sign(&payload);
+        PluginLicenseToken {
+            claims,
+            signature: PluginSignature {
+                algorithm: "ed25519".to_string(),
+                public_key: hex_lower(verifying_key.as_bytes()),
+                signature: hex_lower(&signature.to_bytes()),
+            },
+        }
     }
 
     fn hex_lower(bytes: &[u8]) -> String {

@@ -1016,8 +1016,11 @@ proprio — versioning, canali, scaricabili dal **sito Homun**, auto-aggiornabil
   `PluginLicenseToken` verificano firma Ed25519, plugin target e scadenza senza
   backend pagamenti. Verifica 2026-06-24:
   `plugin_license_token_verifies_offline_signature_and_expiry` e suite
-  capabilities verdi. Restano: storage locale dei token, ri-check periodico nel
-  manager, account/pagamenti cloud quando si attiva il paid reale.
+  capabilities verdi. 2026-06-24: aggiunto storage locale
+  `~/.homun/plugins/licenses.json` con `GET/PUT /api/plugins/licenses`; il
+  gateway salva solo token verificati offline e rifiuta token scaduti prima
+  della scrittura atomica. Restano: ri-check periodico nel manager,
+  account/pagamenti cloud quando si attiva il paid reale.
 - ✅ **9.6 ADR** "distribuzione & licensing plugin": ADR 0017 accettata. Fissa
   registry hosted sul sito Homun, verifica locale deterministica, beta opt-in,
   licensing paid predisposto ma pagamento/cloud rinviato, e nessun secondo
