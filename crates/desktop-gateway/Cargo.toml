@@ -51,3 +51,6 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 # umask(0077) at startup so the plaintext SQLite stores are born owner-only (0600).
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+[dev-dependencies]
+ed25519-dalek = "2"

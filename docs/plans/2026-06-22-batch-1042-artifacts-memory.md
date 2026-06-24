@@ -964,8 +964,11 @@ proprio — versioning, canali, scaricabili dal **sito Homun**, auto-aggiornabil
   stable/beta (`beta` solo con opt-in), compatibilità minima Homun e confronto
   versioni semver (`is_newer_than`). Verifica 2026-06-24:
   `plugin_registry_entry_applies_install_and_update_policy` e suite capabilities
-  verdi. Restano: UI manager, fetch/cache registry, download pacchetti e
-  auto-update reale.
+  verdi. 2026-06-24: aggiunto install manager locale nel gateway:
+  `install_hplugin_package()` applica la policy registry, ispeziona/stagea
+  `.hplugin`, controlla identità/versione pacchetto e attiva con rename atomico.
+  Verifica: `plugin_packages::tests::hplugin_package_install_*` verdi. Restano:
+  API/UI manager, fetch/cache registry, download pacchetti e auto-update reale.
 - 🟡 **9.4 Sicurezza**: prima slice integrity/policy fatta. `PluginRegistryEntry`
   valida digest `sha256:<64 hex>`, richiede algoritmo firma `ed25519`, confronta
   SHA-256 del pacchetto e verifica la firma Ed25519 sui byte pacchetto. Inoltre
@@ -979,9 +982,11 @@ proprio — versioning, canali, scaricabili dal **sito Homun**, auto-aggiornabil
   produce blob testuali per `skill_security` senza attivare installazioni.
   Lo stesso modulo scrive in staging solo file dichiarati e blocca lo staging se
   `skill_security` segnala criticità. Verifica:
-  `plugin_packages::tests::hplugin_archive_*` verdi. Restano: enforcement
-  install/update, staging sotto directory manager definitiva e attivazione
-  atomica nel registry locale.
+  `plugin_packages::tests::hplugin_archive_*` verdi. 2026-06-24: enforcement
+  locale install-time aggiunto con staging sotto root manager, mismatch
+  `plugin_id/version` bloccante e attivazione atomica post-verifica. Verifica:
+  `plugin_packages::tests` verdi. Restano: collegamento endpoint/UI, update
+  su plugin già installati e registry locale degli installati.
 - 🟡 **9.5 Licensing/paid (predisporre ora)**: campo `entitlement` nel manifest
   già presente; prima slice token offline fatta. `PluginLicenseClaims` /
   `PluginLicenseToken` verificano firma Ed25519, plugin target e scadenza senza

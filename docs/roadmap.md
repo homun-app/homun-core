@@ -354,6 +354,10 @@ primo percorso locale verde:
 83. WS9 licensing offline contract — `PluginLicenseClaims` /
     `PluginLicenseToken` verificano offline firma Ed25519, plugin target e
     scadenza. Restano storage token, re-check manager e account/payment cloud.
+84. WS9 install manager locale — il gateway installa `.hplugin` solo dopo
+    verifica registry/signature/digest, staging sicuro, controllo
+    `plugin_id/version` e rename atomico. Restano endpoint/UI, fetch/cache feed
+    e update automatico.
 
 Prima di pubblicare/taggare resta prudente ripetere lo smoke manuale in-app su
 una automazione schedulata reale con il binario aggiornato. Il primo smoke ha

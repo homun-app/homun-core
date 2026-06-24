@@ -225,7 +225,13 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   installazioni. **WS9.4c package staging locale/verde:** lo stesso modulo può
   scrivere in una directory di staging nuova solo i file dichiarati e blocca lo
   staging se `skill_security` segnala criticità. Verifica: test mirati gateway
-  verdi.
+  verdi. **WS9.3b/9.4d installazione locale atomica locale/verde:** il gateway
+  espone ora `install_hplugin_package()`, che applica `verify_install_candidate`
+  (canale, compatibilità, chiave trusted, digest, firma), ispeziona/stagea
+  l'archive, verifica che `plugin_id` e `version` del pacchetto coincidano con
+  la entry registry e attiva con rename atomico solo dopo staging riuscito.
+  Verifica: `cargo test -p local-first-desktop-gateway plugin_packages::tests -- --nocapture`
+  verde; restano API/UI manager, fetch/cache registry e update automatico.
   **WS9.6 ADR locale:** ADR 0017 formalizza distribuzione, signing e licensing:
   registry hosted sul sito Homun, verifica locale deterministica, beta opt-in,
   paid predisposto con token offline e runtime sempre contenuto.
