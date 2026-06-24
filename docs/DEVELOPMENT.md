@@ -55,15 +55,17 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   distingue piano completo (`done == total`) da piano aperto/bloccato; i
   proactive prompt usano quella guardia invece di schedulare un falso successo.
   Il contratto operativo corrente della memoria è [MEMORIA.md](MEMORIA.md).
-- **Slice corrente WS5.1a:** audit read-model graph-like. `contact_relationships`
-  resta tabella operativa/UX della rubrica, ma quando entrambe le estremita'
-  hanno un `entity_ref` esplicito la relazione viene mirrorata nel grafo
-  canonico tramite `MemoryFacade` come `MemoryRelation` deterministica
-  `source="contact_relationships"`; la rimozione tombstona lo stesso ref
-  canonico. Nessun matching per nome, nessuna inferenza probabilistica, nessuno
-  store parallelo. Gate mirati: `cargo test -p local-first-desktop-gateway
-  contact_relationship -- --nocapture`; gate allargati da rieseguire prima del
-  commit.
+- **WS5 chiusa localmente/gate:** la memoria ha ora provenance artifact
+  evidence-only, piano/step/outcome nel grafo canonico, reader/eval per
+  artifact-provenance e workflow-status/perché, open loop dedup/closure/wiki e
+  audit read-model graph-like. `contact_relationships` resta tabella UX, ma
+  converge nel `MemoryFacade` quando ha `entity_ref` espliciti; `ChatStore`
+  dichiara una boundary audit per ogni tabella locale, così nuovi read-model
+  devono dichiarare se sono solo UX/ops o convergono nella memoria canonica.
+  Gate di chiusura: `python3 scripts/pre_release_gate.py` verde, inclusi i test
+  WS5.6 e il nuovo `local_store_tables_have_explicit_memory_boundary_audit`.
+  **Prossimo passo unico:** riprendere WS1 core secondo roadmap, senza riaprire
+  memoria salvo regressioni o smoke in-app prima release.
 - **Direzione WS7 aggiornata:** l'obiettivo deliverable non è una gallery statica
   clonata tool-per-tool, ma un **design system dichiarativo condiviso** per
   documenti e presentazioni/plugin: temi, layout, componenti, template e QA
@@ -404,10 +406,9 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   `runtime_plan_memory_materializes_plan_step_graph`.
   Gate locale allargato: `cargo test -p local-first-desktop-gateway -- --nocapture`
   = 182 passati, 1 ignorato; `cargo test -p local-first-memory -- --nocapture` =
-  verde; `npm run build` desktop = verde; `git diff --check` pulito. **Prossimo
-  passo unico:** completare verifica allargata della nuova slice grafo piano e
-  poi proseguire verso convergenza `ExecutionPlan`/workflow runner dichiarativo,
-  senza aprire WS7 prima delle fondamenta.
+  verde; `npm run build` desktop = verde; `git diff --check` pulito. Stato
+  storico: slice grafo piano chiusa; la convergenza `ExecutionPlan`/workflow
+  runner dichiarativo e' proseguita nelle slice WS1 successive.
 - **WS6 post-smoke automation guard (2026-06-23):** analisi runtime su
   `~/.homun/task-runtime.sqlite` e `~/.homun/desktop-gateway.sqlite`: il task
   scheduled `autorun_a4bd...@occ@1782194400` era stato registrato come

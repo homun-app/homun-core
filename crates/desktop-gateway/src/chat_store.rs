@@ -203,6 +203,91 @@ pub struct StoredPerimeter {
     pub can_see_calendar: bool,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct ChatStoreMemoryBoundaryAudit {
+    pub table: &'static str,
+    pub graph_like: bool,
+    pub canonical_policy: &'static str,
+}
+
+pub const CHAT_STORE_MEMORY_BOUNDARY_AUDIT: &[ChatStoreMemoryBoundaryAudit] = &[
+    ChatStoreMemoryBoundaryAudit {
+        table: "channel_inbound_seen",
+        graph_like: false,
+        canonical_policy: "operational inbound dedup; no semantic memory",
+    },
+    ChatStoreMemoryBoundaryAudit {
+        table: "chat_messages",
+        graph_like: false,
+        canonical_policy: "conversation log; durable facts are saved by MemoryFacade via saved_memory_ref",
+    },
+    ChatStoreMemoryBoundaryAudit {
+        table: "chat_threads",
+        graph_like: false,
+        canonical_policy: "conversation index and active pointer; workflow state lives in MemoryFacade open_loop",
+    },
+    ChatStoreMemoryBoundaryAudit {
+        table: "contact_channel_profiles",
+        graph_like: false,
+        canonical_policy: "routing/persona selection read-model; no semantic graph edge",
+    },
+    ChatStoreMemoryBoundaryAudit {
+        table: "contact_identities",
+        graph_like: false,
+        canonical_policy: "address-book handles for routing; contact knowledge lives in MemoryFacade",
+    },
+    ChatStoreMemoryBoundaryAudit {
+        table: "contact_perimeters",
+        graph_like: false,
+        canonical_policy: "privacy policy configuration; no semantic memory",
+    },
+    ChatStoreMemoryBoundaryAudit {
+        table: "contact_relationships",
+        graph_like: true,
+        canonical_policy: "mirrored into canonical MemoryRelation when both contacts have entity_ref; tombstoned on delete",
+    },
+    ChatStoreMemoryBoundaryAudit {
+        table: "contacts",
+        graph_like: false,
+        canonical_policy: "curated address-book entries; entity_ref points to canonical MemoryFacade entity",
+    },
+    ChatStoreMemoryBoundaryAudit {
+        table: "profiles",
+        graph_like: false,
+        canonical_policy: "reusable reply persona configuration; no semantic graph edge",
+    },
+    ChatStoreMemoryBoundaryAudit {
+        table: "remote_approvals",
+        graph_like: false,
+        canonical_policy: "authorization log; no semantic memory",
+    },
+    ChatStoreMemoryBoundaryAudit {
+        table: "settings",
+        graph_like: false,
+        canonical_policy: "local configuration; no semantic memory",
+    },
+    ChatStoreMemoryBoundaryAudit {
+        table: "suggestions",
+        graph_like: false,
+        canonical_policy: "proactive card read-model; accepted/dismissed outcomes write to MemoryFacade separately",
+    },
+    ChatStoreMemoryBoundaryAudit {
+        table: "task_thread_links",
+        graph_like: false,
+        canonical_policy: "task-to-thread routing; plan/workflow state lives in MemoryFacade open_loop",
+    },
+    ChatStoreMemoryBoundaryAudit {
+        table: "thread_attachments",
+        graph_like: false,
+        canonical_policy: "conversation attachment cache; produced deliverables are artifacts in MemoryFacade",
+    },
+    ChatStoreMemoryBoundaryAudit {
+        table: "tool_runs",
+        graph_like: false,
+        canonical_policy: "connector execution telemetry; durable outcomes are explicit MemoryFacade records",
+    },
+];
+
 impl Default for StoredPerimeter {
     fn default() -> Self {
         Self {
@@ -2849,6 +2934,45 @@ mod tests {
         assert!(store.plugin_enabled("proattivita"));
         // Independent per id.
         assert!(store.plugin_enabled("invoicing"));
+    }
+
+    #[test]
+    fn local_store_tables_have_explicit_memory_boundary_audit() {
+        let store = ChatStore::in_memory().unwrap();
+        let mut stmt = store
+            .conn
+            .prepare(
+                "select name from sqlite_master
+                 where type = 'table' and name not like 'sqlite_%'
+                 order by name",
+            )
+            .unwrap();
+        let actual: Vec<String> = stmt
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        let audited: Vec<String> = CHAT_STORE_MEMORY_BOUNDARY_AUDIT
+            .iter()
+            .map(|entry| entry.table.to_string())
+            .collect();
+
+        assert_eq!(
+            actual, audited,
+            "every local ChatStore table must declare whether it is UX/ops only or converges into canonical MemoryFacade"
+        );
+        assert_eq!(
+            CHAT_STORE_MEMORY_BOUNDARY_AUDIT
+                .iter()
+                .filter(|entry| entry.graph_like)
+                .map(|entry| (entry.table, entry.canonical_policy))
+                .collect::<Vec<_>>(),
+            vec![(
+                "contact_relationships",
+                "mirrored into canonical MemoryRelation when both contacts have entity_ref; tombstoned on delete"
+            )],
+            "graph-like read-model tables need explicit canonical memory convergence"
+        );
     }
 
     #[test]

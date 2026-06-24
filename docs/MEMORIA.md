@@ -137,22 +137,17 @@ Fatto:
   sono mirrorate nel grafo canonico come `MemoryRelation` deterministiche con
   metadata `source="contact_relationships"`; la rimozione tombstona il ref
   canonico. Non c'e' matching per nome.
+- guardrail WS5.1b: `ChatStore` dichiara un audit memoria per ogni tabella locale.
+  Il test `local_store_tables_have_explicit_memory_boundary_audit` legge lo
+  schema reale e fallisce se nasce un nuovo read-model senza policy esplicita
+  UX/ops oppure convergenza nel `MemoryFacade`.
 
 Mancante:
 
-- completare l'audit degli altri eventuali read-model graph-like: le relazioni
-  contatti hanno il primo mirror canonico, ma altri read-model futuri devono
-  dichiarare se sono solo UX o convergere nel grafo memoria;
-- graphification estesa oltre il codice: artifact, piano, decisioni, outcome e loop
-  aperti devono diventare nodi/archi causali; il piano ora ha write-back SQL e
-  grafo step-level iniziale più stato/proiezione `ExecutionPlan`, ma non ancora
-  il runner dichiarativo completo;
-- provenance completa decisione/piano → artifact → codice → esito: la slice
-  decisione/source-ref → artifact e i reader/eval sono locali/verdi; il piano ora
-  scrive stato e step nel grafo, resta collegare artifact/esiti a step/piano con
-  evidenza esplicita;
-- eval memoria come gate completo in-app/release; i reader headless per artifact
-  provenance e stato workflow sono locali/verdi.
+- nessun blocco WS5 locale: artifact, piano, decisioni, outcome, open loop e
+  read-model graph-like corrente convergono nel `MemoryFacade` canonico con gate
+  deterministici. Restano validazioni in-app mirate prima delle release e
+  l'estensione futura del grafo a nuovi domini/adapter quando appariranno.
 
 ## Prossimo blocco
 
@@ -209,7 +204,7 @@ Acceptance:
 4. WS5.5b — provenance decisione/source-ref → artifact evidence-only: ✅ slice
    locale/verde.
 5. WS5.6 — eval memoria: ✅ artifact/provenance e stato workflow/perché locali;
-   resta eventuale smoke in-app mirato.
+   gate deterministico incluso nel pre-release locale.
 6. WS7 — generalizzare `make_document` / `make_research` / `make_meeting` sullo
    stesso `ExecutionPlan` + write-back memoria/grafo.
 7. Smoke in-app su deck workflow dopo build release.

@@ -418,7 +418,7 @@ Visione & ragionamento: [memory-vision.md](../memory-vision.md). Baseline reale
 **9** pagine wiki markdown → la macchina c'è ma è **sbilanciata/dormiente** sui pezzi
 che fanno "ricordare il perché e sopravvivere". Caposaldo #8.
 
-- ☐ **5.1 Estendere il grafo** dal primo adapter maturo (code graph/Graphify) a
+- ✅ **5.1 Estendere il grafo** dal primo adapter maturo (code graph/Graphify) a
   **decisioni / artefatti / step di piano / esiti** + **archi causali**
   (`rationale_for`, `produced`, `derived_from`, `supersedes`, `blocks`). Include
   audit dei read-model graph-like (`contact_relationships`): se portano conoscenza
@@ -429,6 +429,12 @@ che fanno "ricordare il perché e sopravvivere". Caposaldo #8.
   contact_relationships`, `read_model = contact_relationships`); la rimozione
   tombstona il ref canonico. Nessun matching per nome o inferenza fragile.
   Test: `cargo test -p local-first-desktop-gateway contact_relationship -- --nocapture`.
+  **Slice 5.1b locale/verde:** `ChatStore` dichiara un audit esplicito per ogni
+  tabella locale rispetto alla memoria canonica. Il test
+  `local_store_tables_have_explicit_memory_boundary_audit` interroga lo schema
+  reale e fallisce se nasce una nuova tabella non classificata come UX/ops o
+  convergente nel `MemoryFacade`; l'unico read-model graph-like corrente resta
+  `contact_relationships`, già mirrorato.
 - ✅ **5.2 Embeddare tutto** — `spawn_embedding_catchup` allo startup vettorizza ogni
   memoria mancante su **tutti** gli scope, loop fino a esaurimento (off critical path).
   Risolve il gap 391/555 (l'auto-consolidamento che faceva il backfill era OFF di
@@ -446,7 +452,7 @@ che fanno "ricordare il perché e sopravvivere". Caposaldo #8.
   gli `open_loop` **più ricchi** (cosa esiste / cosa NON esiste / cosa blocca) — senza
   però immortalare gli errori di processo del modello. Verificabile via eval (un check di
   coerenza A→B).
-- 🟡 **5.4 Open loops nelle chat nuove**:
+- ✅ **5.4 Open loops nelle chat nuove**:
   - ✅ **5.4a briefing always-on** — `gather_open_loops` + sezione "OPEN LOOPS" in cima a
     `format_memory_block` (priorità di budget): una chat nuova li riceve **senza** nominare
     il topic (chiude il gap del test Rossi-B). Build+test verdi. **VERIFICATO in-app
@@ -465,7 +471,7 @@ che fanno "ricordare il perché e sopravvivere". Caposaldo #8.
     `metadata.closes_open_loop`, marcandolo `Stale` solo se c'è overlap con un
     loop reale. Test: `open_loop_dedup_supersedes_duplicate_records` e
     `open_loop_closure_marks_matching_loop_stale_only_with_overlap` verdi.
-- 🟡 **5.5 Catena di provenienza** decisione → artefatto → codice → esito (unisce
+- ✅ **5.5 Catena di provenienza** decisione → artefatto → codice → esito (unisce
   WS2-3.1 artefatti→memoria + WS1-F6 piano→memoria + codice già nel grafo).
   **Slice 5.5a locale/verde:** ogni upsert di artifact memoria ora materializza
   nel grafo canonico anche entity `project`, entity `tool` producer, entity `file`
@@ -487,9 +493,11 @@ che fanno "ricordare il perché e sopravvivere". Caposaldo #8.
   con evidence refs alla memoria sorgente e alla memoria artifact. Non fa matching
   semantico né inferisce relazioni probabili. Test:
   `cargo test -p local-first-desktop-gateway artifact_memory_links_ -- --nocapture`.
-  **Resta:** alimentare refs piano/task dagli artifact verso le entity/ref piano
-  ora disponibili, senza inferire relazioni non evidenziate.
-- 🟡 **5.6 Eval memoria** (guardrail): chat nuova → *"a che punto è il workflow e perché
+  Chiusura WS5: `plan_refs`/`task_refs` sono ref canoniche esplicite trattate come
+  `derived_from`; il grafo piano/step e gli outcome `runtime_plan_step` sono già
+  materializzati dal percorso WS1 e letti dai reader WS5.6. Nessuna relazione
+  piano/task viene inferita senza metadata/ref esplicite.
+- ✅ **5.6 Eval memoria** (guardrail): chat nuova → *"a che punto è il workflow e perché
   make_deck?"* / *"quali artefatti per il progetto X e da quale decisione?"* → deve
   rispondere. Anti-regressione, come l'eval del deck.
   **Prima slice locale/verde:** il reader di recall/RAG attraversa la provenance
@@ -509,9 +517,9 @@ che fanno "ricordare il perché e sopravvivere". Caposaldo #8.
   Verifica artifact/provenance/decisione, `make_document`/`DocumentWorkflow`,
   path gestito, decision rationale/alternative, goal/open-loop e outcome
   verificato.
-  **Resta:** smoke in-app mirato del reader memoria quando si vuole validare il
-  comportamento con dati reali; piano/task refs complete ora possono appoggiarsi
-  al grafo piano materializzato da WS1.
+  Chiusura WS5: il gate deterministico pre-release include i test WS5.6; smoke
+  in-app mirati restano utili prima di release, ma non sono un blocco del
+  contratto memoria locale.
 
 > Nota: WS2-3.1 (artefatti→memoria) e WS1-F6 (piano→memoria) **alimentano** WS5 — sono
 > i nodi che rendono la memoria il cervello connesso. Stesso north-star.
