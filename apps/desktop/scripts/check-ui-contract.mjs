@@ -224,6 +224,7 @@ assertContains("src/components/ChatView.tsx", "wi-progress", "workspace island m
 assertContains("src/components/ChatView.tsx", "if (!hasWorkspaceState) return null", "workspace island must stay hidden when a thread has no real workspace state");
 assertContains("src/components/ChatView.tsx", "panel-menu-wrap--corner", "chat header must expose the right-side workspace/review menu");
 assertContains("src/styles.css", ".panel-menu-wrap {\n  position: relative;\n  display: inline-flex;\n  -webkit-app-region: no-drag;", "chat header workspace/review menu must be clickable inside the Electron drag header");
+assertContains("src/styles.css", "z-index: 220;", "chat header workspace/review menu must sit above the Electron window drag strips");
 assertContains("src/components/ChatView.tsx", "<ArtifactsPanel", "artifact review must use the rich preview/diff surface in the workbench");
 assertNotContains("src/components/ChatView.tsx", "{planSteps.length > 0 && <PlanProgressCard steps={planSteps} />}", "operational plan markers must not render duplicate inline cards inside the assistant answer");
 assertContains("src/components/ChatView.tsx", "{readable && <RichMessage text={readable} streaming={streaming} />}", "assistant markdown must stay progressive while the message streams");

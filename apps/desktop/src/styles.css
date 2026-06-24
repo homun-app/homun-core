@@ -1588,13 +1588,13 @@ body.resizing-drawer {
   -webkit-app-region: no-drag;
 }
 /* Pinned to the top-right corner of the conversation, aligned with the title row.
-   z-index sits BELOW the docked panel (40) so the panel covers it when open and its
-   own header takes over — and ABOVE the thread content so it's clickable when closed. */
+   This must sit above .window-drag-strip (z-index 200): otherwise Electron treats
+   real clicks on the visible control as window dragging. */
 .panel-menu-wrap--corner {
   position: absolute;
   top: 13px;
   right: 16px;
-  z-index: 30;
+  z-index: 220;
 }
 .panel-menu-backdrop {
   position: fixed;
