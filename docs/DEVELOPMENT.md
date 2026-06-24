@@ -106,9 +106,13 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   Workbench laterale parte sotto la titlebar/chrome Electron, riserva spazio
   alla chat quando aperto e usa la stessa grammatica a isola della shell
   (margine, radius, ombra, preview artifact in card bounded) invece di una
-  colonna flat. Il `ChatComputerPanel` resta separato come `ComputerIsland`
-  live: preview browser/terminal compatta sotto la workspace island,
-  espandibile e visibile solo durante attivita' owner del thread. Gate locale:
+  colonna flat. Rifinitura menu: il menu messaggio non espone piu' task o
+  automazioni non verificate per ogni risposta, le azioni codice richiedono
+  blocchi fenced espliciti, e il `+` composer separa modalita', contesto e
+  capability mostrando `Improve prompt` solo quando esiste testo. Il
+  `ChatComputerPanel` resta separato come `ComputerIsland` live: preview
+  browser/terminal compatta sotto la workspace island, espandibile e visibile
+  solo durante attivita' owner del thread. Gate locale:
   `npm run test:ui-contract`, `npm run build`, runtime
   Electron riavviato con gateway `local-first-desktop-gateway` in ascolto su
   `127.0.0.1:18765`. **Prossimo passo unico:** completare la rifinitura UX.2 su

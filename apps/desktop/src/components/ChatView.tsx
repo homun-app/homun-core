@@ -1256,40 +1256,6 @@ export function ChatView({
     }
   }
 
-  async function createTaskFromMessage(message: ChatMessage) {
-    if (message.role !== "assistant" || message.linkedTaskId) return;
-    const optimisticMessages = threadMessages.map((item) =>
-      item.id === message.id ? { ...item, linkedTaskId: "pending" } : item,
-    );
-    onMessagesChange(optimisticMessages);
-    setPromptError(null);
-    try {
-      await coreBridge.createTaskFromChatMessage(thread.threadId, message.id);
-      await onRuntimeChanged();
-      await onThreadChanged();
-    } catch (error) {
-      onMessagesChange(threadMessages);
-      setPromptError(describeBridgeError(error));
-    }
-  }
-
-  async function createAutomationFromMessage(message: ChatMessage) {
-    if (message.role !== "assistant" || message.linkedAutomationRef) return;
-    const optimisticMessages = threadMessages.map((item) =>
-      item.id === message.id ? { ...item, linkedAutomationRef: "pending" } : item,
-    );
-    onMessagesChange(optimisticMessages);
-    setPromptError(null);
-    try {
-      await coreBridge.createAutomationFromChatMessage(thread.threadId, message.id);
-      await onRuntimeChanged();
-      await onThreadChanged();
-    } catch (error) {
-      onMessagesChange(threadMessages);
-      setPromptError(describeBridgeError(error));
-    }
-  }
-
   function continueAssistantResponse(messageId: string) {
     if (promptSubmitting) return;
     const message = threadMessages.find((item) => item.id === messageId);
@@ -1834,20 +1800,14 @@ export function ChatView({
                   }
                   canReply={displayMessage.role !== "system" && Boolean(displayMessage.text)}
                   canEdit={displayMessage.role === "user" && Boolean(displayMessage.text)}
-                  canCreateteAutomation={assistantTextMessage}
-                  canCreateteTask={assistantTextMessage}
                   canExpand={assistantTextMessage}
                   canSaveToMemory={assistantOperationalMessage}
                   canSaveAsGoal={assistantOperationalMessage && threadIsProject}
                   feedback={displayMessage.feedback}
-                  linkedAutomation={Boolean(displayMessage.linkedAutomationRef)}
-                  linkedTask={Boolean(displayMessage.linkedTaskId)}
                   metrics={displayMessage.metrics}
                   savedToMemory={Boolean(displayMessage.savedMemoryRef)}
                   onCopy={() => copyMessageText(displayMessage)}
                   onContinue={() => continueAssistantResponse(displayMessage.id)}
-                  onCreateteAutomation={() => void createAutomationFromMessage(displayMessage)}
-                  onCreateteTask={() => void createTaskFromMessage(displayMessage)}
                   onExpand={() => expandAssistantResponse(displayMessage.id)}
                   onExplainCode={() =>
                     askAboutAssistantResponse(
@@ -2467,13 +2427,7 @@ function hasMermaidContent(text: string) {
 }
 
 function hasCodeContent(text: string) {
-  return (
-    /```[\w-]*[\s\S]*?```/.test(text) ||
-    /^fn\s+[a-zA-Z_]\w*\s*\([^)]*\)\s*\{?/m.test(text) ||
-    /^use\s+[\w:]+/m.test(text) ||
-    /^let\s+(mut\s+)?[a-zA-Z_]\w*/m.test(text) ||
-    /^println!\s*\(/m.test(text)
-  );
+  return /```(?!mermaid\b)[\w-]*\n[\s\S]*?```/i.test(text);
 }
 
 function isLikelyIncompleteMessage(message: ChatMessage) {
@@ -2549,8 +2503,6 @@ function formatRuntimeStatus(status: string | undefined) {
 
 function MessageActionBar({
   canContinue,
-  canCreateteAutomation,
-  canCreateteTask,
   canExpand,
   canRegenerate,
   canReply,
@@ -2560,15 +2512,11 @@ function MessageActionBar({
   contentKind,
   copied,
   feedback,
-  linkedAutomation,
-  linkedTask,
   metrics,
   savedToMemory,
   onCopy,
   onEdit,
   onContinue,
-  onCreateteAutomation,
-  onCreateteTask,
   onExpand,
   onExplainCode,
   onExplainDiagram,
@@ -2581,8 +2529,6 @@ function MessageActionBar({
   onSaveAsGoal,
 }: {
   canContinue: boolean;
-  canCreateteAutomation: boolean;
-  canCreateteTask: boolean;
   canExpand: boolean;
   canRegenerate: boolean;
   canReply: boolean;
@@ -2592,15 +2538,11 @@ function MessageActionBar({
   contentKind: MessageContentKind;
   copied: boolean;
   feedback: ChatMessage["feedback"];
-  linkedAutomation: boolean;
-  linkedTask: boolean;
   metrics?: ChatMessageMetrics;
   savedToMemory: boolean;
   onCopy: () => void;
   onEdit: () => void;
   onContinue: () => void;
-  onCreateteAutomation: () => void;
-  onCreateteTask: () => void;
   onExpand: () => void;
   onExplainCode: () => void;
   onExplainDiagram: () => void;
@@ -2622,8 +2564,6 @@ function MessageActionBar({
     canRegenerate ||
     canSaveToMemory ||
     canSaveAsGoal ||
-    canCreateteTask ||
-    canCreateteAutomation ||
     contentKind === "code" ||
     contentKind === "diagram";
 
@@ -2751,28 +2691,6 @@ function MessageActionBar({
                 <button type="button" role="menuitem" onClick={onSaveAsGoal}>
                   <Target size={14} />
                   <span>{t("chat.action.saveAsGoal")}</span>
-                </button>
-              )}
-              {canCreateteTask && (
-                <button
-                  className={linkedTask ? "active" : ""}
-                  type="button"
-                  role="menuitem"
-                  onClick={onCreateteTask}
-                >
-                  <ListTodo size={14} />
-                  <span>{linkedTask ? t("chat.taskCreated") : t("chat.createTask")}</span>
-                </button>
-              )}
-              {canCreateteAutomation && (
-                <button
-                  className={linkedAutomation ? "active" : ""}
-                  type="button"
-                  role="menuitem"
-                  onClick={onCreateteAutomation}
-                >
-                  <WandSparkles size={14} />
-                  <span>{linkedAutomation ? t("chat.automationProposed") : t("chat.createAutomation")}</span>
                 </button>
               )}
               <div className="message-action-menu-feedback" aria-label={t("chat.responseFeedback")}>
@@ -7587,7 +7505,7 @@ function Composer({
             {addMenuOpen && (
               <div className="composer-pop composer-add-pop" role="menu">
                 <div className="composer-add-eyebrow">
-                  {t("chat.addAgentsContextTools")}
+                  {t("chat.addContextCapabilities")}
                 </div>
                 {CHAT_MODES.filter((m) => !m.projectOnly || linkedFolder != null).map((m) => {
                   const I = m.icon;
@@ -7644,25 +7562,27 @@ function Composer({
                     }}
                   >
                     <Puzzle size={16} />
-                    <span>{forcedSkills ? `Skills · ${forcedSkills.name}` : "Use a skill"}</span>
+                    <span>{forcedSkills ? `Capability · ${forcedSkills.name}` : t("chat.useCapability")}</span>
                   </button>
                 )}
-                <button
-                  type="button"
-                  role="menuitem"
-                  disabled={improving || !value.trim()}
-                  onClick={() => {
-                    setAddMenuOpen(false);
-                    void handleImprovePrompt();
-                  }}
-                >
-                  {improving ? (
-                    <Loader2 size={16} className="composer-spin" />
-                  ) : (
-                    <WandSparkles size={16} />
-                  )}
-                  <span>Improve prompt</span>
-                </button>
+                {value.trim() && (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    disabled={improving}
+                    onClick={() => {
+                      setAddMenuOpen(false);
+                      void handleImprovePrompt();
+                    }}
+                  >
+                    {improving ? (
+                      <Loader2 size={16} className="composer-spin" />
+                    ) : (
+                      <WandSparkles size={16} />
+                    )}
+                    <span>{t("chat.improvePrompt")}</span>
+                  </button>
+                )}
               </div>
             )}
             {fileMenuOpen && !linkedFolder && (

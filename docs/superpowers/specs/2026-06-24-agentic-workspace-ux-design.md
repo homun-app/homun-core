@@ -64,7 +64,9 @@ La chat resta la superficie primaria:
 
 - messaggi leggibili e progressivi;
 - composer stabile, non espanso in modo imprevedibile;
-- azioni messaggio discrete;
+- azioni messaggio discrete e contestuali: non devono promettere task,
+  automazioni, memoria, goal o trasformazioni se quella capability non e'
+  realmente applicabile al messaggio corrente;
 - plan card inline solo quando serve al contesto della conversazione;
 - artifact links sempre visibili quando un output e' prodotto.
 
@@ -107,6 +109,22 @@ live, compare una **Computer Island** sotto la Workspace Island, con mini previe
 del browser come oggi. Si espande per vedere il computer completo e scompare
 quando l'attivita' termina. I log finali possono restare in `Activity`, non come
 pannello computer persistente.
+
+### Composer e menu contestuali
+
+Il `+` del composer non e' un catalogo tecnico di MCP/skill/plugin. E' una
+superficie compatta per aggiungere modalita', contesto e capability realmente
+disponibili:
+
+- **Mode**: Agent, Plan, Ask, Debug quando il contesto lo supporta.
+- **Context**: file allegati, folder linkati e file menzionati.
+- **Capability**: capability del registry/skill abilitate, mostrate come
+  capability e non come dettaglio tecnico.
+
+Le voci disabilitate o speculative non devono comparire nel menu principale.
+`Improve prompt` appare solo quando esiste testo nel composer. Le azioni codice
+nei messaggi richiedono codice esplicito in fenced block: non bastano inline code
+o euristiche fragili su parole come `let`, `fn` o `use`.
 
 ### Destra: Workbench inspector
 

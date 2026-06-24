@@ -440,7 +440,11 @@ primo percorso locale verde e WS5 è chiusa localmente/gate:
     riservando spazio alla chat quando e' aperto. Rifinitura visuale: il
     Workbench e' una island coerente con la shell (margine, radius, ombra) e la
     Review artifact incornicia contenuti e preview in card bounded invece di
-    mostrarli come colonna grezza.
+    mostrarli come colonna grezza. Rifinitura menu chat/composer: il menu
+    messaggio mostra solo azioni contestuali e verificate, senza task/automation
+    generici; le azioni codice richiedono blocchi fenced espliciti; il `+`
+    composer usa il linguaggio capability/context e mostra solo voci realmente
+    applicabili.
 
 Prima di pubblicare/taggare resta prudente ripetere lo smoke manuale in-app su
 una automazione schedulata reale con il binario aggiornato. Il primo smoke ha

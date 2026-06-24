@@ -255,6 +255,12 @@ assertContains("src/components/ChatView.tsx", "onImproveCode", "code responses m
 assertContains("src/components/ChatView.tsx", "reply-context-card", "composer must show the active reply context before submit");
 assertContains("src/components/ChatView.tsx", "message-action-menu", "secondary message actions must stay behind a compact menu");
 assertContains("src/components/ChatView.tsx", "message-latency-summary", "message metrics must be visible without dominating the answer");
+assertNotContains("src/components/ChatView.tsx", "canCreateteTask={assistantTextMessage}", "message action menu must not advertise unverified task creation for every assistant text");
+assertNotContains("src/components/ChatView.tsx", "canCreateteAutomation={assistantTextMessage}", "message action menu must not advertise unverified automation creation for every assistant text");
+assertNotContains("src/components/ChatView.tsx", "\"Use a skill\"", "composer add menu must expose user-facing capabilities, not implementation terms");
+assertContains("src/components/ChatView.tsx", "value.trim() && (", "composer improve prompt action must only render when there is prompt text to improve");
+assertNotContains("src/components/ChatView.tsx", "/^fn\\s+", "code-specific message actions must not rely on fragile plain-text Rust heuristics");
+assertNotContains("src/components/ChatView.tsx", "/^let\\s+", "code-specific message actions must not rely on fragile plain-text variable heuristics");
 assertContains("src/components/ChatView.tsx", "cancelStreamingRequestRef", "chat must allow users to stop a visible streaming response");
 assertNotContains(
   "src/components/ChatView.tsx",
