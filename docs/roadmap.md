@@ -317,6 +317,10 @@ primo percorso locale verde:
     immagine il titolo slide esatto/quotato. Usa keyword tematiche e un vincolo
     esplicito contro tipografia leggibile, riducendo il rischio di testo
     storpiato nelle immagini generate.
+75. WS8 pre-release base gate — `scripts/pre_release_gate.py` rende ripetibile il
+    gate locale prima di tag/build: gateway test completo, UI contract, build
+    desktop e syntax check eval. Gli eval modello/gateway si agganciano via env,
+    senza rendere fragile il gate deterministico.
 
 Prima di pubblicare/taggare resta prudente ripetere lo smoke manuale in-app su
 una automazione schedulata reale con il binario aggiornato. Il primo smoke ha

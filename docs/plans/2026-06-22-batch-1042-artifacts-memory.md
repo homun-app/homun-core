@@ -916,7 +916,15 @@ Il caposaldo #2 ("funziona sul tier locale") oggi è verificato solo sul deck
   reale. Verifica runtime passata su `127.0.0.1:18765`. Da estendere: tool-call
   emission + render end-to-end + ricerca/meeting quando esistono (WS7).
 - ☐ **8.2** Eval memoria (= WS5.6): chat nuova → "stato + perché" → deve rispondere.
-- ☐ **8.3** Gate pre-release: nessuna pubblicazione se la suite non è verde sul tier base.
+- ✅ **8.3** Gate pre-release base: `scripts/pre_release_gate.py` esegue in un
+  comando i gate deterministici (`cargo test -p local-first-desktop-gateway -- --nocapture`,
+  `npm run test:ui-contract`, `npm run build`, `py_compile` eval suite) e si
+  ferma al primo fallimento. Gli eval modello/gateway restano opt-in con
+  `HOMUN_RUN_MODEL_EVAL` e `HOMUN_EVAL_GATEWAY_BASE`, così il gate locale non
+  dipende da runtime esterni. Verifica 2026-06-24: `python3 scripts/pre_release_gate.py`
+  verde (**255 gateway passati, 1 ignorato**, UI contract, build desktop,
+  eval syntax). Da estendere insieme a 8.1: tool-call emission + render
+  end-to-end.
 
 ## WS9 — Distribuzione plugin & marketplace
 

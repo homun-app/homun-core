@@ -159,7 +159,14 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   può eseguire anche contract check opzionali sul gateway reale con
   `HOMUN_EVAL_GATEWAY_BASE`/`HOMUN_EVAL_GATEWAY_TOKEN`, validando
   `/api/templates/catalog` e `/api/capabilities/snapshot` come primi guardrail
-  HTTP prima del render end-to-end.
+  HTTP prima del render end-to-end. **WS8.3 pre-release gate locale/verde:**
+  aggiunto `scripts/pre_release_gate.py`, che raccoglie i gate deterministici
+  (`cargo test -p local-first-desktop-gateway -- --nocapture`,
+  `npm run test:ui-contract`, `npm run build`, `py_compile` della eval suite) e
+  abilita gli eval modello/gateway solo via env (`HOMUN_RUN_MODEL_EVAL`,
+  `HOMUN_EVAL_GATEWAY_BASE`). Verifica: `python3 scripts/pre_release_gate.py`
+  verde con **255 test gateway passati, 1 ignorato**, UI contract e build desktop
+  verdi.
   **WS4 chat perf:** `RichMessage` e il renderer markdown lazy sono memoizzati,
   così polling/live state e sidebar non ricalcolano markdown pesante per messaggi
   completati invariati.
