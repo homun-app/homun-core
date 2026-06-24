@@ -293,7 +293,7 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   artifact/provenance/decisione e workflow status/perché, inclusi producer
   `make_document`, `DocumentWorkflow`, path gestito, decision rationale,
   alternativa scartata, goal/open-loop e outcome verificato. Comando:
-  `cargo test -p local-first-desktop-gateway memory_guardrail_release_gate -- --nocapture`.
+  `cargo test -p local-first-desktop-gateway memory_guardrail_release_gate_covers_artifact_and_workflow_recall -- --nocapture`.
   **WS1-Fase 2 write-back memoria
   locale/verde:** ogni `update_plan` / `step_advance` materializza lo stato del
   piano runtime-owned come unico `open_loop` canonico `source="runtime_plan"` per

@@ -915,7 +915,13 @@ Il caposaldo #2 ("funziona sul tier locale") oggi è verificato solo sul deck
   non-callable con preview built-in) e `/api/capabilities/snapshot` sul gateway
   reale. Verifica runtime passata su `127.0.0.1:18765`. Da estendere: tool-call
   emission + render end-to-end + ricerca/meeting quando esistono (WS7).
-- ☐ **8.2** Eval memoria (= WS5.6): chat nuova → "stato + perché" → deve rispondere.
+- ✅ **8.2** Eval memoria (= WS5.6): chiuso dai gate headless già materializzati
+  nel gateway. Una nuova chat simulata recupera provenance artifact/decisione e
+  stato workflow/perché dal `MemoryFacade` canonico, non da store paralleli.
+  Verifica 2026-06-24: verdi
+  `memory_eval_surfaces_artifact_provenance_and_decision_why`,
+  `memory_eval_surfaces_workflow_status_and_why` e
+  `memory_guardrail_release_gate_covers_artifact_and_workflow_recall`.
 - ✅ **8.3** Gate pre-release base: `scripts/pre_release_gate.py` esegue in un
   comando i gate deterministici (`cargo test -p local-first-desktop-gateway -- --nocapture`,
   `npm run test:ui-contract`, `npm run build`, `py_compile` eval suite) e si

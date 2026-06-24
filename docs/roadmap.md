@@ -321,6 +321,9 @@ primo percorso locale verde:
     gate locale prima di tag/build: gateway test completo, UI contract, build
     desktop e syntax check eval. Gli eval modello/gateway si agganciano via env,
     senza rendere fragile il gate deterministico.
+76. WS8 memory eval closure — il requisito "nuova chat: stato + perché" è coperto
+    dai gate WS5.6 (`memory_eval_*` e release gate memoria): artifact provenance,
+    decision why e workflow status/why emergono dalla memoria canonica.
 
 Prima di pubblicare/taggare resta prudente ripetere lo smoke manuale in-app su
 una automazione schedulata reale con il binario aggiornato. Il primo smoke ha
