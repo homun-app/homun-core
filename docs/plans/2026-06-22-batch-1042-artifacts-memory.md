@@ -858,7 +858,8 @@ ragionato il contratto degli strumenti `make_*` creati dall'harness. ADR 0011
   `make_deck`/`render_deck` normalizzano il `DECK_QA_JSON` in metadata artifact
   e memoria (`quality_status`, `quality_slide_count`, `quality_issues`), senza
   salvare payload grezzi. Così i deck prodotti con warning QA restano visibili
-  e interrogabili anche dopo il turno. Test mirati:
+  e interrogabili anche dopo il turno; il provenance context artifact espone
+  `quality: warning` e i codici issue. Test mirati:
   `rendered_deck_qa_metadata_is_structured_for_artifacts`,
   `rendered_deck_qa`, `make_deck_`, artifact provenance deck.
   **Dodicesima slice document QA (2026-06-23, locale/verde):**

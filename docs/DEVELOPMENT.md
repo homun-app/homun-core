@@ -225,7 +225,9 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   `make_deck`/`render_deck` allegano agli artifact e alla memoria metadata QA
   strutturati (`quality_status`, `quality_slide_count`, `quality_issues`) derivati
   da `DECK_QA_JSON`, così warning e problemi visuali restano recuperabili anche
-  fuori dal testo del turno. Correzione activity stream:
+  fuori dal testo del turno; il provenance context degli artifact li espone come
+  `quality: warning` + codici issue quando una nuova chat chiede degli artifact.
+  Correzione activity stream:
   `/api/chat/active_streams` ora considera terminato qualunque stream che abbia
   già emesso `done/error` nello stesso punto in cui il gateway emette il
   terminale, anche se il post-processing memoria è ancora lento; inoltre gli

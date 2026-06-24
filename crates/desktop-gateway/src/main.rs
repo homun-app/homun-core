@@ -10136,6 +10136,43 @@ fn format_recall_entry(summary: &str, metadata: &serde_json::Value) -> String {
     out
 }
 
+fn artifact_quality_summary(metadata: &serde_json::Value) -> Option<String> {
+    let status = metadata.get("quality_status").and_then(|value| value.as_str())?;
+    let mut parts = vec![format!("quality: {status}")];
+    if let Some(slide_count) = metadata
+        .get("quality_slide_count")
+        .and_then(|value| value.as_u64())
+    {
+        parts.push(format!("slides: {slide_count}"));
+    }
+    let issues = metadata
+        .get("quality_issues")
+        .and_then(|value| value.as_array())
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(|issue| {
+                    let code = issue.get("code").and_then(|value| value.as_str())?;
+                    let message = issue
+                        .get("message")
+                        .and_then(|value| value.as_str())
+                        .unwrap_or("");
+                    if message.is_empty() {
+                        Some(code.to_string())
+                    } else {
+                        Some(format!("{code}: {message}"))
+                    }
+                })
+                .take(3)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    if !issues.is_empty() {
+        parts.push(format!("issues: {}", issues.join("; ")));
+    }
+    Some(parts.join("; "))
+}
+
 fn artifact_provenance_context_for_query(
     facade: &MemoryFacade,
     user: &MemoryUserId,
@@ -10273,6 +10310,9 @@ fn artifact_provenance_context_for_query(
         }
         if !path_bits.is_empty() {
             detail.push_str(&format!(" [{}]", path_bits.join("; ")));
+        }
+        if let Some(quality) = artifact_quality_summary(&artifact.metadata) {
+            detail.push_str(&format!("; {quality}"));
         }
 
         let mut producers: Vec<String> = artifact
@@ -42984,6 +43024,15 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
                 "path_ref": "thread-deck/deck.pptx",
                 "managed_path": "/Users/fabio/.homun/artifacts/thread-deck/deck.pptx",
                 "size_bytes": 456,
+                "quality_status": "warning",
+                "quality_slide_count": 3,
+                "quality_issues": [
+                    {
+                        "severity": "error",
+                        "code": "low_contrast",
+                        "message": "slide 2: contrast ratio 2.1 is below 4.5"
+                    }
+                ],
             }),
         )
         .unwrap();
@@ -43001,6 +43050,8 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         assert!(context.contains("/Users/fabio/.homun/artifacts/thread-deck/deck.pptx"), "{context}");
         assert!(context.contains("produced by make_deck"), "{context}");
         assert!(context.contains("derives from workflow make_deck"), "{context}");
+        assert!(context.contains("quality: warning"), "{context}");
+        assert!(context.contains("low_contrast"), "{context}");
     }
 
     #[test]

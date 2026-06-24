@@ -321,7 +321,8 @@ primo percorso locale verde e WS5 è chiusa localmente/gate:
     Follow-up WS7 deck QA metadata: `make_deck` e `render_deck` allegano agli
     artifact gestiti metadata strutturati derivati da `DECK_QA_JSON`
     (`quality_status`, `quality_slide_count`, `quality_issues`), così un deck
-    prodotto con warning resta ispezionabile/recuperabile anche dalla memoria.
+    prodotto con warning resta ispezionabile/recuperabile anche dalla memoria;
+    il provenance context artifact espone `quality: warning` e i codici issue.
 73. WS8 gateway contract eval — `scripts/eval_suite.py` può ora, se configurato
     con `HOMUN_EVAL_GATEWAY_BASE` e token, verificare anche il gateway reale:
     `/api/templates/catalog` deve esporre template non-callable con preview
