@@ -104,6 +104,7 @@ use local_first_task_runtime::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
+    collections::HashSet,
     env, fs,
     io::{Cursor, Write},
     net::SocketAddr,
@@ -13562,6 +13563,62 @@ fn clip_chars(value: &str, max_chars: usize) -> String {
     clipped
 }
 
+fn deck_text_fingerprint(value: &str) -> String {
+    value
+        .split_whitespace()
+        .map(|word| {
+            word.chars()
+                .filter(|ch| ch.is_alphanumeric())
+                .flat_map(|ch| ch.to_lowercase())
+                .collect::<String>()
+        })
+        .filter(|word| !word.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn deck_bullets_have_duplicate_or_redundant_text(
+    title_key: &str,
+    bullets: &[serde_json::Value],
+) -> bool {
+    let mut seen = HashSet::new();
+    for bullet in bullets {
+        let Some(text) = bullet.as_str() else {
+            continue;
+        };
+        let key = deck_text_fingerprint(text);
+        if key.is_empty() {
+            continue;
+        }
+        if !title_key.is_empty() && key == title_key {
+            return true;
+        }
+        if !seen.insert(key) {
+            return true;
+        }
+    }
+    false
+}
+
+fn normalize_deck_bullets(title_key: &str, bullets: &mut Vec<serde_json::Value>) {
+    let mut seen = HashSet::new();
+    let mut normalized = Vec::new();
+    for bullet in bullets.iter() {
+        let Some(text) = bullet.as_str().map(str::trim).filter(|value| !value.is_empty()) else {
+            continue;
+        };
+        let key = deck_text_fingerprint(text);
+        if key.is_empty() || (!title_key.is_empty() && key == title_key) || !seen.insert(key) {
+            continue;
+        }
+        normalized.push(serde_json::json!(clip_chars(text, 150)));
+        if normalized.len() >= 4 {
+            break;
+        }
+    }
+    *bullets = normalized;
+}
+
 fn deck_quality_guardrail_issues(deck: &serde_json::Value) -> Vec<String> {
     let mut issues = Vec::new();
     let Some(slides) = deck.get("slides").and_then(|value| value.as_array()) else {
@@ -13586,6 +13643,14 @@ fn deck_quality_guardrail_issues(deck: &serde_json::Value) -> Vec<String> {
             issues.push(format!("slide {slide_no}: more than 4 bullets"));
         }
         if let Some(bullets) = slide.get("bullets").and_then(|value| value.as_array()) {
+            let title_key = slide
+                .get("title")
+                .and_then(|value| value.as_str())
+                .map(deck_text_fingerprint)
+                .unwrap_or_default();
+            if deck_bullets_have_duplicate_or_redundant_text(&title_key, bullets) {
+                issues.push(format!("slide {slide_no}: duplicate/redundant bullet text"));
+            }
             for (bullet_index, bullet) in bullets.iter().enumerate() {
                 let len = bullet
                     .as_str()
@@ -13612,13 +13677,13 @@ fn apply_deck_quality_guardrails(deck: &mut serde_json::Value) -> Vec<String> {
         if let Some(title) = slide.get("title").and_then(|value| value.as_str()) {
             slide["title"] = serde_json::json!(clip_chars(title, 72));
         }
+        let title_key = slide
+            .get("title")
+            .and_then(|value| value.as_str())
+            .map(deck_text_fingerprint)
+            .unwrap_or_default();
         if let Some(bullets) = slide.get_mut("bullets").and_then(|value| value.as_array_mut()) {
-            bullets.truncate(4);
-            for bullet in bullets {
-                if let Some(text) = bullet.as_str() {
-                    *bullet = serde_json::json!(clip_chars(text, 150));
-                }
-            }
+            normalize_deck_bullets(&title_key, bullets);
         }
     }
     issues
@@ -40772,6 +40837,44 @@ mod tests {
             slide["bullets"][0].as_str().unwrap().chars().count() <= 150,
             "{slide}"
         );
+    }
+
+    #[test]
+    fn deck_quality_guardrails_remove_duplicate_and_title_repeated_bullets() {
+        let mut deck = serde_json::json!({
+            "title": "Homun",
+            "subtitle": "",
+            "slides": [
+                {
+                    "layout": "bullets",
+                    "title": "Zero dati fuori dal dispositivo",
+                    "bullets": [
+                        "Zero dati fuori dal dispositivo",
+                        "Automazioni ricorrenti locali",
+                        "Automazioni ricorrenti locali",
+                        "Artifact editabili con provenienza"
+                    ],
+                    "notes": "",
+                    "want_image": false
+                }
+            ]
+        });
+
+        let issues = super::apply_deck_quality_guardrails(&mut deck);
+        let bullets = deck
+            .pointer("/slides/0/bullets")
+            .and_then(|value| value.as_array())
+            .expect("bullets");
+
+        assert!(
+            issues
+                .iter()
+                .any(|issue| issue.contains("duplicate/redundant bullet")),
+            "{issues:?}"
+        );
+        assert_eq!(bullets.len(), 2, "{bullets:?}");
+        assert_eq!(bullets[0].as_str(), Some("Automazioni ricorrenti locali"));
+        assert_eq!(bullets[1].as_str(), Some("Artifact editabili con provenienza"));
     }
 
     #[test]

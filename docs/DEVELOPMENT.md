@@ -152,7 +152,9 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   (`clean_corporate`, `high_contrast`, `warm_editorial`, `minimal_mono`,
   `soft_gradient`) entra negli schemi/workflow/prompt; lato deck materializza
   token `theme` compatibili con `deck_render.py` e applica un primo guardrail QA
-  deterministico su titoli/bullet troppo lunghi prima del render. Settima slice
+  deterministico su titoli/bullet troppo lunghi prima del render. Follow-up WS7:
+  lo stesso guardrail rimuove bullet duplicati o identici al titolo slide prima
+  del render, preservando ordine e contenuto unico. Settima slice
   locale/verde: nuovo comando container `deck-qa` apre l'HTML renderizzato con
   Chromium headless via DevTools Protocol e blocca la consegna se rileva
   overflow slide, elementi fuori bounds o immagini non caricate; `make_deck` e

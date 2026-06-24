@@ -843,6 +843,11 @@ ragionato il contratto degli strumenti `make_*` creati dall'harness. ADR 0011
   i codici. Test mirati: `rendered_deck_qa_failure_is_extracted_from_renderer_output`,
   `python3 runtimes/contained-computer/deck_qa.py --self-test`,
   `python3 -m py_compile runtimes/contained-computer/deck_qa.py`.
+  **Follow-up WS7 deck pre-render QA (2026-06-24, locale/verde):**
+  `apply_deck_quality_guardrails` ora normalizza i bullet slide e rimuove
+  duplicati o bullet ridondanti identici al titolo, preservando ordine e
+  contenuto unico prima del render. Test mirato:
+  `deck_quality_guardrails_remove_duplicate_and_title_repeated_bullets`.
   **Dodicesima slice document QA (2026-06-23, locale/verde):**
   `make_document` valida il Markdown generato prima di scrivere artifact
   `.md`/`.pdf`/`.docx`: linee troppo lunghe, token non spezzabili oltre soglia
