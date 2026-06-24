@@ -115,10 +115,16 @@ reale della Workspace Island o da un artifact/link messaggio e deve:
 
 - partire sotto la titlebar/chrome Electron, cosi' close ed expand restano
   cliccabili su macOS/Win/Linux;
+- usare la stessa grammatica a isola della shell: margine dal bordo, radius,
+  ombra leggera e contenuto incorniciato. Non deve sembrare una colonna flat
+  appoggiata al bordo finestra;
 - riservare spazio alla chat quando e' aperto, invece di coprire la
   conversazione;
 - mostrare solo tab aperte da dati o azioni reali: Review/Artifacts, Files,
   Activity, Plan, Goals o Memory quando hanno contesto;
+- nella Review artifact, adattare il contenuto al pannello con card, padding e
+  preview bounded; testo, diff, HTML e tabelle non devono uscire dalla superficie
+  o sembrare contenuto grezzo incollato;
 - non duplicare la funzione della Workspace Island: l'isola e' stato + launcher,
   il Workbench e' dettaglio/revisione.
 

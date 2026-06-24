@@ -437,7 +437,10 @@ primo percorso locale verde e WS5 è chiusa localmente/gate:
     durante attivita' owner del thread. Correzione post-smoke: l'isola ora
     resta assente su chat vuote o thread senza stato operativo reale, non mostra
     righe a zero e il Workbench laterale parte sotto la titlebar/chrome Electron
-    riservando spazio alla chat quando e' aperto.
+    riservando spazio alla chat quando e' aperto. Rifinitura visuale: il
+    Workbench e' una island coerente con la shell (margine, radius, ombra) e la
+    Review artifact incornicia contenuti e preview in card bounded invece di
+    mostrarli come colonna grezza.
 
 Prima di pubblicare/taggare resta prudente ripetere lo smoke manuale in-app su
 una automazione schedulata reale con il binario aggiornato. Il primo smoke ha
