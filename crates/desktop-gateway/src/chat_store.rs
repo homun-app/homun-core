@@ -391,8 +391,8 @@ impl ChatStore {
         let thread_id = format!("thread_{}_{}", timestamp, monotonic_suffix());
         let thread = ChatThread {
             thread_id: thread_id.clone(),
-            title: "Nuovo compito".to_string(),
-            subtitle: "Chat locale".to_string(),
+            title: "New task".to_string(),
+            subtitle: "Local chat".to_string(),
             status: "active".to_string(),
             pinned: false,
             computer_session_id: format!("computer_{thread_id}"),
@@ -735,8 +735,9 @@ impl ChatStore {
             self.set_active_leaf(thread_id, parent.as_deref())?;
         }
         self.insert_message(thread_id, user_message)?;
-        self.insert_message(thread_id, assistant_message)?;
         self.update_thread_after_messages(thread_id, Some(&user_message.text))?;
+        self.insert_message(thread_id, assistant_message)?;
+        self.update_thread_after_messages(thread_id, None)?;
         self.messages(thread_id)
     }
 
@@ -2566,8 +2567,8 @@ impl ChatStore {
         let timestamp = current_timestamp_seconds();
         let thread = ChatThread {
             thread_id: "thread_active_prompt".to_string(),
-            title: "Nuovo compito".to_string(),
-            subtitle: "Chat locale".to_string(),
+            title: "New task".to_string(),
+            subtitle: "Local chat".to_string(),
             status: "active".to_string(),
             pinned: false,
             computer_session_id: "computer_active_prompt".to_string(),
@@ -2591,8 +2592,8 @@ impl ChatStore {
         let thread_id = format!("thread_{}_{}", timestamp, monotonic_suffix());
         let thread = ChatThread {
             thread_id: thread_id.clone(),
-            title: "Nuovo compito".to_string(),
-            subtitle: "Chat locale".to_string(),
+            title: "New task".to_string(),
+            subtitle: "Local chat".to_string(),
             status: "active".to_string(),
             pinned: false,
             computer_session_id: format!("computer_{thread_id}"),
@@ -2744,20 +2745,24 @@ impl ChatStore {
             )
             .optional()?;
         let title = match (current_title.as_deref(), user_prompt) {
-            (Some("Nuovo compito"), Some(prompt)) if !prompt.trim().is_empty() => {
+            (Some("New task" | "Nuovo compito"), Some(prompt)) if !prompt.trim().is_empty() => {
                 compact_thread_title(prompt)
             }
             (Some(title), _) => title.to_string(),
-            _ => "Nuovo compito".to_string(),
+            _ => "New task".to_string(),
         };
+        let last_activity = self
+            .latest_message_timestamp(thread_id)?
+            .map(|ts| ts.to_string())
+            .unwrap_or_else(current_timestamp_seconds);
         self.conn.execute(
             "update chat_threads
                 set title = ?1, subtitle = ?2, updated_at = ?3, message_count = ?4
               where thread_id = ?5",
             params![
                 title,
-                "Modello locale",
-                current_timestamp_seconds(),
+                "Local model",
+                last_activity,
                 message_count,
                 thread_id
             ],
@@ -3045,8 +3050,47 @@ mod tests {
                 .unwrap()
                 .threads
                 .iter()
-                .any(|item| item.title == "tell me a joke")
+                .any(|item| item.title == "joke")
         );
+    }
+
+    #[test]
+    fn chat_thread_title_is_synthesized_from_first_user_prompt() {
+        assert_eq!(
+            compact_thread_title("Crea una presentazione pitch per Homun usando il template_ref monet/startup"),
+            "presentazione pitch Homun template ref"
+        );
+        assert_eq!(
+            compact_thread_title("Dimmi che versione di Homun sto usando e se ci sono aggiornamenti disponibili."),
+            "versione Homun aggiornamenti disponibili"
+        );
+    }
+
+    #[test]
+    fn selecting_thread_does_not_change_activity_timestamp() {
+        let store = ChatStore::in_memory().unwrap();
+        let first = store.create_thread("default").unwrap();
+        let _second = store.create_thread("default").unwrap();
+
+        let before = store
+            .threads("default")
+            .unwrap()
+            .threads
+            .into_iter()
+            .find(|thread| thread.thread_id == first.thread_id)
+            .unwrap()
+            .updated_at;
+
+        let snap = store.select_thread(&first.thread_id).unwrap();
+        let after = snap
+            .threads
+            .into_iter()
+            .find(|thread| thread.thread_id == first.thread_id)
+            .unwrap()
+            .updated_at;
+
+        assert_eq!(snap.active_thread_id, first.thread_id);
+        assert_eq!(after, before);
     }
 
     #[test]

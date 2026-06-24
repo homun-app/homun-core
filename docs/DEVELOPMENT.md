@@ -80,8 +80,12 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   (`Work`, `Create`, `Workspace`, `More`), `Personal` come categoria chat
   sorella dei progetti, `Projects` come albero diretto senza dropdown primario,
   e promozione plugin/addon guidata dal manifest (`navSection`, `promoted`,
-  ordine) invece che da hardcode. **Prossimo passo unico:** verificare in app la
-  nuova sidebar, poi continuare su micro-slice UX.2 chat/dock o tornare a WS7
+  ordine) invece che da hardcode. La slice ora include collapse indipendente di
+  sezioni operative, Personal e Projects; i progetti possono espandersi senza
+  cambiare workspace, le chat si ordinano per ultima attività/messaggio e non
+  per semplice lettura, e il placeholder resta `New task` mentre il primo prompt
+  genera subito un titolo sintetico. **Prossimo passo unico:** verificare in app
+  la nuova sidebar, poi continuare su micro-slice UX.2 chat/dock o tornare a WS7
   qualita' deliverable senza riaprire memoria/WS1/WS8 salvo regressioni.
 - **Direzione WS7 aggiornata:** l'obiettivo deliverable non è una gallery statica
   clonata tool-per-tool, ma un **design system dichiarativo condiviso** per

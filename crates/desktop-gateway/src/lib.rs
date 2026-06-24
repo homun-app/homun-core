@@ -256,11 +256,34 @@ pub fn seeded_ready_message(thread_id: &str, timestamp: String) -> ChatMessage {
 }
 
 pub fn compact_thread_title(text: &str) -> String {
-    let normalized = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    if normalized.chars().count() > 44 {
-        format!("{}...", normalized.chars().take(41).collect::<String>())
+    let normalized = text
+        .chars()
+        .map(|ch| {
+            if ch.is_alphanumeric() || ch == '\'' || ch == '-' {
+                ch
+            } else {
+                ' '
+            }
+        })
+        .collect::<String>();
+    let words = normalized.split_whitespace().collect::<Vec<_>>();
+    let stop_words = [
+        "a", "ad", "al", "alla", "anche", "che", "con", "crea", "creare", "dai", "dammi",
+        "ci", "del", "della", "di", "dimmi", "e", "fai", "fare", "il", "in", "la", "le",
+        "lo", "mi", "per", "puoi", "se", "sono", "sto", "su", "sui", "una", "usando",
+        "usa", "using", "with", "the", "for", "to", "create", "make", "me", "tell", "give",
+    ];
+    let keywords = words
+        .iter()
+        .copied()
+        .filter(|word| !stop_words.contains(&word.to_lowercase().as_str()))
+        .collect::<Vec<_>>();
+    let source = if keywords.is_empty() { words } else { keywords };
+    let title = source.into_iter().take(5).collect::<Vec<_>>().join(" ");
+    if title.chars().count() > 44 {
+        format!("{}...", title.chars().take(41).collect::<String>().trim())
     } else {
-        normalized
+        title
     }
 }
 

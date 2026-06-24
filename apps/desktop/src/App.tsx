@@ -141,20 +141,75 @@ function starterMessages(_thread: ChatThread): ChatMessage[] {
   return [];
 }
 
+function summarizeThreadTitle(text: string): string {
+  const normalized = text.replace(/[^\p{L}\p{N}\s'-]/gu, " ").split(/\s+/).filter(Boolean);
+  const stop = new Set([
+    "a",
+    "ad",
+    "al",
+    "alla",
+    "anche",
+    "che",
+    "ci",
+    "con",
+    "crea",
+    "creare",
+    "dai",
+    "dammi",
+    "del",
+    "della",
+    "di",
+    "dimmi",
+    "e",
+    "fai",
+    "fare",
+    "il",
+    "in",
+    "la",
+    "le",
+    "lo",
+    "mi",
+    "per",
+    "puoi",
+    "se",
+    "sono",
+    "sto",
+    "su",
+    "sui",
+    "una",
+    "usando",
+    "usa",
+    "using",
+    "with",
+    "the",
+    "for",
+    "to",
+    "create",
+    "make",
+    "me",
+    "tell",
+    "give",
+  ]);
+  const keywords = normalized.filter((word) => !stop.has(word.toLowerCase()));
+  const source = keywords.length > 0 ? keywords : normalized;
+  const title = source.slice(0, 5).join(" ");
+  return title.length > 44 ? `${title.slice(0, 41).trim()}...` : title;
+}
+
 function updateThreadPreview(
   thread: ChatThread,
   messages: ChatMessage[],
 ): ChatThread {
   const lastMessage = messages.at(-1);
   const firstUserMessage = messages.find((message) => message.role === "user");
-  const userTitle = firstUserMessage?.text.trim().slice(0, 44);
+  const userTitle = firstUserMessage ? summarizeThreadTitle(firstUserMessage.text) : "";
+  const isPlaceholderTitle = thread.title === "New task" || thread.title === "Nuovo compito";
   return {
     ...thread,
-    title:
-      thread.title === "New task" && userTitle ? userTitle : thread.title,
+    title: isPlaceholderTitle && userTitle ? userTitle : thread.title,
     messageCount: messages.length,
     subtitle: lastMessage?.text.slice(0, 72) || "Local chat ready",
-    updatedAt: currentTimestampSeconds(),
+    updatedAt: lastMessage?.timestamp ?? thread.updatedAt,
   };
 }
 

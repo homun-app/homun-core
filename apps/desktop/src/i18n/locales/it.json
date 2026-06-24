@@ -329,7 +329,7 @@
     "contacts": "Contatti"
   },
   "chat": {
-    "newTask": "Nuovo compito",
+    "newTask": "New task",
     "emptyHero": "Come posso aiutarti?",
     "heroChip": {
       "presentation": { "label": "Crea una presentazione", "seed": "Fammi una presentazione su " },

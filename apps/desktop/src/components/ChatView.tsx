@@ -503,12 +503,13 @@ export function ChatView({
       detail: "Preparing the request for the local model.",
     });
     setOptimisticMessages(promptMessages);
+    onMessagesChange(promptMessages);
     const streamingMessage: ChatMessage = {
       id: `local_assistant_${Date.now()}`,
       role: "assistant",
       text: "",
       timestamp: currentTimestampSeconds(),
-      metadata: "Model locale",
+      metadata: "Local model",
     };
     let streamedText = "";
     let streamChunks = 0;
@@ -732,7 +733,7 @@ export function ChatView({
       role: "assistant",
       text: "",
       timestamp: currentTimestampSeconds(),
-      metadata: "Model locale",
+      metadata: "Local model",
     };
     const promptMessages = [...messages, userMessage];
     let streamedText = "";

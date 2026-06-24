@@ -541,7 +541,7 @@ function createLocalChatThread() {
       role: "assistant",
       text: "I'm ready. Just write to me — I reply locally.",
       timestamp: currentTimestampSeconds(),
-      metadata: "Model locale",
+      metadata: "Local model",
       metrics: null,
       feedback: null,
       saved_memory_ref: null,
@@ -842,8 +842,8 @@ function updateThreadAfterMessages(
     return {
       ...thread,
       title,
-      subtitle: "Model locale",
-      updated_at: currentTimestampSeconds(),
+      subtitle: "Local model",
+      updated_at: localMessages.get(threadId)?.at(-1)?.timestamp ?? thread.updated_at,
       message_count: messageCount,
     };
   });
@@ -875,8 +875,58 @@ function isConversationMessage(
 }
 
 function compactTitle(text: string) {
-  const normalized = text.trim().replace(/\s+/g, " ");
-  return normalized.length > 44 ? `${normalized.slice(0, 41)}...` : normalized;
+  const normalized = text.replace(/[^\p{L}\p{N}\s'-]/gu, " ").split(/\s+/).filter(Boolean);
+  const stop = new Set([
+    "a",
+    "ad",
+    "al",
+    "alla",
+    "anche",
+    "che",
+    "ci",
+    "con",
+    "crea",
+    "creare",
+    "dai",
+    "dammi",
+    "del",
+    "della",
+    "di",
+    "dimmi",
+    "e",
+    "fai",
+    "fare",
+    "il",
+    "in",
+    "la",
+    "le",
+    "lo",
+    "mi",
+    "per",
+    "puoi",
+    "se",
+    "sono",
+    "sto",
+    "su",
+    "sui",
+    "una",
+    "usando",
+    "usa",
+    "using",
+    "with",
+    "the",
+    "for",
+    "to",
+    "create",
+    "make",
+    "me",
+    "tell",
+    "give",
+  ]);
+  const keywords = normalized.filter((word) => !stop.has(word.toLowerCase()));
+  const source = keywords.length > 0 ? keywords : normalized;
+  const title = source.slice(0, 5).join(" ");
+  return title.length > 44 ? `${title.slice(0, 41).trim()}...` : title;
 }
 
 function currentTimestampSeconds() {

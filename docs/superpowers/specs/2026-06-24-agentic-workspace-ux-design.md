@@ -141,9 +141,16 @@ riflettere la natura tecnica degli addon, ma il loro ruolo operativo.
   hanno una superficie diretta.
 - **More**: addon, connector o strumenti abilitati ma non promossi.
 - **Personal**: categoria di chat non legate a un progetto, pari ai progetti ma
-  semanticamente distinta da essi.
+  semanticamente distinta da essi; il suo header e' il controllo di collapse,
+  senza una seconda riga duplicata.
 - **Projects**: lista diretta dei workspace/progetti, senza dropdown primario;
-  il progetto attivo si espande e mostra i thread recenti.
+  ogni progetto si espande/collassa in modo indipendente e aprire l'albero non
+  cambia workspace finche' l'utente non seleziona un thread.
+
+Le chat nella sidebar si ordinano per ultima attività reale, non per ultimo
+click di lettura. Il placeholder iniziale e' `New task` anche in locale italiano;
+appena il primo prompt viene accettato, la sidebar deve mostrare un titolo breve
+sintetizzato dal contenuto invece delle prime parole grezze.
 
 Gli addon dichiarano `navSection`, `promoted` e ordine nel manifest/registry. La
 sidebar usa questi metadata per promuovere una capability senza hardcode.

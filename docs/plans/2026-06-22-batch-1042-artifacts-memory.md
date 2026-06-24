@@ -988,7 +988,10 @@ feature laterali né una dashboard generica.
   Linear, nav raggruppata per ruolo operativo (`work`, `create`, `workspace`,
   `more`), `Personal` come categoria chat sorella dei progetti, `Projects` come
   albero diretto e plugin/addon promossi dal registry/manifest invece che
-  hardcoded.
+  hardcoded. Le sezioni sono collapsabili in modo indipendente; espandere un
+  progetto non cambia workspace finché non si apre un suo thread; l'ordine chat
+  segue l'ultima attività reale, non la sola apertura; `New task` resta il
+  placeholder e viene sostituito subito da un titolo sintetico del primo prompt.
 - ☐ **UX.3 Superfici deliverable**: dopo UX.1, riallineare Artifacts e
   Presentations al modello workspace: artifact/versioni/provenance e template
   come output/capability di prima classe.

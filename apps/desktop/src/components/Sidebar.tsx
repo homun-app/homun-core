@@ -174,7 +174,10 @@ function ProjectsNav({
   const [workspaces, setWorkspaces] = useState<WorkspaceRecord[]>([]);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState(PERSONAL_WORKSPACE_ID);
   const [personalThreads, setPersonalThreads] = useState<ChatThread[]>([]);
+  const [projectThreadsById, setProjectThreadsById] = useState<Record<string, ChatThread[]>>({});
   const [busy, setBusy] = useState(false);
+  const [expandedGroups, setExpandedGroups] = useState({ personal: true, projects: true });
+  const [expandedProjectIds, setExpandedProjectIds] = useState<Set<string>>(new Set());
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const [creating, setCreateting] = useState(false);
@@ -217,6 +220,13 @@ function ProjectsNav({
     ? activeThreads.filter((t) => t.status === "active" && t.threadId !== "homun")
     : [];
 
+  useEffect(() => {
+    if (!inProject) return;
+    setExpandedProjectIds((current) => new Set([...current, activeWorkspaceId]));
+    setProjectThreadsById((current) => ({ ...current, [activeWorkspaceId]: projectChats }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeWorkspaceId, inProject]);
+
   // Context switches re-scope memory/capabilities/artifacts-folder → full reload.
   async function selectProject(id: string) {
     setBusy(true);
@@ -227,6 +237,56 @@ function ProjectsNav({
       setError((e as Error).message);
       setBusy(false);
     }
+  }
+  async function openProjectThread(projectId: string, threadId: string) {
+    if (projectId === activeWorkspaceId) {
+      onSelectThread(threadId);
+      return;
+    }
+    setBusy(true);
+    try {
+      await coreBridge.selectChatThread(threadId);
+      await coreBridge.selectWorkspace(projectId);
+      window.location.reload();
+    } catch (e) {
+      setError((e as Error).message);
+      setBusy(false);
+    }
+  }
+
+  async function loadProjectThreads(projectId: string) {
+    try {
+      const snap = await coreBridge.chatThreads(projectId);
+      setProjectThreadsById((current) => ({
+        ...current,
+        [projectId]: snap.threads
+          .map(toChatThread)
+          .filter((thread) => thread.status === "active" && thread.threadId !== "homun"),
+      }));
+    } catch {
+      setProjectThreadsById((current) => ({ ...current, [projectId]: [] }));
+    }
+  }
+
+  function togglePersonal() {
+    setExpandedGroups((current) => ({ ...current, personal: !current.personal }));
+  }
+
+  function toggleProjects() {
+    setExpandedGroups((current) => ({ ...current, projects: !current.projects }));
+  }
+
+  function toggleProject(projectId: string) {
+    setExpandedProjectIds((current) => {
+      const next = new Set(current);
+      if (next.has(projectId)) {
+        next.delete(projectId);
+      } else {
+        next.add(projectId);
+        void loadProjectThreads(projectId);
+      }
+      return next;
+    });
   }
   async function openPersonalThread(threadId: string) {
     if (!inProject) {
@@ -333,9 +393,12 @@ function ProjectsNav({
 
   return (
     <>
-      <section className={`drawer-project ${!inProject ? "active" : ""}`} data-project-tree="personal">
+      <section className="drawer-section drawer-personal-tree" data-project-tree="personal">
         <div className="drawer-chats-head">
-          <span className="drawer-eyebrow">{t("sidebar.personal")}</span>
+          <button className="drawer-section-toggle" type="button" onClick={togglePersonal}>
+            {expandedGroups.personal ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+            <span>{t("sidebar.personal")}</span>
+          </button>
           <button
             className="drawer-eyebrow-add"
             type="button"
@@ -347,18 +410,7 @@ function ProjectsNav({
             <Plus size={16} />
           </button>
         </div>
-        <button
-          className="drawer-link drawer-project-name"
-          type="button"
-          disabled={busy}
-          onClick={() => {
-            if (inProject) void selectProject(PERSONAL_WORKSPACE_ID);
-          }}
-        >
-          <span className="ctx-switcher-chip" aria-hidden="true" />
-          <span className="drawer-link-title">{t("sidebar.personal")}</span>
-        </button>
-        {!inProject && (
+        {expandedGroups.personal && (
           <div className="drawer-project-chats">
             {renderThreadList(personalChats, t("sidebar.noChatsYet"), (thread) => {
               void openPersonalThread(thread.threadId);
@@ -369,7 +421,10 @@ function ProjectsNav({
 
       <section className="drawer-section drawer-projects-tree" data-project-tree="projects">
         <div className="drawer-chats-head">
-          <span className="drawer-eyebrow">{t("sidebar.projects")}</span>
+          <button className="drawer-section-toggle" type="button" onClick={toggleProjects}>
+            {expandedGroups.projects ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+            <span>{t("sidebar.projects")}</span>
+          </button>
           <button
             className="drawer-eyebrow-add"
             type="button"
@@ -386,86 +441,95 @@ function ProjectsNav({
             <Plus size={16} />
           </button>
         </div>
-        {projects.length === 0 && <p className="drawer-empty">{t("sidebar.noProjects")}</p>}
-        {projects.map((project) => (
-          <div
-            key={project.id}
-            className={`drawer-project ${project.id === activeWorkspaceId ? "active" : ""}`}
-          >
-            <div className="drawer-project-row">
-              <button
-                className="drawer-link drawer-project-name"
-                type="button"
-                disabled={busy}
-                onClick={() => {
-                  if (project.id !== activeWorkspaceId) void selectProject(project.id);
-                }}
-              >
-                <FolderOpen size={14} />
-                <span className="drawer-link-title">{project.name}</span>
-              </button>
-              <button
-                className="drawer-edit-btn"
-                type="button"
-                aria-label={`Edit ${project.name}`}
-                disabled={busy}
-                onClick={() => {
-                  setEditingId(project.id);
-                  setEditName(project.name);
-                }}
-              >
-                <Pencil size={12} />
-              </button>
-            </div>
-            {editingId === project.id && (
-              <div className="drawer-project-edit">
-                <input
-                  autoFocus
-                  value={editName}
-                  onChange={(e) => setEditName(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") void renameProject(project.id);
-                    if (e.key === "Escape") setEditingId(null);
-                  }}
-                />
-                <div className="drawer-project-edit-actions">
-                  <button
-                    className="link-button"
-                    type="button"
-                    disabled={busy}
-                    title={project.folder ?? t("sidebar.noFolder")}
-                    onClick={() => void linkProjectFolder(project.id)}
-                  >
-                    {t("sidebar.folder")}
-                  </button>
-                  <button
-                    className="link-button danger"
-                    type="button"
-                    disabled={busy}
-                    onClick={() => void deleteProject(project.id)}
-                  >
-                    Delete
-                  </button>
-                  <button
-                    className="primary-button"
-                    type="button"
-                    disabled={busy || !editName.trim()}
-                    onClick={() => void renameProject(project.id)}
-                  >
-                    Save
-                  </button>
+        {expandedGroups.projects && (
+          <>
+            {projects.length === 0 && <p className="drawer-empty">{t("sidebar.noProjects")}</p>}
+            {projects.map((project) => {
+              const expanded = expandedProjectIds.has(project.id);
+              const projectThreads = project.id === activeWorkspaceId
+                ? projectChats
+                : projectThreadsById[project.id] ?? [];
+              return (
+                <div
+                  key={project.id}
+                  className={`drawer-project ${project.id === activeWorkspaceId ? "active" : ""}`}
+                >
+                  <div className="drawer-project-row">
+                    <button
+                      className="drawer-link drawer-project-name"
+                      type="button"
+                      disabled={busy}
+                      onClick={() => toggleProject(project.id)}
+                    >
+                      {expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                      <FolderOpen size={14} />
+                      <span className="drawer-link-title">{project.name}</span>
+                    </button>
+                    <button
+                      className="drawer-edit-btn"
+                      type="button"
+                      aria-label={`Edit ${project.name}`}
+                      disabled={busy}
+                      onClick={() => {
+                        setEditingId(project.id);
+                        setEditName(project.name);
+                      }}
+                    >
+                      <Pencil size={12} />
+                    </button>
+                  </div>
+                  {editingId === project.id && (
+                    <div className="drawer-project-edit">
+                      <input
+                        autoFocus
+                        value={editName}
+                        onChange={(e) => setEditName(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") void renameProject(project.id);
+                          if (e.key === "Escape") setEditingId(null);
+                        }}
+                      />
+                      <div className="drawer-project-edit-actions">
+                        <button
+                          className="link-button"
+                          type="button"
+                          disabled={busy}
+                          title={project.folder ?? t("sidebar.noFolder")}
+                          onClick={() => void linkProjectFolder(project.id)}
+                        >
+                          {t("sidebar.folder")}
+                        </button>
+                        <button
+                          className="link-button danger"
+                          type="button"
+                          disabled={busy}
+                          onClick={() => void deleteProject(project.id)}
+                        >
+                          Delete
+                        </button>
+                        <button
+                          className="primary-button"
+                          type="button"
+                          disabled={busy || !editName.trim()}
+                          onClick={() => void renameProject(project.id)}
+                        >
+                          Save
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  {expanded && (
+                    <div className="drawer-project-chats">
+                      {renderThreadList(projectThreads, t("sidebar.noChatsYet"), (thread) => {
+                        void openProjectThread(project.id, thread.threadId);
+                      })}
+                    </div>
+                  )}
                 </div>
-              </div>
-            )}
-            {project.id === activeWorkspaceId && (
-              <div className="drawer-project-chats">
-                {renderThreadList(projectChats, t("sidebar.noChatsYet"), (thread) => {
-                  onSelectThread(thread.threadId);
-                })}
-              </div>
-            )}
-          </div>
-        ))}
+              );
+            })}
+          </>
+        )}
       </section>
 
       {error && (
@@ -584,6 +648,14 @@ export function NavDrawer({
   const [collapsedSections, setCollapsedSections] = useState({
     archived: false,
   });
+  const [collapsedNavGroups, setCollapsedNavGroups] = useState<
+    Record<NonNullable<NavItem["navSection"]>, boolean>
+  >({
+    work: false,
+    create: false,
+    workspace: false,
+    more: false,
+  });
   const [deleteCandidate, setDeleteCandidate] = useState<ChatThread | null>(null);
   const [threadMenu, setThreadMenu] = useState<{
     thread: ChatThread;
@@ -611,6 +683,13 @@ export function NavDrawer({
 
   function toggleSection(section: keyof typeof collapsedSections) {
     setCollapsedSections((current) => ({
+      ...current,
+      [section]: !current[section],
+    }));
+  }
+
+  function toggleNavGroup(section: NonNullable<NavItem["navSection"]>) {
+    setCollapsedNavGroups((current) => ({
       ...current,
       [section]: !current[section],
     }));
@@ -656,24 +735,32 @@ export function NavDrawer({
       <nav className="drawer-nav linear-sidebar-nav" aria-label="Workspace navigation">
         {groupedNavItems.map(({ section, items }) => (
           <section className="drawer-nav-group" key={section}>
-            <div className="drawer-nav-group-label">{NAV_SECTION_LABELS[section]}</div>
-            {items.map((item) => {
-              const Icon = item.icon;
-              return (
-                <button
-                  className={`drawer-nav-item ${activeView === item.id ? "active" : ""}`}
-                  key={item.id}
-                  type="button"
-                  data-nav-section={section}
-                  data-promoted={item.promoted === true ? "true" : "false"}
-                  onClick={() => onNavigate(item.id)}
-                >
-                  <Icon size={16} />
-                  <span>{t(item.label)}</span>
-                  {item.badge && <em>{item.badge}</em>}
-                </button>
-              );
-            })}
+            <button
+              className="drawer-nav-group-label"
+              type="button"
+              onClick={() => toggleNavGroup(section)}
+            >
+              {collapsedNavGroups[section] ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
+              <span>{NAV_SECTION_LABELS[section]}</span>
+            </button>
+            {!collapsedNavGroups[section] &&
+              items.map((item) => {
+                const Icon = item.icon;
+                return (
+                  <button
+                    className={`drawer-nav-item ${activeView === item.id ? "active" : ""}`}
+                    key={item.id}
+                    type="button"
+                    data-nav-section={section}
+                    data-promoted={item.promoted === true ? "true" : "false"}
+                    onClick={() => onNavigate(item.id)}
+                  >
+                    <Icon size={16} />
+                    <span>{t(item.label)}</span>
+                    {item.badge && <em>{item.badge}</em>}
+                  </button>
+                );
+              })}
           </section>
         ))}
       </nav>

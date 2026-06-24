@@ -85,7 +85,15 @@ assertContains("src/components/Sidebar.tsx", "data-nav-section={section}", "side
 assertContains("src/components/Sidebar.tsx", "data-promoted={item.promoted === true ? \"true\" : \"false\"}", "sidebar must preserve promoted addon metadata");
 assertContains("src/components/Sidebar.tsx", "data-project-tree=\"personal\"", "sidebar must expose Personal as a first-class chat category");
 assertContains("src/components/Sidebar.tsx", "data-project-tree=\"projects\"", "sidebar must expose Projects as a first-class tree, not only a dropdown switcher");
+assertContains("src/components/Sidebar.tsx", "drawer-personal-tree", "Personal must render as a section like Projects, not as a duplicated active workspace row");
+assertContains("src/components/Sidebar.tsx", "collapsedNavGroups", "sidebar operational groups must collapse independently");
+assertContains("src/components/Sidebar.tsx", "expandedGroups", "Personal and Projects trees must collapse independently");
+assertContains("src/components/Sidebar.tsx", "expandedProjectIds", "project rows must expand independently without switching workspace");
+assertContains("src/components/Sidebar.tsx", "coreBridge.chatThreads(projectId)", "inactive project rows must load their thread tree without becoming active");
 assertNotContains("src/components/Sidebar.tsx", "setSwitcherOpen", "project navigation must not be primarily driven by a workspace dropdown");
+assertContains("src/App.tsx", "summarizeThreadTitle", "frontend optimistic chat titles must be synthesized, not first-prompt slices");
+assertContains("src/App.tsx", "updatedAt: lastMessage?.timestamp ?? thread.updatedAt", "chat preview ordering must use last message activity, not read time");
+assertContains("src/components/ChatView.tsx", "onMessagesChange(promptMessages)", "chat title must update as soon as the user prompt is accepted");
 assertContains("src/plugins/registry.tsx", "navSection?: \"work\" | \"create\" | \"workspace\" | \"more\"", "plugin manifest must declare sidebar placement by operational role");
 assertContains("src/plugins/presentations/index.tsx", "navSection: \"create\"", "presentations addon must be promoted into the create section");
 assertContains("src/plugins/proattivita/index.tsx", "navSection: \"work\"", "proactivity addon must be promoted into the work section");

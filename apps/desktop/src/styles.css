@@ -709,10 +709,24 @@ body.resizing-drawer {
 }
 
 .drawer-nav-group-label {
+  min-height: 22px;
   padding: 0 8px 2px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: none;
+  border-radius: var(--radius-control);
+  background: transparent;
   color: var(--faint);
   font-size: 12px;
   font-weight: 520;
+  text-align: left;
+  cursor: pointer;
+}
+
+.drawer-nav-group-label:hover {
+  background: var(--surface-hover);
+  color: var(--muted);
 }
 
 .drawer-nav-item {
@@ -871,6 +885,34 @@ body.resizing-drawer {
   margin: 4px 0 2px;
   padding: 0 6px 0 8px;
 }
+
+.drawer-section-toggle {
+  min-width: 0;
+  min-height: 24px;
+  padding: 0 4px 0 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--faint);
+  font-size: 12px;
+  font-weight: 520;
+  text-align: left;
+  cursor: pointer;
+}
+
+.drawer-section-toggle:hover {
+  color: var(--muted);
+}
+
+.drawer-section-toggle span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .drawer-eyebrow {
   font-size: 12px;
   letter-spacing: 0;

@@ -412,7 +412,10 @@ primo percorso locale verde e WS5 è chiusa localmente/gate:
     come albero diretto senza dropdown primario. Presentations e Proactivity
     restano plugin/addon tecnici, ma sono promossi dal registry/manifest tramite
     `navSection`, `promoted` e ordine, evitando hardcode e duplicazioni tra
-    registry e UI.
+    registry e UI. La slice successiva rende Work/Create/Personal/Projects
+    collapsabili in modo indipendente, permette di espandere progetti senza
+    cambiare workspace, ordina le chat per ultima attività/messaggio e assegna
+    subito un titolo sintetico al posto del placeholder `New task`.
 
 Prima di pubblicare/taggare resta prudente ripetere lo smoke manuale in-app su
 una automazione schedulata reale con il binario aggiornato. Il primo smoke ha
