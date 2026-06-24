@@ -975,6 +975,7 @@
     "addonsFetchRegistry": "Fetch registry",
     "addonsTrustSigner": "Trust signer",
     "addonsInstallPackage": "Install",
+    "addonsUpdatePackage": "Update",
     "addonsBetaOptIn": "Allow beta plugins",
     "addonsBetaOptInHint": "Stable stays the default; beta packages require this explicit local opt-in.",
     "addonsUpdateAvailable": "Update available",

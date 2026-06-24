@@ -987,8 +987,11 @@ proprio — versioning, canali, scaricabili dal **sito Homun**, auto-aggiornabil
   stable firmati da chiavi fidate. 2026-06-24: opt-in beta locale aggiunto nello
   stesso trust store (`beta_enabled=false` di default) e toggle in Settings ->
   Addons. 2026-06-24: aggiunta detection update read-only
-  `GET /api/plugins/packages/updates`, visibile in Settings -> Addons. Restano
-  auto-update/install update reale e feed/package pubblicati sul sito.
+  `GET /api/plugins/packages/updates`, visibile in Settings -> Addons. 2026-06-24:
+  aggiunto install-update manuale `POST /api/plugins/packages/update-from-registry`,
+  che accetta solo candidate piu' nuove per plugin gia' installati e riusa
+  verifica/staging/swap dell'install manager; Settings -> Addons mostra `Update`
+  sulle candidate. Restano auto-update e feed/package pubblicati sul sito.
 - 🟡 **9.4 Sicurezza**: prima slice integrity/policy fatta. `PluginRegistryEntry`
   valida digest `sha256:<64 hex>`, richiede algoritmo firma `ed25519`, confronta
   SHA-256 del pacchetto e verifica la firma Ed25519 sui byte pacchetto. Inoltre
@@ -1005,8 +1008,9 @@ proprio — versioning, canali, scaricabili dal **sito Homun**, auto-aggiornabil
   `plugin_packages::tests::hplugin_archive_*` verdi. 2026-06-24: enforcement
   locale install-time aggiunto con staging sotto root manager, mismatch
   `plugin_id/version` bloccante e attivazione atomica post-verifica. Verifica:
-  `plugin_packages::tests` verdi. Endpoint install locale e lettura installati
-  collegati nel gateway; restano UI e update su plugin già installati.
+  `plugin_packages::tests` verdi. Endpoint install locale, lettura installati e
+  update manuale su plugin gia' installati collegati nel gateway/UI; resta
+  auto-update.
 - 🟡 **9.5 Licensing/paid (predisporre ora)**: campo `entitlement` nel manifest
   già presente; prima slice token offline fatta. `PluginLicenseClaims` /
   `PluginLicenseToken` verificano firma Ed25519, plugin target e scadenza senza

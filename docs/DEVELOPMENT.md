@@ -2,7 +2,7 @@
 
 > **Punto d'ingresso unico.** Da qui si parte e si torna. Questo file è SEMPRE
 > aggiornato: se cambia una scelta importante, si aggiorna qui (o nel doc linkato).
-> Ultimo aggiornamento: 2026-06-23.
+> Ultimo aggiornamento: 2026-06-24.
 
 ## North Star
 
@@ -38,7 +38,7 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
 | **Prodotto / distribuzione / self-host** | [PRODUCT_LOOP.md](PRODUCT_LOOP.md) · [distribution.md](distribution.md) · [self-host.md](self-host.md) · [release-macos.md](release-macos.md) |
 | **Storico** (changelog, vecchi piani, snapshot) | [archive/](archive/) — non più "corrente", solo memoria storica |
 
-## Stato esecuzione — "SEI QUI" (aggiornato 2026-06-23, anti-compattazione)
+## Stato esecuzione — "SEI QUI" (aggiornato 2026-06-24, anti-compattazione)
 
 > Se il contesto si è compattato: rileggi QUESTO blocco + il
 > [backlog](plans/2026-06-22-batch-1042-artifacts-memory.md) (gli stati ☐/✅ = i loop
@@ -262,8 +262,13 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   l'install beta resta bloccata finche' non e' attivo. **WS9.3j update
   detection locale/verde:** `GET /api/plugins/packages/updates` confronta
   registry cache e installati, e Settings -> Addons mostra `Update available`
-  sulle candidate version piu' nuove. Restano feed/package reali sul sito Homun
-  e update automatico/install update.
+  sulle candidate version piu' nuove. **WS9.3k install-update locale/verde:**
+  `POST /api/plugins/packages/update-from-registry` aggiorna solo plugin gia'
+  installati e solo se la registry entry e' piu' nuova; riusa download,
+  verifica firma/trust/beta e staging dell'install manager, poi sostituisce la
+  directory installata con rollback best-effort. Settings -> Addons mostra
+  `Update` sulle candidate rilevate. Restano feed/package reali sul sito Homun e
+  update automatico.
   **WS9.6 ADR locale:** ADR 0017 formalizza distribuzione, signing e licensing:
   registry hosted sul sito Homun, verifica locale deterministica, beta opt-in,
   paid predisposto con token offline e runtime sempre contenuto.

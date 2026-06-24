@@ -1924,6 +1924,22 @@ async function electronInstallPluginPackageFromRegistry(input: {
   return payload.installed_plugins ?? { plugins: [] };
 }
 
+async function electronUpdatePluginPackageFromRegistry(input: {
+  registry_entry: PluginRegistryEntryView;
+  beta_enabled?: boolean;
+  trusted_public_keys?: string[];
+}): Promise<InstalledPluginPackagesView> {
+  const payload = await gatewayPostJson<{ installed_plugins?: InstalledPluginPackagesView }>(
+    "/api/plugins/packages/update-from-registry",
+    {
+      registry_entry: input.registry_entry,
+      beta_enabled: input.beta_enabled ?? false,
+      trusted_public_keys: input.trusted_public_keys ?? [],
+    },
+  );
+  return payload.installed_plugins ?? { plugins: [] };
+}
+
 async function electronComposioDisconnect(id: string): Promise<void> {
   const response = await fetch(
     `${DESKTOP_GATEWAY_URL}/api/capabilities/composio/connections/${encodeURIComponent(id)}`,
@@ -2192,6 +2208,11 @@ export const coreBridge = {
     beta_enabled?: boolean;
     trusted_public_keys?: string[];
   }) => electronInstallPluginPackageFromRegistry(input),
+  updatePluginPackageFromRegistry: (input: {
+    registry_entry: PluginRegistryEntryView;
+    beta_enabled?: boolean;
+    trusted_public_keys?: string[];
+  }) => electronUpdatePluginPackageFromRegistry(input),
   composioDisconnect: (id: string) => electronComposioDisconnect(id),
   composioExecute: (
     tool: string,

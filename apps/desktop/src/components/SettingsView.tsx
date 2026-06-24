@@ -5680,10 +5680,17 @@ function AddonsPane({ onChanged }: { onChanged?: () => void }) {
     setBusy(entry.plugin_id);
     setRegistryError(null);
     try {
-      const installedPackages = await coreBridge.installPluginPackageFromRegistry({
-        registry_entry: entry,
-        beta_enabled: trustedKeys.beta_enabled,
-      });
+      const update = updateById.get(entry.plugin_id);
+      const isUpdate = update?.candidate.version === entry.version;
+      const installedPackages = isUpdate
+        ? await coreBridge.updatePluginPackageFromRegistry({
+            registry_entry: entry,
+            beta_enabled: trustedKeys.beta_enabled,
+          })
+        : await coreBridge.installPluginPackageFromRegistry({
+            registry_entry: entry,
+            beta_enabled: trustedKeys.beta_enabled,
+          });
       setInstalled(installedPackages);
       setUpdates(await coreBridge.pluginPackageUpdates());
     } catch (error) {
@@ -5834,13 +5841,17 @@ function AddonsPane({ onChanged }: { onChanged?: () => void }) {
                         className="set-btn primary"
                         disabled={
                           installing ||
-                          Boolean(installedPlugin) ||
+                          (Boolean(installedPlugin) && update?.candidate.version !== entry.version) ||
                           (entry.channel === "beta" && !trustedKeys.beta_enabled)
                         }
                         onClick={() => void installEntry(entry)}
                       >
                         <Download size={15} />
-                        <span>{t("settings.addonsInstallPackage")}</span>
+                        <span>
+                          {update?.candidate.version === entry.version
+                            ? t("settings.addonsUpdatePackage")
+                            : t("settings.addonsInstallPackage")}
+                        </span>
                       </button>
                     )}
                   </div>

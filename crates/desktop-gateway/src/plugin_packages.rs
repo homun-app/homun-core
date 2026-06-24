@@ -27,6 +27,7 @@ pub struct PluginInstallOptions<'a> {
     pub homun_version: &'a str,
     pub beta_enabled: bool,
     pub trusted_public_keys: &'a [String],
+    pub replace_existing: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -183,7 +184,7 @@ pub fn install_hplugin_package(
 
     fs::create_dir_all(install_root).map_err(|e| e.to_string())?;
     let install_dir = install_root.join(&registry_entry.plugin_id);
-    if install_dir.exists() {
+    if install_dir.exists() && !options.replace_existing {
         return Err("plugin already installed".to_string());
     }
 
@@ -208,10 +209,28 @@ pub fn install_hplugin_package(
         return Err("plugin package version does not match registry entry".to_string());
     }
 
-    fs::rename(&staging_dir, &install_dir).map_err(|e| {
-        let _ = fs::remove_dir_all(&staging_dir);
-        e.to_string()
-    })?;
+    if install_dir.exists() {
+        let replacing_dir = install_root.join(format!(
+            ".replacing-{}-{}",
+            registry_entry.plugin_id,
+            uuid::Uuid::new_v4()
+        ));
+        fs::rename(&install_dir, &replacing_dir).map_err(|e| {
+            let _ = fs::remove_dir_all(&staging_dir);
+            e.to_string()
+        })?;
+        if let Err(error) = fs::rename(&staging_dir, &install_dir) {
+            let _ = fs::rename(&replacing_dir, &install_dir);
+            let _ = fs::remove_dir_all(&staging_dir);
+            return Err(error.to_string());
+        }
+        let _ = fs::remove_dir_all(&replacing_dir);
+    } else {
+        fs::rename(&staging_dir, &install_dir).map_err(|e| {
+            let _ = fs::remove_dir_all(&staging_dir);
+            e.to_string()
+        })?;
+    }
 
     Ok(PluginPackageInstall {
         plugin_id: registry_entry.plugin_id.clone(),
@@ -473,6 +492,7 @@ mod tests {
                 homun_version: "0.1.1046",
                 beta_enabled: false,
                 trusted_public_keys: &[public_key],
+                replace_existing: false,
             },
         )
         .unwrap();
@@ -515,6 +535,7 @@ mod tests {
                 homun_version: "0.1.1046",
                 beta_enabled: false,
                 trusted_public_keys: &[public_key],
+                replace_existing: false,
             },
         )
         .unwrap_err();
@@ -527,6 +548,75 @@ mod tests {
                 .file_name()
                 .to_string_lossy()
                 .starts_with(".staging-")
+        }));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn hplugin_package_install_can_replace_existing_when_explicit() {
+        let plugin_v123 = br#"{"id":"presentations-pro","version":"1.2.3"}"#;
+        let plugin_v124 = br#"{"id":"presentations-pro","version":"1.2.4"}"#;
+        let skill_v123 = b"name: Presentations\n---\nCreate decks";
+        let skill_v124 = b"name: Presentations\n---\nCreate better decks";
+        let first_archive = sample_archive_with_version(plugin_v123, skill_v123, None, "1.2.3");
+        let second_archive = sample_archive_with_version(plugin_v124, skill_v124, None, "1.2.4");
+        let (first_entry, first_public_key) =
+            signed_registry_entry_with_version(&first_archive, "1.2.3");
+        let (second_entry, second_public_key) =
+            signed_registry_entry_with_version(&second_archive, "1.2.4");
+        let root = test_dir("install-replace");
+
+        install_hplugin_package(
+            &first_entry,
+            &first_archive,
+            &root,
+            PluginInstallOptions {
+                homun_version: "0.1.1046",
+                beta_enabled: false,
+                trusted_public_keys: &[first_public_key],
+                replace_existing: false,
+            },
+        )
+        .unwrap();
+
+        let duplicate_error = install_hplugin_package(
+            &first_entry,
+            &first_archive,
+            &root,
+            PluginInstallOptions {
+                homun_version: "0.1.1046",
+                beta_enabled: false,
+                trusted_public_keys: &[second_public_key.clone()],
+                replace_existing: false,
+            },
+        )
+        .unwrap_err();
+        assert!(duplicate_error.contains("already installed"));
+
+        let replaced = install_hplugin_package(
+            &second_entry,
+            &second_archive,
+            &root,
+            PluginInstallOptions {
+                homun_version: "0.1.1046",
+                beta_enabled: false,
+                trusted_public_keys: &[second_public_key],
+                replace_existing: true,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(replaced.version, "1.2.4");
+        assert_eq!(
+            fs::read_to_string(root.join("presentations-pro/plugin.json")).unwrap(),
+            std::str::from_utf8(plugin_v124).unwrap()
+        );
+        assert!(!fs::read_dir(&root).unwrap().any(|entry| {
+            entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".replacing-")
         }));
         let _ = fs::remove_dir_all(root);
     }
@@ -657,13 +747,22 @@ mod tests {
         skill: &[u8],
         override_skill_digest: Option<&str>,
     ) -> Vec<u8> {
+        sample_archive_with_version(plugin_json, skill, override_skill_digest, "1.2.3")
+    }
+
+    fn sample_archive_with_version(
+        plugin_json: &[u8],
+        skill: &[u8],
+        override_skill_digest: Option<&str>,
+        version: &str,
+    ) -> Vec<u8> {
         let skill_digest = override_skill_digest
             .map(str::to_string)
             .unwrap_or_else(|| digest(skill));
         let package = PluginPackageManifest {
             schema_version: 1,
             plugin_id: "presentations-pro".to_string(),
-            version: "1.2.3".to_string(),
+            version: version.to_string(),
             manifest_path: "plugin.json".to_string(),
             files: vec![
                 PluginPackageFile {
@@ -700,6 +799,13 @@ mod tests {
     }
 
     fn signed_registry_entry(archive: &[u8]) -> (PluginRegistryEntry, String) {
+        signed_registry_entry_with_version(archive, "1.2.3")
+    }
+
+    fn signed_registry_entry_with_version(
+        archive: &[u8],
+        version: &str,
+    ) -> (PluginRegistryEntry, String) {
         let signing_key = SigningKey::from_bytes(&[7; 32]);
         let verifying_key = signing_key.verifying_key();
         let public_key = hex_lower(verifying_key.as_bytes());
@@ -707,15 +813,15 @@ mod tests {
         (
             PluginRegistryEntry {
                 plugin_id: "presentations-pro".to_string(),
-                version: "1.2.3".to_string(),
+                version: version.to_string(),
                 channel: PluginChannel::Stable,
                 min_homun_version: Some("0.1.1046".to_string()),
                 entitlement: PluginEntitlement::Paid,
                 manifest_url: "https://homun.app/plugins/presentations-pro/manifest.json"
                     .to_string(),
-                package_url:
-                    "https://homun.app/plugins/presentations-pro/presentations-pro-1.2.3.hplugin"
-                        .to_string(),
+                package_url: format!(
+                    "https://homun.app/plugins/presentations-pro/presentations-pro-{version}.hplugin"
+                ),
                 package_sha256: digest(archive),
                 signature: PluginSignature {
                     algorithm: "ed25519".to_string(),

@@ -702,6 +702,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             post(install_plugin_package_from_registry),
         )
         .route(
+            "/api/plugins/packages/update-from-registry",
+            post(update_plugin_package_from_registry),
+        )
+        .route(
             "/api/plugins/packages/installed",
             get(installed_plugin_packages),
         )
@@ -20584,6 +20588,7 @@ async fn install_local_plugin_package(
         homun_version,
         request.beta_enabled,
         &request.trusted_public_keys,
+        false,
     )
 }
 
@@ -20591,8 +20596,80 @@ async fn install_plugin_package_from_registry(
     State(state): State<AppState>,
     Json(request): Json<InstallPluginPackageFromRegistryRequest>,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
-    let package_url = request
+    let archive = download_plugin_package_archive(&state, &request.registry_entry).await?;
+    let homun_version = request
+        .homun_version
+        .as_deref()
+        .unwrap_or(env!("CARGO_PKG_VERSION"));
+    install_verified_plugin_archive(
+        &request.registry_entry,
+        &archive,
+        homun_version,
+        request.beta_enabled,
+        &request.trusted_public_keys,
+        false,
+    )
+}
+
+async fn update_plugin_package_from_registry(
+    State(state): State<AppState>,
+    Json(request): Json<InstallPluginPackageFromRegistryRequest>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let installed = plugin_packages::load_installed_plugin_registry(
+        &installed_plugin_registry_path().map_err(|e| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "plugin_registry_path_unavailable",
+            message: e.to_string(),
+        })?,
+    )
+    .map_err(|e| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "plugin_registry_read_failed",
+        message: e,
+    })?;
+    let Some(installed_plugin) = installed
+        .plugins
+        .iter()
+        .find(|plugin| plugin.plugin_id == request.registry_entry.plugin_id)
+    else {
+        return Err(GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "plugin_package_not_installed",
+            message: "Plugin package is not installed".to_string(),
+        });
+    };
+    if !request
         .registry_entry
+        .is_newer_than(&installed_plugin.version)
+    {
+        return Err(GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "plugin_package_update_not_newer",
+            message: "Plugin package candidate is not newer than the installed version"
+                .to_string(),
+        });
+    }
+
+    let archive = download_plugin_package_archive(&state, &request.registry_entry).await?;
+    let homun_version = request
+        .homun_version
+        .as_deref()
+        .unwrap_or(env!("CARGO_PKG_VERSION"));
+    install_verified_plugin_archive(
+        &request.registry_entry,
+        &archive,
+        homun_version,
+        request.beta_enabled,
+        &request.trusted_public_keys,
+        true,
+    )
+}
+
+async fn download_plugin_package_archive(
+    state: &AppState,
+    registry_entry: &PluginRegistryEntry,
+) -> Result<Bytes, GatewayError> {
+    let package_url = registry_entry
         .package_url
         .trim()
         .parse::<reqwest::Url>()
@@ -20645,17 +20722,7 @@ async fn install_plugin_package_from_registry(
             message: "Plugin package is larger than the local install limit".to_string(),
         });
     }
-    let homun_version = request
-        .homun_version
-        .as_deref()
-        .unwrap_or(env!("CARGO_PKG_VERSION"));
-    install_verified_plugin_archive(
-        &request.registry_entry,
-        &archive,
-        homun_version,
-        request.beta_enabled,
-        &request.trusted_public_keys,
-    )
+    Ok(archive)
 }
 
 fn install_verified_plugin_archive(
@@ -20664,6 +20731,7 @@ fn install_verified_plugin_archive(
     homun_version: &str,
     beta_enabled: bool,
     trusted_public_keys: &[String],
+    replace_existing: bool,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
     let local_trusted_keys;
     let (trusted_public_keys, beta_enabled) = if trusted_public_keys.is_empty() {
@@ -20699,6 +20767,7 @@ fn install_verified_plugin_archive(
             homun_version,
             beta_enabled,
             trusted_public_keys,
+            replace_existing,
         },
     )
     .map_err(|e| GatewayError {
