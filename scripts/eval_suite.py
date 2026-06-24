@@ -11,6 +11,8 @@ gateway needed. :cloud models are routed by the local daemon after `ollama signi
 Usage:
   python3 scripts/eval_suite.py [model] [runs]
   python3 scripts/eval_suite.py gemma4:latest 3
+  HOMUN_EVAL_GATEWAY_BASE=http://127.0.0.1:18765 \
+    HOMUN_EVAL_GATEWAY_TOKEN=... python3 scripts/eval_suite.py gemma4:latest 1
 
 Exit 0 only if every check passes all runs. Wire into pre-release later (WS8.3).
 """
@@ -22,6 +24,8 @@ import urllib.error
 import urllib.request
 
 BASE = os.environ.get("HOMUN_EVAL_BASE", "http://127.0.0.1:11434/v1/chat/completions")
+GATEWAY_BASE = os.environ.get("HOMUN_EVAL_GATEWAY_BASE", "").rstrip("/")
+GATEWAY_TOKEN = os.environ.get("HOMUN_EVAL_GATEWAY_TOKEN") or os.environ.get("HOMUN_DESKTOP_GATEWAY_TOKEN")
 
 
 def post(model, system, user, schema):
@@ -64,6 +68,20 @@ def parse_json(content):
             c = c[len(fence):]
     c = c.strip().rstrip("`").strip()
     return json.loads(c)
+
+
+def gateway_get(path):
+    headers = {"Accept": "application/json"}
+    if GATEWAY_TOKEN:
+        headers["Authorization"] = f"Bearer {GATEWAY_TOKEN}"
+    req = urllib.request.Request(f"{GATEWAY_BASE}{path}", headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=20) as r:
+            return 200, json.load(r)
+    except urllib.error.HTTPError as e:
+        return e.code, e.read().decode()[:200]
+    except Exception as e:  # noqa: BLE001
+        return -1, str(e)
 
 
 def find_with(d, key):
@@ -242,6 +260,62 @@ CHECKS = [
      "modello immagine non è configurato; va completato.", v_openloop),
 ]
 
+GATEWAY_CHECKS = [
+    ("gateway templates", "/api/templates/catalog"),
+    ("gateway capabilities", "/api/capabilities/snapshot"),
+]
+
+
+def v_gateway_templates(payload):
+    templates = payload.get("templates") if isinstance(payload, dict) else None
+    if not isinstance(templates, list) or not templates:
+        return False, "no templates"
+    startup = next((entry for entry in templates if entry.get("id") == "monet/startup-pitch-clean-01"), None)
+    if not startup:
+        return False, "missing startup pitch template"
+    preview = startup.get("preview_ref")
+    if not isinstance(preview, str) or not preview.startswith("builtin:template-preview/"):
+        return False, "missing built-in preview_ref"
+    forbidden = [entry for entry in templates if "schema" in entry or "callable" in entry]
+    if forbidden:
+        return False, "template leaked callable fields"
+    return True, f"{len(templates)} templates"
+
+
+def v_gateway_capabilities(payload):
+    if not isinstance(payload, dict):
+        return False, "not an object"
+    if not isinstance(payload.get("connections"), list):
+        return False, "missing connections array"
+    if not isinstance(payload.get("tools"), list):
+        return False, "missing tools array"
+    policy = payload.get("policy")
+    if not isinstance(policy, dict) or not isinstance(policy.get("enabled_providers"), list):
+        return False, "missing policy"
+    return True, f"{len(payload['tools'])} tools"
+
+
+def run_gateway_checks():
+    if not GATEWAY_BASE:
+        return True
+    print(f"== gateway contracts :: {GATEWAY_BASE}", flush=True)
+    validators = {
+        "/api/templates/catalog": v_gateway_templates,
+        "/api/capabilities/snapshot": v_gateway_capabilities,
+    }
+    all_ok = True
+    for name, path in GATEWAY_CHECKS:
+        code, payload = gateway_get(path)
+        if code != 200:
+            print(f"  [FAIL] {name:20} HTTP {code}: {str(payload)[:120]}", flush=True)
+            all_ok = False
+            continue
+        ok, reason = validators[path](payload)
+        if not ok:
+            all_ok = False
+        print(f"  [{'PASS' if ok else 'FAIL'}] {name:20} :: {reason}", flush=True)
+    return all_ok
+
 
 def main():
     model = sys.argv[1] if len(sys.argv) > 1 else "gemma4:latest"
@@ -268,6 +342,7 @@ def main():
         if passed != runs:
             all_ok = False
         print(f"  [{mark}] {name:14} {passed}/{runs}  :: {last}", flush=True)
+    all_ok = run_gateway_checks() and all_ok
     print(f"== {'ALL GREEN' if all_ok else 'FAILURES'} ==", flush=True)
     sys.exit(0 if all_ok else 1)
 

@@ -909,8 +909,12 @@ Il caposaldo #2 ("funziona sul tier locale") oggi è verificato solo sul deck
   check documento strutturato con `docx` obbligatorio, `HOMUN_EVAL_BASE` per
   cambiare endpoint e flush progressivo durante run lunghi; smoke
   `python3 scripts/eval_suite.py gemma4:latest 1` passato su
-  deck/document/plan/decision/open_loop. Da estendere: flussi via gateway
-  (tool-call emission, render end-to-end) + ricerca/meeting quando esistono (WS7).
+  deck/document/plan/decision/open_loop. **Slice gateway contract (2026-06-24,
+  locale/verde):** la suite supporta `HOMUN_EVAL_GATEWAY_BASE` +
+  `HOMUN_EVAL_GATEWAY_TOKEN` e verifica `/api/templates/catalog` (template
+  non-callable con preview built-in) e `/api/capabilities/snapshot` sul gateway
+  reale. Verifica runtime passata su `127.0.0.1:18765`. Da estendere: tool-call
+  emission + render end-to-end + ricerca/meeting quando esistono (WS7).
 - ☐ **8.2** Eval memoria (= WS5.6): chat nuova → "stato + perché" → deve rispondere.
 - ☐ **8.3** Gate pre-release: nessuna pubblicazione se la suite non è verde sul tier base.
 

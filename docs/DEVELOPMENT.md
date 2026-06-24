@@ -155,7 +155,11 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   **WS8 eval locale:** `scripts/eval_suite.py` ora include anche il flusso
   documento strutturato con formato `docx` obbligatorio, supporta
   `HOMUN_EVAL_BASE` e stampa progressivamente; smoke locale `gemma4:latest 1`
-  passato su deck/document/plan/decision/open_loop.
+  passato su deck/document/plan/decision/open_loop. Slice successiva: la suite
+  può eseguire anche contract check opzionali sul gateway reale con
+  `HOMUN_EVAL_GATEWAY_BASE`/`HOMUN_EVAL_GATEWAY_TOKEN`, validando
+  `/api/templates/catalog` e `/api/capabilities/snapshot` come primi guardrail
+  HTTP prima del render end-to-end.
   **WS4 chat perf:** `RichMessage` e il renderer markdown lazy sono memoizzati,
   così polling/live state e sidebar non ricalcolano markdown pesante per messaggi
   completati invariati.

@@ -299,6 +299,11 @@ primo percorso locale verde:
     layout archetype, componenti) invece di scegliere da sole card testuali. I
     cataloghi esterni senza `preview_ref` restano sul fallback contract-only; il
     registry rimane la fonte unica e i template non diventano tool callable.
+71. WS8 gateway contract eval — `scripts/eval_suite.py` può ora, se configurato
+    con `HOMUN_EVAL_GATEWAY_BASE` e token, verificare anche il gateway reale:
+    `/api/templates/catalog` deve esporre template non-callable con preview
+    built-in, e `/api/capabilities/snapshot` deve restare uno snapshot valido.
+    È il primo strato HTTP del gate; il render end-to-end resta da aggiungere.
 
 Prima di pubblicare/taggare resta prudente ripetere lo smoke manuale in-app su
 una automazione schedulata reale con il binario aggiornato. Il primo smoke ha
