@@ -1776,6 +1776,47 @@ export interface PluginState {
   enabled: boolean;
 }
 
+export interface PluginSignatureView {
+  algorithm: string;
+  public_key: string;
+  signature: string;
+}
+
+export interface PluginRegistryEntryView {
+  plugin_id: string;
+  version: string;
+  channel: "stable" | "beta";
+  min_homun_version?: string | null;
+  entitlement: "free" | "paid";
+  manifest_url: string;
+  package_url: string;
+  package_sha256: string;
+  signature: PluginSignatureView;
+}
+
+export interface PluginRegistryIndexView {
+  schema_version: number;
+  generated_at: string;
+  plugins: PluginRegistryEntryView[];
+}
+
+export interface CachedPluginRegistryView {
+  schema_version: number;
+  source_url?: string | null;
+  registry: PluginRegistryIndexView;
+}
+
+export interface InstalledPluginPackageView {
+  plugin_id: string;
+  version: string;
+  install_dir: string;
+  package_sha256: string;
+}
+
+export interface InstalledPluginPackagesView {
+  plugins: InstalledPluginPackageView[];
+}
+
 async function electronPlugins(): Promise<PluginState[]> {
   try {
     const payload = await gatewayGetJson<{ plugins: PluginState[] }>("/api/plugins");
@@ -1795,6 +1836,41 @@ async function electronTogglePlugin(id: string): Promise<PluginState | null> {
   } catch {
     return null;
   }
+}
+
+async function electronPluginRegistryCache(): Promise<CachedPluginRegistryView | null> {
+  try {
+    const payload = await gatewayGetJson<{ cached: CachedPluginRegistryView | null }>(
+      "/api/plugins/registry/cache",
+    );
+    return payload.cached ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function electronInstalledPluginPackages(): Promise<InstalledPluginPackagesView> {
+  try {
+    return await gatewayGetJson<InstalledPluginPackagesView>("/api/plugins/packages/installed");
+  } catch {
+    return { plugins: [] };
+  }
+}
+
+async function electronInstallPluginPackageFromRegistry(input: {
+  registry_entry: PluginRegistryEntryView;
+  beta_enabled?: boolean;
+  trusted_public_keys?: string[];
+}): Promise<InstalledPluginPackagesView> {
+  const payload = await gatewayPostJson<{ installed_plugins?: InstalledPluginPackagesView }>(
+    "/api/plugins/packages/install-from-registry",
+    {
+      registry_entry: input.registry_entry,
+      beta_enabled: input.beta_enabled ?? false,
+      trusted_public_keys: input.trusted_public_keys ?? [],
+    },
+  );
+  return payload.installed_plugins ?? { plugins: [] };
 }
 
 async function electronComposioDisconnect(id: string): Promise<void> {
@@ -2053,6 +2129,13 @@ export const coreBridge = {
   proactivityReviewNow: (scope: string) => electronProactivityReviewNow(scope),
   plugins: () => electronPlugins(),
   togglePlugin: (id: string) => electronTogglePlugin(id),
+  pluginRegistryCache: () => electronPluginRegistryCache(),
+  installedPluginPackages: () => electronInstalledPluginPackages(),
+  installPluginPackageFromRegistry: (input: {
+    registry_entry: PluginRegistryEntryView;
+    beta_enabled?: boolean;
+    trusted_public_keys?: string[];
+  }) => electronInstallPluginPackageFromRegistry(input),
   composioDisconnect: (id: string) => electronComposioDisconnect(id),
   composioExecute: (
     tool: string,

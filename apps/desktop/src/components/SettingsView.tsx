@@ -52,6 +52,8 @@ import {
   type CoreCapabilitySnapshot,
   type CoreChannelSettings,
   type CoreTelegramStatus,
+  type CachedPluginRegistryView,
+  type InstalledPluginPackagesView,
   type LanguageInfo,
   type LlmConcurrencyView,
   type ProviderModelView,
@@ -5581,19 +5583,42 @@ function MemoryItemsList() {
 function AddonsPane({ onChanged }: { onChanged?: () => void }) {
   const { t } = useTranslation();
   const [states, setStates] = useState<PluginState[]>([]);
+  const [cache, setCache] = useState<CachedPluginRegistryView | null>(null);
+  const [installed, setInstalled] = useState<InstalledPluginPackagesView>({ plugins: [] });
   const [busy, setBusy] = useState<string | null>(null);
+  const [loadingRegistry, setLoadingRegistry] = useState(false);
+  const [registryError, setRegistryError] = useState<string | null>(null);
+
+  async function loadRegistryState() {
+    setLoadingRegistry(true);
+    setRegistryError(null);
+    try {
+      const [cached, installedPackages] = await Promise.all([
+        coreBridge.pluginRegistryCache(),
+        coreBridge.installedPluginPackages(),
+      ]);
+      setCache(cached);
+      setInstalled(installedPackages);
+    } catch (error) {
+      setRegistryError((error as Error).message);
+    } finally {
+      setLoadingRegistry(false);
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
     void coreBridge.plugins().then((s) => {
       if (!cancelled) setStates(s);
     });
+    void loadRegistryState();
     return () => {
       cancelled = true;
     };
   }, []);
 
   const isEnabled = (id: string) => states.find((s) => s.id === id)?.enabled !== false;
+  const installedById = new Map(installed.plugins.map((plugin) => [plugin.plugin_id, plugin]));
 
   async function toggle(id: string) {
     setBusy(id);
@@ -5642,6 +5667,70 @@ function AddonsPane({ onChanged }: { onChanged?: () => void }) {
           );
         })}
       </div>
+      <div className="addon-market-head">
+        <div>
+          <p className="addon-market-eyebrow">{t("settings.addonsMarketplace")}</p>
+          <p className="set-hint">{t("settings.addonsMarketplaceIntro")}</p>
+        </div>
+        <button
+          type="button"
+          className="set-icon-btn"
+          aria-label={t("settings.refresh")}
+          disabled={loadingRegistry}
+          onClick={() => void loadRegistryState()}
+        >
+          <RefreshCw size={15} />
+        </button>
+      </div>
+      {registryError && <p className="set-hint set-hint-error">{registryError}</p>}
+      {!cache ? (
+        <div className="addon-empty">
+          <p>{t("settings.addonsNoRegistryCache")}</p>
+        </div>
+      ) : (
+        <>
+          <div className="addon-cache-meta">
+            <span>{t("settings.addonsRegistryGenerated", { date: cache.registry.generated_at })}</span>
+            {cache.source_url && <span>{cache.source_url}</span>}
+          </div>
+          <div className="addon-list">
+            {cache.registry.plugins.map((entry) => {
+              const installedPlugin = installedById.get(entry.plugin_id);
+              return (
+                <div key={`${entry.plugin_id}@${entry.version}`} className="addon-row">
+                  <div className="addon-row-main">
+                    <div className="addon-row-title">
+                      <Boxes size={16} aria-hidden="true" />
+                      <span>{entry.plugin_id}</span>
+                      <span className="addon-badge">{entry.version}</span>
+                      <span className={`addon-badge ${entry.channel === "stable" ? "on" : ""}`}>
+                        {entry.channel}
+                      </span>
+                      {installedPlugin && (
+                        <span className="addon-badge on">{t("settings.addonsInstalled")}</span>
+                      )}
+                    </div>
+                    <p className="addon-row-desc">
+                      {entry.entitlement}
+                      {entry.min_homun_version
+                        ? ` · min Homun ${entry.min_homun_version}`
+                        : ""}
+                    </p>
+                    <div className="addon-caps">
+                      <span className="addon-cap">{entry.package_sha256.slice(0, 19)}…</span>
+                      <span className="addon-cap">{entry.signature.algorithm}</span>
+                      <span className="addon-cap">{entry.signature.public_key.slice(0, 16)}…</span>
+                    </div>
+                    {installedPlugin && (
+                      <p className="addon-install-path">{installedPlugin.install_dir}</p>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
     </>
   );
 }
