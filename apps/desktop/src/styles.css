@@ -279,6 +279,31 @@ small {
   background: color-mix(in srgb, var(--muted) 28%, transparent);
 }
 
+.drawer-floating-trigger {
+  position: fixed;
+  top: 8px;
+  left: 96px;
+  z-index: 96;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: none;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+
+.drawer-floating-trigger:hover,
+.drawer-floating-trigger:focus-visible,
+.app-shell.drawer-transient-open .drawer-floating-trigger {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
 .drawer-floating-host {
   position: fixed;
   top: calc(var(--window-drag-height) + 8px);

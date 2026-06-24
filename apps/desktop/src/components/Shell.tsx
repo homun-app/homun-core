@@ -1,3 +1,4 @@
+import { PanelLeftOpen } from "lucide-react";
 import { useRef, useState, type CSSProperties, type PointerEvent, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -145,6 +146,15 @@ export function Shell({
             onFocus={() => setTransientDrawerOpen(true)}
             onClick={() => setTransientDrawerOpen(true)}
           />
+          <button
+            className="drawer-floating-trigger"
+            type="button"
+            aria-label={t("sidebar.expandSidebar")}
+            title={t("sidebar.expandSidebar")}
+            onClick={() => setTransientDrawerOpen(true)}
+          >
+            <PanelLeftOpen size={16} />
+          </button>
           {transientDrawerOpen && (
             <div
               className="drawer-floating-host"

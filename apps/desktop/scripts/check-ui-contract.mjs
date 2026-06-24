@@ -80,6 +80,7 @@ assertContains("src/styles.css", "-webkit-app-region: no-drag", "interactive con
 
 assertContains("src/components/Sidebar.tsx", "nav-drawer", "expanded navigation must be a drawer");
 assertContains("src/components/Shell.tsx", "drawer-edge-hotspot", "collapsed sidebar must be opened from a left-edge hotspot");
+assertContains("src/components/Shell.tsx", "drawer-floating-trigger", "collapsed sidebar must also expose a visible open icon");
 assertContains("src/components/Shell.tsx", "drawer-floating-host", "collapsed sidebar must render as a transient floating island");
 assertContains("src/components/Sidebar.tsx", "presentation?: \"pinned\" | \"floating\"", "drawer must support pinned and floating presentations");
 assertContains("src/styles.css", ".nav-drawer.floating-island", "floating drawer must use island styling instead of a fixed rail");
