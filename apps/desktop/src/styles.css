@@ -10601,6 +10601,19 @@ body.resizing-drawer {
   font-size: 12px;
   color: var(--faint);
 }
+.addon-fetch-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  margin-top: 12px;
+}
+.addon-fetch-row input {
+  width: 100%;
+  min-width: 0;
+}
+.addon-fetch-row .set-btn {
+  white-space: nowrap;
+}
 .addon-cache-meta span,
 .addon-install-path {
   max-width: 100%;

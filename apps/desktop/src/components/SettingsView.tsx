@@ -5587,6 +5587,7 @@ function AddonsPane({ onChanged }: { onChanged?: () => void }) {
   const [installed, setInstalled] = useState<InstalledPluginPackagesView>({ plugins: [] });
   const [busy, setBusy] = useState<string | null>(null);
   const [loadingRegistry, setLoadingRegistry] = useState(false);
+  const [registryUrl, setRegistryUrl] = useState("");
   const [registryError, setRegistryError] = useState<string | null>(null);
 
   async function loadRegistryState() {
@@ -5631,6 +5632,22 @@ function AddonsPane({ onChanged }: { onChanged?: () => void }) {
       onChanged?.();
     }
     setBusy(null);
+  }
+
+  async function fetchRegistry() {
+    const sourceUrl = registryUrl.trim();
+    if (!sourceUrl) return;
+    setLoadingRegistry(true);
+    setRegistryError(null);
+    try {
+      const cached = await coreBridge.fetchPluginRegistry(sourceUrl);
+      setCache(cached);
+      setInstalled(await coreBridge.installedPluginPackages());
+    } catch (error) {
+      setRegistryError((error as Error).message);
+    } finally {
+      setLoadingRegistry(false);
+    }
   }
 
   return (
@@ -5680,6 +5697,23 @@ function AddonsPane({ onChanged }: { onChanged?: () => void }) {
           onClick={() => void loadRegistryState()}
         >
           <RefreshCw size={15} />
+        </button>
+      </div>
+      <div className="addon-fetch-row">
+        <input
+          value={registryUrl}
+          onChange={(event) => setRegistryUrl(event.target.value)}
+          placeholder="https://homun.app/plugins/registry.json"
+          aria-label={t("settings.addonsRegistryUrl")}
+        />
+        <button
+          type="button"
+          className="set-btn"
+          disabled={loadingRegistry || registryUrl.trim().length === 0}
+          onClick={() => void fetchRegistry()}
+        >
+          <Download size={15} />
+          <span>{t("settings.addonsFetchRegistry")}</span>
         </button>
       </div>
       {registryError && <p className="set-hint set-hint-error">{registryError}</p>}

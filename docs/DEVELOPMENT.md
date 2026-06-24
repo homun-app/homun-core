@@ -251,9 +251,10 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   `install_verified_plugin_archive()` di `install-local`. **WS9.3g UI manager
   read-only locale/verde:** Settings -> Addons mostra anche cache marketplace
   locale e pacchetti installati, leggendo `/api/plugins/registry/cache` e
-  `/api/plugins/packages/installed`; install da UI rinviato alla gestione
-  esplicita delle chiavi trusted. Restano feed/package reali sul sito Homun,
-  install UI sicura e update automatico.
+  `/api/plugins/packages/installed`; puo' popolare la cache da URL HTTPS via
+  `/api/plugins/registry/fetch`. Install da UI rinviato alla gestione esplicita
+  delle chiavi trusted. Restano feed/package reali sul sito Homun, install UI
+  sicura e update automatico.
   **WS9.6 ADR locale:** ADR 0017 formalizza distribuzione, signing e licensing:
   registry hosted sul sito Homun, verifica locale deterministica, beta opt-in,
   paid predisposto con token offline e runtime sempre contenuto.

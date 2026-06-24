@@ -971,6 +971,8 @@
     "addonsNoRegistryCache": "Nessuna cache registry plugin. Prima va scaricato un registry dal backend o dal futuro feed marketplace Homun.",
     "addonsRegistryGenerated": "Generato {{date}}",
     "addonsInstalled": "Installato",
+    "addonsRegistryUrl": "URL registry plugin",
+    "addonsFetchRegistry": "Scarica registry",
     "start": "Avvia",
     "stop": "Ferma",
     "starting": "Avvio…",

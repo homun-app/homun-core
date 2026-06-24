@@ -981,8 +981,8 @@ proprio — versioning, canali, scaricabili dal **sito Homun**, auto-aggiornabil
   2026-06-24: aggiunto download/install pacchetto da `package_url` con
   `POST /api/plugins/packages/install-from-registry`, riusando lo stesso install
   manager verificato. 2026-06-24: Settings -> Addons espone una prima UI
-  manager read-only per cache marketplace e pacchetti installati. Restano
-  install UI sicura e auto-update reale.
+  manager per cache marketplace e pacchetti installati, con fetch registry da
+  URL HTTPS attraverso il backend. Restano install UI sicura e auto-update reale.
 - 🟡 **9.4 Sicurezza**: prima slice integrity/policy fatta. `PluginRegistryEntry`
   valida digest `sha256:<64 hex>`, richiede algoritmo firma `ed25519`, confronta
   SHA-256 del pacchetto e verifica la firma Ed25519 sui byte pacchetto. Inoltre

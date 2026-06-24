@@ -362,8 +362,8 @@ primo percorso locale verde:
     aggiornato atomicamente e letto da `/api/plugins/packages/installed`.
     `install-from-registry` scarica anche `package_url` HTTPS e riusa lo stesso
     percorso verificato. Settings -> Addons mostra cache marketplace e
-    pacchetti installati in read-only. Restano install UI sicura e update
-    automatico.
+    pacchetti installati, e puo' scaricare un registry HTTPS tramite backend.
+    Restano install UI sicura e update automatico.
 85. WS9 registry cache locale — `PluginRegistryIndex` marketplace può essere
     validato e salvato atomicamente in `~/.homun/plugins/registry-cache.json`
     tramite `GET/POST /api/plugins/registry/cache`; il gateway può anche

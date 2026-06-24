@@ -1849,6 +1849,14 @@ async function electronPluginRegistryCache(): Promise<CachedPluginRegistryView |
   }
 }
 
+async function electronFetchPluginRegistry(sourceUrl: string): Promise<CachedPluginRegistryView | null> {
+  const payload = await gatewayPostJson<{ cached: CachedPluginRegistryView | null }>(
+    "/api/plugins/registry/fetch",
+    { source_url: sourceUrl },
+  );
+  return payload.cached ?? null;
+}
+
 async function electronInstalledPluginPackages(): Promise<InstalledPluginPackagesView> {
   try {
     return await gatewayGetJson<InstalledPluginPackagesView>("/api/plugins/packages/installed");
@@ -2130,6 +2138,7 @@ export const coreBridge = {
   plugins: () => electronPlugins(),
   togglePlugin: (id: string) => electronTogglePlugin(id),
   pluginRegistryCache: () => electronPluginRegistryCache(),
+  fetchPluginRegistry: (sourceUrl: string) => electronFetchPluginRegistry(sourceUrl),
   installedPluginPackages: () => electronInstalledPluginPackages(),
   installPluginPackageFromRegistry: (input: {
     registry_entry: PluginRegistryEntryView;
