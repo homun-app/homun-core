@@ -76,7 +76,9 @@ primo percorso locale verde e WS5 è chiusa localmente/gate:
     reale. Resta da promuovere `ExecutionPlan` a stato runtime primario.
 18. WS1-Fase 2 Slice 3b — il loop agente usa `ExecutionPlan` come stato runtime
     canonico; lo snapshot `Vec<Value>` resta solo vista derivata per marker UI,
-    memoria/grafo e verifica step.
+    memoria/grafo e verifica step. Il merge progressivo preserva route,
+    `plan_propose`, provider/tool, execution policy e contratto degli step
+    workflow/capability invece di ricostruirli come `DirectAnswer`.
 19. WS1-Fase 3a — `make_deck` ha una `WorkflowDefinition` harness-owned
     proiettata in `ExecutionPlan` con DAG e contratto `DeckWorkflow`; il modello
     continua a vedere un solo tool.

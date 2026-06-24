@@ -437,9 +437,13 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
 - **WS1-Fase 2 Slice 3b locale/verde:** il loop agente usa ora `ExecutionPlan`
   come stato runtime canonico del piano; il vecchio `Vec<Value>` resta solo come
   vista derivata per marker UI, memoria/grafo e verifica step. `merge_execution_plan`
-  applica le stesse regole monotone di `merge_plan` e rigenera il contratto
-  `ExecutionPlan`; la resume da marker rimane retrocompatibile. Test mirato:
-  `merge_execution_plan_is_runtime_canonical_state`.
+  applica le stesse regole monotone di `merge_plan` senza perdere il contratto
+  gia' costruito: conserva route, `plan_propose`, metadata workflow/capability
+  dello step, provider/tool, execution policy, timeout e limiti token; aggiorna
+  solo vista/stato (`status`, `detail`, `done_criterion`, dipendenze esplicite).
+  La resume da marker rimane retrocompatibile. Test mirati:
+  `merge_execution_plan_is_runtime_canonical_state`,
+  `merge_execution_plan_preserves_plan_and_step_contract_metadata`.
 - **WS1-Fase 3a locale/verde:** primo workflow dichiarativo: `make_deck` ha una
   `WorkflowDefinition` harness-owned (`brand → content → images/deck_json →
   render → register_artifacts`) e viene proiettato in `ExecutionPlan` interno

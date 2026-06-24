@@ -5928,8 +5928,57 @@ fn execution_plan_steps(plan: &ExecutionPlan) -> Vec<serde_json::Value> {
 fn merge_execution_plan(plan: &mut ExecutionPlan, sent: &[serde_json::Value]) -> Vec<usize> {
     let mut steps = execution_plan_steps(plan);
     let claims = merge_plan(&mut steps, sent);
-    *plan = runtime_execution_plan(&steps);
+    let mut previous_steps = std::mem::take(&mut plan.steps);
+    plan.steps = steps
+        .iter()
+        .filter_map(|step_view| {
+            let step_id = plan_step_id(step_view)?.to_string();
+            if let Some(index) = previous_steps.iter().position(|step| step.step_id == step_id) {
+                let mut step = previous_steps.remove(index);
+                apply_execution_plan_step_view(&mut step, step_view);
+                Some(step)
+            } else {
+                runtime_execution_plan(std::slice::from_ref(step_view))
+                    .steps
+                    .into_iter()
+                    .next()
+            }
+        })
+        .collect();
     claims
+}
+
+fn apply_execution_plan_step_view(step: &mut PlanStep, step_view: &serde_json::Value) {
+    if !plan_step_depends_on(step_view).is_empty() {
+        step.depends_on = plan_step_depends_on(step_view);
+    }
+    if !step.arguments.is_object() {
+        step.arguments = serde_json::json!({});
+    }
+    if let Some(arguments) = step.arguments.as_object_mut() {
+        arguments.insert(
+            "title".to_string(),
+            serde_json::json!(plan_step_title(step_view)),
+        );
+        arguments.insert(
+            "status".to_string(),
+            serde_json::json!(plan_step_status(step_view)),
+        );
+        arguments.insert(
+            "detail".to_string(),
+            step_view
+                .get("detail")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null),
+        );
+        arguments.insert(
+            "done_criterion".to_string(),
+            step_view
+                .get("done_criterion")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null),
+        );
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -39320,6 +39369,80 @@ mod tests {
         assert_eq!(plan.steps[1].depends_on, vec!["s1".to_string()]);
         assert_eq!(steps[1]["title"], "Implement slice");
         assert_eq!(steps[1]["status"], "doing");
+    }
+
+    #[test]
+    fn merge_execution_plan_preserves_plan_and_step_contract_metadata() {
+        let mut plan = local_first_orchestrator::ExecutionPlan {
+            route: local_first_orchestrator::OrchestratorRoute::CapabilityCall,
+            direct_answer: None,
+            plan_propose: Some(local_first_orchestrator::PlanProposal {
+                summary: "Approve the workflow".to_string(),
+                steps: vec!["Render deck".to_string()],
+            }),
+            steps: vec![local_first_orchestrator::PlanStep {
+                step_id: "render".to_string(),
+                kind: local_first_orchestrator::PlanStepKind::CapabilityCall,
+                depends_on: vec!["brand".to_string()],
+                provider_id: Some("native".to_string()),
+                tool_name: Some("make_deck".to_string()),
+                arguments: serde_json::json!({
+                    "title": "Render deck",
+                    "status": "doing",
+                    "detail": "Rendering",
+                    "done_criterion": "deck.pptx exists"
+                }),
+                execution_policy: local_first_orchestrator::StepExecutionPolicy::DurableTask,
+                risk_level: "medium".to_string(),
+                expected_duration_seconds: 30,
+                agent_id: None,
+                goal: Some("Render deck".to_string()),
+                contract: Some("DeckWorkflow".to_string()),
+                allowed_actions: vec![],
+                requires_user_approval: Some(false),
+                timeout_seconds: Some(120),
+                max_tokens: Some(2048),
+            }],
+            needs_more_tools: None,
+        };
+
+        let claims = super::merge_execution_plan(
+            &mut plan,
+            &[serde_json::json!({
+                "id": "render",
+                "status": "blocked",
+                "detail": "Provider unavailable"
+            })],
+        );
+
+        assert!(claims.is_empty());
+        assert_eq!(
+            plan.route,
+            local_first_orchestrator::OrchestratorRoute::CapabilityCall
+        );
+        assert!(plan.plan_propose.is_some());
+        assert_eq!(plan.steps.len(), 1);
+        let step = &plan.steps[0];
+        assert_eq!(
+            step.kind,
+            local_first_orchestrator::PlanStepKind::CapabilityCall
+        );
+        assert_eq!(step.provider_id.as_deref(), Some("native"));
+        assert_eq!(step.tool_name.as_deref(), Some("make_deck"));
+        assert_eq!(
+            step.execution_policy,
+            local_first_orchestrator::StepExecutionPolicy::DurableTask
+        );
+        assert_eq!(step.contract.as_deref(), Some("DeckWorkflow"));
+        assert_eq!(step.timeout_seconds, Some(120));
+        assert_eq!(
+            step.arguments.get("status").and_then(|value| value.as_str()),
+            Some("blocked")
+        );
+        assert_eq!(
+            step.arguments.get("detail").and_then(|value| value.as_str()),
+            Some("Provider unavailable")
+        );
     }
 
     #[test]

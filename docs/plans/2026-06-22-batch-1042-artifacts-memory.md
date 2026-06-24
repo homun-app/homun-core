@@ -68,9 +68,12 @@ modelli deboli/locali. Invarianti: monotonìa, limitatezza, identità non inferi
   - ✅ **Slice 3b (2026-06-23, locale/verde)**: `ExecutionPlan` è ora lo stato
     runtime canonico del piano nel loop agente. Il `Vec<Value>` resta vista
     derivata per marker UI, memoria/grafo e verifica step; `merge_execution_plan`
-    applica le regole monotone/sticky di `merge_plan` e rigenera il contratto.
-    La resume da marker resta retrocompatibile. Test mirato:
-    `merge_execution_plan_is_runtime_canonical_state`.
+    applica le regole monotone/sticky di `merge_plan` senza degradare il
+    contratto: route, `plan_propose`, metadata step workflow/capability,
+    execution policy, provider/tool e timeout restano intatti quando cambia solo
+    lo stato di avanzamento. La resume da marker resta retrocompatibile. Test
+    mirati: `merge_execution_plan_is_runtime_canonical_state`,
+    `merge_execution_plan_preserves_plan_and_step_contract_metadata`.
   - ✅ **Slice 3c (2026-06-23, locale/verde)**: `ExecutionPlan` include
     `plan_propose: Option<PlanProposal>` (`summary`, `steps`) come campo
     top-level opzionale; schema e prompt planner lo accettano quando serve
