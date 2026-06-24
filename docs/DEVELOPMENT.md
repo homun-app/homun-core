@@ -96,7 +96,10 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   trasforma in una card flottante nello stesso anchor, senza controlli esterni
   disallineati e senza aprire accidentalmente il Workbench. I marker `PLAN`/`ACT`
   non duplicano piu' card tecniche dentro il corpo del messaggio. Il
-  `ChatComputerPanel` resta separato come
+  menu `...` dell'isola espone `Auto expand` / `Always expanded` /
+  `Always collapsed`, persiste la preferenza locale e la card contiene una
+  sezione `Progress` con completed collassabili. Il `ChatComputerPanel` resta
+  separato come
   `ComputerIsland` live: preview browser/terminal compatta sotto la workspace
   island, espandibile e visibile solo durante attivita' owner del thread. Gate
   locale: `npm run test:ui-contract`, `npm run build`, runtime Electron su

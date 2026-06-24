@@ -1733,6 +1733,7 @@ body.resizing-drawer {
 }
 
 .wi-head {
+  position: relative;
   justify-content: space-between;
   margin-bottom: 8px;
   padding: 0 4px;
@@ -1778,6 +1779,37 @@ body.resizing-drawer {
   background: var(--surface-hover);
 }
 
+.wi-menu {
+  position: absolute;
+  top: 30px;
+  right: 24px;
+  z-index: 2;
+  width: 178px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.99);
+  box-shadow: 0 12px 30px rgba(20, 22, 30, 0.14);
+}
+
+.wi-menu button {
+  width: 100%;
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 8px;
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 12px;
+  text-align: left;
+}
+
+.wi-menu button:hover {
+  background: var(--surface-hover);
+}
+
 .wi-row {
   width: 100%;
   gap: 10px;
@@ -1803,6 +1835,47 @@ body.resizing-drawer {
   color: var(--green);
   font-size: 12px;
   font-weight: 650;
+}
+
+.wi-progress {
+  margin: 4px 0 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.wi-progress-head,
+.wi-completed-toggle {
+  display: flex;
+  align-items: center;
+}
+
+.wi-progress-head {
+  gap: 14px;
+  padding: 0 8px 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.wi-progress-head strong {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.wi-completed-toggle {
+  width: calc(100% - 8px);
+  min-height: 26px;
+  gap: 7px;
+  margin: 0 4px 4px;
+  padding: 0 8px;
+  border-radius: 8px;
+  color: var(--muted);
+  background: transparent;
+  font-size: 12px;
+}
+
+.wi-completed-toggle:hover {
+  color: var(--text);
+  background: var(--surface-muted);
 }
 
 .wi-steps {
@@ -1843,6 +1916,10 @@ body.resizing-drawer {
 
 .wi-steps li.done {
   text-decoration: line-through;
+}
+
+.wi-steps-completed {
+  margin-top: 0;
 }
 
 .wi-steps li.done svg {

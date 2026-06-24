@@ -2041,6 +2041,16 @@ function AssistantThinkingState({ status }: { status: ChatStreamStatus | null })
   );
 }
 
+type WorkspaceIslandMode = "auto" | "expanded" | "collapsed";
+
+const WORKSPACE_ISLAND_MODE_KEY = "homun.workspaceIsland.mode";
+
+function loadWorkspaceIslandMode(): WorkspaceIslandMode {
+  if (typeof window === "undefined") return "auto";
+  const raw = window.localStorage.getItem(WORKSPACE_ISLAND_MODE_KEY);
+  return raw === "expanded" || raw === "collapsed" || raw === "auto" ? raw : "auto";
+}
+
 function WorkspaceIsland({
   activitySteps,
   artifactsCount,
@@ -2059,8 +2069,13 @@ function WorkspaceIsland({
   onExportChat: () => void;
 }) {
   const { t } = useTranslation();
-  const [expanded, setExpanded] = useState(false);
+  const [mode, setModeState] = useState<WorkspaceIslandMode>(() => loadWorkspaceIslandMode());
+  const [expanded, setExpanded] = useState(() => loadWorkspaceIslandMode() === "expanded");
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [completedExpanded, setCompletedExpanded] = useState(false);
   const doneCount = planSteps.filter((step) => step.status === "done").length;
+  const completedSteps = planSteps.filter((step) => step.status === "done");
+  const openSteps = planSteps.filter((step) => step.status !== "done");
   const runningPlan = planSteps.find((step) => step.status === "doing");
   const blockedPlan = planSteps.find((step) => step.status === "blocked");
   const latestActivity = activitySteps[activitySteps.length - 1] ?? null;
@@ -2078,6 +2093,40 @@ function WorkspaceIsland({
         : artifactsCount > 0
           ? `${artifactsCount}`
           : "";
+
+  const setMode = (next: WorkspaceIslandMode) => {
+    setModeState(next);
+    window.localStorage.setItem(WORKSPACE_ISLAND_MODE_KEY, next);
+    setMenuOpen(false);
+    if (next === "expanded") {
+      setExpanded(true);
+    } else if (next === "collapsed") {
+      setExpanded(false);
+    }
+  };
+
+  useEffect(() => {
+    if (mode === "expanded") {
+      setExpanded(true);
+      return undefined;
+    }
+    if (mode === "collapsed") {
+      return undefined;
+    }
+    if (streaming || blockedPlan) {
+      setExpanded(true);
+      return undefined;
+    }
+
+    const timer = window.setTimeout(() => setExpanded(false), 3200);
+    return () => window.clearTimeout(timer);
+  }, [activitySteps.length, artifactsCount, blockedPlan, doneCount, mode, planSteps.length, streaming]);
+
+  const menuOptions: Array<{ value: WorkspaceIslandMode; label: string }> = [
+    { value: "auto", label: "Auto expand" },
+    { value: "expanded", label: "Always expanded" },
+    { value: "collapsed", label: "Always collapsed" },
+  ];
 
   return (
     <div className={`workspace-island${expanded ? " expanded" : ""}${streaming ? " live" : ""}`}>
@@ -2104,13 +2153,45 @@ function WorkspaceIsland({
               <small>{streaming ? "live" : "thread"}</small>
             </span>
             <span className="wi-head-actions">
-              <button type="button" aria-label="More status actions">
+              <button
+                type="button"
+                aria-haspopup="menu"
+                aria-expanded={menuOpen}
+                aria-label="Workspace island options"
+                onClick={() => setMenuOpen((value) => !value)}
+              >
                 <MoreHorizontal size={14} />
               </button>
-              <button type="button" onClick={() => setExpanded(false)} aria-label="Collapse status">
+              <button
+                type="button"
+                onClick={() => {
+                  setMenuOpen(false);
+                  if (mode === "expanded") {
+                    setMode("auto");
+                  }
+                  setExpanded(false);
+                }}
+                aria-label="Collapse status"
+              >
                 <ChevronUp size={14} />
               </button>
             </span>
+            {menuOpen && (
+              <div className="wi-menu" role="menu">
+                {menuOptions.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={mode === option.value}
+                    onClick={() => setMode(option.value)}
+                  >
+                    <span>{option.label}</span>
+                    {mode === option.value && <Check size={14} />}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
           <div className="wi-row">
@@ -2119,14 +2200,43 @@ function WorkspaceIsland({
             <strong>{planSteps.length > 0 ? `${doneCount}/${planSteps.length}` : "0"}</strong>
           </div>
           {planSteps.length > 0 && (
-            <ol className="wi-steps">
-              {planSteps.slice(0, 5).map((step, index) => (
-                <li key={`${index}-${step.title}`} className={step.status}>
-                  <span>{step.status === "done" ? <Check size={12} /> : <span />}</span>
-                  <em>{step.title}</em>
-                </li>
-              ))}
-            </ol>
+            <div className="wi-progress">
+              <div className="wi-progress-head">
+                <span>Progress</span>
+                <strong>{doneCount}/{planSteps.length}</strong>
+              </div>
+              {completedSteps.length > 0 && (
+                <button
+                  className="wi-completed-toggle"
+                  type="button"
+                  aria-expanded={completedExpanded}
+                  onClick={() => setCompletedExpanded((value) => !value)}
+                >
+                  {completedExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                  <span>{completedExpanded ? "Hide" : "Show"} {completedSteps.length} completed</span>
+                </button>
+              )}
+              {openSteps.length > 0 && (
+                <ol className="wi-steps">
+                  {openSteps.slice(0, 5).map((step, index) => (
+                    <li key={`open-${index}-${step.title}`} className={step.status}>
+                      <span>{step.status === "done" ? <Check size={12} /> : <span />}</span>
+                      <em>{step.title}</em>
+                    </li>
+                  ))}
+                </ol>
+              )}
+              {completedExpanded && completedSteps.length > 0 && (
+                <ol className="wi-steps wi-steps-completed">
+                  {completedSteps.slice(0, 8).map((step, index) => (
+                    <li key={`done-${index}-${step.title}`} className="done">
+                      <span><Check size={12} /></span>
+                      <em>{step.title}</em>
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </div>
           )}
 
           <div className="wi-row">

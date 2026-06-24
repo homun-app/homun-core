@@ -85,6 +85,9 @@ La Workspace Island:
 - al click la pill si trasforma in una card flottante nello stesso anchor, senza
   pulsanti esterni disallineati;
 - la card mostra riepilogo progressivo del piano e degli ultimi step;
+- il menu `...` permette `Auto expand`, `Always expanded` e `Always collapsed`;
+- la sezione `Progress` puo' comprimere/mostrare gli step completati, che restano
+  barrati e meno prominenti rispetto al lavoro corrente;
 - non apre il Workbench come effetto collaterale dei controlli di espansione;
 - resta per-thread: non mostra stato di un thread diverso;
 - puo' restare visibile come riepilogo leggero quando ci sono artifact o piano

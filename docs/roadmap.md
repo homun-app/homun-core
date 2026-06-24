@@ -425,6 +425,8 @@ primo percorso locale verde e WS5 è chiusa localmente/gate:
     Zcode che riepiloga plan/activity/artifact per thread. Lo stato chiuso e'
     una pill unica; il click trasforma il pill in una card flottante nello
     stesso anchor, senza pulsanti esterni o aperture accidentali del Workbench.
+    Il menu `...` gestisce `Auto expand`, `Always expanded` e `Always collapsed`
+    con preferenza locale; la card include `Progress` con completed collassabili.
     I marker `PLAN`/`ACT` escono dal corpo messaggio; il computer resta una
     `ComputerIsland` separata con preview live ed espansione, visibile solo
     durante attivita' owner del thread.
