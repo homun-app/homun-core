@@ -952,6 +952,11 @@ proprio — versioning, canali, scaricabili dal **sito Homun**, auto-aggiornabil
   Ogni entry dichiara `manifest_url`, `package_url`, `package_sha256`, channel,
   entitlement, compatibilità minima e firma. Verifica 2026-06-24:
   `plugin_registry_index_declares_signed_packages` e suite capabilities verdi.
+  2026-06-24: aggiunto anche il contratto interno `.hplugin`
+  `PluginPackageManifest` / `PluginPackageFile`, con validazione di manifest
+  path, file relativi sicuri e digest `sha256`. Verifica:
+  `plugin_package_manifest_validates_safe_archive_layout` e suite capabilities
+  verdi.
   Restano: pubblicare il feed sul sito Homun, packaging `.hplugin`, fetch/cache
   locale e integrazione install/update.
 - 🟡 **9.3 Plugin manager in-app**: prima slice policy fatta nel contratto
@@ -969,8 +974,8 @@ proprio — versioning, canali, scaricabili dal **sito Homun**, auto-aggiornabil
   2026-06-24: `plugin_registry_entry_validates_digest_and_signature_policy`,
   `plugin_registry_entry_verifies_ed25519_package_signature`,
   `plugin_registry_entry_verifies_install_candidate_policy` e suite capabilities
-  verdi. Restano: enforcement install/update, esecuzione contenuta (ADR 0009) +
-  `skill_security` scan sul pacchetto estratto.
+  verdi. Restano: enforcement install/update, estrazione pacchetto in staging
+  contenuto (ADR 0009) + `skill_security` scan sul pacchetto estratto.
 - ☐ **9.5 Licensing/paid (predisporre ora)**: campo `entitlement` nel manifest + **token
   di licenza firmato** verificabile **offline** + ri-check periodico. Il paywall vero
   (account + pagamenti, es. Stripe) è fase successiva e **lega cloud/always-on**.

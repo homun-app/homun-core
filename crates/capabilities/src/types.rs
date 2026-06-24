@@ -2,6 +2,7 @@ use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::path::Path;
 use time::OffsetDateTime;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -380,6 +381,69 @@ pub struct PluginRegistryIndex {
     pub schema_version: u32,
     pub generated_at: String,
     pub plugins: Vec<PluginRegistryEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PluginPackageManifest {
+    pub schema_version: u32,
+    pub plugin_id: String,
+    pub version: String,
+    pub manifest_path: String,
+    pub files: Vec<PluginPackageFile>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PluginPackageFile {
+    pub path: String,
+    pub sha256: String,
+    pub size_bytes: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PluginPackageValidationError {
+    EmptyPackage,
+    InvalidDigest,
+    MissingManifest,
+    UnsafePath,
+}
+
+impl PluginPackageManifest {
+    pub fn validate_layout(&self) -> Result<(), PluginPackageValidationError> {
+        if self.files.is_empty() {
+            return Err(PluginPackageValidationError::EmptyPackage);
+        }
+        if !is_safe_package_path(&self.manifest_path) {
+            return Err(PluginPackageValidationError::UnsafePath);
+        }
+        if !self.files.iter().any(|file| file.path == self.manifest_path) {
+            return Err(PluginPackageValidationError::MissingManifest);
+        }
+        for file in &self.files {
+            if !is_safe_package_path(&file.path) {
+                return Err(PluginPackageValidationError::UnsafePath);
+            }
+            if !is_sha256_digest(&file.sha256) {
+                return Err(PluginPackageValidationError::InvalidDigest);
+            }
+        }
+        Ok(())
+    }
+}
+
+fn is_safe_package_path(value: &str) -> bool {
+    let path = Path::new(value);
+    !value.is_empty()
+        && !path.is_absolute()
+        && path
+            .components()
+            .all(|component| matches!(component, std::path::Component::Normal(_)))
+}
+
+fn is_sha256_digest(value: &str) -> bool {
+    let Some(digest) = value.strip_prefix("sha256:") else {
+        return false;
+    };
+    digest.len() == 64 && digest.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

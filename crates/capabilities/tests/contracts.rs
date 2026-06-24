@@ -2,9 +2,9 @@ use ed25519_dalek::{Signer, SigningKey};
 use local_first_capabilities::{
     ActionClass, CapabilityProviderKind, CapabilityTool, DataBoundary, ManagedProviderMetadata,
     PluginCapabilityDeclaration, PluginCapabilityKind, PluginChannel, PluginEntitlement,
-    PluginManifest, PluginRegistryEntry, PluginRegistryIndex, PluginRegistryValidationError,
-    PluginSignature, ProviderId, SkillManifest, SkillPermissions, SkillToolManifest, UserId,
-    WorkspaceId,
+    PluginManifest, PluginPackageFile, PluginPackageManifest, PluginPackageValidationError,
+    PluginRegistryEntry, PluginRegistryIndex, PluginRegistryValidationError, PluginSignature,
+    ProviderId, SkillManifest, SkillPermissions, SkillToolManifest, UserId, WorkspaceId,
 };
 
 #[test]
@@ -253,6 +253,44 @@ fn plugin_registry_entry_verifies_install_candidate_policy() {
     assert_eq!(
         entry.verify_install_candidate(package, "0.1.1046", false, &[trusted_key]),
         Err(PluginRegistryValidationError::BetaChannelDisabled)
+    );
+}
+
+#[test]
+fn plugin_package_manifest_validates_safe_archive_layout() {
+    let package = PluginPackageManifest {
+        schema_version: 1,
+        plugin_id: "presentations-pro".to_string(),
+        version: "1.2.3".to_string(),
+        manifest_path: "plugin.json".to_string(),
+        files: vec![
+            PluginPackageFile {
+                path: "plugin.json".to_string(),
+                sha256: "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824".to_string(),
+                size_bytes: 1024,
+            },
+            PluginPackageFile {
+                path: "skills/presentations/SKILL.md".to_string(),
+                sha256: "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824".to_string(),
+                size_bytes: 4096,
+            },
+        ],
+    };
+
+    assert!(package.validate_layout().is_ok());
+
+    let mut unsafe_package = package.clone();
+    unsafe_package.files[1].path = "../escape".to_string();
+    assert_eq!(
+        unsafe_package.validate_layout(),
+        Err(PluginPackageValidationError::UnsafePath)
+    );
+
+    let mut missing_manifest = package;
+    missing_manifest.manifest_path = "missing.json".to_string();
+    assert_eq!(
+        missing_manifest.validate_layout(),
+        Err(PluginPackageValidationError::MissingManifest)
     );
 }
 

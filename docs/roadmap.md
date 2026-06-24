@@ -341,6 +341,10 @@ primo percorso locale verde:
     deterministiche per disponibilità canale (`stable` sempre, `beta` solo con
     opt-in), compatibilità minima Homun e confronto versioni semver. Il manager
     in-app deve ancora usare queste regole per fetch/install/update reali.
+81. WS9 `.hplugin` package manifest — il pacchetto plugin ha un manifest interno
+    dichiarativo (`PluginPackageManifest`) con file, digest e manifest path; la
+    validazione rifiuta pacchetti vuoti, digest non SHA-256 e path assoluti o
+    traversal. Restano builder/extractor ZIP e scan contenuto.
 
 Prima di pubblicare/taggare resta prudente ripetere lo smoke manuale in-app su
 una automazione schedulata reale con il binario aggiornato. Il primo smoke ha
