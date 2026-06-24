@@ -4,7 +4,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use local_first_capabilities::{PluginPackageFile, PluginPackageManifest, PluginRegistryEntry};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::skill_security::{self, SecurityReport};
@@ -33,6 +33,29 @@ pub struct PluginPackageInstall {
     pub version: String,
     pub install_dir: PathBuf,
     pub inspection: PluginPackageInspection,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct InstalledPluginRecord {
+    pub plugin_id: String,
+    pub version: String,
+    pub install_dir: String,
+    pub package_sha256: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct InstalledPluginRegistry {
+    pub schema_version: u32,
+    pub plugins: Vec<InstalledPluginRecord>,
+}
+
+impl Default for InstalledPluginRegistry {
+    fn default() -> Self {
+        Self {
+            schema_version: 1,
+            plugins: Vec::new(),
+        }
+    }
 }
 
 pub fn inspect_hplugin_archive(archive_bytes: &[u8]) -> Result<PluginPackageInspection, String> {
@@ -181,6 +204,48 @@ pub fn install_hplugin_package(
     })
 }
 
+pub fn load_installed_plugin_registry(path: &Path) -> Result<InstalledPluginRegistry, String> {
+    if !path.exists() {
+        return Ok(InstalledPluginRegistry::default());
+    }
+    let bytes = fs::read(path).map_err(|e| e.to_string())?;
+    let registry: InstalledPluginRegistry =
+        serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+    if registry.schema_version != 1 {
+        return Err("unsupported installed plugin registry schema".to_string());
+    }
+    Ok(registry)
+}
+
+pub fn upsert_installed_plugin_record(
+    path: &Path,
+    record: InstalledPluginRecord,
+) -> Result<InstalledPluginRegistry, String> {
+    if !is_safe_plugin_id(&record.plugin_id) {
+        return Err("unsafe installed plugin id".to_string());
+    }
+    let mut registry = load_installed_plugin_registry(path)?;
+    registry
+        .plugins
+        .retain(|plugin| plugin.plugin_id != record.plugin_id);
+    registry.plugins.push(record);
+    registry
+        .plugins
+        .sort_by(|left, right| left.plugin_id.cmp(&right.plugin_id));
+
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let tmp_path = path.with_extension(format!("tmp-{}", uuid::Uuid::new_v4()));
+    let bytes = serde_json::to_vec_pretty(&registry).map_err(|e| e.to_string())?;
+    fs::write(&tmp_path, bytes).map_err(|e| e.to_string())?;
+    fs::rename(&tmp_path, path).map_err(|e| {
+        let _ = fs::remove_file(&tmp_path);
+        e.to_string()
+    })?;
+    Ok(registry)
+}
+
 fn declared_digest_matches(declared: &PluginPackageFile, bytes: &[u8]) -> bool {
     let Some(expected) = declared.sha256.strip_prefix("sha256:") else {
         return false;
@@ -288,15 +353,19 @@ mod tests {
         assert_eq!(installed.inspection.package.plugin_id, "presentations-pro");
         assert_eq!(installed.install_dir, root.join("presentations-pro"));
         assert!(installed.install_dir.join(PACKAGE_MANIFEST_PATH).exists());
-        assert!(installed
-            .install_dir
-            .join("skills/presentations/SKILL.md")
-            .exists());
-        assert!(!fs::read_dir(&root).unwrap().any(|entry| entry
-            .unwrap()
-            .file_name()
-            .to_string_lossy()
-            .starts_with(".staging-")));
+        assert!(
+            installed
+                .install_dir
+                .join("skills/presentations/SKILL.md")
+                .exists()
+        );
+        assert!(!fs::read_dir(&root).unwrap().any(|entry| {
+            entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".staging-")
+        }));
         let _ = fs::remove_dir_all(root);
     }
 
@@ -323,11 +392,59 @@ mod tests {
 
         assert!(error.contains("does not match"));
         assert!(!root.join("other-plugin").exists());
-        assert!(!fs::read_dir(&root).unwrap().any(|entry| entry
-            .unwrap()
-            .file_name()
-            .to_string_lossy()
-            .starts_with(".staging-")));
+        assert!(!fs::read_dir(&root).unwrap().any(|entry| {
+            entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".staging-")
+        }));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn installed_plugin_registry_upserts_atomically_and_replaces_existing() {
+        let root = test_dir("installed-registry");
+        let registry_path = root.join("installed.json");
+
+        let first = upsert_installed_plugin_record(
+            &registry_path,
+            InstalledPluginRecord {
+                plugin_id: "presentations-pro".to_string(),
+                version: "1.2.3".to_string(),
+                install_dir: "/tmp/presentations-pro".to_string(),
+                package_sha256: "sha256:aaa".to_string(),
+            },
+        )
+        .unwrap();
+        assert_eq!(first.plugins.len(), 1);
+
+        let second = upsert_installed_plugin_record(
+            &registry_path,
+            InstalledPluginRecord {
+                plugin_id: "presentations-pro".to_string(),
+                version: "1.2.4".to_string(),
+                install_dir: "/tmp/presentations-pro".to_string(),
+                package_sha256: "sha256:bbb".to_string(),
+            },
+        )
+        .unwrap();
+        assert_eq!(second.plugins.len(), 1);
+        assert_eq!(second.plugins[0].version, "1.2.4");
+        assert_eq!(
+            load_installed_plugin_registry(&registry_path)
+                .unwrap()
+                .plugins[0]
+                .package_sha256,
+            "sha256:bbb"
+        );
+        assert!(!fs::read_dir(&root).unwrap().any(|entry| {
+            entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .contains(".tmp-")
+        }));
         let _ = fs::remove_dir_all(root);
     }
 

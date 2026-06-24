@@ -20545,6 +20545,24 @@ async fn install_local_plugin_package(
         code: "plugin_package_install_failed",
         message: e,
     })?;
+    let installed_registry = plugin_packages::upsert_installed_plugin_record(
+        &installed_plugin_registry_path().map_err(|e| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "plugin_registry_path_unavailable",
+            message: e.to_string(),
+        })?,
+        plugin_packages::InstalledPluginRecord {
+            plugin_id: installed.plugin_id.clone(),
+            version: installed.version.clone(),
+            install_dir: installed.install_dir.to_string_lossy().to_string(),
+            package_sha256: request.registry_entry.package_sha256.clone(),
+        },
+    )
+    .map_err(|e| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "plugin_registry_update_failed",
+        message: e,
+    })?;
 
     Ok(Json(serde_json::json!({
         "ok": true,
@@ -20553,11 +20571,16 @@ async fn install_local_plugin_package(
         "install_dir": installed.install_dir,
         "files": installed.inspection.files,
         "security": installed.inspection.security,
+        "installed_plugins": installed_registry.plugins,
     })))
 }
 
 fn installed_plugin_packages_root() -> Result<PathBuf, std::io::Error> {
     Ok(gateway_data_dir()?.join("plugins").join("installed"))
+}
+
+fn installed_plugin_registry_path() -> Result<PathBuf, std::io::Error> {
+    Ok(gateway_data_dir()?.join("plugins").join("installed.json"))
 }
 
 pub(crate) fn weekday_it(w: jiff::civil::Weekday) -> &'static str {

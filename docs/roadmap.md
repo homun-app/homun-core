@@ -358,7 +358,8 @@ primo percorso locale verde:
     verifica registry/signature/digest, staging sicuro, controllo
     `plugin_id/version` e rename atomico. Endpoint locale
     `/api/plugins/packages/install-local` disponibile per pacchetti già
-    scaricati. Restano UI, fetch/cache feed e update automatico.
+    scaricati, con registry installati `~/.homun/plugins/installed.json`
+    aggiornato atomicamente. Restano UI, fetch/cache feed e update automatico.
 
 Prima di pubblicare/taggare resta prudente ripetere lo smoke manuale in-app su
 una automazione schedulata reale con il binario aggiornato. Il primo smoke ha

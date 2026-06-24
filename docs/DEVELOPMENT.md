@@ -235,7 +235,10 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   `POST /api/plugins/packages/install-local`, che prende una `PluginRegistryEntry`
   e un path locale `.hplugin`, applica lo stesso manager e installa sotto
   `~/.homun/plugins/installed`; e' un ponte dev/desktop in attesa del download
-  dal feed. Restano UI manager, fetch/cache registry e update automatico.
+  dal feed. **WS9.3d installed registry locale/verde:** l'install API aggiorna
+  atomicamente `~/.homun/plugins/installed.json` con plugin id, versione,
+  directory installata e digest pacchetto. Restano UI manager, fetch/cache
+  registry e update automatico.
   **WS9.6 ADR locale:** ADR 0017 formalizza distribuzione, signing e licensing:
   registry hosted sul sito Homun, verifica locale deterministica, beta opt-in,
   paid predisposto con token offline e runtime sempre contenuto.
