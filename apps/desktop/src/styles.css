@@ -1965,40 +1965,6 @@ body.resizing-drawer {
   font-size: 12px;
 }
 
-.wi-artifacts {
-  margin: 2px 0 10px 6px;
-  padding: 0;
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-
-.wi-artifacts button {
-  width: 100%;
-  min-height: 28px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 8px;
-  border-radius: 8px;
-  color: var(--text);
-  background: transparent;
-  font-size: 12px;
-  text-align: left;
-}
-
-.wi-artifacts button:hover {
-  background: var(--surface-hover);
-}
-
-.wi-artifacts span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .wi-actions {
   gap: 6px;
   margin-top: 8px;
@@ -4345,7 +4311,15 @@ body.resizing-drawer {
   box-shadow: none;
 }
 .artifacts-panel.embedded .artifacts-panel-body {
-  grid-template-columns: 150px minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) 220px;
+}
+.artifacts-panel.embedded .artifacts-list {
+  order: 2;
+  border-right: 0;
+  border-left: 1px solid var(--line);
+}
+.artifacts-panel.embedded .artifacts-preview {
+  order: 1;
 }
 .workbench-files {
   flex: 1;

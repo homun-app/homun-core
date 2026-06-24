@@ -221,7 +221,8 @@ assertContains("src/components/ChatView.tsx", "<WorkspaceIsland", "closed operat
 assertContains("src/components/ChatView.tsx", "workspacePlanSteps", "workspace island must derive progress from closed operational plan markers");
 assertContains("src/components/ChatView.tsx", "Workspace island options", "workspace island must expose its expand/collapse preference menu");
 assertContains("src/components/ChatView.tsx", "wi-progress", "workspace island must render collapsible progress inside the island");
-assertContains("src/components/ChatView.tsx", "wi-artifacts", "workspace island must expose a compact artifact list, not just a count");
+assertContains("src/components/ChatView.tsx", "panel-menu-wrap--corner", "chat header must expose the right-side workspace/review menu");
+assertContains("src/components/ChatView.tsx", "<ArtifactsPanel", "artifact review must use the rich preview/diff surface in the workbench");
 assertNotContains("src/components/ChatView.tsx", "{planSteps.length > 0 && <PlanProgressCard steps={planSteps} />}", "operational plan markers must not render duplicate inline cards inside the assistant answer");
 assertContains("src/components/ChatView.tsx", "{readable && <RichMessage text={readable} streaming={streaming} />}", "assistant markdown must stay progressive while the message streams");
 assertContains("src/components/ChatView.tsx", "{planPropose && !streaming && onChoose && (", "actionable plan proposal cards must wait for a completed non-streaming message");

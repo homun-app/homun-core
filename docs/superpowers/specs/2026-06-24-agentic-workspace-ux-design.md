@@ -88,8 +88,9 @@ La Workspace Island:
 - il menu `...` permette `Auto expand`, `Always expanded` e `Always collapsed`;
 - la sezione `Progress` puo' comprimere/mostrare gli step completati, che restano
   barrati e meno prominenti rispetto al lavoro corrente;
-- `Artifacts` mostra un elenco compatto dei file quando espanso; il conteggio da
-  solo non e' sufficiente;
+- `Artifacts` e il menu header aprono una Review sidebar stile Codex con file,
+  preview, versioni e diff; il conteggio da solo non e' sufficiente e l'isola non
+  deve diventare un file browser;
 - non apre il Workbench come effetto collaterale dei controlli di espansione;
 - resta per-thread: non mostra stato di un thread diverso;
 - puo' restare visibile come riepilogo leggero quando ci sono artifact o piano

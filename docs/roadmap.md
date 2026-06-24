@@ -427,8 +427,9 @@ primo percorso locale verde e WS5 è chiusa localmente/gate:
     stesso anchor, senza pulsanti esterni o aperture accidentali del Workbench.
     Il menu `...` gestisce `Auto expand`, `Always expanded` e `Always collapsed`
     con preferenza locale; la card include `Progress` con completed collassabili.
-    `Artifacts` non resta solo un contatore: si espande in un elenco compatto
-    dei file e il click apre l'inspector artifact.
+    L'header chat espone un menu workspace/review a destra e `Artifacts` apre la
+    Review sidebar stile Codex con preview/diff/versioni, non una mini-lista
+    dentro l'isola.
     I marker `PLAN`/`ACT` escono dal corpo messaggio; il computer resta una
     `ComputerIsland` separata con preview live ed espansione, visibile solo
     durante attivita' owner del thread.

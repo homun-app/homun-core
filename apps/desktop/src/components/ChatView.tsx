@@ -237,6 +237,7 @@ export function ChatView({
   // "Artefatti" tab; File / Computer / Activity / Piano land in later phases.
   const [artifactsOpen, setArtifactsOpen] = useState(false);
   const [workbenchTab, setWorkbenchTab] = useState<WorkbenchTab>("files");
+  const [workbenchMenuOpen, setWorkbenchMenuOpen] = useState(false);
   const [artifactsInitial, setArtifactsInitial] = useState<string | null>(null);
   const [memoryArtifacts, setMemoryArtifacts] = useState<MemoryArtifactView[]>([]);
   // Is this thread a project? Reliable context signal (not keyword-detection) that gates
@@ -1657,6 +1658,49 @@ export function ChatView({
           </div>
         </div>
 
+        <div className="panel-menu-wrap panel-menu-wrap--corner">
+          <button
+            type="button"
+            className={`workbench-toggle${artifactsOpen ? " active" : ""}`}
+            aria-haspopup="menu"
+            aria-expanded={workbenchMenuOpen}
+            aria-label="Open workspace tools"
+            title="Workspace tools"
+            onClick={() => setWorkbenchMenuOpen((value) => !value)}
+          >
+            <PanelRight size={17} />
+            <ChevronDown size={13} className="workbench-toggle-caret" />
+          </button>
+          {workbenchMenuOpen && (
+            <>
+              <button
+                type="button"
+                className="panel-menu-backdrop"
+                aria-label="Close workspace menu"
+                onClick={() => setWorkbenchMenuOpen(false)}
+              />
+              <div className="panel-menu" role="menu">
+                {PANEL_VIEWS.map(({ key, label, icon: Icon }) => (
+                  <button
+                    key={key}
+                    type="button"
+                    role="menuitem"
+                    className={`panel-menu-item${workbenchTab === key && artifactsOpen ? " active" : ""}`}
+                    onClick={() => {
+                      setWorkbenchTab(key);
+                      setArtifactsInitial(null);
+                      setArtifactsOpen(true);
+                      setWorkbenchMenuOpen(false);
+                    }}
+                  >
+                    <Icon size={15} />
+                    <span>{label}</span>
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
       </header>
 
       <WorkspaceIsland
@@ -1667,8 +1711,8 @@ export function ChatView({
         status={streamStatus}
         onCaptureScreenshot={IS_DESKTOP ? () => void captureScreenshot() : undefined}
         onExportChat={() => void exportChatMarkdown()}
-        onOpenArtifact={(artifact) => {
-          setArtifactsInitial(artifact.name);
+        onOpenArtifacts={() => {
+          setArtifactsInitial(null);
           setWorkbenchTab("artifacts");
           setArtifactsOpen(true);
         }}
@@ -2064,7 +2108,7 @@ function WorkspaceIsland({
   status,
   onCaptureScreenshot,
   onExportChat,
-  onOpenArtifact,
+  onOpenArtifacts,
 }: {
   activitySteps: string[];
   artifacts: ParsedArtifact[];
@@ -2073,14 +2117,13 @@ function WorkspaceIsland({
   status: ChatStreamStatus | null;
   onCaptureScreenshot?: () => void;
   onExportChat: () => void;
-  onOpenArtifact: (artifact: ParsedArtifact) => void;
+  onOpenArtifacts: () => void;
 }) {
   const { t } = useTranslation();
   const [mode, setModeState] = useState<WorkspaceIslandMode>(() => loadWorkspaceIslandMode());
   const [expanded, setExpanded] = useState(() => loadWorkspaceIslandMode() === "expanded");
   const [menuOpen, setMenuOpen] = useState(false);
   const [completedExpanded, setCompletedExpanded] = useState(false);
-  const [artifactsExpanded, setArtifactsExpanded] = useState(false);
   const doneCount = planSteps.filter((step) => step.status === "done").length;
   const completedSteps = planSteps.filter((step) => step.status === "done");
   const openSteps = planSteps.filter((step) => step.status !== "done");
@@ -2259,25 +2302,12 @@ function WorkspaceIsland({
             className="wi-row wi-row-button"
             type="button"
             disabled={artifactsCount === 0}
-            aria-expanded={artifactsExpanded}
-            onClick={() => setArtifactsExpanded((value) => !value)}
+            onClick={onOpenArtifacts}
           >
-            {artifactsExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+            <FileText size={14} />
             <span>Artifacts</span>
             <strong>{artifactsCount}</strong>
           </button>
-          {artifactsExpanded && artifactsCount > 0 && (
-            <ol className="wi-artifacts" aria-label="Thread artifacts">
-              {artifacts.slice(0, 6).map((artifact) => (
-                <li key={artifact.name}>
-                  <button type="button" onClick={() => onOpenArtifact(artifact)}>
-                    {artifactTypeIcon(artifact.name)}
-                    <span>{artifact.projectRelativePath || artifact.name}</span>
-                  </button>
-                </li>
-              ))}
-            </ol>
-          )}
 
           <div className="wi-actions">
             {onCaptureScreenshot && (
@@ -3583,16 +3613,16 @@ type WorkbenchTab = "files" | "artifacts" | "memoria" | "goals" | "activity" | "
 // in-panel title both read from here, so labels/icons never drift. Mock interaction:
 // toggle → dropdown menu → docked panel with that view + a clean title header.
 const PANEL_VIEWS: { key: WorkbenchTab; label: string; icon: typeof FileText }[] = [
+  { key: "artifacts", label: "Review", icon: ClipboardList },
   { key: "files", label: "Files", icon: FolderOpen },
-  { key: "artifacts", label: "Artifacts", icon: FileText },
-  { key: "memoria", label: "Memory", icon: Share2 },
-  { key: "goals", label: "Goals", icon: Target },
   { key: "activity", label: "Activity", icon: Clock3 },
   { key: "plan", label: "Plan", icon: ListTodo },
+  { key: "memoria", label: "Memory", icon: Share2 },
+  { key: "goals", label: "Goals", icon: Target },
 ];
 const PANEL_VIEW_LABEL: Record<WorkbenchTab, string> = {
   files: "Files",
-  artifacts: "Artifacts",
+  artifacts: "Review",
   memoria: "Memory",
   goals: "Goals",
   activity: "Activity",
@@ -4623,7 +4653,12 @@ function Workbench({
         )}
         {tab === "artifacts" &&
           (artifacts.length > 0 ? (
-            <ArtifactsList artifacts={artifacts} initialName={artifactsInitial} />
+            <ArtifactsPanel
+              artifacts={artifacts}
+              initialName={artifactsInitial}
+              onClose={onClose}
+              embedded
+            />
           ) : (
             <div className="workbench-empty">
               <FileText size={28} />
