@@ -4114,13 +4114,34 @@ export function MemoryGraphPanel({
       links: graph.edges.map((e) => ({ source: e.source, target: e.target, label: e.label })),
     };
   }, [graph]);
+
+  const fitMemoryGraph = useCallback(
+    (duration = 320, padding = 44, options: { reheat?: boolean } = {}) => {
+      const graphApi = fgRef.current;
+      if (!graphApi || mode !== "graph") return;
+      if (options.reheat) graphApi.d3ReheatSimulation?.();
+      graphApi.zoomToFit?.(duration, padding);
+    },
+    [mode],
+  );
+
   useEffect(() => {
     if (mode !== "graph" || !graph || size.w <= 0 || size.h <= 0) return undefined;
+    let firstFrame = 0;
+    let secondFrame = 0;
     const resizeFitTimer = window.setTimeout(() => {
-      fgRef.current?.zoomToFit(300, 60);
-    }, 80);
-    return () => window.clearTimeout(resizeFitTimer);
-  }, [graph, mode, size.h, size.w]);
+      firstFrame = window.requestAnimationFrame(() => {
+        secondFrame = window.requestAnimationFrame(() => {
+          fitMemoryGraph(360, 44, { reheat: true });
+        });
+      });
+    }, 100);
+    return () => {
+      window.clearTimeout(resizeFitTimer);
+      if (firstFrame) window.cancelAnimationFrame(firstFrame);
+      if (secondFrame) window.cancelAnimationFrame(secondFrame);
+    };
+  }, [fitMemoryGraph, graph, mode, size.h, size.w]);
 
   const selectedNode = selected ? nodeById.get(selected) ?? null : null;
   const selectedEdges = useMemo(() => {
@@ -4211,7 +4232,7 @@ export function MemoryGraphPanel({
             <button type="button" onClick={() => fgRef.current?.zoom((fgRef.current?.zoom() ?? 1) * 0.77, 300)} aria-label="Zoom −">
               −
             </button>
-            <button type="button" onClick={() => fgRef.current?.zoomToFit(400, 50)} aria-label={t("chat.fitToView")}>
+            <button type="button" onClick={() => fitMemoryGraph(400, 50)} aria-label={t("chat.fitToView")}>
               ⟲
             </button>
           </div>
@@ -4292,7 +4313,7 @@ export function MemoryGraphPanel({
           nodeRelSize={4}
           nodeVal={(n: any) => n.val}
           cooldownTicks={140}
-          onEngineStop={() => fgRef.current?.zoomToFit(400, 60)}
+          onEngineStop={() => fitMemoryGraph(400, 60)}
           onNodeClick={(n: any) => {
             setSelected(n.id);
             // Focus: centre + zoom onto the clicked node and its neighbourhood.
