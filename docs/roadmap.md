@@ -224,8 +224,9 @@ primo percorso locale verde e WS5 è chiusa localmente/gate:
     materializzato in token renderer-compatible prima del render; il workflow
     applica anche un primo guardrail QA deterministico che rileva e corregge
     titoli/bullet troppo lunghi e, nel follow-up 2026-06-24, rimuove bullet
-    duplicati o identici al titolo slide prima del render. Il primo floor era
-    testuale; la slice seguente porta la verifica sull'HTML renderizzato.
+    duplicati o identici al titolo slide prima del render; il renderer HTML
+    aggiunge inoltre wrap/hyphenation robusti e self-test per token lunghi. Il
+    primo floor era testuale; la slice seguente porta la verifica sull'HTML renderizzato.
 54. WS7 rendered deck QA — il contained computer include `deck-qa`, comando
     dependency-free che apre `deck.html` con Chromium headless e misura layout
     reale via DevTools Protocol. `make_deck` e `render_deck` lo eseguono dopo il

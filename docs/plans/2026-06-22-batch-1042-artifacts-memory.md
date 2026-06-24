@@ -848,6 +848,12 @@ ragionato il contratto degli strumenti `make_*` creati dall'harness. ADR 0011
   duplicati o bullet ridondanti identici al titolo, preservando ordine e
   contenuto unico prima del render. Test mirato:
   `deck_quality_guardrails_remove_duplicate_and_title_repeated_bullets`.
+  **Follow-up WS7 renderer wrap (2026-06-24, locale/verde):**
+  `deck_render.py` espone `--self-test` e l'HTML applica `overflow-wrap` /
+  `hyphens` a titoli, bullet, body, colonne, KPI e quote per ridurre overflow
+  da token lunghi senza chiedere al modello di correggere il layout. Gate:
+  `python3 runtimes/contained-computer/deck_render.py --self-test`,
+  `python3 -m py_compile runtimes/contained-computer/deck_render.py`.
   **Dodicesima slice document QA (2026-06-23, locale/verde):**
   `make_document` valida il Markdown generato prima di scrivere artifact
   `.md`/`.pdf`/`.docx`: linee troppo lunghe, token non spezzabili oltre soglia

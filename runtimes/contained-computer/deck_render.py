@@ -201,6 +201,8 @@ body{{font-family:'{heading}',-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sa
   color:var(--ink);margin-bottom:.7em;padding-bottom:.32em;
   border-bottom:4px solid var(--accent);display:inline-block}}
 .slide h3{{font-size:1.4rem;color:var(--brand);font-weight:700;margin-bottom:.4em}}
+.slide h1,.slide h2,.slide h3,.slide li,.slide p,.slide .sub,.slide .col,
+.slide blockquote,.slide .kpi{{overflow-wrap:anywhere;hyphens:auto}}
 .body{{font-family:'{body}',-apple-system,sans-serif}}
 .slide ul{{margin-top:.4rem}}
 .slide li{{font-size:1.6rem;line-height:1.4;color:var(--muted);margin:.75rem 0;
@@ -488,10 +490,20 @@ def render_pptx(deck, base_dir, out_path):
 # ---------------------------------------------------------------------------- main
 def main():
     ap = argparse.ArgumentParser(description="Render a Homun deck JSON to HTML + PPTX.")
-    ap.add_argument("deck", help="path to deck.json")
+    ap.add_argument("deck", nargs="?", help="path to deck.json")
     ap.add_argument("--prefix", default=None, help="output prefix (default: deck file stem)")
     ap.add_argument("--no-pptx", action="store_true", help="skip the .pptx output")
+    ap.add_argument("--self-test", action="store_true", help="verify renderer quality contracts")
     args = ap.parse_args()
+
+    if args.self_test:
+        required = ["overflow-wrap:anywhere", "hyphens:auto"]
+        missing = [item for item in required if item not in _HTML_CSS]
+        print(json.dumps({"ok": not missing, "missing": missing}, ensure_ascii=False))
+        return 0 if not missing else 2
+
+    if not args.deck:
+        ap.error("the following arguments are required: deck")
 
     with open(args.deck, "r", encoding="utf-8") as fh:
         deck = json.load(fh)
@@ -540,4 +552,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
