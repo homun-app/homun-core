@@ -1820,6 +1820,7 @@ export interface InstalledPluginPackagesView {
 
 export interface TrustedPluginPublicKeysView {
   schema_version: number;
+  beta_enabled: boolean;
   public_keys: string[];
 }
 
@@ -1875,15 +1876,17 @@ async function electronTrustedPluginPublicKeys(): Promise<TrustedPluginPublicKey
   try {
     return await gatewayGetJson<TrustedPluginPublicKeysView>("/api/plugins/trusted-keys");
   } catch {
-    return { schema_version: 1, public_keys: [] };
+    return { schema_version: 1, beta_enabled: false, public_keys: [] };
   }
 }
 
 async function electronSetTrustedPluginPublicKeys(
   publicKeys: string[],
+  betaEnabled: boolean,
 ): Promise<TrustedPluginPublicKeysView> {
   return gatewayPutJson<TrustedPluginPublicKeysView>("/api/plugins/trusted-keys", {
     public_keys: publicKeys,
+    beta_enabled: betaEnabled,
   });
 }
 
@@ -2163,8 +2166,8 @@ export const coreBridge = {
   fetchPluginRegistry: (sourceUrl: string) => electronFetchPluginRegistry(sourceUrl),
   installedPluginPackages: () => electronInstalledPluginPackages(),
   trustedPluginPublicKeys: () => electronTrustedPluginPublicKeys(),
-  setTrustedPluginPublicKeys: (publicKeys: string[]) =>
-    electronSetTrustedPluginPublicKeys(publicKeys),
+  setTrustedPluginPublicKeys: (publicKeys: string[], betaEnabled: boolean) =>
+    electronSetTrustedPluginPublicKeys(publicKeys, betaEnabled),
   installPluginPackageFromRegistry: (input: {
     registry_entry: PluginRegistryEntryView;
     beta_enabled?: boolean;

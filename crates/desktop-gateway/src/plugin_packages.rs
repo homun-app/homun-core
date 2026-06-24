@@ -61,6 +61,8 @@ pub struct CachedPluginRegistry {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TrustedPluginPublicKeys {
     pub schema_version: u32,
+    #[serde(default)]
+    pub beta_enabled: bool,
     pub public_keys: Vec<String>,
 }
 
@@ -281,6 +283,7 @@ impl Default for TrustedPluginPublicKeys {
     fn default() -> Self {
         Self {
             schema_version: 1,
+            beta_enabled: false,
             public_keys: Vec::new(),
         }
     }
@@ -300,6 +303,7 @@ pub fn load_trusted_plugin_public_keys(path: &Path) -> Result<TrustedPluginPubli
 pub fn save_trusted_plugin_public_keys(
     path: &Path,
     public_keys: Vec<String>,
+    beta_enabled: bool,
 ) -> Result<TrustedPluginPublicKeys, String> {
     let mut public_keys = public_keys
         .into_iter()
@@ -310,6 +314,7 @@ pub fn save_trusted_plugin_public_keys(
     public_keys.dedup();
     let trusted = TrustedPluginPublicKeys {
         schema_version: 1,
+        beta_enabled,
         public_keys,
     };
     validate_trusted_plugin_public_keys(&trusted)?;
@@ -623,9 +628,11 @@ mod tests {
         let saved = save_trusted_plugin_public_keys(
             &path,
             vec![key.clone(), key.to_ascii_lowercase(), String::new()],
+            true,
         )
         .unwrap();
 
+        assert!(saved.beta_enabled);
         assert_eq!(saved.public_keys, vec![key.to_ascii_lowercase()]);
         assert_eq!(load_trusted_plugin_public_keys(&path).unwrap(), saved);
         let _ = fs::remove_dir_all(root);
@@ -637,7 +644,7 @@ mod tests {
         let path = root.join("trusted-keys.json");
 
         let error =
-            save_trusted_plugin_public_keys(&path, vec!["not-a-public-key".to_string()])
+            save_trusted_plugin_public_keys(&path, vec!["not-a-public-key".to_string()], false)
                 .unwrap_err();
 
         assert!(error.contains("invalid trusted plugin public key"));

@@ -5588,6 +5588,7 @@ function AddonsPane({ onChanged }: { onChanged?: () => void }) {
   const [installed, setInstalled] = useState<InstalledPluginPackagesView>({ plugins: [] });
   const [trustedKeys, setTrustedKeys] = useState<TrustedPluginPublicKeysView>({
     schema_version: 1,
+    beta_enabled: false,
     public_keys: [],
   });
   const [busy, setBusy] = useState<string | null>(null);
@@ -5660,7 +5661,12 @@ function AddonsPane({ onChanged }: { onChanged?: () => void }) {
 
   async function trustSigner(publicKey: string) {
     const nextKeys = Array.from(new Set([...trustedKeys.public_keys, publicKey.toLowerCase()]));
-    const next = await coreBridge.setTrustedPluginPublicKeys(nextKeys);
+    const next = await coreBridge.setTrustedPluginPublicKeys(nextKeys, trustedKeys.beta_enabled);
+    setTrustedKeys(next);
+  }
+
+  async function setBetaEnabled(enabled: boolean) {
+    const next = await coreBridge.setTrustedPluginPublicKeys(trustedKeys.public_keys, enabled);
     setTrustedKeys(next);
   }
 
@@ -5670,7 +5676,7 @@ function AddonsPane({ onChanged }: { onChanged?: () => void }) {
     try {
       const installedPackages = await coreBridge.installPluginPackageFromRegistry({
         registry_entry: entry,
-        beta_enabled: false,
+        beta_enabled: trustedKeys.beta_enabled,
       });
       setInstalled(installedPackages);
     } catch (error) {
@@ -5746,6 +5752,13 @@ function AddonsPane({ onChanged }: { onChanged?: () => void }) {
           <span>{t("settings.addonsFetchRegistry")}</span>
         </button>
       </div>
+      <div className="addon-beta-row">
+        <div>
+          <span>{t("settings.addonsBetaOptIn")}</span>
+          <small>{t("settings.addonsBetaOptInHint")}</small>
+        </div>
+        <Toggle on={trustedKeys.beta_enabled} onChange={() => void setBetaEnabled(!trustedKeys.beta_enabled)} />
+      </div>
       {registryError && <p className="set-hint set-hint-error">{registryError}</p>}
       {!cache ? (
         <div className="addon-empty">
@@ -5806,7 +5819,11 @@ function AddonsPane({ onChanged }: { onChanged?: () => void }) {
                       <button
                         type="button"
                         className="set-btn primary"
-                        disabled={installing || Boolean(installedPlugin) || entry.channel === "beta"}
+                        disabled={
+                          installing ||
+                          Boolean(installedPlugin) ||
+                          (entry.channel === "beta" && !trustedKeys.beta_enabled)
+                        }
                         onClick={() => void installEntry(entry)}
                       >
                         <Download size={15} />

@@ -257,8 +257,10 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   `GET/PUT /api/plugins/trusted-keys`; l'install usa la allowlist locale quando
   la richiesta non passa chiavi esplicite. Settings -> Addons puo' fidare una
   chiave signer da una entry registry e installare package stable firmati.
-  Restano feed/package reali sul sito Homun, beta opt-in esplicito e update
-  automatico.
+  **WS9.3i beta opt-in locale/verde:** lo stesso trust store persiste
+  `beta_enabled=false` di default; Settings -> Addons espone un toggle locale e
+  l'install beta resta bloccata finche' non e' attivo. Restano feed/package
+  reali sul sito Homun e update automatico.
   **WS9.6 ADR locale:** ADR 0017 formalizza distribuzione, signing e licensing:
   registry hosted sul sito Homun, verifica locale deterministica, beta opt-in,
   paid predisposto con token offline e runtime sempre contenuto.

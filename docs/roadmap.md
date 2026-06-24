@@ -364,8 +364,8 @@ primo percorso locale verde:
     percorso verificato. Settings -> Addons mostra cache marketplace e
     pacchetti installati, e puo' scaricare un registry HTTPS tramite backend.
     Il trust store locale `~/.homun/plugins/trusted-keys.json` consente di
-    fidare signer Ed25519 e installare package stable firmati dalla UI. Restano
-    beta opt-in esplicito e update automatico.
+    fidare signer Ed25519, attivare opt-in beta esplicito e installare package
+    firmati dalla UI. Resta update automatico.
 85. WS9 registry cache locale — `PluginRegistryIndex` marketplace può essere
     validato e salvato atomicamente in `~/.homun/plugins/registry-cache.json`
     tramite `GET/POST /api/plugins/registry/cache`; il gateway può anche

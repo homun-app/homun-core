@@ -20520,6 +20520,8 @@ struct FetchPluginRegistryRequest {
 struct SetTrustedPluginPublicKeysRequest {
     #[serde(default)]
     public_keys: Vec<String>,
+    #[serde(default)]
+    beta_enabled: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -20660,7 +20662,7 @@ fn install_verified_plugin_archive(
     trusted_public_keys: &[String],
 ) -> Result<Json<serde_json::Value>, GatewayError> {
     let local_trusted_keys;
-    let trusted_public_keys = if trusted_public_keys.is_empty() {
+    let (trusted_public_keys, beta_enabled) = if trusted_public_keys.is_empty() {
         local_trusted_keys = plugin_packages::load_trusted_plugin_public_keys(
             &trusted_plugin_public_keys_path().map_err(|e| GatewayError {
                 status: StatusCode::INTERNAL_SERVER_ERROR,
@@ -20673,9 +20675,12 @@ fn install_verified_plugin_archive(
             code: "plugin_trusted_keys_read_failed",
             message: e,
         })?;
-        local_trusted_keys.public_keys.as_slice()
+        (
+            local_trusted_keys.public_keys.as_slice(),
+            beta_enabled || local_trusted_keys.beta_enabled,
+        )
     } else {
-        trusted_public_keys
+        (trusted_public_keys, beta_enabled)
     };
     let install_root = installed_plugin_packages_root().map_err(|e| GatewayError {
         status: StatusCode::INTERNAL_SERVER_ERROR,
@@ -20768,6 +20773,7 @@ async fn trusted_plugin_public_keys() -> Result<Json<serde_json::Value>, Gateway
     })?;
     Ok(Json(serde_json::json!({
         "schema_version": trusted.schema_version,
+        "beta_enabled": trusted.beta_enabled,
         "public_keys": trusted.public_keys,
     })))
 }
@@ -20782,6 +20788,7 @@ async fn set_trusted_plugin_public_keys(
             message: e.to_string(),
         })?,
         request.public_keys,
+        request.beta_enabled,
     )
     .map_err(|e| GatewayError {
         status: StatusCode::BAD_REQUEST,
@@ -20791,6 +20798,7 @@ async fn set_trusted_plugin_public_keys(
     Ok(Json(serde_json::json!({
         "ok": true,
         "schema_version": trusted.schema_version,
+        "beta_enabled": trusted.beta_enabled,
         "public_keys": trusted.public_keys,
     })))
 }

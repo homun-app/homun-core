@@ -975,6 +975,8 @@
     "addonsFetchRegistry": "Scarica registry",
     "addonsTrustSigner": "Fida chiave",
     "addonsInstallPackage": "Installa",
+    "addonsBetaOptIn": "Consenti plugin beta",
+    "addonsBetaOptInHint": "Stable resta il default; i pacchetti beta richiedono questo opt-in locale esplicito.",
     "start": "Avvia",
     "stop": "Ferma",
     "starting": "Avvio…",
