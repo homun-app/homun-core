@@ -332,6 +332,9 @@ primo percorso locale verde:
     JSON marketplace separato dai manifest installati: entry con URL manifest e
     package, digest SHA-256, firma, channel, compatibilità ed entitlement. È il
     contratto per sito/install manager; non scarica ancora pacchetti.
+79. WS9 package integrity policy — le entry registry validano forma del digest
+    `sha256`, algoritmo firma `ed25519` e confronto SHA-256 sui byte pacchetto.
+    La verifica crittografica Ed25519 della firma resta lo step successivo.
 
 Prima di pubblicare/taggare resta prudente ripetere lo smoke manuale in-app su
 una automazione schedulata reale con il binario aggiornato. Il primo smoke ha

@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -248,6 +249,35 @@ pub struct PluginRegistryEntry {
     pub package_url: String,
     pub package_sha256: String,
     pub signature: PluginSignature,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PluginRegistryValidationError {
+    InvalidPackageDigest,
+    UnsupportedSignatureAlgorithm,
+}
+
+impl PluginRegistryEntry {
+    pub fn validate_metadata(&self) -> Result<(), PluginRegistryValidationError> {
+        let Some(digest) = self.package_sha256.strip_prefix("sha256:") else {
+            return Err(PluginRegistryValidationError::InvalidPackageDigest);
+        };
+        if digest.len() != 64 || !digest.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return Err(PluginRegistryValidationError::InvalidPackageDigest);
+        }
+        if self.signature.algorithm.to_ascii_lowercase() != "ed25519" {
+            return Err(PluginRegistryValidationError::UnsupportedSignatureAlgorithm);
+        }
+        Ok(())
+    }
+
+    pub fn package_digest_matches(&self, package_bytes: &[u8]) -> bool {
+        let Some(expected) = self.package_sha256.strip_prefix("sha256:") else {
+            return false;
+        };
+        let actual = format!("{:x}", Sha256::digest(package_bytes));
+        expected.eq_ignore_ascii_case(&actual)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

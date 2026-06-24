@@ -177,6 +177,37 @@ fn plugin_registry_index_declares_signed_packages() {
     assert_eq!(decoded.plugins[0].entitlement, PluginEntitlement::Paid);
 }
 
+#[test]
+fn plugin_registry_entry_validates_digest_and_signature_policy() {
+    let mut entry = sample_registry_entry();
+    entry.package_sha256 = "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824".to_string();
+
+    assert!(entry.validate_metadata().is_ok());
+    assert!(entry.package_digest_matches(b"hello"));
+    assert!(!entry.package_digest_matches(b"tampered"));
+
+    entry.signature.algorithm = "rsa".to_string();
+    assert!(entry.validate_metadata().is_err());
+}
+
+fn sample_registry_entry() -> PluginRegistryEntry {
+    PluginRegistryEntry {
+        plugin_id: "presentations-pro".to_string(),
+        version: "1.2.3".to_string(),
+        channel: PluginChannel::Stable,
+        min_homun_version: Some("0.1.1046".to_string()),
+        entitlement: PluginEntitlement::Paid,
+        manifest_url: "https://homun.app/plugins/presentations-pro/manifest.json".to_string(),
+        package_url: "https://homun.app/plugins/presentations-pro/presentations-pro-1.2.3.hplugin".to_string(),
+        package_sha256: "sha256:abc123".to_string(),
+        signature: PluginSignature {
+            algorithm: "ed25519".to_string(),
+            public_key: "pk_live_test".to_string(),
+            signature: "sig_live_test".to_string(),
+        },
+    }
+}
+
 fn sample_skill_manifest() -> SkillManifest {
     SkillManifest {
         id: "deck-local".to_string(),
