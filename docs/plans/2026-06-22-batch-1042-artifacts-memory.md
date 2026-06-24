@@ -966,6 +966,24 @@ Il caposaldo #2 ("funziona sul tier locale") oggi è verificato solo sul deck
   (capabilities, orchestrator, gateway, UI contract, build desktop, unit test
   eval/pre-release, eval syntax). **WS8 chiusa localmente/gate.**
 
+## UX — Agentic workspace coherence
+
+Principio fissato in
+[CAPISALDI.md](../CAPISALDI.md) e specifica dedicata:
+[Homun Agentic Workspace UX Design](../superpowers/specs/2026-06-24-agentic-workspace-ux-design.md).
+Homun è un **workspace agentico operativo con chat al centro**, non una chat con
+feature laterali né una dashboard generica.
+
+- 🟡 **UX.1 Prima slice**: activity/computer ownership per-thread, lifecycle del
+  dock, plan/markdown progressivi e cleanup indicatori sidebar. Obiettivo:
+  quando un lavoro parte, l'utente deve capire a quale thread appartiene, quale
+  capability sta usando, cosa aspetta, cosa ha prodotto e come riprenderlo.
+- ☐ **UX.2 Coerenza visuale leggera**: spaziature, densità, stati e gerarchia su
+  sidebar/chat/dock senza redesign invasivo.
+- ☐ **UX.3 Superfici deliverable**: dopo UX.1, riallineare Artifacts e
+  Presentations al modello workspace: artifact/versioni/provenance e template
+  come output/capability di prima classe.
+
 ## WS9 — Distribuzione plugin & marketplace
 
 Da "app con plugin" a **piattaforma**: i plugin/addon (WS7) devono avere ciclo di vita

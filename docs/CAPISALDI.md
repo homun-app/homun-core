@@ -120,10 +120,18 @@ Tutto è **scoped per `workspace_id` (progetto) + `user_id`**.
    un routing euristico parallelo. Cataloghi esterni tipo Monet sono provider/
    adapter di `template_ref` dentro il registry unico, non renderer o store
    paralleli.
-9. **Comprensione senza keyword/regex; verità verificabile.** Il core non capisce le
+9. **Homun è un workspace agentico operativo con chat al centro.** La chat è il
+   comando naturale e la timeline narrativa, ma non l'unico contenitore dello
+   stato. Piano, computer/tool activity, artifact, template e capability devono
+   avere superfici contestuali, per-thread, spiegabili e verificabili. Il prodotto
+   deve comportarsi come un action engine local-first: obiettivo → piano →
+   capability dal registry unico → esecuzione → evidenza → artifact → ripresa/
+   correzione. Vedi
+   [Homun Agentic Workspace UX Design](superpowers/specs/2026-06-24-agentic-workspace-ux-design.md).
+10. **Comprensione senza keyword/regex; verità verificabile.** Il core non capisce le
    richieste con regex/keyword (de-gemma/capable-first); la verifica è deterministica
    dove possibile.
-10. **La memoria cattura il PERCHÉ e i LOOP APERTI, non solo i fatti, e collega TUTTO
+11. **La memoria cattura il PERCHÉ e i LOOP APERTI, non solo i fatti, e collega TUTTO
    nel grafo** (codice, decisioni, artefatti, piano), con archi causali. Il lavoro
    incompiuto resta richiamabile finché non è chiuso. Obiettivo: un cervello che
    sopravvive alle chat e sa sempre il perché — **verificabile via eval**. Vedi
