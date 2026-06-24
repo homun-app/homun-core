@@ -198,7 +198,12 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   `signature`) e capability dichiarate (`panel`, `skill`, `workflow`,
   `connector`, `template_catalog`). I manifest legacy deserializzano come
   stable/free senza firma. Verifica: `cargo test -p local-first-capabilities -- --nocapture`
-  verde.
+  verde. **WS9.2 registry index contract locale/verde:** lo stesso crate espone
+  `PluginRegistryIndex` / `PluginRegistryEntry` per un feed JSON marketplace
+  separato: `schema_version`, `generated_at`, entry per plugin con channel,
+  entitlement, compatibilità minima, `manifest_url`, `package_url`,
+  `package_sha256` e firma Ed25519 dichiarata. Verifica: suite capabilities
+  verde; restano da implementare fetch/install e verifica crittografica.
   `make_research` e `make_meeting` restano dopo questo asse.
 - **WS2-3.1 PASSATA in runtime (2026-06-23):** gli artifact scritti via
   Filesystem MCP dentro la root progetto vengono registrati come

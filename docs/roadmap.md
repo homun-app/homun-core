@@ -328,6 +328,10 @@ primo percorso locale verde:
     porta i metadati distributivi necessari al marketplace: channel, compatibilità
     Homun minima, entitlement, firma opzionale e capability dichiarate. I manifest
     legacy restano validi come stable/free.
+78. WS9 plugin registry index contract — `PluginRegistryIndex` definisce il feed
+    JSON marketplace separato dai manifest installati: entry con URL manifest e
+    package, digest SHA-256, firma, channel, compatibilità ed entitlement. È il
+    contratto per sito/install manager; non scarica ancora pacchetti.
 
 Prima di pubblicare/taggare resta prudente ripetere lo smoke manuale in-app su
 una automazione schedulata reale con il binario aggiornato. Il primo smoke ha

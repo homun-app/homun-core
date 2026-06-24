@@ -1,8 +1,8 @@
 use local_first_capabilities::{
     ActionClass, CapabilityProviderKind, CapabilityTool, DataBoundary, ManagedProviderMetadata,
     PluginCapabilityDeclaration, PluginCapabilityKind, PluginChannel, PluginEntitlement,
-    PluginManifest, PluginSignature, ProviderId, SkillManifest, SkillPermissions,
-    SkillToolManifest, UserId, WorkspaceId,
+    PluginManifest, PluginRegistryEntry, PluginRegistryIndex, PluginSignature, ProviderId,
+    SkillManifest, SkillPermissions, SkillToolManifest, UserId, WorkspaceId,
 };
 
 #[test]
@@ -143,6 +143,38 @@ fn plugin_manifest_legacy_json_defaults_to_stable_free() {
     assert_eq!(decoded.min_homun_version, None);
     assert_eq!(decoded.signature, None);
     assert!(decoded.capabilities.is_empty());
+}
+
+#[test]
+fn plugin_registry_index_declares_signed_packages() {
+    let index = PluginRegistryIndex {
+        schema_version: 1,
+        generated_at: "2026-06-24T00:00:00Z".to_string(),
+        plugins: vec![PluginRegistryEntry {
+            plugin_id: "presentations-pro".to_string(),
+            version: "1.2.3".to_string(),
+            channel: PluginChannel::Stable,
+            min_homun_version: Some("0.1.1046".to_string()),
+            entitlement: PluginEntitlement::Paid,
+            manifest_url: "https://homun.app/plugins/presentations-pro/manifest.json".to_string(),
+            package_url: "https://homun.app/plugins/presentations-pro/presentations-pro-1.2.3.hplugin".to_string(),
+            package_sha256: "sha256:abc123".to_string(),
+            signature: PluginSignature {
+                algorithm: "ed25519".to_string(),
+                public_key: "pk_live_test".to_string(),
+                signature: "sig_live_test".to_string(),
+            },
+        }],
+    };
+
+    let encoded = serde_json::to_value(&index).unwrap();
+    let decoded: PluginRegistryIndex = serde_json::from_value(encoded.clone()).unwrap();
+
+    assert_eq!(encoded["schema_version"], 1);
+    assert_eq!(encoded["plugins"][0]["channel"], "stable");
+    assert_eq!(encoded["plugins"][0]["package_sha256"], "sha256:abc123");
+    assert_eq!(encoded["plugins"][0]["signature"]["algorithm"], "ed25519");
+    assert_eq!(decoded.plugins[0].entitlement, PluginEntitlement::Paid);
 }
 
 fn sample_skill_manifest() -> SkillManifest {

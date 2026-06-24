@@ -238,6 +238,26 @@ pub struct PluginCapabilityDeclaration {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PluginRegistryEntry {
+    pub plugin_id: String,
+    pub version: String,
+    pub channel: PluginChannel,
+    pub min_homun_version: Option<String>,
+    pub entitlement: PluginEntitlement,
+    pub manifest_url: String,
+    pub package_url: String,
+    pub package_sha256: String,
+    pub signature: PluginSignature,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PluginRegistryIndex {
+    pub schema_version: u32,
+    pub generated_at: String,
+    pub plugins: Vec<PluginRegistryEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PluginManifest {
     pub id: String,
     pub version: String,

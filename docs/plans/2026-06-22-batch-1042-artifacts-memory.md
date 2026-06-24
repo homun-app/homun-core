@@ -947,8 +947,13 @@ proprio — versioning, canali, scaricabili dal **sito Homun**, auto-aggiornabil
   Verifica 2026-06-24: `cargo test -p local-first-capabilities -- --nocapture`
   verde. Restano in 9.2-9.4 registry remoto, pacchetti firmati e verifica
   crittografica all'install/update.
-- ☐ **9.2 Registry/catalogo sul sito Homun**: indice JSON + pacchetti **firmati** (modello
-  come l'auto-update dell'app: feed separato per i plugin).
+- 🟡 **9.2 Registry/catalogo sul sito Homun**: **contratto indice JSON fatto** in
+  `local-first-capabilities` con `PluginRegistryIndex` / `PluginRegistryEntry`.
+  Ogni entry dichiara `manifest_url`, `package_url`, `package_sha256`, channel,
+  entitlement, compatibilità minima e firma. Verifica 2026-06-24:
+  `plugin_registry_index_declares_signed_packages` e suite capabilities verdi.
+  Restano: pubblicare il feed sul sito Homun, packaging `.hplugin`, fetch/cache
+  locale e integrazione install/update.
 - ☐ **9.3 Plugin manager in-app**: installa da registry · beta opt-in per-plugin ·
   controllo aggiornamenti + **auto-update** (confronto versioni).
 - ☐ **9.4 Sicurezza**: firma **Ed25519** verificata all'install/update; `stable`=firmato,
