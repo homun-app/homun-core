@@ -313,6 +313,10 @@ primo percorso locale verde:
     `image_generation` non ha modelli immagine disponibili. Il deck workflow può
     degradare senza immagini, ma l'utente vede prima che serve un provider
     image-capable o un refresh catalogo.
+74. WS4 deck image prompt mitigation — il workflow deck non invia più al modello
+    immagine il titolo slide esatto/quotato. Usa keyword tematiche e un vincolo
+    esplicito contro tipografia leggibile, riducendo il rischio di testo
+    storpiato nelle immagini generate.
 
 Prima di pubblicare/taggare resta prudente ripetere lo smoke manuale in-app su
 una automazione schedulata reale con il binario aggiornato. Il primo smoke ha

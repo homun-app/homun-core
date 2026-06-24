@@ -181,6 +181,9 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   **WS4 image role UX:** Settings → Model per task mostra un hint quando il
   ruolo `image_generation` non ha modelli immagine disponibili; i deck restano
   generabili senza immagini, ma la causa è esplicita prima del workflow.
+  **WS4 deck image prompt:** il workflow deck non passa più il titolo slide
+  esatto/quotato al provider immagini; usa temi/keyword e un divieto esplicito
+  di tipografia per ridurre testo storpiato nelle immagini generate.
   `make_research` e `make_meeting` restano dopo questo asse.
 - **WS2-3.1 PASSATA in runtime (2026-06-23):** gli artifact scritti via
   Filesystem MCP dentro la root progetto vengono registrati come

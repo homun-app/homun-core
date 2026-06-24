@@ -2414,6 +2414,38 @@ fn image_timeout_secs() -> u64 {
         .unwrap_or(300)
 }
 
+fn deck_slide_image_prompt(title: &str, accent: &str) -> String {
+    let topics = title
+        .split_whitespace()
+        .filter_map(|word| {
+            let clean = word
+                .chars()
+                .filter(|ch| ch.is_ascii_alphabetic() || *ch == '-')
+                .collect::<String>()
+                .trim_matches('-')
+                .to_ascii_lowercase();
+            if clean.len() < 3 {
+                None
+            } else {
+                Some(clean)
+            }
+        })
+        .take(5)
+        .collect::<Vec<_>>();
+    let topic_line = if topics.is_empty() {
+        "an abstract product narrative".to_string()
+    } else {
+        format!("themes: {}", topics.join(", "))
+    };
+
+    format!(
+        "Editorial, modern, professional slide illustration about {topic_line}. \
+Clean minimal composition, {accent} accents, abstract shapes, subtle depth, lots of negative space. \
+No typography of any kind: no readable text, words, letters, numbers, captions, labels, UI screenshots or logos. \
+Do not render the topic words as visible text."
+    )
+}
+
 async fn generate_image_png(
     http: &reqwest::Client,
     prompt: &str,
@@ -17952,11 +17984,7 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                             } else {
                                                 format!("s{idx}")
                                             };
-                                            let prompt = format!(
-                                                "Editorial, modern, professional illustration for a slide titled \"{title}\". \
-Clean minimal composition, {accent} accents, abstract shapes, lots of negative space. \
-Absolutely NO text, NO words, NO letters, NO numbers, NO captions, NO logos."
-                                            );
+                                            let prompt = deck_slide_image_prompt(&title, &accent);
                                             let _ = emit_stream_event(
                                                 &tx,
                                                 GenerateStreamEvent::Delta {
@@ -41927,6 +41955,17 @@ data: [DONE]\n";
         let _ = std::fs::remove_dir_all(&root);
 
         assert_ne!(first, second);
+    }
+
+    #[test]
+    fn deck_slide_image_prompt_avoids_rendering_title_text() {
+        let prompt = super::deck_slide_image_prompt("Local-first AI for PMI 2026", "#14947d");
+
+        assert!(!prompt.contains("\"Local-first AI for PMI 2026\""), "{prompt}");
+        assert!(!prompt.contains("PMI 2026"), "{prompt}");
+        assert!(prompt.contains("themes:"), "{prompt}");
+        assert!(prompt.contains("No typography of any kind"), "{prompt}");
+        assert!(prompt.contains("Do not render the topic words as visible text"), "{prompt}");
     }
 
     #[test]

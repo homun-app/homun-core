@@ -967,8 +967,12 @@ proprio — versioning, canali, scaricabili dal **sito Homun**, auto-aggiornabil
   bundled aggiornano una skill non editata dall'utente e restano bloccati se il
   tree su disco diverge dal record seeded. Test mirato:
   `skill_tree_hash_tracks_script_changes`.
-- ☐ **Immagini deck con testo storpiato** ("no text" ignorato) — limite del modello
-  immagine; mitigare prompt o accettare.
+- ✅ **Immagini deck con testo storpiato, mitigazione prompt (2026-06-24):**
+  il workflow deck non passa più il titolo slide esatto/quotato al provider
+  immagini; genera invece un prompt per temi/keyword e ribadisce il divieto di
+  tipografia leggibile. Resta un limite dei modelli immagine, ma il prompt non
+  li incentiva più a renderizzare il titolo. Test mirato:
+  `deck_slide_image_prompt_avoids_rendering_title_text`.
 - ✅ **Ruolo immagine opzionale (2026-06-24):** Settings → Model per task mostra
   un hint quando `image_generation` non ha modelli immagine disponibili; i deck
   possono comunque essere creati, ma l'utente vede che usciranno senza immagini
