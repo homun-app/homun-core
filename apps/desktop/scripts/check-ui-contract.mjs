@@ -83,6 +83,9 @@ assertContains("src/components/Sidebar.tsx", "nav-drawer", "expanded navigation 
 assertContains("src/components/Sidebar.tsx", "linear-sidebar-nav", "expanded sidebar must use grouped Linear-style workspace navigation");
 assertContains("src/components/Sidebar.tsx", "data-nav-section={section}", "sidebar nav rows must expose registry-driven operational sections");
 assertContains("src/components/Sidebar.tsx", "data-promoted={item.promoted === true ? \"true\" : \"false\"}", "sidebar must preserve promoted addon metadata");
+assertContains("src/components/Sidebar.tsx", "data-project-tree=\"personal\"", "sidebar must expose Personal as a first-class chat category");
+assertContains("src/components/Sidebar.tsx", "data-project-tree=\"projects\"", "sidebar must expose Projects as a first-class tree, not only a dropdown switcher");
+assertNotContains("src/components/Sidebar.tsx", "setSwitcherOpen", "project navigation must not be primarily driven by a workspace dropdown");
 assertContains("src/plugins/registry.tsx", "navSection?: \"work\" | \"create\" | \"workspace\" | \"more\"", "plugin manifest must declare sidebar placement by operational role");
 assertContains("src/plugins/presentations/index.tsx", "navSection: \"create\"", "presentations addon must be promoted into the create section");
 assertContains("src/plugins/proattivita/index.tsx", "navSection: \"work\"", "proactivity addon must be promoted into the work section");

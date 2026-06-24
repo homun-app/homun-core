@@ -407,8 +407,9 @@ primo percorso locale verde e WS5 è chiusa localmente/gate:
     scaricarlo via `POST /api/plugins/registry/fetch` da HTTPS. Restano feed e
     package reali pubblicati sul sito Homun.
 91. UX.2 Linear-inspired sidebar — prima slice locale: la sidebar aperta usa
-    sezioni operative dense (`Work`, `Create`, `Workspace`, `More`) e separa i
-    thread recenti dalla navigazione primaria. Presentations e Proactivity
+    sezioni operative dense (`Work`, `Create`, `Workspace`, `More`), tratta
+    `Personal` come categoria chat sorella dei progetti e mostra `Projects`
+    come albero diretto senza dropdown primario. Presentations e Proactivity
     restano plugin/addon tecnici, ma sono promossi dal registry/manifest tramite
     `navSection`, `promoted` e ordine, evitando hardcode e duplicazioni tra
     registry e UI.

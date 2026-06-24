@@ -3,7 +3,6 @@ import {
   Archive,
   ArchiveRestore,
   Bell,
-  Check,
   ChevronDown,
   ChevronRight,
   FolderOpen,
@@ -17,7 +16,6 @@ import {
   Search,
   Settings,
   Trash2,
-  User,
   X,
 } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -177,9 +175,6 @@ function ProjectsNav({
   const [activeWorkspaceId, setActiveWorkspaceId] = useState(PERSONAL_WORKSPACE_ID);
   const [personalThreads, setPersonalThreads] = useState<ChatThread[]>([]);
   const [busy, setBusy] = useState(false);
-  const [switcherOpen, setSwitcherOpen] = useState(false);
-  const [query, setQuery] = useState("");
-  const [showChannels, setShowChannels] = useState(true);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const [creating, setCreateting] = useState(false);
@@ -211,21 +206,16 @@ function ProjectsNav({
 
   const inProject = activeWorkspaceId !== PERSONAL_WORKSPACE_ID;
   const projects = workspaces.filter((w) => w.id !== PERSONAL_WORKSPACE_ID);
-  const activeProjectName = projects.find((w) => w.id === activeWorkspaceId)?.name;
-  const q = query.trim().toLowerCase();
-  const filteredProjects = q
-    ? projects.filter((p) => p.name.toLowerCase().includes(q))
-    : projects;
   // Chats of the ACTIVE context. Channels (WhatsApp/Telegram) live in the personal
   // scope and are mixed straight into the list — ordered by recency like every other
   // thread (their leading type icon is what tells them apart). The "homun" thread is
   // excluded (retired). Backend order is already `pinned desc, updated_at desc`.
-  const personalSource = (inProject ? personalThreads : activeThreads).filter(
-    (t) => t.status === "active",
+  const personalChats = (inProject ? personalThreads : activeThreads).filter(
+    (t) => t.status === "active" && t.threadId !== "homun",
   );
-  const contextChats = inProject
+  const projectChats = inProject
     ? activeThreads.filter((t) => t.status === "active" && t.threadId !== "homun")
-    : personalSource.filter((t) => t.threadId !== "homun");
+    : [];
 
   // Context switches re-scope memory/capabilities/artifacts-folder → full reload.
   async function selectProject(id: string) {
@@ -323,171 +313,158 @@ function ProjectsNav({
     }
   }
 
+  function renderThreadList(
+    threads: ChatThread[],
+    emptyLabel: string,
+    onSelect: (thread: ChatThread) => void,
+  ) {
+    if (threads.length === 0) return <p className="drawer-empty">{emptyLabel}</p>;
+    return threads.map((thread) => (
+      <ThreadLink
+        key={thread.threadId}
+        active={thread.threadId === activeThreadId && activeView === "chat"}
+        busy={busyThreadIds.has(thread.threadId)}
+        thread={thread}
+        onContextMenu={(e) => onThreadContextMenu(thread, e)}
+        onSelect={() => onSelect(thread)}
+      />
+    ));
+  }
+
   return (
     <>
-      {/* Context switcher (IDE-style): scales to many projects via search + recents. */}
-      <div className="ctx-switcher-wrap">
+      <section className={`drawer-project ${!inProject ? "active" : ""}`} data-project-tree="personal">
+        <div className="drawer-chats-head">
+          <span className="drawer-eyebrow">{t("sidebar.personal")}</span>
+          <button
+            className="drawer-eyebrow-add"
+            type="button"
+            disabled={busy}
+            onClick={onCreateteChatThread}
+            aria-label={t("sidebar.newChat")}
+            title={t("sidebar.newChat")}
+          >
+            <Plus size={16} />
+          </button>
+        </div>
         <button
-          className="ctx-switcher"
+          className="drawer-link drawer-project-name"
           type="button"
           disabled={busy}
-          onClick={() => setSwitcherOpen((v) => !v)}
+          onClick={() => {
+            if (inProject) void selectProject(PERSONAL_WORKSPACE_ID);
+          }}
         >
-          {inProject ? (
-            <FolderOpen size={14} />
-          ) : (
-            <span className="ctx-switcher-chip" aria-hidden="true" />
-          )}
-          <span className="ctx-switcher-name">
-            {inProject ? (activeProjectName ?? t("sidebar.project")) : t("sidebar.personal")}
-          </span>
-          <ChevronDown size={14} />
+          <span className="ctx-switcher-chip" aria-hidden="true" />
+          <span className="drawer-link-title">{t("sidebar.personal")}</span>
         </button>
-        {switcherOpen && (
-          <>
-            <div
-              className="ctx-menu-backdrop"
-              role="presentation"
-              onClick={() => setSwitcherOpen(false)}
-            />
-            <div className="ctx-menu" role="menu">
-              <input
-                className="ctx-menu-search"
-                placeholder={t("sidebar.searchProject")}
-                value={query}
-                autoFocus
-                onChange={(e) => setQuery(e.target.value)}
-              />
+        {!inProject && (
+          <div className="drawer-project-chats">
+            {renderThreadList(personalChats, t("sidebar.noChatsYet"), (thread) => {
+              void openPersonalThread(thread.threadId);
+            })}
+          </div>
+        )}
+      </section>
+
+      <section className="drawer-section drawer-projects-tree" data-project-tree="projects">
+        <div className="drawer-chats-head">
+          <span className="drawer-eyebrow">{t("sidebar.projects")}</span>
+          <button
+            className="drawer-eyebrow-add"
+            type="button"
+            disabled={busy}
+            onClick={() => {
+              setNewName("");
+              setNewFolder(null);
+              setError(null);
+              setCreateting(true);
+            }}
+            aria-label={t("sidebar.newProject")}
+            title={t("sidebar.newProject")}
+          >
+            <Plus size={16} />
+          </button>
+        </div>
+        {projects.length === 0 && <p className="drawer-empty">{t("sidebar.noProjects")}</p>}
+        {projects.map((project) => (
+          <div
+            key={project.id}
+            className={`drawer-project ${project.id === activeWorkspaceId ? "active" : ""}`}
+          >
+            <div className="drawer-project-row">
               <button
-                className={`ctx-menu-item ${!inProject ? "active" : ""}`}
+                className="drawer-link drawer-project-name"
                 type="button"
+                disabled={busy}
                 onClick={() => {
-                  setSwitcherOpen(false);
-                  if (inProject) void selectProject(PERSONAL_WORKSPACE_ID);
+                  if (project.id !== activeWorkspaceId) void selectProject(project.id);
                 }}
               >
-                <User size={14} />
-                <span>{t("sidebar.personal")}</span>
-                {!inProject && <Check size={14} />}
+                <FolderOpen size={14} />
+                <span className="drawer-link-title">{project.name}</span>
               </button>
-              <div className="ctx-menu-label">{t("sidebar.projects")}</div>
-              {filteredProjects.length === 0 && <p className="ctx-menu-empty">{t("sidebar.noProjects")}</p>}
-              {filteredProjects.map((project) =>
-                editingId === project.id ? (
-                  <div key={project.id} className="ctx-menu-edit">
-                    <input
-                      autoFocus
-                      value={editName}
-                      onChange={(e) => setEditName(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") void renameProject(project.id);
-                        if (e.key === "Escape") setEditingId(null);
-                      }}
-                    />
-                    <div className="ctx-menu-edit-actions">
-                      <button
-                        className="link-button"
-                        type="button"
-                        disabled={busy}
-                        title={project.folder ?? t("sidebar.noFolder")}
-                        onClick={() => void linkProjectFolder(project.id)}
-                      >
-                        {t("sidebar.folder")}
-                      </button>
-                      <button
-                        className="link-button danger"
-                        type="button"
-                        disabled={busy}
-                        onClick={() => void deleteProject(project.id)}
-                      >
-                        Delete
-                      </button>
-                      <button
-                        className="primary-button"
-                        type="button"
-                        disabled={busy || !editName.trim()}
-                        onClick={() => void renameProject(project.id)}
-                      >
-                        Save
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <div key={project.id} className="ctx-menu-row">
-                    <button
-                      className={`ctx-menu-item ${project.id === activeWorkspaceId ? "active" : ""}`}
-                      type="button"
-                      onClick={() => {
-                        setSwitcherOpen(false);
-                        if (project.id !== activeWorkspaceId) void selectProject(project.id);
-                      }}
-                    >
-                      <FolderOpen size={14} />
-                      <span>{project.name}</span>
-                      {project.id === activeWorkspaceId && <Check size={14} />}
-                    </button>
-                    <button
-                      className="ctx-menu-edit-btn"
-                      type="button"
-                      aria-label={`Edit ${project.name}`}
-                      disabled={busy}
-                      onClick={() => {
-                        setEditingId(project.id);
-                        setEditName(project.name);
-                      }}
-                    >
-                      <Pencil size={12} />
-                    </button>
-                  </div>
-                ),
-              )}
               <button
-                className="ctx-menu-create"
+                className="drawer-edit-btn"
                 type="button"
+                aria-label={`Edit ${project.name}`}
+                disabled={busy}
                 onClick={() => {
-                  setSwitcherOpen(false);
-                  setNewName("");
-                  setNewFolder(null);
-                  setError(null);
-                  setCreateting(true);
+                  setEditingId(project.id);
+                  setEditName(project.name);
                 }}
               >
-                <FolderPlus size={14} />
-                <span>{t("sidebar.newProject")}</span>
+                <Pencil size={12} />
               </button>
             </div>
-          </>
-        )}
-      </div>
-
-      <div className="drawer-chats-head">
-        <span className="drawer-eyebrow">Recent</span>
-        <button
-          className="drawer-eyebrow-add"
-          type="button"
-          disabled={busy}
-          onClick={onCreateteChatThread}
-          aria-label={t("sidebar.newChat")}
-          title={t("sidebar.newChat")}
-        >
-          <Plus size={16} />
-        </button>
-      </div>
-
-      <section className="drawer-section drawer-chats">
-        {contextChats.length === 0 && <p className="drawer-empty">{t("sidebar.noChatsYet")}</p>}
-        {contextChats.map((thread) => (
-          <ThreadLink
-            key={thread.threadId}
-            active={thread.threadId === activeThreadId && activeView === "chat"}
-            busy={busyThreadIds.has(thread.threadId)}
-            thread={thread}
-            onContextMenu={(e) => onThreadContextMenu(thread, e)}
-            onSelect={() => {
-              if (inProject) onSelectThread(thread.threadId);
-              else void openPersonalThread(thread.threadId);
-            }}
-          />
+            {editingId === project.id && (
+              <div className="drawer-project-edit">
+                <input
+                  autoFocus
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") void renameProject(project.id);
+                    if (e.key === "Escape") setEditingId(null);
+                  }}
+                />
+                <div className="drawer-project-edit-actions">
+                  <button
+                    className="link-button"
+                    type="button"
+                    disabled={busy}
+                    title={project.folder ?? t("sidebar.noFolder")}
+                    onClick={() => void linkProjectFolder(project.id)}
+                  >
+                    {t("sidebar.folder")}
+                  </button>
+                  <button
+                    className="link-button danger"
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void deleteProject(project.id)}
+                  >
+                    Delete
+                  </button>
+                  <button
+                    className="primary-button"
+                    type="button"
+                    disabled={busy || !editName.trim()}
+                    onClick={() => void renameProject(project.id)}
+                  >
+                    Save
+                  </button>
+                </div>
+              </div>
+            )}
+            {project.id === activeWorkspaceId && (
+              <div className="drawer-project-chats">
+                {renderThreadList(projectChats, t("sidebar.noChatsYet"), (thread) => {
+                  onSelectThread(thread.threadId);
+                })}
+              </div>
+            )}
+          </div>
         ))}
       </section>
 

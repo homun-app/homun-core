@@ -77,8 +77,9 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   `ChatComputerPanel` richiede attività running e owner uguale al thread attivo.
   **UX.2 sidebar in corso:** prima slice di coerenza visuale leggera applicata
   alla sidebar aperta, con riferimento Linear: sezioni operative dense
-  (`Work`, `Create`, `Workspace`, `More`), thread recenti separati e
-  promozione plugin/addon guidata dal manifest (`navSection`, `promoted`,
+  (`Work`, `Create`, `Workspace`, `More`), `Personal` come categoria chat
+  sorella dei progetti, `Projects` come albero diretto senza dropdown primario,
+  e promozione plugin/addon guidata dal manifest (`navSection`, `promoted`,
   ordine) invece che da hardcode. **Prossimo passo unico:** verificare in app la
   nuova sidebar, poi continuare su micro-slice UX.2 chat/dock o tornare a WS7
   qualita' deliverable senza riaprire memoria/WS1/WS8 salvo regressioni.

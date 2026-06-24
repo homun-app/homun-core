@@ -140,7 +140,10 @@ riflettere la natura tecnica degli addon, ma il loro ruolo operativo.
 - **Workspace**: risorse del workspace come Projects, Artifacts, Memory quando
   hanno una superficie diretta.
 - **More**: addon, connector o strumenti abilitati ma non promossi.
-- **Recent**: thread/task recenti del workspace corrente.
+- **Personal**: categoria di chat non legate a un progetto, pari ai progetti ma
+  semanticamente distinta da essi.
+- **Projects**: lista diretta dei workspace/progetti, senza dropdown primario;
+  il progetto attivo si espande e mostra i thread recenti.
 
 Gli addon dichiarano `navSection`, `promoted` e ordine nel manifest/registry. La
 sidebar usa questi metadata per promuovere una capability senza hardcode.

@@ -986,7 +986,9 @@ feature laterali né una dashboard generica.
 - 🟡 **UX.2 Coerenza visuale leggera**: spaziature, densità, stati e gerarchia su
   sidebar/chat/dock senza redesign invasivo. Prima slice sidebar: ispirazione
   Linear, nav raggruppata per ruolo operativo (`work`, `create`, `workspace`,
-  `more`) e plugin/addon promossi dal registry/manifest invece che hardcoded.
+  `more`), `Personal` come categoria chat sorella dei progetti, `Projects` come
+  albero diretto e plugin/addon promossi dal registry/manifest invece che
+  hardcoded.
 - ☐ **UX.3 Superfici deliverable**: dopo UX.1, riallineare Artifacts e
   Presentations al modello workspace: artifact/versioni/provenance e template
   come output/capability di prima classe.
