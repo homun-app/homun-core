@@ -30,6 +30,7 @@ import {
   subscribeAppEvents,
   type AppEvent,
   type AutomationCreateteInput,
+  type ChatAttachmentInput,
   type ManagedAutomation,
   type CoreApprovelItem,
   type CoreChatAttachment,
@@ -43,6 +44,7 @@ import {
   type CoreTaskQueueSnapshot,
   type ProactivitySuggestion,
   type PluginState,
+  type TemplateCatalogEntry,
 } from "./lib/coreBridge";
 import { useSetting } from "./lib/settingsStore";
 import { showSystemNotification, notificationPermission } from "./lib/systemNotifications";
@@ -775,6 +777,87 @@ export default function App() {
     }
   }
 
+  async function handleStartTemplateWorkflow(input: {
+    template: TemplateCatalogEntry;
+    sourcePath: string;
+    displayName: string;
+    mimeType: string;
+    sizeBytes: number;
+  }) {
+    const attachment: ChatAttachmentInput = {
+      localPath: input.sourcePath,
+      displayName: input.displayName,
+      mimeType: input.mimeType,
+      sizeBytes: input.sizeBytes,
+    };
+    const visiblePrompt = `Aiutami a creare una presentazione usando il template importato "${input.template.name}".`;
+    const operativePrompt = [
+      `L'utente ha appena importato un template PowerPoint e vuole usarlo per creare una nuova presentazione.`,
+      `template_ref=${input.template.id}`,
+      `template_name=${input.template.name}`,
+      `source_provider=${input.template.source_provider ?? "user_upload"}`,
+      `attached_file=${input.displayName}`,
+      "",
+      "Non generare ancora il deck.",
+      "Analizza il template allegato come vincolo di stile, layout e tono visivo.",
+      "Fai prima 2-4 domande essenziali per capire obiettivo, pubblico, contenuti disponibili, numero di slide e tono.",
+      "Poi proponi un piano sintetico e attendi conferma prima di usare make_deck.",
+      `Quando l'utente conferma l'esecuzione, usa make_deck con template_ref="${input.template.id}".`,
+    ].join("\n");
+    let startedThreadId: string | null = null;
+    try {
+      const created = mapCoreChatThread(await coreBridge.createChatThread());
+      startedThreadId = created.threadId;
+      const messages = await coreBridge.chatMessages(created.threadId);
+      setChatThreads((current) => [
+        created,
+        ...current.filter((thread) => thread.threadId !== created.threadId),
+      ]);
+      setThreadMessages((current) => ({
+        ...current,
+        [created.threadId]: messages.messages.map(mapCoreChatMessage),
+      }));
+      setActiveThreadId(created.threadId);
+      setSelectedTaskId(created.taskId);
+      setActiveView("chat");
+      setStreamingThreadId(created.threadId);
+      const requestId = `template_workflow_${Date.now()}_${Math.random()
+        .toString(36)
+        .slice(2)}`;
+      await coreBridge.submitChatPromptStream(
+        requestId,
+        created.threadId,
+        created.computerSessionId,
+        operativePrompt,
+        [attachment],
+        visiblePrompt,
+        undefined,
+        undefined,
+        "plan",
+      );
+      const refreshed = await coreBridge.chatMessages(created.threadId);
+      const mappedMessages = refreshed.messages.map(mapCoreChatMessage);
+      setThreadMessages((current) => ({
+        ...current,
+        [created.threadId]: mappedMessages,
+      }));
+      setChatThreads((current) =>
+        current.map((thread) =>
+          thread.threadId === created.threadId
+            ? updateThreadPreview(thread, mappedMessages)
+            : thread,
+        ),
+      );
+      await refreshChatReadModels(created.threadId);
+    } catch (error) {
+      console.warn("start_template_workflow unavailable", error);
+    } finally {
+      setStreamingThreadId((current) =>
+        startedThreadId && current === startedThreadId ? null : current,
+      );
+    }
+  }
+
   async function reloadPlugins() {
     setPluginStates(await coreBridge.plugins());
   }
@@ -798,7 +881,10 @@ export default function App() {
     })),
   ];
   // The host capability surface handed to each plugin panel (ADR 0011 §6).
-  const pluginHost: PluginHost = { openChat: handleOpenSuggestion };
+  const pluginHost: PluginHost = {
+    openChat: handleOpenSuggestion,
+    startTemplateWorkflow: handleStartTemplateWorkflow,
+  };
 
   async function applyThreadSnapshot(snapshot: CoreChatThreadSnapshot) {
     const mappedThreads = snapshot.threads.map(mapCoreChatThread);

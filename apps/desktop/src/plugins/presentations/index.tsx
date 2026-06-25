@@ -21,7 +21,7 @@ export const presentationsPlugin: PluginManifest = {
   promoted: true,
   navOrder: 10,
   capabilities: ["artifacts.read", "artifacts.write", "images.generate"],
-  Panel: () => <BrandKitPanel />,
+  Panel: ({ host }) => <BrandKitPanel host={host} />,
   registerI18n: (i18n: I18n) => {
     i18n.addResourceBundle("en", "presentations", en);
     i18n.addResourceBundle("it", "presentations", it);

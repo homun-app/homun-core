@@ -4,6 +4,7 @@ import { Copy, FileText, ImageIcon, Presentation, Save, Upload } from "lucide-re
 import { copyText } from "../lib/clipboard";
 import { coreBridge, type BrandKit, type TemplateCatalogEntry } from "../lib/coreBridge";
 import { fileLocalPathFromBridge } from "../lib/gatewayConfig";
+import type { PluginHost } from "../plugins/registry";
 
 const DEFAULT_KIT: BrandKit = {
   organization: "",
@@ -19,7 +20,7 @@ const COLOR_KEYS = ["primary_color", "secondary_color", "accent_color"] as const
 
 /** The Presentations plugin's panel: the persistent BRAND KIT (colours, fonts, logo)
  *  that the on-brand deck/document generators apply. Stored gateway-side. */
-export function BrandKitPanel() {
+export function BrandKitPanel({ host }: { host: PluginHost }) {
   const { t } = useTranslation();
   const [kit, setKit] = useState<BrandKit>(DEFAULT_KIT);
   const [loading, setLoading] = useState(true);
@@ -197,12 +198,12 @@ export function BrandKitPanel() {
         </div>
       </section>
 
-      <TemplateCatalogGallery />
+      <TemplateCatalogGallery host={host} />
     </div>
   );
 }
 
-function TemplateCatalogGallery() {
+function TemplateCatalogGallery({ host }: { host: PluginHost }) {
   const { t } = useTranslation();
   const [templates, setTemplates] = useState<TemplateCatalogEntry[]>([]);
   const [filter, setFilter] = useState<"all" | "presentation" | "document">("all");
@@ -240,7 +241,7 @@ function TemplateCatalogGallery() {
     const name = file.name.replace(/\.(pptx|potx)$/i, "");
     setImporting(true);
     try {
-      await coreBridge.importPptxTemplate({
+      const imported = await coreBridge.importPptxTemplate({
         source_path: sourcePath,
         name,
         source_provider: "user_upload",
@@ -249,6 +250,17 @@ function TemplateCatalogGallery() {
         tags: ["imported", "pptx"],
       });
       await refreshTemplates();
+      await host.startTemplateWorkflow({
+        template: imported,
+        sourcePath,
+        displayName: file.name,
+        mimeType:
+          file.type ||
+          (sourcePath.toLowerCase().endsWith(".potx")
+            ? "application/vnd.openxmlformats-officedocument.presentationml.template"
+            : "application/vnd.openxmlformats-officedocument.presentationml.presentation"),
+        sizeBytes: file.size,
+      });
     } catch (error) {
       setImportError(error instanceof Error ? error.message : "Could not import PPTX template.");
     } finally {

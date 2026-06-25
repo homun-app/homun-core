@@ -1049,10 +1049,17 @@ feature laterali né una dashboard generica.
   espongono metadata sicuri (`source_provider`, licenza/attribuzione,
   `redistribution_policy`, `is_imported`) senza path assoluti; la UI mostra
   `Import PPTX` e badge `Local`/provider/attribution; `make_deck` registra sugli
-  artifact metadata `template_*` per provenance e attribuzione. Resta da fare:
-  smoke runtime import in Electron, thumbnail reali, catalogo "Powered by
-  SlidesCarnival" con ricerca/filtri/import esplicito e, dopo, vero slide-cloning
-  del PPTX importato. Spec:
+  artifact metadata `template_*` per provenance e attribuzione. Follow-up
+  locale/verde: l'import manuale apre subito una nuova chat con il PPTX allegato
+  e un turno in modalità piano; il prompt operativo contiene `template_ref` e
+  vieta la generazione immediata, chiedendo prima 2-4 informazioni essenziali e
+  attendendo conferma prima di chiamare `make_deck`. Il bridge ora preserva gli
+  allegati utente nel commit dello stream, quindi il template importato resta
+  visibile nella conversazione. Gate: `npm run test:ui-contract`, `npm run
+  build`, `git diff --check`. Resta da fare: smoke runtime import→chat→plan in
+  Electron, thumbnail reali, catalogo "Powered by SlidesCarnival" con
+  ricerca/filtri/import esplicito e, dopo, vero slide-cloning del PPTX importato.
+  Spec:
   `docs/superpowers/specs/2026-06-25-real-pptx-template-import-design.md`.
 
 ## WS9 — Distribuzione plugin & marketplace

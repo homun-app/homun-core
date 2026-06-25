@@ -173,7 +173,13 @@ assertContains("src/components/BrandKitPanel.tsx", "selection_notes", "template 
 assertContains("src/components/BrandKitPanel.tsx", "entry.selection_notes ?? []", "template gallery must tolerate legacy catalog entries without selection_notes");
 assertContains("src/components/BrandKitPanel.tsx", "Import PPTX", "Presentations must expose manual PPTX template import");
 assertContains("src/components/BrandKitPanel.tsx", "attribution_required", "Presentations must surface attribution state for imported/source templates");
+assertContains("src/components/BrandKitPanel.tsx", "host.startTemplateWorkflow", "PPTX import must open a template-guided chat workflow instead of only copying a reference");
+assertContains("src/plugins/registry.tsx", "startTemplateWorkflow", "plugin host must expose a typed template workflow handoff");
+assertContains("src/App.tsx", "handleStartTemplateWorkflow", "App must own the template workflow chat creation path");
+assertContains("src/App.tsx", "template_ref=", "template workflow prompt must preserve the canonical template reference");
+assertContains("src/App.tsx", "Non generare ancora il deck.", "template workflow must start with discovery and planning, not immediate deck generation");
 assertContains("src/lib/coreBridge.ts", "importPptxTemplate", "Desktop bridge must expose PPTX template import");
+assertContains("src/lib/coreBridge.ts", "attachments?: CoreChatAttachment[]", "streamed prompt commits must be able to preserve user attachments");
 
 assertContains("src/components/ChatView.tsx", "coreBridge.submitChatPromptStream", "composer must submit prompts through the local chat transport");
 assertContains("src/lib/coreBridge.ts", "submitBrowserRuntimeChatPromptStream", "Electron bridge must stream from the local Gemma runtime through Electron-safe transport");

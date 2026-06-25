@@ -347,8 +347,11 @@ primo percorso locale verde e WS5 è chiusa localmente/gate:
     (`source_provider`, licenza/attribuzione, `redistribution_policy`,
     `is_imported`), UI `Import PPTX` con badge provider/attribuzione e
     metadata `template_*` sugli artifact `make_deck`. Il renderer usa ancora il
-    template come evidenza/provenance, non clona ancora le slide del PPTX reale:
-    quello resta la slice successiva dopo smoke Electron e catalogo
+    template come evidenza/provenance, non clona ancora le slide del PPTX reale.
+    Follow-up locale/verde: l'import ora apre una nuova chat con il PPTX
+    allegato e avvia un turno in modalità piano con `template_ref`, chiedendo
+    prima le informazioni essenziali e attendendo conferma prima di chiamare
+    `make_deck`. Quello resta la slice successiva dopo smoke Electron e catalogo
     SlidesCarnival con import esplicito.
 74. WS8 gateway contract eval — `scripts/eval_suite.py` può ora, se configurato
     con `HOMUN_EVAL_GATEWAY_BASE` e token, verificare anche il gateway reale:
@@ -579,9 +582,10 @@ Sedicesima slice: prima gallery UI nel plugin Presentations. Diciassettesima
 slice: preview built-in per i seed locali, renderizzate dalla gallery usando i
 token del catalogo. Diciottesima slice: import manuale di template PowerPoint
 reali `.pptx`/`.potx` come pack locali con manifest, metadata sicuri in
-API/bridge, UI `Import PPTX` e provenance `template_*` sugli artifact. Prossimo
-asse: smoke runtime Electron, catalogo "Powered by SlidesCarnival" con
-ricerca/filtri/import esplicito, thumbnail reali e poi vero slide-cloning da
-PPTX importato.
+API/bridge, UI `Import PPTX` e provenance `template_*` sugli artifact.
+Follow-up: l'import apre una nuova chat con allegato PPTX e piano guidato con
+`template_ref`, non una semplice copia del riferimento. Prossimo asse: smoke
+runtime Electron, catalogo "Powered by SlidesCarnival" con ricerca/filtri/import
+esplicito, thumbnail reali e poi vero slide-cloning da PPTX importato.
 `make_research` e `make_meeting` restano futuri.
 Il contratto corrente della memoria è in [MEMORIA.md](MEMORIA.md).

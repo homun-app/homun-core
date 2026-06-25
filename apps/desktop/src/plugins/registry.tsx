@@ -4,13 +4,20 @@ import type { ComponentType } from "react";
 import type { LucideIcon } from "lucide-react";
 import { presentationsPlugin } from "./presentations";
 import { proattivitaPlugin } from "./proattivita";
-import type { ProactivitySuggestion } from "../lib/coreBridge";
+import type { ProactivitySuggestion, TemplateCatalogEntry } from "../lib/coreBridge";
 
 // The host-provided capability surface a plugin's panel may use (ADR 0011 §6).
 // In path A this is a plain object; in path B it becomes the typed postMessage
 // bridge across the iframe boundary — same shape, so conversion is mechanical.
 export interface PluginHost {
   openChat: (suggestion: ProactivitySuggestion) => void | Promise<void>;
+  startTemplateWorkflow: (input: {
+    template: TemplateCatalogEntry;
+    sourcePath: string;
+    displayName: string;
+    mimeType: string;
+    sizeBytes: number;
+  }) => void | Promise<void>;
 }
 
 export interface PluginPanelProps {

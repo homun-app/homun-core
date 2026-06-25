@@ -815,7 +815,7 @@ function corePromptMessageToChatMessage(
     saved_memory_ref: null,
     linked_task_id: null,
     linked_automation_ref: null,
-    attachments: [],
+    attachments: message.attachments ?? [],
   };
 }
 

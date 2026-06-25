@@ -259,6 +259,7 @@ export interface CorePromptMessage {
   timestamp: string;
   metadata: string | null;
   metrics: CoreChatMessageMetrics | null;
+  attachments?: CoreChatAttachment[];
 }
 
 export interface CorePromptSubmissionResult {
@@ -3458,6 +3459,7 @@ async function submitBrowserRuntimeChatPromptStream(
 
   const timestamp = currentTimestampSeconds();
   const totalElapsedSeconds = roundedSeconds((performance.now() - startedAt) / 1000);
+  const promptAttachments = (attachments ?? []).map(coreAttachmentFromInput);
   const assistantText = previousAssistantText
     ? joinContinuetionText(previousAssistantText, text)
     : text.trim();
@@ -3470,6 +3472,7 @@ async function submitBrowserRuntimeChatPromptStream(
       timestamp,
       metadata: null,
       metrics: null,
+      attachments: promptAttachments,
     },
     assistant_message: {
       id: assistantMessageId ?? `browser_assistant_${Date.now()}`,
@@ -3507,6 +3510,26 @@ async function submitBrowserRuntimeChatPromptStream(
   }
   result.computer_session = await electronLocalComputerSession(sessionId);
   return result;
+}
+
+function coreAttachmentFromInput(
+  attachment: ChatAttachmentInput,
+  index: number,
+): CoreChatAttachment {
+  return {
+    artifact_id: `pending_${Date.now()}_${index}`,
+    title_redacted: attachment.displayName,
+    kind: attachmentKindFromMime(attachment.mimeType),
+    size_bytes: attachment.sizeBytes,
+    preview_available: attachment.mimeType.startsWith("image/"),
+    privacy_domain: "local_files",
+  };
+}
+
+function attachmentKindFromMime(mimeType: string): CoreChatAttachment["kind"] {
+  if (mimeType.startsWith("image/")) return "image";
+  if (mimeType.startsWith("text/") || mimeType === "application/json") return "text";
+  return "file";
 }
 
 // Reattaches to an in-flight (or just-finished, within the server grace window)

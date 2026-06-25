@@ -2,7 +2,7 @@
 
 > **Punto d'ingresso unico.** Da qui si parte e si torna. Questo file è SEMPRE
 > aggiornato: se cambia una scelta importante, si aggiorna qui (o nel doc linkato).
-> Ultimo aggiornamento: 2026-06-24.
+> Ultimo aggiornamento: 2026-06-25.
 
 ## North Star
 
@@ -149,10 +149,17 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   licenza/attribuzione, policy, `is_imported`) senza path locali; il plugin
   Presentations mostra `Import PPTX` e badge `Local`/provider/attribution; gli
   artifact `make_deck` registrano nei metadata provenance `template_*`
-  (provider, source, license, attribution) insieme alla QA. **Prossimo passo
-  unico:** completare WS7 con smoke runtime import PPTX in Electron e poi
-  catalogo "Powered by SlidesCarnival" con ricerca/filtri/import esplicito; il
-  vero slide-cloning da PPTX reale resta slice successiva del renderer.
+  (provider, source, license, attribution) insieme alla QA. Follow-up locale:
+  `Import PPTX` non copia piu' soltanto il `template_ref`; dopo l'import apre
+  una nuova chat con il PPTX allegato, prompt visibile di avvio presentazione e
+  prompt operativo nascosto in modalità piano con `template_ref=<local/...>`,
+  chiedendo prima le informazioni essenziali e attendendo conferma prima di
+  chiamare `make_deck`. Il commit dello stream preserva gli allegati utente, così
+  il template resta visibile nella conversazione. Gate: `npm run
+  test:ui-contract`, `npm run build`, `git diff --check`. **Prossimo passo
+  unico:** smoke runtime in Electron del nuovo import→chat→plan, poi catalogo
+  "Powered by SlidesCarnival" con ricerca/filtri/import esplicito; il vero
+  slide-cloning da PPTX reale resta slice successiva del renderer.
   Spec: [Real PPTX Template Import and SlidesCarnival-Powered Catalog](superpowers/specs/2026-06-25-real-pptx-template-import-design.md).
 - **Direzione WS7 aggiornata:** l'obiettivo deliverable non è una gallery statica
   clonata tool-per-tool, ma un **design system dichiarativo condiviso** per
