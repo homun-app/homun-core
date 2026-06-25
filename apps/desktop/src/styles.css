@@ -1289,6 +1289,78 @@ body.resizing-drawer {
   box-shadow: var(--shadow-menu);
 }
 
+.drawer-new-chat-menu {
+  width: 280px;
+  max-width: min(280px, calc(100vw - 24px));
+}
+
+.drawer-new-chat-search {
+  height: 34px;
+  margin: 2px 2px 6px;
+  padding: 0 9px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  background: var(--surface);
+}
+
+.drawer-new-chat-search input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+
+.drawer-new-chat-projects {
+  max-height: 264px;
+  overflow-y: auto;
+  padding-right: 1px;
+}
+
+.drawer-new-chat-projects::-webkit-scrollbar {
+  width: 4px;
+}
+
+.drawer-new-chat-projects::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--muted) 32%, transparent);
+  border-radius: 999px;
+}
+
+.drawer-new-chat-label {
+  display: block;
+  padding: 7px 8px 4px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.drawer-new-chat-actions {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+}
+
+.drawer-new-chat-empty,
+.drawer-new-chat-error {
+  margin: 6px 8px;
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--muted);
+}
+
+.drawer-new-chat-error {
+  color: var(--danger);
+}
+
 .thread-context-menu button {
   width: 100%;
   min-height: 32px;

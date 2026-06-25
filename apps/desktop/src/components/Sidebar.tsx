@@ -30,6 +30,7 @@ import { useNotificationCount } from "../lib/useNotificationCount";
 
 // The base personal workspace ("Predefinito"): always present, never a "project".
 const PERSONAL_WORKSPACE_ID = "local-workspace";
+const NEW_CHAT_PROJECT_LIMIT = 8;
 const NAV_SECTION_LABELS: Record<NonNullable<NavItem["navSection"]>, string> = {
   work: "Work",
   create: "Create",
@@ -159,7 +160,7 @@ interface ProjectsNavProps {
   busyThreadIds: Set<string>;
   onArchiveChatThread: (threadId: string) => void;
   onSelectThread: (threadId: string) => void;
-  onCreateteChatThread: () => void;
+  onCreateteChatThread: (workspaceId?: string) => void;
   onSetChatThreadPinned: (threadId: string, pinned: boolean) => void;
   onThreadContextMenu: (thread: ChatThread, event: MouseEvent<HTMLElement>) => void;
 }
@@ -174,6 +175,15 @@ type ProjectModalState =
       name: string;
       folder: string | null;
     };
+
+type NewChatProjectModalState = {
+  name: string;
+  folder: string | null;
+};
+
+function folderDisplayName(folder: string): string {
+  return folder.split("/").filter(Boolean).at(-1) ?? "Project";
+}
 
 function ProjectsNav({
   activeView,
@@ -468,7 +478,7 @@ function ProjectsNav({
             className="drawer-eyebrow-add"
             type="button"
             disabled={busy}
-            onClick={onCreateteChatThread}
+            onClick={() => onCreateteChatThread(PERSONAL_WORKSPACE_ID)}
             aria-label={t("sidebar.newChat")}
             title={t("sidebar.newChat")}
           >
@@ -698,7 +708,7 @@ interface NavDrawerProps {
   chatThreads: ChatThread[];
   navItems: NavItem[];
   onArchiveChatThread: (threadId: string) => void;
-  onCreateteChatThread: () => void;
+  onCreateteChatThread: (workspaceId?: string) => void;
   onDeleteChatThread: (threadId: string) => void;
   onNavigate: (view: ViewId) => void;
   onSearchChat: () => void;
@@ -738,11 +748,34 @@ export function NavDrawer({
     more: false,
   });
   const [deleteCandidate, setDeleteCandidate] = useState<ChatThread | null>(null);
+  const [newChatMenu, setNewChatMenu] = useState<{
+    x: number;
+    y: number;
+  } | null>(null);
+  const [newChatWorkspaces, setNewChatWorkspaces] = useState<WorkspaceRecord[]>([]);
+  const [newChatQuery, setNewChatQuery] = useState("");
+  const [newChatBusy, setNewChatBusy] = useState(false);
+  const [newChatError, setNewChatError] = useState<string | null>(null);
+  const [newChatProjectModal, setNewChatProjectModal] =
+    useState<NewChatProjectModalState | null>(null);
   const [threadMenu, setThreadMenu] = useState<{
     thread: ChatThread;
     x: number;
     y: number;
   } | null>(null);
+
+  useEffect(() => {
+    if (!newChatMenu) return;
+    function closeMenu() {
+      setNewChatMenu(null);
+    }
+    window.addEventListener("click", closeMenu);
+    window.addEventListener("keydown", closeMenu);
+    return () => {
+      window.removeEventListener("click", closeMenu);
+      window.removeEventListener("keydown", closeMenu);
+    };
+  }, [newChatMenu]);
 
   useEffect(() => {
     if (!threadMenu) return;
@@ -762,6 +795,82 @@ export function NavDrawer({
     setThreadMenu(null);
   }
 
+  async function openNewChatMenu(event: MouseEvent<HTMLButtonElement>) {
+    event.stopPropagation();
+    setNewChatMenu({ x: event.clientX, y: event.clientY });
+    setNewChatQuery("");
+    setNewChatError(null);
+    try {
+      const snap = await coreBridge.workspaces();
+      setNewChatWorkspaces(snap.workspaces);
+    } catch {
+      setNewChatWorkspaces([]);
+    }
+  }
+
+  async function createProjectFromFolder() {
+    setNewChatBusy(true);
+    setNewChatError(null);
+    try {
+      const folder = await coreBridge.pickFolder();
+      if (!folder) return;
+      const current = await coreBridge.workspaces();
+      const existing = current.workspaces.find((workspace) => workspace.folder === folder);
+      if (existing) {
+        setNewChatMenu(null);
+        onCreateteChatThread(existing.id);
+        return;
+      }
+      const name = folderDisplayName(folder);
+      const createdSnap = await coreBridge.createWorkspace(name, folder);
+      const created =
+        createdSnap.workspaces.find((workspace) => workspace.folder === folder) ??
+        createdSnap.workspaces.find((workspace) => workspace.name === name);
+      if (!created) throw new Error("Project was created but could not be selected.");
+      setNewChatMenu(null);
+      onCreateteChatThread(created.id);
+    } catch (error) {
+      setNewChatError((error as Error).message);
+    } finally {
+      setNewChatBusy(false);
+    }
+  }
+
+  async function pickNewChatProjectFolder() {
+    const folder = await coreBridge.pickFolder();
+    if (!folder) return;
+    setNewChatProjectModal((current) => {
+      if (!current) return current;
+      return {
+        ...current,
+        folder,
+        name: current.name.trim() ? current.name : folderDisplayName(folder),
+      };
+    });
+  }
+
+  async function saveNewChatProject() {
+    if (!newChatProjectModal) return;
+    const name = newChatProjectModal.name.trim();
+    const folder = newChatProjectModal.folder;
+    if (!name || !folder) return;
+    setNewChatBusy(true);
+    setNewChatError(null);
+    try {
+      const createdSnap = await coreBridge.createWorkspace(name, folder);
+      const created =
+        createdSnap.workspaces.find((workspace) => workspace.folder === folder) ??
+        createdSnap.workspaces.find((workspace) => workspace.name === name);
+      if (!created) throw new Error("Project was created but could not be selected.");
+      setNewChatProjectModal(null);
+      onCreateteChatThread(created.id);
+    } catch (error) {
+      setNewChatError((error as Error).message);
+    } finally {
+      setNewChatBusy(false);
+    }
+  }
+
   function toggleSection(section: keyof typeof collapsedSections) {
     setCollapsedSections((current) => ({
       ...current,
@@ -778,6 +887,14 @@ export function NavDrawer({
 
   const activeThreads = chatThreads.filter((thread) => thread.status === "active");
   const archivedThreads = chatThreads.filter((thread) => thread.status === "archived");
+  const newChatProjects = newChatWorkspaces
+    .filter((project) => project.id !== PERSONAL_WORKSPACE_ID)
+    .filter((project) => {
+      const query = newChatQuery.trim().toLowerCase();
+      if (!query) return true;
+      return `${project.name} ${project.folder ?? ""}`.toLowerCase().includes(query);
+    })
+    .slice(0, NEW_CHAT_PROJECT_LIMIT);
   const groupedNavItems = (["work", "create", "workspace", "more"] as const)
     .map((section) => ({
       section,
@@ -789,7 +906,7 @@ export function NavDrawer({
   return (
     <aside className="nav-drawer" aria-label={t("sidebar.mainMenu")}>
       <div className="drawer-topbar">
-        <button className="drawer-new-chat-action" type="button" onClick={onCreateteChatThread}>
+        <button className="drawer-new-chat-action" type="button" onClick={openNewChatMenu}>
           <Pencil size={15} />
           <span>{t("sidebar.newChat")}</span>
         </button>
@@ -918,6 +1035,168 @@ export function NavDrawer({
         </div>
       )}
 
+      {newChatMenu && (
+        <div
+          className="thread-context-menu drawer-new-chat-menu"
+          role="menu"
+          style={{ left: newChatMenu.x, top: newChatMenu.y }}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <label className="drawer-new-chat-search">
+            <Search size={14} />
+            <input
+              autoFocus
+              placeholder="Search projects..."
+              value={newChatQuery}
+              onChange={(event) => setNewChatQuery(event.target.value)}
+            />
+          </label>
+          <button
+            type="button"
+            role="menuitem"
+            disabled={newChatBusy}
+            onClick={() => {
+              setNewChatMenu(null);
+              onCreateteChatThread(PERSONAL_WORKSPACE_ID);
+            }}
+          >
+            <Pencil size={15} />
+            <span>{t("sidebar.personal")}</span>
+          </button>
+          {newChatProjects.length > 0 && (
+            <div className="drawer-new-chat-projects" role="group" aria-label="Projects">
+              {!newChatQuery.trim() && <span className="drawer-new-chat-label">Recent projects</span>}
+              {newChatProjects.map((project) => (
+                <button
+                  key={project.id}
+                  type="button"
+                  role="menuitem"
+                  disabled={newChatBusy}
+                  title={project.folder ?? project.name}
+                  onClick={() => {
+                    setNewChatMenu(null);
+                    onCreateteChatThread(project.id);
+                  }}
+                >
+                  <FolderOpen size={15} />
+                  <span>{project.name}</span>
+                </button>
+              ))}
+            </div>
+          )}
+          {newChatQuery.trim() && newChatProjects.length === 0 && (
+            <p className="drawer-new-chat-empty">No matching projects</p>
+          )}
+          <div className="drawer-new-chat-actions">
+            <button
+              type="button"
+              role="menuitem"
+              disabled={newChatBusy}
+              onClick={() => {
+                setNewChatMenu(null);
+                setNewChatProjectModal({ name: "", folder: null });
+              }}
+            >
+              <FolderPlus size={15} />
+              <span>{t("sidebar.newProject")}...</span>
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              disabled={newChatBusy}
+              onClick={() => void createProjectFromFolder()}
+            >
+              <FolderOpen size={15} />
+              <span>Use existing folder...</span>
+            </button>
+          </div>
+          {newChatError && <p className="drawer-new-chat-error">{newChatError}</p>}
+        </div>
+      )}
+
+      {newChatProjectModal && (
+        <div
+          className="confirm-modal-backdrop"
+          role="presentation"
+          onClick={() => {
+            if (!newChatBusy) setNewChatProjectModal(null);
+          }}
+        >
+          <div
+            className="confirm-modal"
+            role="dialog"
+            aria-label={t("sidebar.newProject")}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <header>
+              <strong>{t("sidebar.newProject")}</strong>
+              <button
+                className="icon-button"
+                type="button"
+                aria-label={t("sidebar.close")}
+                disabled={newChatBusy}
+                onClick={() => setNewChatProjectModal(null)}
+              >
+                <X size={17} />
+              </button>
+            </header>
+            <p className="drawer-modal-hint">
+              {t("sidebar.projectFolderHintPre")}
+              <strong>{t("sidebar.projectFolderHintBold")}</strong>
+              {t("sidebar.projectFolderHintPost")}
+            </p>
+            <input
+              className="set-input drawer-modal-input"
+              autoFocus
+              placeholder={t("sidebar.projectNamePlaceholder")}
+              value={newChatProjectModal.name}
+              onChange={(event) =>
+                setNewChatProjectModal((current) =>
+                  current ? { ...current, name: event.target.value } : current,
+                )
+              }
+            />
+            <button
+              className="workspace-switcher-folder-pick"
+              type="button"
+              disabled={newChatBusy}
+              title={newChatProjectModal.folder ?? t("sidebar.projectFolderTitle")}
+              onClick={() => void pickNewChatProjectFolder()}
+            >
+              <FolderPlus size={13} />
+              <span>
+                {newChatProjectModal.folder
+                  ? folderDisplayName(newChatProjectModal.folder)
+                  : t("sidebar.pickFolder")}
+              </span>
+            </button>
+            {newChatError && <p className="drawer-new-chat-error">{newChatError}</p>}
+            <footer>
+              <button
+                className="secondary-button"
+                type="button"
+                disabled={newChatBusy}
+                onClick={() => setNewChatProjectModal(null)}
+              >
+                Cancel
+              </button>
+              <button
+                className="primary-button"
+                type="button"
+                disabled={
+                  newChatBusy ||
+                  !newChatProjectModal.name.trim() ||
+                  !newChatProjectModal.folder
+                }
+                onClick={() => void saveNewChatProject()}
+              >
+                Create
+              </button>
+            </footer>
+          </div>
+        </div>
+      )}
+
       {threadMenu && (
         <div
           className="thread-context-menu"
@@ -925,35 +1204,6 @@ export function NavDrawer({
           style={{ left: threadMenu.x, top: threadMenu.y }}
           onClick={(event) => event.stopPropagation()}
         >
-          {threadMenu.thread.status === "active" && (
-            <>
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() =>
-                  runThreadAction(() =>
-                    onSetChatThreadPinned(
-                      threadMenu.thread.threadId,
-                      !threadMenu.thread.pinned,
-                    ),
-                  )
-                }
-              >
-                {threadMenu.thread.pinned ? <PinOff size={15} /> : <Pin size={15} />}
-                <span>{threadMenu.thread.pinned ? "Remove pin" : "Pin"}</span>
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() =>
-                  runThreadAction(() => onArchiveChatThread(threadMenu.thread.threadId))
-                }
-              >
-                <Archive size={15} />
-                <span>{t("sidebar.archive")}</span>
-              </button>
-            </>
-          )}
           {threadMenu.thread.status === "archived" && (
             <button
               type="button"

@@ -18,7 +18,7 @@ interface ShellProps {
   navItems: NavItem[];
   onArchiveChatThread: (threadId: string) => void;
   onBackFromSettings: () => void;
-  onCreateteChatThread: () => void;
+  onCreateteChatThread: (workspaceId?: string) => void;
   onDeleteChatThread: (threadId: string) => void;
   onNavigate: (view: ViewId) => void;
   onSelectThread: (threadId: string) => void;

@@ -204,12 +204,15 @@ function updateThreadPreview(
   const firstUserMessage = messages.find((message) => message.role === "user");
   const userTitle = firstUserMessage ? summarizeThreadTitle(firstUserMessage.text) : "";
   const isPlaceholderTitle = thread.title === "New task" || thread.title === "Nuovo compito";
+  const nextActivityMessageCount = messages.length;
+  const hasNewAssistantActivity =
+    nextActivityMessageCount > thread.messageCount && lastMessage?.role === "assistant";
   return {
     ...thread,
     title: isPlaceholderTitle && userTitle ? userTitle : thread.title,
     messageCount: messages.length,
     subtitle: lastMessage?.text.slice(0, 72) || "Local chat ready",
-    updatedAt: lastMessage?.timestamp ?? thread.updatedAt,
+    updatedAt: hasNewAssistantActivity ? lastMessage.timestamp : thread.updatedAt,
   };
 }
 
@@ -680,8 +683,18 @@ export default function App() {
     })();
   }, []);
 
-  async function handleCreateteChatThread() {
+  async function handleCreateteChatThread(workspaceId?: string) {
     try {
+      const targetWorkspace = workspaceId?.trim();
+      if (targetWorkspace) {
+        await coreBridge.selectWorkspace(targetWorkspace);
+        const created = mapCoreChatThread(
+          await coreBridge.createChatThread(targetWorkspace),
+        );
+        await coreBridge.selectChatThread(created.threadId);
+        window.location.reload();
+        return;
+      }
       const created = mapCoreChatThread(await coreBridge.createChatThread());
       const messages = await coreBridge.chatMessages(created.threadId);
       setChatThreads((current) => [
