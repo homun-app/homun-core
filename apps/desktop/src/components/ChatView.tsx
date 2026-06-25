@@ -7817,10 +7817,10 @@ function Composer({
         </div>
       )}
       {forcedSkills && (
-        <div className="composer-forced-skill" aria-label={t("chat.forcedSkillNextMessage")}>
+        <div className="composer-forced-skill" aria-label={t("chat.forcedCapabilityNextMessage")}>
           <Puzzle size={13} />
           <span>{forcedSkills.name}</span>
-          <button type="button" aria-label="Remove skill" onClick={() => setForcedSkills(null)}>
+          <button type="button" aria-label="Remove capability" onClick={() => setForcedSkills(null)}>
             <X size={12} />
           </button>
         </div>
@@ -7854,9 +7854,8 @@ function Composer({
             type="file"
             onChange={handleAttachmentSelect}
           />
-          {/* Mock: one ⊕ gathers every input action (attach / folder / skill / improve)
-              in a menu, keeping the bar clean. The folder + skill popovers it opens are
-              anchored to this same wrap. */}
+          {/* One add menu gathers every input action while keeping the composer compact.
+              Folder and capability popovers stay anchored to this same wrap. */}
           <div className="composer-pop-wrap">
             <button
               className={`composer-add-button${
@@ -8052,14 +8051,14 @@ function Composer({
                     <input
                       autoFocus
                       type="text"
-                      placeholder={t("chat.searchSkill")}
+                      placeholder={t("chat.searchCapability")}
                       value={skillQuery}
                       onChange={(event) => setSkillsQuery(event.target.value)}
                     />
                   </div>
                   <div className="composer-pop-list">
                     {filteredSkillss.length === 0 ? (
-                      <p className="composer-pop-empty">{t("chat.noSkills")}</p>
+                      <p className="composer-pop-empty">{t("chat.noCapabilities")}</p>
                     ) : (
                       filteredSkillss.map((skill) => (
                         <button

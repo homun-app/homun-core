@@ -282,6 +282,12 @@ assertContains("src/styles.css", ".memory-graph-canvas canvas", "memory graph mu
 assertNotContains("src/components/ChatView.tsx", "canCreateteTask={assistantTextMessage}", "message action menu must not advertise unverified task creation for every assistant text");
 assertNotContains("src/components/ChatView.tsx", "canCreateteAutomation={assistantTextMessage}", "message action menu must not advertise unverified automation creation for every assistant text");
 assertNotContains("src/components/ChatView.tsx", "\"Use a skill\"", "composer add menu must expose user-facing capabilities, not implementation terms");
+assertNotContains("src/components/ChatView.tsx", "t(\"chat.searchSkill\")", "composer capability picker must not expose skill terminology");
+assertContains("src/components/ChatView.tsx", "t(\"chat.searchCapability\")", "composer capability picker must search capabilities");
+assertContains("src/components/ChatView.tsx", "t(\"chat.noCapabilities\")", "composer capability picker must use capability empty state");
+assertContains("src/components/ChatView.tsx", "t(\"chat.forcedCapabilityNextMessage\")", "forced capability chip must use user-facing capability terminology");
+assertContains("src/i18n/locales/en.json", "\"searchCapability\"", "English chat locale must include capability search label");
+assertContains("src/i18n/locales/it.json", "\"searchCapability\"", "Italian chat locale must include capability search label");
 assertContains("src/components/ChatView.tsx", "value.trim() && (", "composer improve prompt action must only render when there is prompt text to improve");
 assertNotContains("src/components/ChatView.tsx", "/^fn\\s+", "code-specific message actions must not rely on fragile plain-text Rust heuristics");
 assertNotContains("src/components/ChatView.tsx", "/^let\\s+", "code-specific message actions must not rely on fragile plain-text variable heuristics");
