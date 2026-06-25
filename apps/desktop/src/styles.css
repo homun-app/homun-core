@@ -460,9 +460,11 @@ body.resizing-drawer {
 .drawer-topbar {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
+  gap: 2px;
   margin-bottom: 2px;
 }
 
+.drawer-new-chat-action,
 .drawer-search-action {
   min-height: 30px;
   border: none;
@@ -472,6 +474,7 @@ body.resizing-drawer {
   cursor: pointer;
 }
 
+.drawer-new-chat-action,
 .drawer-search-action {
   display: flex;
   align-items: center;
@@ -481,6 +484,12 @@ body.resizing-drawer {
   font-size: var(--text-sm);
 }
 
+.drawer-new-chat-action {
+  color: var(--text);
+  font-weight: 560;
+}
+
+.drawer-new-chat-action:hover,
 .drawer-search-action:hover {
   background: var(--surface-hover);
   color: var(--text);
@@ -870,6 +879,78 @@ body.resizing-drawer {
   gap: 9px;
 }
 
+.drawer-thread-row {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  border-radius: var(--radius);
+}
+
+.drawer-thread-main {
+  width: 100%;
+  padding-right: 44px;
+  color: var(--text);
+  background: transparent;
+  border-radius: var(--radius);
+  text-align: left;
+}
+
+.drawer-thread-row.active .drawer-thread-main {
+  background: var(--surface-hover);
+  font-weight: 560;
+}
+
+.drawer-thread-time {
+  color: var(--faint);
+  font-size: 12px;
+  white-space: nowrap;
+  transition: opacity 0.12s ease;
+}
+
+.drawer-thread-actions {
+  position: absolute;
+  right: 3px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  padding: 2px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--line) 70%, transparent);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+}
+
+.drawer-thread-action {
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  color: var(--muted);
+  background: transparent;
+}
+
+.drawer-thread-action:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+.drawer-thread-row:hover .drawer-thread-actions,
+.drawer-thread-row:focus-within .drawer-thread-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.drawer-thread-row:hover .drawer-thread-time,
+.drawer-thread-row:focus-within .drawer-thread-time {
+  opacity: 0;
+}
+
 .drawer-link.pinned svg {
   color: var(--muted);
 }
@@ -1004,7 +1085,7 @@ body.resizing-drawer {
 
 .drawer-project-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 26px;
+  grid-template-columns: minmax(0, 1fr) 26px 26px;
   align-items: center;
 }
 
@@ -1038,6 +1119,7 @@ body.resizing-drawer {
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--blue) 38%, transparent);
 }
 
+.drawer-row-action,
 .drawer-edit-btn {
   width: 26px;
   height: 26px;
@@ -1051,11 +1133,14 @@ body.resizing-drawer {
   transition: opacity 0.12s ease;
 }
 
+.drawer-project-row:hover .drawer-row-action,
+.drawer-project.active .drawer-row-action,
 .drawer-project-row:hover .drawer-edit-btn,
 .drawer-project.active .drawer-edit-btn {
   opacity: 1;
 }
 
+.drawer-row-action:hover,
 .drawer-edit-btn:hover {
   background: var(--surface-hover);
   color: var(--text);

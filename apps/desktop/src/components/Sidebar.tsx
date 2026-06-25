@@ -7,6 +7,7 @@ import {
   ChevronRight,
   FolderOpen,
   FolderPlus,
+  MoreHorizontal,
   PanelLeftClose,
   PanelLeftOpen,
   Pencil,
@@ -156,18 +157,33 @@ interface ProjectsNavProps {
   activeThreadId: string;
   activeThreads: ChatThread[];
   busyThreadIds: Set<string>;
+  onArchiveChatThread: (threadId: string) => void;
   onSelectThread: (threadId: string) => void;
   onCreateteChatThread: () => void;
-  onThreadContextMenu: (thread: ChatThread, event: MouseEvent<HTMLButtonElement>) => void;
+  onSetChatThreadPinned: (threadId: string, pinned: boolean) => void;
+  onThreadContextMenu: (thread: ChatThread, event: MouseEvent<HTMLElement>) => void;
 }
+
+type ProjectModalState =
+  | { mode: "create"; name: string; folder: string | null }
+  | {
+      mode: "edit";
+      id: string;
+      originalName: string;
+      originalFolder: string | null;
+      name: string;
+      folder: string | null;
+    };
 
 function ProjectsNav({
   activeView,
   activeThreadId,
   activeThreads,
   busyThreadIds,
+  onArchiveChatThread,
   onSelectThread,
   onCreateteChatThread,
+  onSetChatThreadPinned,
   onThreadContextMenu,
 }: ProjectsNavProps) {
   const { t } = useTranslation();
@@ -178,12 +194,26 @@ function ProjectsNav({
   const [busy, setBusy] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState({ personal: true, projects: true });
   const [expandedProjectIds, setExpandedProjectIds] = useState<Set<string>>(new Set());
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editName, setEditName] = useState("");
-  const [creating, setCreateting] = useState(false);
-  const [newName, setNewName] = useState("");
-  const [newFolder, setNewFolder] = useState<string | null>(null);
+  const [projectModal, setProjectModal] = useState<ProjectModalState | null>(null);
+  const [projectMenu, setProjectMenu] = useState<{
+    project: WorkspaceRecord;
+    x: number;
+    y: number;
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!projectMenu) return;
+    function closeMenu() {
+      setProjectMenu(null);
+    }
+    window.addEventListener("click", closeMenu);
+    window.addEventListener("keydown", closeMenu);
+    return () => {
+      window.removeEventListener("click", closeMenu);
+      window.removeEventListener("keydown", closeMenu);
+    };
+  }, [projectMenu]);
 
   async function reloadWorkspaces() {
     const snap = await coreBridge.workspaces();
@@ -304,34 +334,81 @@ function ProjectsNav({
     }
   }
 
-  async function renameProject(id: string) {
-    const name = editName.trim();
-    if (!name) return;
+  function openCreateProjectModal() {
+    setProjectMenu(null);
+    setError(null);
+    setProjectModal({ mode: "create", name: "", folder: null });
+  }
+
+  function openEditProjectModal(project: WorkspaceRecord) {
+    setProjectMenu(null);
+    setError(null);
+    setProjectModal({
+      mode: "edit",
+      id: project.id,
+      originalName: project.name,
+      originalFolder: project.folder ?? null,
+      name: project.name,
+      folder: project.folder ?? null,
+    });
+  }
+
+  async function createProjectChat(projectId: string) {
     setBusy(true);
     try {
-      await coreBridge.renameWorkspace(id, name);
-      await reloadWorkspaces();
-      setEditingId(null);
+      await coreBridge.selectWorkspace(projectId);
+      const created = await coreBridge.createChatThread(projectId);
+      await coreBridge.selectChatThread(created.thread_id);
+      window.location.reload();
     } catch (e) {
       setError((e as Error).message);
-    } finally {
       setBusy(false);
     }
   }
-  async function linkProjectFolder(id: string) {
+
+  async function pickProjectModalFolder() {
     const folder = await coreBridge.pickFolder();
     if (!folder) return;
+    setProjectModal((current) => (current ? { ...current, folder } : current));
+  }
+
+  async function saveProjectModal() {
+    if (!projectModal) return;
+    const name = projectModal.name.trim();
+    if (!name) return;
+    if (projectModal.mode === "create" && !projectModal.folder) return;
     setBusy(true);
+    setError(null);
     try {
-      await coreBridge.setWorkspaceFolder(id, folder);
-      await reloadWorkspaces();
+      if (projectModal.mode === "create") {
+        const folder = projectModal.folder;
+        if (!folder) return;
+        const snap = await coreBridge.createWorkspace(name, folder);
+        const created = snap.workspaces.find((w) => w.name === name);
+        if (created) {
+          await coreBridge.selectWorkspace(created.id);
+          window.location.reload();
+          return;
+        }
+      } else {
+        if (name !== projectModal.originalName) {
+          await coreBridge.renameWorkspace(projectModal.id, name);
+        }
+        if (projectModal.folder && projectModal.folder !== projectModal.originalFolder) {
+          await coreBridge.setWorkspaceFolder(projectModal.id, projectModal.folder);
+        }
+        await reloadWorkspaces();
+      }
+      setProjectModal(null);
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setBusy(false);
     }
   }
+
   async function deleteProject(id: string) {
+    setProjectMenu(null);
     setBusy(true);
     try {
       await coreBridge.deleteWorkspace(id);
@@ -340,7 +417,7 @@ function ProjectsNav({
         return;
       }
       await reloadWorkspaces();
-      setEditingId(null);
+      setProjectModal(null);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -348,28 +425,13 @@ function ProjectsNav({
     }
   }
 
-  async function pickNewFolder() {
-    const folder = await coreBridge.pickFolder();
-    if (folder) setNewFolder(folder);
-  }
-  async function createProject() {
-    const name = newName.trim();
-    if (!name || !newFolder) return;
-    setBusy(true);
-    setError(null);
+  async function revealProject(project: WorkspaceRecord) {
+    setProjectMenu(null);
+    if (!project.folder) return;
     try {
-      const snap = await coreBridge.createWorkspace(name, newFolder);
-      const created = snap.workspaces.find((w) => w.name === name);
-      if (created) {
-        await coreBridge.selectWorkspace(created.id);
-        window.location.reload();
-      } else {
-        setBusy(false);
-        setCreateting(false);
-      }
+      await coreBridge.revealPath(project.folder);
     } catch (e) {
       setError((e as Error).message);
-      setBusy(false);
     }
   }
 
@@ -385,7 +447,10 @@ function ProjectsNav({
         active={thread.threadId === activeThreadId && activeView === "chat"}
         busy={busyThreadIds.has(thread.threadId)}
         thread={thread}
+        onArchive={() => onArchiveChatThread(thread.threadId)}
         onContextMenu={(e) => onThreadContextMenu(thread, e)}
+        onMore={(e) => onThreadContextMenu(thread, e)}
+        onPinToggle={() => onSetChatThreadPinned(thread.threadId, !thread.pinned)}
         onSelect={() => onSelect(thread)}
       />
     ));
@@ -429,12 +494,7 @@ function ProjectsNav({
             className="drawer-eyebrow-add"
             type="button"
             disabled={busy}
-            onClick={() => {
-              setNewName("");
-              setNewFolder(null);
-              setError(null);
-              setCreateting(true);
-            }}
+            onClick={openCreateProjectModal}
             aria-label={t("sidebar.newProject")}
             title={t("sidebar.newProject")}
           >
@@ -466,58 +526,28 @@ function ProjectsNav({
                       <span className="drawer-link-title">{project.name}</span>
                     </button>
                     <button
-                      className="drawer-edit-btn"
+                      className="drawer-row-action"
                       type="button"
-                      aria-label={`Edit ${project.name}`}
+                      aria-label={`New chat in ${project.name}`}
+                      title={t("sidebar.newChat")}
                       disabled={busy}
-                      onClick={() => {
-                        setEditingId(project.id);
-                        setEditName(project.name);
-                      }}
+                      onClick={() => void createProjectChat(project.id)}
                     >
                       <Pencil size={12} />
                     </button>
+                    <button
+                      className="drawer-row-action"
+                      type="button"
+                      aria-label={`Project menu for ${project.name}`}
+                      disabled={busy}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setProjectMenu({ project, x: event.clientX, y: event.clientY });
+                      }}
+                    >
+                      <MoreHorizontal size={13} />
+                    </button>
                   </div>
-                  {editingId === project.id && (
-                    <div className="drawer-project-edit">
-                      <input
-                        autoFocus
-                        value={editName}
-                        onChange={(e) => setEditName(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") void renameProject(project.id);
-                          if (e.key === "Escape") setEditingId(null);
-                        }}
-                      />
-                      <div className="drawer-project-edit-actions">
-                        <button
-                          className="link-button"
-                          type="button"
-                          disabled={busy}
-                          title={project.folder ?? t("sidebar.noFolder")}
-                          onClick={() => void linkProjectFolder(project.id)}
-                        >
-                          {t("sidebar.folder")}
-                        </button>
-                        <button
-                          className="link-button danger"
-                          type="button"
-                          disabled={busy}
-                          onClick={() => void deleteProject(project.id)}
-                        >
-                          Delete
-                        </button>
-                        <button
-                          className="primary-button"
-                          type="button"
-                          disabled={busy || !editName.trim()}
-                          onClick={() => void renameProject(project.id)}
-                        >
-                          Save
-                        </button>
-                      </div>
-                    </div>
-                  )}
                   {expanded && (
                     <div className="drawer-project-chats">
                       {renderThreadList(projectThreads, t("sidebar.noChatsYet"), (thread) => {
@@ -538,27 +568,72 @@ function ProjectsNav({
         </p>
       )}
 
-      {creating && (
+      {projectMenu && (
+        <div
+          className="thread-context-menu"
+          role="menu"
+          style={{ left: projectMenu.x, top: projectMenu.y }}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              const { project } = projectMenu;
+              setProjectMenu(null);
+              void createProjectChat(project.id);
+            }}
+          >
+            <Pencil size={15} />
+            <span>{t("sidebar.newChat")}</span>
+          </button>
+          <button type="button" role="menuitem" onClick={() => openEditProjectModal(projectMenu.project)}>
+            <Pencil size={15} />
+            <span>Project settings</span>
+          </button>
+          {projectMenu.project.folder && (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => void revealProject(projectMenu.project)}
+            >
+              <FolderOpen size={15} />
+              <span>Show in Finder</span>
+            </button>
+          )}
+          <button
+            className="danger"
+            type="button"
+            role="menuitem"
+            onClick={() => void deleteProject(projectMenu.project.id)}
+          >
+            <Trash2 size={15} />
+            <span>{t("common.delete")}</span>
+          </button>
+        </div>
+      )}
+
+      {projectModal && (
         <div
           className="confirm-modal-backdrop"
           role="presentation"
           onClick={() => {
-            if (!busy) setCreateting(false);
+            if (!busy) setProjectModal(null);
           }}
         >
           <div
             className="confirm-modal"
             role="dialog"
-            aria-label={t("sidebar.newProject")}
+            aria-label={projectModal.mode === "create" ? t("sidebar.newProject") : "Project settings"}
             onClick={(e) => e.stopPropagation()}
           >
             <header>
-              <strong>{t("sidebar.newProject")}</strong>
+              <strong>{projectModal.mode === "create" ? t("sidebar.newProject") : "Project settings"}</strong>
               <button
                 className="icon-button"
                 type="button"
                 aria-label={t("sidebar.close")}
-                onClick={() => setCreateting(false)}
+                onClick={() => setProjectModal(null)}
               >
                 <X size={17} />
               </button>
@@ -572,35 +647,41 @@ function ProjectsNav({
               className="set-input drawer-modal-input"
               autoFocus
               placeholder={t("sidebar.projectNamePlaceholder")}
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
+              value={projectModal.name}
+              onChange={(e) =>
+                setProjectModal((current) => (current ? { ...current, name: e.target.value } : current))
+              }
             />
             <button
               className="workspace-switcher-folder-pick"
               type="button"
               disabled={busy}
-              title={newFolder ?? t("sidebar.projectFolderTitle")}
-              onClick={() => void pickNewFolder()}
+              title={projectModal.folder ?? t("sidebar.projectFolderTitle")}
+              onClick={() => void pickProjectModalFolder()}
             >
               <FolderPlus size={13} />
-              <span>{newFolder ? newFolder.split("/").pop() : t("sidebar.pickFolder")}</span>
+              <span>{projectModal.folder ? projectModal.folder.split("/").pop() : t("sidebar.pickFolder")}</span>
             </button>
             <footer>
               <button
                 className="secondary-button"
                 type="button"
                 disabled={busy}
-                onClick={() => setCreateting(false)}
+                onClick={() => setProjectModal(null)}
               >
                 Cancel
               </button>
               <button
                 className="primary-button"
                 type="button"
-                disabled={busy || !newName.trim() || !newFolder}
-                onClick={() => void createProject()}
+                disabled={
+                  busy ||
+                  !projectModal.name.trim() ||
+                  (projectModal.mode === "create" && !projectModal.folder)
+                }
+                onClick={() => void saveProjectModal()}
               >
-                Create
+                {projectModal.mode === "create" ? "Create" : "Save"}
               </button>
             </footer>
           </div>
@@ -708,6 +789,10 @@ export function NavDrawer({
   return (
     <aside className="nav-drawer" aria-label={t("sidebar.mainMenu")}>
       <div className="drawer-topbar">
+        <button className="drawer-new-chat-action" type="button" onClick={onCreateteChatThread}>
+          <Pencil size={15} />
+          <span>{t("sidebar.newChat")}</span>
+        </button>
         <button className="drawer-search-action" type="button" onClick={onSearchChat}>
           <Search size={15} />
           <span>{t("sidebar.search")}</span>
@@ -753,8 +838,10 @@ export function NavDrawer({
           activeThreadId={activeThreadId}
           activeThreads={activeThreads}
           busyThreadIds={busyThreadIds}
+          onArchiveChatThread={onArchiveChatThread}
           onSelectThread={onSelectThread}
           onCreateteChatThread={onCreateteChatThread}
+          onSetChatThreadPinned={onSetChatThreadPinned}
           onThreadContextMenu={(thread, event) => {
             event.preventDefault();
             setThreadMenu({ thread, x: event.clientX, y: event.clientY });
@@ -853,7 +940,7 @@ export function NavDrawer({
                 }
               >
                 {threadMenu.thread.pinned ? <PinOff size={15} /> : <Pin size={15} />}
-                <span>{threadMenu.thread.pinned ? "Remove pin" : "Pin in alto"}</span>
+                <span>{threadMenu.thread.pinned ? "Remove pin" : "Pin"}</span>
               </button>
               <button
                 type="button"
@@ -1154,34 +1241,105 @@ function threadTypeIcon(
 function ThreadLink({
   active,
   busy,
+  onArchive,
   onContextMenu,
+  onMore,
+  onPinToggle,
   onSelect,
   thread,
 }: {
   active: boolean;
   busy?: boolean;
-  onContextMenu: (event: MouseEvent<HTMLButtonElement>) => void;
+  onArchive?: () => void;
+  onContextMenu: (event: MouseEvent<HTMLElement>) => void;
+  onMore?: (event: MouseEvent<HTMLButtonElement>) => void;
+  onPinToggle?: () => void;
   onSelect: () => void;
   thread: ChatThread;
 }) {
   const { t } = useTranslation();
   const icon = threadTypeIcon(thread.source, t);
   return (
-    <button
-      className={`drawer-link ${active ? "active" : ""} ${thread.pinned ? "pinned" : ""}`}
-      type="button"
-      aria-busy={busy || undefined}
+    <div
+      className={`drawer-thread-row ${active ? "active" : ""} ${thread.pinned ? "pinned" : ""}`}
       onContextMenu={onContextMenu}
-      onClick={onSelect}
     >
-      <span className="drawer-link-icon" title={icon?.label} aria-label={icon?.label}>
-        {icon?.node}
-      </span>
-      <span className="drawer-link-title">
-        {busy && <span className="thread-busy-dot" aria-hidden="true" />}
-        {thread.title}
-      </span>
-      {thread.pinned && <Pin size={12} aria-hidden="true" />}
-    </button>
+      <button
+        className="drawer-link drawer-thread-main"
+        type="button"
+        aria-busy={busy || undefined}
+        onClick={onSelect}
+      >
+        <span className="drawer-link-icon" title={icon?.label} aria-label={icon?.label}>
+          {icon?.node}
+        </span>
+        <span className="drawer-link-title">
+          {busy && <span className="thread-busy-dot" aria-hidden="true" />}
+          {thread.title}
+        </span>
+        <span className="drawer-thread-time">{formatThreadRelativeTime(thread.updatedAt)}</span>
+      </button>
+      {(onPinToggle || onArchive || onMore) && (
+        <span className="drawer-thread-actions" aria-label="Thread actions">
+          {onPinToggle && (
+            <button
+              className="drawer-thread-action"
+              type="button"
+              aria-label={thread.pinned ? "Unpin chat" : "Pin chat"}
+              onClick={(event) => {
+                event.stopPropagation();
+                onPinToggle();
+              }}
+            >
+              {thread.pinned ? <PinOff size={12} /> : <Pin size={12} />}
+            </button>
+          )}
+          {onArchive && (
+            <button
+              className="drawer-thread-action"
+              type="button"
+              aria-label={t("sidebar.archive")}
+              onClick={(event) => {
+                event.stopPropagation();
+                onArchive();
+              }}
+            >
+              <Archive size={12} />
+            </button>
+          )}
+          {onMore && (
+            <button
+              className="drawer-thread-action"
+              type="button"
+              aria-label={t("chat.moreActions")}
+              onClick={(event) => {
+                event.stopPropagation();
+                onMore(event);
+              }}
+            >
+              <MoreHorizontal size={13} />
+            </button>
+          )}
+        </span>
+      )}
+    </div>
   );
+}
+
+function formatThreadRelativeTime(updatedAt: string): string {
+  if (!updatedAt) return "";
+  const numeric = Number(updatedAt);
+  const timestamp = Number.isFinite(numeric)
+    ? numeric > 1_000_000_000_000
+      ? numeric
+      : numeric * 1000
+    : Date.parse(updatedAt);
+  if (Number.isNaN(timestamp)) return updatedAt;
+  const seconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
+  if (seconds < 60) return "ora";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes} m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} h`;
+  return `${Math.floor(hours / 24)} g`;
 }
