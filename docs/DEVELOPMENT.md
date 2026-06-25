@@ -38,7 +38,7 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
 | **Prodotto / distribuzione / self-host** | [PRODUCT_LOOP.md](PRODUCT_LOOP.md) · [distribution.md](distribution.md) · [self-host.md](self-host.md) · [release-macos.md](release-macos.md) |
 | **Storico** (changelog, vecchi piani, snapshot) | [archive/](archive/) — non più "corrente", solo memoria storica |
 
-## Stato esecuzione — "SEI QUI" (aggiornato 2026-06-24, anti-compattazione)
+## Stato esecuzione — "SEI QUI" (aggiornato 2026-06-25, anti-compattazione)
 
 > Se il contesto si è compattato: rileggi QUESTO blocco + il
 > [backlog](plans/2026-06-22-batch-1042-artifacts-memory.md) (gli stati ☐/✅ = i loop
@@ -137,9 +137,11 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   del bundle + `Deleted/unknown chat` senza esporre solo `thread_*`. Gate locale:
   `npm run test:ui-contract`, `npm run build`, runtime
   Electron riavviato con gateway `local-first-desktop-gateway` in ascolto su
-  `127.0.0.1:18765`. **Prossimo passo unico:** continuare WS7 sulla qualita'
-  deliverable con slice deterministiche e verificabili; UX.2 resta da rifinire
-  solo con review visuale dell'utente, senza riaprire memoria/WS1/WS8 salvo
+  `127.0.0.1:18765`. Follow-up WS7 chiuso e committato: il template catalog
+  espone `selection_notes` condivise da gallery e BM25 capability search.
+  **Prossimo passo unico:** continuare WS7 con preview asset/thumbnail reali per
+  template pack esterni e QA visuale della gallery; UX.2 resta da rifinire solo
+  con review visuale dell'utente, senza riaprire memoria/WS1/WS8 salvo
   regressioni.
 - **Direzione WS7 aggiornata:** l'obiettivo deliverable non è una gallery statica
   clonata tool-per-tool, ma un **design system dichiarativo condiviso** per
