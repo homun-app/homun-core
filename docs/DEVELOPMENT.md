@@ -141,12 +141,18 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   espone `selection_notes` condivise da gallery e BM25 capability search.
   Hotfix runtime Presentations: la gallery tollera cataloghi legacy senza
   `selection_notes`, evitando il crash al click su Presentations quando il
-  gateway espone ancora payload pre-rationale.
-  **Prossimo passo unico:** continuare WS7 con template PowerPoint reali:
-  import `.pptx`/`.potx` in template pack locali con manifest, thumbnail,
-  licenza/attribuzione e uso da `make_deck(template_ref=...)`. SlidesCarnival
-  viene trattato come sorgente/catalogo "powered by", non come mirror di file
-  redistribuiti; prima slice manual import, poi ricerca/filtri/import diretto.
+  gateway espone ancora payload pre-rationale. WS7 real PPTX import prima slice
+  locale/verde: template PowerPoint reali `.pptx`/`.potx` possono essere
+  importati manualmente come pack locali sotto il registry canonico
+  (`source.pptx|source.potx` + `manifest.json`); `/api/templates/catalog` e
+  `coreBridge.templateCatalog()` espongono metadata sicuri (`source_provider`,
+  licenza/attribuzione, policy, `is_imported`) senza path locali; il plugin
+  Presentations mostra `Import PPTX` e badge `Local`/provider/attribution; gli
+  artifact `make_deck` registrano nei metadata provenance `template_*`
+  (provider, source, license, attribution) insieme alla QA. **Prossimo passo
+  unico:** completare WS7 con smoke runtime import PPTX in Electron e poi
+  catalogo "Powered by SlidesCarnival" con ricerca/filtri/import esplicito; il
+  vero slide-cloning da PPTX reale resta slice successiva del renderer.
   Spec: [Real PPTX Template Import and SlidesCarnival-Powered Catalog](superpowers/specs/2026-06-25-real-pptx-template-import-design.md).
 - **Direzione WS7 aggiornata:** l'obiettivo deliverable non è una gallery statica
   clonata tool-per-tool, ma un **design system dichiarativo condiviso** per

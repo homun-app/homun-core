@@ -1042,14 +1042,17 @@ feature laterali né una dashboard generica.
   Presentations usa `selection_notes` quando presenti ma resta compatibile con
   cataloghi legacy senza quel campo; il gate evita regressioni in cui cliccare
   Presentations crasha il plugin prima del rendering dei template.
-- 🟡 **WS7 real PPTX template import (prossimo asse approvato, 2026-06-25):**
-  Presentations deve passare da card sintetiche a template PowerPoint reali.
-  Prima slice: import manuale `.pptx`/`.potx` in template pack locali con
-  `source.pptx`, thumbnail, manifest, licenza/attribuzione e registro canonico;
-  `make_deck(template_ref=...)` deve usare il PPTX reale come base. Seconda
-  slice: catalogo "Powered by SlidesCarnival" con ricerca/filtri e import
-  esplicito, preservando attribution e senza redistribuire file grezzi come
-  mirror. Spec:
+- ✅ **WS7 real PPTX template import — prima slice locale/verde (2026-06-25):**
+  Presentations ora supporta import manuale `.pptx`/`.potx` in template pack
+  locali (`source.pptx|source.potx` + `manifest.json`) letti dal registry
+  template canonico. `/api/templates/catalog` e `coreBridge.templateCatalog()`
+  espongono metadata sicuri (`source_provider`, licenza/attribuzione,
+  `redistribution_policy`, `is_imported`) senza path assoluti; la UI mostra
+  `Import PPTX` e badge `Local`/provider/attribution; `make_deck` registra sugli
+  artifact metadata `template_*` per provenance e attribuzione. Resta da fare:
+  smoke runtime import in Electron, thumbnail reali, catalogo "Powered by
+  SlidesCarnival" con ricerca/filtri/import esplicito e, dopo, vero slide-cloning
+  del PPTX importato. Spec:
   `docs/superpowers/specs/2026-06-25-real-pptx-template-import-design.md`.
 
 ## WS9 — Distribuzione plugin & marketplace

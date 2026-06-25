@@ -342,6 +342,14 @@ primo percorso locale verde e WS5 è chiusa localmente/gate:
     licenza/attribuzione e risoluzione da `make_deck(template_ref=...)`.
     SlidesCarnival entra come catalogo "powered by" con ricerca/filtri/import
     esplicito e attribution, non come mirror di file redistribuiti.
+    Prima slice locale/verde: import manuale `.pptx`/`.potx` in template pack
+    locali sotto il registry canonico, API/bridge con metadata sicuri
+    (`source_provider`, licenza/attribuzione, `redistribution_policy`,
+    `is_imported`), UI `Import PPTX` con badge provider/attribuzione e
+    metadata `template_*` sugli artifact `make_deck`. Il renderer usa ancora il
+    template come evidenza/provenance, non clona ancora le slide del PPTX reale:
+    quello resta la slice successiva dopo smoke Electron e catalogo
+    SlidesCarnival con import esplicito.
 74. WS8 gateway contract eval — `scripts/eval_suite.py` può ora, se configurato
     con `HOMUN_EVAL_GATEWAY_BASE` e token, verificare anche il gateway reale:
     `/api/templates/catalog` deve esporre template non-callable con preview
@@ -569,7 +577,11 @@ Quattordicesima slice: manifest con metadati sanificati per preview/gallery
 futura. Quindicesima slice: API/bridge read-only del catalogo template.
 Sedicesima slice: prima gallery UI nel plugin Presentations. Diciassettesima
 slice: preview built-in per i seed locali, renderizzate dalla gallery usando i
-token del catalogo. Prossimo asse: thumbnail/asset reali per pack esterni e QA
-più profonda.
+token del catalogo. Diciottesima slice: import manuale di template PowerPoint
+reali `.pptx`/`.potx` come pack locali con manifest, metadata sicuri in
+API/bridge, UI `Import PPTX` e provenance `template_*` sugli artifact. Prossimo
+asse: smoke runtime Electron, catalogo "Powered by SlidesCarnival" con
+ricerca/filtri/import esplicito, thumbnail reali e poi vero slide-cloning da
+PPTX importato.
 `make_research` e `make_meeting` restano futuri.
 Il contratto corrente della memoria è in [MEMORIA.md](MEMORIA.md).
