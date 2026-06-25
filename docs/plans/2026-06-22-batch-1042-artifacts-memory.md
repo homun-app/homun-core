@@ -1042,6 +1042,15 @@ feature laterali né una dashboard generica.
   Presentations usa `selection_notes` quando presenti ma resta compatibile con
   cataloghi legacy senza quel campo; il gate evita regressioni in cui cliccare
   Presentations crasha il plugin prima del rendering dei template.
+- 🟡 **WS7 real PPTX template import (prossimo asse approvato, 2026-06-25):**
+  Presentations deve passare da card sintetiche a template PowerPoint reali.
+  Prima slice: import manuale `.pptx`/`.potx` in template pack locali con
+  `source.pptx`, thumbnail, manifest, licenza/attribuzione e registro canonico;
+  `make_deck(template_ref=...)` deve usare il PPTX reale come base. Seconda
+  slice: catalogo "Powered by SlidesCarnival" con ricerca/filtri e import
+  esplicito, preservando attribution e senza redistribuire file grezzi come
+  mirror. Spec:
+  `docs/superpowers/specs/2026-06-25-real-pptx-template-import-design.md`.
 
 ## WS9 — Distribuzione plugin & marketplace
 

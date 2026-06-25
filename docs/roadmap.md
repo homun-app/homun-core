@@ -337,6 +337,11 @@ primo percorso locale verde e WS5 è chiusa localmente/gate:
     Hotfix runtime: la gallery tollera cataloghi legacy senza `selection_notes`,
     quindi il click su Presentations non crasha quando gateway/app e catalogo
     sono temporaneamente disallineati.
+    Nuovo asse approvato: Presentations deve usare template PowerPoint reali,
+    importabili come pack locali con `source.pptx`, thumbnail, manifest,
+    licenza/attribuzione e risoluzione da `make_deck(template_ref=...)`.
+    SlidesCarnival entra come catalogo "powered by" con ricerca/filtri/import
+    esplicito e attribution, non come mirror di file redistribuiti.
 74. WS8 gateway contract eval — `scripts/eval_suite.py` può ora, se configurato
     con `HOMUN_EVAL_GATEWAY_BASE` e token, verificare anche il gateway reale:
     `/api/templates/catalog` deve esporre template non-callable con preview

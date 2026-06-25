@@ -142,10 +142,12 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   Hotfix runtime Presentations: la gallery tollera cataloghi legacy senza
   `selection_notes`, evitando il crash al click su Presentations quando il
   gateway espone ancora payload pre-rationale.
-  **Prossimo passo unico:** continuare WS7 con preview asset/thumbnail reali per
-  template pack esterni e QA visuale della gallery; UX.2 resta da rifinire solo
-  con review visuale dell'utente, senza riaprire memoria/WS1/WS8 salvo
-  regressioni.
+  **Prossimo passo unico:** continuare WS7 con template PowerPoint reali:
+  import `.pptx`/`.potx` in template pack locali con manifest, thumbnail,
+  licenza/attribuzione e uso da `make_deck(template_ref=...)`. SlidesCarnival
+  viene trattato come sorgente/catalogo "powered by", non come mirror di file
+  redistribuiti; prima slice manual import, poi ricerca/filtri/import diretto.
+  Spec: [Real PPTX Template Import and SlidesCarnival-Powered Catalog](superpowers/specs/2026-06-25-real-pptx-template-import-design.md).
 - **Direzione WS7 aggiornata:** l'obiettivo deliverable non è una gallery statica
   clonata tool-per-tool, ma un **design system dichiarativo condiviso** per
   documenti e presentazioni/plugin: temi, layout, componenti, template e QA
@@ -225,8 +227,11 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   token canonici del template (use case, audience, tema, layout/componenti) e le
   stesse note entrano nel testo indicizzato da `find_capability`; la gallery le
   mostra sulle card per rendere esplicito perché scegliere un template senza
-  introdurre euristiche fragili o un secondo catalogo. Prossimo asse: preview
-  asset/thumbnail reali per pack esterni e QA ancora più profonda.
+  introdurre euristiche fragili o un secondo catalogo. Prossimo asse approvato:
+  template PowerPoint reali importabili (`.pptx`/`.potx`) come pack locali con
+  manifest, thumbnail, licenza/attribuzione e pipeline `make_deck` che clona il
+  template reale invece di imitarlo da token sintetici; SlidesCarnival è sorgente
+  "powered by" con attribuzione, non redistribuzione di template grezzi.
   Correzione UX post-smoke: il menu modelli distingue ora i modelli cloud
   instradati tramite endpoint locale Ollama (`☁ via local`) dai provider cloud
   diretti; in quel caso serve Ollama locale acceso oppure una binding sul
