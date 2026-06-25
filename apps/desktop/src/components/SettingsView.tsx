@@ -114,6 +114,7 @@ const THEME_SWATCH: Record<ThemeName, { bg: string; panel: string; line: string 
   avorio: { bg: "#fbfaf7", panel: "#f4f2ec", line: "#e4e0d7" },
   neutro: { bg: "#ffffff", panel: "#f6f6f6", line: "#e6e6e8" },
   sabbia: { bg: "#faf8f3", panel: "#f2eee6", line: "#e7e1d6" },
+  dark: { bg: "#111214", panel: "#1a1c20", line: "#343841" },
 };
 import { copyText } from "../lib/clipboard";
 import type {

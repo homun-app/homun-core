@@ -83,6 +83,15 @@ assertContains("scripts/electron-dev.mjs", "stopGatewayOnPort", "Electron dev sh
 assertContains("src/styles.css", "--window-drag-height", "Electron shell must reserve native window control space");
 assertContains("src/styles.css", "-webkit-app-region: drag", "Electron shell must expose a draggable titlebar region");
 assertContains("src/styles.css", "-webkit-app-region: no-drag", "interactive controls must remain clickable inside Electron");
+assertContains("src/lib/accent.ts", "\"dark\"", "appearance surface themes must include a dark preset");
+assertMatches(
+  "src/lib/accent.ts",
+  /value === "freddo" \|\| value === "avorio" \|\| value === "neutro" \|\| value === "sabbia" \|\| value === "dark"/,
+  "persisted dark surface theme must be accepted by the theme validator",
+);
+assertContains("src/styles.css", ":root[data-theme=\"dark\"]", "dark surface theme must define CSS tokens");
+assertContains("src/styles.css", "color-scheme: dark", "dark surface theme must advertise dark controls to the browser");
+assertContains("src/components/SettingsView.tsx", "dark:", "Appearance picker previews must include literal dark swatch values");
 
 assertContains("src/components/Sidebar.tsx", "nav-drawer", "expanded navigation must be a drawer");
 assertContains("src/components/Shell.tsx", "window-chrome", "desktop shell must render a custom draggable window chrome");

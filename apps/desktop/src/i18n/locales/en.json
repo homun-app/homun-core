@@ -753,7 +753,7 @@
     "primaryButton": "Primary button",
     "coloredLink": "colored link",
     "conversation": "Conversation",
-    "generalHint": "Appearance and language follow the system. Dark theme and other preferences will arrive here.",
+    "generalHint": "Appearance and language follow the app preferences.",
     "effective": "Effective: {{value}}",
     "localCount": "1, local",
     "cloudCount": "4, cloud",

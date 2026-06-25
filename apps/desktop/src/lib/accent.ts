@@ -130,7 +130,7 @@ export function saveCustomAccents(list: string[]): void {
 // background/line/text neutrals, while the accent (brand) stays as chosen — exactly the
 // two-axis model the design's palette board uses ("posso mixare … neutro + teal").
 // Sets data-theme on <html>; the [data-theme="…"] blocks in styles.css do the rest.
-export type ThemeName = "freddo" | "avorio" | "neutro" | "sabbia";
+export type ThemeName = "freddo" | "avorio" | "neutro" | "sabbia" | "dark";
 
 export const DEFAULT_THEME: ThemeName = "freddo";
 
@@ -139,12 +139,13 @@ export const THEME_PRESETS: { name: ThemeName; label: string; hint: string }[] =
   { name: "avorio", label: "Ivory", hint: "Warm neutral" },
   { name: "neutro", label: "Neutral", hint: "True grays" },
   { name: "sabbia", label: "Sand", hint: "Warm sand" },
+  { name: "dark", label: "Dark", hint: "Dark neutral" },
 ];
 
 const THEME_KEY = "homun.theme";
 
 function isThemeName(value: string): value is ThemeName {
-  return value === "freddo" || value === "avorio" || value === "neutro" || value === "sabbia";
+  return value === "freddo" || value === "avorio" || value === "neutro" || value === "sabbia" || value === "dark";
 }
 
 /** Set the surface theme by toggling <html data-theme>. */

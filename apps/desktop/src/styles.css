@@ -109,6 +109,26 @@
   --muted: #5a5349;
   --faint: #a89e8d;
 }
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #111214;
+  --panel: #1a1c20;
+  --surface: #202329;
+  --surface-muted: #282c33;
+  --surface-hover: #30353d;
+  --line: #2d3138;
+  --line-strong: #3a404a;
+  --text: #f2f4f7;
+  --muted: #b2b8c3;
+  --faint: #777f8d;
+  --brand-soft: color-mix(in srgb, var(--brand) 22%, #111214);
+  --blue-soft: var(--brand-soft);
+  --green-soft: #173328;
+  --amber-soft: #352612;
+  --red-soft: #351b17;
+  --shadow-soft: 0 18px 60px rgba(0, 0, 0, 0.34);
+  --shadow-menu: 0 18px 50px rgba(0, 0, 0, 0.48);
+}
 
 * {
   box-sizing: border-box;
