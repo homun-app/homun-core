@@ -15307,6 +15307,22 @@ fn deck_quality_metadata_from_qa_result(
     Some(serde_json::Value::Object(metadata))
 }
 
+fn deck_template_metadata(template: Option<&TemplateCatalogEntry>) -> serde_json::Value {
+    let Some(template) = template else {
+        return serde_json::json!({});
+    };
+    serde_json::json!({
+        "template_ref": template.id,
+        "template_provider": template.provider,
+        "template_source_provider": template.source_provider,
+        "template_source_ref": template.source_ref,
+        "template_license": template.license,
+        "template_attribution_required": template.attribution_required,
+        "template_attribution_text": template.attribution_text,
+        "template_redistribution_policy": template.redistribution_policy,
+    })
+}
+
 fn merge_object_metadata(target: &mut serde_json::Value, extra: Option<&serde_json::Value>) {
     let Some(extra) = extra.and_then(|value| value.as_object()) else {
         return;
@@ -20099,6 +20115,16 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                         let quality_metadata = deck_quality_metadata_from_qa_result(
                                             qa_result.as_ref(),
                                         );
+                                        let mut artifact_metadata =
+                                            deck_template_metadata(catalog_template.as_ref());
+                                        merge_object_metadata(
+                                            &mut artifact_metadata,
+                                            quality_metadata.as_ref(),
+                                        );
+                                        let artifact_metadata_ref = artifact_metadata
+                                            .as_object()
+                                            .filter(|metadata| !metadata.is_empty())
+                                            .map(|_| &artifact_metadata);
                                         let produced = emit_rendered_deck_artifacts(
                                             &state_owned,
                                             &tx,
@@ -20106,7 +20132,7 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                             thread_id.as_deref(),
                                             &thread_slug,
                                             "make_deck",
-                                            quality_metadata.as_ref(),
+                                            artifact_metadata_ref,
                                         )
                                         .await;
                                         if let Some(error) = rendered_deck_qa_failure(&render_out) {
@@ -44664,6 +44690,60 @@ mod tests {
         assert!(
             message.contains("Do not create files manually"),
             "{message}"
+        );
+    }
+
+    #[test]
+    fn deck_artifact_metadata_includes_imported_template_attribution() {
+        let template = super::TemplateCatalogEntry {
+            provider: "local_template_pack".to_string(),
+            id: "slidescarnival/pitch-clean".to_string(),
+            name: "Pitch Clean".to_string(),
+            kind: "presentation".to_string(),
+            description: "Imported template.".to_string(),
+            use_cases: vec!["pitch".to_string()],
+            audience: vec!["clients".to_string()],
+            design_template: "startup_pitch".to_string(),
+            design_theme: Some("clean_corporate".to_string()),
+            design_profile: Some("sales_pitch".to_string()),
+            design_components: vec!["kpi_grid".to_string()],
+            layout_archetypes: vec!["cover".to_string()],
+            tags: vec!["slidescarnival".to_string()],
+            preview_ref: Some(
+                "template-pack://slidescarnival/pitch-clean/thumbnails/slide-001.png".to_string(),
+            ),
+            source_ref: Some("https://www.slidescarnival.com/template/example/123".to_string()),
+            license: Some("Creative Commons Attribution 4.0".to_string()),
+            source_provider: Some("slidescarnival".to_string()),
+            source_path: None,
+            template_pack_root: None,
+            attribution_required: true,
+            attribution_text: Some("Template by SlidesCarnival".to_string()),
+            redistribution_policy: Some("generated_decks_only".to_string()),
+            route_text: "pitch".to_string(),
+        };
+
+        let metadata = super::deck_template_metadata(Some(&template));
+
+        assert_eq!(metadata["template_ref"], "slidescarnival/pitch-clean");
+        assert_eq!(metadata["template_provider"], "local_template_pack");
+        assert_eq!(metadata["template_source_provider"], "slidescarnival");
+        assert_eq!(
+            metadata["template_source_ref"],
+            "https://www.slidescarnival.com/template/example/123"
+        );
+        assert_eq!(
+            metadata["template_license"],
+            "Creative Commons Attribution 4.0"
+        );
+        assert_eq!(metadata["template_attribution_required"], true);
+        assert_eq!(
+            metadata["template_attribution_text"],
+            "Template by SlidesCarnival"
+        );
+        assert_eq!(
+            metadata["template_redistribution_policy"],
+            "generated_decks_only"
         );
     }
 
