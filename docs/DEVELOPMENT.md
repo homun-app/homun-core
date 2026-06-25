@@ -178,11 +178,20 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   `sales_templates_Sales Kickoff Slides.pptx` (output: 6 slide, 20x11.25,
   1 master, media preservati). Limite esplicito: HTML/PDF restano ancora
   preview sintetiche e la sostituzione testi e' conservativa, non ancora un
-  editor placeholder completo. **Prossimo passo unico:** smoke runtime Electron
-  import→catalogo→use template→make_deck verificando che `deck.pptx` mantenga
-  il layout del template importato; poi riallineare preview HTML/PDF e catalogo
-  "Powered by SlidesCarnival" con ricerca/filtri/import esplicito.
+  editor placeholder completo. WS7 Presentations studio redesign locale/verde:
+  la pagina Presentations non e' piu' un form settings verticale; ora usa un
+  layout studio con brand kit compatto a sinistra e template workspace a destra,
+  ricerca testuale, filtri fonte (`Local`, `SlidesCarnival`, `Homun`) e card
+  piu' visuali con CTA unica `Use template`. Nessun cambio API/runtime: import,
+  catalogo e avvio chat guidata restano sul registry canonico esistente. Gate:
+  `npm run test:ui-contract`, `npm run build`, `git diff --check`, smoke
+  Playwright su `127.0.0.1:1420` (Presentations apre, `sales` filtra a 6 card,
+  input file logo nativo non visibile). **Prossimo passo unico:** smoke runtime
+  Electron import→catalogo→use template→make_deck verificando che `deck.pptx`
+  mantenga il layout del template importato; poi riallineare preview HTML/PDF e
+  catalogo "Powered by SlidesCarnival" con ricerca/filtri/import esplicito.
   Spec: [Real PPTX Template Import and SlidesCarnival-Powered Catalog](superpowers/specs/2026-06-25-real-pptx-template-import-design.md).
+  UX spec: [Presentations Studio Redesign](superpowers/specs/2026-06-25-presentations-studio-redesign-design.md).
 - **Direzione WS7 aggiornata:** l'obiettivo deliverable non è una gallery statica
   clonata tool-per-tool, ma un **design system dichiarativo condiviso** per
   documenti e presentazioni/plugin: temi, layout, componenti, template e QA

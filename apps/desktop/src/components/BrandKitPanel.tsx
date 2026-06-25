@@ -1,6 +1,6 @@
 import { type ChangeEvent, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { FileText, ImageIcon, Presentation, Save, Upload } from "lucide-react";
+import { FileText, ImageIcon, Presentation, Save, Search, Upload } from "lucide-react";
 import { coreBridge, type BrandKit, type TemplateCatalogEntry } from "../lib/coreBridge";
 import { fileLocalPathFromBridge } from "../lib/gatewayConfig";
 import type { PluginHost } from "../plugins/registry";
@@ -106,9 +106,9 @@ export function BrandKitPanel({ host }: { host: PluginHost }) {
   }
 
   return (
-    <div className="presentations-panel">
-      <section className="brandkit" aria-labelledby="brandkit-title">
-        <header className="learning-header">
+    <div className="presentations-panel presentation-studio">
+      <section className="brandkit presentation-brand-rail" aria-labelledby="brandkit-title">
+        <header className="presentation-rail-header">
           <div>
             <p className="eyebrow">{t("presentations:eyebrow")}</p>
             <h2 id="brandkit-title">{t("presentations:title")}</h2>
@@ -167,7 +167,11 @@ export function BrandKitPanel({ host }: { host: PluginHost }) {
                   <ImageIcon size={18} aria-hidden />
                 </div>
               )}
-              <input type="file" accept="image/*" onChange={onLogo} />
+              <label className="auto-btn brandkit-logo-upload">
+                <Upload size={13} aria-hidden />
+                {t("presentations:uploadLogo")}
+                <input type="file" accept="image/*" onChange={onLogo} />
+              </label>
               {kit.logo_data_url && (
                 <button type="button" className="auto-btn" onClick={() => set("logo_data_url", "")}>
                   {t("presentations:removeLogo")}
@@ -205,7 +209,9 @@ export function BrandKitPanel({ host }: { host: PluginHost }) {
 function TemplateCatalogGallery({ host }: { host: PluginHost }) {
   const { t } = useTranslation();
   const [templates, setTemplates] = useState<TemplateCatalogEntry[]>([]);
+  const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<"all" | "presentation" | "document">("all");
+  const [sourceFilter, setSourceFilter] = useState<"all" | "local" | "slidescarnival" | "homun">("all");
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
   const [selectedTemplate, setSelectedTemplate] = useState<TemplateCatalogEntry | null>(null);
@@ -221,7 +227,33 @@ function TemplateCatalogGallery({ host }: { host: PluginHost }) {
     };
   }, []);
 
-  const visible = templates.filter((entry) => filter === "all" || entry.kind === filter);
+  const visible = templates.filter((entry) => {
+    const matchesKind = filter === "all" || entry.kind === filter;
+    const matchesSource =
+      sourceFilter === "all" ||
+      (sourceFilter === "local" && entry.is_imported) ||
+      (sourceFilter === "slidescarnival" && entry.source_provider === "slidescarnival") ||
+      (sourceFilter === "homun" && !entry.is_imported && entry.source_provider !== "slidescarnival");
+    const haystack = [
+      entry.name,
+      entry.description,
+      entry.id,
+      entry.provider,
+      entry.source_provider,
+      entry.design_template,
+      entry.design_theme,
+      entry.design_profile,
+      ...(entry.selection_notes ?? []),
+      ...entry.tags,
+      ...entry.use_cases,
+      ...entry.audience,
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+    const needle = query.trim().toLowerCase();
+    return matchesKind && matchesSource && (!needle || haystack.includes(needle));
+  });
 
   async function refreshTemplates() {
     const catalog = await coreBridge.templateCatalog();
@@ -281,16 +313,19 @@ function TemplateCatalogGallery({ host }: { host: PluginHost }) {
   }
 
   return (
-    <section className="template-gallery" aria-labelledby="template-gallery-title">
+    <section className="template-gallery presentation-template-workspace" aria-labelledby="template-gallery-title">
       <header className="template-gallery-header">
         <div>
           <p className="eyebrow">{t("presentations:templatesEyebrow")}</p>
           <h3 id="template-gallery-title">{t("presentations:templatesTitle")}</h3>
+          <p className="template-gallery-status">
+            {t("presentations:templatesCount", { visible: visible.length, total: templates.length })}
+          </p>
         </div>
         <div className="template-gallery-controls">
           <label className="auto-btn template-import-button">
             <Upload size={14} aria-hidden />
-            {importing ? "Importing..." : "Import PPTX"}
+            {importing ? t("presentations:importing") : t("presentations:importPptx")}
             <input
               type="file"
               accept=".pptx,.potx,application/vnd.openxmlformats-officedocument.presentationml.presentation,application/vnd.ms-powerpoint.template.macroEnabled.12"
@@ -312,65 +347,95 @@ function TemplateCatalogGallery({ host }: { host: PluginHost }) {
           </div>
         </div>
       </header>
+      <div className="template-gallery-toolbar">
+        <label className="template-search">
+          <Search size={14} aria-hidden />
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder={t("presentations:searchPlaceholder")}
+          />
+        </label>
+        <div className="template-source-tabs" aria-label="Template source">
+          {(["all", "local", "slidescarnival", "homun"] as const).map((key) => (
+            <button
+              key={key}
+              type="button"
+              className={sourceFilter === key ? "active" : ""}
+              onClick={() => setSourceFilter(key)}
+            >
+              {t(`presentations:source_${key}`)}
+            </button>
+          ))}
+        </div>
+      </div>
       {importError && <p className="template-import-error">{importError}</p>}
 
-      <div className="template-gallery-grid">
-        {visible.map((entry) => {
-          const selectionNotes = entry.selection_notes ?? [];
-          const sourceBadges = templateSourceBadges(entry);
-          const starting = startingTemplateId === entry.id;
-          return (
-            <article className="template-card" key={entry.id}>
-              <button
-                type="button"
-                className="template-card-preview-button"
-                onClick={() => setSelectedTemplate(entry)}
-                aria-label={`Open ${entry.name} template details`}
-              >
-                <TemplateCardPreview entry={entry} />
-              </button>
-              <div className="template-card-body">
-                <div className="template-card-title-row">
-                  <h4>{entry.name}</h4>
-                  <span>{entry.kind === "presentation" ? "PPTX" : "DOCX"}</span>
-                </div>
-                <p>{entry.description}</p>
-                {selectionNotes.length > 0 && (
-                  <div className="template-card-fit" aria-label="Template selection notes">
-                    {selectionNotes.slice(0, 2).map((note) => (
-                      <span key={note}>{note}</span>
-                    ))}
+      {visible.length === 0 ? (
+        <div className="template-empty">
+          <Presentation size={22} aria-hidden />
+          <strong>{t("presentations:noTemplatesTitle")}</strong>
+          <span>{t("presentations:noTemplatesBody")}</span>
+        </div>
+      ) : (
+        <div className="template-gallery-grid">
+          {visible.map((entry) => {
+            const selectionNotes = entry.selection_notes ?? [];
+            const sourceBadges = templateSourceBadges(entry);
+            const starting = startingTemplateId === entry.id;
+            return (
+              <article className="template-card" key={entry.id}>
+                <button
+                  type="button"
+                  className="template-card-preview-button"
+                  onClick={() => setSelectedTemplate(entry)}
+                  aria-label={t("presentations:openTemplateDetails", { name: entry.name })}
+                >
+                  <TemplateCardPreview entry={entry} />
+                </button>
+                <div className="template-card-body">
+                  <div className="template-card-title-row">
+                    <h4>{entry.name}</h4>
+                    <span>{entry.kind === "presentation" ? "PPTX" : "DOCX"}</span>
                   </div>
-                )}
-                {sourceBadges.length > 0 && (
-                  <div className="template-card-source">
-                    {sourceBadges.map((badge) => (
-                      <span key={badge}>{badge}</span>
-                    ))}
+                  <p>{entry.description}</p>
+                  {sourceBadges.length > 0 && (
+                    <div className="template-card-source">
+                      {sourceBadges.map((badge) => (
+                        <span key={badge}>{badge}</span>
+                      ))}
+                    </div>
+                  )}
+                  {selectionNotes.length > 0 && (
+                    <div className="template-card-fit" aria-label="Template selection notes">
+                      {selectionNotes.slice(0, 2).map((note) => (
+                        <span key={note}>{note}</span>
+                      ))}
+                    </div>
+                  )}
+                  <div className="template-card-meta">
+                    {[entry.design_theme, entry.design_profile, ...entry.design_components.slice(0, 2)]
+                      .filter(Boolean)
+                      .map((item) => (
+                        <span key={item}>{String(item).replaceAll("_", " ")}</span>
+                      ))}
                   </div>
-                )}
-                <div className="template-card-meta">
-                  {[entry.design_theme, entry.design_profile, ...entry.design_components.slice(0, 3)]
-                    .filter(Boolean)
-                    .map((item) => (
-                      <span key={item}>{String(item).replaceAll("_", " ")}</span>
-                    ))}
                 </div>
-              </div>
-              <button
-                type="button"
-                className="template-use"
-                onClick={() => void useTemplate(entry)}
-                title={t("presentations:useTemplate")}
-                disabled={Boolean(startingTemplateId)}
-              >
-                <Presentation size={14} aria-hidden />
-                {starting ? t("presentations:starting") : t("presentations:useTemplate")}
-              </button>
-            </article>
-          );
-        })}
-      </div>
+                <button
+                  type="button"
+                  className="template-use"
+                  onClick={() => void useTemplate(entry)}
+                  title={t("presentations:useTemplate")}
+                  disabled={Boolean(startingTemplateId)}
+                >
+                  <Presentation size={14} aria-hidden />
+                  {starting ? t("presentations:starting") : t("presentations:useTemplate")}
+                </button>
+              </article>
+            );
+          })}
+        </div>
+      )}
       {selectedTemplate && (
         <TemplateDetailModal
           entry={selectedTemplate}
