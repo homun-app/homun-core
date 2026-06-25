@@ -166,11 +166,22 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   local-first-desktop-gateway powerpoint_file_extracts_slide_text --
   --nocapture`, `cargo test -p local-first-desktop-gateway template_catalog --
   --nocapture`, `npm run test:ui-contract`, `npm run build`, `git diff
-  --check`. **Prossimo passo unico:** smoke runtime in Electron del nuovo
-  import→catalogo→use template→chat/plan verificando che il modello citi il
-  contenuto reale delle slide, poi catalogo "Powered by SlidesCarnival" con
-  ricerca/filtri/import esplicito; il vero slide-cloning da PPTX reale resta
-  slice successiva del renderer.
+  --check`. WS7 renderer PPTX reale prima slice locale/verde: quando
+  `make_deck(template_ref=...)` risolve un template importato con sorgente
+  `.pptx`/`.potx`, il gateway lo materializza in una staging interna del thread
+  e passa `--template-pptx` a `deck-render`; il renderer produce `deck.pptx`
+  editando il PowerPoint reale e preservando dimensioni, master e media del
+  template, invece di generare un deck sintetico. Gate aggiuntivi:
+  `cargo test -p local-first-desktop-gateway
+  materialize_deck_template_source_copies_imported_pptx_for_renderer --
+  --nocapture`, `deck_render.py --self-test`, smoke manuale con
+  `sales_templates_Sales Kickoff Slides.pptx` (output: 6 slide, 20x11.25,
+  1 master, media preservati). Limite esplicito: HTML/PDF restano ancora
+  preview sintetiche e la sostituzione testi e' conservativa, non ancora un
+  editor placeholder completo. **Prossimo passo unico:** smoke runtime Electron
+  import→catalogo→use template→make_deck verificando che `deck.pptx` mantenga
+  il layout del template importato; poi riallineare preview HTML/PDF e catalogo
+  "Powered by SlidesCarnival" con ricerca/filtri/import esplicito.
   Spec: [Real PPTX Template Import and SlidesCarnival-Powered Catalog](superpowers/specs/2026-06-25-real-pptx-template-import-design.md).
 - **Direzione WS7 aggiornata:** l'obiettivo deliverable non è una gallery statica
   clonata tool-per-tool, ma un **design system dichiarativo condiviso** per

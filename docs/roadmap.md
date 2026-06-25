@@ -355,9 +355,12 @@ primo percorso locale verde e WS5 è chiusa localmente/gate:
     bloccata finché l'utente non risponde alle domande essenziali e conferma.
     Fix locale successivo: l'ingestion allegati legge `.pptx`/`.potx` OOXML e
     passa al modello testo estratto slide-by-slide; i template importati non
-    sono piu' file opachi nella chat, anche se il renderer non clona ancora il
-    layout visuale reale.
-    Quello resta la slice successiva dopo smoke Electron e catalogo
+    sono piu' file opachi nella chat. Slice renderer successiva locale/verde:
+    `make_deck` materializza il PPTX importato in staging interna e passa
+    `--template-pptx` a `deck-render`; il `deck.pptx` finale viene editato dal
+    PowerPoint reale preservando dimensioni, master e media del template.
+    Limite: HTML/PDF sono ancora preview sintetiche e la sostituzione testi e'
+    conservativa. Resta da fare smoke Electron end-to-end e catalogo
     SlidesCarnival con import esplicito.
 74. WS8 gateway contract eval — `scripts/eval_suite.py` può ora, se configurato
     con `HOMUN_EVAL_GATEWAY_BASE` e token, verificare anche il gateway reale:

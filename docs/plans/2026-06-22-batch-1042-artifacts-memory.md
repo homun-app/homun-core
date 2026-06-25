@@ -1071,6 +1071,20 @@ feature laterali né una dashboard generica.
   esplicito e, dopo, vero slide-cloning del PPTX importato.
   Spec:
   `docs/superpowers/specs/2026-06-25-real-pptx-template-import-design.md`.
+- ✅ **WS7 real PPTX renderer — prima slice locale/verde (2026-06-25):**
+  `make_deck(template_ref=...)` ora usa davvero il PPTX importato quando il
+  template pack espone `source.pptx`/`source.potx`: il gateway copia il sorgente
+  in una staging interna non visibile come artifact utente e invoca
+  `deck-render --template-pptx`. Il renderer apre il PowerPoint reale con
+  `python-pptx`, preserva dimensioni, master/media/layout, elimina le slide
+  extra rispetto al deck richiesto e sostituisce testi in modo conservativo. Gate:
+  `cargo test -p local-first-desktop-gateway
+  materialize_deck_template_source_copies_imported_pptx_for_renderer --
+  --nocapture`, `deck_render.py --self-test`, smoke manuale sul template
+  `sales_templates_Sales Kickoff Slides.pptx` (output verificato: 6 slide,
+  20x11.25, 1 master, media preservati). Limiti rimasti: HTML/PDF sono ancora
+  preview sintetiche, non render del PPTX reale; placeholder/slot detection resta
+  euristica minima e andra' evoluta dopo lo smoke runtime Electron.
 
 ## WS9 — Distribuzione plugin & marketplace
 

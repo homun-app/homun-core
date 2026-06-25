@@ -721,7 +721,9 @@ git commit -m "docs: update pptx template import status"
 
 - Full SlidesCarnival scraping/search automation.
 - Direct download from SlidesCarnival pages.
-- Replacing `deck_render.py` with a true PPTX slide-cloning renderer.
+- Full placeholder/slot matching for complex PPTX templates.
+- Rendering HTML/PDF previews from the real PPTX output instead of the synthetic
+  HTML renderer.
 - Sophisticated placeholder detection and manual manifest editor.
 - Generating real thumbnails through LibreOffice/PowerPoint in every environment.
 
@@ -729,6 +731,6 @@ Those follow once local packs are canonical and visible.
 
 ## Self-Review
 
-- Spec coverage: this plan covers manual PPTX import, pack manifest, catalog exposure, UI import affordance, attribution metadata, and runtime smoke. It intentionally defers SlidesCarnival browsing/direct import and true PPTX cloning to later slices.
+- Spec coverage: this plan covers manual PPTX import, pack manifest, catalog exposure, UI import affordance, attribution metadata, runtime smoke, and the first real-PPTX renderer slice. It intentionally defers SlidesCarnival browsing/direct import, full placeholder matching, and real-PPTX-derived HTML/PDF previews to later slices.
 - Placeholder scan: no marker placeholders or vague implementation placeholders remain.
 - Type consistency: new metadata fields are defined once on `TemplateCatalogEntry`, mirrored in API response and TypeScript bridge, then reused by UI and artifact provenance.

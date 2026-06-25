@@ -15,6 +15,7 @@ trap. Layout types are deliberately CONSTRAINED so both renderers stay faithful.
 
 Usage:
     python deck_render.py deck.json [--prefix deck] [--no-pptx]
+    python deck_render.py deck.json [--prefix deck] [--template-pptx source.pptx]
 
 deck.json schema (all fields optional unless noted):
 {
@@ -44,6 +45,7 @@ import html
 import json
 import mimetypes
 import os
+import re
 import sys
 
 DEFAULT_THEME = {
@@ -245,6 +247,193 @@ _HTML_SHELL = """<!doctype html><html lang="en"><head><meta charset="utf-8">
 
 
 # ----------------------------------------------------------------------- PPTX side
+def render_template_pptx(deck, base_dir, template_path, out_path):
+    """Edit a real PPTX template in place, preserving its masters/media/layouts.
+
+    This is intentionally conservative. Imported templates are visually stronger
+    than Homun's synthetic layouts, so the first production pass changes only
+    text content and trims text aggressively enough to avoid the worst overflow.
+    """
+    try:
+        from pptx import Presentation
+    except Exception as exc:
+        sys.stderr.write(f"deck_render: python-pptx unavailable ({exc}); skipping template .pptx\n")
+        return False
+
+    source = template_path if os.path.isabs(template_path) else os.path.join(base_dir, template_path)
+    if not os.path.isfile(source):
+        sys.stderr.write(f"deck_render: template pptx not found: {template_path}\n")
+        return False
+
+    prs = Presentation(source)
+    slides_list = deck.get("slides", [])
+    if not slides_list:
+        return False
+
+    def trim(text, max_chars):
+        text = " ".join(str(text or "").split())
+        if len(text) <= max_chars:
+            return text
+        return text[: max(1, max_chars - 1)].rstrip() + "…"
+
+    def normalized(text):
+        return " ".join(str(text or "").split()).lower()
+
+    def shape_text(shape):
+        return " ".join(str(getattr(shape, "text", "") or "").split())
+
+    def text_shapes(slide):
+        shapes = []
+        for shape in slide.shapes:
+            if getattr(shape, "has_text_frame", False) and shape_text(shape):
+                shapes.append(shape)
+        return shapes
+
+    def set_shape_text(shape, text):
+        text = str(text or "")
+        if not text.strip():
+            return
+        # Prefer run-level edits when possible to preserve font styling. Fall
+        # back to shape.text for grouped/split text where the source text spans
+        # multiple runs and cannot be replaced safely.
+        try:
+            paragraphs = shape.text_frame.paragraphs
+            first_run = None
+            for paragraph in paragraphs:
+                for run in paragraph.runs:
+                    if first_run is None:
+                        first_run = run
+                    else:
+                        run.text = ""
+            if first_run is not None:
+                first_run.text = text
+                return
+        except Exception:
+            pass
+        try:
+            shape.text = text
+        except Exception:
+            pass
+
+    def remove_extra_slides(keep):
+        sld_id_list = prs.slides._sldIdLst  # python-pptx has no public delete API.
+        sld_ids = list(sld_id_list)
+        for index in range(len(sld_ids) - 1, keep - 1, -1):
+            rel_id = sld_ids[index].rId
+            prs.part.drop_rel(rel_id)
+            sld_id_list.remove(sld_ids[index])
+
+    def title_for(index, slide_model):
+        if index == 0:
+            return trim(deck.get("title") or slide_model.get("title") or "Presentation", 26)
+        return trim(slide_model.get("title") or f"Slide {index + 1}", 42)
+
+    def body_for(slide_model):
+        parts = []
+        if slide_model.get("subtitle"):
+            parts.append(slide_model.get("subtitle"))
+        if slide_model.get("body"):
+            parts.append(slide_model.get("body"))
+        for bullet in slide_model.get("bullets") or []:
+            parts.append(bullet)
+        for column in slide_model.get("columns") or []:
+            if column.get("title"):
+                parts.append(column.get("title"))
+            parts.extend(column.get("bullets") or [])
+        if slide_model.get("kpi"):
+            parts.append(f"{slide_model.get('kpi')} {slide_model.get('kpi_label', '')}".strip())
+        if slide_model.get("quote"):
+            parts.append(slide_model.get("quote"))
+        return trim(" · ".join(parts), 260)
+
+    def replace_cover(slide, slide_model):
+        shapes = text_shapes(slide)
+        if not shapes:
+            return
+        title = title_for(0, slide_model)
+        subtitle = trim(deck.get("subtitle") or slide_model.get("subtitle") or "Q3 2026", 24)
+        org = trim((deck.get("theme") or {}).get("organization") or deck.get("organization") or "", 24)
+        # Largest textbox is usually the hero title.
+        title_shape = max(shapes, key=lambda shape: int(shape.width) * int(shape.height))
+        set_shape_text(title_shape, title)
+        for shape in shapes:
+            if shape is title_shape:
+                continue
+            txt = normalized(shape_text(shape))
+            if re.search(r"\bq[1-4]\b|\b20\d{2}\b|date", txt):
+                set_shape_text(shape, subtitle)
+            elif org and len(txt) <= 40:
+                set_shape_text(shape, org)
+                org = ""
+
+    def replace_agenda(slide, slides_models):
+        shapes = text_shapes(slide)
+        titles = [trim(item.get("title") or "", 30) for item in slides_models[1:5]]
+        title_idx = 0
+        for shape in shapes:
+            txt = normalized(shape_text(shape))
+            if txt in {"agenda", "table of contents", "overview"}:
+                set_shape_text(shape, "Agenda")
+                continue
+            if re.fullmatch(r"\d{1,2}", txt):
+                continue
+            if title_idx < len(titles) and txt not in {"", "agenda"}:
+                set_shape_text(shape, titles[title_idx])
+                title_idx += 1
+
+    def replace_content_slide(slide, index, slide_model):
+        shapes = text_shapes(slide)
+        if not shapes:
+            return
+        useful = [
+            shape
+            for shape in shapes
+            if "back to agenda" not in normalized(shape_text(shape))
+            and not re.fullmatch(r"\d{1,2}", normalized(shape_text(shape)))
+        ]
+        if not useful:
+            return
+        # Top-most sizeable text tends to be the slide heading.
+        title_shape = min(
+            useful,
+            key=lambda shape: (int(shape.top), -(int(shape.width) * int(shape.height))),
+        )
+        set_shape_text(title_shape, title_for(index, slide_model))
+        body = body_for(slide_model)
+        if not body:
+            return
+        body_candidates = [shape for shape in useful if shape is not title_shape]
+        if body_candidates:
+            body_shape = max(body_candidates, key=lambda shape: int(shape.width) * int(shape.height))
+            set_shape_text(body_shape, body)
+
+    keep = min(len(slides_list), len(prs.slides))
+    if keep < len(prs.slides):
+        remove_extra_slides(keep)
+
+    for index, slide_model in enumerate(slides_list[:keep]):
+        slide = prs.slides[index]
+        if index == 0:
+            replace_cover(slide, slide_model)
+        elif index == 1:
+            replace_agenda(slide, slides_list)
+        else:
+            replace_content_slide(slide, index, slide_model)
+        if slide_model.get("notes"):
+            try:
+                slide.notes_slide.notes_text_frame.text = str(slide_model.get("notes"))
+            except Exception:
+                pass
+
+    prs.save(out_path)
+    return {
+        "logo": False,
+        "img_ok": 0,
+        "img_fail": 0,
+        "notes": [f"template source preserved: {os.path.basename(source)}"],
+    }
+
+
 def render_pptx(deck, base_dir, out_path):
     """Build a native, editable .pptx from the deck model. Returns True on success."""
     try:
@@ -493,6 +682,7 @@ def main():
     ap.add_argument("deck", nargs="?", help="path to deck.json")
     ap.add_argument("--prefix", default=None, help="output prefix (default: deck file stem)")
     ap.add_argument("--no-pptx", action="store_true", help="skip the .pptx output")
+    ap.add_argument("--template-pptx", default=None, help="real .pptx/.potx template to edit for the .pptx output")
     ap.add_argument("--self-test", action="store_true", help="verify renderer quality contracts")
     args = ap.parse_args()
 
@@ -538,13 +728,20 @@ def main():
     print(f"wrote {out_html}")
 
     if not args.no_pptx:
-        result = render_pptx(deck, base_dir, out_pptx)
+        result = (
+            render_template_pptx(deck, base_dir, args.template_pptx, out_pptx)
+            if args.template_pptx
+            else render_pptx(deck, base_dir, out_pptx)
+        )
         if result:
             print(f"wrote {out_pptx}")
-            print(
-                f"  embedded: logo={'yes' if result['logo'] else 'NO'}, "
-                f"images={result['img_ok']} ok / {result['img_fail']} failed"
-            )
+            if args.template_pptx:
+                print(f"  template: {args.template_pptx}")
+            else:
+                print(
+                    f"  embedded: logo={'yes' if result['logo'] else 'NO'}, "
+                    f"images={result['img_ok']} ok / {result['img_fail']} failed"
+                )
             for note in result["notes"]:
                 print(f"  ⚠ {note}")
         else:

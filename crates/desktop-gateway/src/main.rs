@@ -20102,11 +20102,40 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                     if let Err(e) = write_res {
                                         format!("Could not write deck.json: {e}")
                                     } else {
+                                        let template_render_arg =
+                                            match materialize_deck_template_source(
+                                                &thread_slug,
+                                                catalog_template.as_ref(),
+                                            ) {
+                                                Ok(Some(filename)) => {
+                                                    let _ = emit_stream_event(
+                                                        &tx,
+                                                        GenerateStreamEvent::Delta {
+                                                            text: "‹‹ACT››📐 Using imported PPTX template‹‹/ACT››".to_string(),
+                                                        },
+                                                    )
+                                                    .await;
+                                                    format!(" --template-pptx {filename}")
+                                                }
+                                                Ok(None) => String::new(),
+                                                Err(error) => {
+                                                    let _ = emit_stream_event(
+                                                        &tx,
+                                                        GenerateStreamEvent::Delta {
+                                                            text: format!(
+                                                                "‹‹ACT››⚠ Template source unavailable: {error}‹‹/ACT››"
+                                                            ),
+                                                        },
+                                                    )
+                                                    .await;
+                                                    String::new()
+                                                }
+                                            };
                                         // 5) render in the sandbox (no model shell).
                                         let container_out =
                                             sandbox::container_output_dir(&thread_slug);
                                         let cmd = format!(
-                                            "cd '{container_out}' && deck-render deck.json --prefix deck && \
+                                            "cd '{container_out}' && deck-render deck.json --prefix deck{template_render_arg} && \
                                              chromium --headless --no-sandbox --disable-gpu \
                                              --print-to-pdf=deck.pdf deck.html >/dev/null 2>&1 && \
                                              qa=$(deck-qa deck.html --json 2>&1); qa_code=$?; \
@@ -27404,6 +27433,38 @@ fn materialize_brand_kit(thread_slug: &str) {
             }
         }
     }
+}
+
+fn materialize_deck_template_source(
+    thread_slug: &str,
+    template: Option<&TemplateCatalogEntry>,
+) -> Result<Option<String>, String> {
+    let Some(source_path) = template
+        .and_then(|entry| entry.source_path.as_ref())
+        .filter(|path| path.is_file())
+    else {
+        return Ok(None);
+    };
+    let extension = source_path
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| value.to_ascii_lowercase())
+        .filter(|value| matches!(value.as_str(), "pptx" | "potx"))
+        .ok_or_else(|| "Template source must be a .pptx or .potx file.".to_string())?;
+    let filename = format!("template-source.{extension}");
+    let relative_path = format!(".internal/{filename}");
+    let bytes = fs::read(source_path).map_err(|error| {
+        format!(
+            "Could not read template source {}: {error}",
+            source_path.display()
+        )
+    })?;
+    let internal_dir = sandbox::artifacts_dir().join(thread_slug).join(".internal");
+    fs::create_dir_all(&internal_dir)
+        .map_err(|error| format!("Could not create template staging dir: {error}"))?;
+    fs::write(internal_dir.join(&filename), &bytes)
+        .map_err(|error| format!("Could not stage template source: {error}"))?;
+    Ok(Some(relative_path))
 }
 
 /// Copies an artifact to an AUTHORIZED destination folder (host-side). Enforces:
@@ -43902,6 +43963,63 @@ mod tests {
         assert!(first.get("source_path").is_none());
         assert!(first.get("template_pack_root").is_none());
 
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn materialize_deck_template_source_copies_imported_pptx_for_renderer() {
+        let root = std::env::temp_dir().join(format!(
+            "homun-template-render-source-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis()
+        ));
+        let source = root.join("source.pptx");
+        std::fs::create_dir_all(&root).expect("root");
+        std::fs::write(&source, b"real pptx bytes").expect("source");
+        let thread_slug = format!("template-render-source-{}", std::process::id());
+        let _ = std::fs::remove_dir_all(super::sandbox::artifacts_dir().join(&thread_slug));
+
+        let template = super::TemplateCatalogEntry {
+            provider: "local_template_pack".to_string(),
+            id: "local/sales-kickoff".to_string(),
+            name: "Sales Kickoff".to_string(),
+            kind: "presentation".to_string(),
+            description: "Imported template".to_string(),
+            use_cases: Vec::new(),
+            audience: Vec::new(),
+            design_template: "startup_pitch".to_string(),
+            design_theme: None,
+            design_profile: None,
+            design_components: Vec::new(),
+            layout_archetypes: Vec::new(),
+            tags: Vec::new(),
+            preview_ref: None,
+            source_ref: None,
+            license: None,
+            source_provider: Some("user_upload".to_string()),
+            source_path: Some(source.clone()),
+            template_pack_root: Some(root.clone()),
+            attribution_required: false,
+            attribution_text: None,
+            redistribution_policy: None,
+            route_text: "sales kickoff".to_string(),
+        };
+
+        let filename = super::materialize_deck_template_source(&thread_slug, Some(&template))
+            .expect("materialized")
+            .expect("filename");
+
+        assert_eq!(filename, ".internal/template-source.pptx");
+        assert_eq!(
+            std::fs::read(super::sandbox::artifacts_dir().join(&thread_slug).join(&filename))
+                .expect("copied"),
+            b"real pptx bytes"
+        );
+
+        let _ = std::fs::remove_dir_all(super::sandbox::artifacts_dir().join(&thread_slug));
         let _ = std::fs::remove_dir_all(root);
     }
 

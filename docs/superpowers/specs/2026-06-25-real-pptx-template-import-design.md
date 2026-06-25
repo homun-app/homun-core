@@ -119,8 +119,11 @@ When a real PPTX pack is selected:
 
 1. The model generates content structure only: narrative, sections, slide intent,
    text, data and image requests.
-2. The renderer chooses matching real slides/layouts from the template pack.
-3. The renderer clones template slides and replaces placeholders.
+2. The first renderer slice opens the real `.pptx`/`.potx`, keeps its slide
+   size, master and media, trims it to the requested slide count, and edits text
+   conservatively.
+3. Later renderer slices should choose matching real slides/layouts and replace
+   explicit placeholders/slots with higher confidence.
 4. Brand kit application is conservative:
    - use the user's logo where there is a logo slot;
    - map primary/accent colors to theme-safe elements when confidence is high;
@@ -129,6 +132,11 @@ When a real PPTX pack is selected:
 5. Existing QA runs on the HTML/PDF/PPTX preview outputs.
 6. Artifact provenance records template id, source provider, source URL, license,
    attribution and QA status.
+
+Current implementation note: `deck.pptx` can already be produced from a real
+imported PPTX source. The HTML/PDF previews still come from Homun's synthetic
+HTML renderer, so visual parity between preview and PowerPoint is not yet a
+contract.
 
 The renderer should prefer preserving visual quality over over-branding. If a
 template's palette conflicts with the brand kit, Homun should report the tradeoff
