@@ -779,27 +779,20 @@ export default function App() {
 
   async function handleStartTemplateWorkflow(input: {
     template: TemplateCatalogEntry;
-    sourcePath: string;
-    displayName: string;
-    mimeType: string;
-    sizeBytes: number;
+    attachment?: ChatAttachmentInput;
   }) {
-    const attachment: ChatAttachmentInput = {
-      localPath: input.sourcePath,
-      displayName: input.displayName,
-      mimeType: input.mimeType,
-      sizeBytes: input.sizeBytes,
-    };
-    const visiblePrompt = `Aiutami a creare una presentazione usando il template importato "${input.template.name}".`;
+    const visiblePrompt = `Aiutami a creare una presentazione usando il template scelto "${input.template.name}".`;
     const operativePrompt = [
-      `L'utente ha appena importato un template PowerPoint e vuole usarlo per creare una nuova presentazione.`,
+      `L'utente ha scelto un template dal catalogo Presentations e vuole usarlo per creare una nuova presentazione.`,
       `template_ref=${input.template.id}`,
       `template_name=${input.template.name}`,
       `source_provider=${input.template.source_provider ?? "user_upload"}`,
-      `attached_file=${input.displayName}`,
+      input.attachment
+        ? `attached_file=${input.attachment.displayName}`
+        : "attached_file=none; use the catalog template_ref and metadata as the style constraint.",
       "",
       "Non generare ancora il deck.",
-      "Analizza il template allegato come vincolo di stile, layout e tono visivo.",
+      "Analizza il template scelto come vincolo di stile, layout e tono visivo.",
       "Fai prima 2-4 domande essenziali per capire obiettivo, pubblico, contenuti disponibili, numero di slide e tono.",
       "Poi proponi un piano sintetico e attendi conferma prima di usare make_deck.",
       `Quando l'utente conferma l'esecuzione, usa make_deck con template_ref="${input.template.id}".`,
@@ -829,7 +822,7 @@ export default function App() {
         created.threadId,
         created.computerSessionId,
         operativePrompt,
-        [attachment],
+        input.attachment ? [input.attachment] : [],
         visiblePrompt,
         undefined,
         undefined,

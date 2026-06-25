@@ -150,15 +150,20 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   Presentations mostra `Import PPTX` e badge `Local`/provider/attribution; gli
   artifact `make_deck` registrano nei metadata provenance `template_*`
   (provider, source, license, attribution) insieme alla QA. Follow-up locale:
-  `Import PPTX` non copia piu' soltanto il `template_ref`; dopo l'import apre
-  una nuova chat con il PPTX allegato, prompt visibile di avvio presentazione e
-  prompt operativo nascosto in modalità piano con `template_ref=<local/...>`,
-  chiedendo prima le informazioni essenziali e attendendo conferma prima di
-  chiamare `make_deck`. Il commit dello stream preserva gli allegati utente, così
-  il template resta visibile nella conversazione. Gate: `npm run
-  test:ui-contract`, `npm run build`, `git diff --check`. **Prossimo passo
-  unico:** smoke runtime in Electron del nuovo import→chat→plan, poi catalogo
-  "Powered by SlidesCarnival" con ricerca/filtri/import esplicito; il vero
+  `Import PPTX` non copia piu' soltanto il `template_ref` e non avvia
+  automaticamente una chat: importa il file nel catalogo riusabile. Ogni card
+  template apre un dettaglio stile catalogo e il pulsante `Use template` apre
+  una nuova chat con prompt visibile di avvio presentazione e prompt operativo
+  nascosto in modalità piano con `template_ref=<...>`, chiedendo prima le
+  informazioni essenziali e attendendo conferma prima di chiamare `make_deck`.
+  Per i template importati, un endpoint autorizzato risolve il PPTX sorgente
+  solo al momento dell'uso, senza esporre path locali nel catalogo. Il commit
+  dello stream preserva gli allegati utente, così il template resta visibile
+  nella conversazione. Gate: `cargo test -p local-first-desktop-gateway
+  template_catalog -- --nocapture`, `npm run test:ui-contract`, `npm run build`,
+  `git diff --check`. **Prossimo passo unico:** smoke runtime in Electron del
+  nuovo import→catalogo→use template→chat/plan, poi catalogo "Powered by
+  SlidesCarnival" con ricerca/filtri/import esplicito; il vero
   slide-cloning da PPTX reale resta slice successiva del renderer.
   Spec: [Real PPTX Template Import and SlidesCarnival-Powered Catalog](superpowers/specs/2026-06-25-real-pptx-template-import-design.md).
 - **Direzione WS7 aggiornata:** l'obiettivo deliverable non è una gallery statica

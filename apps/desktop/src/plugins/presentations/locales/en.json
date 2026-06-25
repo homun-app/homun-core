@@ -20,5 +20,8 @@
   "filter_presentation": "Presentations",
   "filter_document": "Documents",
   "copyTemplateRef": "Copy template reference",
-  "copied": "Copied"
+  "copied": "Copied",
+  "templateInfo": "Template info",
+  "useTemplate": "Use template",
+  "starting": "Starting..."
 }

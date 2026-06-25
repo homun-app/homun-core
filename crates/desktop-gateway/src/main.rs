@@ -415,6 +415,19 @@ struct ImportPptxTemplateRequest {
     tags: Option<Vec<String>>,
 }
 
+#[derive(Debug, Clone, serde::Deserialize)]
+struct TemplateSourceAttachmentRequest {
+    template_id: String,
+}
+
+#[derive(Debug, Serialize)]
+struct TemplateSourceAttachmentResponse {
+    local_path: String,
+    display_name: String,
+    mime_type: String,
+    size_bytes: u64,
+}
+
 #[derive(Debug, serde::Deserialize)]
 struct RejectApprovalRequest {
     reason: String,
@@ -779,6 +792,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/skills/catalog/preview", get(preview_catalog_skill))
         .route("/api/templates/catalog", get(template_catalog))
         .route("/api/templates/import-pptx", post(import_pptx_template))
+        .route(
+            "/api/templates/source-attachment",
+            post(template_source_attachment),
+        )
         .route("/api/skills/{id}", get(skill_detail))
         .route("/api/skills/{id}/enabled", post(set_skill_enabled))
         .route("/api/tasks/queue", get(task_queue))
@@ -39885,6 +39902,49 @@ async fn import_pptx_template(
         message: "Imported template response is empty.".to_string(),
     })?;
     Ok(Json(entry))
+}
+
+async fn template_source_attachment(
+    Json(request): Json<TemplateSourceAttachmentRequest>,
+) -> Result<Json<TemplateSourceAttachmentResponse>, GatewayError> {
+    let entry = template_catalog_by_id(Some(&request.template_id)).ok_or_else(|| GatewayError {
+        status: StatusCode::NOT_FOUND,
+        code: "template_not_found",
+        message: "Template was not found in the catalog.".to_string(),
+    })?;
+    let source_path = entry.source_path.ok_or_else(|| GatewayError {
+        status: StatusCode::BAD_REQUEST,
+        code: "template_source_unavailable",
+        message: "This template does not expose a local source file.".to_string(),
+    })?;
+    if !source_path.is_file() {
+        return Err(GatewayError {
+            status: StatusCode::NOT_FOUND,
+            code: "template_source_missing",
+            message: "The imported template source file is missing.".to_string(),
+        });
+    }
+    let extension = source_path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("pptx")
+        .to_ascii_lowercase();
+    let mime_type = if extension == "potx" {
+        "application/vnd.openxmlformats-officedocument.presentationml.template"
+    } else {
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+    };
+    let size_bytes = source_path
+        .metadata()
+        .map(|metadata| metadata.len())
+        .unwrap_or(0);
+    let display_slug = slugify_template_pack_name(&entry.name).unwrap_or_else(|| "template".into());
+    Ok(Json(TemplateSourceAttachmentResponse {
+        local_path: source_path.to_string_lossy().to_string(),
+        display_name: format!("{display_slug}.{extension}"),
+        mime_type: mime_type.to_string(),
+        size_bytes,
+    }))
 }
 
 fn task_queue_response_for_state(state: &AppState) -> Result<TaskQueueResponse, GatewayError> {

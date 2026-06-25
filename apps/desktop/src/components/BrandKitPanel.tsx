@@ -1,7 +1,6 @@
 import { type ChangeEvent, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Copy, FileText, ImageIcon, Presentation, Save, Upload } from "lucide-react";
-import { copyText } from "../lib/clipboard";
+import { FileText, ImageIcon, Presentation, Save, Upload } from "lucide-react";
 import { coreBridge, type BrandKit, type TemplateCatalogEntry } from "../lib/coreBridge";
 import { fileLocalPathFromBridge } from "../lib/gatewayConfig";
 import type { PluginHost } from "../plugins/registry";
@@ -207,9 +206,10 @@ function TemplateCatalogGallery({ host }: { host: PluginHost }) {
   const { t } = useTranslation();
   const [templates, setTemplates] = useState<TemplateCatalogEntry[]>([]);
   const [filter, setFilter] = useState<"all" | "presentation" | "document">("all");
-  const [copied, setCopied] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
+  const [selectedTemplate, setSelectedTemplate] = useState<TemplateCatalogEntry | null>(null);
+  const [startingTemplateId, setStartingTemplateId] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -241,7 +241,7 @@ function TemplateCatalogGallery({ host }: { host: PluginHost }) {
     const name = file.name.replace(/\.(pptx|potx)$/i, "");
     setImporting(true);
     try {
-      const imported = await coreBridge.importPptxTemplate({
+      await coreBridge.importPptxTemplate({
         source_path: sourcePath,
         name,
         source_provider: "user_upload",
@@ -250,17 +250,6 @@ function TemplateCatalogGallery({ host }: { host: PluginHost }) {
         tags: ["imported", "pptx"],
       });
       await refreshTemplates();
-      await host.startTemplateWorkflow({
-        template: imported,
-        sourcePath,
-        displayName: file.name,
-        mimeType:
-          file.type ||
-          (sourcePath.toLowerCase().endsWith(".potx")
-            ? "application/vnd.openxmlformats-officedocument.presentationml.template"
-            : "application/vnd.openxmlformats-officedocument.presentationml.presentation"),
-        sizeBytes: file.size,
-      });
     } catch (error) {
       setImportError(error instanceof Error ? error.message : "Could not import PPTX template.");
     } finally {
@@ -268,11 +257,27 @@ function TemplateCatalogGallery({ host }: { host: PluginHost }) {
     }
   }
 
-  async function copyTemplateRef(id: string) {
-    const ok = await copyText(id);
-    if (!ok) return;
-    setCopied(id);
-    window.setTimeout(() => setCopied((current) => (current === id ? null : current)), 1400);
+  async function useTemplate(entry: TemplateCatalogEntry) {
+    setImportError(null);
+    setStartingTemplateId(entry.id);
+    try {
+      const attachment = entry.is_imported
+        ? await coreBridge
+            .templateSourceAttachment(entry.id)
+            .then((source) => ({
+              localPath: source.local_path,
+              displayName: source.display_name,
+              mimeType: source.mime_type,
+              sizeBytes: source.size_bytes,
+            }))
+        : undefined;
+      await host.startTemplateWorkflow({ template: entry, attachment });
+      setSelectedTemplate(null);
+    } catch (error) {
+      setImportError(error instanceof Error ? error.message : "Could not start the template workflow.");
+    } finally {
+      setStartingTemplateId(null);
+    }
   }
 
   return (
@@ -313,9 +318,17 @@ function TemplateCatalogGallery({ host }: { host: PluginHost }) {
         {visible.map((entry) => {
           const selectionNotes = entry.selection_notes ?? [];
           const sourceBadges = templateSourceBadges(entry);
+          const starting = startingTemplateId === entry.id;
           return (
             <article className="template-card" key={entry.id}>
-              <TemplateCardPreview entry={entry} />
+              <button
+                type="button"
+                className="template-card-preview-button"
+                onClick={() => setSelectedTemplate(entry)}
+                aria-label={`Open ${entry.name} template details`}
+              >
+                <TemplateCardPreview entry={entry} />
+              </button>
               <div className="template-card-body">
                 <div className="template-card-title-row">
                   <h4>{entry.name}</h4>
@@ -346,18 +359,94 @@ function TemplateCatalogGallery({ host }: { host: PluginHost }) {
               </div>
               <button
                 type="button"
-                className="template-copy"
-                onClick={() => void copyTemplateRef(entry.id)}
-                title={t("presentations:copyTemplateRef")}
+                className="template-use"
+                onClick={() => void useTemplate(entry)}
+                title={t("presentations:useTemplate")}
+                disabled={Boolean(startingTemplateId)}
               >
-                <Copy size={14} aria-hidden />
-                {copied === entry.id ? t("presentations:copied") : entry.id}
+                <Presentation size={14} aria-hidden />
+                {starting ? t("presentations:starting") : t("presentations:useTemplate")}
               </button>
             </article>
           );
         })}
       </div>
+      {selectedTemplate && (
+        <TemplateDetailModal
+          entry={selectedTemplate}
+          busy={startingTemplateId === selectedTemplate.id}
+          onClose={() => setSelectedTemplate(null)}
+          onUse={() => void useTemplate(selectedTemplate)}
+        />
+      )}
     </section>
+  );
+}
+
+function TemplateDetailModal({
+  entry,
+  busy,
+  onClose,
+  onUse,
+}: {
+  entry: TemplateCatalogEntry;
+  busy: boolean;
+  onClose: () => void;
+  onUse: () => void;
+}) {
+  const { t } = useTranslation();
+  const sourceBadges = templateSourceBadges(entry);
+  const chips = [...entry.use_cases, ...entry.audience].slice(0, 6);
+  return (
+    <div className="template-detail-overlay" role="dialog" aria-modal="true" aria-labelledby="template-detail-title">
+      <div className="template-detail-scrim" onClick={onClose} />
+      <div className="template-detail-modal">
+        <header className="template-detail-head">
+          <div>
+            <p className="eyebrow">{t("presentations:templateInfo")}</p>
+            <h3 id="template-detail-title">{entry.name}</h3>
+          </div>
+          <button type="button" className="set-modal-close" onClick={onClose} aria-label="Close">
+            ×
+          </button>
+        </header>
+        <div className="template-detail-summary">
+          <div>
+            <p>{entry.description}</p>
+            <div className="template-card-source">
+              {sourceBadges.map((badge) => (
+                <span key={badge}>{badge}</span>
+              ))}
+            </div>
+            <div className="template-card-meta">
+              {[...chips, entry.design_theme, entry.design_profile]
+                .filter(Boolean)
+                .map((item) => (
+                  <span key={String(item)}>{String(item).replaceAll("_", " ")}</span>
+                ))}
+            </div>
+          </div>
+          <button
+            type="button"
+            className="primary-btn template-detail-use"
+            onClick={onUse}
+            disabled={busy}
+          >
+            {busy ? t("presentations:starting") : t("presentations:useTemplate")}
+          </button>
+        </div>
+        <div className="template-detail-preview">
+          <TemplateCardPreview entry={entry} />
+        </div>
+        <div className="template-detail-strip" aria-label="Template slides">
+          {entry.layout_archetypes.slice(0, 5).map((layout, index) => (
+            <button type="button" className={index === 0 ? "active" : ""} key={layout}>
+              <TemplateCardPreview entry={{ ...entry, layout_archetypes: [layout] }} />
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
   );
 }
 

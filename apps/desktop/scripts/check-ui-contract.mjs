@@ -173,12 +173,16 @@ assertContains("src/components/BrandKitPanel.tsx", "selection_notes", "template 
 assertContains("src/components/BrandKitPanel.tsx", "entry.selection_notes ?? []", "template gallery must tolerate legacy catalog entries without selection_notes");
 assertContains("src/components/BrandKitPanel.tsx", "Import PPTX", "Presentations must expose manual PPTX template import");
 assertContains("src/components/BrandKitPanel.tsx", "attribution_required", "Presentations must surface attribution state for imported/source templates");
-assertContains("src/components/BrandKitPanel.tsx", "host.startTemplateWorkflow", "PPTX import must open a template-guided chat workflow instead of only copying a reference");
+assertContains("src/components/BrandKitPanel.tsx", "TemplateDetailModal", "template gallery must expose a catalog detail view before use");
+assertContains("src/components/BrandKitPanel.tsx", "useTemplate(entry", "template gallery must start chat workflows from the selected catalog entry");
+assertContains("src/components/BrandKitPanel.tsx", ".templateSourceAttachment(entry.id)", "imported PPTX templates must resolve their source attachment only when used");
+assertContains("src/components/BrandKitPanel.tsx", "await refreshTemplates()", "PPTX import must refresh the reusable catalog instead of immediately starting chat");
 assertContains("src/plugins/registry.tsx", "startTemplateWorkflow", "plugin host must expose a typed template workflow handoff");
 assertContains("src/App.tsx", "handleStartTemplateWorkflow", "App must own the template workflow chat creation path");
 assertContains("src/App.tsx", "template_ref=", "template workflow prompt must preserve the canonical template reference");
 assertContains("src/App.tsx", "Non generare ancora il deck.", "template workflow must start with discovery and planning, not immediate deck generation");
 assertContains("src/lib/coreBridge.ts", "importPptxTemplate", "Desktop bridge must expose PPTX template import");
+assertContains("src/lib/coreBridge.ts", "templateSourceAttachment", "Desktop bridge must resolve local template attachments without exposing paths in the catalog");
 assertContains("src/lib/coreBridge.ts", "attachments?: CoreChatAttachment[]", "streamed prompt commits must be able to preserve user attachments");
 
 assertContains("src/components/ChatView.tsx", "coreBridge.submitChatPromptStream", "composer must submit prompts through the local chat transport");

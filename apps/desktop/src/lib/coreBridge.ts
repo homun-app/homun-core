@@ -2119,6 +2119,13 @@ export interface ImportPptxTemplateRequest {
   tags?: string[];
 }
 
+export interface TemplateSourceAttachment {
+  local_path: string;
+  display_name: string;
+  mime_type: string;
+  size_bytes: number;
+}
+
 async function electronSkillsCatalog(
   query?: string,
   category?: string,
@@ -2138,6 +2145,14 @@ async function electronImportPptxTemplate(
   payload: ImportPptxTemplateRequest,
 ): Promise<TemplateCatalogEntry> {
   return gatewayPostJson<TemplateCatalogEntry>("/api/templates/import-pptx", payload);
+}
+
+async function electronTemplateSourceAttachment(
+  templateId: string,
+): Promise<TemplateSourceAttachment> {
+  return gatewayPostJson<TemplateSourceAttachment>("/api/templates/source-attachment", {
+    template_id: templateId,
+  });
 }
 
 export interface CatalogPreview {
@@ -2316,6 +2331,8 @@ export const coreBridge = {
   templateCatalog: () => electronTemplateCatalog(),
   importPptxTemplate: (payload: ImportPptxTemplateRequest) =>
     electronImportPptxTemplate(payload),
+  templateSourceAttachment: (templateId: string) =>
+    electronTemplateSourceAttachment(templateId),
   catalogPreview: (slug: string) => electronCatalogPreview(slug),
   catalogInstall: (slug: string) => electronCatalogInstall(slug),
   chatThreads: (workspace?: string) => chatApi.chatThreads(workspace),
