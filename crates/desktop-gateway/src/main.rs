@@ -26132,6 +26132,14 @@ struct ArtifactFileView {
 #[derive(Debug, Serialize)]
 struct ArtifactThreadView {
     thread: String,
+    #[serde(default)]
+    title: Option<String>,
+    #[serde(default)]
+    workspace_id: Option<String>,
+    #[serde(default)]
+    workspace_name: Option<String>,
+    #[serde(default)]
+    chat_missing: bool,
     bytes: u64,
     files: Vec<ArtifactFileView>,
 }
@@ -26233,6 +26241,65 @@ fn artifact_file_name_for_zip(name: &str) -> String {
     } else {
         trimmed.to_string()
     }
+}
+
+fn workspace_name_for_artifact_scope(workspace_id: &str) -> Option<String> {
+    match workspace_id {
+        PERSONAL_WORKSPACE => Some("Personal".to_string()),
+        THREADS_WORKSPACE => Some("Conversations".to_string()),
+        other => load_workspaces_file()
+            .workspaces
+            .into_iter()
+            .find(|workspace| workspace.id == other)
+            .map(|workspace| workspace.name),
+    }
+}
+
+fn artifact_thread_metadata(
+    state: &AppState,
+    thread_id: &str,
+) -> (Option<String>, Option<String>, Option<String>, bool) {
+    let Ok(store) = lock_store(state) else {
+        return (None, None, None, true);
+    };
+    let thread = store.thread(thread_id).ok().flatten();
+    let chat_missing = thread.is_none();
+    let workspace_id = thread
+        .as_ref()
+        .and_then(|_| store.workspace_for_thread(thread_id).ok());
+    drop(store);
+    let workspace_name = workspace_id
+        .as_deref()
+        .and_then(workspace_name_for_artifact_scope);
+    (
+        thread.map(|thread| thread.title),
+        workspace_id,
+        workspace_name,
+        chat_missing,
+    )
+}
+
+fn artifact_bundle_title(dir: &std::path::Path) -> Option<String> {
+    for name in ["deck.json", "document.json", "manifest.json", "artifact.json"] {
+        let path = dir.join(name);
+        let Ok(raw) = fs::read_to_string(path) else {
+            continue;
+        };
+        let Ok(value) = serde_json::from_str::<Value>(&raw) else {
+            continue;
+        };
+        for key in ["title", "name", "subject"] {
+            if let Some(title) = value
+                .get(key)
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                return Some(title.to_string());
+            }
+        }
+    }
+    None
 }
 
 fn artifact_zip_segment(value: &str) -> String {
@@ -26513,8 +26580,15 @@ async fn artifacts_usage(State(state): State<AppState>) -> Json<ArtifactsUsage> 
             }
             files.sort_by(|a, b| a.name.cmp(&b.name));
             total += bytes;
+            let (title, workspace_id, workspace_name, chat_missing) =
+                artifact_thread_metadata(&state, &thread);
+            let title = title.or_else(|| artifact_bundle_title(&entry.path()));
             threads.push(ArtifactThreadView {
                 thread,
+                title,
+                workspace_id,
+                workspace_name,
+                chat_missing,
                 bytes,
                 files,
             });
@@ -26592,8 +26666,14 @@ async fn artifacts_usage(State(state): State<AppState>) -> Json<ArtifactsUsage> 
             files.sort_by(|a, b| a.name.cmp(&b.name));
             let bytes = files.iter().map(|file| file.size).sum();
             total += bytes;
+            let workspace_id = workspace.as_str().to_string();
+            let workspace_name = workspace_name_for_artifact_scope(&workspace_id);
             threads.push(ArtifactThreadView {
-                thread: format!("memory:{}", workspace.as_str()),
+                thread: format!("memory:{}", workspace_id),
+                title: Some("Memory artifacts".to_string()),
+                workspace_id: Some(workspace_id),
+                workspace_name,
+                chat_missing: false,
                 bytes,
                 files,
             });

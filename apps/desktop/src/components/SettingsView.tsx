@@ -2,6 +2,7 @@ import {
   AlertTriangle,
   Boxes,
   Check,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Code2,
@@ -26,7 +27,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { QRCodeSVG } from "qrcode.react";
 import { pluginRegistry } from "../plugins/registry";
@@ -51,6 +52,7 @@ import {
   type ContainedComputerLive,
   type CoreCapabilitySnapshot,
   type CoreChannelSettings,
+  type CoreChatThread,
   type CoreTelegramStatus,
   type CachedPluginRegistryView,
   type InstalledPluginPackagesView,
@@ -4503,6 +4505,36 @@ function formatArtifactBytes(bytes: number) {
 
 type ArtifactSourceFilter = "all" | "managed" | "memory";
 type ArtifactLinkFilter = "all" | "linked" | "orphan";
+type ArtifactThreadLabel = {
+  title: string;
+  workspace?: string;
+};
+
+function ArtifactFilterSelect({
+  label,
+  value,
+  onChange,
+  children,
+  wide,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  children: ReactNode;
+  wide?: boolean;
+}) {
+  return (
+    <label className={`artifacts-filter ${wide ? "wide" : ""}`}>
+      <span>{label}</span>
+      <span className="set-select artifacts-filter-select">
+        <select value={value} onChange={(event) => onChange(event.target.value)}>
+          {children}
+        </select>
+        <ChevronDown className="chev" size={14} />
+      </span>
+    </label>
+  );
+}
 
 function artifactFileKey(thread: string, file: ArtifactFileView) {
   return `${thread}\u0000${file.source ?? "managed"}\u0000${file.reference ?? ""}\u0000${file.name}`;
@@ -4519,6 +4551,59 @@ function artifactFileSource(file: ArtifactFileView): "managed" | "memory" {
 
 function artifactFileIsOrphan(file: ArtifactFileView) {
   return artifactFileSource(file) === "managed" && !file.reference;
+}
+
+function compactArtifactThreadId(thread: string) {
+  if (thread.length <= 26) return thread;
+  return `${thread.slice(0, 18)}…${thread.slice(-6)}`;
+}
+
+function artifactGroupLabel(
+  thread: ArtifactThreadView,
+  threadLabels: Record<string, ArtifactThreadLabel>,
+  workspaceLabels: Record<string, string>,
+) {
+  const label = threadLabels[thread.thread];
+  if (label) return label;
+  if (thread.title?.trim()) {
+    return {
+      title: thread.title.trim(),
+      workspace: thread.chat_missing ? "Deleted/unknown chat" : (thread.workspace_name ?? undefined),
+    };
+  }
+  if (thread.thread.startsWith("memory:")) {
+    const workspaceId = thread.workspace_id ?? thread.thread.slice("memory:".length);
+    const workspace =
+      thread.workspace_name ?? workspaceLabels[workspaceId] ?? (workspaceId === "__personal__" ? "Personal" : undefined);
+    return {
+      title: workspace ? `${workspace} memory artifacts` : "Memory artifacts",
+      workspace,
+    };
+  }
+  if (thread.thread === "default") {
+    return { title: "Unscoped artifacts" };
+  }
+  return {
+    title: "Unknown or deleted chat",
+    workspace: thread.workspace_name ?? undefined,
+  };
+}
+
+function artifactGroupOptionLabel(
+  thread: ArtifactThreadView,
+  threadLabels: Record<string, ArtifactThreadLabel>,
+  workspaceLabels: Record<string, string>,
+) {
+  const label = artifactGroupLabel(thread, threadLabels, workspaceLabels);
+  if (thread.chat_missing) {
+    return label.workspace
+      ? `${label.title} · ${label.workspace} · ${compactArtifactThreadId(thread.thread)}`
+      : `${label.title} · ${compactArtifactThreadId(thread.thread)}`;
+  }
+  if (thread.title || threadLabels[thread.thread] || thread.thread.startsWith("memory:")) {
+    return label.workspace ? `${label.title} · ${label.workspace}` : label.title;
+  }
+  return `${label.title} · ${compactArtifactThreadId(thread.thread)}`;
 }
 
 function artifactExportRequest(thread: ArtifactThreadView, file: ArtifactFileView): ExportArtifactFileRequest {
@@ -4544,6 +4629,8 @@ function downloadBlob(blob: Blob, filename: string) {
 function ArtifactsCard() {
   const { t } = useTranslation();
   const [usage, setUsage] = useState<ArtifactsUsage | null>(null);
+  const [threadLabels, setThreadLabels] = useState<Record<string, ArtifactThreadLabel>>({});
+  const [workspaceLabels, setWorkspaceLabels] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [groupFilter, setGroupFilter] = useState("all");
@@ -4568,6 +4655,51 @@ function ArtifactsCard() {
   };
   useEffect(() => {
     void refresh();
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function refreshThreadLabels() {
+      try {
+        const workspaceSnap = await coreBridge.workspaces();
+        if (cancelled) return;
+        const workspaces = workspaceSnap.workspaces;
+        const nextWorkspaces: Record<string, string> = {};
+        const nextThreads: Record<string, ArtifactThreadLabel> = {};
+        for (const workspace of workspaces) {
+          nextWorkspaces[workspace.id] = workspace.name;
+        }
+        const threadSnaps = await Promise.all(
+          workspaces.map(async (workspace) => {
+            try {
+              return {
+                workspace,
+                threads: (await coreBridge.chatThreads(workspace.id)).threads,
+              };
+            } catch {
+              return { workspace, threads: [] as CoreChatThread[] };
+            }
+          }),
+        );
+        if (cancelled) return;
+        for (const snap of threadSnaps) {
+          for (const thread of snap.threads) {
+            nextThreads[thread.thread_id] = {
+              title: thread.title || compactArtifactThreadId(thread.thread_id),
+              workspace: snap.workspace.name,
+            };
+          }
+        }
+        setWorkspaceLabels(nextWorkspaces);
+        setThreadLabels(nextThreads);
+      } catch {
+        /* keep technical fallback */
+      }
+    }
+    void refreshThreadLabels();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   async function run(action: () => Promise<void>) {
@@ -4626,7 +4758,14 @@ function ArtifactsCard() {
     selected.has(artifactFileKey(thread.thread, file)),
   );
   const exportableFiles = selectedVisibleFiles.length > 0 ? selectedVisibleFiles : visibleFiles;
-  const groupOptions = usage?.threads.map((thread) => thread.thread).sort((a, b) => a.localeCompare(b)) ?? [];
+  const groupOptions =
+    usage?.threads
+      .slice()
+      .sort((a, b) =>
+        artifactGroupOptionLabel(a, threadLabels, workspaceLabels).localeCompare(
+          artifactGroupOptionLabel(b, threadLabels, workspaceLabels),
+        ),
+      ) ?? [];
   const typeOptions = Array.from(
     new Set(
       (usage?.threads ?? []).flatMap((thread) => thread.files.map((file) => artifactFileType(file))),
@@ -4672,7 +4811,7 @@ function ArtifactsCard() {
             location: usage?.base_path ? t("settings.artifactsLocation", { path: usage.base_path }) : "",
           })}
         </p>
-        <div className="set-meter" style={{ marginTop: 8, gap: 8 }}>
+        <div className="artifacts-actions">
           <button
             className="set-btn"
             type="button"
@@ -4680,7 +4819,7 @@ function ArtifactsCard() {
             disabled={!usage?.base_path}
           >
             <Folder size={14} />
-            <span style={{ marginLeft: 6 }}>{t("chat.openFolder")}</span>
+            <span>{t("chat.openFolder")}</span>
           </button>
           <button
             className="set-btn"
@@ -4689,7 +4828,7 @@ function ArtifactsCard() {
             onClick={() => void run(exportArtifacts)}
           >
             <Download size={14} />
-            <span style={{ marginLeft: 6 }}>Export ZIP ({selectedLabel})</span>
+            <span>Export ZIP ({selectedLabel})</span>
           </button>
           <button
             className="set-btn danger"
@@ -4698,114 +4837,98 @@ function ArtifactsCard() {
             onClick={() => void run(() => coreBridge.clearArtifacts())}
           >
             <Trash2 size={14} />
-            <span style={{ marginLeft: 6 }}>{t("settings.deleteAll")}</span>
+            <span>{t("settings.deleteAll")}</span>
           </button>
         </div>
         {hasArtifacts && (
-          <div className="set-meter" style={{ marginTop: 8, gap: 8, flexWrap: "wrap" }}>
-            <label className="set-hint" style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              Group
-              <select
-                value={groupFilter}
-                onChange={(event) => {
-                  setGroupFilter(event.target.value);
-                  setSelected(new Set());
-                }}
-              >
+          <div className="artifacts-filters">
+            <ArtifactFilterSelect
+              label="Group"
+              value={groupFilter}
+              wide
+              onChange={(value) => {
+                setGroupFilter(value);
+                setSelected(new Set());
+              }}
+            >
                 <option value="all">All</option>
-                {groupOptions.map((group) => (
-                  <option key={group} value={group}>
-                    {group}
+                {groupOptions.map((thread) => (
+                  <option key={thread.thread} value={thread.thread}>
+                    {artifactGroupOptionLabel(thread, threadLabels, workspaceLabels)}
                   </option>
                 ))}
-              </select>
-            </label>
-            <label className="set-hint" style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              Source
-              <select
-                value={sourceFilter}
-                onChange={(event) => {
-                  setSourceFilter(event.target.value as ArtifactSourceFilter);
-                  setSelected(new Set());
-                }}
-              >
+            </ArtifactFilterSelect>
+            <ArtifactFilterSelect
+              label="Source"
+              value={sourceFilter}
+              onChange={(value) => {
+                setSourceFilter(value as ArtifactSourceFilter);
+                setSelected(new Set());
+              }}
+            >
                 <option value="all">All</option>
                 <option value="managed">Managed</option>
                 <option value="memory">Memory</option>
-              </select>
-            </label>
-            <label className="set-hint" style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              Type
-              <select
-                value={typeFilter}
-                onChange={(event) => {
-                  setTypeFilter(event.target.value);
-                  setSelected(new Set());
-                }}
-              >
+            </ArtifactFilterSelect>
+            <ArtifactFilterSelect
+              label="Type"
+              value={typeFilter}
+              onChange={(value) => {
+                setTypeFilter(value);
+                setSelected(new Set());
+              }}
+            >
                 <option value="all">All</option>
                 {typeOptions.map((type) => (
                   <option key={type} value={type}>
                     {type}
                   </option>
                 ))}
-              </select>
-            </label>
-            <label className="set-hint" style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              Link
-              <select
-                value={linkFilter}
-                onChange={(event) => {
-                  setLinkFilter(event.target.value as ArtifactLinkFilter);
-                  setSelected(new Set());
-                }}
-              >
+            </ArtifactFilterSelect>
+            <ArtifactFilterSelect
+              label="Link"
+              value={linkFilter}
+              onChange={(value) => {
+                setLinkFilter(value as ArtifactLinkFilter);
+                setSelected(new Set());
+              }}
+            >
                 <option value="all">All</option>
                 <option value="linked">Memory-linked</option>
                 <option value="orphan">Orphans</option>
-              </select>
-            </label>
+            </ArtifactFilterSelect>
           </div>
         )}
         {hasArtifacts ? (
-          <div className="set-rows" style={{ marginTop: 10 }}>
+          <div className="set-rows artifacts-groups">
             {visibleThreads.map((thread) => {
               const open = expanded.has(thread.thread);
+              const groupLabel = artifactGroupLabel(thread, threadLabels, workspaceLabels);
+              const showThreadId =
+                Boolean(thread.title || threadLabels[thread.thread] || thread.chat_missing) ||
+                groupLabel.title === "Unknown or deleted chat";
               return (
-                <div key={thread.thread}>
+                <div className="artifacts-group" key={thread.thread}>
                   <div className="set-row">
                     <button
+                      className="artifacts-group-toggle"
                       type="button"
                       onClick={() => toggleExpanded(thread.thread)}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 6,
-                        minWidth: 0,
-                        flex: 1,
-                        background: "none",
-                        border: "none",
-                        padding: 0,
-                        cursor: "pointer",
-                        textAlign: "left",
-                        color: "inherit",
-                      }}
                       aria-expanded={open}
                     >
                       <ChevronRight
+                        className="artifacts-chevron"
                         size={14}
-                        style={{
-                          flex: "0 0 auto",
-                          transform: open ? "rotate(90deg)" : "none",
-                          transition: "transform .15s",
-                        }}
+                        data-open={open ? "true" : "false"}
                       />
-                      <span style={{ minWidth: 0 }}>
-                        <div className="rk" style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
-                          {thread.thread}
+                      <span className="artifacts-group-copy">
+                        <div className="rk">
+                          {groupLabel.title}
                         </div>
                         <div className="rv">
+                          {groupLabel.workspace ? `${groupLabel.workspace} · ` : ""}
                           {thread.files.length} file · {formatArtifactBytes(thread.bytes)}
+                          {showThreadId ? ` · ${compactArtifactThreadId(thread.thread)}` : ""}
                         </div>
                       </span>
                     </button>
@@ -4819,24 +4942,24 @@ function ArtifactsCard() {
                     </button>
                   </div>
                   {open && (
-                    <div className="set-rows" style={{ paddingLeft: 22, marginTop: 4 }}>
+                    <div className="artifacts-file-list">
                       {thread.files.map((file) => (
                         <div className="set-row" key={artifactFileKey(thread.thread, file)}>
-                          <label style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, flex: 1 }}>
+                          <label className="artifacts-file-check">
                             <input
                               type="checkbox"
                               checked={selected.has(artifactFileKey(thread.thread, file))}
                               onChange={() => toggleSelected(thread, file)}
                               aria-label={`Select ${file.name}`}
                             />
-                            <span style={{ minWidth: 0 }}>
-                            <div className="rk" style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
-                              {file.title || file.name}
-                            </div>
-                            <div className="rv">
-                              {file.project_relative_path || file.name} · {artifactFileSource(file)} · {artifactFileType(file)} ·{" "}
-                              {artifactFileIsOrphan(file) ? "orphan" : "memory-linked"} · {formatArtifactBytes(file.size)}
-                            </div>
+                            <span className="artifacts-file-copy">
+                              <div className="rk">
+                                {file.title || file.name}
+                              </div>
+                              <div className="rv">
+                                {file.project_relative_path || file.name} · {artifactFileSource(file)} · {artifactFileType(file)} ·{" "}
+                                {artifactFileIsOrphan(file) ? "orphan" : "memory-linked"} · {formatArtifactBytes(file.size)}
+                              </div>
                             </span>
                           </label>
                           <button

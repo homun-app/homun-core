@@ -8694,6 +8694,110 @@ body.resizing-drawer {
 .set-btn.primary:hover { opacity: 0.9; }
 .set-btn.danger { border-color: #f1c4c6; color: var(--red); }
 .set-btn.danger:hover { background: var(--red-soft); }
+.set-btn svg + span { margin-left: 7px; }
+
+/* Artifacts settings: same settings vocabulary, with denser controls for filters. */
+.artifacts-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+.artifacts-actions .set-btn.danger { margin-left: auto; }
+.artifacts-filters {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.8fr) repeat(3, minmax(120px, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+.artifacts-filter {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.artifacts-filter > span:first-child {
+  padding-left: 2px;
+}
+.artifacts-filter-select {
+  min-width: 0;
+  width: 100%;
+  padding: 7px 10px;
+  border-color: var(--line);
+}
+.artifacts-groups { margin-top: 14px; }
+.artifacts-group + .artifacts-group {
+  position: relative;
+}
+.artifacts-group + .artifacts-group::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: var(--s4);
+  right: var(--s4);
+  border-top: 1px solid var(--line);
+}
+.artifacts-group-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+}
+.artifacts-chevron {
+  flex: 0 0 auto;
+  color: var(--muted);
+  transition: transform .15s ease;
+}
+.artifacts-chevron[data-open="true"] { transform: rotate(90deg); }
+.artifacts-group-copy,
+.artifacts-file-copy {
+  min-width: 0;
+}
+.artifacts-group-copy .rk,
+.artifacts-file-copy .rk {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.artifacts-file-list {
+  margin: 0 var(--s4) var(--s3) calc(var(--s4) + 22px);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--panel);
+  overflow: hidden;
+}
+.artifacts-file-check {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  flex: 1;
+  cursor: pointer;
+}
+.artifacts-file-check input {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--brand);
+  flex: none;
+}
+
+@media (max-width: 900px) {
+  .artifacts-filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .artifacts-actions .set-btn.danger { margin-left: 0; }
+}
 
 /* Danger zone */
 .set-danger {

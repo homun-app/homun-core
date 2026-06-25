@@ -1080,6 +1080,10 @@ export interface ArtifactFileView {
 }
 export interface ArtifactThreadView {
   thread: string;
+  title?: string | null;
+  workspace_id?: string | null;
+  workspace_name?: string | null;
+  chat_missing?: boolean;
   bytes: number;
   files: ArtifactFileView[];
 }

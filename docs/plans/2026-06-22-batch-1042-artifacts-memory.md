@@ -1023,9 +1023,12 @@ feature laterali né una dashboard generica.
   placeholder e viene sostituito subito da un titolo sintetico del primo prompt.
   La modalità chiusa usa un hotspot sul bordo sinistro e riapre la stessa
   sidebar come isola floating temporanea invece di mantenere una rail fissa.
-- ☐ **UX.3 Superfici deliverable**: dopo UX.1, riallineare Artifacts e
+- 🟡 **UX.3 Superfici deliverable**: dopo UX.1, riallineare Artifacts e
   Presentations al modello workspace: artifact/versioni/provenance e template
-  come output/capability di prima classe.
+  come output/capability di prima classe. Prima slice locale: Settings →
+  Artifacts usa controlli coerenti con Settings e i gruppi artifact sono
+  identificati da metadati backend (`title`, `workspace`, `chat_missing`) o dal
+  manifest del bundle, non dal solo nome cartella `thread_*`.
 
 ## WS9 — Distribuzione plugin & marketplace
 

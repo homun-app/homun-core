@@ -131,7 +131,10 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   browser/terminal compatta sotto la workspace island, espandibile e visibile
   solo durante attivita' owner del thread. Il chrome dell'isola resta minimale:
   header con `Computer` + `LIVE` e controlli, senza prompt/attivita' corrente
-  troncata accanto al titolo. Gate locale:
+  troncata accanto al titolo. Rifinitura Artifacts: Settings → Artifacts usa la
+  grammatica visuale Settings anche nei filtri, e `/api/artifacts/usage`
+  arricchisce i gruppi con titolo chat/progetto o, per artifact orfani, titolo
+  del bundle + `Deleted/unknown chat` senza esporre solo `thread_*`. Gate locale:
   `npm run test:ui-contract`, `npm run build`, runtime
   Electron riavviato con gateway `local-first-desktop-gateway` in ascolto su
   `127.0.0.1:18765`. **Prossimo passo unico:** continuare WS7 sulla qualita'
