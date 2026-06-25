@@ -6660,6 +6660,12 @@ struct TemplateCatalogEntry {
     preview_ref: Option<String>,
     source_ref: Option<String>,
     license: Option<String>,
+    source_provider: Option<String>,
+    source_path: Option<PathBuf>,
+    template_pack_root: Option<PathBuf>,
+    attribution_required: bool,
+    attribution_text: Option<String>,
+    redistribution_policy: Option<String>,
     route_text: String,
 }
 
@@ -6677,6 +6683,11 @@ struct LocalTemplateCatalogProvider;
 #[derive(Debug, Clone)]
 struct FileTemplateCatalogProvider {
     provider_id: String,
+    entries: Vec<TemplateCatalogEntry>,
+}
+
+#[derive(Debug, Clone)]
+struct ImportedTemplatePackProvider {
     entries: Vec<TemplateCatalogEntry>,
 }
 
@@ -6842,6 +6853,12 @@ fn template_catalog_entry(
         preview_ref: None,
         source_ref: None,
         license: None,
+        source_provider: None,
+        source_path: None,
+        template_pack_root: None,
+        attribution_required: false,
+        attribution_text: None,
+        redistribution_policy: None,
         route_text: route_text.to_string(),
     }
 }
@@ -7139,6 +7156,90 @@ impl TemplateCatalogProvider for FileTemplateCatalogProvider {
     }
 }
 
+impl ImportedTemplatePackProvider {
+    fn from_root(root: &std::path::Path) -> Result<Self, String> {
+        let mut entries = Vec::new();
+        if !root.exists() {
+            return Ok(Self { entries });
+        }
+        for item in std::fs::read_dir(root).map_err(|error| {
+            format!(
+                "could not read template pack root {}: {error}",
+                root.display()
+            )
+        })? {
+            let path = item
+                .map_err(|error| format!("could not read template pack entry: {error}"))?
+                .path();
+            if !path.is_dir() {
+                continue;
+            }
+            if let Some(entry) = parse_imported_template_pack(&path) {
+                entries.push(entry);
+            }
+        }
+        Ok(Self { entries })
+    }
+}
+
+impl TemplateCatalogProvider for ImportedTemplatePackProvider {
+    fn provider_id(&self) -> &str {
+        "local_template_pack"
+    }
+
+    fn entries(&self) -> Vec<TemplateCatalogEntry> {
+        self.entries.clone()
+    }
+}
+
+fn imported_template_source_path(pack_root: &std::path::Path) -> Option<PathBuf> {
+    ["source.pptx", "source.potx"]
+        .iter()
+        .map(|name| pack_root.join(name))
+        .find(|path| path.is_file())
+}
+
+fn imported_template_preview_ref(id: &str, pack_root: &std::path::Path) -> Option<String> {
+    let thumb = pack_root.join("thumbnails").join("slide-001.png");
+    if !thumb.is_file() {
+        return None;
+    }
+    clean_template_catalog_ref(Some(&serde_json::Value::String(format!(
+        "template-pack://{id}/thumbnails/slide-001.png"
+    ))))
+}
+
+fn parse_imported_template_pack(pack_root: &std::path::Path) -> Option<TemplateCatalogEntry> {
+    let source_path = imported_template_source_path(pack_root)?;
+    let manifest_path = pack_root.join("manifest.json");
+    let raw = std::fs::read_to_string(manifest_path).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    let mut entry = parse_file_template_catalog_entry("local_template_pack", &value).ok()?;
+
+    entry.source_provider = value
+        .get("source_provider")
+        .and_then(|value| value.as_str())
+        .and_then(clean_template_catalog_id);
+    entry.source_ref = clean_template_catalog_ref(
+        value
+            .get("source_url")
+            .or_else(|| value.get("source_ref")),
+    );
+    entry.license = clean_template_catalog_text(value.get("license"), 120);
+    entry.attribution_required = value
+        .get("attribution_required")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
+    entry.attribution_text = clean_template_catalog_text(value.get("attribution_text"), 240);
+    entry.redistribution_policy =
+        clean_template_catalog_text(value.get("redistribution_policy"), 80);
+    entry.source_path = Some(source_path);
+    entry.template_pack_root = Some(pack_root.to_path_buf());
+    entry.preview_ref = imported_template_preview_ref(&entry.id, pack_root);
+
+    Some(entry)
+}
+
 fn clean_template_catalog_id(value: &str) -> Option<String> {
     let value = value.trim();
     if value.is_empty()
@@ -7284,6 +7385,12 @@ fn parse_file_template_catalog_entry(
         preview_ref: clean_template_catalog_ref(value.get("preview_ref")),
         source_ref: clean_template_catalog_ref(value.get("source_ref")),
         license: clean_template_catalog_text(value.get("license"), 80),
+        source_provider: None,
+        source_path: None,
+        template_pack_root: None,
+        attribution_required: false,
+        attribution_text: None,
+        redistribution_policy: None,
         route_text,
     })
 }
@@ -43264,6 +43371,114 @@ mod tests {
     }
 
     #[test]
+    fn imported_template_pack_manifest_loads_real_pptx_metadata() {
+        let root = std::env::temp_dir().join(format!(
+            "homun-imported-template-pack-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis()
+        ));
+        let pack = root.join("slidescarnival_pitch");
+        std::fs::create_dir_all(pack.join("thumbnails")).expect("pack dirs");
+        std::fs::write(pack.join("source.pptx"), b"pptx bytes").expect("source pptx");
+        std::fs::write(pack.join("thumbnails/slide-001.png"), b"png").expect("thumb");
+        std::fs::write(
+            pack.join("manifest.json"),
+            serde_json::json!({
+                "id": "slidescarnival/pitch-clean",
+                "name": "Pitch Clean",
+                "kind": "presentation",
+                "description": "Imported SlidesCarnival pitch template.",
+                "source_provider": "slidescarnival",
+                "source_url": "https://www.slidescarnival.com/template/example/123",
+                "license": "Creative Commons Attribution 4.0",
+                "attribution_required": true,
+                "attribution_text": "Template by SlidesCarnival",
+                "redistribution_policy": "generated_decks_only",
+                "design_template": "startup_pitch",
+                "design_theme": "clean_corporate",
+                "design_profile": "sales_pitch",
+                "design_components": ["kpi_grid", "timeline"],
+                "layout_archetypes": ["cover", "problem", "solution", "ask"],
+                "tags": ["slidescarnival", "pitch"],
+                "route_text": "slidescarnival pitch investor startup"
+            })
+            .to_string(),
+        )
+        .expect("manifest");
+
+        let provider = super::ImportedTemplatePackProvider::from_root(&root).expect("provider");
+        let entries = super::TemplateCatalogProvider::entries(&provider);
+        let entry = entries
+            .iter()
+            .find(|entry| entry.id == "slidescarnival/pitch-clean")
+            .expect("imported entry");
+
+        assert_eq!(entry.provider, "local_template_pack");
+        assert_eq!(entry.source_provider.as_deref(), Some("slidescarnival"));
+        assert_eq!(
+            entry.source_ref.as_deref(),
+            Some("https://www.slidescarnival.com/template/example/123")
+        );
+        assert_eq!(
+            entry.license.as_deref(),
+            Some("Creative Commons Attribution 4.0")
+        );
+        assert_eq!(
+            entry.attribution_text.as_deref(),
+            Some("Template by SlidesCarnival")
+        );
+        assert_eq!(
+            entry.redistribution_policy.as_deref(),
+            Some("generated_decks_only")
+        );
+        assert!(entry.attribution_required);
+        assert!(
+            entry
+                .preview_ref
+                .as_deref()
+                .is_some_and(|value| value.starts_with("template-pack://slidescarnival/pitch-clean/"))
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn imported_template_pack_rejects_missing_source_pptx() {
+        let root = std::env::temp_dir().join(format!(
+            "homun-imported-template-pack-missing-{}",
+            std::process::id()
+        ));
+        let pack = root.join("bad_pack");
+        std::fs::create_dir_all(&pack).expect("pack dir");
+        std::fs::write(
+            pack.join("manifest.json"),
+            serde_json::json!({
+                "id": "slidescarnival/missing-source",
+                "name": "Missing Source",
+                "kind": "presentation",
+                "description": "Invalid imported pack.",
+                "source_provider": "slidescarnival",
+                "license": "Creative Commons Attribution 4.0",
+                "attribution_required": true,
+                "attribution_text": "Template by SlidesCarnival",
+                "redistribution_policy": "generated_decks_only",
+                "design_template": "startup_pitch",
+                "route_text": "invalid"
+            })
+            .to_string(),
+        )
+        .expect("manifest");
+
+        let provider = super::ImportedTemplatePackProvider::from_root(&root).expect("provider");
+        assert!(super::TemplateCatalogProvider::entries(&provider).is_empty());
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn expanded_template_catalog_routes_common_pmi_deliverables() {
         let corpus = super::template_catalog_capability_entries();
 
@@ -43458,6 +43673,12 @@ mod tests {
                 preview_ref: Some("assets/gallery-template.png".to_string()),
                 source_ref: Some("https://example.com/gallery-template".to_string()),
                 license: Some("commercial".to_string()),
+                source_provider: None,
+                source_path: None,
+                template_pack_root: None,
+                attribution_required: false,
+                attribution_text: None,
+                redistribution_policy: None,
                 route_text: "gallery template".to_string(),
             }]);
         let value = serde_json::to_value(&response).expect("json");
