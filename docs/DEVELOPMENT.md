@@ -159,12 +159,18 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   Per i template importati, un endpoint autorizzato risolve il PPTX sorgente
   solo al momento dell'uso, senza esporre path locali nel catalogo. Il commit
   dello stream preserva gli allegati utente, così il template resta visibile
-  nella conversazione. Gate: `cargo test -p local-first-desktop-gateway
-  template_catalog -- --nocapture`, `npm run test:ui-contract`, `npm run build`,
-  `git diff --check`. **Prossimo passo unico:** smoke runtime in Electron del
-  nuovo import→catalogo→use template→chat/plan, poi catalogo "Powered by
-  SlidesCarnival" con ricerca/filtri/import esplicito; il vero
-  slide-cloning da PPTX reale resta slice successiva del renderer.
+  nella conversazione. Fix locale: l'ingestion degli allegati ora legge anche
+  `.pptx`/`.potx` OOXML ed espone testo slide-by-slide al modello; quindi una
+  chat avviata da `Use template` non deve piu' rispondere che il gateway non
+  puo' ispezionare PowerPoint. Gate: `cargo test -p
+  local-first-desktop-gateway powerpoint_file_extracts_slide_text --
+  --nocapture`, `cargo test -p local-first-desktop-gateway template_catalog --
+  --nocapture`, `npm run test:ui-contract`, `npm run build`, `git diff
+  --check`. **Prossimo passo unico:** smoke runtime in Electron del nuovo
+  import→catalogo→use template→chat/plan verificando che il modello citi il
+  contenuto reale delle slide, poi catalogo "Powered by SlidesCarnival" con
+  ricerca/filtri/import esplicito; il vero slide-cloning da PPTX reale resta
+  slice successiva del renderer.
   Spec: [Real PPTX Template Import and SlidesCarnival-Powered Catalog](superpowers/specs/2026-06-25-real-pptx-template-import-design.md).
 - **Direzione WS7 aggiornata:** l'obiettivo deliverable non è una gallery statica
   clonata tool-per-tool, ma un **design system dichiarativo condiviso** per

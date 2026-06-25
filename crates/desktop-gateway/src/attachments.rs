@@ -7,6 +7,7 @@
 //! `local_path` provided (with size/existence guards) rather than going through the
 //! folder-authorization jail used by the model-driven `list_directory` tool.
 
+use std::io::Read;
 use std::path::Path;
 
 use base64::Engine;
@@ -134,6 +135,9 @@ fn ingest_one(att: &AttachmentInput) -> Result<One, String> {
     if mime == "application/pdf" || ext == "pdf" {
         return ingest_pdf(path);
     }
+    if is_powerpoint(&mime, &ext) {
+        return ingest_powerpoint(path);
+    }
     if is_text_like(&mime, &ext) {
         let bytes = read_file_capped(path)?;
         let mut text = String::from_utf8_lossy(&bytes).into_owned();
@@ -143,7 +147,10 @@ fn ingest_one(att: &AttachmentInput) -> Result<One, String> {
             images: Vec::new(),
         });
     }
-    Err("type not yet supported for analysis (for now: PDF, images, text/code)".to_string())
+    Err(
+        "type not yet supported for analysis (for now: PDF, PowerPoint, images, text/code)"
+            .to_string(),
+    )
 }
 
 /// PDF: prefer the embedded text layer (born-digital docs → cheap, exact). If the
@@ -201,6 +208,145 @@ pub fn render_pdf_to_images(path: &Path) -> Result<Vec<String>, String> {
         .load_pdf_from_file(path, None)
         .map_err(|e| format!("unreadable PDF: {e}"))?;
     render_pdf_pages(&document)
+}
+
+/// Extracts human-readable text from a PowerPoint OOXML package (`.pptx`/`.potx`).
+/// This intentionally stays lightweight: imported templates must be understood as
+/// visual/content references, not fully converted into an editable intermediate
+/// representation here. The render/generation workflow still owns deck creation.
+fn ingest_powerpoint(path: &Path) -> Result<One, String> {
+    let bytes = read_file_capped(path)?;
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes))
+        .map_err(|e| format!("unreadable PowerPoint package: {e}"))?;
+
+    let mut slide_names = Vec::new();
+    for i in 0..archive.len() {
+        let Ok(file) = archive.by_index(i) else {
+            continue;
+        };
+        let name = file.name().to_string();
+        if is_powerpoint_slide_xml(&name) {
+            slide_names.push(name);
+        }
+    }
+    slide_names.sort_by_key(|name| (powerpoint_slide_number(name), name.clone()));
+
+    if slide_names.is_empty() {
+        return Err("PowerPoint package has no readable slide XML".to_string());
+    }
+
+    let mut blocks = Vec::new();
+    for (index, name) in slide_names.iter().enumerate() {
+        let mut xml = String::new();
+        archive
+            .by_name(name)
+            .map_err(|e| format!("read {name}: {e}"))?
+            .read_to_string(&mut xml)
+            .map_err(|e| format!("read {name}: {e}"))?;
+        let runs = powerpoint_text_runs(&xml);
+        if runs.is_empty() {
+            blocks.push(format!("Slide {}: (no text)", index + 1));
+        } else {
+            blocks.push(format!("Slide {}:\n{}", index + 1, runs.join("\n")));
+        }
+    }
+
+    let mut text = format!(
+        "PowerPoint template/deck extracted from file.\nSlides: {}\n\n{}",
+        blocks.len(),
+        blocks.join("\n\n")
+    );
+    truncate_chars(&mut text, MAX_TEXT_CHARS);
+    Ok(One {
+        text: Some(text),
+        images: Vec::new(),
+    })
+}
+
+fn is_powerpoint(mime: &str, ext: &str) -> bool {
+    matches!(ext, "pptx" | "potx")
+        || matches!(
+            mime,
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                | "application/vnd.openxmlformats-officedocument.presentationml.template"
+        )
+}
+
+fn is_powerpoint_slide_xml(name: &str) -> bool {
+    name.starts_with("ppt/slides/slide") && name.ends_with(".xml")
+}
+
+fn powerpoint_slide_number(name: &str) -> usize {
+    name.strip_prefix("ppt/slides/slide")
+        .and_then(|rest| rest.strip_suffix(".xml"))
+        .and_then(|raw| raw.parse::<usize>().ok())
+        .unwrap_or(usize::MAX)
+}
+
+fn powerpoint_text_runs(xml: &str) -> Vec<String> {
+    let mut runs = Vec::new();
+    let mut rest = xml;
+    while let Some(tag_start) = rest.find("<a:t") {
+        rest = &rest[tag_start..];
+        let Some(content_start) = rest.find('>') else {
+            break;
+        };
+        rest = &rest[content_start + 1..];
+        let Some(content_end) = rest.find("</a:t>") else {
+            break;
+        };
+        let raw = &rest[..content_end];
+        let text = decode_xml_text(raw).trim().to_string();
+        if !text.is_empty() {
+            runs.push(text);
+        }
+        rest = &rest[content_end + "</a:t>".len()..];
+    }
+    runs
+}
+
+fn decode_xml_text(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    let mut rest = raw;
+    while let Some(pos) = rest.find('&') {
+        out.push_str(&rest[..pos]);
+        rest = &rest[pos + 1..];
+        let Some(end) = rest.find(';') else {
+            out.push('&');
+            out.push_str(rest);
+            return out;
+        };
+        let entity = &rest[..end];
+        match entity {
+            "amp" => out.push('&'),
+            "lt" => out.push('<'),
+            "gt" => out.push('>'),
+            "quot" => out.push('"'),
+            "apos" => out.push('\''),
+            _ if entity.starts_with("#x") => {
+                if let Ok(codepoint) = u32::from_str_radix(&entity[2..], 16) {
+                    if let Some(ch) = char::from_u32(codepoint) {
+                        out.push(ch);
+                    }
+                }
+            }
+            _ if entity.starts_with('#') => {
+                if let Ok(codepoint) = entity[1..].parse::<u32>() {
+                    if let Some(ch) = char::from_u32(codepoint) {
+                        out.push(ch);
+                    }
+                }
+            }
+            _ => {
+                out.push('&');
+                out.push_str(entity);
+                out.push(';');
+            }
+        }
+        rest = &rest[end + 1..];
+    }
+    out.push_str(rest);
+    out
 }
 
 fn render_pdf_pages(document: &PdfDocument) -> Result<Vec<String>, String> {
@@ -361,6 +507,7 @@ fn truncate_chars(text: &mut String, max: usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
 
     #[test]
     fn text_file_is_read_as_a_text_block() {
@@ -451,6 +598,43 @@ mod tests {
         };
         let out = ingest_attachments(std::slice::from_ref(&att));
         assert!(out.text.contains("not yet supported"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn powerpoint_file_extracts_slide_text() {
+        let dir = std::env::temp_dir().join(format!("lfpa-pptx-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("sales-kickoff.pptx");
+        {
+            let mut zip = zip::ZipWriter::new(std::fs::File::create(&file).unwrap());
+            let options = zip::write::SimpleFileOptions::default();
+            zip.start_file("ppt/slides/slide2.xml", options).unwrap();
+            zip.write_all(
+                br#"<p:sld><p:cSld><p:spTree><a:t>Quarterly goals</a:t><a:t>Pipeline &amp; team focus</a:t></p:spTree></p:cSld></p:sld>"#,
+            )
+            .unwrap();
+            zip.start_file("ppt/slides/slide1.xml", options).unwrap();
+            zip.write_all(br#"<p:sld><p:cSld><p:spTree><a:t>Sales Kickoff</a:t><a:t>FY 2026</a:t></p:spTree></p:cSld></p:sld>"#)
+                .unwrap();
+            zip.finish().unwrap();
+        }
+
+        let att = AttachmentInput {
+            local_path: file.display().to_string(),
+            display_name: "sales-kickoff.pptx".into(),
+            mime_type: "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                .into(),
+            size_bytes: 0,
+        };
+        let out = ingest_attachments(std::slice::from_ref(&att));
+        assert!(out.text.contains("PowerPoint template/deck extracted"));
+        assert!(out.text.contains("Slides: 2"));
+        assert!(out.text.contains("Slide 1:\nSales Kickoff\nFY 2026"));
+        assert!(out
+            .text
+            .contains("Slide 2:\nQuarterly goals\nPipeline & team focus"));
+        assert!(out.images.is_empty());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

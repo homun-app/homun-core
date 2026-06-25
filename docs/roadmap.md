@@ -353,6 +353,10 @@ primo percorso locale verde e WS5 è chiusa localmente/gate:
     piano con `template_ref`, allegando il PPTX sorgente solo per template
     importati e solo tramite endpoint autorizzato. La generazione resta
     bloccata finché l'utente non risponde alle domande essenziali e conferma.
+    Fix locale successivo: l'ingestion allegati legge `.pptx`/`.potx` OOXML e
+    passa al modello testo estratto slide-by-slide; i template importati non
+    sono piu' file opachi nella chat, anche se il renderer non clona ancora il
+    layout visuale reale.
     Quello resta la slice successiva dopo smoke Electron e catalogo
     SlidesCarnival con import esplicito.
 74. WS8 gateway contract eval — `scripts/eval_suite.py` può ora, se configurato
@@ -587,8 +591,11 @@ reali `.pptx`/`.potx` come pack locali con manifest, metadata sicuri in
 API/bridge, UI `Import PPTX` e provenance `template_*` sugli artifact.
 Follow-up: l'import alimenta il catalogo riusabile; `Use template` sulla card o
 nel dettaglio apre una nuova chat con piano guidato e `template_ref`, allegando
-il PPTX solo quando esiste un source locale autorizzato. Prossimo asse: smoke
-runtime Electron, catalogo "Powered by SlidesCarnival" con ricerca/filtri/import
-esplicito, thumbnail reali e poi vero slide-cloning da PPTX importato.
+il PPTX solo quando esiste un source locale autorizzato. L'ingestion degli
+allegati PowerPoint estrae ora testo per slide dal pacchetto OOXML, così il
+modello puo' ragionare sul template allegato invece di dedurre dal filename.
+Prossimo asse: smoke runtime Electron, catalogo "Powered by SlidesCarnival" con
+ricerca/filtri/import esplicito, thumbnail reali e poi vero slide-cloning da
+PPTX importato.
 `make_research` e `make_meeting` restano futuri.
 Il contratto corrente della memoria è in [MEMORIA.md](MEMORIA.md).

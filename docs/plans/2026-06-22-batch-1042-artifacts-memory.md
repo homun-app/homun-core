@@ -1058,12 +1058,17 @@ feature laterali né una dashboard generica.
   endpoint autorizzato che risolve il PPTX sorgente solo al momento dell'uso,
   mantenendo i path fuori dal catalogo pubblico. Il bridge preserva gli allegati
   utente nel commit dello stream, quindi il template importato resta visibile
-  nella conversazione. Gate: `cargo test -p local-first-desktop-gateway
-  template_catalog -- --nocapture`, `npm run test:ui-contract`, `npm run build`,
-  `git diff --check`. Resta da fare: smoke runtime import→catalogo→use
-  template→chat/plan in Electron, thumbnail reali, catalogo "Powered by
-  SlidesCarnival" con ricerca/filtri/import esplicito e, dopo, vero
-  slide-cloning del PPTX importato.
+  nella conversazione. Fix locale successivo: l'ingestion degli allegati ora
+  supporta `.pptx`/`.potx` OOXML e inietta nel contesto testo estratto
+  slide-by-slide, evitando risposte in cui il modello deduce dal nome del file
+  invece di leggere il template allegato. Gate: `cargo test -p
+  local-first-desktop-gateway powerpoint_file_extracts_slide_text --
+  --nocapture`, `cargo test -p local-first-desktop-gateway template_catalog --
+  --nocapture`, `npm run test:ui-contract`, `npm run build`, `git diff
+  --check`. Resta da fare: smoke runtime import→catalogo→use template→chat/plan
+  in Electron verificando che il modello citi contenuti reali delle slide,
+  thumbnail reali, catalogo "Powered by SlidesCarnival" con ricerca/filtri/import
+  esplicito e, dopo, vero slide-cloning del PPTX importato.
   Spec:
   `docs/superpowers/specs/2026-06-25-real-pptx-template-import-design.md`.
 
