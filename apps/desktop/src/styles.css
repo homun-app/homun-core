@@ -11148,7 +11148,7 @@ body.resizing-drawer {
 }
 .presentation-brand-rail {
   position: sticky;
-  top: 18px;
+  top: 0;
   padding: 18px;
 }
 .presentation-rail-header h2 {
