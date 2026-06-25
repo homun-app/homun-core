@@ -421,6 +421,11 @@ struct TemplateSourceAttachmentRequest {
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
+struct TemplateDeleteRequest {
+    template_id: String,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
 struct TemplatePreviewQuery {
     #[serde(rename = "ref")]
     reference: String,
@@ -798,6 +803,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/skills/catalog/preview", get(preview_catalog_skill))
         .route("/api/templates/catalog", get(template_catalog))
         .route("/api/templates/import-pptx", post(import_pptx_template))
+        .route("/api/templates/delete", post(delete_template))
         .route("/api/templates/preview", get(template_preview))
         .route(
             "/api/templates/source-attachment",
@@ -7505,6 +7511,30 @@ fn imported_template_pack_root() -> Option<PathBuf> {
         .ok()
         .map(PathBuf::from)
         .or_else(|| gateway_data_dir().ok().map(|dir| dir.join("template-packs")))
+}
+
+fn delete_imported_template_pack(root: &std::path::Path, template_id: &str) -> Result<(), String> {
+    let template_id = template_id.trim();
+    if template_id.is_empty() {
+        return Err("template id is required".to_string());
+    }
+    let provider = ImportedTemplatePackProvider::from_root(root)?;
+    let entry = TemplateCatalogProvider::get(&provider, template_id)
+        .ok_or_else(|| "imported template not found".to_string())?;
+    let pack_root = entry
+        .template_pack_root
+        .ok_or_else(|| "template is not an imported local pack".to_string())?;
+    let root_canonical = root
+        .canonicalize()
+        .map_err(|error| format!("could not resolve template pack root: {error}"))?;
+    let pack_canonical = pack_root
+        .canonicalize()
+        .map_err(|error| format!("could not resolve imported template pack: {error}"))?;
+    if !pack_canonical.starts_with(&root_canonical) {
+        return Err("imported template pack is outside the template root".to_string());
+    }
+    fs::remove_dir_all(&pack_canonical)
+        .map_err(|error| format!("could not delete imported template pack: {error}"))
 }
 
 fn imported_template_pack_provider() -> Option<ImportedTemplatePackProvider> {
@@ -40209,6 +40239,24 @@ async fn import_pptx_template(
     Ok(Json(entry))
 }
 
+async fn delete_template(
+    Json(request): Json<TemplateDeleteRequest>,
+) -> Result<Json<TemplateCatalogResponse>, GatewayError> {
+    let root = imported_template_pack_root().ok_or_else(|| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "template_pack_root_unavailable",
+        message: "Template pack root is unavailable.".to_string(),
+    })?;
+    delete_imported_template_pack(&root, &request.template_id).map_err(|message| GatewayError {
+        status: StatusCode::BAD_REQUEST,
+        code: "template_delete_failed",
+        message,
+    })?;
+    Ok(Json(template_catalog_response_from_entries(
+        template_catalog_entries(),
+    )))
+}
+
 async fn template_source_attachment(
     Json(request): Json<TemplateSourceAttachmentRequest>,
 ) -> Result<Json<TemplateSourceAttachmentResponse>, GatewayError> {
@@ -44314,6 +44362,47 @@ prs.save(Path({path:?}))
             "{}",
             value["templates"][0]
         );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn delete_imported_template_pack_removes_local_pack_only() {
+        let root = std::env::temp_dir().join(format!(
+            "homun-import-delete-root-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis()
+        ));
+        let pack = root.join("sales-kickoff");
+        std::fs::create_dir_all(pack.join("thumbnails")).expect("pack dirs");
+        std::fs::write(pack.join("source.pptx"), b"pptx").expect("source");
+        std::fs::write(pack.join("thumbnails/slide-001.png"), b"png").expect("thumb");
+        std::fs::write(
+            pack.join("manifest.json"),
+            serde_json::json!({
+                "id": "local/sales-kickoff",
+                "name": "Sales Kickoff",
+                "kind": "presentation",
+                "description": "Imported real PPTX template.",
+                "source_provider": "user_upload",
+                "license": "User upload",
+                "attribution_required": false,
+                "redistribution_policy": "owned_by_user",
+                "design_template": "startup_pitch",
+                "route_text": "sales kickoff"
+            })
+            .to_string(),
+        )
+        .expect("manifest");
+
+        super::delete_imported_template_pack(&root, "local/sales-kickoff")
+            .expect("delete imported pack");
+
+        assert!(!pack.exists(), "pack directory should be removed");
+        assert!(super::delete_imported_template_pack(&root, "monet/startup-pitch-clean-01").is_err());
 
         let _ = std::fs::remove_dir_all(root);
     }

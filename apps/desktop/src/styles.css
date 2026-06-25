@@ -10735,6 +10735,54 @@ body.resizing-drawer {
   height: 142px;
   object-fit: cover;
 }
+.template-preview-loading {
+  position: relative;
+  overflow: hidden;
+  display: grid;
+  align-content: end;
+  gap: 10px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--surface-muted) 84%, var(--text)) 0%, var(--surface) 100%);
+}
+.template-preview-shimmer {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(90deg, transparent 0%, color-mix(in srgb, var(--surface) 70%, transparent) 45%, transparent 90%),
+    linear-gradient(var(--line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line) 1px, transparent 1px);
+  background-size: 160px 100%, 24px 24px, 24px 24px;
+  animation: template-preview-shimmer 1.2s ease-in-out infinite;
+}
+.template-preview-loading-lines {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 7px;
+}
+.template-preview-loading-lines span {
+  display: block;
+  height: 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text) 10%, var(--surface));
+}
+.template-preview-loading-lines span:nth-child(1) {
+  width: 58%;
+}
+.template-preview-loading-lines span:nth-child(2) {
+  width: 84%;
+}
+.template-preview-loading-lines span:nth-child(3) {
+  width: 42%;
+}
+@keyframes template-preview-shimmer {
+  0% {
+    background-position: -160px 0, 0 0, 0 0;
+  }
+  100% {
+    background-position: 160px 0, 0 0, 0 0;
+  }
+}
 .template-preview-chrome {
   display: flex;
   gap: 5px;
@@ -11004,6 +11052,36 @@ body.resizing-drawer {
   cursor: wait;
   opacity: 0.55;
 }
+.template-remove {
+  margin: -6px 14px 14px;
+  border: 1px solid color-mix(in srgb, var(--danger) 36%, var(--line));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--danger) 7%, var(--surface));
+  color: var(--danger);
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  justify-content: center;
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 720;
+  cursor: pointer;
+}
+.template-remove:hover {
+  background: color-mix(in srgb, var(--danger) 12%, var(--surface));
+}
+.template-remove:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+.template-use-static {
+  cursor: wait;
+}
+.template-card-pending {
+  pointer-events: none;
+}
 .template-detail-overlay {
   position: fixed;
   inset: 0;
@@ -11060,6 +11138,12 @@ body.resizing-drawer {
 .template-detail-use {
   min-width: 160px;
   justify-content: center;
+}
+.template-detail-remove {
+  min-width: 112px;
+  justify-content: center;
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 34%, var(--line));
 }
 .template-detail-preview {
   border: 1px solid var(--line);

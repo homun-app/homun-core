@@ -1,6 +1,6 @@
 import { type ChangeEvent, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { FileText, ImageIcon, Presentation, Save, Search, Upload } from "lucide-react";
+import { FileText, ImageIcon, Loader2, Presentation, Save, Search, Trash2, Upload } from "lucide-react";
 import { coreBridge, type BrandKit, type TemplateCatalogEntry } from "../lib/coreBridge";
 import { fileLocalPathFromBridge } from "../lib/gatewayConfig";
 import type { PluginHost } from "../plugins/registry";
@@ -213,9 +213,11 @@ function TemplateCatalogGallery({ host }: { host: PluginHost }) {
   const [filter, setFilter] = useState<"all" | "presentation" | "document">("all");
   const [sourceFilter, setSourceFilter] = useState<"all" | "local" | "slidescarnival" | "homun">("all");
   const [importing, setImporting] = useState(false);
+  const [importingName, setImportingName] = useState<string | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
   const [selectedTemplate, setSelectedTemplate] = useState<TemplateCatalogEntry | null>(null);
   const [startingTemplateId, setStartingTemplateId] = useState<string | null>(null);
+  const [deletingTemplateId, setDeletingTemplateId] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -272,6 +274,7 @@ function TemplateCatalogGallery({ host }: { host: PluginHost }) {
     }
     const name = file.name.replace(/\.(pptx|potx)$/i, "");
     setImporting(true);
+    setImportingName(name);
     try {
       await coreBridge.importPptxTemplate({
         source_path: sourcePath,
@@ -286,6 +289,22 @@ function TemplateCatalogGallery({ host }: { host: PluginHost }) {
       setImportError(error instanceof Error ? error.message : "Could not import PPTX template.");
     } finally {
       setImporting(false);
+      setImportingName(null);
+    }
+  }
+
+  async function deleteTemplate(entry: TemplateCatalogEntry) {
+    if (!entry.is_imported) return;
+    setImportError(null);
+    setDeletingTemplateId(entry.id);
+    try {
+      const catalog = await coreBridge.deleteTemplate(entry.id);
+      setTemplates(catalog.templates);
+      if (selectedTemplate?.id === entry.id) setSelectedTemplate(null);
+    } catch (error) {
+      setImportError(error instanceof Error ? error.message : "Could not remove the template.");
+    } finally {
+      setDeletingTemplateId(null);
     }
   }
 
@@ -371,7 +390,7 @@ function TemplateCatalogGallery({ host }: { host: PluginHost }) {
       </div>
       {importError && <p className="template-import-error">{importError}</p>}
 
-      {visible.length === 0 ? (
+      {visible.length === 0 && !importingName ? (
         <div className="template-empty">
           <Presentation size={22} aria-hidden />
           <strong>{t("presentations:noTemplatesTitle")}</strong>
@@ -379,10 +398,12 @@ function TemplateCatalogGallery({ host }: { host: PluginHost }) {
         </div>
       ) : (
         <div className="template-gallery-grid">
+          {importingName && <TemplateImportingCard name={importingName} />}
           {visible.map((entry) => {
             const selectionNotes = entry.selection_notes ?? [];
             const sourceBadges = templateSourceBadges(entry);
             const starting = startingTemplateId === entry.id;
+            const deleting = deletingTemplateId === entry.id;
             return (
               <article className="template-card" key={entry.id}>
                 <button
@@ -426,11 +447,23 @@ function TemplateCatalogGallery({ host }: { host: PluginHost }) {
                   className="template-use"
                   onClick={() => void useTemplate(entry)}
                   title={t("presentations:useTemplate")}
-                  disabled={Boolean(startingTemplateId)}
+                  disabled={Boolean(startingTemplateId) || deleting}
                 >
                   <Presentation size={14} aria-hidden />
                   {starting ? t("presentations:starting") : t("presentations:useTemplate")}
                 </button>
+                {entry.is_imported && (
+                  <button
+                    type="button"
+                    className="template-remove"
+                    onClick={() => void deleteTemplate(entry)}
+                    disabled={deleting || Boolean(startingTemplateId)}
+                    title={t("presentations:removeTemplate")}
+                  >
+                    <Trash2 size={13} aria-hidden />
+                    {deleting ? t("presentations:removing") : t("presentations:removeTemplate")}
+                  </button>
+                )}
               </article>
             );
           })}
@@ -440,24 +473,57 @@ function TemplateCatalogGallery({ host }: { host: PluginHost }) {
         <TemplateDetailModal
           entry={selectedTemplate}
           busy={startingTemplateId === selectedTemplate.id}
+          deleting={deletingTemplateId === selectedTemplate.id}
           onClose={() => setSelectedTemplate(null)}
           onUse={() => void useTemplate(selectedTemplate)}
+          onDelete={() => void deleteTemplate(selectedTemplate)}
         />
       )}
     </section>
   );
 }
 
+function TemplateImportingCard({ name }: { name: string }) {
+  const { t } = useTranslation();
+  return (
+    <article className="template-card template-card-pending" aria-live="polite">
+      <div className="template-card-preview template-preview-loading">
+        <div className="template-preview-shimmer" />
+        <div className="template-preview-loading-lines">
+          <span />
+          <span />
+          <span />
+        </div>
+      </div>
+      <div className="template-card-body">
+        <div className="template-card-title-row">
+          <h4>{name}</h4>
+          <span>PPTX</span>
+        </div>
+        <p>{t("presentations:renderingPreview")}</p>
+      </div>
+      <div className="template-use template-use-static">
+        <Loader2 size={14} className="composer-spin" aria-hidden />
+        {t("presentations:importing")}
+      </div>
+    </article>
+  );
+}
+
 function TemplateDetailModal({
   entry,
   busy,
+  deleting,
   onClose,
   onUse,
+  onDelete,
 }: {
   entry: TemplateCatalogEntry;
   busy: boolean;
+  deleting: boolean;
   onClose: () => void;
   onUse: () => void;
+  onDelete: () => void;
 }) {
   const { t } = useTranslation();
   const sourceBadges = templateSourceBadges(entry);
@@ -495,10 +561,21 @@ function TemplateDetailModal({
             type="button"
             className="primary-btn template-detail-use"
             onClick={onUse}
-            disabled={busy}
+            disabled={busy || deleting}
           >
             {busy ? t("presentations:starting") : t("presentations:useTemplate")}
           </button>
+          {entry.is_imported && (
+            <button
+              type="button"
+              className="auto-btn template-detail-remove"
+              onClick={onDelete}
+              disabled={busy || deleting}
+            >
+              <Trash2 size={14} aria-hidden />
+              {deleting ? t("presentations:removing") : t("presentations:removeTemplate")}
+            </button>
+          )}
         </div>
         <div className="template-detail-preview">
           <TemplateCardPreview entry={entry} />
@@ -528,18 +605,71 @@ function templateSourceBadges(entry: TemplateCatalogEntry) {
 }
 
 function TemplateCardPreview({ entry }: { entry: TemplateCatalogEntry }) {
+  const { t } = useTranslation();
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [imageFailed, setImageFailed] = useState(false);
   const canRenderBuiltin = entry.preview_ref?.startsWith("builtin:template-preview/");
   const canRenderImage = entry.preview_ref
     ? /^(https?:\/\/|\/api\/templates\/preview|template-pack:\/\/)/.test(entry.preview_ref)
     : false;
-  const imageSrc = entry.preview_ref
-    ? coreBridge.templatePreviewUrl(entry.preview_ref)
-    : "";
+  const needsAuthenticatedFetch = entry.preview_ref
+    ? /^(\/*api\/templates\/preview|template-pack:\/\/)/.test(entry.preview_ref)
+    : false;
+  const imageSrc = entry.preview_ref ? coreBridge.templatePreviewUrl(entry.preview_ref) : "";
 
-  if (canRenderImage) {
+  useEffect(() => {
+    if (!entry.preview_ref || !needsAuthenticatedFetch) {
+      setBlobUrl(null);
+      setImageFailed(false);
+      return undefined;
+    }
+    let active = true;
+    let nextUrl: string | null = null;
+    setBlobUrl(null);
+    setImageFailed(false);
+    void coreBridge
+      .templatePreviewBlobUrl(entry.preview_ref)
+      .then((url) => {
+        nextUrl = url;
+        if (active) {
+          setBlobUrl(url);
+        } else if (url.startsWith("blob:")) {
+          URL.revokeObjectURL(url);
+        }
+      })
+      .catch(() => {
+        if (active) setImageFailed(true);
+      });
+    return () => {
+      active = false;
+      if (nextUrl?.startsWith("blob:")) {
+        URL.revokeObjectURL(nextUrl);
+      }
+    };
+  }, [entry.preview_ref, needsAuthenticatedFetch]);
+
+  if (canRenderImage && needsAuthenticatedFetch && !blobUrl && !imageFailed) {
+    return (
+      <div className="template-card-preview template-preview-loading" aria-label={t("presentations:loadingPreview")}>
+        <div className="template-preview-shimmer" />
+        <div className="template-preview-loading-lines">
+          <span />
+          <span />
+          <span />
+        </div>
+      </div>
+    );
+  }
+
+  if (canRenderImage && !imageFailed) {
     return (
       <div className="template-card-preview image-preview">
-        <img src={imageSrc} alt="" loading="lazy" />
+        <img
+          src={needsAuthenticatedFetch ? blobUrl ?? "" : imageSrc}
+          alt=""
+          loading="lazy"
+          onError={() => setImageFailed(true)}
+        />
       </div>
     );
   }

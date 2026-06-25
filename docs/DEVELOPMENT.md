@@ -2,7 +2,7 @@
 
 > **Punto d'ingresso unico.** Da qui si parte e si torna. Questo file è SEMPRE
 > aggiornato: se cambia una scelta importante, si aggiorna qui (o nel doc linkato).
-> Ultimo aggiornamento: 2026-06-25.
+> Ultimo aggiornamento: 2026-06-26.
 
 ## North Star
 
@@ -38,7 +38,7 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
 | **Prodotto / distribuzione / self-host** | [PRODUCT_LOOP.md](PRODUCT_LOOP.md) · [distribution.md](distribution.md) · [self-host.md](self-host.md) · [release-macos.md](release-macos.md) |
 | **Storico** (changelog, vecchi piani, snapshot) | [archive/](archive/) — non più "corrente", solo memoria storica |
 
-## Stato esecuzione — "SEI QUI" (aggiornato 2026-06-25, anti-compattazione)
+## Stato esecuzione — "SEI QUI" (aggiornato 2026-06-26, anti-compattazione)
 
 > Se il contesto si è compattato: rileggi QUESTO blocco + il
 > [backlog](plans/2026-06-22-batch-1042-artifacts-memory.md) (gli stati ☐/✅ = i loop
@@ -186,6 +186,17 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   i template importati. Gate: `cargo test -p local-first-desktop-gateway
   import_pptx_template_pack_generates_slide_preview_thumbnail -- --nocapture`,
   `cargo test -p local-first-desktop-gateway template_catalog -- --nocapture`.
+  Follow-up import UX locale/verde: le preview dei template importati non sono
+  piu' lette con `<img>` diretto su una route gateway protetta; il bridge fa
+  fetch autenticato e passa alla UI un blob URL revocato a cleanup. Durante
+  import appare una card skeleton nella gallery finche' il pack e la thumbnail
+  sono pronti. I template locali importati sono cancellabili dal catalogo
+  tramite `/api/templates/delete`, confinato alla root dei template pack. `Use
+  template` apre la nuova chat mostrando subito il prompt visibile e il chip
+  PPTX allegato, mentre l'analisi/piano continua nello stream: non resta piu'
+  una fase muta fino alla fine dell'analisi del PowerPoint. Gate: `cargo test
+  -p local-first-desktop-gateway template -- --nocapture`, `npm run build`
+  da `apps/desktop`.
   WS7 Presentations studio redesign locale/verde:
   la pagina Presentations non e' piu' un form settings verticale; ora usa un
   layout studio con brand kit compatto a sinistra e template workspace a destra,
@@ -195,10 +206,10 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   `npm run test:ui-contract`, `npm run build`, `git diff --check`, smoke
   Playwright su `127.0.0.1:1420` (Presentations apre, `sales` filtra a 6 card,
   input file logo nativo non visibile). **Prossimo passo unico:** smoke runtime
-  Electron import→catalogo→preview reale→use template→make_deck verificando che
-  `deck.pptx` mantenga il layout del template importato; poi riallineare preview
-  HTML/PDF e catalogo "Powered by SlidesCarnival" con ricerca/filtri/import
-  esplicito.
+  Electron import→placeholder→catalogo→preview reale→delete/use template→chat
+  con allegato visibile→make_deck verificando che `deck.pptx` mantenga il
+  layout del template importato; poi riallineare preview HTML/PDF e catalogo
+  "Powered by SlidesCarnival" con ricerca/filtri/import esplicito.
   Spec: [Real PPTX Template Import and SlidesCarnival-Powered Catalog](superpowers/specs/2026-06-25-real-pptx-template-import-design.md).
   UX spec: [Presentations Studio Redesign](superpowers/specs/2026-06-25-presentations-studio-redesign-design.md).
 - **Direzione WS7 aggiornata:** l'obiettivo deliverable non è una gallery statica

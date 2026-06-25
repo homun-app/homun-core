@@ -2155,6 +2155,12 @@ async function electronTemplateSourceAttachment(
   });
 }
 
+async function electronDeleteTemplate(templateId: string): Promise<TemplateCatalogResponse> {
+  return gatewayPostJson<TemplateCatalogResponse>("/api/templates/delete", {
+    template_id: templateId,
+  });
+}
+
 function electronTemplatePreviewUrl(previewRef: string): string {
   if (previewRef.startsWith("template-pack://")) {
     return `${DESKTOP_GATEWAY_URL}/api/templates/preview?ref=${encodeURIComponent(previewRef)}`;
@@ -2163,6 +2169,18 @@ function electronTemplatePreviewUrl(previewRef: string): string {
     return `${DESKTOP_GATEWAY_URL}${previewRef}`;
   }
   return previewRef;
+}
+
+async function electronTemplatePreviewBlobUrl(previewRef: string): Promise<string> {
+  const url = electronTemplatePreviewUrl(previewRef);
+  if (!url.startsWith(DESKTOP_GATEWAY_URL)) {
+    return url;
+  }
+  const response = await fetch(url, { headers: gatewayHeaders() });
+  if (!response.ok) {
+    throw new Error(`Template preview unavailable: HTTP ${response.status}`);
+  }
+  return URL.createObjectURL(await response.blob());
 }
 
 export interface CatalogPreview {
@@ -2343,7 +2361,10 @@ export const coreBridge = {
     electronImportPptxTemplate(payload),
   templateSourceAttachment: (templateId: string) =>
     electronTemplateSourceAttachment(templateId),
+  deleteTemplate: (templateId: string) => electronDeleteTemplate(templateId),
   templatePreviewUrl: (previewRef: string) => electronTemplatePreviewUrl(previewRef),
+  templatePreviewBlobUrl: (previewRef: string) =>
+    electronTemplatePreviewBlobUrl(previewRef),
   catalogPreview: (slug: string) => electronCatalogPreview(slug),
   catalogInstall: (slug: string) => electronCatalogInstall(slug),
   chatThreads: (workspace?: string) => chatApi.chatThreads(workspace),

@@ -404,50 +404,58 @@ primo percorso locale verde e WS5 è chiusa localmente/gate:
     template e avvio chat guidata continuano a usare il contratto esistente.
     Gate locale: `npm run test:ui-contract`, `npm run build`, `git diff
     --check`, smoke Playwright su `127.0.0.1:1420`.
-82. UX agentic workspace principle — Homun assume il modello "workspace agentico
+82. WS7 imported template lifecycle UX — i template PPTX importati diventano
+    oggetti gestibili del catalogo: card skeleton durante import, preview reale
+    caricata via fetch autenticato del bridge (blob URL, non `<img>` non
+    autorizzato), delete esplicito dei soli pack locali tramite
+    `/api/templates/delete`, e `Use template` che apre subito una chat con prompt
+    visibile e chip PPTX allegato prima dell'analisi/piano. Gate locale:
+    `cargo test -p local-first-desktop-gateway template -- --nocapture`,
+    `npm run build` da `apps/desktop`.
+83. UX agentic workspace principle — Homun assume il modello "workspace agentico
     operativo con chat al centro": sidebar per orientamento, chat come comando e
     timeline, dock contestuale per piano/computer/activity, artifact come output
     di prima classe. La spec dedicata definisce la prima slice: ownership
     per-thread, lifecycle dock, rendering progressivo e cleanup sidebar.
-83. UX.1 live activity ownership — il gateway espone owner/terminal live solo
+84. UX.1 live activity ownership — il gateway espone owner/terminal live solo
     durante attività browser o terminale running; il dock Computer compare solo
     nel thread proprietario dell'attività live. I guardrail UI coprono ownership,
     plan/markdown progressivi e busy indicator limitati a stream attivi o task
     queued/running.
-84. WS9 plugin manifest contract — `PluginManifest` nel crate capabilities ora
+85. WS9 plugin manifest contract — `PluginManifest` nel crate capabilities ora
     porta i metadati distributivi necessari al marketplace: channel, compatibilità
     Homun minima, entitlement, firma opzionale e capability dichiarate. I manifest
     legacy restano validi come stable/free.
-85. WS9 plugin registry index contract — `PluginRegistryIndex` definisce il feed
+86. WS9 plugin registry index contract — `PluginRegistryIndex` definisce il feed
     JSON marketplace separato dai manifest installati: entry con URL manifest e
     package, digest SHA-256, firma, channel, compatibilità ed entitlement. È il
     contratto per sito/install manager; non scarica ancora pacchetti.
-86. WS9 package integrity policy — le entry registry validano forma del digest
+87. WS9 package integrity policy — le entry registry validano forma del digest
     `sha256`, algoritmo firma `ed25519` e confronto SHA-256 sui byte pacchetto.
     La verifica Ed25519 e il gate install-candidate coprono canale beta,
     compatibilità Homun, allowlist chiavi trusted, digest e firma; restano
     enforcement install/update e scan contenuto pacchetto.
-87. WS9 install/update policy — le entry registry ora espongono regole
+88. WS9 install/update policy — le entry registry ora espongono regole
     deterministiche per disponibilità canale (`stable` sempre, `beta` solo con
     opt-in), compatibilità minima Homun e confronto versioni semver. Il manager
     in-app deve ancora usare queste regole per fetch/install/update reali.
-88. WS9 `.hplugin` package manifest — il pacchetto plugin ha un manifest interno
+89. WS9 `.hplugin` package manifest — il pacchetto plugin ha un manifest interno
     dichiarativo (`PluginPackageManifest`) con file, digest e manifest path; la
     validazione rifiuta pacchetti vuoti, digest non SHA-256 e path assoluti o
     traversal. Il gateway ora ispeziona gli archive in memoria, verifica i digest
     dei file dichiarati, prepara i blob per `skill_security` e può scrivere in
     staging solo i file dichiarati, bloccando pacchetti critici. Restano
     endpoint/manager e attivazione atomica nel registry locale.
-89. WS9 ADR distribuzione/licensing — ADR 0017 formalizza registry hosted sul
+90. WS9 ADR distribuzione/licensing — ADR 0017 formalizza registry hosted sul
     sito Homun, verifica locale deterministica, beta opt-in, paid predisposto con
     token offline e pagamento/cloud rinviati.
-90. WS9 licensing offline contract — `PluginLicenseClaims` /
+91. WS9 licensing offline contract — `PluginLicenseClaims` /
     `PluginLicenseToken` verificano offline firma Ed25519, plugin target e
     scadenza. Il gateway persiste token verificati in
     `~/.homun/plugins/licenses.json` tramite `GET/PUT /api/plugins/licenses` e
     rifiuta token scaduti/non coerenti prima della scrittura. Restano re-check
     manager e account/payment cloud.
-91. WS9 install manager locale — il gateway installa `.hplugin` solo dopo
+92. WS9 install manager locale — il gateway installa `.hplugin` solo dopo
     verifica registry/signature/digest, staging sicuro, controllo
     `plugin_id/version` e rename atomico. Endpoint locale
     `/api/plugins/packages/install-local` disponibile per pacchetti già
@@ -463,12 +471,12 @@ primo percorso locale verde e WS5 è chiusa localmente/gate:
     /api/plugins/packages/update-from-registry` applica manualmente candidate
     piu' nuove per plugin gia' installati, riusando verifica/staging/swap
     dell'install manager. Resta update automatico.
-92. WS9 registry cache locale — `PluginRegistryIndex` marketplace può essere
+93. WS9 registry cache locale — `PluginRegistryIndex` marketplace può essere
     validato e salvato atomicamente in `~/.homun/plugins/registry-cache.json`
     tramite `GET/POST /api/plugins/registry/cache`; il gateway può anche
     scaricarlo via `POST /api/plugins/registry/fetch` da HTTPS. Restano feed e
     package reali pubblicati sul sito Homun.
-93. UX.2 Linear-inspired sidebar — prima slice locale: la sidebar aperta usa
+94. UX.2 Linear-inspired sidebar — prima slice locale: la sidebar aperta usa
     sezioni operative dense (`Work`, `Create`, `Workspace`, `More`), tratta
     `Personal` come categoria chat sorella dei progetti e mostra `Projects`
     come albero diretto senza dropdown primario. Presentations e Proactivity

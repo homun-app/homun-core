@@ -50,6 +50,7 @@ import { useSetting } from "./lib/settingsStore";
 import { showSystemNotification, notificationPermission } from "./lib/systemNotifications";
 import type {
   ApprovelItem,
+  ChatAttachment,
   ChatMessage,
   ChatThread,
   ConnectionItem,
@@ -134,6 +135,21 @@ function mapCoreChatAttachment(attachment: CoreChatAttachment): NonNullable<Chat
     sizeBytes: attachment.size_bytes,
     previewAvailable: attachment.preview_available,
     privacyDomain: attachment.privacy_domain,
+  };
+}
+
+function pendingChatAttachmentFromInput(attachment: ChatAttachmentInput): ChatAttachment {
+  return {
+    artifactId: `pending_${attachment.displayName}_${attachment.sizeBytes}`,
+    title: attachment.displayName,
+    kind: attachment.mimeType.startsWith("image/")
+      ? "image"
+      : attachment.mimeType.startsWith("text/")
+        ? "text"
+        : "file",
+    sizeBytes: attachment.sizeBytes,
+    previewAvailable: attachment.mimeType.startsWith("image/"),
+    privacyDomain: "local_files",
   };
 }
 
@@ -802,13 +818,25 @@ export default function App() {
       const created = mapCoreChatThread(await coreBridge.createChatThread());
       startedThreadId = created.threadId;
       const messages = await coreBridge.chatMessages(created.threadId);
+      const localUserMessage: ChatMessage = {
+        id: `local_template_user_${Date.now()}`,
+        role: "user",
+        text: visiblePrompt,
+        timestamp: currentTimestampSeconds(),
+        attachments: input.attachment ? [pendingChatAttachmentFromInput(input.attachment)] : [],
+      };
       setChatThreads((current) => [
-        created,
+        {
+          ...created,
+          title: summarizeThreadTitle(visiblePrompt),
+          messageCount: Math.max(created.messageCount, messages.messages.length + 1),
+          updatedAt: localUserMessage.timestamp,
+        },
         ...current.filter((thread) => thread.threadId !== created.threadId),
       ]);
       setThreadMessages((current) => ({
         ...current,
-        [created.threadId]: messages.messages.map(mapCoreChatMessage),
+        [created.threadId]: [...messages.messages.map(mapCoreChatMessage), localUserMessage],
       }));
       setActiveThreadId(created.threadId);
       setSelectedTaskId(created.taskId);

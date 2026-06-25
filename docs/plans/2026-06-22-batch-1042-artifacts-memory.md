@@ -1097,6 +1097,18 @@ feature laterali né una dashboard generica.
   `cargo test -p local-first-desktop-gateway
   import_pptx_template_pack_copies_source_and_writes_manifest -- --nocapture`,
   `cargo test -p local-first-desktop-gateway template_catalog -- --nocapture`.
+- ✅ **WS7 real PPTX import UX — lifecycle catalogo locale (2026-06-26):**
+  la gallery Presentations ora tratta i template importati come oggetti del
+  catalogo: durante import mostra una card skeleton, carica la preview reale
+  tramite fetch autenticato del bridge (blob URL, non `<img>` diretto su route
+  protetta), e consente delete esplicito dei soli pack locali tramite
+  `/api/templates/delete` con path confinato alla root template pack. `Use
+  template` crea subito la chat con prompt visibile e chip PPTX allegato prima
+  dell'analisi/plan, evitando il vuoto percettivo mentre il gateway legge il
+  PowerPoint. Gate: `cargo test -p local-first-desktop-gateway template --
+  --nocapture`, `npm run build` da `apps/desktop`. Resta da fare: smoke Electron
+  import→preview→delete/use→make_deck e catalogo SlidesCarnival con ricerca e
+  import esplicito.
 
 ## WS9 — Distribuzione plugin & marketplace
 
