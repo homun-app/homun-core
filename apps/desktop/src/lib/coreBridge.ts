@@ -2155,6 +2155,16 @@ async function electronTemplateSourceAttachment(
   });
 }
 
+function electronTemplatePreviewUrl(previewRef: string): string {
+  if (previewRef.startsWith("template-pack://")) {
+    return `${DESKTOP_GATEWAY_URL}/api/templates/preview?ref=${encodeURIComponent(previewRef)}`;
+  }
+  if (previewRef.startsWith("/api/templates/preview")) {
+    return `${DESKTOP_GATEWAY_URL}${previewRef}`;
+  }
+  return previewRef;
+}
+
 export interface CatalogPreview {
   slug: string;
   name: string;
@@ -2333,6 +2343,7 @@ export const coreBridge = {
     electronImportPptxTemplate(payload),
   templateSourceAttachment: (templateId: string) =>
     electronTemplateSourceAttachment(templateId),
+  templatePreviewUrl: (previewRef: string) => electronTemplatePreviewUrl(previewRef),
   catalogPreview: (slug: string) => electronCatalogPreview(slug),
   catalogInstall: (slug: string) => electronCatalogInstall(slug),
   chatThreads: (workspace?: string) => chatApi.chatThreads(workspace),

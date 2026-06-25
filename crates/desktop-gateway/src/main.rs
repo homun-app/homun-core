@@ -420,6 +420,12 @@ struct TemplateSourceAttachmentRequest {
     template_id: String,
 }
 
+#[derive(Debug, Clone, serde::Deserialize)]
+struct TemplatePreviewQuery {
+    #[serde(rename = "ref")]
+    reference: String,
+}
+
 #[derive(Debug, Serialize)]
 struct TemplateSourceAttachmentResponse {
     local_path: String,
@@ -792,6 +798,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/skills/catalog/preview", get(preview_catalog_skill))
         .route("/api/templates/catalog", get(template_catalog))
         .route("/api/templates/import-pptx", post(import_pptx_template))
+        .route("/api/templates/preview", get(template_preview))
         .route(
             "/api/templates/source-attachment",
             post(template_source_attachment),
@@ -7245,6 +7252,29 @@ fn imported_template_preview_ref(id: &str, pack_root: &std::path::Path) -> Optio
     ))))
 }
 
+fn percent_encode_query(value: &str) -> String {
+    let mut output = String::new();
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                output.push(byte as char);
+            }
+            _ => output.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    output
+}
+
+fn template_catalog_preview_response_ref(preview_ref: Option<String>) -> Option<String> {
+    preview_ref.map(|preview| {
+        if preview.starts_with("template-pack://") {
+            format!("/api/templates/preview?ref={}", percent_encode_query(&preview))
+        } else {
+            preview
+        }
+    })
+}
+
 fn parse_imported_template_pack(pack_root: &std::path::Path) -> Option<TemplateCatalogEntry> {
     let source_path = imported_template_source_path(pack_root)?;
     let manifest_path = pack_root.join("manifest.json");
@@ -7529,6 +7559,152 @@ fn next_template_pack_slug(root: &std::path::Path, base_slug: &str) -> Result<St
     Err("could not allocate a unique template pack name".to_string())
 }
 
+fn find_executable(candidates: &[String]) -> Option<PathBuf> {
+    for candidate in candidates {
+        let path = std::path::Path::new(candidate);
+        if path.components().count() > 1 && path.is_file() {
+            return Some(path.to_path_buf());
+        }
+        if path.components().count() == 1 {
+            if let Some(paths) = env::var_os("PATH") {
+                for dir in env::split_paths(&paths) {
+                    let executable = dir.join(candidate);
+                    if executable.is_file() {
+                        return Some(executable);
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+fn render_imported_template_thumbnails(
+    source_path: &std::path::Path,
+    pack_root: &std::path::Path,
+) -> Result<usize, String> {
+    let home = env::var("HOME").unwrap_or_default();
+    let soffice_candidates = [
+        env::var("HOMUN_SOFFICE_BIN").ok(),
+        Some("soffice".to_string()),
+        Some("libreoffice".to_string()),
+        Some("/Applications/LibreOffice.app/Contents/MacOS/soffice".to_string()),
+        Some("/opt/homebrew/bin/soffice".to_string()),
+        Some("/usr/local/bin/soffice".to_string()),
+        (!home.is_empty()).then(|| {
+            format!("{home}/.cache/codex-runtimes/codex-primary-runtime/dependencies/bin/soffice")
+        }),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>();
+    let pdftoppm_candidates = [
+        env::var("HOMUN_PDFTOPPM_BIN").ok(),
+        Some("pdftoppm".to_string()),
+        Some("/opt/homebrew/bin/pdftoppm".to_string()),
+        Some("/usr/local/bin/pdftoppm".to_string()),
+        (!home.is_empty()).then(|| {
+            format!("{home}/.cache/codex-runtimes/codex-primary-runtime/dependencies/bin/pdftoppm")
+        }),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>();
+    let soffice = find_executable(&soffice_candidates)
+    .ok_or_else(|| "PowerPoint thumbnail generation requires LibreOffice/soffice".to_string())?;
+    let pdftoppm = find_executable(&pdftoppm_candidates)
+    .ok_or_else(|| "PowerPoint thumbnail generation requires pdftoppm".to_string())?;
+
+    let temp_root = env::temp_dir().join(format!(
+        "homun-template-preview-{}-{}",
+        std::process::id(),
+        uuid::Uuid::new_v4().simple()
+    ));
+    fs::create_dir_all(&temp_root)
+        .map_err(|error| format!("could not create thumbnail temp dir: {error}"))?;
+    let cleanup = |path: &std::path::Path| {
+        let _ = fs::remove_dir_all(path);
+    };
+
+    let soffice_output = Command::new(&soffice)
+        .args(["--headless", "--convert-to", "pdf", "--outdir"])
+        .arg(&temp_root)
+        .arg(source_path)
+        .output()
+        .map_err(|error| {
+            cleanup(&temp_root);
+            format!("could not run soffice for template preview: {error}")
+        })?;
+    if !soffice_output.status.success() {
+        let stderr = String::from_utf8_lossy(&soffice_output.stderr);
+        let stdout = String::from_utf8_lossy(&soffice_output.stdout);
+        cleanup(&temp_root);
+        return Err(format!(
+            "soffice failed while rendering template preview: {stderr}{stdout}"
+        ));
+    }
+    let pdf_path = fs::read_dir(&temp_root)
+        .map_err(|error| {
+            cleanup(&temp_root);
+            format!("could not inspect template preview temp dir: {error}")
+        })?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .find(|path| {
+            path.extension()
+                .and_then(|value| value.to_str())
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("pdf"))
+        })
+        .ok_or_else(|| {
+            cleanup(&temp_root);
+            "soffice did not produce a PDF for template preview".to_string()
+        })?;
+
+    let prefix = temp_root.join("slide");
+    let pdf_output = Command::new(&pdftoppm)
+        .args(["-png", "-r", "120", "-f", "1", "-l", "8"])
+        .arg(&pdf_path)
+        .arg(&prefix)
+        .output()
+        .map_err(|error| {
+            cleanup(&temp_root);
+            format!("could not run pdftoppm for template preview: {error}")
+        })?;
+    if !pdf_output.status.success() {
+        let stderr = String::from_utf8_lossy(&pdf_output.stderr);
+        cleanup(&temp_root);
+        return Err(format!("pdftoppm failed while rendering template preview: {stderr}"));
+    }
+
+    let thumbnails_dir = pack_root.join("thumbnails");
+    fs::create_dir_all(&thumbnails_dir)
+        .map_err(|error| format!("could not create template thumbnails dir: {error}"))?;
+    let mut rendered = fs::read_dir(&temp_root)
+        .map_err(|error| format!("could not read template preview temp dir: {error}"))?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|value| value.to_str())
+                .is_some_and(|name| name.starts_with("slide-") && name.ends_with(".png"))
+        })
+        .collect::<Vec<_>>();
+    rendered.sort();
+
+    let mut count = 0usize;
+    for (index, image) in rendered.into_iter().take(8).enumerate() {
+        let target = thumbnails_dir.join(format!("slide-{:03}.png", index + 1));
+        fs::copy(&image, &target)
+            .map_err(|error| format!("could not copy template thumbnail: {error}"))?;
+        count += 1;
+    }
+    cleanup(&temp_root);
+    if count == 0 {
+        return Err("template preview renderer produced no thumbnails".to_string());
+    }
+    Ok(count)
+}
+
 fn import_pptx_template_pack(
     root: &std::path::Path,
     request: ImportPptxTemplateRequest,
@@ -7575,6 +7751,7 @@ fn import_pptx_template_pack(
             source_path.display()
         )
     })?;
+    render_imported_template_thumbnails(&target_source, &pack_root)?;
 
     let source_provider = request
         .source_provider
@@ -7666,7 +7843,7 @@ fn template_catalog_response_from_entries(
                     layout_archetypes: entry.layout_archetypes,
                     tags: entry.tags,
                     selection_notes,
-                    preview_ref: entry.preview_ref,
+                    preview_ref: template_catalog_preview_response_ref(entry.preview_ref),
                     source_ref: entry.source_ref,
                     license: entry.license,
                     source_provider: entry.source_provider,
@@ -39943,6 +40120,73 @@ async fn template_catalog() -> Json<TemplateCatalogResponse> {
     ))
 }
 
+async fn template_preview(
+    Query(query): Query<TemplatePreviewQuery>,
+) -> Result<Response, GatewayError> {
+    let reference = query.reference.trim();
+    let rest = reference
+        .strip_prefix("template-pack://")
+        .ok_or_else(|| GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "template_preview_ref_invalid",
+            message: "Template preview reference is invalid.".to_string(),
+        })?;
+
+    for entry in template_catalog_entries() {
+        let Some(pack_root) = entry.template_pack_root.as_ref() else {
+            continue;
+        };
+        let Some(internal_preview) = entry.preview_ref.as_deref() else {
+            continue;
+        };
+        if internal_preview != reference {
+            continue;
+        }
+        let prefix = format!("{}/", entry.id);
+        let Some(relative_path) = rest.strip_prefix(&prefix) else {
+            continue;
+        };
+        if !relative_path.starts_with("thumbnails/") || !relative_path.ends_with(".png") {
+            return Err(GatewayError {
+                status: StatusCode::BAD_REQUEST,
+                code: "template_preview_path_invalid",
+                message: "Template preview path is invalid.".to_string(),
+            });
+        }
+        let path = jail_in_root(pack_root, relative_path).map_err(|message| GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "template_preview_path_invalid",
+            message,
+        })?;
+        if !path.is_file() {
+            return Err(GatewayError {
+                status: StatusCode::NOT_FOUND,
+                code: "template_preview_missing",
+                message: "Template preview image is missing.".to_string(),
+            });
+        }
+        let bytes = fs::read(&path).map_err(|error| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "template_preview_read_failed",
+            message: error.to_string(),
+        })?;
+        return Response::builder()
+            .header(CONTENT_TYPE, "image/png")
+            .body(Body::from(bytes))
+            .map_err(|error| GatewayError {
+                status: StatusCode::INTERNAL_SERVER_ERROR,
+                code: "template_preview_response_failed",
+                message: error.to_string(),
+            });
+    }
+
+    Err(GatewayError {
+        status: StatusCode::NOT_FOUND,
+        code: "template_preview_not_found",
+        message: "Template preview was not found.".to_string(),
+    })
+}
+
 async fn import_pptx_template(
     Json(request): Json<ImportPptxTemplateRequest>,
 ) -> Result<Json<TemplateCatalogEntryResponse>, GatewayError> {
@@ -42490,6 +42734,50 @@ mod tests {
     };
     use std::collections::HashMap;
 
+    fn bundled_python_with_pptx() -> Option<&'static str> {
+        let python =
+            "/Users/fabio/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3";
+        if !std::path::Path::new(python).is_file() {
+            eprintln!("skipping PPTX import test: bundled python unavailable");
+            return None;
+        }
+        if std::process::Command::new(python)
+            .args(["-c", "import pptx"])
+            .status()
+            .map(|status| !status.success())
+            .unwrap_or(true)
+        {
+            eprintln!("skipping PPTX import test: python-pptx unavailable");
+            return None;
+        }
+        Some(python)
+    }
+
+    fn write_test_pptx(path: &std::path::Path, title: &str) -> bool {
+        let Some(python) = bundled_python_with_pptx() else {
+            return false;
+        };
+        let script = format!(
+            r#"
+from pptx import Presentation
+from pathlib import Path
+prs = Presentation()
+slide = prs.slides.add_slide(prs.slide_layouts[0])
+slide.shapes.title.text = {title:?}
+slide.placeholders[1].text = "Template preview"
+prs.save(Path({path:?}))
+"#,
+            title = title,
+            path = path.to_string_lossy().to_string(),
+        );
+        let status = std::process::Command::new(python)
+            .args(["-c", &script])
+            .status()
+            .expect("create pptx fixture");
+        assert!(status.success(), "python-pptx fixture generation failed");
+        true
+    }
+
     #[test]
     fn proactive_dedup_key_is_semantic_and_stable() {
         // kind + anchor → "{kind}:{slug}"; paraphrases of the SAME anchor collapse.
@@ -43917,7 +44205,9 @@ mod tests {
         ));
         let source = root.join("source-files/template.pptx");
         std::fs::create_dir_all(source.parent().unwrap()).expect("source dir");
-        std::fs::write(&source, b"pptx").expect("source");
+        if !write_test_pptx(&source, "Customer Pitch") {
+            return;
+        }
         let target_root = root.join("packs");
 
         let imported = super::import_pptx_template_pack(
@@ -43962,6 +44252,68 @@ mod tests {
         assert_eq!(first["is_imported"], true);
         assert!(first.get("source_path").is_none());
         assert!(first.get("template_pack_root").is_none());
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn import_pptx_template_pack_generates_slide_preview_thumbnail() {
+        let root = std::env::temp_dir().join(format!(
+            "homun-import-thumbnail-root-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis()
+        ));
+        let source = root.join("source-files/template.pptx");
+        std::fs::create_dir_all(source.parent().unwrap()).expect("source dir");
+        if !write_test_pptx(&source, "Sales Kickoff") {
+            return;
+        }
+        let target_root = root.join("packs");
+
+        let imported = super::import_pptx_template_pack(
+            &target_root,
+            super::ImportPptxTemplateRequest {
+                source_path: source.to_string_lossy().to_string(),
+                name: "Sales Kickoff".to_string(),
+                source_provider: Some("slidescarnival".to_string()),
+                source_url: None,
+                license: None,
+                attribution_required: Some(false),
+                attribution_text: None,
+                redistribution_policy: None,
+                tags: Some(vec!["sales".to_string()]),
+            },
+        )
+        .expect("imported");
+
+        let thumb = target_root
+            .join("sales-kickoff")
+            .join("thumbnails")
+            .join("slide-001.png");
+        assert!(thumb.is_file(), "expected thumbnail at {}", thumb.display());
+        assert!(
+            std::fs::metadata(&thumb)
+                .map(|metadata| metadata.len() > 1024)
+                .unwrap_or(false),
+            "thumbnail should contain rendered PNG data"
+        );
+        assert_eq!(
+            imported.preview_ref.as_deref(),
+            Some("template-pack://local/sales-kickoff/thumbnails/slide-001.png")
+        );
+
+        let response = super::template_catalog_response_from_entries(vec![imported]);
+        let value = serde_json::to_value(&response).expect("json");
+        assert!(
+            value["templates"][0]["preview_ref"]
+                .as_str()
+                .is_some_and(|preview| preview.starts_with("/api/templates/preview?ref=")),
+            "{}",
+            value["templates"][0]
+        );
 
         let _ = std::fs::remove_dir_all(root);
     }

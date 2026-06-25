@@ -360,8 +360,11 @@ primo percorso locale verde e WS5 è chiusa localmente/gate:
     `--template-pptx` a `deck-render`; il `deck.pptx` finale viene editato dal
     PowerPoint reale preservando dimensioni, master e media del template.
     Limite: HTML/PDF sono ancora preview sintetiche e la sostituzione testi e'
-    conservativa. Resta da fare smoke Electron end-to-end e catalogo
-    SlidesCarnival con import esplicito.
+    conservativa. Follow-up preview import: l'import `.pptx`/`.potx` genera ora
+    `thumbnails/slide-001.png` dal file reale con LibreOffice/Poppler, il gateway
+    serve l'immagine da `/api/templates/preview` senza path locali e la gallery
+    Presentations usa quella preview reale per i template importati. Resta da
+    fare smoke Electron end-to-end e catalogo SlidesCarnival con import esplicito.
 74. WS8 gateway contract eval — `scripts/eval_suite.py` può ora, se configurato
     con `HOMUN_EVAL_GATEWAY_BASE` e token, verificare anche il gateway reale:
     `/api/templates/catalog` deve esporre template non-callable con preview

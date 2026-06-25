@@ -530,13 +530,16 @@ function templateSourceBadges(entry: TemplateCatalogEntry) {
 function TemplateCardPreview({ entry }: { entry: TemplateCatalogEntry }) {
   const canRenderBuiltin = entry.preview_ref?.startsWith("builtin:template-preview/");
   const canRenderImage = entry.preview_ref
-    ? /^(https?:\/\/|\/)/.test(entry.preview_ref)
+    ? /^(https?:\/\/|\/api\/templates\/preview|template-pack:\/\/)/.test(entry.preview_ref)
     : false;
+  const imageSrc = entry.preview_ref
+    ? coreBridge.templatePreviewUrl(entry.preview_ref)
+    : "";
 
   if (canRenderImage) {
     return (
       <div className="template-card-preview image-preview">
-        <img src={entry.preview_ref ?? ""} alt="" loading="lazy" />
+        <img src={imageSrc} alt="" loading="lazy" />
       </div>
     );
   }

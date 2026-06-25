@@ -178,7 +178,15 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   `sales_templates_Sales Kickoff Slides.pptx` (output: 6 slide, 20x11.25,
   1 master, media preservati). Limite esplicito: HTML/PDF restano ancora
   preview sintetiche e la sostituzione testi e' conservativa, non ancora un
-  editor placeholder completo. WS7 Presentations studio redesign locale/verde:
+  editor placeholder completo. Follow-up import preview locale/verde: durante
+  l'import `.pptx`/`.potx` il gateway renderizza il file reale con
+  LibreOffice/Poppler, salva `thumbnails/slide-001.png` nel template pack e
+  serve la preview tramite `/api/templates/preview` senza esporre path locali;
+  la gallery usa quelle immagini reali al posto dei placeholder sintetici per
+  i template importati. Gate: `cargo test -p local-first-desktop-gateway
+  import_pptx_template_pack_generates_slide_preview_thumbnail -- --nocapture`,
+  `cargo test -p local-first-desktop-gateway template_catalog -- --nocapture`.
+  WS7 Presentations studio redesign locale/verde:
   la pagina Presentations non e' piu' un form settings verticale; ora usa un
   layout studio con brand kit compatto a sinistra e template workspace a destra,
   ricerca testuale, filtri fonte (`Local`, `SlidesCarnival`, `Homun`) e card
@@ -187,9 +195,10 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   `npm run test:ui-contract`, `npm run build`, `git diff --check`, smoke
   Playwright su `127.0.0.1:1420` (Presentations apre, `sales` filtra a 6 card,
   input file logo nativo non visibile). **Prossimo passo unico:** smoke runtime
-  Electron import→catalogo→use template→make_deck verificando che `deck.pptx`
-  mantenga il layout del template importato; poi riallineare preview HTML/PDF e
-  catalogo "Powered by SlidesCarnival" con ricerca/filtri/import esplicito.
+  Electron import→catalogo→preview reale→use template→make_deck verificando che
+  `deck.pptx` mantenga il layout del template importato; poi riallineare preview
+  HTML/PDF e catalogo "Powered by SlidesCarnival" con ricerca/filtri/import
+  esplicito.
   Spec: [Real PPTX Template Import and SlidesCarnival-Powered Catalog](superpowers/specs/2026-06-25-real-pptx-template-import-design.md).
   UX spec: [Presentations Studio Redesign](superpowers/specs/2026-06-25-presentations-studio-redesign-design.md).
 - **Direzione WS7 aggiornata:** l'obiettivo deliverable non è una gallery statica

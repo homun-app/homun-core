@@ -1085,6 +1085,18 @@ feature laterali né una dashboard generica.
   20x11.25, 1 master, media preservati). Limiti rimasti: HTML/PDF sono ancora
   preview sintetiche, non render del PPTX reale; placeholder/slot detection resta
   euristica minima e andra' evoluta dopo lo smoke runtime Electron.
+- ✅ **WS7 real PPTX import preview — prima slice locale/verde (2026-06-25):**
+  l'import `.pptx`/`.potx` non registra piu' solo metadata: il gateway invoca
+  LibreOffice/Poppler, genera `thumbnails/slide-001.png` nel template pack e
+  pubblica la preview tramite `/api/templates/preview` con path jail sul pack.
+  `/api/templates/catalog` continua a non esporre path locali e restituisce un
+  `preview_ref` gateway-safe; il frontend risolve anche `template-pack://` via
+  `coreBridge.templatePreviewUrl()` e mostra la slide reale nelle card/dettaglio
+  Presentations. Gate: `cargo test -p local-first-desktop-gateway
+  import_pptx_template_pack_generates_slide_preview_thumbnail -- --nocapture`,
+  `cargo test -p local-first-desktop-gateway
+  import_pptx_template_pack_copies_source_and_writes_manifest -- --nocapture`,
+  `cargo test -p local-first-desktop-gateway template_catalog -- --nocapture`.
 
 ## WS9 — Distribuzione plugin & marketplace
 
