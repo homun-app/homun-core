@@ -390,6 +390,11 @@ struct TemplateCatalogEntryResponse {
     preview_ref: Option<String>,
     source_ref: Option<String>,
     license: Option<String>,
+    source_provider: Option<String>,
+    attribution_required: bool,
+    attribution_text: Option<String>,
+    redistribution_policy: Option<String>,
+    is_imported: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -7434,13 +7439,38 @@ fn file_template_catalog_provider() -> Option<FileTemplateCatalogProvider> {
     }
 }
 
+fn imported_template_pack_root() -> Option<PathBuf> {
+    gateway_data_dir()
+        .ok()
+        .map(|dir| dir.join("template-packs"))
+}
+
+fn imported_template_pack_provider() -> Option<ImportedTemplatePackProvider> {
+    let root = imported_template_pack_root()?;
+    match ImportedTemplatePackProvider::from_root(&root) {
+        Ok(provider) => Some(provider),
+        Err(error) => {
+            eprintln!(
+                "[template-catalog] ignoring imported packs under {}: {error}",
+                root.display()
+            );
+            None
+        }
+    }
+}
+
 fn template_catalog_entries() -> Vec<TemplateCatalogEntry> {
     let local = LocalTemplateCatalogProvider;
-    if let Some(file_provider) = file_template_catalog_provider() {
-        collect_template_catalog_entries(&[&local, &file_provider])
-    } else {
-        collect_template_catalog_entries(&[&local])
+    let file_provider = file_template_catalog_provider();
+    let imported_provider = imported_template_pack_provider();
+    let mut providers: Vec<&dyn TemplateCatalogProvider> = vec![&local];
+    if let Some(provider) = file_provider.as_ref() {
+        providers.push(provider);
     }
+    if let Some(provider) = imported_provider.as_ref() {
+        providers.push(provider);
+    }
+    collect_template_catalog_entries(&providers)
 }
 
 fn template_catalog_by_id_from_entries(
@@ -7481,6 +7511,11 @@ fn template_catalog_response_from_entries(
                     preview_ref: entry.preview_ref,
                     source_ref: entry.source_ref,
                     license: entry.license,
+                    source_provider: entry.source_provider,
+                    attribution_required: entry.attribution_required,
+                    attribution_text: entry.attribution_text,
+                    redistribution_policy: entry.redistribution_policy,
+                    is_imported: entry.template_pack_root.is_some(),
                 }
             })
             .collect(),
@@ -43474,6 +43509,88 @@ mod tests {
 
         let provider = super::ImportedTemplatePackProvider::from_root(&root).expect("provider");
         assert!(super::TemplateCatalogProvider::entries(&provider).is_empty());
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn template_catalog_entries_include_imported_template_packs_after_seed_templates() {
+        let root = std::env::temp_dir().join(format!(
+            "homun-template-pack-aggregate-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis()
+        ));
+        let pack = root.join("imported_pitch");
+        std::fs::create_dir_all(pack.join("thumbnails")).expect("pack dirs");
+        std::fs::write(pack.join("source.pptx"), b"pptx").expect("source");
+        std::fs::write(pack.join("thumbnails/slide-001.png"), b"png").expect("thumb");
+        std::fs::write(
+            pack.join("manifest.json"),
+            serde_json::json!({
+                "id": "slidescarnival/imported-pitch",
+                "name": "Imported Pitch",
+                "kind": "presentation",
+                "description": "Imported real PPTX template.",
+                "source_provider": "slidescarnival",
+                "source_url": "https://www.slidescarnival.com/template/imported/123",
+                "license": "Creative Commons Attribution 4.0",
+                "attribution_required": true,
+                "attribution_text": "Template by SlidesCarnival",
+                "redistribution_policy": "generated_decks_only",
+                "design_template": "startup_pitch",
+                "route_text": "imported pitch"
+            })
+            .to_string(),
+        )
+        .expect("manifest");
+
+        let imported = super::ImportedTemplatePackProvider::from_root(&root).expect("provider");
+        let catalog = super::collect_template_catalog_entries(&[
+            &super::LocalTemplateCatalogProvider,
+            &imported,
+        ]);
+        let seed_position = catalog
+            .iter()
+            .position(|entry| entry.id == "monet/startup-pitch-clean-01")
+            .expect("seed template");
+        let imported_position = catalog
+            .iter()
+            .position(|entry| entry.id == "slidescarnival/imported-pitch")
+            .expect("imported template");
+
+        assert!(seed_position < imported_position);
+        assert_eq!(
+            catalog[imported_position].source_provider.as_deref(),
+            Some("slidescarnival")
+        );
+        assert!(catalog[imported_position].template_pack_root.is_some());
+
+        let response = super::template_catalog_response_from_entries(catalog);
+        let value = serde_json::to_value(&response).expect("json");
+        let imported_json = value["templates"]
+            .as_array()
+            .expect("templates")
+            .iter()
+            .find(|entry| entry["id"] == "slidescarnival/imported-pitch")
+            .expect("imported response");
+
+        assert_eq!(imported_json["provider"], "local_template_pack");
+        assert_eq!(imported_json["source_provider"], "slidescarnival");
+        assert_eq!(imported_json["attribution_required"], true);
+        assert_eq!(
+            imported_json["attribution_text"],
+            "Template by SlidesCarnival"
+        );
+        assert_eq!(
+            imported_json["redistribution_policy"],
+            "generated_decks_only"
+        );
+        assert_eq!(imported_json["is_imported"], true);
+        assert!(imported_json.get("source_path").is_none());
+        assert!(imported_json.get("template_pack_root").is_none());
 
         let _ = std::fs::remove_dir_all(root);
     }
