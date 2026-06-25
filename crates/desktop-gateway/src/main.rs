@@ -12,9 +12,9 @@ mod skills_catalog;
 // Static security scan for installed skills, ported from Homun.
 mod skill_security;
 // Skill execution sandbox (reuses the browser's contained-computer container).
-mod process_skills;
 mod mcp_http;
 mod mcp_registry;
+mod process_skills;
 // Reverse proxy for the contained computer's noVNC live view (HTTP assets + WS),
 // so a remote browser on the cloud build can watch the agent's computer.
 mod novnc_proxy;
@@ -40,25 +40,46 @@ use axum::{
     routing::put,
 };
 use base64::Engine as _;
+use bytes::Bytes;
 use chat_store::{BranchPoint, ChatStore, RemoteApprovalInput, RemoteApprovalRow};
 use local_first_browser_automation::{
     BrowserAutomationClient, BrowserAutomationError, BrowserMethod, BrowserResponse,
     BrowserSidecarSession, BrowserSidecarSpawnOptions, BrowserUrlApprovalGrant,
     BrowserUrlApprovalScope, BrowserUrlPolicyStore, BrowserVisibilityMode,
 };
+use local_first_capabilities::{
+    ActionClass, CachedCapabilityTool, CachedToolProvider, CapabilityCall,
+    CapabilityConnectionConfig, CapabilityError, CapabilityFacade, CapabilityPolicy,
+    CapabilityProvider, CapabilityProviderConfig, CapabilityProviderGrant, CapabilityProviderKind,
+    CapabilityRegistryStore, CapabilityResult, CapabilityTaskPayload, ComposioCapabilityProvider,
+    ComposioProviderConfig, ComposioTransport, InMemoryCapabilityAudit, McpCapabilityProvider,
+    McpStdioConfig, McpStdioTransport, McpToolPolicy, McpTransport, PluginRegistryEntry,
+    PluginRegistryIndex, PolicyContext, ProviderId as CapabilityProviderId,
+    UserId as CapabilityUserId, WorkspaceId as CapabilityWorkspaceId,
+};
+use local_first_desktop_gateway::{
+    BuildPromptRequest, BuildPromptResponse, ChatContextMessage, ChatContextRole,
+    ChatGenerateStreamRequest, ChatMessage, ChatMessagesSnapshot, ChatThread, ChatThreadSnapshot,
+    CommitContinuationResultRequest, CommitPromptResultRequest, CommitRegeneratedResultRequest,
+    SetActiveLeafRequest, SetBranchLabelRequest, SetThreadPinnedRequest, build_chat_runtime_prompt,
+    compact_thread_title,
+};
 use local_first_inference::{
     AnthropicProvider, CapabilityDescriptor, Locality, ModelRouter, OpenAiCompatProvider,
     PrivacyPolicy, Requirements,
 };
-use local_first_capabilities::{
-    ActionClass, CachedCapabilityTool, CachedToolProvider, CapabilityCall, CapabilityConnectionConfig,
-    CapabilityError, CapabilityFacade, CapabilityPolicy, CapabilityProvider, CapabilityProviderConfig,
-    CapabilityProviderGrant, CapabilityProviderKind, CapabilityRegistryStore, CapabilityResult,
-    CapabilityTaskPayload, ComposioCapabilityProvider, ComposioProviderConfig, ComposioTransport,
-    InMemoryCapabilityAudit, McpCapabilityProvider, McpStdioConfig, McpStdioTransport, McpToolPolicy,
-    McpTransport, PluginRegistryEntry, PluginRegistryIndex,
-    PolicyContext, ProviderId as CapabilityProviderId, UserId as CapabilityUserId,
-    WorkspaceId as CapabilityWorkspaceId,
+use local_first_local_computer_session::{
+    ApprovalState, ArtifactRecord, ComputerEventRecord, ComputerSessionRecord,
+    ComputerSurfaceRecord, SessionStatus, SurfaceKind, SurfaceStatus, TakeoverState,
+};
+use local_first_local_computer_session::{LocalComputerReadModel, LocalComputerSessionStore};
+use local_first_memory::{
+    DataSensitivity as MemoryDataSensitivity, ExtractedEntity, ExtractedMemory, ExtractedRelation,
+    MemoryAccessRequest, MemoryCreateRequest, MemoryDashboard, MemoryEntity, MemoryExtraction,
+    MemoryFacade, MemoryLifecycleRequest, MemoryRecord, MemoryRef, MemoryRefKind, MemoryRelation,
+    MemorySearchRequest, MemoryStatus, MemoryUiReadModel, MemoryUpdatePatch, MemoryWikiProjection,
+    PERSONAL_WORKSPACE, PrivacyDomain, SQLiteMemoryStore, UserId as MemoryUserId, WikiFileStore,
+    WikiPage, WorkspaceId as MemoryWorkspaceId,
 };
 use local_first_orchestrator::{
     ExecutionPlan, MemoryContextProvider, MemoryContextSnippet, OrchestratorBrain,
@@ -68,38 +89,15 @@ use local_first_orchestrator::{
 use local_first_secrets::{
     DevelopmentSecretKeyProvider, EncryptedFileSecretStore, SecretMaterial, SecretRef, SecretStore,
 };
-use local_first_desktop_gateway::{
-    BuildPromptRequest, BuildPromptResponse, ChatContextMessage, ChatContextRole,
-    ChatGenerateStreamRequest, ChatMessage, ChatMessagesSnapshot, ChatThread, ChatThreadSnapshot,
-    CommitContinuationResultRequest, CommitPromptResultRequest, CommitRegeneratedResultRequest,
-    SetActiveLeafRequest, SetBranchLabelRequest, SetThreadPinnedRequest,
-    build_chat_runtime_prompt, compact_thread_title,
-};
-use local_first_local_computer_session::{
-    ApprovalState, ArtifactRecord, ComputerEventRecord, ComputerSessionRecord,
-    ComputerSurfaceRecord, SessionStatus, SurfaceKind, SurfaceStatus, TakeoverState,
-};
-use local_first_local_computer_session::{LocalComputerReadModel, LocalComputerSessionStore};
-use local_first_memory::{
-    DataSensitivity as MemoryDataSensitivity, ExtractedEntity, ExtractedMemory, ExtractedRelation,
-    MemoryAccessRequest, MemoryCreateRequest, MemoryDashboard, MemoryEntity,
-    MemoryExtraction,
-    MemoryFacade, MemoryLifecycleRequest, MemoryRecord, MemoryRef, MemoryRefKind, MemoryRelation,
-    MemorySearchRequest, MemoryStatus, MemoryUiReadModel, MemoryUpdatePatch, MemoryWikiProjection,
-    PrivacyDomain,
-    SQLiteMemoryStore, UserId as MemoryUserId, WikiFileStore, WikiPage,
-    WorkspaceId as MemoryWorkspaceId, PERSONAL_WORKSPACE,
-};
-use bytes::Bytes;
 use local_first_subagents::{
     GenerateJsonRequest, GenerateStreamEvent, SubagentTaskExecutor, TokenMetrics,
 };
 use local_first_task_runtime::{
     ApprovalGate, ApprovalPolicy, ApprovalRequest, Automation, AutomationSource, AutomationTrigger,
     EventTrigger, ExecutorResult, LeaseManager, ResourceClass, ResourceGovernor, ResourceLimits,
-    TaskExecutor,
-    TaskId, TaskQueueSnapshot, TaskRecord, TaskRuntimeError, TaskRuntimeResult, TaskScheduler,
-    TaskStatus, TaskStore, TaskUiDetail, TaskUiItem, TaskUiReadModel, UserId, WorkspaceId,
+    TaskExecutor, TaskId, TaskQueueSnapshot, TaskRecord, TaskRuntimeError, TaskRuntimeResult,
+    TaskScheduler, TaskStatus, TaskStore, TaskUiDetail, TaskUiItem, TaskUiReadModel, UserId,
+    WorkspaceId,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -110,6 +108,7 @@ use std::{
     net::SocketAddr,
     path::{Path as FsPath, PathBuf},
     process::Command,
+    str::FromStr,
     sync::{Arc, Mutex, MutexGuard},
     time::Duration as StdDuration,
 };
@@ -178,7 +177,11 @@ struct TaskExecutorStatus {
 
 impl TaskExecutorStatus {
     fn new(enabled: bool) -> Self {
-        let count = if enabled { task_executor_worker_count() } else { 0 };
+        let count = if enabled {
+            task_executor_worker_count()
+        } else {
+            0
+        };
         Self {
             enabled,
             worker_id: if count > 1 {
@@ -607,10 +610,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "/api/chat/threads/{thread_id}/messages/commit_regenerated_result",
             post(commit_regenerated_result),
         )
-        .route(
-            "/api/chat/threads/{thread_id}/branches",
-            get(chat_branches),
-        )
+        .route("/api/chat/threads/{thread_id}/branches", get(chat_branches))
         .route(
             "/api/chat/threads/{thread_id}/active_leaf",
             post(set_active_leaf),
@@ -634,7 +634,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/events", get(app_events))
         .route("/api/chat/improve_prompt", post(improve_prompt))
         .route("/api/chat/transcribe", post(transcribe_audio))
-        .route("/api/artifacts/file", get(download_artifact).delete(delete_artifact_file))
+        .route(
+            "/api/artifacts/file",
+            get(download_artifact).delete(delete_artifact_file),
+        )
         .route("/api/artifacts/pdf-pages", get(artifact_pdf_pages))
         .route("/api/artifacts/path", get(artifact_folder_path))
         .route("/api/artifacts/versions", get(artifact_versions))
@@ -654,7 +657,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .delete(remove_artifact_destination),
         )
         .route("/api/chat/suggestions", post(chat_suggestions))
-        .route("/api/chat/threads/{thread_id}/autotitle", post(autotitle_chat_thread))
+        .route(
+            "/api/chat/threads/{thread_id}/autotitle",
+            post(autotitle_chat_thread),
+        )
         .route(
             "/api/chat/threads/{thread_id}/assistant_message",
             post(seed_assistant_message),
@@ -663,9 +669,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "/api/chat/threads/{thread_id}/folder",
             get(get_thread_folder).post(set_thread_folder),
         )
-        .route("/api/chat/threads/{thread_id}/files", get(search_thread_files))
+        .route(
+            "/api/chat/threads/{thread_id}/files",
+            get(search_thread_files),
+        )
         .route("/api/chat/threads/{thread_id}/file", get(read_thread_file))
-        .route("/api/runtime/model", get(runtime_model).post(set_runtime_model))
+        .route(
+            "/api/runtime/model",
+            get(runtime_model).post(set_runtime_model),
+        )
         .route("/api/runtime/models", get(runtime_models))
         .route(
             "/api/runtime/llm-concurrency",
@@ -710,10 +722,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "/api/plugins/packages/installed",
             get(installed_plugin_packages),
         )
-        .route(
-            "/api/plugins/packages/updates",
-            get(plugin_package_updates),
-        )
+        .route("/api/plugins/packages/updates", get(plugin_package_updates))
         .route(
             "/api/plugins/trusted-keys",
             get(trusted_plugin_public_keys).put(set_trusted_plugin_public_keys),
@@ -757,11 +766,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/tasks/run_next", post(run_next_task))
         .route("/api/tasks/{task_id}/cancel", post(cancel_task))
         .route("/api/tasks/{task_id}", get(task_detail))
-        .route("/api/automations/event-sources", get(automation_event_sources))
-        .route("/api/automations", get(automations_list).post(automation_create))
+        .route(
+            "/api/automations/event-sources",
+            get(automation_event_sources),
+        )
+        .route(
+            "/api/automations",
+            get(automations_list).post(automation_create),
+        )
         .route("/api/automations/{id}/toggle", post(automation_toggle))
         .route("/api/automations/{id}/runs", get(automation_runs))
-        .route("/api/automations/{id}", put(automation_update).delete(automation_delete))
+        .route(
+            "/api/automations/{id}",
+            put(automation_update).delete(automation_delete),
+        )
         .route(
             "/api/approvals/{approval_id}/approve",
             post(approve_approval),
@@ -780,7 +798,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/local-computer/stop", post(local_computer_stop))
         // Bearer-authed: mint a short-lived ticket for the noVNC live-view proxy
         // (the iframe + WS that follow can't send the Bearer header).
-        .route("/api/computer/novnc-ticket", post(novnc_proxy::novnc_ticket))
+        .route(
+            "/api/computer/novnc-ticket",
+            post(novnc_proxy::novnc_ticket),
+        )
         .route("/api/system/status", get(system_status))
         .route("/api/update/info", get(update_info))
         .route("/api/update/trigger", post(update_trigger))
@@ -790,9 +811,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/export", get(export_user_data))
         .route("/api/memory/items", get(memory_items))
         .route("/api/memory/graph", get(memory_graph))
+        .route("/api/memory/graph/merge", post(memory_graph_merge))
+        .route(
+            "/api/memory/hygiene/suggestions",
+            get(memory_hygiene_suggestions),
+        )
         .route("/api/memory/graphify/import", post(memory_graphify_import))
-        .route("/api/memory/project-graph/ensure", post(project_graph_ensure))
-        .route("/api/memory/project-graph/subdirs", get(project_graph_subdirs))
+        .route(
+            "/api/memory/project-graph/ensure",
+            post(project_graph_ensure),
+        )
+        .route(
+            "/api/memory/project-graph/subdirs",
+            get(project_graph_subdirs),
+        )
         .route("/api/memory/goals", get(memory_goals_list))
         .route("/api/memory/goals/suggest", post(memory_goals_suggest))
         .route("/api/memory/goals/promote", post(memory_goals_promote))
@@ -803,35 +835,68 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/memory/contacts", get(contacts_list))
         .route("/api/memory/contacts/memories", post(contact_memories))
         .route("/api/memory/contacts/profile", post(contact_profile))
-        .route("/api/memory/contacts/profile/refresh", post(contact_profile_refresh))
+        .route(
+            "/api/memory/contacts/profile/refresh",
+            post(contact_profile_refresh),
+        )
         .route("/api/memory/contacts/update", post(contact_update))
         .route("/api/memory/contacts/merge", post(contacts_merge))
         .route("/api/memory/contacts/create", post(contact_create))
-        .route("/api/memory/contacts/identity/add", post(contact_identity_add))
-        .route("/api/memory/contacts/identity/remove", post(contact_identity_remove))
+        .route(
+            "/api/memory/contacts/identity/add",
+            post(contact_identity_add),
+        )
+        .route(
+            "/api/memory/contacts/identity/remove",
+            post(contact_identity_remove),
+        )
         .route("/api/memory/contacts/delete", post(contact_delete))
-        .route("/api/memory/contacts/perimeter", post(contact_perimeter_get))
-        .route("/api/memory/contacts/perimeter/update", post(contact_perimeter_set))
+        .route(
+            "/api/memory/contacts/perimeter",
+            post(contact_perimeter_get),
+        )
+        .route(
+            "/api/memory/contacts/perimeter/update",
+            post(contact_perimeter_set),
+        )
         .route("/api/profiles", get(profiles_list))
         .route("/api/profiles/create", post(profile_create))
         .route("/api/profiles/update", post(profile_update))
         .route("/api/profiles/delete", post(profile_delete))
-        .route("/api/memory/contacts/assign-profile", post(contact_assign_profile))
-        .route("/api/memory/contacts/relationships", post(contact_relationships))
-        .route("/api/memory/contacts/relationships/add", post(contact_relationship_add))
-        .route("/api/memory/contacts/relationships/remove", post(contact_relationship_remove))
+        .route(
+            "/api/memory/contacts/assign-profile",
+            post(contact_assign_profile),
+        )
+        .route(
+            "/api/memory/contacts/relationships",
+            post(contact_relationships),
+        )
+        .route(
+            "/api/memory/contacts/relationships/add",
+            post(contact_relationship_add),
+        )
+        .route(
+            "/api/memory/contacts/relationships/remove",
+            post(contact_relationship_remove),
+        )
         .route(
             "/api/channels/settings",
             get(get_channel_settings).post(set_channel_settings),
         )
         .route("/api/channels/whatsapp/status", get(whatsapp_status))
         .route("/api/channels/whatsapp/connect", post(whatsapp_connect))
-        .route("/api/channels/whatsapp/disconnect", post(whatsapp_disconnect))
+        .route(
+            "/api/channels/whatsapp/disconnect",
+            post(whatsapp_disconnect),
+        )
         .route("/api/channels/whatsapp/send", post(whatsapp_send))
         .route("/api/channels/whatsapp/inbound", post(whatsapp_inbound))
         .route("/api/channels/telegram/status", get(telegram_status))
         .route("/api/channels/telegram/connect", post(telegram_connect))
-        .route("/api/channels/telegram/disconnect", post(telegram_disconnect))
+        .route(
+            "/api/channels/telegram/disconnect",
+            post(telegram_disconnect),
+        )
         .route("/api/channels/telegram/inbound", post(telegram_inbound))
         .route("/api/channels/telegram/callback", post(telegram_callback))
         .route("/api/capabilities/snapshot", get(capability_snapshot))
@@ -839,10 +904,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "/api/workspaces",
             get(workspaces_list).post(create_workspace),
         )
-        .route("/api/workspaces/{workspace_id}/select", post(select_workspace))
-        .route("/api/workspaces/{workspace_id}/folder", post(set_workspace_folder))
-        .route("/api/workspaces/{workspace_id}/rename", post(rename_workspace))
-        .route("/api/workspaces/{workspace_id}/delete", post(delete_workspace))
+        .route(
+            "/api/workspaces/{workspace_id}/select",
+            post(select_workspace),
+        )
+        .route(
+            "/api/workspaces/{workspace_id}/folder",
+            post(set_workspace_folder),
+        )
+        .route(
+            "/api/workspaces/{workspace_id}/rename",
+            post(rename_workspace),
+        )
+        .route(
+            "/api/workspaces/{workspace_id}/delete",
+            post(delete_workspace),
+        )
         .route("/api/capabilities/mcp/connect", post(connect_mcp))
         .route("/api/capabilities/mcp/execute", post(mcp_execute))
         .route("/api/capabilities/mcp/registry", get(mcp_registry_search))
@@ -853,16 +930,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/fs/file", get(fs_file))
         .route("/api/connect/mark", post(connect_mark))
         .route("/api/capabilities/composio/connect", post(connect_composio))
-        .route("/api/capabilities/composio/toolkits", get(composio_toolkits))
+        .route(
+            "/api/capabilities/composio/toolkits",
+            get(composio_toolkits),
+        )
         .route(
             "/api/capabilities/composio/toolkits/{slug}/auth",
             get(composio_toolkit_auth),
         )
         .route("/api/capabilities/composio/link", post(composio_link))
-        .route("/api/capabilities/composio/connections", get(composio_connections))
-        .route("/api/capabilities/composio/connections/{id}", delete(composio_disconnect))
+        .route(
+            "/api/capabilities/composio/connections",
+            get(composio_connections),
+        )
+        .route(
+            "/api/capabilities/composio/connections/{id}",
+            delete(composio_disconnect),
+        )
         .route("/api/capabilities/composio/execute", post(composio_execute))
-        .route("/api/capabilities/composio/allowed-tools", get(composio_allowed_tools))
+        .route(
+            "/api/capabilities/composio/allowed-tools",
+            get(composio_allowed_tools),
+        )
         .route(
             "/api/capabilities/composio/allowed-tools/{slug}",
             delete(composio_revoke_allowed_tool),
@@ -1028,7 +1117,10 @@ fn gather_scope_memory(state: &AppState, scope: &str, cap: usize) -> Vec<String>
         .into_iter()
         .filter(|m| {
             matches!(m.status, MemoryStatus::Confirmed | MemoryStatus::Candidate)
-                && matches!(m.memory_type.as_str(), "fact" | "preference" | "decision" | "goal")
+                && matches!(
+                    m.memory_type.as_str(),
+                    "fact" | "preference" | "decision" | "goal"
+                )
         })
         .map(|m| {
             let one = m.text.trim().replace('\n', " ");
@@ -1082,7 +1174,12 @@ fn gather_recent_connector_activity(state: &AppState, cap: usize) -> Vec<String>
             } else {
                 format!("error:{}", r.error_kind.as_deref().unwrap_or("?"))
             };
-            match r.summary.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            match r
+                .summary
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            {
                 Some(s) => format!("- {} [{status}] {s}", r.tool),
                 None => format!("- {} [{status}]", r.tool),
             }
@@ -1131,7 +1228,13 @@ fn parse_review_suggestion(
     if s.is_null() {
         return None;
     }
-    let field = |k: &str| s.get(k).and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    let field = |k: &str| {
+        s.get(k)
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string()
+    };
     let title = field("title");
     let body = field("body");
     // A card with no title or body is not actionable — treat as "declined".
@@ -1140,7 +1243,11 @@ fn parse_review_suggestion(
     }
     let kind = {
         let raw = field("kind");
-        if raw.is_empty() { "suggerimento".to_string() } else { raw }
+        if raw.is_empty() {
+            "suggerimento".to_string()
+        } else {
+            raw
+        }
     };
     let anchor = {
         let dk = field("dedup_key");
@@ -1245,7 +1352,10 @@ const KNOWN_PLUGINS: &[&str] = &["proattivita", "presentations"];
 /// surfacing / duplicate / no context / no provider). Read-only: never acts.
 async fn run_proactive_review(state: &AppState, scope: &str) -> Option<i64> {
     // The engine is part of the addon: if proattivita is detached, it doesn't run.
-    if !lock_store(state).map(|s| s.plugin_enabled("proattivita")).unwrap_or(true) {
+    if !lock_store(state)
+        .map(|s| s.plugin_enabled("proattivita"))
+        .unwrap_or(true)
+    {
         eprintln!("[proactivity] addon disabled, skipping");
         return None;
     }
@@ -1295,25 +1405,40 @@ async fn run_proactive_review(state: &AppState, scope: &str) -> Option<i64> {
     if !feedback.is_empty() {
         brief.push_str("USER FEEDBACK (learn from this):\n");
         for (verdict, kind, title) in &feedback {
-            let mark = if verdict == "liked" { "USEFUL" } else { "NOT USEFUL" };
+            let mark = if verdict == "liked" {
+                "USEFUL"
+            } else {
+                "NOT USEFUL"
+            };
             brief.push_str(&format!("- [{mark}] ({kind}) {title}\n"));
         }
-        eprintln!("[proactivity] review '{scope}': {} feedback signals in context", feedback.len());
+        eprintln!(
+            "[proactivity] review '{scope}': {} feedback signals in context",
+            feedback.len()
+        );
     }
 
     let root = call_memory_json(state, PROACTIVE_SUPERVISOR_SYSTEM, &brief).await?;
     let input = parse_review_suggestion(&root, scope)?;
 
     let store = lock_store(state).ok()?;
-    if store.suggestion_dedup_exists(scope, &input.dedup_key).unwrap_or(false) {
-        eprintln!("[proactivity] review '{scope}': duplicate '{}', skipping", input.dedup_key);
+    if store
+        .suggestion_dedup_exists(scope, &input.dedup_key)
+        .unwrap_or(false)
+    {
+        eprintln!(
+            "[proactivity] review '{scope}': duplicate '{}', skipping",
+            input.dedup_key
+        );
         return None;
     }
     // Fix 3 (anti re-propose): the exact key only catches identical anchors. The
     // supervisor rewords the same thing across runs, so also reject SEMANTIC dups of
     // any card already surfaced (pending/accepted/dismissed) — that's how "ho già
     // fatto" cards stop coming back paraphrased.
-    let anchors = store.recent_suggestion_anchors(scope, 150).unwrap_or_default();
+    let anchors = store
+        .recent_suggestion_anchors(scope, 150)
+        .unwrap_or_default();
     if is_semantic_duplicate(&input.dedup_key, &input.title, &anchors) {
         eprintln!(
             "[proactivity] review '{scope}': near-duplicate of a card already emitted ('{}'), skipping",
@@ -1322,7 +1447,10 @@ async fn run_proactive_review(state: &AppState, scope: &str) -> Option<i64> {
         return None;
     }
     let id = store.insert_suggestion(&input).ok()?;
-    eprintln!("[proactivity] review '{scope}': card #{id} '{}'", input.title);
+    eprintln!(
+        "[proactivity] review '{scope}': card #{id} '{}'",
+        input.title
+    );
     Some(id)
 }
 
@@ -1439,7 +1567,10 @@ fn spawn_embedding_catchup(state: AppState) {
 
 async fn proactivity_auto_review_tick(state: &AppState) {
     // Addon detached → silent (UI and engine gated by the same flag).
-    if !lock_store(state).map(|s| s.plugin_enabled("proattivita")).unwrap_or(true) {
+    if !lock_store(state)
+        .map(|s| s.plugin_enabled("proattivita"))
+        .unwrap_or(true)
+    {
         return;
     }
     // Waking hours only (user timezone) — no surfacing in the middle of the night.
@@ -1569,8 +1700,7 @@ fn gc_stale_tasks(state: &AppState) {
                     | local_first_task_runtime::TaskStatus::WaitingResource
                     | local_first_task_runtime::TaskStatus::Failed
             );
-            let is_execution =
-                task.kind == "browser_task" || task.kind.starts_with("capability.");
+            let is_execution = task.kind == "browser_task" || task.kind.starts_with("capability.");
             if stuck && is_execution && task.created_at < cutoff {
                 let _ = store.update_task_status(
                     &task.task_id,
@@ -1753,7 +1883,10 @@ async fn activate_remote_approvals_from_message(
         let Some(marker) = confirm_marker_value(&message.text, open_tag, close_tag) else {
             continue;
         };
-        let Some(approval_id) = marker.get("approval_id").and_then(serde_json::Value::as_str) else {
+        let Some(approval_id) = marker
+            .get("approval_id")
+            .and_then(serde_json::Value::as_str)
+        else {
             continue;
         };
         let Some(tool) = marker.get("tool").and_then(serde_json::Value::as_str) else {
@@ -1771,14 +1904,12 @@ async fn activate_remote_approvals_from_message(
         if !matches {
             continue;
         }
-        let row = lock_store(state)
-            .ok()
-            .and_then(|store| {
-                store
-                    .bind_remote_approval_source(approval_id, thread_id, &message.id)
-                    .ok()
-                    .flatten()
-            });
+        let row = lock_store(state).ok().and_then(|store| {
+            store
+                .bind_remote_approval_source(approval_id, thread_id, &message.id)
+                .ok()
+                .flatten()
+        });
         let Some(row) = row else {
             continue;
         };
@@ -1819,7 +1950,9 @@ async fn set_active_leaf(
     store
         .set_active_leaf(&thread_id, request.leaf_id.as_deref())
         .map_err(GatewayError::store)?;
-    Ok(Json(store.messages(&thread_id).map_err(GatewayError::store)?))
+    Ok(Json(
+        store.messages(&thread_id).map_err(GatewayError::store)?,
+    ))
 }
 
 /// Name (or clear) a branch — Phase 4.
@@ -1833,7 +1966,9 @@ async fn set_branch_label(
         .set_branch_label(&thread_id, &request.message_id, request.label.as_deref())
         .map_err(GatewayError::store)?;
     Ok(Json(
-        store.branch_options(&thread_id).map_err(GatewayError::store)?,
+        store
+            .branch_options(&thread_id)
+            .map_err(GatewayError::store)?,
     ))
 }
 
@@ -1961,7 +2096,10 @@ fn persist_explicit_memory(
         reference: MemoryRef::generated(MemoryRefKind::Wiki, user.clone(), workspace.clone()),
         user_id: user,
         workspace_id: workspace,
-        path: format!("notes/{}.md", sanitize_wiki_filename(&record.reference.to_string())),
+        path: format!(
+            "notes/{}.md",
+            sanitize_wiki_filename(&record.reference.to_string())
+        ),
         title: wiki_title_from_text(&redacted),
         body: redacted,
         linked_refs: vec![record.reference.clone()],
@@ -1977,7 +2115,10 @@ fn persist_explicit_memory(
 
 /// Short human title for a wiki note: first non-empty line, bounded length.
 fn wiki_title_from_text(text: &str) -> String {
-    let first = text.lines().find(|line| !line.trim().is_empty()).unwrap_or("Nota");
+    let first = text
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .unwrap_or("Nota");
     let trimmed = first.trim();
     if trimmed.chars().count() <= 60 {
         trimmed.to_string()
@@ -2129,8 +2270,8 @@ fn is_salient_exchange(user_message: &str) -> bool {
     }
     let low = trimmed.to_lowercase();
     const TRIVIAL: [&str; 12] = [
-        "grazie", "ok", "okay", "va bene", "perfetto", "ciao", "sì", "si", "no",
-        "thanks", "ottimo", "capito",
+        "grazie", "ok", "okay", "va bene", "perfetto", "ciao", "sì", "si", "no", "thanks",
+        "ottimo", "capito",
     ];
     !TRIVIAL.contains(&low.as_str())
 }
@@ -2164,8 +2305,23 @@ fn is_confirmation_reply(user_message: &str) -> bool {
     // words, not weak acks like "ok"/"va bene" (those rarely confirm a fact and
     // would just add noise).
     const CONFIRM_LEAD: [&str; 17] = [
-        "sì", "si", "sí", "esatto", "esattamente", "giusto", "corretto", "confermo",
-        "confermato", "vero", "yes", "yep", "yup", "no", "non", "sbagliato", "macché",
+        "sì",
+        "si",
+        "sí",
+        "esatto",
+        "esattamente",
+        "giusto",
+        "corretto",
+        "confermo",
+        "confermato",
+        "vero",
+        "yes",
+        "yep",
+        "yup",
+        "no",
+        "non",
+        "sbagliato",
+        "macché",
     ];
     CONFIRM_LEAD.contains(&lead)
 }
@@ -2178,11 +2334,17 @@ fn is_confirmation_reply(user_message: &str) -> bool {
 /// assistant must know what you own / who's in your life without re-asking, so
 /// `private` auto-confirms. Only `Confidential`/`Secret` (real PII — codice fiscale,
 /// health docs, addresses) stays a candidate for the user to confirm explicitly.
-fn is_auto_confirmable(memory_type: &str, sensitivity: MemoryDataSensitivity, confidence: f64) -> bool {
+fn is_auto_confirmable(
+    memory_type: &str,
+    sensitivity: MemoryDataSensitivity,
+    confidence: f64,
+) -> bool {
     // Decisions are factual records of choices made during work (low privacy risk),
     // so they auto-confirm like facts/preferences when confident + non-sensitive.
-    matches!(memory_type, "preference" | "fact" | "decision" | "goal" | "open_loop")
-        && sensitivity <= MemoryDataSensitivity::Private
+    matches!(
+        memory_type,
+        "preference" | "fact" | "decision" | "goal" | "open_loop"
+    ) && sensitivity <= MemoryDataSensitivity::Private
         && confidence >= 0.8
 }
 
@@ -2193,13 +2355,21 @@ fn strip_json_fences(text: &str) -> &str {
         .strip_prefix("```json")
         .or_else(|| trimmed.strip_prefix("```"))
         .unwrap_or(trimmed);
-    without_open.trim().strip_suffix("```").unwrap_or(without_open.trim()).trim()
+    without_open
+        .trim()
+        .strip_suffix("```")
+        .unwrap_or(without_open.trim())
+        .trim()
 }
 
 /// Normalize a memory's text for cheap dedup against what's already stored.
 /// Normalizes text for exact-duplicate comparison (used by tests + dedup paths).
 fn normalize_for_dedup(text: &str) -> String {
-    text.trim().to_lowercase().split_whitespace().collect::<Vec<_>>().join(" ")
+    text.trim()
+        .to_lowercase()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Content tokens of a memory for similarity. LANGUAGE-AGNOSTIC by design (the system
@@ -2254,11 +2424,7 @@ fn anchors_are_similar(
 /// of one already surfaced (in ANY status). The exact `dedup_key` check misses
 /// paraphrases — the supervisor's anchor drifts between runs — so we compare token
 /// sets on BOTH the dedup_key and the human title. Pure → unit-testable.
-fn is_semantic_duplicate(
-    new_key: &str,
-    new_title: &str,
-    existing: &[(String, String)],
-) -> bool {
+fn is_semantic_duplicate(new_key: &str, new_title: &str, existing: &[(String, String)]) -> bool {
     let nk = dedup_tokens(new_key);
     let nt = dedup_tokens(new_title);
     existing.iter().any(|(key, title)| {
@@ -2299,7 +2465,9 @@ fn is_suppressed(text: &str, forgotten: &[std::collections::HashSet<String>]) ->
         return false;
     }
     let tokens = dedup_tokens(text);
-    forgotten.iter().any(|f| jaccard(&tokens, f) >= DEDUP_JACCARD)
+    forgotten
+        .iter()
+        .any(|f| jaccard(&tokens, f) >= DEDUP_JACCARD)
 }
 
 // ---- Embeddings (multilingual semantic layer) -----------------------------------
@@ -2340,7 +2508,10 @@ async fn embed_text(http: &reqwest::Client, text: &str) -> Option<Vec<f32>> {
         .and_then(|v| v.as_array())
         .cloned()
         .or_else(|| body.get("embedding").and_then(|v| v.as_array()).cloned())?;
-    let vector: Vec<f32> = arr.iter().filter_map(|x| x.as_f64().map(|f| f as f32)).collect();
+    let vector: Vec<f32> = arr
+        .iter()
+        .filter_map(|x| x.as_f64().map(|f| f as f32))
+        .collect();
     (!vector.is_empty()).then_some(vector)
 }
 
@@ -2369,8 +2540,8 @@ const DEDUP_COSINE: f32 = 0.85;
 
 /// Local Ollama OpenAI-compat base for image generation (the last-resort default).
 fn default_image_base() -> String {
-    let ollama = std::env::var("HOMUN_EMBED_BASE")
-        .unwrap_or_else(|_| "http://127.0.0.1:11434".to_string());
+    let ollama =
+        std::env::var("HOMUN_EMBED_BASE").unwrap_or_else(|_| "http://127.0.0.1:11434".to_string());
     format!("{}/v1", ollama.trim_end_matches('/'))
 }
 
@@ -2459,11 +2630,7 @@ fn deck_slide_image_prompt(title: &str, accent: &str) -> String {
                 .collect::<String>()
                 .trim_matches('-')
                 .to_ascii_lowercase();
-            if clean.len() < 3 {
-                None
-            } else {
-                Some(clean)
-            }
+            if clean.len() < 3 { None } else { Some(clean) }
         })
         .take(5)
         .collect::<Vec<_>>();
@@ -2521,7 +2688,10 @@ async fn generate_image_png(
         .get("data")
         .and_then(|d| d.as_array())
         .and_then(|a| a.first());
-    if let Some(b64) = data.and_then(|d| d.get("b64_json")).and_then(|v| v.as_str()) {
+    if let Some(b64) = data
+        .and_then(|d| d.get("b64_json"))
+        .and_then(|v| v.as_str())
+    {
         return base64::engine::general_purpose::STANDARD
             .decode(b64.as_bytes())
             .map_err(|e| format!("image decode failed: {e}"));
@@ -2634,8 +2804,10 @@ fn memory_type_participates_in_semantic_dedup(memory_type: &str) -> bool {
 fn fill_extraction_defaults(item: &serde_json::Value) -> serde_json::Value {
     let mut item = item.clone();
     if let Some(obj) = item.as_object_mut() {
-        obj.entry("privacy_domain").or_insert(serde_json::json!("personal"));
-        obj.entry("sensitivity").or_insert(serde_json::json!("internal"));
+        obj.entry("privacy_domain")
+            .or_insert(serde_json::json!("personal"));
+        obj.entry("sensitivity")
+            .or_insert(serde_json::json!("internal"));
     }
     item
 }
@@ -2725,7 +2897,12 @@ fn persist_scope_memories(
         .unwrap_or_default()
         .into_iter()
         .filter(|m| !matches!(m.status, MemoryStatus::Deleted | MemoryStatus::Rejected))
-        .filter(|m| matches!(m.memory_type.as_str(), "fact" | "preference" | "decision" | "goal"))
+        .filter(|m| {
+            matches!(
+                m.memory_type.as_str(),
+                "fact" | "preference" | "decision" | "goal"
+            )
+        })
         .map(|m| (m.reference, m.text))
         .collect();
     // include the just-extracted refs even if not yet listable
@@ -2828,11 +3005,7 @@ fn artifact_memory_matches(memory: &MemoryRecord, thread_slug: &str, name: &str)
             .get("thread_slug")
             .and_then(|value| value.as_str())
             == Some(thread_slug)
-        && memory
-            .metadata
-            .get("name")
-            .and_then(|value| value.as_str())
-            == Some(name)
+        && memory.metadata.get("name").and_then(|value| value.as_str()) == Some(name)
 }
 
 fn provenance_key_fragment(value: &str) -> String {
@@ -2889,14 +3062,25 @@ fn upsert_memory_relation(
 }
 
 fn provenance_label(value: &serde_json::Value) -> Option<String> {
-    value.as_str().map(str::trim).filter(|value| !value.is_empty()).map(str::to_string)
+    value
+        .as_str()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
 }
 
 fn provenance_normalized_label(value: &str) -> String {
-    value.trim().trim_matches('/').replace('\\', "/").to_ascii_lowercase()
+    value
+        .trim()
+        .trim_matches('/')
+        .replace('\\', "/")
+        .to_ascii_lowercase()
 }
 
-fn artifact_provenance_labels(name: &str, metadata: &serde_json::Value) -> std::collections::HashSet<String> {
+fn artifact_provenance_labels(
+    name: &str,
+    metadata: &serde_json::Value,
+) -> std::collections::HashSet<String> {
     let mut labels = std::collections::HashSet::new();
     let mut push = |value: &str| {
         let normalized = provenance_normalized_label(value);
@@ -2905,10 +3089,19 @@ fn artifact_provenance_labels(name: &str, metadata: &serde_json::Value) -> std::
         }
     };
     push(name);
-    for key in ["title", "path_ref", "project_relative_path", "managed_path", "project_path"] {
+    for key in [
+        "title",
+        "path_ref",
+        "project_relative_path",
+        "managed_path",
+        "project_path",
+    ] {
         if let Some(value) = metadata.get(key).and_then(|value| value.as_str()) {
             push(value);
-            if let Some(file_name) = std::path::Path::new(value).file_name().and_then(|value| value.to_str()) {
+            if let Some(file_name) = std::path::Path::new(value)
+                .file_name()
+                .and_then(|value| value.to_str())
+            {
                 push(file_name);
             }
         }
@@ -2916,7 +3109,10 @@ fn artifact_provenance_labels(name: &str, metadata: &serde_json::Value) -> std::
     labels
 }
 
-fn decision_affects_artifact(decision: &MemoryRecord, artifact_labels: &std::collections::HashSet<String>) -> bool {
+fn decision_affects_artifact(
+    decision: &MemoryRecord,
+    artifact_labels: &std::collections::HashSet<String>,
+) -> bool {
     let affected = decision
         .metadata
         .get("affects_labels")
@@ -2939,14 +3135,20 @@ fn explicit_artifact_source_refs(metadata: &serde_json::Value) -> Vec<MemoryRef>
         "source_memory_refs",
         "derived_from_refs",
     ] {
-        let Some(value) = metadata.get(key) else { continue };
+        let Some(value) = metadata.get(key) else {
+            continue;
+        };
         let values: Vec<&serde_json::Value> = if let Some(array) = value.as_array() {
             array.iter().collect()
         } else {
             vec![value]
         };
         for value in values {
-            let Some(raw) = value.as_str().map(str::trim).filter(|value| !value.is_empty()) else {
+            let Some(raw) = value
+                .as_str()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            else {
                 continue;
             };
             let Ok(reference) = raw.parse::<MemoryRef>() else {
@@ -2983,13 +3185,18 @@ fn upsert_artifact_evidence_provenance_graph(
         .into_iter()
         .filter(|memory| {
             memory.memory_type == "decision"
-                && matches!(memory.status, MemoryStatus::Confirmed | MemoryStatus::Candidate)
+                && matches!(
+                    memory.status,
+                    MemoryStatus::Confirmed | MemoryStatus::Candidate
+                )
                 && (decision_affects_artifact(memory, &artifact_labels)
                     || explicit_refs.contains(&memory.reference.to_string()))
         })
         .collect::<Vec<_>>();
-    let decision_refs: std::collections::HashSet<String> =
-        decisions.iter().map(|decision| decision.reference.to_string()).collect();
+    let decision_refs: std::collections::HashSet<String> = decisions
+        .iter()
+        .map(|decision| decision.reference.to_string())
+        .collect();
     for decision in decisions {
         let decision_fragment = provenance_key_fragment(&decision.reference.key);
         let artifact_fragment = provenance_key_fragment(name);
@@ -3674,14 +3881,8 @@ async fn register_mcp_filesystem_artifact_memory(
                 .map(|content| content.len() as u64)
         })
         .unwrap_or_default();
-    register_project_file_artifact_memory(
-        state,
-        thread_id,
-        &relative_path,
-        size,
-        "mcp_filesystem",
-    )
-    .await;
+    register_project_file_artifact_memory(state, thread_id, &relative_path, size, "mcp_filesystem")
+        .await;
 }
 
 /// Persists extracted entities + relations into the graph (M3b), 2-pass so a
@@ -3692,7 +3893,9 @@ async fn register_mcp_filesystem_artifact_memory(
 /// Wiki pages the user edited by hand (`workspace|path`) — these are NOT auto-regenerated
 /// (the hybrid model: the human-curated version wins for that page).
 fn wiki_edited_path() -> Option<PathBuf> {
-    gateway_data_dir().ok().map(|dir| dir.join("wiki-edited.json"))
+    gateway_data_dir()
+        .ok()
+        .map(|dir| dir.join("wiki-edited.json"))
 }
 fn load_wiki_edited() -> std::collections::BTreeSet<String> {
     wiki_edited_path()
@@ -3742,7 +3945,10 @@ fn rebuild_decisions_wiki(
     let mut kept_tokens: Vec<std::collections::HashSet<String>> = Vec::new();
     decisions.retain(|m| {
         let tokens = dedup_tokens(&m.text);
-        if kept_tokens.iter().any(|ex| jaccard(&tokens, ex) >= DEDUP_JACCARD) {
+        if kept_tokens
+            .iter()
+            .any(|ex| jaccard(&tokens, ex) >= DEDUP_JACCARD)
+        {
             false
         } else {
             kept_tokens.push(tokens);
@@ -3772,12 +3978,19 @@ fn rebuild_decisions_wiki(
                     if option.is_empty() {
                         continue;
                     }
-                    let why = alt.get("rejected_because").and_then(|w| w.as_str()).unwrap_or("");
+                    let why = alt
+                        .get("rejected_because")
+                        .and_then(|w| w.as_str())
+                        .unwrap_or("");
                     body.push_str(&format!("- Scartata **{option}**: {why}\n"));
                 }
             }
         }
-        if let Some(affected) = memory.metadata.get("affects_labels").and_then(|a| a.as_array()) {
+        if let Some(affected) = memory
+            .metadata
+            .get("affects_labels")
+            .and_then(|a| a.as_array())
+        {
             let files: Vec<&str> = affected.iter().filter_map(|v| v.as_str()).collect();
             if !files.is_empty() {
                 body.push_str(&format!("\n_File: {}_\n", files.join(", ")));
@@ -3791,7 +4004,12 @@ fn rebuild_decisions_wiki(
     let reference = facade
         .list_wiki_pages_for_ui(user_id, workspace)
         .ok()
-        .and_then(|pages| pages.into_iter().find(|p| p.path == path).map(|p| p.reference))
+        .and_then(|pages| {
+            pages
+                .into_iter()
+                .find(|p| p.path == path)
+                .map(|p| p.reference)
+        })
         .unwrap_or_else(|| {
             MemoryRef::generated(MemoryRefKind::Wiki, user_id.clone(), workspace.clone())
         });
@@ -3822,11 +4040,13 @@ fn rebuild_profile_wiki(
     if wiki_is_edited(workspace, "profilo.md") {
         return;
     }
-    let memories = facade.list_memories_for_ui(user_id, workspace).unwrap_or_default();
+    let memories = facade
+        .list_memories_for_ui(user_id, workspace)
+        .unwrap_or_default();
     let facts: Vec<_> = memories
         .into_iter()
         .filter(|m| {
-            matches!(m.status, MemoryStatus::Confirmed | MemoryStatus::Candidate)
+            matches!(m.status, MemoryStatus::Confirmed)
                 && matches!(m.memory_type.as_str(), "fact" | "preference")
         })
         .collect();
@@ -3841,7 +4061,10 @@ fn rebuild_profile_wiki(
         .map(|e| (e.reference.to_string(), e.name))
         .collect();
     let mut mem_entities: std::collections::HashMap<String, Vec<String>> = Default::default();
-    for rel in facade.list_relations_for_ui(user_id, workspace).unwrap_or_default() {
+    for rel in facade
+        .list_relations_for_ui(user_id, workspace)
+        .unwrap_or_default()
+    {
         if rel.relation_type == "mentions" {
             if let Some(name) = entity_name.get(&rel.target_ref.to_string()) {
                 mem_entities
@@ -3860,10 +4083,16 @@ fn rebuild_profile_wiki(
         match names {
             Some(ns) if !ns.is_empty() => {
                 for n in ns {
-                    sections.entry(n.clone()).or_default().push(fact.text.as_str());
+                    sections
+                        .entry(n.clone())
+                        .or_default()
+                        .push(fact.text.as_str());
                 }
             }
-            _ => sections.entry("Generale".to_string()).or_default().push(fact.text.as_str()),
+            _ => sections
+                .entry("Generale".to_string())
+                .or_default()
+                .push(fact.text.as_str()),
         }
     }
     let mut body = String::from(
@@ -3883,8 +4112,15 @@ fn rebuild_profile_wiki(
     let reference = facade
         .list_wiki_pages_for_ui(user_id, workspace)
         .ok()
-        .and_then(|pages| pages.into_iter().find(|p| p.path == path).map(|p| p.reference))
-        .unwrap_or_else(|| MemoryRef::generated(MemoryRefKind::Wiki, user_id.clone(), workspace.clone()));
+        .and_then(|pages| {
+            pages
+                .into_iter()
+                .find(|p| p.path == path)
+                .map(|p| p.reference)
+        })
+        .unwrap_or_else(|| {
+            MemoryRef::generated(MemoryRefKind::Wiki, user_id.clone(), workspace.clone())
+        });
     let page = WikiPage {
         reference,
         user_id: user_id.clone(),
@@ -3941,7 +4177,9 @@ fn rebuild_project_brief(
 Your edits stick. It's what the assistant ALWAYS keeps in mind about the project.\n\n## Objectives\n\n",
     );
     if goals.is_empty() {
-        body.push_str("_No objective recorded — edit this page to define where the project is heading._\n\n");
+        body.push_str(
+            "_No objective recorded — edit this page to define where the project is heading._\n\n",
+        );
     } else {
         for g in &goals {
             body.push_str(&format!("- {g}\n"));
@@ -3959,8 +4197,15 @@ Your edits stick. It's what the assistant ALWAYS keeps in mind about the project
     let reference = facade
         .list_wiki_pages_for_ui(user_id, workspace)
         .ok()
-        .and_then(|pages| pages.into_iter().find(|p| p.path == path).map(|p| p.reference))
-        .unwrap_or_else(|| MemoryRef::generated(MemoryRefKind::Wiki, user_id.clone(), workspace.clone()));
+        .and_then(|pages| {
+            pages
+                .into_iter()
+                .find(|p| p.path == path)
+                .map(|p| p.reference)
+        })
+        .unwrap_or_else(|| {
+            MemoryRef::generated(MemoryRefKind::Wiki, user_id.clone(), workspace.clone())
+        });
     let page = WikiPage {
         reference,
         user_id: user_id.clone(),
@@ -4000,8 +4245,15 @@ fn rebuild_status_wiki(
     let reference = facade
         .list_wiki_pages_for_ui(user_id, workspace)
         .ok()
-        .and_then(|pages| pages.into_iter().find(|p| p.path == path).map(|p| p.reference))
-        .unwrap_or_else(|| MemoryRef::generated(MemoryRefKind::Wiki, user_id.clone(), workspace.clone()));
+        .and_then(|pages| {
+            pages
+                .into_iter()
+                .find(|p| p.path == path)
+                .map(|p| p.reference)
+        })
+        .unwrap_or_else(|| {
+            MemoryRef::generated(MemoryRefKind::Wiki, user_id.clone(), workspace.clone())
+        });
     let privacy_domain = if workspace.as_str() == PERSONAL_WORKSPACE {
         PrivacyDomain::new("personal")
     } else {
@@ -4023,7 +4275,10 @@ fn rebuild_status_wiki(
 
 fn active_open_loop_record(memory: &MemoryRecord) -> bool {
     memory.memory_type == "open_loop"
-        && matches!(memory.status, MemoryStatus::Confirmed | MemoryStatus::Candidate)
+        && matches!(
+            memory.status,
+            MemoryStatus::Confirmed | MemoryStatus::Candidate
+        )
         && memory.superseded_by.is_none()
         && !memory.text.trim().is_empty()
 }
@@ -4156,7 +4411,9 @@ fn close_matching_open_loops(
     closed
 }
 
-fn status_wiki_body_from_open_loops(open_loops: &[(MemoryRef, String)]) -> (String, Vec<MemoryRef>) {
+fn status_wiki_body_from_open_loops(
+    open_loops: &[(MemoryRef, String)],
+) -> (String, Vec<MemoryRef>) {
     let mut loops: Vec<(MemoryRef, String)> = open_loops
         .iter()
         .filter_map(|(reference, text)| {
@@ -4172,7 +4429,10 @@ fn status_wiki_body_from_open_loops(open_loops: &[(MemoryRef, String)]) -> (Stri
     let mut kept_tokens: Vec<std::collections::HashSet<String>> = Vec::new();
     loops.retain(|(_, text)| {
         let tokens = dedup_tokens(text);
-        if kept_tokens.iter().any(|existing| jaccard(&tokens, existing) >= DEDUP_JACCARD) {
+        if kept_tokens
+            .iter()
+            .any(|existing| jaccard(&tokens, existing) >= DEDUP_JACCARD)
+        {
             false
         } else {
             kept_tokens.push(tokens);
@@ -4293,7 +4553,14 @@ fn recent_work_block(state: &AppState) -> Option<String> {
     if out.is_empty() {
         return None;
     }
-    let capped: String = out.lines().take(8).collect::<Vec<_>>().join("\n").chars().take(1200).collect();
+    let capped: String = out
+        .lines()
+        .take(8)
+        .collect::<Vec<_>>()
+        .join("\n")
+        .chars()
+        .take(1200)
+        .collect();
     Some(format!(
         "RECENT WORK (the project's latest commits — pick up the thread, don't start from scratch):\n{capped}"
     ))
@@ -4317,7 +4584,10 @@ async fn call_memory_json(
         ],
     });
     let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
-    let mut builder = state.http.post(&endpoint).timeout(std::time::Duration::from_secs(150));
+    let mut builder = state
+        .http
+        .post(&endpoint)
+        .timeout(std::time::Duration::from_secs(150));
     if let Some(key) = api_key.as_ref() {
         builder = builder.bearer_auth(key);
     }
@@ -4365,7 +4635,10 @@ async fn consolidate_scope(
                     .into_iter()
                     .filter(|m| {
                         matches!(m.status, MemoryStatus::Confirmed | MemoryStatus::Candidate)
-                            && matches!(m.memory_type.as_str(), "fact" | "preference" | "decision" | "goal")
+                            && matches!(
+                                m.memory_type.as_str(),
+                                "fact" | "preference" | "decision" | "goal"
+                            )
                     })
                     .map(|m| (m.reference, m.memory_type, m.text))
                     .collect()
@@ -4393,7 +4666,10 @@ async fn consolidate_scope(
             Default::default();
         let mut name_tokens: std::collections::HashSet<String> = Default::default();
         if let Ok(facade) = lock_memory_facade(state) {
-            for rel in facade.list_relations_for_ui(user, workspace).unwrap_or_default() {
+            for rel in facade
+                .list_relations_for_ui(user, workspace)
+                .unwrap_or_default()
+            {
                 if rel.relation_type == "mentions" {
                     map.entry(rel.source_ref.to_string())
                         .or_default()
@@ -4402,7 +4678,10 @@ async fn consolidate_scope(
             }
             // Entity-name tokens (e.g. "jannik","sinner") so the structural check can
             // require shared content BEYOND the entity name itself.
-            for entity in facade.list_entities_for_ui(user, workspace).unwrap_or_default() {
+            for entity in facade
+                .list_entities_for_ui(user, workspace)
+                .unwrap_or_default()
+            {
                 for tok in dedup_tokens(&entity.name) {
                     name_tokens.insert(tok);
                 }
@@ -4431,7 +4710,10 @@ async fn consolidate_scope(
         let (reference, mtype, text) = &mems[i];
         let tokens = dedup_tokens(text);
         let vector = embeddings.get(&reference.to_string()).cloned();
-        let entset = entity_sets.get(&reference.to_string()).cloned().unwrap_or_default();
+        let entset = entity_sets
+            .get(&reference.to_string())
+            .cloned()
+            .unwrap_or_default();
         let duplicate = kept_meta.iter().any(|(kt, ktok, kvec, kent)| {
             kt == mtype
                 && (jaccard(&tokens, ktok) >= DEDUP_JACCARD
@@ -4514,8 +4796,16 @@ If there is nothing to do: {\"merges\":[],\"drops\":[]}.";
         }
         return (merged, 0);
     };
-    let merges = root.get("merges").and_then(|v| v.as_array()).cloned().unwrap_or_default();
-    let drops = root.get("drops").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+    let merges = root
+        .get("merges")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let drops = root
+        .get("drops")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
 
     // 2. Apply the LLM curator's merges/drops under a single lock (no awaits here →
     //    Send-safe). `merged` already counts the deterministic pre-pass — keep adding.
@@ -4530,17 +4820,32 @@ If there is nothing to do: {\"merges\":[],\"drops\":[]}.";
         purpose: "consolidate".to_string(),
     };
     for merge in &merges {
-        let into = merge.get("into").and_then(|v| v.as_str()).unwrap_or("").trim();
+        let into = merge
+            .get("into")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim();
         let from: Vec<usize> = merge
             .get("from")
             .and_then(|v| v.as_array())
-            .map(|a| a.iter().filter_map(|x| x.as_u64().map(|n| n as usize)).collect())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|x| x.as_u64().map(|n| n as usize))
+                    .collect()
+            })
             .unwrap_or_default();
         if into.is_empty() || from.len() < 2 {
             continue;
         }
-        let memory_type = merge.get("memory_type").and_then(|v| v.as_str()).unwrap_or("fact").to_string();
-        let importance = merge.get("importance").and_then(|v| v.as_f64()).unwrap_or(0.7);
+        let memory_type = merge
+            .get("memory_type")
+            .and_then(|v| v.as_str())
+            .unwrap_or("fact")
+            .to_string();
+        let importance = merge
+            .get("importance")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.7);
         let created = facade.create_memory_candidate(MemoryCreateRequest {
             request: lifecycle.clone(),
             memory_type,
@@ -4564,10 +4869,17 @@ If there is nothing to do: {\"merges\":[],\"drops\":[]}.";
         }
     }
     for drop in &drops {
-        let Some(idx) = drop.get("index").and_then(|v| v.as_u64()).map(|n| n as usize) else {
+        let Some(idx) = drop
+            .get("index")
+            .and_then(|v| v.as_u64())
+            .map(|n| n as usize)
+        else {
             continue;
         };
-        let reason = drop.get("reason").and_then(|v| v.as_str()).unwrap_or("rumore/ininfluente");
+        let reason = drop
+            .get("reason")
+            .and_then(|v| v.as_str())
+            .unwrap_or("rumore/ininfluente");
         if let Some((reference, _, _)) = mems.get(idx) {
             if facade.delete_memory(&lifecycle, reference, reason).is_ok() {
                 dropped += 1;
@@ -4593,11 +4905,11 @@ fn persist_graph(
     // is how `main.py`/`pytest` stopped leaking into the personal entity list.
     if let Some(project) = project_ws {
         let project_entities: Vec<ExtractedEntity> = {
-            let (to_project, to_personal): (Vec<_>, Vec<_>) = entities.drain(..).partition(|e| {
-                e.metadata.get("scope").and_then(|s| s.as_str()) == Some("project")
-            });
+            let (to_project, to_personal): (Vec<_>, Vec<_>) = entities
+                .drain(..)
+                .partition(|e| e.metadata.get("scope").and_then(|s| s.as_str()) == Some("project"));
             entities = to_personal;
-            to_project
+            normalize_project_scope_entities(project, to_project)
         };
         // Resolve existing refs by canonical_key (the UNIQUE spine) so re-seeing an
         // entity updates it instead of colliding on the index.
@@ -4636,7 +4948,8 @@ fn persist_graph(
     if entities.is_empty() && relations.is_empty() {
         return;
     }
-    let mut key_to_ref: std::collections::HashMap<String, MemoryRef> = std::collections::HashMap::new();
+    let mut key_to_ref: std::collections::HashMap<String, MemoryRef> =
+        std::collections::HashMap::new();
     if let Ok(existing) = facade.list_entities_for_ui(user_id, workspace) {
         for entity in existing {
             key_to_ref.insert(entity.canonical_key.clone(), entity.reference);
@@ -4646,7 +4959,8 @@ fn persist_graph(
     // "person:self", which the extractor is told to use) resolve instead of being
     // dropped — e.g. "ho una figlia Sara" → parent_of(person:self → person:sara).
     if !key_to_ref.contains_key("person:self") {
-        let reference = MemoryRef::generated(MemoryRefKind::Entity, user_id.clone(), workspace.clone());
+        let reference =
+            MemoryRef::generated(MemoryRefKind::Entity, user_id.clone(), workspace.clone());
         let entity = MemoryEntity {
             reference: reference.clone(),
             user_id: user_id.clone(),
@@ -4667,9 +4981,12 @@ fn persist_graph(
         if extracted.canonical_key.trim().is_empty() {
             continue;
         }
-        let reference = key_to_ref.get(&extracted.canonical_key).cloned().unwrap_or_else(|| {
-            MemoryRef::generated(MemoryRefKind::Entity, user_id.clone(), workspace.clone())
-        });
+        let reference = key_to_ref
+            .get(&extracted.canonical_key)
+            .cloned()
+            .unwrap_or_else(|| {
+                MemoryRef::generated(MemoryRefKind::Entity, user_id.clone(), workspace.clone())
+            });
         let entity = MemoryEntity {
             reference: reference.clone(),
             user_id: user_id.clone(),
@@ -4694,7 +5011,11 @@ fn persist_graph(
             continue;
         };
         let relation = MemoryRelation {
-            reference: MemoryRef::generated(MemoryRefKind::Relation, user_id.clone(), workspace.clone()),
+            reference: MemoryRef::generated(
+                MemoryRefKind::Relation,
+                user_id.clone(),
+                workspace.clone(),
+            ),
             user_id: user_id.clone(),
             workspace_id: workspace.clone(),
             source_ref: source.clone(),
@@ -4708,6 +5029,32 @@ fn persist_graph(
         };
         let _ = facade.upsert_relation(&relation);
     }
+}
+
+fn normalize_project_scope_entities(
+    workspace: &MemoryWorkspaceId,
+    entities: Vec<ExtractedEntity>,
+) -> Vec<ExtractedEntity> {
+    let workspace_root_key = format!("workspace:{}", workspace.as_str());
+    entities
+        .into_iter()
+        .map(|mut entity| {
+            if entity.entity_type == "project" && entity.canonical_key != workspace_root_key {
+                entity.entity_type = "topic".to_string();
+                let slug = sanitize_dedup_key("topic", &entity.name)
+                    .strip_prefix("topic:")
+                    .unwrap_or(entity.name.as_str())
+                    .to_string();
+                entity.canonical_key = format!("topic:{slug}");
+                let extra = serde_json::json!({
+                    "demoted_from_entity_type": "project",
+                    "demotion_reason": "workspace root is canonical",
+                });
+                merge_object_metadata(&mut entity.metadata, Some(&extra));
+            }
+            entity
+        })
+        .collect()
 }
 
 /// G2 — the missing link of the graph: deterministic memory→entity "mentions"
@@ -4795,7 +5142,11 @@ fn link_mentions_core(
                 continue;
             }
             let relation = MemoryRelation {
-                reference: MemoryRef::generated(MemoryRefKind::Relation, user_id.clone(), workspace.clone()),
+                reference: MemoryRef::generated(
+                    MemoryRefKind::Relation,
+                    user_id.clone(),
+                    workspace.clone(),
+                ),
                 user_id: user_id.clone(),
                 workspace_id: workspace.clone(),
                 source_ref: memory_ref.clone(),
@@ -4834,7 +5185,12 @@ fn sweep_graph_orphans(state: &AppState, workspace: &MemoryWorkspaceId) {
         .unwrap_or_default()
         .into_iter()
         .filter(|m| !matches!(m.status, MemoryStatus::Deleted | MemoryStatus::Rejected))
-        .filter(|m| matches!(m.memory_type.as_str(), "fact" | "preference" | "decision" | "goal"))
+        .filter(|m| {
+            matches!(
+                m.memory_type.as_str(),
+                "fact" | "preference" | "decision" | "goal"
+            )
+        })
         .map(|m| (m.reference, m.text))
         .collect();
     // Re-link against ALL entities INCLUDING tombstoned ones, resurrecting any that a
@@ -4844,9 +5200,8 @@ fn sweep_graph_orphans(state: &AppState, workspace: &MemoryWorkspaceId) {
     // wholesale by build_project_graph, not mention-linked from personal facts. Skipping
     // them keeps the sweep cheap on big repos (idra ~48k code entities) — otherwise
     // mention-matching would be O(facts × 48k) and loading them is pure waste here.
-    let is_graphify = |e: &MemoryEntity| {
-        e.metadata.get("source").and_then(|v| v.as_str()) == Some("graphify")
-    };
+    let is_graphify =
+        |e: &MemoryEntity| e.metadata.get("source").and_then(|v| v.as_str()) == Some("graphify");
     let all_entities: Vec<MemoryEntity> = facade
         .list_entities_including_tombstoned(&user, workspace)
         .unwrap_or_default()
@@ -4861,7 +5216,10 @@ fn sweep_graph_orphans(state: &AppState, workspace: &MemoryWorkspaceId) {
         .into_iter()
         .flat_map(|r| [r.source_ref.to_string(), r.target_ref.to_string()])
         .collect();
-    for entity in facade.list_entities_for_ui(&user, workspace).unwrap_or_default() {
+    for entity in facade
+        .list_entities_for_ui(&user, workspace)
+        .unwrap_or_default()
+    {
         let id = entity.reference.to_string();
         let is_channel_identity = entity.canonical_key.starts_with("person:whatsapp:")
             || entity.canonical_key.starts_with("person:telegram:");
@@ -4900,6 +5258,132 @@ fn regenerate_graph_links(state: &AppState, workspace: &MemoryWorkspaceId) {
     sweep_graph_orphans(state, workspace);
 }
 
+fn reconcile_memory_scope(state: &AppState, workspace: &MemoryWorkspaceId) {
+    regenerate_graph_links(state, workspace);
+    let user = gateway_memory_user_id();
+    if let Ok(facade) = lock_memory_facade(state) {
+        rebuild_decisions_wiki(&facade, &user, workspace);
+        rebuild_project_brief(&facade, &user, workspace);
+        rebuild_status_wiki(&facade, &user, workspace);
+        if workspace.as_str() == PERSONAL_WORKSPACE {
+            rebuild_profile_wiki(&facade, &user, workspace);
+        }
+    }
+}
+
+fn tombstone_automation_memory_records(
+    facade: &MemoryFacade,
+    user: &MemoryUserId,
+    workspace: &MemoryWorkspaceId,
+    automation_id: &str,
+) -> Result<usize, String> {
+    let lifecycle = MemoryLifecycleRequest {
+        actor_id: "automation".to_string(),
+        user_id: user.clone(),
+        workspace_id: workspace.clone(),
+        purpose: "automation_removed".to_string(),
+    };
+    let mut deleted = 0;
+    for memory in facade
+        .list_memories_for_ui(user, workspace)
+        .map_err(|error| error.to_string())?
+    {
+        let matches_id = memory
+            .metadata
+            .get("automation_id")
+            .and_then(|value| value.as_str())
+            == Some(automation_id);
+        if !matches_id {
+            continue;
+        }
+        facade
+            .delete_memory(&lifecycle, &memory.reference, "automation deleted")
+            .map_err(|error| error.to_string())?;
+        deleted += 1;
+    }
+    Ok(deleted)
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct MemoryHygieneSuggestion {
+    survivor_ref: String,
+    absorbed_ref: String,
+    survivor_label: String,
+    absorbed_label: String,
+    reason: String,
+    safe_auto_merge: bool,
+    confidence: f64,
+}
+
+fn normalized_entity_name(name: &str) -> String {
+    sanitize_dedup_key("name", name)
+        .strip_prefix("name:")
+        .unwrap_or("")
+        .to_string()
+}
+
+fn verified_identity_aliases(entity: &MemoryEntity) -> std::collections::BTreeSet<String> {
+    entity
+        .aliases
+        .iter()
+        .map(|alias| alias.trim().to_lowercase())
+        .filter(|alias| {
+            alias.contains('@')
+                || alias.starts_with("telegram:")
+                || alias.starts_with("whatsapp:")
+                || alias.starts_with("email:")
+        })
+        .collect()
+}
+
+fn memory_hygiene_suggestions_for_scope(
+    facade: &MemoryFacade,
+    user: &MemoryUserId,
+    workspace: &MemoryWorkspaceId,
+) -> Result<Vec<MemoryHygieneSuggestion>, String> {
+    let mut people: Vec<MemoryEntity> = facade
+        .list_entities_for_ui(user, workspace)
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .filter(|entity| entity.entity_type == "person")
+        .filter(|entity| entity.metadata.get("merged_into").is_none())
+        .collect();
+    people.sort_by(|a, b| a.canonical_key.cmp(&b.canonical_key));
+    let mut out = Vec::new();
+    for i in 0..people.len() {
+        for j in (i + 1)..people.len() {
+            let left = &people[i];
+            let right = &people[j];
+            let left_handles = verified_identity_aliases(left);
+            let right_handles = verified_identity_aliases(right);
+            let shared_handle = left_handles.intersection(&right_handles).next().cloned();
+            let same_name = !left.name.trim().is_empty()
+                && normalized_entity_name(&left.name) == normalized_entity_name(&right.name);
+            let (reason, safe_auto_merge, confidence) = if let Some(handle) = shared_handle {
+                (
+                    format!("same verified identity alias: {handle}"),
+                    true,
+                    0.99,
+                )
+            } else if same_name {
+                ("same normalized person name".to_string(), false, 0.72)
+            } else {
+                continue;
+            };
+            out.push(MemoryHygieneSuggestion {
+                survivor_ref: left.reference.to_string(),
+                absorbed_ref: right.reference.to_string(),
+                survivor_label: left.name.clone(),
+                absorbed_label: right.name.clone(),
+                reason,
+                safe_auto_merge,
+                confidence,
+            });
+        }
+    }
+    Ok(out)
+}
+
 /// M2/M3: after a chat turn, mine the exchange for durable facts, preferences and
 /// DECISIONS (with the why), plus graph entities/relations — routing each to its
 /// scope (personal vs active project) and auto-confirming the low-risk ones.
@@ -4912,14 +5396,23 @@ fn summarize_tool_action(name: &str, args_raw: &str) -> Option<String> {
     let value: serde_json::Value =
         serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
     let field = |key: &str| {
-        value.get(key).and_then(|x| x.as_str()).unwrap_or("").trim().to_string()
+        value
+            .get(key)
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string()
     };
     let clip = |text: String, n: usize| text.chars().take(n).collect::<String>();
     let line = match name {
         "write_file" | "edit_file" => format!("edited file {}", field("path")),
         "create_artifact" => format!("created artifact {}", field("name")),
         "save_artifact" => {
-            let target = if field("name").is_empty() { field("path") } else { field("name") };
+            let target = if field("name").is_empty() {
+                field("path")
+            } else {
+                field("name")
+            };
             format!("saved {target}")
         }
         "run_in_project" => format!("ran in the project: {}", clip(field("command"), 120)),
@@ -4929,7 +5422,11 @@ fn summarize_tool_action(name: &str, args_raw: &str) -> Option<String> {
         "schedule_task" => format!("scheduled task: {}", clip(field("prompt"), 80)),
         "cancel_scheduled_task" => format!("cancelled task {}", field("task_id")),
         // Pure reads / discovery → nothing to remember.
-        "read_file" | "read_text_file" | "list_files" | "list_directory" | "recall_memory"
+        "read_file"
+        | "read_text_file"
+        | "list_files"
+        | "list_directory"
+        | "recall_memory"
         | "suggest_capabilities" => return None,
         _ => return None,
     };
@@ -5117,13 +5614,22 @@ otherwise do not save it."
                         .into_iter()
                         .filter(|m| {
                             m.memory_type == "decision"
-                                && matches!(m.status, MemoryStatus::Confirmed | MemoryStatus::Candidate)
+                                && matches!(
+                                    m.status,
+                                    MemoryStatus::Confirmed | MemoryStatus::Candidate
+                                )
                         })
                         .take(40)
                         .map(|m| {
                             format!(
                                 "- {}",
-                                m.text.lines().next().unwrap_or(&m.text).chars().take(110).collect::<String>()
+                                m.text
+                                    .lines()
+                                    .next()
+                                    .unwrap_or(&m.text)
+                                    .chars()
+                                    .take(110)
+                                    .collect::<String>()
                             )
                         })
                         .collect::<Vec<_>>()
@@ -5161,7 +5667,10 @@ substantially updated decisions relative to these):\n{known_decisions}"
                     .filter(active_open_loop_record)
                     .take(8)
                 {
-                    lines.push(format!("- ({label}) {}", memory.text.trim().replace('\n', " ")));
+                    lines.push(format!(
+                        "- ({label}) {}",
+                        memory.text.trim().replace('\n', " ")
+                    ));
                 }
             }
         }
@@ -5215,7 +5724,10 @@ loop text/paraphrase:\n{known_open_loops}"
     let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
     // Generous timeout: the role model may be a slow cloud reasoning model
     // (e.g. glm-4.6 via ollama). Extraction is background, so a long wait is fine.
-    let mut builder = state.http.post(&endpoint).timeout(std::time::Duration::from_secs(120));
+    let mut builder = state
+        .http
+        .post(&endpoint)
+        .timeout(std::time::Duration::from_secs(120));
     if let Some(key) = api_key.as_ref() {
         builder = builder.bearer_auth(key);
     }
@@ -5268,16 +5780,28 @@ loop text/paraphrase:\n{known_open_loops}"
                 .collect()
         })
         .unwrap_or_default();
-    let mut extraction = MemoryExtraction { memories, entities, relations };
+    let mut extraction = MemoryExtraction {
+        memories,
+        entities,
+        relations,
+    };
     // M4: one-line episodic summary of this turn (stored in the thread scope).
-    let episode = root.get("episode").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    let episode = root
+        .get("episode")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
     // Take the graph (entities/relations) out before we consume the memories;
     // keep durable memory types only (facts, preferences, decisions).
     let graph_entities = std::mem::take(&mut extraction.entities);
     let graph_relations = std::mem::take(&mut extraction.relations);
-    extraction
-        .memories
-        .retain(|m| matches!(m.memory_type.as_str(), "fact" | "preference" | "decision" | "goal" | "open_loop"));
+    extraction.memories.retain(|m| {
+        matches!(
+            m.memory_type.as_str(),
+            "fact" | "preference" | "decision" | "goal" | "open_loop"
+        )
+    });
     if extraction.memories.is_empty()
         && graph_entities.is_empty()
         && graph_relations.is_empty()
@@ -5301,7 +5825,11 @@ loop text/paraphrase:\n{known_open_loops}"
     let mut personal_mems: Vec<ExtractedMemory> = Vec::new();
     let mut project_mems: Vec<ExtractedMemory> = Vec::new();
     for memory in extraction.memories {
-        let scope = memory.metadata.get("scope").and_then(|s| s.as_str()).unwrap_or("");
+        let scope = memory
+            .metadata
+            .get("scope")
+            .and_then(|s| s.as_str())
+            .unwrap_or("");
         let to_project = has_project
             && (scope == "project"
                 || (scope.is_empty() && memory.memory_type.as_str() == "decision"));
@@ -5346,7 +5874,13 @@ loop text/paraphrase:\n{known_open_loops}"
     }
     // Lock released — incrementally embed new memories (semantic layer) off the hot
     // path: a bounded batch per turn so vectors accumulate in the background.
-    backfill_embeddings(state, &user_id, &MemoryWorkspaceId::new(PERSONAL_WORKSPACE), 12).await;
+    backfill_embeddings(
+        state,
+        &user_id,
+        &MemoryWorkspaceId::new(PERSONAL_WORKSPACE),
+        12,
+    )
+    .await;
     if has_project {
         backfill_embeddings(state, &user_id, &active, 12).await;
     }
@@ -5361,11 +5895,11 @@ fn recall_memory_tool_schema() -> serde_json::Value {
         "function": {
             "name": "recall_memory",
             "description": "Search the user's long-term memory (facts, preferences, people, past \
-decisions and their why) for what is relevant to the request. Use it when you need a personal or \
-project detail you may have learned before and that is NOT already in the prompt profile, BEFORE \
-saying you don't know it — and ALSO BEFORE ASKING the user for a possession, a person or a context \
-they take as already known (e.g. «my motorbike», «my boss»): retrieve what you know and ask only for \
-the details that remain missing.",
+    decisions and their why) for what is relevant to the request. Use it when you need a personal or \
+    project detail you may have learned before and that is NOT already in the prompt profile, BEFORE \
+    saying you don't know it — and ALSO BEFORE ASKING the user for a possession, a person or a context \
+    they take as already known (e.g. «my motorbike», «my boss»): retrieve what you know and ask only for \
+    the details that remain missing.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -5386,10 +5920,10 @@ fn record_decision_tool_schema() -> serde_json::Value {
         "function": {
             "name": "record_decision",
             "description": "Record in memory a DECISION made during work — valid for ANY domain \
-(code, documents e.g. a customer quote, data, configurations), not only technical. Call it AFTER \
-a non-trivial choice, so the WHY stays remembered and doesn't have to be reconstructed by re-reading \
-the files. Save: what was decided, the why, the discarded alternatives and the touched objects. The \
-decision is linked to the current project.",
+    (code, documents e.g. a customer quote, data, configurations), not only technical. Call it AFTER \
+    a non-trivial choice, so the WHY stays remembered and doesn't have to be reconstructed by re-reading \
+    the files. Save: what was decided, the why, the discarded alternatives and the touched objects. The \
+    decision is linked to the current project.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -5412,18 +5946,37 @@ decision is linked to the current project.",
 /// the agent calls this after a non-trivial choice so the "why" survives — for any
 /// domain (code, documents, data), not just coding.
 fn record_decision(state: &AppState, args: &serde_json::Value) -> String {
-    let summary = args.get("summary").and_then(|v| v.as_str()).unwrap_or("").trim();
-    let rationale = args.get("rationale").and_then(|v| v.as_str()).unwrap_or("").trim();
+    let summary = args
+        .get("summary")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim();
+    let rationale = args
+        .get("rationale")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim();
     if summary.is_empty() || rationale.is_empty() {
         return "Per registrare una decisione servono almeno 'summary' e 'rationale'.".to_string();
     }
-    let alternatives = args.get("alternatives").cloned().unwrap_or_else(|| serde_json::json!([]));
-    let affects = args.get("affects").cloned().unwrap_or_else(|| serde_json::json!([]));
+    let alternatives = args
+        .get("alternatives")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!([]));
+    let affects = args
+        .get("affects")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!([]));
     // The touched objects (file names, etc.) become ALIASES — those are FTS-indexed,
     // so a later "decisions affecting this file" lookup finds the decision by name.
     let affect_aliases: Vec<String> = affects
         .as_array()
-        .map(|items| items.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|v| v.as_str().map(str::to_string))
+                .collect()
+        })
         .unwrap_or_default();
     let user = gateway_memory_user_id();
     let workspace = gateway_memory_workspace_id();
@@ -5461,7 +6014,8 @@ fn record_decision(state: &AppState, args: &serde_json::Value) -> String {
             let _ = facade.confirm_memory(&lifecycle, &rec.reference, "decision recorded by agent");
             rebuild_decisions_wiki(&facade, &user, &workspace);
             "✅ Decision recorded in memory (the why will stay available in upcoming turns and \
-in future sessions).".to_string()
+in future sessions)."
+                .to_string()
         }
         Err(error) => format!("I couldn't record the decision: {error}"),
     }
@@ -5473,9 +6027,9 @@ fn forget_memory_tool_schema() -> serde_json::Value {
         "function": {
             "name": "forget_memory",
             "description": "Delete from long-term memory what matches the query. Use it when the user \
-asks to FORGET/delete a piece of information, or when a decision/fact is no longer valid and it's \
-better to remove it (not just update it). It searches its scopes and soft-deletes the best matches; \
-always report to the user WHAT you forgot.",
+    asks to FORGET/delete a piece of information, or when a decision/fact is no longer valid and it's \
+    better to remove it (not just update it). It searches its scopes and soft-deletes the best matches; \
+    always report to the user WHAT you forgot.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -5530,7 +6084,10 @@ fn forget_in_scope(
             purpose: "forget".to_string(),
         };
         for item in page.items {
-            if facade.delete_memory(&lifecycle, &item.reference, reason).is_ok() {
+            if facade
+                .delete_memory(&lifecycle, &item.reference, reason)
+                .is_ok()
+            {
                 out.push(item.summary);
             }
         }
@@ -5578,7 +6135,9 @@ fn forget_topic_in_scope(
         .list_relations_for_ui(user, ws)
         .unwrap_or_default()
         .into_iter()
-        .filter(|r| r.relation_type == "mentions" && matched_set.contains(&r.target_ref.to_string()))
+        .filter(|r| {
+            r.relation_type == "mentions" && matched_set.contains(&r.target_ref.to_string())
+        })
         .map(|r| r.source_ref.to_string())
         .collect();
     let lifecycle = MemoryLifecycleRequest {
@@ -5591,7 +6150,9 @@ fn forget_topic_in_scope(
     for m in facade.list_memories_for_ui(user, ws).unwrap_or_default() {
         if matches!(m.status, MemoryStatus::Confirmed | MemoryStatus::Candidate)
             && to_delete.contains(&m.reference.to_string())
-            && facade.delete_memory(&lifecycle, &m.reference, reason).is_ok()
+            && facade
+                .delete_memory(&lifecycle, &m.reference, reason)
+                .is_ok()
         {
             out.push(m.text);
         }
@@ -5604,7 +6165,12 @@ fn forget_topic_in_scope(
 }
 
 fn forget_memory(state: &AppState, args: &serde_json::Value) -> String {
-    let query = args.get("query").and_then(|q| q.as_str()).unwrap_or("").trim().to_string();
+    let query = args
+        .get("query")
+        .and_then(|q| q.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
     if query.is_empty() {
         return "To forget something, tell me what (query).".to_string();
     }
@@ -5625,11 +6191,15 @@ fn forget_memory(state: &AppState, args: &serde_json::Value) -> String {
     let user = gateway_memory_user_id();
     let active = gateway_memory_workspace_id();
     let mut deleted = forget_in_scope(&facade, &user, &active, &query, reason);
-    deleted.extend(forget_topic_in_scope(&facade, &user, &active, &query, reason, &protected));
+    deleted.extend(forget_topic_in_scope(
+        &facade, &user, &active, &query, reason, &protected,
+    ));
     if active.as_str() != PERSONAL_WORKSPACE {
         let personal = MemoryWorkspaceId::new(PERSONAL_WORKSPACE);
         deleted.extend(forget_in_scope(&facade, &user, &personal, &query, reason));
-        deleted.extend(forget_topic_in_scope(&facade, &user, &personal, &query, reason, &protected));
+        deleted.extend(forget_topic_in_scope(
+            &facade, &user, &personal, &query, reason, &protected,
+        ));
     }
     deleted.sort();
     deleted.dedup();
@@ -5639,9 +6209,9 @@ fn forget_memory(state: &AppState, args: &serde_json::Value) -> String {
     // facade lock must be released first; sweep re-locks).
     drop(facade);
     if !deleted.is_empty() {
-        regenerate_graph_links(state, &active);
+        reconcile_memory_scope(state, &active);
         if active.as_str() != PERSONAL_WORKSPACE {
-            regenerate_graph_links(state, &MemoryWorkspaceId::new(PERSONAL_WORKSPACE));
+            reconcile_memory_scope(state, &MemoryWorkspaceId::new(PERSONAL_WORKSPACE));
         }
     }
     if deleted.is_empty() {
@@ -5662,10 +6232,10 @@ fn update_plan_tool_schema() -> serde_json::Value {
         "function": {
             "name": "update_plan",
             "description": "Create or update the operational step-by-step PLAN of a NON-trivial task \
-(multi-step: development, refactor, in-depth research). It appears in the \"Plan\" panel and the user \
-follows progress. Call it at the START with ALL steps (status \"todo\", the first \"doing\") and UPDATE \
-IT as you proceed (move to \"done\" what you completed, set \"doing\" the current step). Do NOT use it \
-for single-step requests.",
+    (multi-step: development, refactor, in-depth research). It appears in the \"Plan\" panel and the user \
+    follows progress. Call it at the START with ALL steps (status \"todo\", the first \"doing\") and UPDATE \
+    IT as you proceed (move to \"done\" what you completed, set \"doing\" the current step). Do NOT use it \
+    for single-step requests.",
             "strict": true,
             "parameters": {
                 "type": "object",
@@ -5737,7 +6307,8 @@ fn plan_status_marker(status: &str) -> char {
 /// RESUMES an interrupted task on the SAME authoritative state. A `done` step in the
 /// marker is genuinely done (the canonical marker only shows done once verified).
 fn parse_plan_marker(text: &str) -> Vec<serde_json::Value> {
-    let (Some(s), Some(e)) = (text.rfind("‹‹PLAN››"), text.rfind("‹‹/PLAN››")) else {
+    let (Some(s), Some(e)) = (text.rfind("‹‹PLAN››"), text.rfind("‹‹/PLAN››"))
+    else {
         return Vec::new();
     };
     if e <= s {
@@ -5766,14 +6337,22 @@ fn parse_plan_marker(text: &str) -> Vec<serde_json::Value> {
         // `- [m] **Title** (`id`): detail`
         let title = t
             .find("**")
-            .and_then(|a| t[a + 2..].find("**").map(|b| t[a + 2..a + 2 + b].trim().to_string()))
+            .and_then(|a| {
+                t[a + 2..]
+                    .find("**")
+                    .map(|b| t[a + 2..a + 2 + b].trim().to_string())
+            })
             .unwrap_or_default();
         if title.is_empty() {
             continue;
         }
         let id = t
             .find("(`")
-            .and_then(|a| t[a + 2..].find("`)").map(|b| t[a + 2..a + 2 + b].to_string()))
+            .and_then(|a| {
+                t[a + 2..]
+                    .find("`)")
+                    .map(|b| t[a + 2..a + 2 + b].to_string())
+            })
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| format!("s{}", out.len() + 1));
         let detail = t
@@ -5791,7 +6370,9 @@ fn parse_plan_marker(text: &str) -> Vec<serde_json::Value> {
 }
 
 fn plan_step_status(step: &serde_json::Value) -> &str {
-    step.get("status").and_then(|s| s.as_str()).unwrap_or("todo")
+    step.get("status")
+        .and_then(|s| s.as_str())
+        .unwrap_or("todo")
 }
 fn plan_step_title(step: &serde_json::Value) -> &str {
     step.get("title").and_then(|s| s.as_str()).unwrap_or("")
@@ -5799,7 +6380,9 @@ fn plan_step_title(step: &serde_json::Value) -> &str {
 
 /// Count of canonically-DONE steps (the single source of truth for progress).
 fn plan_done_count(plan: &[serde_json::Value]) -> usize {
-    plan.iter().filter(|s| plan_step_status(s) == "done").count()
+    plan.iter()
+        .filter(|s| plan_step_status(s) == "done")
+        .count()
 }
 
 /// Title of the first step that isn't done and isn't blocked — the next action. None
@@ -5833,8 +6416,7 @@ fn plan_incomplete_reason(plan: &[serde_json::Value]) -> Option<String> {
     }
     let done = plan_done_count(plan);
     let total = plan.len();
-    let next = plan_next_open(plan)
-        .unwrap_or_else(|| "blocked or unfinished step".to_string());
+    let next = plan_next_open(plan).unwrap_or_else(|| "blocked or unfinished step".to_string());
     Some(format!(
         "plan is incomplete ({done}/{total}); next step: {next}"
     ))
@@ -5869,7 +6451,10 @@ fn runtime_plan_memory_text(plan: &[serde_json::Value]) -> Option<String> {
     Some(parts.join(" "))
 }
 
-fn runtime_plan_memory_metadata(thread_id: Option<&str>, plan: &[serde_json::Value]) -> serde_json::Value {
+fn runtime_plan_memory_metadata(
+    thread_id: Option<&str>,
+    plan: &[serde_json::Value],
+) -> serde_json::Value {
     serde_json::json!({
         "source": "runtime_plan",
         "thread_id": runtime_plan_thread_key(thread_id),
@@ -5970,7 +6555,10 @@ fn merge_execution_plan(plan: &mut ExecutionPlan, sent: &[serde_json::Value]) ->
         .iter()
         .filter_map(|step_view| {
             let step_id = plan_step_id(step_view)?.to_string();
-            if let Some(index) = previous_steps.iter().position(|step| step.step_id == step_id) {
+            if let Some(index) = previous_steps
+                .iter()
+                .position(|step| step.step_id == step_id)
+            {
                 let mut step = previous_steps.remove(index);
                 apply_execution_plan_step_view(&mut step, step_view);
                 Some(step)
@@ -6283,7 +6871,9 @@ fn local_template_catalog_seed(provider: &str) -> Vec<TemplateCatalogEntry> {
             Some("clean_corporate"),
             Some("sales_pitch"),
             &["kpi_grid", "timeline", "quote_callout"],
-            &["cover", "problem", "solution", "traction", "roadmap", "closing"],
+            &[
+                "cover", "problem", "solution", "traction", "roadmap", "closing",
+            ],
             "startup pitch fundraising product intro clean corporate investor customer proposta commerciale presentazione homun",
         )),
         with_builtin_template_preview(template_catalog_entry(
@@ -6298,7 +6888,14 @@ fn local_template_catalog_seed(provider: &str) -> Vec<TemplateCatalogEntry> {
             Some("high_contrast"),
             Some("executive"),
             &["kpi_grid", "risks_table", "timeline"],
-            &["cover", "status", "metrics", "risks", "decisions", "next steps"],
+            &[
+                "cover",
+                "status",
+                "metrics",
+                "risks",
+                "decisions",
+                "next steps",
+            ],
             "executive update board status management review KPI risks decisions leadership aggiornamento direzione CDA",
         )),
         with_builtin_template_preview(template_catalog_entry(
@@ -6313,7 +6910,14 @@ fn local_template_catalog_seed(provider: &str) -> Vec<TemplateCatalogEntry> {
             Some("minimal_mono"),
             Some("technical"),
             &["process_steps", "timeline", "risks_table"],
-            &["cover", "objective", "phases", "architecture", "risks", "milestones"],
+            &[
+                "cover",
+                "objective",
+                "phases",
+                "architecture",
+                "risks",
+                "milestones",
+            ],
             "project plan technical roadmap implementation phases milestones risks PM engineering piano progetto tecnico roadmap",
         )),
         with_builtin_template_preview(template_catalog_entry(
@@ -6328,7 +6932,14 @@ fn local_template_catalog_seed(provider: &str) -> Vec<TemplateCatalogEntry> {
             Some("warm_editorial"),
             Some("sales_pitch"),
             &["comparison_table", "timeline", "kpi_grid"],
-            &["summary", "problem", "solution", "scope", "timeline", "next action"],
+            &[
+                "summary",
+                "problem",
+                "solution",
+                "scope",
+                "timeline",
+                "next action",
+            ],
             "sales proposal client commercial offer proposta commerciale preventivo cliente warm editorial documento",
         )),
         with_builtin_template_preview(template_catalog_entry(
@@ -6337,13 +6948,23 @@ fn local_template_catalog_seed(provider: &str) -> Vec<TemplateCatalogEntry> {
             "Technical Brief Minimal",
             "document",
             "Minimal technical brief template for architecture, tradeoffs, rollout and verification.",
-            &["technical brief", "architecture brief", "implementation note"],
+            &[
+                "technical brief",
+                "architecture brief",
+                "implementation note",
+            ],
             &["engineering", "technical leadership", "product"],
             "technical_brief",
             Some("minimal_mono"),
             Some("technical"),
             &["process_steps", "comparison_table", "risks_table"],
-            &["summary", "architecture", "tradeoffs", "implementation", "verification"],
+            &[
+                "summary",
+                "architecture",
+                "tradeoffs",
+                "implementation",
+                "verification",
+            ],
             "technical brief architecture implementation tradeoffs verification engineering documento tecnico architettura",
         )),
         with_builtin_template_preview(template_catalog_entry(
@@ -6403,7 +7024,14 @@ fn local_template_catalog_seed(provider: &str) -> Vec<TemplateCatalogEntry> {
             Some("soft_gradient"),
             Some("sales_pitch"),
             &["timeline", "comparison_table", "kpi_grid", "risks_table"],
-            &["cover", "positioning", "channels", "timeline", "metrics", "risks"],
+            &[
+                "cover",
+                "positioning",
+                "channels",
+                "timeline",
+                "metrics",
+                "risks",
+            ],
             "product launch go to market lancio prodotto piano marketing sales canali timeline metriche rischi",
         )),
         with_builtin_template_preview(template_catalog_entry(
@@ -6418,7 +7046,14 @@ fn local_template_catalog_seed(provider: &str) -> Vec<TemplateCatalogEntry> {
             Some("minimal_mono"),
             Some("technical"),
             &["timeline", "process_steps", "risks_table"],
-            &["summary", "impact", "timeline", "root cause", "remediation", "prevention"],
+            &[
+                "summary",
+                "impact",
+                "timeline",
+                "root cause",
+                "remediation",
+                "prevention",
+            ],
             "incident review postmortem root cause analysis RCA timeline remediation prevenzione incidente tecnico operations",
         )),
         with_builtin_template_preview(template_catalog_entry(
@@ -6433,7 +7068,14 @@ fn local_template_catalog_seed(provider: &str) -> Vec<TemplateCatalogEntry> {
             Some("high_contrast"),
             Some("executive"),
             &["timeline", "kpi_grid", "risks_table"],
-            &["cover", "priorities", "roadmap", "dependencies", "risks", "asks"],
+            &[
+                "cover",
+                "priorities",
+                "roadmap",
+                "dependencies",
+                "risks",
+                "asks",
+            ],
             "product roadmap board release plan priorità rilasci dipendenze rischi richieste CDA prodotto engineering",
         )),
     ]
@@ -6476,8 +7118,12 @@ impl FileTemplateCatalogProvider {
     }
 
     fn from_path(path: &std::path::Path) -> Result<Self, String> {
-        let raw = std::fs::read_to_string(path)
-            .map_err(|error| format!("could not read template catalog {}: {error}", path.display()))?;
+        let raw = std::fs::read_to_string(path).map_err(|error| {
+            format!(
+                "could not read template catalog {}: {error}",
+                path.display()
+            )
+        })?;
         Self::from_json_str(&raw)
     }
 }
@@ -6508,7 +7154,10 @@ fn clean_template_catalog_id(value: &str) -> Option<String> {
     }
 }
 
-fn clean_template_catalog_text(value: Option<&serde_json::Value>, max_len: usize) -> Option<String> {
+fn clean_template_catalog_text(
+    value: Option<&serde_json::Value>,
+    max_len: usize,
+) -> Option<String> {
     value
         .and_then(|value| value.as_str())
         .map(str::trim)
@@ -6604,15 +7253,12 @@ fn parse_file_template_catalog_entry(
         .and_then(|value| value.as_str())
         .map(|value| value.trim().to_ascii_lowercase())
         .filter(|value| DELIVERABLE_DESIGN_PROFILES.contains(&value.as_str()));
-    let design_components = clean_template_catalog_string_list(
-        value.get("design_components"),
-        6,
-        60,
-    )
-    .into_iter()
-    .map(|value| value.to_ascii_lowercase())
-    .filter(|value| DELIVERABLE_DESIGN_COMPONENTS.contains(&value.as_str()))
-    .collect::<Vec<_>>();
+    let design_components =
+        clean_template_catalog_string_list(value.get("design_components"), 6, 60)
+            .into_iter()
+            .map(|value| value.to_ascii_lowercase())
+            .filter(|value| DELIVERABLE_DESIGN_COMPONENTS.contains(&value.as_str()))
+            .collect::<Vec<_>>();
     let route_text = clean_template_catalog_text(value.get("route_text"), 500)
         .ok_or_else(|| "template missing route_text".to_string())?;
 
@@ -6659,7 +7305,11 @@ fn template_catalog_file_path() -> Option<PathBuf> {
     std::env::var("HOMUN_TEMPLATE_CATALOG_PATH")
         .ok()
         .map(std::path::PathBuf::from)
-        .or_else(|| gateway_data_dir().ok().map(|dir| dir.join("template-catalog.json")))
+        .or_else(|| {
+            gateway_data_dir()
+                .ok()
+                .map(|dir| dir.join("template-catalog.json"))
+        })
 }
 
 fn file_template_catalog_provider() -> Option<FileTemplateCatalogProvider> {
@@ -6805,7 +7455,11 @@ fn workflow_execution_plan(
             .map(|step| PlanStep {
                 step_id: step.id.to_string(),
                 kind: PlanStepKind::DirectAnswer,
-                depends_on: step.depends_on.iter().map(|value| value.to_string()).collect(),
+                depends_on: step
+                    .depends_on
+                    .iter()
+                    .map(|value| value.to_string())
+                    .collect(),
                 provider_id: None,
                 tool_name: Some(definition.tool_name.to_string()),
                 arguments: serde_json::json!({
@@ -6837,7 +7491,10 @@ fn run_static_workflow_plan_through_brain(
     let mut brain = OrchestratorBrain::new(
         router,
         GatewayBrainMemory(None),
-        CapabilityFacade::new(CapabilityPolicy::default(), InMemoryCapabilityAudit::default()),
+        CapabilityFacade::new(
+            CapabilityPolicy::default(),
+            InMemoryCapabilityAudit::default(),
+        ),
         ToolSearchIndexStore::open_in_memory().map_err(|error| error.to_string())?,
         TaskStore::open_in_memory().map_err(|error| error.to_string())?,
     );
@@ -6968,21 +7625,8 @@ fn atomic_pdf_operation_reason(prompt: &str) -> Option<String> {
         return None;
     }
     let atomic_actions = [
-        "estrai",
-        "estrarre",
-        "extract",
-        "leggi",
-        "read",
-        "unisci",
-        "merge",
-        "combina",
-        "combine",
-        "converti",
-        "convert",
-        "comprimi",
-        "compress",
-        "split",
-        "dividi",
+        "estrai", "estrarre", "extract", "leggi", "read", "unisci", "merge", "combina", "combine",
+        "converti", "convert", "comprimi", "compress", "split", "dividi",
     ];
     let matched = atomic_actions
         .iter()
@@ -7102,14 +7746,24 @@ provider or start the required local service."
 
 fn runtime_plan_memory_matches(memory: &MemoryRecord, thread_key: &str) -> bool {
     memory.memory_type == "open_loop"
-        && !matches!(memory.status, MemoryStatus::Deleted | MemoryStatus::Rejected | MemoryStatus::Stale)
+        && !matches!(
+            memory.status,
+            MemoryStatus::Deleted | MemoryStatus::Rejected | MemoryStatus::Stale
+        )
         && memory.metadata.get("source").and_then(|v| v.as_str()) == Some("runtime_plan")
         && memory.metadata.get("thread_id").and_then(|v| v.as_str()) == Some(thread_key)
 }
 
-fn runtime_plan_step_outcome_matches(memory: &MemoryRecord, thread_key: &str, step_id: &str) -> bool {
+fn runtime_plan_step_outcome_matches(
+    memory: &MemoryRecord,
+    thread_key: &str,
+    step_id: &str,
+) -> bool {
     memory.memory_type == "fact"
-        && !matches!(memory.status, MemoryStatus::Deleted | MemoryStatus::Rejected | MemoryStatus::Stale)
+        && !matches!(
+            memory.status,
+            MemoryStatus::Deleted | MemoryStatus::Rejected | MemoryStatus::Stale
+        )
         && memory.metadata.get("source").and_then(|v| v.as_str()) == Some("runtime_plan_step")
         && memory.metadata.get("thread_id").and_then(|v| v.as_str()) == Some(thread_key)
         && memory.metadata.get("step_id").and_then(|v| v.as_str()) == Some(step_id)
@@ -7222,13 +7876,7 @@ fn record_runtime_plan_step_outcome_from_state(
         purpose: "runtime_plan_step_verified".to_string(),
     };
     if record_runtime_plan_step_outcome(
-        &facade,
-        &user,
-        &workspace,
-        &lifecycle,
-        thread_id,
-        step,
-        evidence,
+        &facade, &user, &workspace, &lifecycle, thread_id, step, evidence,
     )
     .is_ok()
     {
@@ -7269,21 +7917,17 @@ fn record_subagent_task_step_outcome_memory(
         },
         "done_criterion": done_criterion,
     });
-    let evidence = vec![serde_json::json!({
-        "source": "subagent_task",
-        "task_id": task.task_id.as_str(),
-        "kind": task.kind.as_str(),
-        "checkpoint": outcome.checkpoint_redacted,
-    })
-    .to_string()];
+    let evidence = vec![
+        serde_json::json!({
+            "source": "subagent_task",
+            "task_id": task.task_id.as_str(),
+            "kind": task.kind.as_str(),
+            "checkpoint": outcome.checkpoint_redacted,
+        })
+        .to_string(),
+    ];
     record_runtime_plan_step_outcome(
-        facade,
-        user,
-        workspace,
-        lifecycle,
-        thread_id,
-        &step,
-        &evidence,
+        facade, user, workspace, lifecycle, thread_id, &step, &evidence,
     )
     .map(Some)
 }
@@ -7295,7 +7939,12 @@ fn record_subagent_task_step_outcome(
 ) {
     let thread_id = lock_store(state)
         .ok()
-        .and_then(|store| store.thread_by_task_id(task.task_id.as_str()).ok().flatten())
+        .and_then(|store| {
+            store
+                .thread_by_task_id(task.task_id.as_str())
+                .ok()
+                .flatten()
+        })
         .map(|thread| thread.thread_id);
     let Ok(facade) = lock_memory_facade(state) else {
         return;
@@ -7367,7 +8016,10 @@ fn upsert_runtime_plan_graph(
         user,
         workspace,
         privacy_domain,
-        format!("runtime_plan_described_by:{}", provenance_key_fragment(thread_key)),
+        format!(
+            "runtime_plan_described_by:{}",
+            provenance_key_fragment(thread_key)
+        ),
         memory_ref.clone(),
         "describes",
         plan_ref.clone(),
@@ -7612,19 +8264,27 @@ fn merge_plan(plan: &mut Vec<serde_json::Value>, sent: &[serde_json::Value]) -> 
         // ‹‹PLAN›› marker); fall back to title. Id-first stops ballooning from
         // paraphrased titles, AND lets `step_advance` update a step by id ALONE (no
         // title) — the model reports progress without re-sending the whole plan. (WS1-F2.)
-        let sent_id = s.get("id").and_then(|v| v.as_str()).map(str::trim).filter(|x| !x.is_empty());
+        let sent_id = s
+            .get("id")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|x| !x.is_empty());
         if title.is_empty() && sent_id.is_none() {
             continue;
         }
         let new_status = s.get("status").and_then(|v| v.as_str()).unwrap_or("todo");
         let detail = s.get("detail").and_then(|v| v.as_str()).unwrap_or("");
         let pos = sent_id
-            .and_then(|id| plan.iter().position(|p| p.get("id").and_then(|v| v.as_str()) == Some(id)))
+            .and_then(|id| {
+                plan.iter()
+                    .position(|p| p.get("id").and_then(|v| v.as_str()) == Some(id))
+            })
             .or_else(|| {
                 if title.is_empty() {
                     None
                 } else {
-                    plan.iter().position(|p| tkey(plan_step_title(p)) == tkey(title))
+                    plan.iter()
+                        .position(|p| tkey(plan_step_title(p)) == tkey(title))
                 }
             });
         match pos {
@@ -7652,7 +8312,11 @@ fn merge_plan(plan: &mut Vec<serde_json::Value>, sent: &[serde_json::Value]) -> 
                     continue;
                 }
                 let id = format!("s{}", plan.len() + 1);
-                let status = if new_status == "done" { "doing" } else { new_status };
+                let status = if new_status == "done" {
+                    "doing"
+                } else {
+                    new_status
+                };
                 plan.push(serde_json::json!({
                     "id": id, "title": title, "status": status, "detail": detail,
                     "done_criterion": s.get("done_criterion").and_then(|v| v.as_str()).unwrap_or(""),
@@ -7672,11 +8336,18 @@ fn merge_plan(plan: &mut Vec<serde_json::Value>, sent: &[serde_json::Value]) -> 
 fn build_plan_markdown(steps: &[serde_json::Value]) -> String {
     let mut lines = Vec::new();
     for (index, step) in steps.iter().enumerate() {
-        let title = step.get("title").and_then(|t| t.as_str()).unwrap_or("").trim();
+        let title = step
+            .get("title")
+            .and_then(|t| t.as_str())
+            .unwrap_or("")
+            .trim();
         if title.is_empty() {
             continue;
         }
-        let status = step.get("status").and_then(|s| s.as_str()).unwrap_or("todo");
+        let status = step
+            .get("status")
+            .and_then(|s| s.as_str())
+            .unwrap_or("todo");
         let detail = step
             .get("detail")
             .and_then(|d| d.as_str())
@@ -7710,8 +8381,8 @@ fn query_code_graph_tool_schema() -> serde_json::Value {
         "function": {
             "name": "query_code_graph",
             "description": "Query the code map of the active project: given a symbol (function, file, \
-class), list who calls it, what it calls and where it's located. Use it for questions about the \
-architecture/structure of the current project's code.",
+    class), list who calls it, what it calls and where it's located. Use it for questions about the \
+    architecture/structure of the current project's code.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -7733,9 +8404,9 @@ fn query_git_history_tool_schema() -> serde_json::Value {
         "function": {
             "name": "query_git_history",
             "description": "Query the git HISTORY of the active project: given a file, a symbol, or a \
-theme, returns the relevant commits (message = the WHY, with date) and when the related \
-code changed. Use it for 'why/when did X change', 'the history of Y', 'what \
-happened to this file'.",
+    theme, returns the relevant commits (message = the WHY, with date) and when the related \
+    code changed. Use it for 'why/when did X change', 'the history of Y', 'what \
+    happened to this file'.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -7753,9 +8424,9 @@ fn github_search_tool_schema() -> serde_json::Value {
         "function": {
             "name": "github_search",
             "description": "Search REPOSITORIES on GitHub via API (fast and structured, NO browser). \
-Use it for \"search GitHub\", finding similar/competing projects, assessing the uniqueness of an idea, or \
-inspecting repos for stars/language/freshness. Returns the top repos sorted by stars. \
-ALWAYS PREFER it over the browser for GitHub queries.",
+    Use it for \"search GitHub\", finding similar/competing projects, assessing the uniqueness of an idea, or \
+    inspecting repos for stars/language/freshness. Returns the top repos sorted by stars. \
+    ALWAYS PREFER it over the browser for GitHub queries.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -7792,14 +8463,21 @@ async fn github_search(state: &AppState, query: &str) -> String {
     let Ok(json) = resp.json::<serde_json::Value>().await else {
         return "Unreadable GitHub response.".to_string();
     };
-    let items = json.get("items").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+    let items = json
+        .get("items")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
     if items.is_empty() {
         return format!("No repository found on GitHub for «{query}».");
     }
     let mut out = format!("GitHub results for «{query}» (top by stars):");
     for it in items.iter().take(8) {
         let name = it.get("full_name").and_then(|v| v.as_str()).unwrap_or("?");
-        let stars = it.get("stargazers_count").and_then(|v| v.as_u64()).unwrap_or(0);
+        let stars = it
+            .get("stargazers_count")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
         let lang = it.get("language").and_then(|v| v.as_str()).unwrap_or("—");
         let desc = it.get("description").and_then(|v| v.as_str()).unwrap_or("");
         let url = it.get("html_url").and_then(|v| v.as_str()).unwrap_or("");
@@ -7873,7 +8551,9 @@ fn query_git_history(query: &str) -> String {
         out.push_str(&format!("\n**File history:**\n{by_path}\n"));
     }
     if !by_code.is_empty() {
-        out.push_str(&format!("\n**When the code with «{q}» changed:**\n{by_code}\n"));
+        out.push_str(&format!(
+            "\n**When the code with «{q}» changed:**\n{by_code}\n"
+        ));
     }
     out
 }
@@ -7900,13 +8580,18 @@ fn query_code_graph(state: &AppState, symbol: &str) -> String {
     let Some(target) = code
         .iter()
         .find(|e| e.name.to_lowercase() == needle)
-        .or_else(|| code.iter().find(|e| e.name.to_lowercase().contains(&needle)))
+        .or_else(|| {
+            code.iter()
+                .find(|e| e.name.to_lowercase().contains(&needle))
+        })
     else {
         return format!("I can't find «{symbol}» in the project's code map.");
     };
     let tref = target.reference.to_string();
-    let name_by_ref: std::collections::HashMap<String, String> =
-        entities.iter().map(|e| (e.reference.to_string(), e.name.clone())).collect();
+    let name_by_ref: std::collections::HashMap<String, String> = entities
+        .iter()
+        .map(|e| (e.reference.to_string(), e.name.clone()))
+        .collect();
     let rels = facade.list_relations_for_ui(&user, &ws).unwrap_or_default();
     let mut calls: Vec<String> = Vec::new(); // target → X (outgoing)
     let mut callers: Vec<String> = Vec::new(); // X → target (incoming)
@@ -7918,7 +8603,9 @@ fn query_code_graph(state: &AppState, symbol: &str) -> String {
             if r.relation_type == "contains" {
                 continue; // target contains children — list as calls below if relevant
             }
-            if let Some(n) = name_by_ref.get(&t) { calls.push(n.clone()); }
+            if let Some(n) = name_by_ref.get(&t) {
+                calls.push(n.clone());
+            }
         } else if t == tref {
             if r.relation_type == "contains" {
                 container = name_by_ref.get(&s).cloned();
@@ -7927,10 +8614,16 @@ fn query_code_graph(state: &AppState, symbol: &str) -> String {
             }
         }
     }
-    calls.sort(); calls.dedup(); calls.truncate(20);
-    callers.sort(); callers.dedup(); callers.truncate(20);
+    calls.sort();
+    calls.dedup();
+    calls.truncate(20);
+    callers.sort();
+    callers.dedup();
+    callers.truncate(20);
     let mut out = format!("**{}**", target.name);
-    if let Some(c) = container { out.push_str(&format!(" (in {c})")); }
+    if let Some(c) = container {
+        out.push_str(&format!(" (in {c})"));
+    }
     out.push('\n');
     if callers.is_empty() {
         out.push_str("- No known callers.\n");
@@ -7949,10 +8642,10 @@ fn resolve_datetime_tool_schema() -> serde_json::Value {
         "function": {
             "name": "resolve_datetime",
             "description": "Converts a user's time reference (in ANY language: \"tomorrow morning\", \
-\"next Monday at 9\", \"pasado mañana\", \"in 3 days\", \"the 15th\") into the correct ABSOLUTE \
-date/time, computed relative to NOW and the user's timezone. CALL IT BEFORE using any date — don't \
-compute dates yourself (you easily get \"today\" wrong). You CLASSIFY the reference by filling in the \
-fields below; I do the computation. Returns the ISO value to write into forms or pass to other tools.",
+    \"next Monday at 9\", \"pasado mañana\", \"in 3 days\", \"the 15th\") into the correct ABSOLUTE \
+    date/time, computed relative to NOW and the user's timezone. CALL IT BEFORE using any date — don't \
+    compute dates yourself (you easily get \"today\" wrong). You CLASSIFY the reference by filling in the \
+    fields below; I do the computation. Returns the ISO value to write into forms or pass to other tools.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -7960,8 +8653,8 @@ fields below; I do the computation. Returns the ISO value to write into forms or
                         "type": "string",
                         "enum": ["relative_day", "weekday", "relative_unit", "absolute"],
                         "description": "relative_day: today/tomorrow/yesterday/day-after-tomorrow (use offset_days). \
-weekday: a day of the week (use weekday + which). relative_unit: \"in N days/weeks/months\" \
-(use n + unit). absolute: explicit date (use date)."
+    weekday: a day of the week (use weekday + which). relative_unit: \"in N days/weeks/months\" \
+    (use n + unit). absolute: explicit date (use date)."
                     },
                     "offset_days": {
                         "type": "integer",
@@ -8006,11 +8699,11 @@ fn schedule_task_tool_schema() -> serde_json::Value {
         "function": {
             "name": "schedule_task",
             "description": "Create a recurring time-based AUTOMATION (a rule, visible in \
-Automations). Use it when the user asks to do/check something periodically (e.g. \
-\"every morning check the news on X\", \"every Monday send me the summary\"). On each occurrence \
-I run the 'goal' with all tools and ASK FOR CONFIRMATION before sending/publishing. For \
-EVENT-based (non-time) triggers use create_automation. Do NOT use it for one-off immediate actions \
-(do those now).",
+    Automations). Use it when the user asks to do/check something periodically (e.g. \
+    \"every morning check the news on X\", \"every Monday send me the summary\"). On each occurrence \
+    I run the 'goal' with all tools and ASK FOR CONFIRMATION before sending/publishing. For \
+    EVENT-based (non-time) triggers use create_automation. Do NOT use it for one-off immediate actions \
+    (do those now).",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -8044,7 +8737,9 @@ EVENT-based (non-time) triggers use create_automation. Do NOT use it for one-off
 fn schedule_proactive_task(state: &AppState, goal: &str, every: &str, tz: Option<&str>) -> String {
     let now = OffsetDateTime::now_utc();
     let Some(next) = local_first_task_runtime::next_occurrence(every, tz, now) else {
-        return format!("Schedule '{every}' is not valid. Use an interval (\"every 6h\", \"every 1d\") or a time (\"daily@08:00\", \"weekly@mon@09:30\").");
+        return format!(
+            "Schedule '{every}' is not valid. Use an interval (\"every 6h\", \"every 1d\") or a time (\"daily@08:00\", \"weekly@mon@09:30\")."
+        );
     };
     let id = format!("sched_{}", uuid::Uuid::new_v4().simple());
     let mut task = TaskRecord::new(
@@ -8115,11 +8810,18 @@ fn humanize_recurrence(rec: &str) -> String {
     let lower = rec.trim().to_ascii_lowercase();
     if let Some(rest) = lower.strip_prefix("dow") {
         if let Some((days, times)) = rest.trim_start_matches(['@', ' ']).split_once('@') {
-            let times_h = times.split(',').map(str::trim).collect::<Vec<_>>().join(", ");
+            let times_h = times
+                .split(',')
+                .map(str::trim)
+                .collect::<Vec<_>>()
+                .join(", ");
             let days_h = if matches!(days.trim(), "*" | "all" | "daily" | "") {
                 "Every day".to_string()
             } else {
-                days.split(',').map(day_label).collect::<Vec<_>>().join(", ")
+                days.split(',')
+                    .map(day_label)
+                    .collect::<Vec<_>>()
+                    .join(", ")
             };
             return format!("{days_h} · {times_h}");
         }
@@ -8130,7 +8832,11 @@ fn humanize_recurrence(rec: &str) -> String {
     if let Some(rest) = lower.strip_prefix("weekly") {
         let rest = rest.trim_start_matches(['@', ' ']);
         if let Some((d, t)) = rest.split_once(['@', ' ']) {
-            return format!("{} · {}", day_label(d), t.trim_start_matches(['@', ' ']).trim());
+            return format!(
+                "{} · {}",
+                day_label(d),
+                t.trim_start_matches(['@', ' ']).trim()
+            );
         }
     }
     if lower.starts_with("every") {
@@ -8303,7 +9009,8 @@ fn update_automation_tool_schema() -> serde_json::Value {
 /// fragment, apply the given changes, re-sync the driving recurring task (so a new
 /// prompt/recurrence takes effect next run), and persist. Returns a user-facing line.
 fn update_automation_from_chat(state: &AppState, args_raw: &str) -> String {
-    let args: serde_json::Value = serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
+    let args: serde_json::Value =
+        serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
     let opt = |k: &str| {
         args.get(k)
             .and_then(|v| v.as_str())
@@ -8325,18 +9032,27 @@ fn update_automation_from_chat(state: &AppState, args_raw: &str) -> String {
         let all = store
             .list_automations(&gateway_user_id(), &gateway_workspace_id())
             .unwrap_or_default();
-        let mut hits: Vec<Automation> =
-            all.into_iter().filter(|a| a.title.to_lowercase().contains(&needle)).collect();
+        let mut hits: Vec<Automation> = all
+            .into_iter()
+            .filter(|a| a.title.to_lowercase().contains(&needle))
+            .collect();
         match hits.len() {
             0 => return format!("No automation whose title contains «{needle}»."),
             1 => hits.remove(0),
             _ => {
-                let titles = hits.iter().map(|a| a.title.clone()).collect::<Vec<_>>().join(", ");
-                return format!("Several automations match «{needle}»: {titles}. Say which one (or pass its id).");
+                let titles = hits
+                    .iter()
+                    .map(|a| a.title.clone())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                return format!(
+                    "Several automations match «{needle}»: {titles}. Say which one (or pass its id)."
+                );
             }
         }
     } else {
-        return "To edit an automation, give its `id` or a `match` (a fragment of its title).".to_string();
+        return "To edit an automation, give its `id` or a `match` (a fragment of its title)."
+            .to_string();
     };
     let mut changed: Vec<&str> = Vec::new();
     if let Some(title) = opt("title") {
@@ -8351,7 +9067,13 @@ fn update_automation_from_chat(state: &AppState, args_raw: &str) -> String {
         match &automation.trigger {
             AutomationTrigger::Schedule { tz, .. } => {
                 let tz = tz.clone();
-                if local_first_task_runtime::next_occurrence(&recurrence, tz.as_deref(), OffsetDateTime::now_utc()).is_none() {
+                if local_first_task_runtime::next_occurrence(
+                    &recurrence,
+                    tz.as_deref(),
+                    OffsetDateTime::now_utc(),
+                )
+                .is_none()
+                {
                     return format!("The recurrence '{recurrence}' is not valid.");
                 }
                 automation.trigger = AutomationTrigger::Schedule { recurrence, tz };
@@ -8378,15 +9100,26 @@ fn update_automation_from_chat(state: &AppState, args_raw: &str) -> String {
     if store.upsert_automation(&automation).is_err() {
         return "Failed to save the change to the automation.".to_string();
     }
-    format!("✅ Updated automation «{}» ({}).", automation.title, changed.join(", "))
+    format!(
+        "✅ Updated automation «{}» ({}).",
+        automation.title,
+        changed.join(", ")
+    )
 }
 
 /// Create a first-class Automation from a chat tool call (source=chat). Builds the trigger,
 /// dedups against existing automations (same kind + high prompt overlap), materializes the
 /// driving task for schedules, and persists it so it shows in the Automazioni view.
 fn create_automation_from_chat(state: &AppState, args_raw: &str) -> String {
-    let args: serde_json::Value = serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
-    let s = |k: &str| args.get(k).and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    let args: serde_json::Value =
+        serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
+    let s = |k: &str| {
+        args.get(k)
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string()
+    };
     let opt = |k: &str| {
         args.get(k)
             .and_then(|v| v.as_str())
@@ -8397,7 +9130,8 @@ fn create_automation_from_chat(state: &AppState, args_raw: &str) -> String {
     let title = s("title");
     let prompt = s("prompt");
     if title.is_empty() || prompt.is_empty() {
-        return "Creating an automation requires at least the title and what to do (prompt).".to_string();
+        return "Creating an automation requires at least the title and what to do (prompt)."
+            .to_string();
     }
     let trigger = if s("trigger_type") == "event" {
         // Event on a connected service (Gmail/Calendar/Slack/MCP/…) via polling, when a
@@ -8407,7 +9141,10 @@ fn create_automation_from_chat(state: &AppState, args_raw: &str) -> String {
             if key_field.is_empty() {
                 return "An event on a connected service requires event_key_field (the field that identifies an item, e.g. \"messageId\").".to_string();
             }
-            let event_args = args.get("event_args").cloned().unwrap_or_else(|| serde_json::json!({}));
+            let event_args = args
+                .get("event_args")
+                .cloned()
+                .unwrap_or_else(|| serde_json::json!({}));
             AutomationTrigger::Event {
                 event: EventTrigger::ConnectorPoll {
                     tool,
@@ -8432,7 +9169,11 @@ fn create_automation_from_chat(state: &AppState, args_raw: &str) -> String {
         let tz = opt("timezone").or_else(|| Some(effective_user_tz_name()));
         AutomationTrigger::Schedule { recurrence, tz }
     };
-    let approval = if args.get("require_confirmation").and_then(|v| v.as_bool()).unwrap_or(true) {
+    let approval = if args
+        .get("require_confirmation")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true)
+    {
         ApprovalPolicy::Confirm
     } else {
         ApprovalPolicy::Autonomous
@@ -8446,7 +9187,8 @@ fn create_automation_from_chat(state: &AppState, args_raw: &str) -> String {
         AutomationTrigger::Schedule { .. } => "schedule",
         AutomationTrigger::Event { .. } => "event",
     };
-    let new_tokens: std::collections::BTreeSet<String> = cap_tokenize(&prompt).into_iter().collect();
+    let new_tokens: std::collections::BTreeSet<String> =
+        cap_tokenize(&prompt).into_iter().collect();
     if let Ok(existing) = store.list_automations(&gateway_user_id(), &gateway_workspace_id()) {
         for a in &existing {
             if a.trigger_kind() != new_kind {
@@ -8512,8 +9254,11 @@ fn extract_poll_items(value: &serde_json::Value, key_field: &str) -> Vec<serde_j
     fn search(v: &serde_json::Value, key: &str) -> Option<Vec<serde_json::Value>> {
         match v {
             serde_json::Value::Array(arr) => {
-                let hits: Vec<serde_json::Value> =
-                    arr.iter().filter(|e| e.get(key).is_some()).cloned().collect();
+                let hits: Vec<serde_json::Value> = arr
+                    .iter()
+                    .filter(|e| e.get(key).is_some())
+                    .cloned()
+                    .collect();
                 if !hits.is_empty() {
                     return Some(hits);
                 }
@@ -8561,7 +9306,13 @@ async fn connector_poll_tick(state: &AppState) {
     for automation in automations {
         let (tool, args, key_field, label) = match &automation.trigger {
             AutomationTrigger::Event {
-                event: EventTrigger::ConnectorPoll { tool, args, key_field, label },
+                event:
+                    EventTrigger::ConnectorPoll {
+                        tool,
+                        args,
+                        key_field,
+                        label,
+                    },
             } => (tool.clone(), args.clone(), key_field.clone(), label.clone()),
             _ => continue,
         };
@@ -8569,19 +9320,18 @@ async fn connector_poll_tick(state: &AppState) {
         let st = state.clone();
         let tname = tool.clone();
         let av = args.clone();
-        let exec: Option<serde_json::Value> = if let Some((prov, mcp_tool)) =
-            parse_mcp_chat_name(&tname)
-        {
-            tokio::task::spawn_blocking(move || run_mcp_chat_tool(&st, &prov, &mcp_tool, av))
-                .await
-                .ok()
-                .and_then(Result::ok)
-        } else {
-            tokio::task::spawn_blocking(move || composio_execute_tool(&st, &tname, &av))
-                .await
-                .ok()
-                .and_then(Result::ok)
-        };
+        let exec: Option<serde_json::Value> =
+            if let Some((prov, mcp_tool)) = parse_mcp_chat_name(&tname) {
+                tokio::task::spawn_blocking(move || run_mcp_chat_tool(&st, &prov, &mcp_tool, av))
+                    .await
+                    .ok()
+                    .and_then(Result::ok)
+            } else {
+                tokio::task::spawn_blocking(move || composio_execute_tool(&st, &tname, &av))
+                    .await
+                    .ok()
+                    .and_then(Result::ok)
+            };
         let Some(value) = exec else { continue };
         let items = extract_poll_items(&value, &key_field);
         if items.is_empty() {
@@ -8592,7 +9342,11 @@ async fn connector_poll_tick(state: &AppState) {
             .as_ref()
             .and_then(|s| s.get("seen"))
             .and_then(|v| v.as_array())
-            .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|x| x.as_str().map(String::from))
+                    .collect()
+            })
             .unwrap_or_default();
         let initialized = automation
             .state
@@ -8602,7 +9356,10 @@ async fn connector_poll_tick(state: &AppState) {
             .unwrap_or(false);
         let mut fresh = Vec::new();
         for item in &items {
-            let key = item.get(&key_field).map(|v| v.to_string()).unwrap_or_default();
+            let key = item
+                .get(&key_field)
+                .map(|v| v.to_string())
+                .unwrap_or_default();
             if key.is_empty() {
                 continue;
             }
@@ -8680,7 +9437,11 @@ fn fire_channel_event_automations(state: &AppState, channel: &str, message: &Cha
     };
     let sender = message.sender.trim();
     let sender_name = message.sender_name.trim();
-    let speaker = if sender_name.is_empty() { sender } else { sender_name };
+    let speaker = if sender_name.is_empty() {
+        sender
+    } else {
+        sender_name
+    };
     let now = OffsetDateTime::now_utc();
     for automation in automations {
         // Only ChannelMessage triggers; clone the filters so the borrow ends here.
@@ -8725,7 +9486,10 @@ fn fire_channel_event_automations(state: &AppState, channel: &str, message: &Cha
             let mut fired = automation;
             fired.last_fired_at = Some(now);
             let _ = store.upsert_automation(&fired);
-            eprintln!("automation/{}: fired on {channel} message from {speaker}", fired.id);
+            eprintln!(
+                "automation/{}: fired on {channel} message from {speaker}",
+                fired.id
+            );
         }
     }
 }
@@ -8826,10 +9590,20 @@ async fn automation_event_sources(State(state): State<AppState>) -> Json<serde_j
             .ok()
             .map(|t| composio_connected_toolkits(&t))
             .unwrap_or_default();
-        (connected, composio_chat_tools_cached(&st, 500), mcp_chat_tools(&st, 500))
+        (
+            connected,
+            composio_chat_tools_cached(&st, 500),
+            mcp_chat_tools(&st, 500),
+        )
     })
     .await
-    .unwrap_or_else(|_| (Vec::new(), ComposioChatTools::default(), McpChatTools::default()));
+    .unwrap_or_else(|_| {
+        (
+            Vec::new(),
+            ComposioChatTools::default(),
+            McpChatTools::default(),
+        )
+    });
     // Index the catalogue's READ tools by toolkit prefix, so each connected service can be
     // matched to a poll tool (the agent picks the actual operation at run time).
     let mut tools_by_kit: std::collections::BTreeMap<String, Vec<String>> = Default::default();
@@ -8900,11 +9674,18 @@ async fn automation_event_sources(State(state): State<AppState>) -> Json<serde_j
 async fn automations_list(
     State(state): State<AppState>,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
-    let store = lock_task_store(&state)
-        .map_err(|_| GatewayError { status: StatusCode::SERVICE_UNAVAILABLE, code: "task_store", message: "task store unavailable".into() })?;
+    let store = lock_task_store(&state).map_err(|_| GatewayError {
+        status: StatusCode::SERVICE_UNAVAILABLE,
+        code: "task_store",
+        message: "task store unavailable".into(),
+    })?;
     let items = store
         .list_automations(&gateway_user_id(), &gateway_workspace_id())
-        .map_err(|e| GatewayError { status: StatusCode::INTERNAL_SERVER_ERROR, code: "automations_list", message: e.to_string() })?;
+        .map_err(|e| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "automations_list",
+            message: e.to_string(),
+        })?;
     let json: Vec<_> = items.iter().map(automation_to_json).collect();
     Ok(Json(serde_json::json!({ "automations": json })))
 }
@@ -8938,8 +9719,18 @@ async fn automation_create(
 ) -> Result<Json<serde_json::Value>, GatewayError> {
     // Validate a schedule trigger's recurrence up front (fail fast, like schedule_task).
     if let AutomationTrigger::Schedule { recurrence, tz } = &req.trigger {
-        if local_first_task_runtime::next_occurrence(recurrence, tz.as_deref(), OffsetDateTime::now_utc()).is_none() {
-            return Err(GatewayError { status: StatusCode::BAD_REQUEST, code: "bad_recurrence", message: format!("recurrence '{recurrence}' is not valid") });
+        if local_first_task_runtime::next_occurrence(
+            recurrence,
+            tz.as_deref(),
+            OffsetDateTime::now_utc(),
+        )
+        .is_none()
+        {
+            return Err(GatewayError {
+                status: StatusCode::BAD_REQUEST,
+                code: "bad_recurrence",
+                message: format!("recurrence '{recurrence}' is not valid"),
+            });
         }
     }
     let now = OffsetDateTime::now_utc();
@@ -8959,13 +9750,25 @@ async fn automation_create(
         last_fired_at: None,
         state: None,
     };
-    let store = lock_task_store(&state)
-        .map_err(|_| GatewayError { status: StatusCode::SERVICE_UNAVAILABLE, code: "task_store", message: "task store unavailable".into() })?;
+    let store = lock_task_store(&state).map_err(|_| GatewayError {
+        status: StatusCode::SERVICE_UNAVAILABLE,
+        code: "task_store",
+        message: "task store unavailable".into(),
+    })?;
     // Schedule + enabled → materialize the recurring task that drives it now.
-    automation.task_id = materialize_automation_task(&store, &automation)
-        .map_err(|msg| GatewayError { status: StatusCode::BAD_REQUEST, code: "bad_recurrence", message: msg })?;
-    store.upsert_automation(&automation)
-        .map_err(|e| GatewayError { status: StatusCode::INTERNAL_SERVER_ERROR, code: "automation_create", message: e.to_string() })?;
+    automation.task_id =
+        materialize_automation_task(&store, &automation).map_err(|msg| GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "bad_recurrence",
+            message: msg,
+        })?;
+    store
+        .upsert_automation(&automation)
+        .map_err(|e| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "automation_create",
+            message: e.to_string(),
+        })?;
     Ok(Json(automation_to_json(&automation)))
 }
 
@@ -8980,16 +9783,37 @@ async fn automation_update(
 ) -> Result<Json<serde_json::Value>, GatewayError> {
     // Validate a new schedule recurrence up front (fail fast, like create).
     if let Some(AutomationTrigger::Schedule { recurrence, tz }) = &req.trigger {
-        if local_first_task_runtime::next_occurrence(recurrence, tz.as_deref(), OffsetDateTime::now_utc()).is_none() {
-            return Err(GatewayError { status: StatusCode::BAD_REQUEST, code: "bad_recurrence", message: format!("recurrence '{recurrence}' is not valid") });
+        if local_first_task_runtime::next_occurrence(
+            recurrence,
+            tz.as_deref(),
+            OffsetDateTime::now_utc(),
+        )
+        .is_none()
+        {
+            return Err(GatewayError {
+                status: StatusCode::BAD_REQUEST,
+                code: "bad_recurrence",
+                message: format!("recurrence '{recurrence}' is not valid"),
+            });
         }
     }
-    let store = lock_task_store(&state)
-        .map_err(|_| GatewayError { status: StatusCode::SERVICE_UNAVAILABLE, code: "task_store", message: "task store unavailable".into() })?;
+    let store = lock_task_store(&state).map_err(|_| GatewayError {
+        status: StatusCode::SERVICE_UNAVAILABLE,
+        code: "task_store",
+        message: "task store unavailable".into(),
+    })?;
     let mut automation = store
         .get_automation(&id, &gateway_user_id(), &gateway_workspace_id())
-        .map_err(|e| GatewayError { status: StatusCode::INTERNAL_SERVER_ERROR, code: "automation_get", message: e.to_string() })?
-        .ok_or_else(|| GatewayError { status: StatusCode::NOT_FOUND, code: "automation_missing", message: "automation not found".into() })?;
+        .map_err(|e| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "automation_get",
+            message: e.to_string(),
+        })?
+        .ok_or_else(|| GatewayError {
+            status: StatusCode::NOT_FOUND,
+            code: "automation_missing",
+            message: "automation not found".into(),
+        })?;
     if let Some(title) = req.title {
         automation.title = title;
     }
@@ -9009,11 +9833,27 @@ async fn automation_update(
         cancel_automation_task(&store, &old);
     }
     if automation.enabled {
-        automation.task_id = materialize_automation_task(&store, &automation)
-            .map_err(|msg| GatewayError { status: StatusCode::BAD_REQUEST, code: "bad_recurrence", message: msg })?;
+        automation.task_id =
+            materialize_automation_task(&store, &automation).map_err(|msg| GatewayError {
+                status: StatusCode::BAD_REQUEST,
+                code: "bad_recurrence",
+                message: msg,
+            })?;
     }
-    store.upsert_automation(&automation)
-        .map_err(|e| GatewayError { status: StatusCode::INTERNAL_SERVER_ERROR, code: "automation_update", message: e.to_string() })?;
+    store
+        .upsert_automation(&automation)
+        .map_err(|e| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "automation_update",
+            message: e.to_string(),
+        })?;
+    drop(store);
+    let memory_user = gateway_memory_user_id();
+    let memory_workspace = gateway_memory_workspace_id();
+    if let Ok(facade) = lock_memory_facade(&state) {
+        let _ = tombstone_automation_memory_records(&facade, &memory_user, &memory_workspace, &id);
+    }
+    reconcile_memory_scope(&state, &memory_workspace);
     Ok(Json(automation_to_json(&automation)))
 }
 
@@ -9022,26 +9862,46 @@ async fn automation_toggle(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
-    let store = lock_task_store(&state)
-        .map_err(|_| GatewayError { status: StatusCode::SERVICE_UNAVAILABLE, code: "task_store", message: "task store unavailable".into() })?;
+    let store = lock_task_store(&state).map_err(|_| GatewayError {
+        status: StatusCode::SERVICE_UNAVAILABLE,
+        code: "task_store",
+        message: "task store unavailable".into(),
+    })?;
     let mut automation = store
         .get_automation(&id, &gateway_user_id(), &gateway_workspace_id())
-        .map_err(|e| GatewayError { status: StatusCode::INTERNAL_SERVER_ERROR, code: "automation_get", message: e.to_string() })?
-        .ok_or_else(|| GatewayError { status: StatusCode::NOT_FOUND, code: "automation_missing", message: "automation not found".into() })?;
+        .map_err(|e| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "automation_get",
+            message: e.to_string(),
+        })?
+        .ok_or_else(|| GatewayError {
+            status: StatusCode::NOT_FOUND,
+            code: "automation_missing",
+            message: "automation not found".into(),
+        })?;
     automation.enabled = !automation.enabled;
     automation.updated_at = OffsetDateTime::now_utc();
     if automation.enabled {
         // Re-enable: (re)create the driving task for a schedule automation.
         if automation.task_id.is_none() {
-            automation.task_id = materialize_automation_task(&store, &automation)
-                .map_err(|msg| GatewayError { status: StatusCode::BAD_REQUEST, code: "bad_recurrence", message: msg })?;
+            automation.task_id =
+                materialize_automation_task(&store, &automation).map_err(|msg| GatewayError {
+                    status: StatusCode::BAD_REQUEST,
+                    code: "bad_recurrence",
+                    message: msg,
+                })?;
         }
     } else if let Some(tid) = automation.task_id.take() {
         // Disable: stop the recurring task (set task_id back to None so re-enable is fresh).
         cancel_automation_task(&store, &tid);
     }
-    store.upsert_automation(&automation)
-        .map_err(|e| GatewayError { status: StatusCode::INTERNAL_SERVER_ERROR, code: "automation_toggle", message: e.to_string() })?;
+    store
+        .upsert_automation(&automation)
+        .map_err(|e| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "automation_toggle",
+            message: e.to_string(),
+        })?;
     Ok(Json(automation_to_json(&automation)))
 }
 
@@ -9050,16 +9910,33 @@ async fn automation_delete(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
-    let store = lock_task_store(&state)
-        .map_err(|_| GatewayError { status: StatusCode::SERVICE_UNAVAILABLE, code: "task_store", message: "task store unavailable".into() })?;
+    let store = lock_task_store(&state).map_err(|_| GatewayError {
+        status: StatusCode::SERVICE_UNAVAILABLE,
+        code: "task_store",
+        message: "task store unavailable".into(),
+    })?;
     // Stop the driving task (if any) before removing the rule.
-    if let Ok(Some(existing)) = store.get_automation(&id, &gateway_user_id(), &gateway_workspace_id()) {
+    if let Ok(Some(existing)) =
+        store.get_automation(&id, &gateway_user_id(), &gateway_workspace_id())
+    {
         if let Some(tid) = existing.task_id.as_deref() {
             cancel_automation_task(&store, tid);
         }
     }
-    store.delete_automation(&id, &gateway_user_id(), &gateway_workspace_id())
-        .map_err(|e| GatewayError { status: StatusCode::INTERNAL_SERVER_ERROR, code: "automation_delete", message: e.to_string() })?;
+    store
+        .delete_automation(&id, &gateway_user_id(), &gateway_workspace_id())
+        .map_err(|e| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "automation_delete",
+            message: e.to_string(),
+        })?;
+    drop(store);
+    let memory_user = gateway_memory_user_id();
+    let memory_workspace = gateway_memory_workspace_id();
+    if let Ok(facade) = lock_memory_facade(&state) {
+        let _ = tombstone_automation_memory_records(&facade, &memory_user, &memory_workspace, &id);
+    }
+    reconcile_memory_scope(&state, &memory_workspace);
     Ok(Json(serde_json::json!({ "deleted": id })))
 }
 
@@ -9151,7 +10028,7 @@ fn cancel_scheduled_task(state: &AppState, task_id: &str) -> String {
     let task = match store.get_task(&tid, &user, &workspace) {
         Ok(Some(task)) => task,
         Ok(None) => {
-            return format!("No task with id '{id}'. Use list_scheduled_tasks for the exact ids.")
+            return format!("No task with id '{id}'. Use list_scheduled_tasks for the exact ids.");
         }
         Err(error) => return format!("Error: {error}"),
     };
@@ -9379,12 +10256,27 @@ struct WorkspaceScopedMcpManifest {
 }
 
 const WORKSPACE_FILESYSTEM_WRITES: &[WorkspaceScopedMcpManifest] = &[
-    WorkspaceScopedMcpManifest { provider: "mcp:filesystem", tool: "create", paths: &["/path"] },
-    WorkspaceScopedMcpManifest { provider: "mcp:filesystem", tool: "insert", paths: &["/path"] },
-    WorkspaceScopedMcpManifest { provider: "mcp:filesystem", tool: "str_replace", paths: &["/path"] },
+    WorkspaceScopedMcpManifest {
+        provider: "mcp:filesystem",
+        tool: "create",
+        paths: &["/path"],
+    },
+    WorkspaceScopedMcpManifest {
+        provider: "mcp:filesystem",
+        tool: "insert",
+        paths: &["/path"],
+    },
+    WorkspaceScopedMcpManifest {
+        provider: "mcp:filesystem",
+        tool: "str_replace",
+        paths: &["/path"],
+    },
 ];
 
-fn workspace_filesystem_manifest(provider: &str, tool: &str) -> Option<&'static WorkspaceScopedMcpManifest> {
+fn workspace_filesystem_manifest(
+    provider: &str,
+    tool: &str,
+) -> Option<&'static WorkspaceScopedMcpManifest> {
     WORKSPACE_FILESYSTEM_WRITES
         .iter()
         .find(|entry| entry.provider == provider && entry.tool == tool)
@@ -9454,7 +10346,11 @@ user a confirmation card and will not execute it until the user approves."
 /// and exists on disk. Falls back to the active workspace when the thread is unknown.
 fn project_root_for_thread(state: &AppState, thread_id: Option<&str>) -> Option<PathBuf> {
     let workspace_id = thread_id
-        .and_then(|tid| lock_store(state).ok().and_then(|s| s.workspace_for_thread(tid).ok()))
+        .and_then(|tid| {
+            lock_store(state)
+                .ok()
+                .and_then(|s| s.workspace_for_thread(tid).ok())
+        })
         .unwrap_or_else(active_workspace_id);
     let folder = load_workspaces_file()
         .workspaces
@@ -9509,7 +10405,10 @@ fn jail_in_root(root: &std::path::Path, rel: &str) -> Result<PathBuf, String> {
     Ok(joined)
 }
 
-fn jail_absolute_in_root(root: &std::path::Path, candidate: &std::path::Path) -> Result<PathBuf, String> {
+fn jail_absolute_in_root(
+    root: &std::path::Path,
+    candidate: &std::path::Path,
+) -> Result<PathBuf, String> {
     if !candidate.is_absolute() {
         return Err("use an absolute path".to_string());
     }
@@ -9521,7 +10420,8 @@ fn jail_absolute_in_root(root: &std::path::Path, candidate: &std::path::Path) ->
 
 fn no_project_folder_msg() -> String {
     "This project has no folder associated with it: open/create one with a folder \
-(the authorized destinations), or use run_in_sandbox for throwaway work.".to_string()
+(the authorized destinations), or use run_in_sandbox for throwaway work."
+        .to_string()
 }
 
 const FS_LIST_CAP: usize = 400;
@@ -9560,9 +10460,11 @@ fn fs_path_authorized(path: &std::path::Path, roots: &[PathBuf]) -> bool {
     let Ok(canon) = path.canonicalize() else {
         return false;
     };
-    roots
-        .iter()
-        .any(|root| root.canonicalize().map(|r| canon.starts_with(&r)).unwrap_or(false))
+    roots.iter().any(|root| {
+        root.canonicalize()
+            .map(|r| canon.starts_with(&r))
+            .unwrap_or(false)
+    })
 }
 
 /// Why a native filesystem op can't proceed immediately.
@@ -9688,7 +10590,12 @@ async fn fs_list(
     Query(query): Query<FsListQuery>,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
     let thread_id = query.thread_id.clone();
-    let target = match query.path.as_deref().map(str::trim).filter(|p| !p.is_empty()) {
+    let target = match query
+        .path
+        .as_deref()
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+    {
         Some(path) => path.to_string(),
         None => match project_root_for_thread(&state, thread_id.as_deref()) {
             Some(root) => root.display().to_string(),
@@ -9699,8 +10606,8 @@ async fn fs_list(
             }
         },
     };
-    let root = project_root_for_thread(&state, thread_id.as_deref())
-        .map(|p| p.display().to_string());
+    let root =
+        project_root_for_thread(&state, thread_id.as_deref()).map(|p| p.display().to_string());
     match fs_resolve_authorized(&state, thread_id.as_deref(), &target) {
         Ok(path) => {
             let listed = path.clone();
@@ -9757,9 +10664,7 @@ fn git_head_version(path: &std::path::Path) -> (bool, String) {
         .args(["rev-parse", "--show-toplevel"])
         .output();
     let root = match root {
-        Ok(out) if out.status.success() => {
-            String::from_utf8_lossy(&out.stdout).trim().to_string()
-        }
+        Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout).trim().to_string(),
         _ => return (false, String::new()),
     };
     // Canonicalize both sides before strip_prefix: git's --show-toplevel returns
@@ -9896,7 +10801,10 @@ fn fs_authorize_folder(path: &std::path::Path) -> Result<(), String> {
     if list.iter().any(|d| d.path == path_str) {
         return Ok(());
     }
-    list.push(ArtifactDestination { label, path: path_str });
+    list.push(ArtifactDestination {
+        label,
+        path: path_str,
+    });
     write_artifact_destinations(&list)
 }
 
@@ -9912,7 +10820,9 @@ fn read_project_file(state: &AppState, thread_id: Option<&str>, rel: &str) -> St
         Ok(content) => {
             if content.len() > PROJECT_READ_MAX_CHARS {
                 let head: String = content.chars().take(PROJECT_READ_MAX_CHARS).collect();
-                format!("{head}\n[…truncated: file longer than {PROJECT_READ_MAX_CHARS} characters]")
+                format!(
+                    "{head}\n[…truncated: file longer than {PROJECT_READ_MAX_CHARS} characters]"
+                )
             } else {
                 content
             }
@@ -9921,7 +10831,12 @@ fn read_project_file(state: &AppState, thread_id: Option<&str>, rel: &str) -> St
     }
 }
 
-fn write_project_file(state: &AppState, thread_id: Option<&str>, rel: &str, content: &str) -> String {
+fn write_project_file(
+    state: &AppState,
+    thread_id: Option<&str>,
+    rel: &str,
+    content: &str,
+) -> String {
     let Some(root) = project_root_for_thread(state, thread_id) else {
         return no_project_folder_msg();
     };
@@ -10007,7 +10922,11 @@ fn list_project_files(state: &AppState, thread_id: Option<&str>) -> String {
             if name.starts_with('.') && name != ".env.example" || SKIP.contains(&name.as_str()) {
                 continue;
             }
-            let rel = path.strip_prefix(&root).unwrap_or(&path).to_string_lossy().to_string();
+            let rel = path
+                .strip_prefix(&root)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .to_string();
             if path.is_dir() {
                 out.push(format!("{rel}/"));
                 stack.push((path, depth + 1));
@@ -10026,7 +10945,9 @@ fn list_project_files(state: &AppState, thread_id: Option<&str>) -> String {
         let mut text = format!("Project files (root: {}):\n", root.display());
         text.push_str(&out.join("\n"));
         if out.len() >= PROJECT_LIST_MAX_ENTRIES {
-            text.push_str(&format!("\n[…list truncated to {PROJECT_LIST_MAX_ENTRIES} entries]"));
+            text.push_str(&format!(
+                "\n[…list truncated to {PROJECT_LIST_MAX_ENTRIES} entries]"
+            ));
         }
         text
     }
@@ -10081,7 +11002,10 @@ Reformulate it without destructive operations.",
                 .code()
                 .map(|c| c.to_string())
                 .unwrap_or_else(|| "terminated by signal".to_string());
-            let body: String = combined.chars().take(PROJECT_CMD_MAX_OUTPUT_CHARS).collect();
+            let body: String = combined
+                .chars()
+                .take(PROJECT_CMD_MAX_OUTPUT_CHARS)
+                .collect();
             let body = if body.trim().is_empty() {
                 "(no output)"
             } else {
@@ -10121,7 +11045,10 @@ fn format_recall_entry(summary: &str, metadata: &serde_json::Value) -> String {
                 if option.is_empty() {
                     return None;
                 }
-                let why = alt.get("rejected_because").and_then(|w| w.as_str()).unwrap_or("");
+                let why = alt
+                    .get("rejected_because")
+                    .and_then(|w| w.as_str())
+                    .unwrap_or("");
                 Some(if why.is_empty() {
                     option.to_string()
                 } else {
@@ -10130,14 +11057,19 @@ fn format_recall_entry(summary: &str, metadata: &serde_json::Value) -> String {
             })
             .collect();
         if !rejected.is_empty() {
-            out.push_str(&format!(" [rejected alternatives: {}]", rejected.join("; ")));
+            out.push_str(&format!(
+                " [rejected alternatives: {}]",
+                rejected.join("; ")
+            ));
         }
     }
     out
 }
 
 fn artifact_quality_summary(metadata: &serde_json::Value) -> Option<String> {
-    let status = metadata.get("quality_status").and_then(|value| value.as_str())?;
+    let status = metadata
+        .get("quality_status")
+        .and_then(|value| value.as_str())?;
     let mut parts = vec![format!("quality: {status}")];
     if let Some(slide_count) = metadata
         .get("quality_slide_count")
@@ -10205,7 +11137,9 @@ fn artifact_provenance_context_for_query(
         return None;
     }
 
-    let memories = facade.list_memories_for_ui(user, workspace).unwrap_or_default();
+    let memories = facade
+        .list_memories_for_ui(user, workspace)
+        .unwrap_or_default();
     let memory_by_ref: std::collections::HashMap<String, MemoryRecord> = memories
         .iter()
         .cloned()
@@ -10215,20 +11149,27 @@ fn artifact_provenance_context_for_query(
         .iter()
         .filter(|memory| {
             memory.memory_type == "artifact"
-                && matches!(memory.status, MemoryStatus::Confirmed | MemoryStatus::Candidate)
+                && matches!(
+                    memory.status,
+                    MemoryStatus::Confirmed | MemoryStatus::Candidate
+                )
         })
         .collect();
     if artifact_memories.is_empty() {
         return None;
     }
 
-    let entities = facade.list_entities_for_ui(user, workspace).unwrap_or_default();
+    let entities = facade
+        .list_entities_for_ui(user, workspace)
+        .unwrap_or_default();
     let entity_by_ref: std::collections::HashMap<String, MemoryEntity> = entities
         .iter()
         .cloned()
         .map(|entity| (entity.reference.to_string(), entity))
         .collect();
-    let relations = facade.list_relations_for_ui(user, workspace).unwrap_or_default();
+    let relations = facade
+        .list_relations_for_ui(user, workspace)
+        .unwrap_or_default();
     let artifact_entity_for_memory = |artifact: &MemoryRecord| -> Option<MemoryRef> {
         relations
             .iter()
@@ -10241,8 +11182,14 @@ fn artifact_provenance_context_for_query(
             })
             .map(|relation| relation.target_ref.clone())
             .or_else(|| {
-                let thread_slug = artifact.metadata.get("thread_slug").and_then(|value| value.as_str())?;
-                let name = artifact.metadata.get("name").and_then(|value| value.as_str())?;
+                let thread_slug = artifact
+                    .metadata
+                    .get("thread_slug")
+                    .and_then(|value| value.as_str())?;
+                let name = artifact
+                    .metadata
+                    .get("name")
+                    .and_then(|value| value.as_str())?;
                 Some(MemoryRef::new(
                     MemoryRefKind::Entity,
                     user.clone(),
@@ -10270,9 +11217,16 @@ fn artifact_provenance_context_for_query(
                     .is_some_and(|file_name| query_lc.contains(&file_name.to_ascii_lowercase()))
         });
         if !query_hits_artifact
-            && !["artifact", "artef", "deliverable", "provenance", "provenienza", "workflow"]
-                .iter()
-                .any(|needle| query_lc.contains(needle))
+            && ![
+                "artifact",
+                "artef",
+                "deliverable",
+                "provenance",
+                "provenienza",
+                "workflow",
+            ]
+            .iter()
+            .any(|needle| query_lc.contains(needle))
         {
             continue;
         }
@@ -10284,10 +11238,19 @@ fn artifact_provenance_context_for_query(
             .metadata
             .get("title")
             .and_then(|value| value.as_str())
-            .or_else(|| artifact.metadata.get("name").and_then(|value| value.as_str()))
+            .or_else(|| {
+                artifact
+                    .metadata
+                    .get("name")
+                    .and_then(|value| value.as_str())
+            })
             .unwrap_or_else(|| artifact.text.lines().next().unwrap_or("artifact"));
         let mut detail = format!("- {artifact_name}");
-        if let Some(kind) = artifact.metadata.get("artifact_type").and_then(|value| value.as_str()) {
+        if let Some(kind) = artifact
+            .metadata
+            .get("artifact_type")
+            .and_then(|value| value.as_str())
+        {
             detail.push_str(&format!(" ({kind})"));
         }
         let mut path_bits = Vec::new();
@@ -10298,12 +11261,20 @@ fn artifact_provenance_context_for_query(
         {
             path_bits.push(format!("project path: {path}"));
         }
-        if let Some(path) = artifact.metadata.get("path_ref").and_then(|value| value.as_str()) {
+        if let Some(path) = artifact
+            .metadata
+            .get("path_ref")
+            .and_then(|value| value.as_str())
+        {
             if !path_bits.iter().any(|bit| bit.contains(path)) {
                 path_bits.push(format!("ref: {path}"));
             }
         }
-        if let Some(path) = artifact.metadata.get("managed_path").and_then(|value| value.as_str()) {
+        if let Some(path) = artifact
+            .metadata
+            .get("managed_path")
+            .and_then(|value| value.as_str())
+        {
             if !path_bits.iter().any(|bit| bit.contains(path)) {
                 path_bits.push(format!("local managed path: {path}"));
             }
@@ -10417,10 +11388,14 @@ fn workflow_status_context_for_query(
         return None;
     }
 
-    let memories = facade.list_memories_for_ui(user, workspace).unwrap_or_default();
+    let memories = facade
+        .list_memories_for_ui(user, workspace)
+        .unwrap_or_default();
     let live = |memory: &&MemoryRecord| {
-        matches!(memory.status, MemoryStatus::Confirmed | MemoryStatus::Candidate)
-            && memory.superseded_by.is_none()
+        matches!(
+            memory.status,
+            MemoryStatus::Confirmed | MemoryStatus::Candidate
+        ) && memory.superseded_by.is_none()
             && !memory.text.trim().is_empty()
     };
     let mut goals: Vec<&MemoryRecord> = memories
@@ -10443,10 +11418,10 @@ fn workflow_status_context_for_query(
         .filter(|memory| {
             memory.memory_type == "fact"
                 && (memory
-                        .metadata
-                        .get("certainty")
-                        .and_then(|value| value.as_str())
-                        .is_some_and(|value| matches!(value, "committed" | "completed" | "verified"))
+                    .metadata
+                    .get("certainty")
+                    .and_then(|value| value.as_str())
+                    .is_some_and(|value| matches!(value, "committed" | "completed" | "verified"))
                     || memory
                         .metadata
                         .get("source")
@@ -10474,25 +11449,36 @@ fn workflow_status_context_for_query(
     if !open_loops.is_empty() {
         let mut lines = vec!["Open loops / next work:".to_string()];
         for open_loop in open_loops.into_iter().take(6) {
-            lines.push(format!("- {} (ref: {})", open_loop.text.trim(), open_loop.reference));
+            lines.push(format!(
+                "- {} (ref: {})",
+                open_loop.text.trim(),
+                open_loop.reference
+            ));
         }
         sections.push(lines.join("\n"));
     }
     if !outcomes.is_empty() {
         let mut lines = vec!["Verified outcomes / current state:".to_string()];
         for outcome in outcomes.into_iter().take(4) {
-            lines.push(format!("- {}", format_recall_entry(&outcome.text, &outcome.metadata)));
+            lines.push(format!(
+                "- {}",
+                format_recall_entry(&outcome.text, &outcome.metadata)
+            ));
         }
         sections.push(lines.join("\n"));
     }
     if !decisions.is_empty() {
         let mut lines = vec!["Recent decisions / why:".to_string()];
         for decision in decisions.into_iter().take(6) {
-            lines.push(format!("- {}", format_recall_entry(&decision.text, &decision.metadata)));
+            lines.push(format!(
+                "- {}",
+                format_recall_entry(&decision.text, &decision.metadata)
+            ));
         }
         sections.push(lines.join("\n"));
     }
-    if let Some(provenance) = artifact_provenance_context_for_query(facade, user, workspace, query) {
+    if let Some(provenance) = artifact_provenance_context_for_query(facade, user, workspace, query)
+    {
         sections.push(format!("Evidence artifacts:\n{provenance}"));
     }
 
@@ -10544,7 +11530,10 @@ fn decisions_for_path(state: &AppState, path: &str) -> Option<String> {
         "📌 Past decisions about «{base}» (from memory — keep them in mind, don't re-derive them):"
     )];
     for item in page.items {
-        lines.push(format!("- {}", format_recall_entry(&item.summary, &item.metadata)));
+        lines.push(format!(
+            "- {}",
+            format_recall_entry(&item.summary, &item.metadata)
+        ));
     }
     Some(lines.join("\n"))
 }
@@ -10587,7 +11576,11 @@ fn relevant_code_components_for_prompt(state: &AppState, prompt: &str) -> Option
 do NOT recreate them, EXTEND/reuse the right ones; use query_code_graph for details):",
     );
     for (name, etype, src) in hits.iter().take(15) {
-        let loc = if src.is_empty() { String::new() } else { format!(" — {src}") };
+        let loc = if src.is_empty() {
+            String::new()
+        } else {
+            format!(" — {src}")
+        };
         block.push_str(&format!("\n- {name} ({}){loc}", kind(etype)));
     }
     Some(block)
@@ -10651,7 +11644,11 @@ async fn relevant_memory_for_prompt(state: &AppState, prompt: &str) -> Option<St
     // whatever the two passes surface.
     let records: std::collections::HashMap<String, local_first_memory::MemoryRecord> = facade
         .list_memories_for_ui(&user, &active)
-        .map(|ms| ms.into_iter().map(|m| (m.reference.to_string(), m)).collect())
+        .map(|ms| {
+            ms.into_iter()
+                .map(|m| (m.reference.to_string(), m))
+                .collect()
+        })
         .unwrap_or_default();
 
     // Lexical pass (FTS/bm25, policy-filtered) → rank per reference.
@@ -10749,7 +11746,9 @@ async fn relevant_memory_for_prompt(state: &AppState, prompt: &str) -> Option<St
     }
     if let Some(workflow) = workflow_status_context_for_query(&facade, &user, &active, query) {
         lines.insert(0, workflow);
-    } else if let Some(provenance) = artifact_provenance_context_for_query(&facade, &user, &active, query) {
+    } else if let Some(provenance) =
+        artifact_provenance_context_for_query(&facade, &user, &active, query)
+    {
         lines.insert(0, provenance);
     }
     lines.truncate(10);
@@ -10801,7 +11800,12 @@ fn recall_memory(state: &AppState, query: &str) -> String {
             .map(|page| {
                 page.items
                     .into_iter()
-                    .map(|item| (item.memory_type, format_recall_entry(&item.summary, &item.metadata)))
+                    .map(|item| {
+                        (
+                            item.memory_type,
+                            format_recall_entry(&item.summary, &item.metadata),
+                        )
+                    })
                     .collect()
             })
             .unwrap_or_default()
@@ -10821,21 +11825,28 @@ fn recall_memory(state: &AppState, query: &str) -> String {
     }
     if let Some(workflow) = workflow_status_context_for_query(&facade, &user, &active, query) {
         lines.push(workflow);
-    } else if let Some(provenance) = artifact_provenance_context_for_query(&facade, &user, &active, query) {
+    } else if let Some(provenance) =
+        artifact_provenance_context_for_query(&facade, &user, &active, query)
+    {
         lines.push(provenance);
     }
     // Episodic memory (M4): past conversations — SCOPED to the active workspace via the
     // episode's origin tag, so a project recalls only its own conversations.
-    if let Ok(episodes) = facade.list_memories_for_ui(&user, &MemoryWorkspaceId::new(THREADS_WORKSPACE)) {
+    if let Ok(episodes) =
+        facade.list_memories_for_ui(&user, &MemoryWorkspaceId::new(THREADS_WORKSPACE))
+    {
         let needle = query.to_lowercase();
-        let terms: Vec<&str> = needle.split_whitespace().filter(|w| w.chars().count() >= 4).collect();
+        let terms: Vec<&str> = needle
+            .split_whitespace()
+            .filter(|w| w.chars().count() >= 4)
+            .collect();
         let mut hits: Vec<String> = episodes
             .into_iter()
             .filter(|m| m.memory_type == "episode")
-            .filter(|m| m.metadata.get("workspace").and_then(|w| w.as_str()) == Some(active.as_str()))
             .filter(|m| {
-                terms.is_empty() || terms.iter().any(|t| m.text.to_lowercase().contains(t))
+                m.metadata.get("workspace").and_then(|w| w.as_str()) == Some(active.as_str())
             })
+            .filter(|m| terms.is_empty() || terms.iter().any(|t| m.text.to_lowercase().contains(t)))
             .map(|m| format!("- [conversation] {}", m.text))
             .collect();
         hits.truncate(8);
@@ -10845,24 +11856,24 @@ fn recall_memory(state: &AppState, query: &str) -> String {
     // project (it's personal-scope knowledge; a project must not surface it).
     let personal = MemoryWorkspaceId::new(PERSONAL_WORKSPACE);
     if !in_project {
-    if let Ok(relations) = facade.list_relations_for_ui(&user, &personal) {
-        if !relations.is_empty() {
-            let names: std::collections::HashMap<String, String> = facade
-                .list_entities_for_ui(&user, &personal)
-                .unwrap_or_default()
-                .into_iter()
-                .map(|entity| (entity.reference.to_string(), entity.name))
-                .collect();
-            for relation in relations.iter().take(12) {
-                if let (Some(source), Some(target)) = (
-                    names.get(&relation.source_ref.to_string()),
-                    names.get(&relation.target_ref.to_string()),
-                ) {
-                    lines.push(format!("- {source} —{}→ {target}", relation.relation_type));
+        if let Ok(relations) = facade.list_relations_for_ui(&user, &personal) {
+            if !relations.is_empty() {
+                let names: std::collections::HashMap<String, String> = facade
+                    .list_entities_for_ui(&user, &personal)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|entity| (entity.reference.to_string(), entity.name))
+                    .collect();
+                for relation in relations.iter().take(12) {
+                    if let (Some(source), Some(target)) = (
+                        names.get(&relation.source_ref.to_string()),
+                        names.get(&relation.target_ref.to_string()),
+                    ) {
+                        lines.push(format!("- {source} —{}→ {target}", relation.relation_type));
+                    }
                 }
             }
         }
-    }
     }
     if lines.is_empty() {
         format!("No memories relevant to «{query}».")
@@ -10887,12 +11898,18 @@ async fn generate_stream(
         // from ALL providers, so switch to the chosen model's OWN provider (endpoint +
         // key), not just its name on the role's provider — otherwise a cross-provider
         // pick hits the wrong server and silently falls back to the settings model.
-        if let Some(override_model) = request.model.as_ref().map(|m| m.trim()).filter(|m| !m.is_empty()) {
+        if let Some(override_model) = request
+            .model
+            .as_ref()
+            .map(|m| m.trim())
+            .filter(|m| !m.is_empty())
+        {
             // The grouped picker sends "<provider_id>::<model>" (disambiguates a model id
             // present in several providers); the plain form "<model>" is also accepted.
             let resolved = match override_model.split_once("::") {
-                Some((pid, mid)) => provider_config_by_id(pid, mid)
-                    .or_else(|| provider_config_for_model(mid)),
+                Some((pid, mid)) => {
+                    provider_config_by_id(pid, mid).or_else(|| provider_config_for_model(mid))
+                }
                 None => provider_config_for_model(override_model),
             };
             if let Some((ov_base, ov_model, ov_key)) = resolved {
@@ -10900,7 +11917,11 @@ async fn generate_stream(
                 model = ov_model;
                 api_key = ov_key;
             } else {
-                model = override_model.rsplit("::").next().unwrap_or(override_model).to_string();
+                model = override_model
+                    .rsplit("::")
+                    .next()
+                    .unwrap_or(override_model)
+                    .to_string();
             }
         }
         // Expose the EFFECTIVE model on the response so the UI can label the message
@@ -10942,7 +11963,9 @@ async fn improve_prompt(
 ) -> Result<Json<ImprovePromptResponse>, GatewayError> {
     let draft = request.prompt.trim();
     if draft.is_empty() {
-        return Ok(Json(ImprovePromptResponse { improved: String::new() }));
+        return Ok(Json(ImprovePromptResponse {
+            improved: String::new(),
+        }));
     }
     let (base_url, model, api_key) = chat_openai_stream_config().ok_or_else(|| GatewayError {
         status: StatusCode::SERVICE_UNAVAILABLE,
@@ -10963,15 +11986,22 @@ Return ONLY the rewritten prompt, as plain text, without preamble, quotes or exp
             { "role": "user", "content": format!("Rewrite this prompt:\n\n{draft}") },
         ],
     });
-    let mut builder = state.http.post(&endpoint).timeout(std::time::Duration::from_secs(30));
+    let mut builder = state
+        .http
+        .post(&endpoint)
+        .timeout(std::time::Duration::from_secs(30));
     if let Some(key) = api_key.as_ref() {
         builder = builder.bearer_auth(key);
     }
-    let resp = builder.json(&payload).send().await.map_err(|error| GatewayError {
-        status: StatusCode::BAD_GATEWAY,
-        code: "improve_prompt_failed",
-        message: format!("Provider unreachable: {error}"),
-    })?;
+    let resp = builder
+        .json(&payload)
+        .send()
+        .await
+        .map_err(|error| GatewayError {
+            status: StatusCode::BAD_GATEWAY,
+            code: "improve_prompt_failed",
+            message: format!("Provider unreachable: {error}"),
+        })?;
     if !resp.status().is_success() {
         let status = resp.status();
         return Err(GatewayError {
@@ -10995,7 +12025,11 @@ Return ONLY the rewritten prompt, as plain text, without preamble, quotes or exp
         .trim()
         .trim_matches('"')
         .to_string();
-    let improved = if improved.is_empty() { draft.to_string() } else { improved };
+    let improved = if improved.is_empty() {
+        draft.to_string()
+    } else {
+        improved
+    };
     Ok(Json(ImprovePromptResponse { improved }))
 }
 
@@ -11017,7 +12051,9 @@ async fn chat_suggestions(
     State(state): State<AppState>,
     Json(request): Json<SuggestionsRequest>,
 ) -> Json<SuggestionsResponse> {
-    let empty = Json(SuggestionsResponse { suggestions: Vec::new() });
+    let empty = Json(SuggestionsResponse {
+        suggestions: Vec::new(),
+    });
     let Some((base_url, model, api_key)) = chat_openai_stream_config() else {
         return empty;
     };
@@ -11042,7 +12078,10 @@ without numbering, dashes or quotes. Return ONLY the 3 lines.";
             { "role": "user", "content": user },
         ],
     });
-    let mut builder = state.http.post(&endpoint).timeout(std::time::Duration::from_secs(25));
+    let mut builder = state
+        .http
+        .post(&endpoint)
+        .timeout(std::time::Duration::from_secs(25));
     if let Some(key) = api_key.as_ref() {
         builder = builder.bearer_auth(key);
     }
@@ -11118,7 +12157,10 @@ language as the user. Only the title, without quotes, final punctuation or prefi
             { "role": "user", "content": user },
         ],
     });
-    let mut builder = state.http.post(&endpoint).timeout(std::time::Duration::from_secs(20));
+    let mut builder = state
+        .http
+        .post(&endpoint)
+        .timeout(std::time::Duration::from_secs(20));
     if let Some(key) = api_key.as_ref() {
         builder = builder.bearer_auth(key);
     }
@@ -11133,7 +12175,15 @@ language as the user. Only the title, without quotes, final punctuation or prefi
                     .and_then(|c| c.get("message"))
                     .and_then(|m| m.get("content"))
                     .and_then(|c| c.as_str())
-                    .map(|s| s.trim().trim_matches('"').lines().next().unwrap_or("").trim().to_string())
+                    .map(|s| {
+                        s.trim()
+                            .trim_matches('"')
+                            .lines()
+                            .next()
+                            .unwrap_or("")
+                            .trim()
+                            .to_string()
+                    })
             })
             .unwrap_or_default(),
         _ => String::new(),
@@ -11247,7 +12297,12 @@ async fn transcribe_audio(
         .timeout(std::time::Duration::from_secs(300))
         .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
         .body(bytes);
-    if let Some(lang) = request.language.as_ref().map(|l| l.trim()).filter(|l| !l.is_empty()) {
+    if let Some(lang) = request
+        .language
+        .as_ref()
+        .map(|l| l.trim())
+        .filter(|l| !l.is_empty())
+    {
         builder = builder.header("X-Language", lang);
     }
     let resp = builder.send().await.map_err(|e| GatewayError {
@@ -11261,7 +12316,10 @@ async fn transcribe_audio(
         return Err(GatewayError {
             status: StatusCode::BAD_GATEWAY,
             code: "transcribe_failed",
-            message: format!("STT responded {status}: {}", body.chars().take(200).collect::<String>()),
+            message: format!(
+                "STT responded {status}: {}",
+                body.chars().take(200).collect::<String>()
+            ),
         });
     }
     let body: serde_json::Value = resp.json().await.map_err(|e| GatewayError {
@@ -11270,8 +12328,16 @@ async fn transcribe_audio(
         message: format!("Invalid STT response: {e}"),
     })?;
     Ok(Json(TranscribeResponse {
-        text: body.get("text").and_then(|t| t.as_str()).unwrap_or("").trim().to_string(),
-        language: body.get("language").and_then(|l| l.as_str()).map(String::from),
+        text: body
+            .get("text")
+            .and_then(|t| t.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string(),
+        language: body
+            .get("language")
+            .and_then(|l| l.as_str())
+            .map(String::from),
     }))
 }
 
@@ -11351,7 +12417,10 @@ fn persisted_inference_api_key() -> Option<String> {
     let store = open_gateway_secret_store().ok()?;
     let reference = inference_secret_ref()?;
     let material = store.get(&reference).ok()??;
-    material.expose_utf8().ok().filter(|value| !value.is_empty())
+    material
+        .expose_utf8()
+        .ok()
+        .filter(|value| !value.is_empty())
 }
 
 fn set_persisted_inference_api_key(key: &str) -> Result<(), String> {
@@ -11366,12 +12435,14 @@ fn set_persisted_inference_api_key(key: &str) -> Result<(), String> {
 // ── Provider registry (Phase 1: multi-provider inference) ──────────────────
 
 use model_registry::{
-    canonical_provider_base_url, ProviderEntry, ProviderKind, ProviderRegistry, ResolvedRole,
-    RoleBinding,
+    ProviderEntry, ProviderKind, ProviderRegistry, ResolvedRole, RoleBinding,
+    canonical_provider_base_url,
 };
 
 fn provider_registry_path() -> Option<PathBuf> {
-    gateway_data_dir().ok().map(|dir| dir.join("providers.json"))
+    gateway_data_dir()
+        .ok()
+        .map(|dir| dir.join("providers.json"))
 }
 
 /// Per-provider API-key reference in the encrypted secret store (keyed by id).
@@ -11419,7 +12490,8 @@ fn provider_api_key(provider_id: &str) -> Option<String> {
 
 fn set_provider_api_key(provider_id: &str, key: &str) -> Result<(), String> {
     let store = open_gateway_secret_store().map_err(|error| error.to_string())?;
-    let reference = provider_secret_ref(provider_id).ok_or_else(|| "invalid secret ref".to_string())?;
+    let reference =
+        provider_secret_ref(provider_id).ok_or_else(|| "invalid secret ref".to_string())?;
     store
         .put(reference, SecretMaterial::from_string(key))
         .map(|_| ())
@@ -11427,9 +12499,10 @@ fn set_provider_api_key(provider_id: &str, key: &str) -> Result<(), String> {
 }
 
 fn delete_provider_api_key(provider_id: &str) {
-    if let (Ok(store), Some(reference)) =
-        (open_gateway_secret_store(), provider_secret_ref(provider_id))
-    {
+    if let (Ok(store), Some(reference)) = (
+        open_gateway_secret_store(),
+        provider_secret_ref(provider_id),
+    ) {
         let _ = store.delete(&reference);
     }
 }
@@ -11511,7 +12584,11 @@ fn chat_openai_stream_config() -> Option<(String, String, Option<String>)> {
         return Some((resolved.base_url, resolved.model, api_key));
     }
     let base_url = effective_inference_base_url()?;
-    Some((base_url, active_inference_model(), resolve_inference_api_key()))
+    Some((
+        base_url,
+        active_inference_model(),
+        resolve_inference_api_key(),
+    ))
 }
 
 /// OpenAI-compatible (base_url, model, api_key) for an ARBITRARY role, falling back to
@@ -11596,7 +12673,9 @@ failed or error-laden tool result is NOT complete. Reply with STRICT JSON only, 
             { "role": "user", "content": user },
         ],
     });
-    let mut builder = http.post(&endpoint).timeout(std::time::Duration::from_secs(45));
+    let mut builder = http
+        .post(&endpoint)
+        .timeout(std::time::Duration::from_secs(45));
     if let Some(key) = api_key.as_ref() {
         builder = builder.bearer_auth(key);
     }
@@ -11664,7 +12743,9 @@ request is COMPLETE. Reply with STRICT JSON only, no prose: \
             { "role": "user", "content": user },
         ],
     });
-    let mut builder = http.post(&endpoint).timeout(std::time::Duration::from_secs(45));
+    let mut builder = http
+        .post(&endpoint)
+        .timeout(std::time::Duration::from_secs(45));
     if let Some(key) = api_key.as_ref() {
         builder = builder.bearer_auth(key);
     }
@@ -11741,7 +12822,9 @@ concrete values (names, numbers, URLs, artifact filenames). No preamble, no mark
             { "role": "user", "content": buf.chars().take(12000).collect::<String>() },
         ],
     });
-    let mut builder = http.post(&endpoint).timeout(std::time::Duration::from_secs(45));
+    let mut builder = http
+        .post(&endpoint)
+        .timeout(std::time::Duration::from_secs(45));
     if let Some(key) = api_key.as_ref() {
         builder = builder.bearer_auth(key);
     }
@@ -11780,10 +12863,7 @@ concrete values (names, numbers, URLs, artifact filenames). No preamble, no mark
 fn orchestrator_is_local() -> bool {
     let registry = load_provider_registry();
     if let Some(resolved) = registry.resolve_role("orchestrator") {
-        return resolved
-            .base_url
-            .contains("127.0.0.1")
-            || resolved.base_url.contains("localhost");
+        return resolved.base_url.contains("127.0.0.1") || resolved.base_url.contains("localhost");
     }
     // Fall back to the active provider, then legacy config.
     registry
@@ -11813,11 +12893,7 @@ fn active_llm_concurrency() -> u32 {
     if let Some(forced) = registry.llm_concurrency_override() {
         return forced;
     }
-    if orchestrator_is_local() {
-        1
-    } else {
-        4
-    }
+    if orchestrator_is_local() { 1 } else { 4 }
 }
 
 /// The data the `/api/runtime/llm-concurrency` GET handler returns — so the UI
@@ -11962,8 +13038,10 @@ fn reassemble_openai_stream(sse: &str) -> serde_json::Value {
                     }
                     if let Some(args) = function.get("arguments").and_then(|v| v.as_str()) {
                         if !args.is_empty() {
-                            let current =
-                                slot["function"]["arguments"].as_str().unwrap_or("").to_string();
+                            let current = slot["function"]["arguments"]
+                                .as_str()
+                                .unwrap_or("")
+                                .to_string();
                             slot["function"]["arguments"] =
                                 serde_json::Value::String(current + args);
                         }
@@ -12052,7 +13130,9 @@ async fn collect_openai_stream(
                         {
                             let _ = emit_stream_event(
                                 sink,
-                                GenerateStreamEvent::Delta { text: fragment.to_string() },
+                                GenerateStreamEvent::Delta {
+                                    text: fragment.to_string(),
+                                },
                             )
                             .await;
                         }
@@ -12061,7 +13141,10 @@ async fn collect_openai_stream(
             }
             Ok(Some(Err(error))) => {
                 // DIAGNOSTIC: full error chain (Display hides the real cause; #2839).
-                eprintln!("[stream-error openai] debug={error:?} source={:?}", std::error::Error::source(&error));
+                eprintln!(
+                    "[stream-error openai] debug={error:?} source={:?}",
+                    std::error::Error::source(&error)
+                );
                 // Mid-stream drop ("error decoding response body" — common when a
                 // cloud proxy resets a long generation near the end): salvage the
                 // partial output instead of failing the whole turn.
@@ -12116,7 +13199,10 @@ fn zai_thinking_enabled() -> bool {
 fn chat_endpoint(base_url: &str) -> String {
     let trimmed = base_url.trim_end_matches('/');
     if is_ollama_base(base_url) {
-        let root = trimmed.strip_suffix("/v1").unwrap_or(trimmed).trim_end_matches('/');
+        let root = trimmed
+            .strip_suffix("/v1")
+            .unwrap_or(trimmed)
+            .trim_end_matches('/');
         format!("{root}/api/chat")
     } else {
         format!("{trimmed}/chat/completions")
@@ -12218,8 +13304,13 @@ async fn process_ollama_line(
             .filter(|s| !s.is_empty())
         {
             content.push_str(fragment);
-            let _ = emit_stream_event(sink, GenerateStreamEvent::Delta { text: fragment.to_string() })
-                .await;
+            let _ = emit_stream_event(
+                sink,
+                GenerateStreamEvent::Delta {
+                    text: fragment.to_string(),
+                },
+            )
+            .await;
         }
         if let Some(calls) = message.get("tool_calls").and_then(|v| v.as_array()) {
             for call in calls {
@@ -12230,7 +13321,9 @@ async fn process_ollama_line(
                     .unwrap_or("");
                 let args_str = match call.get("function").and_then(|f| f.get("arguments")) {
                     Some(serde_json::Value::String(s)) => s.clone(),
-                    Some(value) => serde_json::to_string(value).unwrap_or_else(|_| "{}".to_string()),
+                    Some(value) => {
+                        serde_json::to_string(value).unwrap_or_else(|_| "{}".to_string())
+                    }
                     None => "{}".to_string(),
                 };
                 let id = format!("ollama_call_{}", tool_calls.len());
@@ -12275,7 +13368,10 @@ async fn collect_ollama_native_stream(
             Ok(None) => break,
             Ok(Some(Err(error))) => {
                 // DIAGNOSTIC: full error chain (Display hides the real cause; #2839).
-                eprintln!("[stream-error ollama] debug={error:?} source={:?}", std::error::Error::source(&error));
+                eprintln!(
+                    "[stream-error ollama] debug={error:?} source={:?}",
+                    std::error::Error::source(&error)
+                );
                 if content.is_empty() && tool_calls.is_empty() {
                     return Err(error.to_string());
                 }
@@ -12387,7 +13483,8 @@ fn auth_fallback_config(failing_model: &str) -> Option<(String, String, Option<S
     }
     // 2) A loopback provider with a non-cloud model (runs locally, no auth).
     for provider in &registry.providers {
-        let local = provider.base_url.contains("127.0.0.1") || provider.base_url.contains("localhost");
+        let local =
+            provider.base_url.contains("127.0.0.1") || provider.base_url.contains("localhost");
         if !local {
             continue;
         }
@@ -12778,8 +13875,9 @@ fn create_skill(name: &str, description: &str, instructions: &str) -> String {
     }
     let desc_yaml =
         serde_json::to_string(description).unwrap_or_else(|_| format!("\"{description}\""));
-    let content =
-        format!("---\nname: {name}\nslug: {slug}\nversion: 1.0.0\ndescription: {desc_yaml}\n---\n\n{instructions}\n");
+    let content = format!(
+        "---\nname: {name}\nslug: {slug}\nversion: 1.0.0\ndescription: {desc_yaml}\n---\n\n{instructions}\n"
+    );
     if let Err(error) = fs::write(skill_dir.join("SKILL.md"), &content) {
         let _ = fs::remove_dir_all(&skill_dir);
         return format!("Could not write the skill: {error}");
@@ -12848,11 +13946,7 @@ fn skill_id_from_command(command: &str) -> Option<String> {
         .chars()
         .take_while(|c| *c != '/' && *c != ' ' && *c != '"' && *c != '\'')
         .collect();
-    if id.is_empty() {
-        None
-    } else {
-        Some(id)
-    }
+    if id.is_empty() { None } else { Some(id) }
 }
 
 /// Adapts a skill's SKILL.md for execution in the contained computer: substitutes
@@ -13107,21 +14201,26 @@ fn deliverable_template_defaults(
     template: Option<&str>,
 ) -> (Option<&'static str>, Vec<&'static str>) {
     match template {
-        Some("startup_pitch") => {
-            (Some("sales_pitch"), vec!["kpi_grid", "timeline", "quote_callout"])
-        }
-        Some("executive_update") => {
-            (Some("executive"), vec!["kpi_grid", "risks_table", "timeline"])
-        }
-        Some("project_plan") => {
-            (Some("technical"), vec!["process_steps", "timeline", "risks_table"])
-        }
-        Some("technical_brief") => {
-            (Some("technical"), vec!["process_steps", "comparison_table", "risks_table"])
-        }
-        Some("sales_proposal") => {
-            (Some("sales_pitch"), vec!["comparison_table", "timeline", "kpi_grid"])
-        }
+        Some("startup_pitch") => (
+            Some("sales_pitch"),
+            vec!["kpi_grid", "timeline", "quote_callout"],
+        ),
+        Some("executive_update") => (
+            Some("executive"),
+            vec!["kpi_grid", "risks_table", "timeline"],
+        ),
+        Some("project_plan") => (
+            Some("technical"),
+            vec!["process_steps", "timeline", "risks_table"],
+        ),
+        Some("technical_brief") => (
+            Some("technical"),
+            vec!["process_steps", "comparison_table", "risks_table"],
+        ),
+        Some("sales_proposal") => (
+            Some("sales_pitch"),
+            vec!["comparison_table", "timeline", "kpi_grid"],
+        ),
         _ => (None, Vec::new()),
     }
 }
@@ -13399,7 +14498,10 @@ fn deck_content_schema() -> serde_json::Value {
 /// down. This tolerant parsing — not enforcement — is the TRUE cross-model floor.
 fn extract_deck_object(v: &serde_json::Value) -> Option<serde_json::Value> {
     let has_slides = |o: &serde_json::Value| {
-        o.get("slides").and_then(|s| s.as_array()).map(|a| !a.is_empty()).unwrap_or(false)
+        o.get("slides")
+            .and_then(|s| s.as_array())
+            .map(|a| !a.is_empty())
+            .unwrap_or(false)
     };
     if has_slides(v) {
         return Some(v.clone());
@@ -13482,7 +14584,10 @@ fn apply_deck_design_components(deck: &mut serde_json::Value, components: &[Stri
     if target_indices.is_empty() {
         return;
     }
-    let Some(slides) = deck.get_mut("slides").and_then(|value| value.as_array_mut()) else {
+    let Some(slides) = deck
+        .get_mut("slides")
+        .and_then(|value| value.as_array_mut())
+    else {
         return;
     };
     let mut target_cursor = 0usize;
@@ -13551,8 +14656,7 @@ fn apply_deck_design_components(deck: &mut serde_json::Value, components: &[Stri
                 slide["want_image"] = serde_json::json!(false);
             }
             "comparison_table" => {
-                let (left, right) =
-                    split_component_bullets(&bullets, "Option A", "Option B");
+                let (left, right) = split_component_bullets(&bullets, "Option A", "Option B");
                 slide["layout"] = serde_json::json!("two_column");
                 slide["columns"] = serde_json::json!([
                     { "title": "Option A", "bullets": left },
@@ -13562,16 +14666,8 @@ fn apply_deck_design_components(deck: &mut serde_json::Value, components: &[Stri
             }
             "process_steps" => {
                 let midpoint = (bullets.len().max(2) + 1) / 2;
-                let first = bullets
-                    .iter()
-                    .take(midpoint)
-                    .cloned()
-                    .collect::<Vec<_>>();
-                let second = bullets
-                    .iter()
-                    .skip(midpoint)
-                    .cloned()
-                    .collect::<Vec<_>>();
+                let first = bullets.iter().take(midpoint).cloned().collect::<Vec<_>>();
+                let second = bullets.iter().skip(midpoint).cloned().collect::<Vec<_>>();
                 slide["layout"] = serde_json::json!("two_column");
                 slide["columns"] = serde_json::json!([
                     { "title": "Steps", "bullets": if first.is_empty() { vec!["Step 1".to_string()] } else { first } },
@@ -13580,8 +14676,7 @@ fn apply_deck_design_components(deck: &mut serde_json::Value, components: &[Stri
                 slide["want_image"] = serde_json::json!(false);
             }
             "risks_table" => {
-                let (left, right) =
-                    split_component_bullets(&bullets, "Risk", "Mitigation");
+                let (left, right) = split_component_bullets(&bullets, "Risk", "Mitigation");
                 slide["layout"] = serde_json::json!("two_column");
                 slide["columns"] = serde_json::json!([
                     { "title": "Risks", "bullets": left },
@@ -13629,7 +14724,10 @@ fn clip_chars(value: &str, max_chars: usize) -> String {
     if value.chars().count() <= max_chars {
         return value.to_string();
     }
-    let mut clipped = value.chars().take(max_chars.saturating_sub(1)).collect::<String>();
+    let mut clipped = value
+        .chars()
+        .take(max_chars.saturating_sub(1))
+        .collect::<String>();
     clipped.push('…');
     clipped
 }
@@ -13675,7 +14773,11 @@ fn normalize_deck_bullets(title_key: &str, bullets: &mut Vec<serde_json::Value>)
     let mut seen = HashSet::new();
     let mut normalized = Vec::new();
     for bullet in bullets.iter() {
-        let Some(text) = bullet.as_str().map(str::trim).filter(|value| !value.is_empty()) else {
+        let Some(text) = bullet
+            .as_str()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        else {
             continue;
         };
         let key = deck_text_fingerprint(text);
@@ -13741,7 +14843,10 @@ fn deck_quality_guardrail_issues(deck: &serde_json::Value) -> Vec<String> {
 
 fn apply_deck_quality_guardrails(deck: &mut serde_json::Value) -> Vec<String> {
     let issues = deck_quality_guardrail_issues(deck);
-    let Some(slides) = deck.get_mut("slides").and_then(|value| value.as_array_mut()) else {
+    let Some(slides) = deck
+        .get_mut("slides")
+        .and_then(|value| value.as_array_mut())
+    else {
         return issues;
     };
     for slide in slides {
@@ -13753,7 +14858,10 @@ fn apply_deck_quality_guardrails(deck: &mut serde_json::Value) -> Vec<String> {
             .and_then(|value| value.as_str())
             .map(deck_text_fingerprint)
             .unwrap_or_default();
-        if let Some(bullets) = slide.get_mut("bullets").and_then(|value| value.as_array_mut()) {
+        if let Some(bullets) = slide
+            .get_mut("bullets")
+            .and_then(|value| value.as_array_mut())
+        {
             normalize_deck_bullets(&title_key, bullets);
         }
     }
@@ -13769,7 +14877,11 @@ fn rendered_deck_qa_result(render_output: &str) -> Option<serde_json::Value> {
 
 fn rendered_deck_qa_failure(render_output: &str) -> Option<String> {
     let qa = rendered_deck_qa_result(render_output)?;
-    if qa.get("ok").and_then(|value| value.as_bool()).unwrap_or(false) {
+    if qa
+        .get("ok")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false)
+    {
         return None;
     }
     let issues = qa
@@ -13804,7 +14916,11 @@ fn deck_quality_metadata_from_qa_result(
     qa: Option<&serde_json::Value>,
 ) -> Option<serde_json::Value> {
     let qa = qa?;
-    let status = if qa.get("ok").and_then(|value| value.as_bool()).unwrap_or(false) {
+    let status = if qa
+        .get("ok")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false)
+    {
         "passed"
     } else {
         "warning"
@@ -13844,7 +14960,10 @@ fn deck_quality_metadata_from_qa_result(
         })
         .unwrap_or_default();
     if !issues.is_empty() {
-        metadata.insert("quality_issues".to_string(), serde_json::Value::Array(issues));
+        metadata.insert(
+            "quality_issues".to_string(),
+            serde_json::Value::Array(issues),
+        );
     }
     Some(serde_json::Value::Object(metadata))
 }
@@ -13964,8 +15083,10 @@ any other key such as \"presentation\" or \"deck\", and add no extra top-level k
                          `ollama signin`), or switch the chat model to a working one."
                     ));
                 }
-                let json: serde_json::Value =
-                    resp.json().await.map_err(|e| format!("bad deck content response: {e}"))?;
+                let json: serde_json::Value = resp
+                    .json()
+                    .await
+                    .map_err(|e| format!("bad deck content response: {e}"))?;
                 content = json
                     .get("choices")
                     .and_then(|c| c.as_array())
@@ -14015,12 +15136,15 @@ any other key such as \"presentation\" or \"deck\", and add no extra top-level k
         .trim();
     let raw: serde_json::Value =
         serde_json::from_str(cleaned).map_err(|e| format!("deck content not valid JSON: {e}"))?;
-    let deck = extract_deck_object(&raw)
-        .ok_or_else(|| "deck content produced no slides".to_string())?;
+    let deck =
+        extract_deck_object(&raw).ok_or_else(|| "deck content produced no slides".to_string())?;
     // Rebuild a CLEAN deck with only the keys the renderer needs, deriving a
     // title when the model omitted one (the cover uses it). Strips any stray
     // wrapper/extra keys the model added (brand/accent_color/…).
-    let slides = deck.get("slides").cloned().unwrap_or_else(|| serde_json::json!([]));
+    let slides = deck
+        .get("slides")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!([]));
     let title = deck
         .get("title")
         .and_then(|t| t.as_str())
@@ -14036,7 +15160,11 @@ any other key such as \"presentation\" or \"deck\", and add no extra top-level k
                 .map(String::from)
         })
         .unwrap_or_else(|| brief.chars().take(60).collect::<String>());
-    let subtitle = deck.get("subtitle").and_then(|t| t.as_str()).unwrap_or("").to_string();
+    let subtitle = deck
+        .get("subtitle")
+        .and_then(|t| t.as_str())
+        .unwrap_or("")
+        .to_string();
     Ok(serde_json::json!({ "title": title, "subtitle": subtitle, "slides": slides }))
 }
 
@@ -14125,8 +15253,11 @@ fn document_generation_options(parsed: &serde_json::Value) -> DocumentGeneration
     let requested_template_ref = deliverable_template_ref(parsed);
     let catalog_template = template_catalog_by_id(requested_template_ref.as_deref());
     let template_ref = catalog_template.as_ref().map(|entry| entry.id.clone());
-    let design_template = deliverable_design_template(parsed)
-        .or_else(|| catalog_template.as_ref().map(|entry| entry.design_template.clone()));
+    let design_template = deliverable_design_template(parsed).or_else(|| {
+        catalog_template
+            .as_ref()
+            .map(|entry| entry.design_template.clone())
+    });
     let design_theme = deliverable_design_theme(parsed).or_else(|| {
         catalog_template
             .as_ref()
@@ -14463,13 +15594,7 @@ fn markdown_table_cell_count(line: &str) -> Option<usize> {
     if !trimmed.starts_with('|') || !trimmed.ends_with('|') {
         return None;
     }
-    Some(
-        trimmed
-            .trim_matches('|')
-            .split('|')
-            .map(str::trim)
-            .count(),
-    )
+    Some(trimmed.trim_matches('|').split('|').map(str::trim).count())
 }
 
 fn document_quality_issues(markdown: &str) -> Vec<String> {
@@ -14479,7 +15604,9 @@ fn document_quality_issues(markdown: &str) -> Vec<String> {
         let line_no = index + 1;
         let trimmed = line.trim();
         if trimmed.chars().count() > 420 {
-            issues.push(format!("line {line_no}: line is too long for stable document rendering"));
+            issues.push(format!(
+                "line {line_no}: line is too long for stable document rendering"
+            ));
         }
         for token in trimmed.split_whitespace() {
             if token.starts_with("http://") || token.starts_with("https://") {
@@ -14589,10 +15716,7 @@ fn normalize_document_tables(markdown: &str) -> String {
 
 fn apply_document_quality_guardrails(markdown: &str) -> (String, Vec<String>) {
     let issues = document_quality_issues(markdown);
-    let normalized = if issues
-        .iter()
-        .any(|issue| issue.contains("table row has"))
-    {
+    let normalized = if issues.iter().any(|issue| issue.contains("table row has")) {
         normalize_document_tables(markdown)
     } else {
         markdown.to_string()
@@ -14606,10 +15730,18 @@ fn document_artifact_name(raw: Option<&str>) -> String {
 
 fn document_artifact_name_with_extension(raw: Option<&str>, extension: &str) -> String {
     let extension = extension.trim_start_matches('.').to_ascii_lowercase();
-    let extension = if extension.is_empty() { "md".to_string() } else { extension };
+    let extension = if extension.is_empty() {
+        "md".to_string()
+    } else {
+        extension
+    };
     let default = format!("document.{extension}");
     let candidate = raw.unwrap_or(default.as_str()).trim();
-    let candidate = if candidate.is_empty() { default.as_str() } else { candidate };
+    let candidate = if candidate.is_empty() {
+        default.as_str()
+    } else {
+        candidate
+    };
     let basename = candidate
         .rsplit(['/', '\\'])
         .next()
@@ -14624,7 +15756,11 @@ fn document_artifact_name_with_extension(raw: Option<&str>, extension: &str) -> 
         }
     }
     let safe = safe.trim_matches('.').trim_matches('-').to_string();
-    let safe = if safe.is_empty() { "document".to_string() } else { safe };
+    let safe = if safe.is_empty() {
+        "document".to_string()
+    } else {
+        safe
+    };
     let lower = safe.to_ascii_lowercase();
     let stem = if lower.ends_with(".md") || lower.ends_with(".pdf") || lower.ends_with(".docx") {
         safe.rsplit_once('.')
@@ -14636,7 +15772,11 @@ fn document_artifact_name_with_extension(raw: Option<&str>, extension: &str) -> 
     } else {
         safe
     };
-    let stem = if stem.is_empty() { "document".to_string() } else { stem };
+    let stem = if stem.is_empty() {
+        "document".to_string()
+    } else {
+        stem
+    };
     format!("{stem}.{extension}")
 }
 
@@ -14668,7 +15808,10 @@ fn document_artifact_name_from_brief(brief: &str) -> Option<String> {
         {
             continue;
         }
-        return Some(document_artifact_name_with_extension(Some(candidate), extension));
+        return Some(document_artifact_name_with_extension(
+            Some(candidate),
+            extension,
+        ));
     }
     None
 }
@@ -14684,12 +15827,14 @@ fn document_requested_pdf(brief: &str) -> bool {
 fn document_requested_docx(brief: &str) -> bool {
     let normalized = brief.to_ascii_lowercase();
     normalized.contains(".docx")
-        || normalized.split(|ch: char| !ch.is_ascii_alphanumeric()).any(|word| {
-            matches!(
-                word,
-                "docx" | "word" | "editable" | "editabile" | "modificabile"
-            )
-        })
+        || normalized
+            .split(|ch: char| !ch.is_ascii_alphanumeric())
+            .any(|word| {
+                matches!(
+                    word,
+                    "docx" | "word" | "editable" | "editabile" | "modificabile"
+                )
+            })
 }
 
 fn document_output_formats(parsed: &serde_json::Value, name: &str, brief: &str) -> Vec<String> {
@@ -14792,7 +15937,10 @@ fn markdown_line_to_docx_paragraph(line: &str, force_heading1: bool) -> String {
         (Some("Heading2"), text.trim())
     } else if let Some(text) = trimmed.strip_prefix("### ") {
         (Some("Heading3"), text.trim())
-    } else if let Some(text) = trimmed.strip_prefix("- ").or_else(|| trimmed.strip_prefix("* ")) {
+    } else if let Some(text) = trimmed
+        .strip_prefix("- ")
+        .or_else(|| trimmed.strip_prefix("* "))
+    {
         (Some("ListParagraph"), text.trim())
     } else if let Some((number, _)) = trimmed.split_once(". ") {
         if number.chars().all(|ch| ch.is_ascii_digit()) && !number.is_empty() {
@@ -14826,11 +15974,7 @@ fn markdown_table_cells(line: &str) -> Option<Vec<String>> {
         .split('|')
         .map(|cell| cell.trim().to_string())
         .collect::<Vec<_>>();
-    if cells.len() < 2 {
-        None
-    } else {
-        Some(cells)
-    }
+    if cells.len() < 2 { None } else { Some(cells) }
 }
 
 fn markdown_table_separator(line: &str) -> bool {
@@ -15095,8 +16239,8 @@ fn save_artifact_tool_schema(destinations: &[ArtifactDestination]) -> serde_json
             "name": "save_artifact",
             "description": format!(
                 "Copy a generated file (artifact, saved in $OUTPUT_DIR) to a destination folder \
-AUTHORIZED by the user. Available destinations: {labels}. Use it when the user \
-asks to save/export a file to a folder."
+    AUTHORIZED by the user. Available destinations: {labels}. Use it when the user \
+    asks to save/export a file to a folder."
             ),
             "parameters": {
                 "type": "object",
@@ -15270,7 +16414,13 @@ async fn auto_retrieve_composio(
         .iter()
         .enumerate()
         .map(|(i, (_, haystack, _))| {
-            (i, q_tokens.iter().filter(|t| haystack.contains(t.as_str())).count())
+            (
+                i,
+                q_tokens
+                    .iter()
+                    .filter(|t| haystack.contains(t.as_str()))
+                    .count(),
+            )
         })
         .filter(|(_, score)| *score > 0)
         .collect();
@@ -15279,8 +16429,11 @@ async fn auto_retrieve_composio(
     if keyword.is_empty() {
         return Vec::new();
     }
-    let keyword_rank: std::collections::HashMap<usize, usize> =
-        keyword.iter().enumerate().map(|(rank, (i, _))| (*i, rank)).collect();
+    let keyword_rank: std::collections::HashMap<usize, usize> = keyword
+        .iter()
+        .enumerate()
+        .map(|(rank, (i, _))| (*i, rank))
+        .collect();
     // Optional dense re-rank over the top candidates (env-gated to avoid per-turn
     // embed latency until measured); bounded to a few local embed calls.
     let dense_rank: std::collections::HashMap<usize, usize> =
@@ -15293,8 +16446,13 @@ async fn auto_retrieve_composio(
                             scored.push((*i, cosine(&q_vec, &v)));
                         }
                     }
-                    scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-                    scored.iter().enumerate().map(|(rank, (i, _))| (*i, rank)).collect()
+                    scored
+                        .sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+                    scored
+                        .iter()
+                        .enumerate()
+                        .map(|(rank, (i, _))| (*i, rank))
+                        .collect()
                 }
                 None => std::collections::HashMap::new(),
             }
@@ -15305,13 +16463,23 @@ async fn auto_retrieve_composio(
     let mut fused: Vec<(usize, f32)> = keyword
         .iter()
         .map(|(i, _)| {
-            let kr = keyword_rank.get(i).map(|r| 1.0 / (RRF_K + *r as f32)).unwrap_or(0.0);
-            let dr = dense_rank.get(i).map(|r| 1.0 / (RRF_K + *r as f32)).unwrap_or(0.0);
+            let kr = keyword_rank
+                .get(i)
+                .map(|r| 1.0 / (RRF_K + *r as f32))
+                .unwrap_or(0.0);
+            let dr = dense_rank
+                .get(i)
+                .map(|r| 1.0 / (RRF_K + *r as f32))
+                .unwrap_or(0.0);
             (*i, kr + dr)
         })
         .collect();
     fused.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-    fused.into_iter().take(k).map(|(i, _)| catalog[i].2.clone()).collect()
+    fused
+        .into_iter()
+        .take(k)
+        .map(|(i, _)| catalog[i].2.clone())
+        .collect()
 }
 
 /// Real BM25 ranking — IDF (rare terms weigh more), TF saturation (k1), and length
@@ -15359,7 +16527,11 @@ fn bm25_rank<'a>(
         })
         .collect();
     scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-    scored.into_iter().take(limit).map(|(_, i)| &corpus[i]).collect()
+    scored
+        .into_iter()
+        .take(limit)
+        .map(|(_, i)| &corpus[i])
+        .collect()
 }
 
 /// Keyword search over the connected-tool catalog. Scores each tool by how many
@@ -15382,7 +16554,10 @@ fn search_composio_catalog(
             let score = if tokens.is_empty() {
                 1
             } else {
-                tokens.iter().filter(|t| entry.1.contains(t.as_str())).count()
+                tokens
+                    .iter()
+                    .filter(|t| entry.1.contains(t.as_str()))
+                    .count()
             };
             (score, entry)
         })
@@ -15458,7 +16633,11 @@ fn capability_discovery_trace_line(intent: &str, entries: &[CapabilityEntry]) ->
         .collect::<Vec<_>>()
         .join(", ");
     let intent = intent.trim();
-    let intent = if intent.is_empty() { "(intent)" } else { intent };
+    let intent = if intent.is_empty() {
+        "(intent)"
+    } else {
+        intent
+    };
     Some(format!("capability discovery `{intent}` -> {names}"))
 }
 
@@ -15511,7 +16690,10 @@ async fn stream_chat_via_openai(
     // released inside; never held across the generation.
     let (contact_ctx, channel_owner) = contact_turn_context(state, request.thread_id.as_deref());
     if verbose_debug()
-        && request.thread_id.as_deref().is_some_and(|t| t.starts_with("channel_"))
+        && request
+            .thread_id
+            .as_deref()
+            .is_some_and(|t| t.starts_with("channel_"))
     {
         eprintln!(
             "channel-turn: thread={} owner={} contact={}",
@@ -15647,8 +16829,11 @@ when the answer is long. Reply in {language}, clear and well-structured.",
             lock_memory_facade(&st)
                 .ok()
                 .and_then(|f| {
-                    f.list_entities_for_ui(&gateway_memory_user_id(), &gateway_memory_workspace_id())
-                        .ok()
+                    f.list_entities_for_ui(
+                        &gateway_memory_user_id(),
+                        &gateway_memory_workspace_id(),
+                    )
+                    .ok()
                 })
                 .map(|ents| ents.iter().any(|e| e.entity_type.starts_with("code_")))
                 .unwrap_or(false)
@@ -15844,7 +17029,11 @@ calendar events.",
             .map(|(id, name, desc)| format!("- {id}: {name} — {desc}"))
             .collect::<Vec<_>>()
             .join("\n");
-        let methodology = if is_project && enabled_skills.iter().any(|(id, _, _)| homuncoder.contains(id)) {
+        let methodology = if is_project
+            && enabled_skills
+                .iter()
+                .any(|(id, _, _)| homuncoder.contains(id))
+        {
             "\nMETHODOLOGY (HomunCoder) — for DEVELOPMENT work follow the evidence-first habits: \
 plan with update_plan, REMEMBER/record decisions with their why, and VERIFY by executing \
 (build/test/lint) before saying \"done\". When you apply one of these disciplines, call \
@@ -15909,7 +17098,9 @@ save/export a file to a folder, call save_artifact(file, destination)."
         .map(|c| (c.perimeter.can_see_contacts, c.perimeter.can_see_calendar))
         .unwrap_or((true, true));
     let system = if contact_only {
-        let cx = contact_ctx.as_ref().expect("contact_only implies contact_ctx");
+        let cx = contact_ctx
+            .as_ref()
+            .expect("contact_only implies contact_ctx");
         let episodes = {
             let facade = lock_memory_facade(state)?;
             let user = gateway_memory_user_id();
@@ -16247,9 +17438,14 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
     if has_composio {
         let loaded: std::collections::HashSet<String> = base_tools
             .iter()
-            .filter_map(|s| s.pointer("/function/name").and_then(|v| v.as_str()).map(String::from))
+            .filter_map(|s| {
+                s.pointer("/function/name")
+                    .and_then(|v| v.as_str())
+                    .map(String::from)
+            })
             .collect();
-        for schema in auto_retrieve_composio(&state.http, &request.prompt, &catalog_index, 4).await {
+        for schema in auto_retrieve_composio(&state.http, &request.prompt, &catalog_index, 4).await
+        {
             let name = schema
                 .pointer("/function/name")
                 .and_then(|v| v.as_str())
@@ -16343,7 +17539,11 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
         let manifest = working
             .iter()
             .map(|a| {
-                let kind = if a.images.is_empty() { "text" } else { "images/scan" };
+                let kind = if a.images.is_empty() {
+                    "text"
+                } else {
+                    "images/scan"
+                };
                 format!("- {} ({kind})", a.display_name)
             })
             .collect::<Vec<_>>()
@@ -16414,7 +17614,10 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
     if let Ok(mut map) = stream_registry().lock() {
         map.insert(resume_id.clone(), stream_entry.clone());
     }
-    let tx = StreamSink { mpsc: mpsc_tx, entry: stream_entry };
+    let tx = StreamSink {
+        mpsc: mpsc_tx,
+        entry: stream_entry,
+    };
     // Dedicated STREAMING client: HTTP/1.1 (avoids HTTP/2 RST_STREAM that CDNs in
     // front of cloud model hosts can throw on long streams) + no idle connection
     // reuse (a stale pooled keep-alive connection is a classic cause of the
@@ -16539,7 +17742,8 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
                 });
             }
         }
-        let mut loaded_tools: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        let mut loaded_tools: std::collections::BTreeSet<String> =
+            std::collections::BTreeSet::new();
         // Turn-local browser state for the granular tools. The sidecar session is
         // held for the WHOLE turn (lock acquired only around each single call) and
         // parked back at every exit path. `last_snapshot` feeds the safety gate so
@@ -16655,16 +17859,21 @@ round={round} tools={payload_has_tools} tool_count={} body={err_body}",
                                 let shapes: Vec<String> = arr
                                     .iter()
                                     .map(|m| {
-                                        let role = m.get("role").and_then(|r| r.as_str()).unwrap_or("?");
+                                        let role =
+                                            m.get("role").and_then(|r| r.as_str()).unwrap_or("?");
                                         match m.get("tool_calls").and_then(|t| t.as_array()) {
                                             None => role.to_string(),
                                             Some(calls) => {
                                                 let kinds = calls
                                                     .iter()
-                                                    .map(|c| match c.pointer("/function/arguments") {
-                                                        Some(serde_json::Value::String(_)) => "str",
-                                                        Some(_) => "OBJ",
-                                                        None => "none",
+                                                    .map(|c| {
+                                                        match c.pointer("/function/arguments") {
+                                                            Some(serde_json::Value::String(_)) => {
+                                                                "str"
+                                                            }
+                                                            Some(_) => "OBJ",
+                                                            None => "none",
+                                                        }
                                                     })
                                                     .collect::<Vec<_>>()
                                                     .join(",");
@@ -16713,14 +17922,18 @@ retrying through «{fb_model}»…‹‹/ACT››"
                                     continue;
                                 }
                             }
-                            let transient = matches!(code.as_u16(), 408 | 429 | 500 | 502 | 503 | 504);
+                            let transient =
+                                matches!(code.as_u16(), 408 | 429 | 500 | 502 | 503 | 504);
                             if transient && attempt < 2 {
                                 attempt += 1;
                                 let _ = emit_stream_event(&tx, GenerateStreamEvent::Delta {
                                     text: format!("‹‹ACT››⏳ The model isn't responding ({code}), retrying ({attempt}/2)…‹‹/ACT››"),
                                 })
                                 .await;
-                                tokio::time::sleep(std::time::Duration::from_millis(800 * u64::from(attempt))).await;
+                                tokio::time::sleep(std::time::Duration::from_millis(
+                                    800 * u64::from(attempt),
+                                ))
+                                .await;
                                 continue;
                             }
                             // Self-heal on 401: retry once with a provider that has a
@@ -16728,7 +17941,9 @@ retrying through «{fb_model}»…‹‹/ACT››"
                             // FAILING model is the orchestrator itself, so an
                             // unauthenticated binding doesn't break the turn.
                             if code.as_u16() == 401 && !fallback_tried {
-                                if let Some((fb_base, fb_model, fb_key)) = auth_fallback_config(&model) {
+                                if let Some((fb_base, fb_model, fb_key)) =
+                                    auth_fallback_config(&model)
+                                {
                                     if fb_model != model {
                                         fallback_tried = true;
                                         let _ = emit_stream_event(&tx, GenerateStreamEvent::Delta {
@@ -16764,7 +17979,8 @@ Model & Runtime), or select a LOCAL model."
                                     )
                                 } else {
                                     " It looks like a provider authentication problem: \
-check/update the key in Settings → Model & Runtime.".to_string()
+check/update the key in Settings → Model & Runtime."
+                                        .to_string()
                                 }
                             } else {
                                 String::new()
@@ -16783,14 +17999,19 @@ check/update the key in Settings → Model & Runtime.".to_string()
                                     text: format!("‹‹ACT››⏳ Network to the model unstable, retrying ({attempt}/2)…‹‹/ACT››"),
                                 })
                                 .await;
-                                tokio::time::sleep(std::time::Duration::from_millis(800 * u64::from(attempt))).await;
+                                tokio::time::sleep(std::time::Duration::from_millis(
+                                    800 * u64::from(attempt),
+                                ))
+                                .await;
                                 continue;
                             }
                             // Persistent timeout/connect (e.g. a huge/slow cloud model,
                             // or a `:cloud` model on the local daemon): self-heal once
                             // onto a provider that has a key — same as the 401 path.
                             if transient && !fallback_tried {
-                                if let Some((fb_base, fb_model, fb_key)) = auth_fallback_config(&model) {
+                                if let Some((fb_base, fb_model, fb_key)) =
+                                    auth_fallback_config(&model)
+                                {
                                     if fb_model != model {
                                         fallback_tried = true;
                                         let _ = emit_stream_event(&tx, GenerateStreamEvent::Delta {
@@ -16953,7 +18174,11 @@ check/update the key in Settings → Model & Runtime.".to_string()
                         .and_then(|f| f.get("arguments"))
                         .and_then(|a| a.as_str())
                         .unwrap_or("{}");
-                    let call_id = call.get("id").and_then(|i| i.as_str()).unwrap_or("").to_string();
+                    let call_id = call
+                        .get("id")
+                        .and_then(|i| i.as_str())
+                        .unwrap_or("")
+                        .to_string();
 
                     if let Some(blocked) =
                         workflow_route_blocked_tool_message(&capability_route_for_runtime, name)
@@ -16996,8 +18221,7 @@ check/update the key in Settings → Model & Runtime.".to_string()
                                 | "cancel_scheduled_task"
                                 | "customize_addon"
                                 | "create_skill"
-                        )
-                    {
+                        ) {
                         // Defensive: these aren't offered in read-only mode, but if the
                         // model calls one anyway, refuse instead of executing.
                         "Action not available from the channel: operations with effects \
@@ -17015,8 +18239,8 @@ require your confirmation in the app. Propose it and stop."
                         // Granular browser tools (HOMUN_CHAT_BROWSER_GRANULAR):
                         // the main agent drives the browser one micro-action at a
                         // time against a per-turn session.
-                        let args: serde_json::Value =
-                            serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
+                        let args: serde_json::Value = serde_json::from_str(args_raw)
+                            .unwrap_or_else(|_| serde_json::json!({}));
                         // First browser tool this turn: mark used (raises round
                         // budget), publish live activity, acquire the session
                         // (reuse the thread's warm one, else spawn a chat sidecar).
@@ -17147,174 +18371,188 @@ or tell the user to start the contained computer (Settings → Local computer)."
                                     .to_string())
                             }
                             Some(client) => match name {
-                            "browser_navigate" => {
-                                // Multi-tab: an explicit `target` switches the current
-                                // tab; `new_tab` allocates a fresh chat_N id (so the
-                                // logic below treats it as not-yet-opened → Open).
-                                if let Some(t) = args.get("target").and_then(|v| v.as_str()) {
-                                    if !t.trim().is_empty() {
-                                        current_target = t.to_string();
+                                "browser_navigate" => {
+                                    // Multi-tab: an explicit `target` switches the current
+                                    // tab; `new_tab` allocates a fresh chat_N id (so the
+                                    // logic below treats it as not-yet-opened → Open).
+                                    if let Some(t) = args.get("target").and_then(|v| v.as_str()) {
+                                        if !t.trim().is_empty() {
+                                            current_target = t.to_string();
+                                        }
+                                    }
+                                    if args
+                                        .get("new_tab")
+                                        .and_then(|v| v.as_bool())
+                                        .unwrap_or(false)
+                                    {
+                                        current_target = format!("chat_{}", opened_targets.len());
+                                    }
+                                    let url = args
+                                        .get("url")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("")
+                                        .to_string();
+                                    if url.trim().is_empty() {
+                                        browser_session = Some(client);
+                                        Err("Missing URL for browser_navigate.".to_string())
+                                    } else {
+                                        let _ = emit_stream_event(
+                                            &tx,
+                                            GenerateStreamEvent::Delta {
+                                                text: format!("‹‹ACT››🌐 Opening {url}‹‹/ACT››"),
+                                            },
+                                        )
+                                        .await;
+                                        let guard = browse_web_lock().lock().await;
+                                        // Open the current tab the first time, then Navigate.
+                                        let already_open =
+                                            opened_targets.iter().any(|t| t == &current_target);
+                                        let (open_method, open_params) = if already_open {
+                                            (
+                                                BrowserMethod::Navigate,
+                                                serde_json::json!({
+                                                    "target_id": current_target.as_str(),
+                                                    "url": url,
+                                                }),
+                                            )
+                                        } else {
+                                            (
+                                                BrowserMethod::Open,
+                                                serde_json::json!({
+                                                    "url": url,
+                                                    "label": current_target.as_str(),
+                                                }),
+                                            )
+                                        };
+                                        let (client_back, nav_res) =
+                                            chat_browser_call(client, open_method, open_params)
+                                                .await;
+                                        let nav_err = nav_res.err();
+                                        // Navigate/Open return no snapshot → snapshot now.
+                                        let mut client_now = client_back;
+                                        let snap_result = if nav_err.is_none() {
+                                            if let Some(c) = client_now.take() {
+                                                let (c2, snap) = chat_browser_call(
+                                                    c,
+                                                    BrowserMethod::Snapshot,
+                                                    browser_chat_snapshot_params(
+                                                        current_target.as_str(),
+                                                    ),
+                                                )
+                                                .await;
+                                                client_now = c2;
+                                                snap
+                                            } else {
+                                                Err("session lost after navigation".to_string())
+                                            }
+                                        } else {
+                                            Err(nav_err.clone().unwrap_or_default())
+                                        };
+                                        drop(guard);
+                                        browser_session = client_now;
+                                        // Mark this tab opened once the Open/Navigate succeeds.
+                                        if nav_err.is_none()
+                                            && !opened_targets.iter().any(|t| t == &current_target)
+                                        {
+                                            opened_targets.push(current_target.clone());
+                                        }
+                                        match (nav_err, snap_result) {
+                                            (Some(error), _) => {
+                                                push_browser_step(
+                                                    format!("navigate {url}"),
+                                                    "error",
+                                                );
+                                                Err(format!("Navigation failed: {error}"))
+                                            }
+                                            (None, Ok(value)) => {
+                                                let snap = browser_snapshot_text(&value);
+                                                if !snap.is_empty() {
+                                                    last_snapshot = snap.clone();
+                                                }
+                                                push_browser_step(
+                                                    format!("navigate {url}"),
+                                                    "done",
+                                                );
+                                                let page_url = value
+                                                    .get("url")
+                                                    .and_then(|u| u.as_str())
+                                                    .unwrap_or(url.as_str());
+                                                Ok(format!(
+                                                    "Page opened ({page_url}). Snapshot:\n{snap}"
+                                                ))
+                                            }
+                                            (None, Err(error)) => {
+                                                push_browser_step(
+                                                    format!("navigate {url}"),
+                                                    "error",
+                                                );
+                                                Err(format!(
+                                                    "Page opened but snapshot failed: {error}"
+                                                ))
+                                            }
+                                        }
                                     }
                                 }
-                                if args.get("new_tab").and_then(|v| v.as_bool()).unwrap_or(false) {
-                                    current_target = format!("chat_{}", opened_targets.len());
-                                }
-                                let url = args
-                                    .get("url")
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or("")
-                                    .to_string();
-                                if url.trim().is_empty() {
-                                    browser_session = Some(client);
-                                    Err("Missing URL for browser_navigate.".to_string())
-                                } else {
+                                "browser_snapshot" => {
+                                    if let Some(t) = args.get("target").and_then(|v| v.as_str()) {
+                                        if !t.trim().is_empty() {
+                                            current_target = t.to_string();
+                                        }
+                                    }
                                     let _ = emit_stream_event(
                                         &tx,
                                         GenerateStreamEvent::Delta {
-                                            text: format!("‹‹ACT››🌐 Opening {url}‹‹/ACT››"),
+                                            text: "‹‹ACT››👁️ Re-reading the page‹‹/ACT››"
+                                                .to_string(),
                                         },
                                     )
                                     .await;
                                     let guard = browse_web_lock().lock().await;
-                                    // Open the current tab the first time, then Navigate.
-                                    let already_open =
-                                        opened_targets.iter().any(|t| t == &current_target);
-                                    let (open_method, open_params) = if already_open {
-                                        (
-                                            BrowserMethod::Navigate,
-                                            serde_json::json!({
-                                                "target_id": current_target.as_str(),
-                                                "url": url,
-                                            }),
-                                        )
-                                    } else {
-                                        (
-                                            BrowserMethod::Open,
-                                            serde_json::json!({
-                                                "url": url,
-                                                "label": current_target.as_str(),
-                                            }),
-                                        )
-                                    };
-                                    let (client_back, nav_res) =
-                                        chat_browser_call(client, open_method, open_params).await;
-                                    let nav_err = nav_res.err();
-                                    // Navigate/Open return no snapshot → snapshot now.
-                                    let mut client_now = client_back;
-                                    let snap_result = if nav_err.is_none() {
-                                        if let Some(c) = client_now.take() {
-                                            let (c2, snap) = chat_browser_call(
-                                                c,
-                                                BrowserMethod::Snapshot,
-                                                browser_chat_snapshot_params(current_target.as_str()),
-                                            )
-                                            .await;
-                                            client_now = c2;
-                                            snap
-                                        } else {
-                                            Err("session lost after navigation".to_string())
-                                        }
-                                    } else {
-                                        Err(nav_err.clone().unwrap_or_default())
-                                    };
+                                    let (client_back, snap) = chat_browser_call(
+                                        client,
+                                        BrowserMethod::Snapshot,
+                                        browser_chat_snapshot_params(current_target.as_str()),
+                                    )
+                                    .await;
                                     drop(guard);
-                                    browser_session = client_now;
-                                    // Mark this tab opened once the Open/Navigate succeeds.
-                                    if nav_err.is_none()
-                                        && !opened_targets.iter().any(|t| t == &current_target)
-                                    {
-                                        opened_targets.push(current_target.clone());
-                                    }
-                                    match (nav_err, snap_result) {
-                                        (Some(error), _) => {
-                                            push_browser_step(
-                                                format!("navigate {url}"),
-                                                "error",
-                                            );
-                                            Err(format!("Navigation failed: {error}"))
-                                        }
-                                        (None, Ok(value)) => {
+                                    browser_session = client_back;
+                                    match snap {
+                                        Ok(value) => {
                                             let snap = browser_snapshot_text(&value);
                                             if !snap.is_empty() {
                                                 last_snapshot = snap.clone();
                                             }
-                                            push_browser_step(format!("navigate {url}"), "done");
-                                            let page_url = value
-                                                .get("url")
-                                                .and_then(|u| u.as_str())
-                                                .unwrap_or(url.as_str());
-                                            Ok(format!(
-                                                "Page opened ({page_url}). Snapshot:\n{snap}"
-                                            ))
+                                            push_browser_step("snapshot".to_string(), "done");
+                                            Ok(format!("Page snapshot:\n{snap}"))
                                         }
-                                        (None, Err(error)) => {
-                                            push_browser_step(format!("navigate {url}"), "error");
-                                            Err(format!(
-                                                "Page opened but snapshot failed: {error}"
-                                            ))
+                                        Err(error) => {
+                                            push_browser_step("snapshot".to_string(), "error");
+                                            Err(format!("Snapshot failed: {error}"))
                                         }
                                     }
                                 }
-                            }
-                            "browser_snapshot" => {
-                                if let Some(t) = args.get("target").and_then(|v| v.as_str()) {
-                                    if !t.trim().is_empty() {
-                                        current_target = t.to_string();
-                                    }
-                                }
-                                let _ = emit_stream_event(
-                                    &tx,
-                                    GenerateStreamEvent::Delta {
-                                        text: "‹‹ACT››👁️ Re-reading the page‹‹/ACT››".to_string(),
-                                    },
-                                )
-                                .await;
-                                let guard = browse_web_lock().lock().await;
-                                let (client_back, snap) = chat_browser_call(
-                                    client,
-                                    BrowserMethod::Snapshot,
-                                    browser_chat_snapshot_params(current_target.as_str()),
-                                )
-                                .await;
-                                drop(guard);
-                                browser_session = client_back;
-                                match snap {
-                                    Ok(value) => {
-                                        let snap = browser_snapshot_text(&value);
-                                        if !snap.is_empty() {
-                                            last_snapshot = snap.clone();
+                                "browser_act" => {
+                                    if let Some(t) = args.get("target").and_then(|v| v.as_str()) {
+                                        if !t.trim().is_empty() {
+                                            current_target = t.to_string();
                                         }
-                                        push_browser_step("snapshot".to_string(), "done");
-                                        Ok(format!("Page snapshot:\n{snap}"))
                                     }
-                                    Err(error) => {
-                                        push_browser_step("snapshot".to_string(), "error");
-                                        Err(format!("Snapshot failed: {error}"))
+                                    // Build the action value the safety gate inspects.
+                                    let mut action = args.clone();
+                                    if let Some(obj) = action.as_object_mut() {
+                                        obj.insert(
+                                            "target_id".to_string(),
+                                            serde_json::Value::String(current_target.clone()),
+                                        );
                                     }
-                                }
-                            }
-                            "browser_act" => {
-                                if let Some(t) = args.get("target").and_then(|v| v.as_str()) {
-                                    if !t.trim().is_empty() {
-                                        current_target = t.to_string();
-                                    }
-                                }
-                                // Build the action value the safety gate inspects.
-                                let mut action = args.clone();
-                                if let Some(obj) = action.as_object_mut() {
-                                    obj.insert(
-                                        "target_id".to_string(),
-                                        serde_json::Value::String(current_target.clone()),
-                                    );
-                                }
-                                // SAFETY GATE: high-risk (buy/login/booking, or
-                                // evaluate) is refused for EVERYONE. In read-only
-                                // (channel) turns any committing action is also
-                                // refused — EXCEPT when the sender is the OWNER
-                                // (is_self card): that block protects the user from
-                                // other people, not from their own requests (e.g.
-                                // clicking "Cerca" on a train search they asked for).
-                                let blocked = browser_safety::high_risk_reason(&action, &last_snapshot)
+                                    // SAFETY GATE: high-risk (buy/login/booking, or
+                                    // evaluate) is refused for EVERYONE. In read-only
+                                    // (channel) turns any committing action is also
+                                    // refused — EXCEPT when the sender is the OWNER
+                                    // (is_self card): that block protects the user from
+                                    // other people, not from their own requests (e.g.
+                                    // clicking "Cerca" on a train search they asked for).
+                                    let blocked = browser_safety::high_risk_reason(&action, &last_snapshot)
                                     .or_else(|| {
                                         if read_only
                                             && !channel_owner
@@ -17328,183 +18566,196 @@ or tell the user to start the contained computer (Settings → Local computer)."
                                             None
                                         }
                                     });
-                                if let Some(reason) = blocked {
-                                    eprintln!("browser-gate: BLOCKED ({reason})");
-                                    browser_session = Some(client);
-                                    push_browser_step(
-                                        format!(
-                                            "action blocked: {}",
-                                            args.get("kind").and_then(|k| k.as_str()).unwrap_or("?")
-                                        ),
-                                        "error",
-                                    );
-                                    Err(format!(
-                                        "🚫 action blocked, user confirmation needed: {reason}. \
+                                    if let Some(reason) = blocked {
+                                        eprintln!("browser-gate: BLOCKED ({reason})");
+                                        browser_session = Some(client);
+                                        push_browser_step(
+                                            format!(
+                                                "action blocked: {}",
+                                                args.get("kind")
+                                                    .and_then(|k| k.as_str())
+                                                    .unwrap_or("?")
+                                            ),
+                                            "error",
+                                        );
+                                        Err(format!(
+                                            "🚫 action blocked, user confirmation needed: {reason}. \
 I did nothing: propose to the user what to do and wait."
-                                    ))
-                                } else {
-                                    let kind = args
-                                        .get("kind")
-                                        .and_then(|k| k.as_str())
-                                        .unwrap_or("action")
-                                        .to_string();
-                                    let _ = emit_stream_event(
-                                        &tx,
-                                        GenerateStreamEvent::Delta {
-                                            text: format!("‹‹ACT››✋ {kind} on the page‹‹/ACT››"),
-                                        },
-                                    )
-                                    .await;
-                                    let guard = browse_web_lock().lock().await;
-                                    let (client_back, act_res) =
-                                        chat_browser_call(client, BrowserMethod::Act, action).await;
-                                    drop(guard);
-                                    browser_session = client_back;
-                                    match act_res {
-                                        Ok(value) => {
-                                            let snap = browser_snapshot_text(&value);
-                                            // No-progress detection: if the action left
-                                            // the page identical, nudge the model to try
-                                            // a different element/approach instead of
-                                            // repeating the same move.
-                                            let no_change = !snap.is_empty() && snap == last_snapshot;
-                                            if !snap.is_empty() {
-                                                last_snapshot = snap.clone();
-                                            }
-                                            push_browser_step(format!("{kind}"), "done");
-                                            let mut out = if snap.is_empty() {
-                                                "Action performed.".to_string()
-                                            } else {
-                                                format!("Action performed. Updated snapshot:\n{snap}")
-                                            };
-                                            if no_change {
-                                                out.push_str(
+                                        ))
+                                    } else {
+                                        let kind = args
+                                            .get("kind")
+                                            .and_then(|k| k.as_str())
+                                            .unwrap_or("action")
+                                            .to_string();
+                                        let _ = emit_stream_event(
+                                            &tx,
+                                            GenerateStreamEvent::Delta {
+                                                text: format!(
+                                                    "‹‹ACT››✋ {kind} on the page‹‹/ACT››"
+                                                ),
+                                            },
+                                        )
+                                        .await;
+                                        let guard = browse_web_lock().lock().await;
+                                        let (client_back, act_res) =
+                                            chat_browser_call(client, BrowserMethod::Act, action)
+                                                .await;
+                                        drop(guard);
+                                        browser_session = client_back;
+                                        match act_res {
+                                            Ok(value) => {
+                                                let snap = browser_snapshot_text(&value);
+                                                // No-progress detection: if the action left
+                                                // the page identical, nudge the model to try
+                                                // a different element/approach instead of
+                                                // repeating the same move.
+                                                let no_change =
+                                                    !snap.is_empty() && snap == last_snapshot;
+                                                if !snap.is_empty() {
+                                                    last_snapshot = snap.clone();
+                                                }
+                                                push_browser_step(format!("{kind}"), "done");
+                                                let mut out = if snap.is_empty() {
+                                                    "Action performed.".to_string()
+                                                } else {
+                                                    format!(
+                                                        "Action performed. Updated snapshot:\n{snap}"
+                                                    )
+                                                };
+                                                if no_change {
+                                                    out.push_str(
                                                     "\n[note: the page did NOT change from before — \
 don't repeat the same action; try a different element, scroll, or wait (kind=wait).]",
                                                 );
-                                            }
-                                            if let Some(committed) = value.get("committedOption") {
-                                                out.push_str(&format!(
-                                                    "\n[automatic selection: {committed}]"
-                                                ));
-                                            }
-                                            if let Some(sugg) = value.get("suggestions") {
-                                                out.push_str(&format!("\n[suggestions: {sugg}]"));
-                                            }
-                                            // Guardrail (advisory, Layer C.3): if the model just
-                                            // typed/filled a date that is in the PAST, nudge it to
-                                            // re-resolve via resolve_datetime instead of submitting.
-                                            // Advisory (not a hard block) because some past dates are
-                                            // legitimate (birthdays, historical lookups).
-                                            if matches!(
-                                                args.get("kind").and_then(|k| k.as_str()),
-                                                Some("type") | Some("fill")
-                                            ) {
-                                                if let Some(typed) =
-                                                    args.get("text").and_then(|t| t.as_str())
+                                                }
+                                                if let Some(committed) =
+                                                    value.get("committedOption")
                                                 {
-                                                    if let Some(hint) = past_date_hint(typed) {
-                                                        out.push_str(&hint);
+                                                    out.push_str(&format!(
+                                                        "\n[automatic selection: {committed}]"
+                                                    ));
+                                                }
+                                                if let Some(sugg) = value.get("suggestions") {
+                                                    out.push_str(&format!(
+                                                        "\n[suggestions: {sugg}]"
+                                                    ));
+                                                }
+                                                // Guardrail (advisory, Layer C.3): if the model just
+                                                // typed/filled a date that is in the PAST, nudge it to
+                                                // re-resolve via resolve_datetime instead of submitting.
+                                                // Advisory (not a hard block) because some past dates are
+                                                // legitimate (birthdays, historical lookups).
+                                                if matches!(
+                                                    args.get("kind").and_then(|k| k.as_str()),
+                                                    Some("type") | Some("fill")
+                                                ) {
+                                                    if let Some(typed) =
+                                                        args.get("text").and_then(|t| t.as_str())
+                                                    {
+                                                        if let Some(hint) = past_date_hint(typed) {
+                                                            out.push_str(&hint);
+                                                        }
                                                     }
                                                 }
+                                                Ok(out)
                                             }
-                                            Ok(out)
-                                        }
-                                        Err(error) => {
-                                            push_browser_step(format!("{kind}"), "error");
-                                            // Stale-ref auto-recovery: the page changed under us
-                                            // so the [ref=eN] is gone. Instead of just erroring
-                                            // (forcing the model to spend a round re-snapshotting),
-                                            // take a fresh snapshot NOW and hand it back so it
-                                            // retries with new refs in the same round.
-                                            let stale = {
-                                                let e = error.to_lowercase();
-                                                e.contains("stale") || e.contains("detached")
-                                            };
-                                            match (stale, browser_session.take()) {
-                                                (true, Some(c)) => {
-                                                    let guard = browse_web_lock().lock().await;
-                                                    let (c_back, snap_res) = chat_browser_call(
-                                                        c,
-                                                        BrowserMethod::Snapshot,
-                                                        browser_chat_snapshot_params(
-                                                            current_target.as_str(),
-                                                        ),
-                                                    )
-                                                    .await;
-                                                    drop(guard);
-                                                    browser_session = c_back;
-                                                    let snap = snap_res
-                                                        .as_ref()
-                                                        .map(browser_snapshot_text)
-                                                        .unwrap_or_default();
-                                                    if snap.is_empty() {
-                                                        Err(format!("Action failed: {error}"))
-                                                    } else {
-                                                        last_snapshot = snap.clone();
-                                                        Ok(format!(
-                                                            "⚠ The reference had expired (the page \
+                                            Err(error) => {
+                                                push_browser_step(format!("{kind}"), "error");
+                                                // Stale-ref auto-recovery: the page changed under us
+                                                // so the [ref=eN] is gone. Instead of just erroring
+                                                // (forcing the model to spend a round re-snapshotting),
+                                                // take a fresh snapshot NOW and hand it back so it
+                                                // retries with new refs in the same round.
+                                                let stale = {
+                                                    let e = error.to_lowercase();
+                                                    e.contains("stale") || e.contains("detached")
+                                                };
+                                                match (stale, browser_session.take()) {
+                                                    (true, Some(c)) => {
+                                                        let guard = browse_web_lock().lock().await;
+                                                        let (c_back, snap_res) = chat_browser_call(
+                                                            c,
+                                                            BrowserMethod::Snapshot,
+                                                            browser_chat_snapshot_params(
+                                                                current_target.as_str(),
+                                                            ),
+                                                        )
+                                                        .await;
+                                                        drop(guard);
+                                                        browser_session = c_back;
+                                                        let snap = snap_res
+                                                            .as_ref()
+                                                            .map(browser_snapshot_text)
+                                                            .unwrap_or_default();
+                                                        if snap.is_empty() {
+                                                            Err(format!("Action failed: {error}"))
+                                                        } else {
+                                                            last_snapshot = snap.clone();
+                                                            Ok(format!(
+                                                                "⚠ The reference had expired (the page \
 changed). I took a fresh snapshot — retry the action with the NEW [ref=...]:\n{snap}"
-                                                        ))
+                                                            ))
+                                                        }
                                                     }
-                                                }
-                                                (_, restored) => {
-                                                    browser_session = restored;
-                                                    Err(format!("Action failed: {error}"))
+                                                    (_, restored) => {
+                                                        browser_session = restored;
+                                                        Err(format!("Action failed: {error}"))
+                                                    }
                                                 }
                                             }
                                         }
                                     }
                                 }
-                            }
-                            "browser_screenshot" => {
-                                if let Some(t) = args.get("target").and_then(|v| v.as_str()) {
-                                    if !t.trim().is_empty() {
-                                        current_target = t.to_string();
+                                "browser_screenshot" => {
+                                    if let Some(t) = args.get("target").and_then(|v| v.as_str()) {
+                                        if !t.trim().is_empty() {
+                                            current_target = t.to_string();
+                                        }
                                     }
-                                }
-                                let full_page = args
-                                    .get("full_page")
-                                    .and_then(|v| v.as_bool())
-                                    .unwrap_or(false);
-                                let marks = args
-                                    .get("marks")
-                                    .and_then(|v| v.as_bool())
-                                    .unwrap_or(false);
-                                let _ = emit_stream_event(
-                                    &tx,
-                                    GenerateStreamEvent::Delta {
-                                        text: "‹‹ACT››📸 Capturing a screenshot‹‹/ACT››".to_string(),
-                                    },
-                                )
-                                .await;
-                                let file_name =
-                                    format!("chat_shot_{}.png", uuid::Uuid::new_v4().simple());
-                                let guard = browse_web_lock().lock().await;
-                                let (client_back, shot_res) = chat_browser_call(
-                                    client,
-                                    BrowserMethod::Screenshot,
-                                    serde_json::json!({
-                                        "target_id": current_target.as_str(),
-                                        "file_name": file_name,
-                                        "full_page": full_page,
-                                        "labels": marks,
-                                    }),
-                                )
-                                .await;
-                                drop(guard);
-                                browser_session = client_back;
-                                match shot_res {
-                                    Ok(value) => {
-                                        let path = value
-                                            .get("path")
-                                            .and_then(|p| p.as_str())
-                                            .unwrap_or("")
-                                            .to_string();
-                                        // Set-of-marks legend: map each numbered badge
-                                        // in the image back to the element's ref so the
-                                        // model can act precisely (browser_act ref=eN).
-                                        let legend = value
+                                    let full_page = args
+                                        .get("full_page")
+                                        .and_then(|v| v.as_bool())
+                                        .unwrap_or(false);
+                                    let marks = args
+                                        .get("marks")
+                                        .and_then(|v| v.as_bool())
+                                        .unwrap_or(false);
+                                    let _ = emit_stream_event(
+                                        &tx,
+                                        GenerateStreamEvent::Delta {
+                                            text: "‹‹ACT››📸 Capturing a screenshot‹‹/ACT››"
+                                                .to_string(),
+                                        },
+                                    )
+                                    .await;
+                                    let file_name =
+                                        format!("chat_shot_{}.png", uuid::Uuid::new_v4().simple());
+                                    let guard = browse_web_lock().lock().await;
+                                    let (client_back, shot_res) = chat_browser_call(
+                                        client,
+                                        BrowserMethod::Screenshot,
+                                        serde_json::json!({
+                                            "target_id": current_target.as_str(),
+                                            "file_name": file_name,
+                                            "full_page": full_page,
+                                            "labels": marks,
+                                        }),
+                                    )
+                                    .await;
+                                    drop(guard);
+                                    browser_session = client_back;
+                                    match shot_res {
+                                        Ok(value) => {
+                                            let path = value
+                                                .get("path")
+                                                .and_then(|p| p.as_str())
+                                                .unwrap_or("")
+                                                .to_string();
+                                            // Set-of-marks legend: map each numbered badge
+                                            // in the image back to the element's ref so the
+                                            // model can act precisely (browser_act ref=eN).
+                                            let legend = value
                                             .get("marks")
                                             .and_then(|m| m.as_array())
                                             .map(|entries| {
@@ -17536,171 +18787,179 @@ changed). I took a fresh snapshot — retry the action with the NEW [ref=...]:\n
                                                 text
                                             })
                                             .unwrap_or_default();
-                                        // Read + base64 the PNG. Skip the image (text
-                                        // note only) if missing or too large (~1.5MB
-                                        // encoded ≈ 1.1MB raw).
-                                        match std::fs::read(&path) {
-                                            Ok(bytes) if bytes.len() <= 1_100_000 => {
-                                                let encoded = base64::engine::general_purpose::STANDARD
-                                                    .encode(&bytes);
-                                                let dataurl =
-                                                    format!("data:image/png;base64,{encoded}");
-                                                pending_browser_image = Some(dataurl);
-                                                push_browser_step("screenshot".to_string(), "done");
-                                                Ok(format!(
-                                                    "Screenshot captured (see the image attached \
+                                            // Read + base64 the PNG. Skip the image (text
+                                            // note only) if missing or too large (~1.5MB
+                                            // encoded ≈ 1.1MB raw).
+                                            match std::fs::read(&path) {
+                                                Ok(bytes) if bytes.len() <= 1_100_000 => {
+                                                    let encoded =
+                                                        base64::engine::general_purpose::STANDARD
+                                                            .encode(&bytes);
+                                                    let dataurl =
+                                                        format!("data:image/png;base64,{encoded}");
+                                                    pending_browser_image = Some(dataurl);
+                                                    push_browser_step(
+                                                        "screenshot".to_string(),
+                                                        "done",
+                                                    );
+                                                    Ok(format!(
+                                                        "Screenshot captured (see the image attached \
 below).{legend}"
-                                                ))
-                                            }
-                                            Ok(bytes) => {
-                                                push_browser_step("screenshot".to_string(), "done");
-                                                Ok(format!(
-                                                    "Screenshot captured but too large for \
+                                                    ))
+                                                }
+                                                Ok(bytes) => {
+                                                    push_browser_step(
+                                                        "screenshot".to_string(),
+                                                        "done",
+                                                    );
+                                                    Ok(format!(
+                                                        "Screenshot captured but too large for \
 the preview ({} bytes). Proceed with the text snapshot.",
-                                                    bytes.len()
-                                                ))
-                                            }
-                                            Err(error) => {
-                                                push_browser_step("screenshot".to_string(), "error");
-                                                Ok(format!(
-                                                    "Screenshot not readable from disk: {error}. \
+                                                        bytes.len()
+                                                    ))
+                                                }
+                                                Err(error) => {
+                                                    push_browser_step(
+                                                        "screenshot".to_string(),
+                                                        "error",
+                                                    );
+                                                    Ok(format!(
+                                                        "Screenshot not readable from disk: {error}. \
 Use the text snapshot."
-                                                ))
+                                                    ))
+                                                }
                                             }
                                         }
-                                    }
-                                    Err(error) => {
-                                        push_browser_step("screenshot".to_string(), "error");
-                                        Err(format!("Screenshot failed: {error}"))
+                                        Err(error) => {
+                                            push_browser_step("screenshot".to_string(), "error");
+                                            Err(format!("Screenshot failed: {error}"))
+                                        }
                                     }
                                 }
-                            }
-                            "browser_tabs" => {
-                                let _ = emit_stream_event(
-                                    &tx,
-                                    GenerateStreamEvent::Delta {
-                                        text: "‹‹ACT››🗂️ Listing tabs‹‹/ACT››".to_string(),
-                                    },
-                                )
-                                .await;
-                                let guard = browse_web_lock().lock().await;
-                                let (client_back, tabs_res) = chat_browser_call(
-                                    client,
-                                    BrowserMethod::Tabs,
-                                    serde_json::json!({}),
-                                )
-                                .await;
-                                drop(guard);
-                                browser_session = client_back;
-                                match tabs_res {
-                                    Ok(value) => {
-                                        // Sidecar shape: { tabs: [ { targetId, url,
-                                        // label?, title? } ] }. Parse defensively in
-                                        // case it's a bare array or uses target_id/id.
-                                        let list = value
-                                            .get("tabs")
-                                            .and_then(|t| t.as_array())
-                                            .or_else(|| value.as_array())
-                                            .cloned()
-                                            .unwrap_or_default();
-                                        let mut lines: Vec<String> = Vec::new();
-                                        for tab in &list {
-                                            let id = tab
-                                                .get("targetId")
-                                                .or_else(|| tab.get("target_id"))
-                                                .or_else(|| tab.get("id"))
-                                                .and_then(|v| v.as_str())
-                                                .unwrap_or("?");
-                                            let url = tab
-                                                .get("url")
-                                                .and_then(|v| v.as_str())
-                                                .unwrap_or("");
-                                            let title = tab
-                                                .get("title")
-                                                .or_else(|| tab.get("label"))
-                                                .and_then(|v| v.as_str())
-                                                .unwrap_or("");
-                                            let mut line = format!("- {id}");
-                                            if !url.is_empty() {
-                                                line.push_str(&format!(" | {url}"));
+                                "browser_tabs" => {
+                                    let _ = emit_stream_event(
+                                        &tx,
+                                        GenerateStreamEvent::Delta {
+                                            text: "‹‹ACT››🗂️ Listing tabs‹‹/ACT››".to_string(),
+                                        },
+                                    )
+                                    .await;
+                                    let guard = browse_web_lock().lock().await;
+                                    let (client_back, tabs_res) = chat_browser_call(
+                                        client,
+                                        BrowserMethod::Tabs,
+                                        serde_json::json!({}),
+                                    )
+                                    .await;
+                                    drop(guard);
+                                    browser_session = client_back;
+                                    match tabs_res {
+                                        Ok(value) => {
+                                            // Sidecar shape: { tabs: [ { targetId, url,
+                                            // label?, title? } ] }. Parse defensively in
+                                            // case it's a bare array or uses target_id/id.
+                                            let list = value
+                                                .get("tabs")
+                                                .and_then(|t| t.as_array())
+                                                .or_else(|| value.as_array())
+                                                .cloned()
+                                                .unwrap_or_default();
+                                            let mut lines: Vec<String> = Vec::new();
+                                            for tab in &list {
+                                                let id = tab
+                                                    .get("targetId")
+                                                    .or_else(|| tab.get("target_id"))
+                                                    .or_else(|| tab.get("id"))
+                                                    .and_then(|v| v.as_str())
+                                                    .unwrap_or("?");
+                                                let url = tab
+                                                    .get("url")
+                                                    .and_then(|v| v.as_str())
+                                                    .unwrap_or("");
+                                                let title = tab
+                                                    .get("title")
+                                                    .or_else(|| tab.get("label"))
+                                                    .and_then(|v| v.as_str())
+                                                    .unwrap_or("");
+                                                let mut line = format!("- {id}");
+                                                if !url.is_empty() {
+                                                    line.push_str(&format!(" | {url}"));
+                                                }
+                                                if !title.is_empty() {
+                                                    line.push_str(&format!(" | {title}"));
+                                                }
+                                                lines.push(line);
                                             }
-                                            if !title.is_empty() {
-                                                line.push_str(&format!(" | {title}"));
+                                            push_browser_step("tabs".to_string(), "done");
+                                            if lines.is_empty() {
+                                                Ok("No tabs open.".to_string())
+                                            } else {
+                                                Ok(format!("Open tabs:\n{}", lines.join("\n")))
                                             }
-                                            lines.push(line);
                                         }
-                                        push_browser_step("tabs".to_string(), "done");
-                                        if lines.is_empty() {
-                                            Ok("No tabs open.".to_string())
-                                        } else {
+                                        Err(error) => {
+                                            push_browser_step("tabs".to_string(), "error");
+                                            Err(format!("Listing tabs failed: {error}"))
+                                        }
+                                    }
+                                }
+                                "browser_dialog" => {
+                                    // Native alert/confirm/prompt blocks the page until
+                                    // answered. In read-only (channel) turns we only allow
+                                    // DISMISS, never accept (an accept could confirm an
+                                    // action). The dialog message is returned so the model
+                                    // sees what it answered.
+                                    let accept = !read_only
+                                        && args
+                                            .get("accept")
+                                            .and_then(|v| v.as_bool())
+                                            .unwrap_or(false);
+                                    let prompt_text = args
+                                        .get("prompt_text")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("");
+                                    let _ = emit_stream_event(
+                                        &tx,
+                                        GenerateStreamEvent::Delta {
+                                            text: format!(
+                                                "‹‹ACT››💬 Dialog: {}‹‹/ACT››",
+                                                if accept { "confirming" } else { "cancelling" }
+                                            ),
+                                        },
+                                    )
+                                    .await;
+                                    let guard = browse_web_lock().lock().await;
+                                    let (client_back, dialog_res) = chat_browser_call(
+                                        client,
+                                        BrowserMethod::RespondDialog,
+                                        serde_json::json!({
+                                            "target_id": current_target.as_str(),
+                                            "accept": accept,
+                                            "promptText": prompt_text,
+                                            "timeoutMs": 5_000,
+                                        }),
+                                    )
+                                    .await;
+                                    drop(guard);
+                                    browser_session = client_back;
+                                    match dialog_res {
+                                        Ok(value) => {
+                                            let msg = value
+                                                .get("message")
+                                                .and_then(|m| m.as_str())
+                                                .unwrap_or("");
+                                            push_browser_step("dialog".to_string(), "done");
                                             Ok(format!(
-                                                "Open tabs:\n{}",
-                                                lines.join("\n")
+                                                "Dialog {} (message: \"{msg}\"). Re-read the page with browser_snapshot.",
+                                                if accept { "confirmed" } else { "cancelled" }
                                             ))
                                         }
-                                    }
-                                    Err(error) => {
-                                        push_browser_step("tabs".to_string(), "error");
-                                        Err(format!("Listing tabs failed: {error}"))
-                                    }
-                                }
-                            }
-                            "browser_dialog" => {
-                                // Native alert/confirm/prompt blocks the page until
-                                // answered. In read-only (channel) turns we only allow
-                                // DISMISS, never accept (an accept could confirm an
-                                // action). The dialog message is returned so the model
-                                // sees what it answered.
-                                let accept = !read_only
-                                    && args.get("accept").and_then(|v| v.as_bool()).unwrap_or(false);
-                                let prompt_text = args
-                                    .get("prompt_text")
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or("");
-                                let _ = emit_stream_event(
-                                    &tx,
-                                    GenerateStreamEvent::Delta {
-                                        text: format!(
-                                            "‹‹ACT››💬 Dialog: {}‹‹/ACT››",
-                                            if accept { "confirming" } else { "cancelling" }
-                                        ),
-                                    },
-                                )
-                                .await;
-                                let guard = browse_web_lock().lock().await;
-                                let (client_back, dialog_res) = chat_browser_call(
-                                    client,
-                                    BrowserMethod::RespondDialog,
-                                    serde_json::json!({
-                                        "target_id": current_target.as_str(),
-                                        "accept": accept,
-                                        "promptText": prompt_text,
-                                        "timeoutMs": 5_000,
-                                    }),
-                                )
-                                .await;
-                                drop(guard);
-                                browser_session = client_back;
-                                match dialog_res {
-                                    Ok(value) => {
-                                        let msg = value
-                                            .get("message")
-                                            .and_then(|m| m.as_str())
-                                            .unwrap_or("");
-                                        push_browser_step("dialog".to_string(), "done");
-                                        Ok(format!(
-                                            "Dialog {} (message: \"{msg}\"). Re-read the page with browser_snapshot.",
-                                            if accept { "confirmed" } else { "cancelled" }
-                                        ))
-                                    }
-                                    Err(error) => {
-                                        push_browser_step("dialog".to_string(), "error");
-                                        Err(format!(
-                                            "No dialog to handle or error: {error}"
-                                        ))
+                                        Err(error) => {
+                                            push_browser_step("dialog".to_string(), "error");
+                                            Err(format!("No dialog to handle or error: {error}"))
+                                        }
                                     }
                                 }
-                            }
                                 _ => Err(format!("Unknown browser tool: {name}")),
                             },
                         };
@@ -17742,7 +19001,9 @@ Use the text snapshot."
                             .map(|w| {
                                 let mut chars = w.chars();
                                 match chars.next() {
-                                    Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+                                    Some(first) => {
+                                        first.to_uppercase().collect::<String>() + chars.as_str()
+                                    }
                                     None => String::new(),
                                 }
                             })
@@ -17756,7 +19017,9 @@ Use the text snapshot."
                         )
                         .await;
                         let id_for_load = id.clone();
-                        match tokio::task::spawn_blocking(move || load_skill_body(&id_for_load)).await {
+                        match tokio::task::spawn_blocking(move || load_skill_body(&id_for_load))
+                            .await
+                        {
                             Ok(Some(body)) => format!(
                                 "Instructions for the skill «{id}» (SKILL.md) — FOLLOW THEM with the \
 available tools (for data from the web use the browser: browser_navigate on the indicated URL):\n\n{}",
@@ -17805,9 +19068,10 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                 // If Docker is down we auto-start Docker Desktop (cold
                                 // start ~1 min) before running — tell the user so the
                                 // wait doesn't look like a hang.
-                                let docker_up = tokio::task::spawn_blocking(sandbox::docker_running)
-                                    .await
-                                    .unwrap_or(false);
+                                let docker_up =
+                                    tokio::task::spawn_blocking(sandbox::docker_running)
+                                        .await
+                                        .unwrap_or(false);
                                 if !docker_up {
                                     let _ = emit_stream_event(
                                         &tx,
@@ -17832,7 +19096,8 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                 // The model may omit skill_id; derive it from the
                                 // command's `/home/agent/skills/<id>/…` path so the
                                 // skill's files are always synced before running.
-                                let sid = skill_id.clone().or_else(|| skill_id_from_command(&command));
+                                let sid =
+                                    skill_id.clone().or_else(|| skill_id_from_command(&command));
                                 let outcome = tokio::task::spawn_blocking(move || {
                                     if let Some(id) = sid.as_deref() {
                                         if let Ok(dir) = skills_dir() {
@@ -17865,7 +19130,9 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                 // active, also copy them there — it's the project's
                                 // default folder for generated files.
                                 let project_folder = active_workspace_folder();
-                                for (file_name, size) in detect_new_artifacts(&host_out, run_started) {
+                                for (file_name, size) in
+                                    detect_new_artifacts(&host_out, run_started)
+                                {
                                     let mut delivered_to: Option<String> = None;
                                     if let Some(folder) = project_folder.as_ref() {
                                         let dest = std::path::Path::new(folder).join(&file_name);
@@ -17878,14 +19145,17 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                         "thread": thread_slug,
                                         "size": size,
                                     });
-                                    let artifact_mark = format!("‹‹ARTIFACT››{marker}‹‹/ARTIFACT››");
+                                    let artifact_mark =
+                                        format!("‹‹ARTIFACT››{marker}‹‹/ARTIFACT››");
                                     // Persist in the committed answer so the UI can
                                     // render the download card + Artefatti panel (the
                                     // Done payload is authoritative).
                                     accumulated.push_str(&artifact_mark);
                                     let _ = emit_stream_event(
                                         &tx,
-                                        GenerateStreamEvent::Delta { text: artifact_mark },
+                                        GenerateStreamEvent::Delta {
+                                            text: artifact_mark,
+                                        },
                                     )
                                     .await;
                                     register_artifact_memory(
@@ -17900,8 +19170,9 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                     )
                                     .await;
                                     match delivered_to {
-                                        Some(path) => model_output
-                                            .push_str(&format!("\n[file generated and saved to {path}]")),
+                                        Some(path) => model_output.push_str(&format!(
+                                            "\n[file generated and saved to {path}]"
+                                        )),
                                         None => model_output.push_str(&format!(
                                             "\n[file generated: {file_name} in $OUTPUT_DIR]"
                                         )),
@@ -17914,9 +19185,16 @@ available tools (for data from the web use the browser: browser_navigate on the 
                         // Model-authored document/code → file artifact (host-side).
                         let parsed = serde_json::from_str::<serde_json::Value>(args_raw)
                             .unwrap_or_else(|_| serde_json::json!({}));
-                        let fname = parsed.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                        let content =
-                            parsed.get("content").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                        let fname = parsed
+                            .get("name")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        let content = parsed
+                            .get("content")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
                         let thread_slug = artifact_thread_slug(thread_id.as_deref());
                         let _ = emit_stream_event(
                             &tx,
@@ -17933,7 +19211,8 @@ available tools (for data from the web use the browser: browser_navigate on the 
                         let is_pdf = fname.to_ascii_lowercase().ends_with(".pdf");
                         let result = tokio::task::spawn_blocking(move || {
                             if is_pdf {
-                                let title = fname_w.trim_end_matches(".pdf").trim_end_matches(".PDF");
+                                let title =
+                                    fname_w.trim_end_matches(".pdf").trim_end_matches(".PDF");
                                 let bytes = pdf_render::markdown_to_pdf(title, &content)
                                     .map_err(|e| format!("PDF render failed: {e}"))?;
                                 write_artifact_bytes(&slug_w, &fname_w, &bytes)
@@ -17959,7 +19238,9 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                 accumulated.push_str(&artifact_mark);
                                 let _ = emit_stream_event(
                                     &tx,
-                                    GenerateStreamEvent::Delta { text: artifact_mark },
+                                    GenerateStreamEvent::Delta {
+                                        text: artifact_mark,
+                                    },
                                 )
                                 .await;
                                 register_artifact_memory(
@@ -18040,7 +19321,9 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                             accumulated.push_str(&artifact_mark);
                                             let _ = emit_stream_event(
                                                 &tx,
-                                                GenerateStreamEvent::Delta { text: artifact_mark },
+                                                GenerateStreamEvent::Delta {
+                                                    text: artifact_mark,
+                                                },
                                             )
                                             .await;
                                             register_artifact_memory(
@@ -18111,20 +19394,24 @@ available tools (for data from the web use the browser: browser_navigate on the 
                             .map(|a| !a.is_empty())
                             .unwrap_or(false);
                         if !has_slides {
-                            "render_deck needs a non-empty 'slides' array (content only).".to_string()
+                            "render_deck needs a non-empty 'slides' array (content only)."
+                                .to_string()
                         } else {
                             let thread_slug = artifact_thread_slug(thread_id.as_deref());
                             let _ = emit_stream_event(
                                 &tx,
                                 GenerateStreamEvent::Delta {
-                                    text: "‹‹ACT››🎬 Rendering the deck (PPTX + preview)‹‹/ACT››".to_string(),
+                                    text: "‹‹ACT››🎬 Rendering the deck (PPTX + preview)‹‹/ACT››"
+                                        .to_string(),
                                 },
                             )
                             .await;
                             // 1) brand.json + logo.png + deck.json into the output dir
                             //    (host side = bind-mounted into the sandbox).
                             let slug_b = thread_slug.clone();
-                            let _ = tokio::task::spawn_blocking(move || materialize_brand_kit(&slug_b)).await;
+                            let _ =
+                                tokio::task::spawn_blocking(move || materialize_brand_kit(&slug_b))
+                                    .await;
                             let deck_bytes = serde_json::to_vec_pretty(&deck).unwrap_or_default();
                             let slug_w = thread_slug.clone();
                             let write_res = tokio::task::spawn_blocking(move || {
@@ -18176,21 +19463,25 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                 if let Some(error) = rendered_deck_qa_failure(&render_out) {
                                     format!(
                                         "Deck rendered with visual QA issues: {error}. Files available: {}. Renderer output:\n{}",
-                                        if produced.is_empty() { "none".to_string() } else { produced.join(", ") },
+                                        if produced.is_empty() {
+                                            "none".to_string()
+                                        } else {
+                                            produced.join(", ")
+                                        },
                                         render_out.chars().take(1200).collect::<String>(),
                                     )
                                 } else {
-                                if produced.iter().any(|fname| fname == "deck.pptx") {
-                                    format!(
-                                        "Deck rendered: {}. The .pptx is editable; .html/.pdf are previews. The deck is DONE — mark the plan complete and give the user a one-line summary.",
-                                        produced.join(", ")
-                                    )
-                                } else {
-                                    format!(
-                                        "Deck render did NOT produce a .pptx. Renderer output:\n{}",
-                                        render_out.chars().take(800).collect::<String>()
-                                    )
-                                }
+                                    if produced.iter().any(|fname| fname == "deck.pptx") {
+                                        format!(
+                                            "Deck rendered: {}. The .pptx is editable; .html/.pdf are previews. The deck is DONE — mark the plan complete and give the user a one-line summary.",
+                                            produced.join(", ")
+                                        )
+                                    } else {
+                                        format!(
+                                            "Deck render did NOT produce a .pptx. Renderer output:\n{}",
+                                            render_out.chars().take(800).collect::<String>()
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -18222,29 +19513,27 @@ available tools (for data from the web use the browser: browser_navigate on the 
                         let catalog_template =
                             template_catalog_by_id(requested_template_ref.as_deref());
                         let template_ref = catalog_template.as_ref().map(|entry| entry.id.clone());
-                        let design_template = deliverable_design_template(&parsed)
-                            .or_else(|| {
-                                catalog_template
-                                    .as_ref()
-                                    .map(|entry| entry.design_template.clone())
-                            });
+                        let design_template = deliverable_design_template(&parsed).or_else(|| {
+                            catalog_template
+                                .as_ref()
+                                .map(|entry| entry.design_template.clone())
+                        });
                         let design_theme = deliverable_design_theme(&parsed).or_else(|| {
                             catalog_template
                                 .as_ref()
                                 .and_then(|entry| entry.design_theme.clone())
                         });
-                        let design_profile =
-                            deliverable_design_profile(&parsed)
-                                .or_else(|| {
-                                    catalog_template
-                                        .as_ref()
-                                        .and_then(|entry| entry.design_profile.clone())
-                                })
-                                .or_else(|| {
-                                    let (profile, _) =
-                                        deliverable_template_defaults(design_template.as_deref());
-                                    profile.map(String::from)
-                                });
+                        let design_profile = deliverable_design_profile(&parsed)
+                            .or_else(|| {
+                                catalog_template
+                                    .as_ref()
+                                    .and_then(|entry| entry.design_profile.clone())
+                            })
+                            .or_else(|| {
+                                let (profile, _) =
+                                    deliverable_template_defaults(design_template.as_deref());
+                                profile.map(String::from)
+                            });
                         let design_components = resolved_deliverable_design_components_with_catalog(
                             &parsed,
                             design_template.as_deref(),
@@ -18269,33 +19558,32 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                     "design_components": design_components.clone(),
                                 }),
                             );
-                            let workflow_plan =
-                                match run_static_workflow_plan_through_brain_async(
-                                    brief.clone(),
-                                    workflow_plan,
-                                )
-                                .await
-                                {
-                                    Ok(plan) => plan,
-                                    Err(error) => {
-                                        eprintln!(
-                                            "make_deck: static workflow plan validation failed: {error}"
-                                        );
-                                        workflow_execution_plan(
-                                            &make_deck_workflow_definition(),
-                                            serde_json::json!({
-                                                "brief": brief.clone(),
-                                                "language": language.clone(),
-                                                "slides": slides,
-                                                "template_ref": template_ref.clone(),
-                                                "design_template": design_template.clone(),
-                                                "design_theme": design_theme.clone(),
-                                                "design_profile": design_profile.clone(),
-                                                "design_components": design_components.clone(),
-                                            }),
-                                        )
-                                    }
-                                };
+                            let workflow_plan = match run_static_workflow_plan_through_brain_async(
+                                brief.clone(),
+                                workflow_plan,
+                            )
+                            .await
+                            {
+                                Ok(plan) => plan,
+                                Err(error) => {
+                                    eprintln!(
+                                        "make_deck: static workflow plan validation failed: {error}"
+                                    );
+                                    workflow_execution_plan(
+                                        &make_deck_workflow_definition(),
+                                        serde_json::json!({
+                                            "brief": brief.clone(),
+                                            "language": language.clone(),
+                                            "slides": slides,
+                                            "template_ref": template_ref.clone(),
+                                            "design_template": design_template.clone(),
+                                            "design_theme": design_theme.clone(),
+                                            "design_profile": design_profile.clone(),
+                                            "design_components": design_components.clone(),
+                                        }),
+                                    )
+                                }
+                            };
                             let thread_slug = artifact_thread_slug(thread_id.as_deref());
                             let _ = emit_stream_event(
                                 &tx,
@@ -18306,7 +19594,9 @@ available tools (for data from the web use the browser: browser_navigate on the 
                             .await;
                             // 1) brand into the output dir + load colours for prompts.
                             let slug_b = thread_slug.clone();
-                            let _ = tokio::task::spawn_blocking(move || materialize_brand_kit(&slug_b)).await;
+                            let _ =
+                                tokio::task::spawn_blocking(move || materialize_brand_kit(&slug_b))
+                                    .await;
                             let brand = tokio::task::spawn_blocking(load_brand_kit)
                                 .await
                                 .unwrap_or_default();
@@ -18364,7 +19654,11 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                             if made >= 3 {
                                                 break;
                                             }
-                                            if !slide.get("want_image").and_then(|v| v.as_bool()).unwrap_or(false) {
+                                            if !slide
+                                                .get("want_image")
+                                                .and_then(|v| v.as_bool())
+                                                .unwrap_or(false)
+                                            {
                                                 continue;
                                             }
                                             let title = slide
@@ -18393,7 +19687,13 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                                 },
                                             )
                                             .await;
-                                            if let Ok(bytes) = generate_image_png(&state_owned.http, &prompt, "1280x720").await {
+                                            if let Ok(bytes) = generate_image_png(
+                                                &state_owned.http,
+                                                &prompt,
+                                                "1280x720",
+                                            )
+                                            .await
+                                            {
                                                 let fname = format!("{iname}.png");
                                                 let slug_w = thread_slug.clone();
                                                 let fname_w = fname.clone();
@@ -18405,7 +19705,8 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                                 if w.is_ok() {
                                                     slide["image"] = serde_json::json!(fname);
                                                     if layout == "bullets" {
-                                                        slide["layout"] = serde_json::json!("image_right");
+                                                        slide["layout"] =
+                                                            serde_json::json!("image_right");
                                                     }
                                                     made += 1;
                                                 }
@@ -18418,7 +19719,8 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                         .and_then(|s| s.as_array())
                                         .map(|a| a.len())
                                         .unwrap_or(0);
-                                    let deck_bytes = serde_json::to_vec_pretty(&deck).unwrap_or_default();
+                                    let deck_bytes =
+                                        serde_json::to_vec_pretty(&deck).unwrap_or_default();
                                     let slug_w = thread_slug.clone();
                                     let write_res = tokio::task::spawn_blocking(move || {
                                         write_artifact_bytes(&slug_w, "deck.json", &deck_bytes)
@@ -18429,7 +19731,8 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                         format!("Could not write deck.json: {e}")
                                     } else {
                                         // 5) render in the sandbox (no model shell).
-                                        let container_out = sandbox::container_output_dir(&thread_slug);
+                                        let container_out =
+                                            sandbox::container_output_dir(&thread_slug);
                                         let cmd = format!(
                                             "cd '{container_out}' && deck-render deck.json --prefix deck && \
                                              chromium --headless --no-sandbox --disable-gpu \
@@ -18454,8 +19757,9 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                         // when QA flags issues: the generated files still need
                                         // to be visible for review and iteration.
                                         let qa_result = rendered_deck_qa_result(&render_out);
-                                        let quality_metadata =
-                                            deck_quality_metadata_from_qa_result(qa_result.as_ref());
+                                        let quality_metadata = deck_quality_metadata_from_qa_result(
+                                            qa_result.as_ref(),
+                                        );
                                         let produced = emit_rendered_deck_artifacts(
                                             &state_owned,
                                             &tx,
@@ -18472,29 +19776,40 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                                 workflow_plan
                                                     .steps
                                                     .first()
-                                                    .and_then(|step| step.arguments.get("workflow_id"))
+                                                    .and_then(|step| step
+                                                        .arguments
+                                                        .get("workflow_id"))
                                                     .and_then(|value| value.as_str())
                                                     .unwrap_or("make_deck"),
-                                                if produced.is_empty() { "none".to_string() } else { produced.join(", ") },
+                                                if produced.is_empty() {
+                                                    "none".to_string()
+                                                } else {
+                                                    produced.join(", ")
+                                                },
                                             )
                                         } else {
-                                        if produced.iter().any(|fname| fname == "deck.pptx") {
-                                            format!(
-                                                "Deck created via workflow {}: {} ({slide_count} slides, {made} images). The .pptx is editable; .html/.pdf are previews. The deck is DONE — give the user a one-line summary.",
-                                                workflow_plan
-                                                    .steps
-                                                    .first()
-                                                    .and_then(|step| step.arguments.get("workflow_id"))
-                                                    .and_then(|value| value.as_str())
-                                                    .unwrap_or("make_deck"),
-                                                produced.join(", ")
-                                            )
-                                        } else {
-                                            format!(
-                                                "Deck render did NOT produce a .pptx. Renderer output:\n{}",
-                                                render_out.chars().take(800).collect::<String>()
-                                            )
-                                        }
+                                            if produced.iter().any(|fname| fname == "deck.pptx") {
+                                                format!(
+                                                    "Deck created via workflow {}: {} ({slide_count} slides, {made} images). The .pptx is editable; .html/.pdf are previews. The deck is DONE — give the user a one-line summary.",
+                                                    workflow_plan
+                                                        .steps
+                                                        .first()
+                                                        .and_then(|step| step
+                                                            .arguments
+                                                            .get("workflow_id"))
+                                                        .and_then(|value| value.as_str())
+                                                        .unwrap_or("make_deck"),
+                                                    produced.join(", ")
+                                                )
+                                            } else {
+                                                format!(
+                                                    "Deck render did NOT produce a .pptx. Renderer output:\n{}",
+                                                    render_out
+                                                        .chars()
+                                                        .take(800)
+                                                        .collect::<String>()
+                                                )
+                                            }
                                         }
                                     }
                                 }
@@ -18546,24 +19861,23 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                 &make_document_workflow_definition(),
                                 workflow_args.clone(),
                             );
-                            let workflow_plan =
-                                match run_static_workflow_plan_through_brain_async(
-                                    brief.clone(),
-                                    workflow_plan,
-                                )
-                                .await
-                                {
-                                    Ok(plan) => plan,
-                                    Err(error) => {
-                                        eprintln!(
-                                            "make_document: static workflow plan validation failed: {error}"
-                                        );
-                                        workflow_execution_plan(
-                                            &make_document_workflow_definition(),
-                                            workflow_args,
-                                        )
-                                    }
-                                };
+                            let workflow_plan = match run_static_workflow_plan_through_brain_async(
+                                brief.clone(),
+                                workflow_plan,
+                            )
+                            .await
+                            {
+                                Ok(plan) => plan,
+                                Err(error) => {
+                                    eprintln!(
+                                        "make_document: static workflow plan validation failed: {error}"
+                                    );
+                                    workflow_execution_plan(
+                                        &make_document_workflow_definition(),
+                                        workflow_args,
+                                    )
+                                }
+                            };
                             let thread_slug = artifact_thread_slug(thread_id.as_deref());
                             let _ = emit_stream_event(
                                 &tx,
@@ -18583,7 +19897,9 @@ available tools (for data from the web use the browser: browser_navigate on the 
                             )
                             .await
                             {
-                                Err(error) => format!("Could not generate document content: {error}"),
+                                Err(error) => {
+                                    format!("Could not generate document content: {error}")
+                                }
                                 Ok(markdown) => {
                                     let markdown = apply_document_design_components(
                                         &markdown,
@@ -18619,7 +19935,10 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                         let mut artifact_error: Option<String> = None;
                                         for format in formats {
                                             let artifact_name =
-                                                document_artifact_name_with_extension(Some(&fname), &format);
+                                                document_artifact_name_with_extension(
+                                                    Some(&fname),
+                                                    &format,
+                                                );
                                             let slug_w = thread_slug.clone();
                                             let fname_w = artifact_name.clone();
                                             let markdown_w = markdown.clone();
@@ -18628,18 +19947,30 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                                     let title = fname_w
                                                         .trim_end_matches(".pdf")
                                                         .trim_end_matches(".PDF");
-                                                    let bytes = pdf_render::markdown_to_pdf(title, &markdown_w)
-                                                        .map_err(|e| format!("PDF render failed: {e}"))?;
+                                                    let bytes = pdf_render::markdown_to_pdf(
+                                                        title,
+                                                        &markdown_w,
+                                                    )
+                                                    .map_err(|e| {
+                                                        format!("PDF render failed: {e}")
+                                                    })?;
                                                     write_artifact_bytes(&slug_w, &fname_w, &bytes)
                                                 } else if format == "docx" {
                                                     let title = fname_w
                                                         .trim_end_matches(".docx")
                                                         .trim_end_matches(".DOCX");
-                                                    let bytes = markdown_to_docx(title, &markdown_w)
-                                                        .map_err(|e| format!("DOCX render failed: {e}"))?;
+                                                    let bytes =
+                                                        markdown_to_docx(title, &markdown_w)
+                                                            .map_err(|e| {
+                                                                format!("DOCX render failed: {e}")
+                                                            })?;
                                                     write_artifact_bytes(&slug_w, &fname_w, &bytes)
                                                 } else {
-                                                    write_text_artifact(&slug_w, &fname_w, &markdown_w)
+                                                    write_text_artifact(
+                                                        &slug_w,
+                                                        &fname_w,
+                                                        &markdown_w,
+                                                    )
                                                 }
                                             })
                                             .await
@@ -18658,12 +19989,15 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                                             .to_string_lossy()
                                                             .to_string(),
                                                     });
-                                                    let artifact_mark =
-                                                        format!("‹‹ARTIFACT››{marker}‹‹/ARTIFACT››");
+                                                    let artifact_mark = format!(
+                                                        "‹‹ARTIFACT››{marker}‹‹/ARTIFACT››"
+                                                    );
                                                     accumulated.push_str(&artifact_mark);
                                                     let _ = emit_stream_event(
                                                         &tx,
-                                                        GenerateStreamEvent::Delta { text: artifact_mark },
+                                                        GenerateStreamEvent::Delta {
+                                                            text: artifact_mark,
+                                                        },
                                                     )
                                                     .await;
                                                     let artifact_name = marker
@@ -18698,7 +20032,9 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                                 workflow_plan
                                                     .steps
                                                     .first()
-                                                    .and_then(|step| step.arguments.get("workflow_id"))
+                                                    .and_then(|step| step
+                                                        .arguments
+                                                        .get("workflow_id"))
                                                     .and_then(|value| value.as_str())
                                                     .unwrap_or("make_document"),
                                                 produced.join(", "),
@@ -18713,7 +20049,11 @@ available tools (for data from the web use the browser: browser_navigate on the 
                         // (gateway performs the copy host-side, scoped to grants).
                         let parsed = serde_json::from_str::<serde_json::Value>(args_raw)
                             .unwrap_or_else(|_| serde_json::json!({}));
-                        let file = parsed.get("file").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                        let file = parsed
+                            .get("file")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
                         let dest_name = parsed
                             .get("destination")
                             .and_then(|v| v.as_str())
@@ -18748,14 +20088,20 @@ contact: use only the messages from this chat. Do NOT reveal personal data of th
                         } else {
                             let query = serde_json::from_str::<serde_json::Value>(args_raw)
                                 .ok()
-                                .and_then(|a| a.get("query").and_then(|q| q.as_str()).map(String::from))
+                                .and_then(|a| {
+                                    a.get("query").and_then(|q| q.as_str()).map(String::from)
+                                })
                                 .unwrap_or_default();
                             let _ = emit_stream_event(
                                 &tx,
                                 GenerateStreamEvent::Delta {
                                     text: format!(
                                         "‹‹ACT››🧠 Searching memory: {}‹‹/ACT››",
-                                        if query.is_empty() { "(query)" } else { query.as_str() }
+                                        if query.is_empty() {
+                                            "(query)"
+                                        } else {
+                                            query.as_str()
+                                        }
                                     ),
                                 },
                             )
@@ -18768,7 +20114,9 @@ contact: use only the messages from this chat. Do NOT reveal personal data of th
                     } else if name == "query_code_graph" {
                         let symbol = serde_json::from_str::<serde_json::Value>(args_raw)
                             .ok()
-                            .and_then(|a| a.get("symbol").and_then(|s| s.as_str()).map(String::from))
+                            .and_then(|a| {
+                                a.get("symbol").and_then(|s| s.as_str()).map(String::from)
+                            })
                             .unwrap_or_default();
                         let _ = emit_stream_event(
                             &tx,
@@ -18819,7 +20167,10 @@ contact: use only the messages from this chat. Do NOT reveal personal data of th
                                 let _ = emit_stream_event(
                                     &tx,
                                     GenerateStreamEvent::Delta {
-                                        text: format!("‹‹ACT››🗓 Date resolved: {}‹‹/ACT››", res.human),
+                                        text: format!(
+                                            "‹‹ACT››🗓 Date resolved: {}‹‹/ACT››",
+                                            res.human
+                                        ),
                                     },
                                 )
                                 .await;
@@ -18849,12 +20200,13 @@ an uncertain date.",
                             ),
                         }
                     } else if name == "record_decision" {
-                        let args_val: serde_json::Value =
-                            serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
+                        let args_val: serde_json::Value = serde_json::from_str(args_raw)
+                            .unwrap_or_else(|_| serde_json::json!({}));
                         let _ = emit_stream_event(
                             &tx,
                             GenerateStreamEvent::Delta {
-                                text: "‹‹ACT››🧠 Recording the decision in memory‹‹/ACT››".to_string(),
+                                text: "‹‹ACT››🧠 Recording the decision in memory‹‹/ACT››"
+                                    .to_string(),
                             },
                         )
                         .await;
@@ -18863,8 +20215,8 @@ an uncertain date.",
                             .await
                             .unwrap_or_else(|e| format!("Execution error: {e}"))
                     } else if name == "forget_memory" {
-                        let args_val: serde_json::Value =
-                            serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
+                        let args_val: serde_json::Value = serde_json::from_str(args_raw)
+                            .unwrap_or_else(|_| serde_json::json!({}));
                         let _ = emit_stream_event(
                             &tx,
                             GenerateStreamEvent::Delta {
@@ -18877,8 +20229,8 @@ an uncertain date.",
                             .await
                             .unwrap_or_else(|e| format!("Execution error: {e}"))
                     } else if name == "update_plan" || name == "step_advance" {
-                        let args_val: serde_json::Value =
-                            serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
+                        let args_val: serde_json::Value = serde_json::from_str(args_raw)
+                            .unwrap_or_else(|_| serde_json::json!({}));
                         // `step_advance` reports progress on a SINGLE step by id (no need to
                         // re-send the whole plan → weak-model-proof, no ballooning). It maps to
                         // a one-element `sent` and rides the exact same merge + F2-verify path.
@@ -18920,8 +20272,13 @@ an uncertain date.",
                                     } else {
                                         step_evidence.join("\n")
                                     };
-                                    verify_step_complete(&state_owned.http, &title, &criterion, &evidence)
-                                        .await
+                                    verify_step_complete(
+                                        &state_owned.http,
+                                        &title,
+                                        &criterion,
+                                        &evidence,
+                                    )
+                                    .await
                                 } else {
                                     (true, String::new())
                                 };
@@ -18961,7 +20318,11 @@ an uncertain date.",
                                 } else {
                                     rejection = Some(format!(
                                         "Step «{title}» is NOT verified complete: {}. Keep working on it — re-mark it done ONLY once its result actually exists.",
-                                        if reason.is_empty() { "the evidence does not show it was finished" } else { &reason }
+                                        if reason.is_empty() {
+                                            "the evidence does not show it was finished"
+                                        } else {
+                                            &reason
+                                        }
                                     ));
                                     break;
                                 }
@@ -18973,8 +20334,11 @@ an uncertain date.",
                             let plan_mark =
                                 format!("‹‹PLAN››{}‹‹/PLAN››", build_plan_markdown(&plan_steps));
                             accumulated.push_str(&plan_mark);
-                            let _ = emit_stream_event(&tx, GenerateStreamEvent::Delta { text: plan_mark })
-                                .await;
+                            let _ = emit_stream_event(
+                                &tx,
+                                GenerateStreamEvent::Delta { text: plan_mark },
+                            )
+                            .await;
                             upsert_runtime_plan_memory_from_state(
                                 &state_owned,
                                 thread_id.as_deref(),
@@ -18983,7 +20347,9 @@ an uncertain date.",
                             let done = plan_done_count(&plan_steps);
                             match rejection {
                                 Some(msg) => format!("⚠️ {msg} (done {done}/{})", plan_steps.len()),
-                                None => format!("Plan updated: {done}/{} steps done.", plan_steps.len()),
+                                None => {
+                                    format!("Plan updated: {done}/{} steps done.", plan_steps.len())
+                                }
                             }
                         }
                     } else if name == "create_automation" {
@@ -19023,7 +20389,11 @@ an uncertain date.",
                             GenerateStreamEvent::Delta {
                                 text: format!(
                                     "‹‹ACT››🧭 Searching for a capability: {}‹‹/ACT››",
-                                    if intent.is_empty() { "(intent)" } else { intent.as_str() }
+                                    if intent.is_empty() {
+                                        "(intent)"
+                                    } else {
+                                        intent.as_str()
+                                    }
                                 ),
                             },
                         )
@@ -19102,8 +20472,8 @@ loaded with use_skill):\n{}",
                             )
                         }
                     } else if name == "schedule_task" {
-                        let args_val: serde_json::Value =
-                            serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
+                        let args_val: serde_json::Value = serde_json::from_str(args_raw)
+                            .unwrap_or_else(|_| serde_json::json!({}));
                         let goal = args_val
                             .get("goal")
                             .and_then(|v| v.as_str())
@@ -19123,7 +20493,8 @@ loaded with use_skill):\n{}",
                             .filter(|s| !s.is_empty());
                         if goal.is_empty() || every.is_empty() {
                             "Scheduling requires 'goal' (what to do) and 'every' (how often: \
-\"every 1d\", \"daily@08:00\", \"weekly@mon@09:30\").".to_string()
+\"every 1d\", \"daily@08:00\", \"weekly@mon@09:30\")."
+                                .to_string()
                         } else {
                             let _ = emit_stream_event(
                                 &tx,
@@ -19151,8 +20522,8 @@ loaded with use_skill):\n{}",
                             .unwrap_or_else(|e| format!("Scheduling error: {e}"))
                         }
                     } else if name == "read_file" {
-                        let args_val: serde_json::Value =
-                            serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
+                        let args_val: serde_json::Value = serde_json::from_str(args_raw)
+                            .unwrap_or_else(|_| serde_json::json!({}));
                         let path = args_val
                             .get("path")
                             .and_then(|v| v.as_str())
@@ -19168,26 +20539,28 @@ loaded with use_skill):\n{}",
                         let st = state_owned.clone();
                         let tid = thread_id.clone();
                         let recall_path = path.clone();
-                        let mut out =
-                            tokio::task::spawn_blocking(move || read_project_file(&st, tid.as_deref(), &path))
-                                .await
-                                .unwrap_or_else(|e| format!("Error: {e}"));
+                        let mut out = tokio::task::spawn_blocking(move || {
+                            read_project_file(&st, tid.as_deref(), &path)
+                        })
+                        .await
+                        .unwrap_or_else(|e| format!("Error: {e}"));
                         // Per-file recall: surface past DECISIONS about this file so the
                         // agent remembers WHY it's like this instead of re-deriving it.
                         let st2 = state_owned.clone();
-                        if let Some(note) =
-                            tokio::task::spawn_blocking(move || decisions_for_path(&st2, &recall_path))
-                                .await
-                                .ok()
-                                .flatten()
+                        if let Some(note) = tokio::task::spawn_blocking(move || {
+                            decisions_for_path(&st2, &recall_path)
+                        })
+                        .await
+                        .ok()
+                        .flatten()
                         {
                             out.push_str("\n\n");
                             out.push_str(&note);
                         }
                         out
                     } else if name == "write_file" {
-                        let args_val: serde_json::Value =
-                            serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
+                        let args_val: serde_json::Value = serde_json::from_str(args_raw)
+                            .unwrap_or_else(|_| serde_json::json!({}));
                         let path = args_val
                             .get("path")
                             .and_then(|v| v.as_str())
@@ -19226,8 +20599,8 @@ loaded with use_skill):\n{}",
                         }
                         result
                     } else if name == "edit_file" {
-                        let args_val: serde_json::Value =
-                            serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
+                        let args_val: serde_json::Value = serde_json::from_str(args_raw)
+                            .unwrap_or_else(|_| serde_json::json!({}));
                         let path = args_val
                             .get("path")
                             .and_then(|v| v.as_str())
@@ -19272,9 +20645,13 @@ loaded with use_skill):\n{}",
                             .unwrap_or_else(|e| format!("Error: {e}"))
                     } else if name == "list_directory" || name == "read_text_file" {
                         let is_read = name == "read_text_file";
-                        let args_val: serde_json::Value =
-                            serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
-                        let p = args_val.get("path").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                        let args_val: serde_json::Value = serde_json::from_str(args_raw)
+                            .unwrap_or_else(|_| serde_json::json!({}));
+                        let p = args_val
+                            .get("path")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
                         let st = state_owned.clone();
                         let tid = thread_id.clone();
                         let pr = p.clone();
@@ -19282,10 +20659,16 @@ loaded with use_skill):\n{}",
                             fs_resolve_authorized(&st, tid.as_deref(), &pr)
                         })
                         .await
-                        .unwrap_or_else(|_| Err(FsAuthIssue::Invalid("internal error".to_string())));
+                        .unwrap_or_else(|_| {
+                            Err(FsAuthIssue::Invalid("internal error".to_string()))
+                        });
                         match resolved {
                             Ok(path) => {
-                                let icon = if is_read { "📄 Reading" } else { "📂 Listing" };
+                                let icon = if is_read {
+                                    "📄 Reading"
+                                } else {
+                                    "📂 Listing"
+                                };
                                 let _ = emit_stream_event(
                                     &tx,
                                     GenerateStreamEvent::Delta {
@@ -19316,8 +20699,11 @@ loaded with use_skill):\n{}",
 ‹‹FS_AUTHORIZE››{marker}‹‹/FS_AUTHORIZE››\n"
                                 );
                                 accumulated.push_str(&card);
-                                let _ = emit_stream_event(&tx, GenerateStreamEvent::Delta { text: card })
-                                    .await;
+                                let _ = emit_stream_event(
+                                    &tx,
+                                    GenerateStreamEvent::Delta { text: card },
+                                )
+                                .await;
                                 pending_confirm = true;
                                 "AWAITING AUTHORIZATION: I showed the user a card with the \
 button to authorize access to the folder. Do NOT say you have read/listed it."
@@ -19325,8 +20711,8 @@ button to authorize access to the folder. Do NOT say you have read/listed it."
                             }
                         }
                     } else if name == "run_in_project" {
-                        let args_val: serde_json::Value =
-                            serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
+                        let args_val: serde_json::Value = serde_json::from_str(args_raw)
+                            .unwrap_or_else(|_| serde_json::json!({}));
                         let command = args_val
                             .get("command")
                             .and_then(|v| v.as_str())
@@ -19348,19 +20734,21 @@ button to authorize access to the folder. Do NOT say you have read/listed it."
                             .await
                             .unwrap_or_else(|e| format!("Error: {e}"))
                     } else if name == "show_addon" {
-                        let args_val: serde_json::Value =
-                            serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
+                        let args_val: serde_json::Value = serde_json::from_str(args_raw)
+                            .unwrap_or_else(|_| serde_json::json!({}));
                         let addon_id = args_val
                             .get("addon_id")
                             .and_then(|v| v.as_str())
                             .unwrap_or("")
                             .to_string();
-                        tokio::task::spawn_blocking(move || process_skills::addon_show_text(&addon_id))
-                            .await
-                            .unwrap_or_else(|e| format!("Error: {e}"))
+                        tokio::task::spawn_blocking(move || {
+                            process_skills::addon_show_text(&addon_id)
+                        })
+                        .await
+                        .unwrap_or_else(|e| format!("Error: {e}"))
                     } else if name == "customize_addon" {
-                        let args_val: serde_json::Value =
-                            serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
+                        let args_val: serde_json::Value = serde_json::from_str(args_raw)
+                            .unwrap_or_else(|_| serde_json::json!({}));
                         let addon_id = args_val
                             .get("addon_id")
                             .and_then(|v| v.as_str())
@@ -19383,10 +20771,13 @@ button to authorize access to the folder. Do NOT say you have read/listed it."
                         .await
                         .unwrap_or_else(|e| format!("Error: {e}"))
                     } else if name == "create_skill" {
-                        let args_val: serde_json::Value =
-                            serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
-                        let skill_name =
-                            args_val.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                        let args_val: serde_json::Value = serde_json::from_str(args_raw)
+                            .unwrap_or_else(|_| serde_json::json!({}));
+                        let skill_name = args_val
+                            .get("name")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
                         let skill_desc = args_val
                             .get("description")
                             .and_then(|v| v.as_str())
@@ -19410,8 +20801,8 @@ button to authorize access to the folder. Do NOT say you have read/listed it."
                         .await
                         .unwrap_or_else(|e| format!("Error: {e}"))
                     } else if name == "suggest_capabilities" {
-                        let args_val: serde_json::Value =
-                            serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
+                        let args_val: serde_json::Value = serde_json::from_str(args_raw)
+                            .unwrap_or_else(|_| serde_json::json!({}));
                         let need = args_val
                             .get("need")
                             .and_then(|v| v.as_str())
@@ -19455,8 +20846,8 @@ connect the suggested connectors (skill/MCP/Composio). Do NOT say you have alrea
                             .await
                             .unwrap_or_else(|e| format!("Error: {e}"))
                     } else if name == "cancel_scheduled_task" {
-                        let args_val: serde_json::Value =
-                            serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
+                        let args_val: serde_json::Value = serde_json::from_str(args_raw)
+                            .unwrap_or_else(|_| serde_json::json!({}));
                         let task_id = args_val
                             .get("task_id")
                             .and_then(|v| v.as_str())
@@ -19544,8 +20935,9 @@ require your confirmation in the app. Propose it and stop."
 ‹‹MCP_CONFIRM››{marker}‹‹/MCP_CONFIRM››\n"
                             );
                             accumulated.push_str(&card);
-                            let _ = emit_stream_event(&tx, GenerateStreamEvent::Delta { text: card })
-                                .await;
+                            let _ =
+                                emit_stream_event(&tx, GenerateStreamEvent::Delta { text: card })
+                                    .await;
                             pending_confirm = true;
                             "AWAITING USER CONFIRMATION: the action was proposed via a \
 confirmation card in the interface. Do NOT say it was executed."
@@ -19569,10 +20961,16 @@ confirmation card in the interface. Do NOT say it was executed."
                             });
                             let mut run_ok = false;
                             let mut run_err: Option<&'static str> = None;
-                            let mcp_result = match tokio::time::timeout(mcp_call_timeout(), exec).await {
+                            let mcp_result = match tokio::time::timeout(mcp_call_timeout(), exec)
+                                .await
+                            {
                                 Ok(Ok(Ok(value))) => {
                                     run_ok = true;
-                                    value.to_string().chars().take(COMPOSIO_RESULT_CHARS).collect()
+                                    value
+                                        .to_string()
+                                        .chars()
+                                        .take(COMPOSIO_RESULT_CHARS)
+                                        .collect()
                                 }
                                 Ok(Ok(Err(error))) => {
                                     // Classify the failure so a broken MCP server tells the user
@@ -19655,8 +21053,9 @@ Connectors → MCP; do NOT claim it's done.",
 ‹‹COMPOSIO_CONFIRM››{marker}‹‹/COMPOSIO_CONFIRM››\n"
                             );
                             accumulated.push_str(&card);
-                            let _ = emit_stream_event(&tx, GenerateStreamEvent::Delta { text: card })
-                                .await;
+                            let _ =
+                                emit_stream_event(&tx, GenerateStreamEvent::Delta { text: card })
+                                    .await;
                             pending_confirm = true;
                             "AWAITING USER CONFIRMATION: the action was proposed via a \
 confirmation card in the interface. Do NOT say it was executed."
@@ -19665,14 +21064,17 @@ confirmation card in the interface. Do NOT say it was executed."
                             let _ = emit_stream_event(
                                 &tx,
                                 GenerateStreamEvent::Delta {
-                                    text: format!("‹‹ACT››🔧 Using {}‹‹/ACT››", humanize_composio_tool(name)),
+                                    text: format!(
+                                        "‹‹ACT››🔧 Using {}‹‹/ACT››",
+                                        humanize_composio_tool(name)
+                                    ),
                                 },
                             )
                             .await;
                             let st = state_owned.clone();
                             let tool = name.to_string();
-                            let args: serde_json::Value =
-                                serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
+                            let args: serde_json::Value = serde_json::from_str(args_raw)
+                                .unwrap_or_else(|_| serde_json::json!({}));
                             let composio_started = std::time::Instant::now();
                             let outcome = tokio::task::spawn_blocking(move || {
                                 composio_execute_tool(&st, &tool, &args)
@@ -19698,7 +21100,11 @@ Tell the user clearly; do NOT claim it's done."
                                     }
                                     None => {
                                         run_ok = true;
-                                        value.to_string().chars().take(COMPOSIO_RESULT_CHARS).collect()
+                                        value
+                                            .to_string()
+                                            .chars()
+                                            .take(COMPOSIO_RESULT_CHARS)
+                                            .collect()
                                     }
                                 },
                                 Ok(Err(error)) => {
@@ -19790,8 +21196,12 @@ Tell the user clearly; do NOT claim it's done."
             // No tool call → normally the final answer. Sanitize any leaked model
             // control tokens (e.g. minimax `]<]minimax[>[` / `<tool_call>` text) so
             // the user never sees raw template markup.
-            let content =
-                sanitize_model_text(message.get("content").and_then(|c| c.as_str()).unwrap_or(""));
+            let content = sanitize_model_text(
+                message
+                    .get("content")
+                    .and_then(|c| c.as_str())
+                    .unwrap_or(""),
+            );
             // Plan-completion enforcement: some models stop after one step (kimi/others),
             // leaving a half-built deliverable. If the plan still has open steps and we
             // have budget, nudge the model to keep going instead of ending the turn.
@@ -20015,7 +21425,11 @@ Tell me if you want me to retry or rephrase."
         if !read_only {
             if let Some(ws) = thread_id
                 .as_deref()
-                .and_then(|tid| lock_store(&state_owned).ok().and_then(|s| s.workspace_for_thread(tid).ok()))
+                .and_then(|tid| {
+                    lock_store(&state_owned)
+                        .ok()
+                        .and_then(|s| s.workspace_for_thread(tid).ok())
+                })
                 .filter(|w| !w.trim().is_empty())
             {
                 spawn_project_graph_refresh(&state_owned, &ws);
@@ -20048,7 +21462,9 @@ Tell me if you want me to retry or rephrase."
 /// Persisted IANA timezone chosen by the user (e.g. "Europe/Rome"). A tiny JSON
 /// file like the other prefs; absent → fall back to the host's system timezone.
 fn user_timezone_path() -> Option<PathBuf> {
-    gateway_data_dir().ok().map(|dir| dir.join("user-prefs.json"))
+    gateway_data_dir()
+        .ok()
+        .map(|dir| dir.join("user-prefs.json"))
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -20073,6 +21489,33 @@ struct UserPrefs {
     /// this exact id may authorize a pending approval.
     #[serde(default)]
     approval_target: Option<String>,
+}
+
+fn channel_message_is_from_owner(
+    prefs: &UserPrefs,
+    channel: &str,
+    sender: &str,
+    chat: Option<&str>,
+    sender_pn: Option<&str>,
+) -> bool {
+    let Some(configured_channel) = prefs.approval_channel.as_deref() else {
+        return false;
+    };
+    if configured_channel != channel {
+        return false;
+    }
+    let Some(target) = prefs
+        .approval_target
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    else {
+        return false;
+    };
+    [Some(sender), chat, sender_pn]
+        .into_iter()
+        .flatten()
+        .any(|value| value.trim().eq_ignore_ascii_case(target))
 }
 
 /// Languages the assistant can reply in. The first element is the default.
@@ -20167,16 +21610,21 @@ fn past_date_hint(typed: &str) -> Option<String> {
         if tok.len() < 8 {
             continue;
         }
-        let parsed: Option<jiff::civil::Date> = if tok.contains('-') && tok.starts_with(|c: char| c.is_ascii_digit()) && tok.split('-').next().map(|y| y.len() == 4).unwrap_or(false) {
+        let parsed: Option<jiff::civil::Date> = if tok.contains('-')
+            && tok.starts_with(|c: char| c.is_ascii_digit())
+            && tok.split('-').next().map(|y| y.len() == 4).unwrap_or(false)
+        {
             tok.parse().ok() // ISO YYYY-MM-DD
         } else {
             // DD/MM/YYYY or DD-MM-YYYY (European order — the app's locale).
             let parts: Vec<&str> = tok.split(['/', '-']).collect();
             if parts.len() == 3 {
-                match (parts[0].parse::<i8>(), parts[1].parse::<i8>(), parts[2].parse::<i16>()) {
-                    (Ok(d), Ok(m), Ok(y)) if y >= 1000 => {
-                        jiff::civil::Date::new(y, m, d).ok()
-                    }
+                match (
+                    parts[0].parse::<i8>(),
+                    parts[1].parse::<i8>(),
+                    parts[2].parse::<i16>(),
+                ) {
+                    (Ok(d), Ok(m), Ok(y)) if y >= 1000 => jiff::civil::Date::new(y, m, d).ok(),
                     _ => None,
                 }
             } else {
@@ -20241,8 +21689,7 @@ async fn set_user_timezone(
     // Preserve other prefs (approval routing) — only update the timezone field.
     let mut prefs = load_user_prefs();
     prefs.timezone = trimmed.map(|s| s.to_string());
-    save_user_prefs(&prefs)
-    .map_err(|message| GatewayError {
+    save_user_prefs(&prefs).map_err(|message| GatewayError {
         status: StatusCode::INTERNAL_SERVER_ERROR,
         code: "timezone_save",
         message,
@@ -20366,7 +21813,11 @@ async fn get_setup_status() -> Json<SetupStatus> {
     let provider_kind = registry
         .resolve_role("orchestrator")
         .map(|r| format!("{:?}", r.kind).to_lowercase())
-        .or_else(|| registry.active().map(|p| format!("{:?}", p.kind).to_lowercase()));
+        .or_else(|| {
+            registry
+                .active()
+                .map(|p| format!("{:?}", p.kind).to_lowercase())
+        });
     let (docker_installed, docker_running) = tokio::task::spawn_blocking(|| {
         let installed = run_cli("docker", &["--version"]).is_some();
         let running =
@@ -20389,8 +21840,8 @@ async fn get_setup_status() -> Json<SetupStatus> {
 /// without saving it. Returns the detected models on success.
 #[derive(Debug, Deserialize)]
 struct ValidateLlmRequest {
-    kind: String,      // "openai_compat" | "anthropic" | "ollama"
-    base_url: String,  // e.g. "https://api.openai.com/v1" or "http://localhost:11434"
+    kind: String,     // "openai_compat" | "anthropic" | "ollama"
+    base_url: String, // e.g. "https://api.openai.com/v1" or "http://localhost:11434"
     api_key: Option<String>,
 }
 
@@ -20409,7 +21860,10 @@ async fn validate_llm_config(
             message: e.to_string(),
         })?;
     let (url, mut headers) = match request.kind.as_str() {
-        "ollama" => (format!("{}/api/tags", request.base_url.trim_end_matches('/')), vec![]),
+        "ollama" => (
+            format!("{}/api/tags", request.base_url.trim_end_matches('/')),
+            vec![],
+        ),
         "anthropic" => (
             format!("{}/v1/models", request.base_url.trim_end_matches('/')),
             vec![(
@@ -20454,7 +21908,10 @@ async fn validate_llm_config(
         return Err(GatewayError {
             status: StatusCode::BAD_GATEWAY,
             code: "validate_provider_error",
-            message: format!("Provider returned {status}{hint}: {}", body.chars().take(200).collect::<String>()),
+            message: format!(
+                "Provider returned {status}{hint}: {}",
+                body.chars().take(200).collect::<String>()
+            ),
         });
     }
     let body: serde_json::Value = response.json().await.map_err(|e| GatewayError {
@@ -20500,7 +21957,9 @@ async fn complete_setup() -> Result<Json<serde_json::Value>, GatewayError> {
 async fn get_approval_routing() -> Json<ApprovalRoutingView> {
     let prefs = load_user_prefs();
     Json(ApprovalRoutingView {
-        channel: prefs.approval_channel.unwrap_or_else(|| "in_app".to_string()),
+        channel: prefs
+            .approval_channel
+            .unwrap_or_else(|| "in_app".to_string()),
         target: prefs.approval_target.filter(|s| !s.trim().is_empty()),
     })
 }
@@ -20526,7 +21985,10 @@ async fn set_approval_routing(
             message: "Invalid approval channel (in_app | telegram | whatsapp).".to_string(),
         });
     }
-    let target = request.target.map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
+    let target = request
+        .target
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty());
     // A non-in-app channel needs a target (the user's own number) to be usable.
     if channel != "in_app" && target.is_none() {
         return Err(GatewayError {
@@ -20693,10 +22155,15 @@ async fn suggestion_act(
         .feedback
         .as_deref()
         .filter(|f| matches!(*f, "liked" | "disliked"));
-    let row = lock_store(&state).ok().and_then(|s| s.suggestion(id).ok().flatten());
+    let row = lock_store(&state)
+        .ok()
+        .and_then(|s| s.suggestion(id).ok().flatten());
     let ok = lock_store(&state)
         .ok()
-        .and_then(|s| s.set_suggestion_status(id, status, feedback, req.note.as_deref()).ok())
+        .and_then(|s| {
+            s.set_suggestion_status(id, status, feedback, req.note.as_deref())
+                .ok()
+        })
         .is_some();
     if ok {
         if let Some(row) = row {
@@ -20769,7 +22236,10 @@ fn proactive_memory_request_for_suggestion_action(
         ),
         "dismissed" => {
             let reason = note.or(feedback).unwrap_or("no reason recorded");
-            format!("Decision from proactive card: dismissed '{}' — reason: {}", row.title, reason)
+            format!(
+                "Decision from proactive card: dismissed '{}' — reason: {}",
+                row.title, reason
+            )
         }
         _ => return None,
     };
@@ -20818,9 +22288,16 @@ async fn proactivity_review_now(
 ) -> Json<serde_json::Value> {
     let scope = {
         let s = req.scope.trim();
-        if s.is_empty() { PERSONAL_WORKSPACE.to_string() } else { s.to_string() }
+        if s.is_empty() {
+            PERSONAL_WORKSPACE.to_string()
+        } else {
+            s.to_string()
+        }
     };
-    if !lock_store(&state).map(|s| s.plugin_enabled("proattivita")).unwrap_or(true) {
+    if !lock_store(&state)
+        .map(|s| s.plugin_enabled("proattivita"))
+        .unwrap_or(true)
+    {
         return Json(serde_json::json!({ "emitted": false, "disabled": true }));
     }
     match run_proactive_review(&state, &scope).await {
@@ -20856,7 +22333,9 @@ async fn plugins_list(State(state): State<AppState>) -> Json<serde_json::Value> 
     let plugins: Vec<serde_json::Value> = KNOWN_PLUGINS
         .iter()
         .map(|id| {
-            let enabled = lock_store(&state).map(|s| s.plugin_enabled(id)).unwrap_or(true);
+            let enabled = lock_store(&state)
+                .map(|s| s.plugin_enabled(id))
+                .unwrap_or(true);
             serde_json::json!({ "id": id, "enabled": enabled })
         })
         .collect();
@@ -21036,8 +22515,7 @@ async fn update_plugin_package_from_registry(
         return Err(GatewayError {
             status: StatusCode::BAD_REQUEST,
             code: "plugin_package_update_not_newer",
-            message: "Plugin package candidate is not newer than the installed version"
-                .to_string(),
+            message: "Plugin package candidate is not newer than the installed version".to_string(),
         });
     }
 
@@ -21250,15 +22728,10 @@ async fn plugin_package_updates() -> Result<Json<serde_json::Value>, GatewayErro
     let mut updates = Vec::new();
     if let Some(cached) = cached {
         for installed_plugin in &installed.plugins {
-            if let Some(candidate) = cached
-                .registry
-                .plugins
-                .iter()
-                .find(|entry| {
-                    entry.plugin_id == installed_plugin.plugin_id
-                        && entry.is_newer_than(&installed_plugin.version)
-                })
-            {
+            if let Some(candidate) = cached.registry.plugins.iter().find(|entry| {
+                entry.plugin_id == installed_plugin.plugin_id
+                    && entry.is_newer_than(&installed_plugin.version)
+            }) {
                 updates.push(serde_json::json!({
                     "plugin_id": installed_plugin.plugin_id,
                     "installed_version": installed_plugin.version,
@@ -21322,18 +22795,19 @@ async fn set_trusted_plugin_public_keys(
 /// GET/PUT /api/plugins/licenses — local offline license token store. Tokens are
 /// accepted only after deterministic signature/plugin/expiry verification.
 async fn plugin_licenses() -> Result<Json<plugin_packages::PluginLicenseStore>, GatewayError> {
-    let store = plugin_packages::load_plugin_license_store(&plugin_license_store_path().map_err(
-        |e| GatewayError {
+    let store =
+        plugin_packages::load_plugin_license_store(&plugin_license_store_path().map_err(|e| {
+            GatewayError {
+                status: StatusCode::INTERNAL_SERVER_ERROR,
+                code: "plugin_license_store_path_unavailable",
+                message: e.to_string(),
+            }
+        })?)
+        .map_err(|e| GatewayError {
             status: StatusCode::INTERNAL_SERVER_ERROR,
-            code: "plugin_license_store_path_unavailable",
-            message: e.to_string(),
-        },
-    )?)
-    .map_err(|e| GatewayError {
-        status: StatusCode::INTERNAL_SERVER_ERROR,
-        code: "plugin_license_store_read_failed",
-        message: e,
-    })?;
+            code: "plugin_license_store_read_failed",
+            message: e,
+        })?;
     Ok(Json(store))
 }
 
@@ -21414,11 +22888,13 @@ async fn fetch_plugin_registry(
     Json(request): Json<FetchPluginRegistryRequest>,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
     let source_url = request.source_url.trim();
-    let parsed_url = source_url.parse::<reqwest::Url>().map_err(|e| GatewayError {
-        status: StatusCode::BAD_REQUEST,
-        code: "plugin_registry_url_invalid",
-        message: e.to_string(),
-    })?;
+    let parsed_url = source_url
+        .parse::<reqwest::Url>()
+        .map_err(|e| GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "plugin_registry_url_invalid",
+            message: e.to_string(),
+        })?;
     if parsed_url.scheme() != "https" {
         return Err(GatewayError {
             status: StatusCode::BAD_REQUEST,
@@ -21463,11 +22939,12 @@ async fn fetch_plugin_registry(
             message: "Plugin registry response is larger than the local cache limit".to_string(),
         });
     }
-    let registry: PluginRegistryIndex = serde_json::from_slice(&bytes).map_err(|e| GatewayError {
-        status: StatusCode::BAD_GATEWAY,
-        code: "plugin_registry_parse_failed",
-        message: e.to_string(),
-    })?;
+    let registry: PluginRegistryIndex =
+        serde_json::from_slice(&bytes).map_err(|e| GatewayError {
+            status: StatusCode::BAD_GATEWAY,
+            code: "plugin_registry_parse_failed",
+            message: e.to_string(),
+        })?;
     let cached = plugin_packages::save_cached_plugin_registry(
         &cached_plugin_registry_path().map_err(|e| GatewayError {
             status: StatusCode::INTERNAL_SERVER_ERROR,
@@ -21497,11 +22974,15 @@ fn installed_plugin_registry_path() -> Result<PathBuf, std::io::Error> {
 }
 
 fn cached_plugin_registry_path() -> Result<PathBuf, std::io::Error> {
-    Ok(gateway_data_dir()?.join("plugins").join("registry-cache.json"))
+    Ok(gateway_data_dir()?
+        .join("plugins")
+        .join("registry-cache.json"))
 }
 
 fn trusted_plugin_public_keys_path() -> Result<PathBuf, std::io::Error> {
-    Ok(gateway_data_dir()?.join("plugins").join("trusted-keys.json"))
+    Ok(gateway_data_dir()?
+        .join("plugins")
+        .join("trusted-keys.json"))
 }
 
 fn plugin_license_store_path() -> Result<PathBuf, std::io::Error> {
@@ -21831,7 +23312,9 @@ async fn chat_browser_call(
     Result<serde_json::Value, String>,
 ) {
     let join = tokio::task::spawn_blocking(move || {
-        let result = client.call(method, params).map_err(|error| error.to_string());
+        let result = client
+            .call(method, params)
+            .map_err(|error| error.to_string());
         (client, result)
     })
     .await;
@@ -21919,7 +23402,9 @@ fn take_thread_browser_session(
         map.remove(thread_id)?
     };
     if session.last_used.elapsed() > THREAD_BROWSER_SESSION_IDLE {
-        let _ = session.client.call(BrowserMethod::Stop, serde_json::json!({}));
+        let _ = session
+            .client
+            .call(BrowserMethod::Stop, serde_json::json!({}));
         return None;
     }
     Some(session.client)
@@ -21954,7 +23439,9 @@ fn close_thread_browser_session(state: &AppState, thread_id: &str) {
         .ok()
         .and_then(|mut map| map.remove(thread_id));
     if let Some(session) = session {
-        let _ = session.client.call(BrowserMethod::Stop, serde_json::json!({}));
+        let _ = session
+            .client
+            .call(BrowserMethod::Stop, serde_json::json!({}));
     }
 }
 
@@ -21970,7 +23457,9 @@ fn spawn_thread_browser_session_reaper(state: AppState) {
                 };
                 let expired: Vec<String> = map
                     .iter()
-                    .filter(|(_, session)| session.last_used.elapsed() > THREAD_BROWSER_SESSION_IDLE)
+                    .filter(|(_, session)| {
+                        session.last_used.elapsed() > THREAD_BROWSER_SESSION_IDLE
+                    })
                     .map(|(thread, _)| thread.clone())
                     .collect();
                 expired
@@ -21985,7 +23474,9 @@ fn spawn_thread_browser_session_reaper(state: AppState) {
             // async runtime.
             let _ = tokio::task::spawn_blocking(move || {
                 for session in stale {
-                    let _ = session.client.call(BrowserMethod::Stop, serde_json::json!({}));
+                    let _ = session
+                        .client
+                        .call(BrowserMethod::Stop, serde_json::json!({}));
                 }
             })
             .await;
@@ -22009,7 +23500,10 @@ fn touch_cc_activity() {
 }
 
 fn cc_idle_for() -> std::time::Duration {
-    cc_last_activity_cell().lock().map(|g| g.elapsed()).unwrap_or_default()
+    cc_last_activity_cell()
+        .lock()
+        .map(|g| g.elapsed())
+        .unwrap_or_default()
 }
 
 /// How long the contained computer may sit idle before the reaper recycles it.
@@ -22087,7 +23581,8 @@ fn spawn_browser_handoff_reaper(state: AppState) {
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(60)).await;
-            let cutoff = OffsetDateTime::now_utc() - Duration::seconds(browser_handoff_timeout_secs());
+            let cutoff =
+                OffsetDateTime::now_utc() - Duration::seconds(browser_handoff_timeout_secs());
             let Ok(store) = lock_task_store(&state) else {
                 continue;
             };
@@ -22217,7 +23712,10 @@ fn end_browser_activity() {
 }
 
 fn current_browser_activity() -> Option<BrowserActivityState> {
-    browser_activity_cell().read().ok().and_then(|guard| guard.clone())
+    browser_activity_cell()
+        .read()
+        .ok()
+        .and_then(|guard| guard.clone())
 }
 
 /// One executed terminal command + its output, for the "computer terminal" panel
@@ -22284,11 +23782,18 @@ fn sandbox_end(output: String) {
 }
 
 fn current_sandbox_activity() -> Vec<TerminalEntryView> {
-    sandbox_activity_cell().read().ok().map(|guard| guard.clone()).unwrap_or_default()
+    sandbox_activity_cell()
+        .read()
+        .ok()
+        .map(|guard| guard.clone())
+        .unwrap_or_default()
 }
 
 fn current_sandbox_owner() -> Option<String> {
-    sandbox_owner_cell().read().ok().and_then(|guard| guard.clone())
+    sandbox_owner_cell()
+        .read()
+        .ok()
+        .and_then(|guard| guard.clone())
 }
 
 #[derive(Debug, Deserialize)]
@@ -22337,7 +23842,10 @@ async fn save_artifact_content(
 
 /// Reports how many archived versions an artifact has (for the panel switcher).
 async fn artifact_versions(Query(reference): Query<ArtifactRef>) -> Json<ArtifactVersionsResponse> {
-    if reference.name.contains('/') || reference.name.contains("..") || reference.thread.contains('/') {
+    if reference.name.contains('/')
+        || reference.name.contains("..")
+        || reference.thread.contains('/')
+    {
         return Json(ArtifactVersionsResponse { versions: 0 });
     }
     let versions_dir = sandbox::artifacts_dir()
@@ -22386,7 +23894,10 @@ async fn download_artifact(Query(reference): Query<ArtifactRef>) -> Result<Respo
     }
     let dir = sandbox::artifacts_dir().join(&reference.thread);
     let path = match reference.version {
-        Some(version) => dir.join(".versions").join(&reference.name).join(version.to_string()),
+        Some(version) => dir
+            .join(".versions")
+            .join(&reference.name)
+            .join(version.to_string()),
         None => dir.join(&reference.name),
     };
     if !path_within(&dir, &path) {
@@ -22413,7 +23924,10 @@ async fn download_artifact(Query(reference): Query<ArtifactRef>) -> Result<Respo
         .header("content-type", artifact_mime(&reference.name))
         .header(
             "content-disposition",
-            format!("attachment; filename=\"{}\"", reference.name.replace('"', "")),
+            format!(
+                "attachment; filename=\"{}\"",
+                reference.name.replace('"', "")
+            ),
         )
         .body(Body::from(bytes))
         .expect("valid artifact response"))
@@ -22444,7 +23958,10 @@ async fn artifact_pdf_pages(
     }
     let dir = sandbox::artifacts_dir().join(&reference.thread);
     let path = match reference.version {
-        Some(version) => dir.join(".versions").join(&reference.name).join(version.to_string()),
+        Some(version) => dir
+            .join(".versions")
+            .join(&reference.name)
+            .join(version.to_string()),
         None => dir.join(&reference.name),
     };
     if !path_within(&dir, &path) {
@@ -22514,7 +24031,9 @@ impl Default for BrandKit {
 }
 
 fn brand_kit_path() -> Option<PathBuf> {
-    gateway_data_dir().ok().map(|dir| dir.join("brand-kit.json"))
+    gateway_data_dir()
+        .ok()
+        .map(|dir| dir.join("brand-kit.json"))
 }
 
 fn load_brand_kit() -> BrandKit {
@@ -22544,7 +24063,9 @@ async fn brand_kit_put(Json(kit): Json<BrandKit>) -> Result<Json<BrandKit>, Gate
 }
 
 fn artifact_destinations_path() -> Option<PathBuf> {
-    gateway_data_dir().ok().map(|dir| dir.join("artifact-destinations.json"))
+    gateway_data_dir()
+        .ok()
+        .map(|dir| dir.join("artifact-destinations.json"))
 }
 
 fn load_artifact_destinations() -> Vec<ArtifactDestination> {
@@ -22618,7 +24139,9 @@ fn inbound_action(settings: &ChannelSettings, sender: &str) -> InboundAction {
 }
 
 fn channel_settings_path() -> Option<PathBuf> {
-    gateway_data_dir().ok().map(|dir| dir.join("channel-settings.json"))
+    gateway_data_dir()
+        .ok()
+        .map(|dir| dir.join("channel-settings.json"))
 }
 
 fn load_channel_settings() -> ChannelSettings {
@@ -22671,7 +24194,9 @@ struct WhatsAppStatus {
 }
 
 fn whatsapp_status_path() -> Option<PathBuf> {
-    gateway_data_dir().ok().map(|dir| dir.join("channel-whatsapp-status.json"))
+    gateway_data_dir()
+        .ok()
+        .map(|dir| dir.join("channel-whatsapp-status.json"))
 }
 
 /// Locates the built sidecar binary (env override, else repo-relative).
@@ -22762,8 +24287,7 @@ async fn reconnect_channels_on_startup(state: AppState) {
     if !load_channel_settings().enabled {
         return; // kill-switch off: stay disconnected.
     }
-    let gw_port =
-        env::var("HOMUN_DESKTOP_GATEWAY_PORT").unwrap_or_else(|_| "18765".to_string());
+    let gw_port = env::var("HOMUN_DESKTOP_GATEWAY_PORT").unwrap_or_else(|_| "18765".to_string());
     let gw_token = state.auth_token.as_ref();
 
     // WhatsApp: only if a session was previously paired (matches the sidecar's
@@ -22810,7 +24334,9 @@ async fn whatsapp_connect(
     Json(request): Json<WhatsAppConnectRequest>,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
     if whatsapp_running() {
-        return Ok(Json(serde_json::json!({ "ok": true, "already_running": true })));
+        return Ok(Json(
+            serde_json::json!({ "ok": true, "already_running": true }),
+        ));
     }
     let bin = whatsapp_bin().ok_or_else(|| GatewayError {
         status: StatusCode::SERVICE_UNAVAILABLE,
@@ -22819,7 +24345,12 @@ async fn whatsapp_connect(
             .to_string(),
     })?;
     let mut command = std::process::Command::new(bin);
-    if let Some(phone) = request.phone.as_ref().map(|p| p.trim()).filter(|p| !p.is_empty()) {
+    if let Some(phone) = request
+        .phone
+        .as_ref()
+        .map(|p| p.trim())
+        .filter(|p| !p.is_empty())
+    {
         command.env("WA_PAIR_PHONE", phone);
     }
     if let Some(path) = whatsapp_status_path() {
@@ -22853,7 +24384,9 @@ async fn whatsapp_disconnect() -> Json<serde_json::Value> {
     // Also kill any sidecar orphaned by a gateway restart (still on the port).
     let _ = std::process::Command::new("sh")
         .arg("-c")
-        .arg(format!("lsof -tiTCP:{WHATSAPP_HTTP_PORT} -sTCP:LISTEN | xargs kill 2>/dev/null"))
+        .arg(format!(
+            "lsof -tiTCP:{WHATSAPP_HTTP_PORT} -sTCP:LISTEN | xargs kill 2>/dev/null"
+        ))
         .status();
     Json(serde_json::json!({ "ok": true }))
 }
@@ -22880,12 +24413,16 @@ struct TelegramStatus {
 }
 
 fn telegram_status_path() -> Option<PathBuf> {
-    gateway_data_dir().ok().map(|dir| dir.join("channel-telegram-status.json"))
+    gateway_data_dir()
+        .ok()
+        .map(|dir| dir.join("channel-telegram-status.json"))
 }
 
 /// Persisted bot token (0600). Lets "Connetti" work without re-entering it.
 fn telegram_token_path() -> Option<PathBuf> {
-    gateway_data_dir().ok().map(|dir| dir.join("telegram-bot-token"))
+    gateway_data_dir()
+        .ok()
+        .map(|dir| dir.join("telegram-bot-token"))
 }
 
 fn load_telegram_token() -> Option<String> {
@@ -22981,10 +24518,13 @@ fn telegram_bridge_action(result: RebindResult) -> TelegramBridgeAction {
 }
 
 async fn rebind_telegram_sidecar(state: &AppState, bot_token: &str) -> RebindResult {
-    let gateway_port = env::var("HOMUN_DESKTOP_GATEWAY_PORT").unwrap_or_else(|_| "18765".to_string());
+    let gateway_port =
+        env::var("HOMUN_DESKTOP_GATEWAY_PORT").unwrap_or_else(|_| "18765".to_string());
     let response = state
         .http
-        .post(format!("http://127.0.0.1:{TELEGRAM_HTTP_PORT}/configure-gateway"))
+        .post(format!(
+            "http://127.0.0.1:{TELEGRAM_HTTP_PORT}/configure-gateway"
+        ))
         .timeout(std::time::Duration::from_secs(3))
         .bearer_auth(bot_token)
         .json(&serde_json::json!({
@@ -23009,7 +24549,9 @@ fn stop_telegram_sidecar() {
     }
     let _ = std::process::Command::new("sh")
         .arg("-c")
-        .arg(format!("lsof -tiTCP:{TELEGRAM_HTTP_PORT} -sTCP:LISTEN | xargs kill 2>/dev/null"))
+        .arg(format!(
+            "lsof -tiTCP:{TELEGRAM_HTTP_PORT} -sTCP:LISTEN | xargs kill 2>/dev/null"
+        ))
         .status();
 }
 
@@ -23026,7 +24568,8 @@ fn spawn_telegram_sidecar(state: &AppState, token: &str) -> Result<(), GatewayEr
     if let Some(path) = telegram_status_path() {
         command.env("TG_STATUS_FILE", path);
     }
-    let gateway_port = env::var("HOMUN_DESKTOP_GATEWAY_PORT").unwrap_or_else(|_| "18765".to_string());
+    let gateway_port =
+        env::var("HOMUN_DESKTOP_GATEWAY_PORT").unwrap_or_else(|_| "18765".to_string());
     command.env("TG_GATEWAY_URL", format!("http://127.0.0.1:{gateway_port}"));
     command.env("TG_GATEWAY_TOKEN", state.auth_token.as_ref());
     let child = command.spawn().map_err(|error| GatewayError {
@@ -23087,7 +24630,12 @@ async fn telegram_connect(
     Json(request): Json<TelegramConnectRequest>,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
     // Resolve the token: explicit (persist it 0600) or previously persisted.
-    let token = match request.token.as_ref().map(|t| t.trim()).filter(|t| !t.is_empty()) {
+    let token = match request
+        .token
+        .as_ref()
+        .map(|t| t.trim())
+        .filter(|t| !t.is_empty())
+    {
         Some(token) => {
             if let Some(path) = telegram_token_path() {
                 write_private_file(&path, token.as_bytes()).map_err(|error| GatewayError {
@@ -23204,7 +24752,10 @@ async fn channel_set_presence(
     if response.status().is_success() {
         Ok(())
     } else {
-        Err(format!("sidecar /chatstate responded {}", response.status()))
+        Err(format!(
+            "sidecar /chatstate responded {}",
+            response.status()
+        ))
     }
 }
 
@@ -23311,8 +24862,9 @@ async fn telegram_callback(
     let approve = verb.eq_ignore_ascii_case("approve");
     let reply = if approve {
         if pending_approval_exists(&state, code) {
-            let _ = telegram_send_with_rebind(&state, target.trim(), &approval_progress_reply(code))
-                .await;
+            let _ =
+                telegram_send_with_rebind(&state, target.trim(), &approval_progress_reply(code))
+                    .await;
         }
         execute_pending_approval(&state, code).await
     } else {
@@ -23338,21 +24890,30 @@ async fn handle_channel_inbound(
     port: u16,
     message: ChannelInbound,
 ) -> Json<serde_json::Value> {
+    let prefs = load_user_prefs();
+    let is_owner_message = channel_message_is_from_owner(
+        &prefs,
+        channel,
+        &message.sender,
+        message.chat.as_deref(),
+        message.sender_pn.as_deref(),
+    );
     // Remote-approval control reply: if the USER's own number (the configured approval_target
     // on THIS channel) replies "OK <code>" / "NO <code>", authorize or cancel the pending action
     // and stop — it's a control message, not a conversation. SECURITY: only the self target.
     {
-        let prefs = load_user_prefs();
         let routed_here = prefs.approval_channel.as_deref() == Some(channel);
         let target = prefs.approval_target.clone().unwrap_or_default();
         let id_matches = |v: Option<&str>| {
-            v.map(|s| s.trim().eq_ignore_ascii_case(target.trim())).unwrap_or(false)
+            v.map(|s| s.trim().eq_ignore_ascii_case(target.trim()))
+                .unwrap_or(false)
         };
-        let is_self = routed_here
-            && !target.trim().is_empty()
-            && (id_matches(Some(message.sender.as_str()))
-                || id_matches(message.chat.as_deref())
-                || id_matches(message.sender_pn.as_deref()));
+        let is_self = is_owner_message
+            || (routed_here
+                && !target.trim().is_empty()
+                && (id_matches(Some(message.sender.as_str()))
+                    || id_matches(message.chat.as_deref())
+                    || id_matches(message.sender_pn.as_deref())));
         if is_self {
             if let Some((approve, code)) = parse_approval_reply(&message.content) {
                 // Only a REAL pending code is a control reply. Otherwise this is a
@@ -23459,9 +25020,7 @@ async fn handle_channel_inbound(
             {
                 let _ = store.mark_inbound_seen(&format!("{channel}:{message_id}"));
             }
-            eprintln!(
-                "channel/{channel}: drop too-old inbound (ts={ts}, recency={recency_secs}s)"
-            );
+            eprintln!("channel/{channel}: drop too-old inbound (ts={ts}, recency={recency_secs}s)");
             return Json(serde_json::json!({ "action": "too_old" }));
         }
 
@@ -23521,7 +25080,7 @@ async fn handle_channel_inbound(
     }
 
     // Best-effort: record the contact (person node) + the message (episodic).
-    record_channel_message(state, channel, &message);
+    record_channel_message(state, channel, &message, is_owner_message);
     // Event-triggered automations: fire any user rule listening for this channel message
     // (independent of the auto-reply/draft policy below — these are explicit rules).
     fire_channel_event_automations(state, channel, &message);
@@ -23534,10 +25093,15 @@ async fn handle_channel_inbound(
         } else {
             message.sender_name.clone()
         };
+        let speaker = if is_owner_message {
+            None
+        } else {
+            Some(speaker)
+        };
         let content = message.content.clone();
         tokio::spawn(async move {
             // thread_id=None: record_channel_message already stored the episode.
-            learn_from_exchange(&st, &content, "", "", None, Some(&speaker), None).await;
+            learn_from_exchange(&st, &content, "", "", None, speaker.as_deref(), None).await;
         });
     }
     match action {
@@ -23662,24 +25226,26 @@ async fn handle_channel_inbound(
                             deliver_remote_approval(&st, "send_message", &args, &lbl, None).await;
                         let _ = channel_set_presence(&st, port, &reply_to, "paused").await;
                         if delivered {
-                            eprintln!("channel/{channel}: draft sent for approval (contact {reply_to})");
+                            eprintln!(
+                                "channel/{channel}: draft sent for approval (contact {reply_to})"
+                            );
                         } else {
-                            eprintln!("channel/{channel}: approve mode without approval channel — draft only in-app (thread)");
+                            eprintln!(
+                                "channel/{channel}: approve mode without approval channel — draft only in-app (thread)"
+                            );
                         }
                     }
                     Some(reply) => match channel_send(&st, port, &reply_to, &reply).await {
                         Ok(()) => {
                             eprintln!("channel/{channel}: auto-reply sent to {reply_to}")
                         }
-                        Err(error) => eprintln!(
-                            "channel/{channel}: auto-reply FAILED to {reply_to}: {error}"
-                        ),
+                        Err(error) => {
+                            eprintln!("channel/{channel}: auto-reply FAILED to {reply_to}: {error}")
+                        }
                     },
                     None => {
                         let _ = channel_set_presence(&st, port, &reply_to, "paused").await;
-                        eprintln!(
-                            "channel/{channel}: no reply generated for {reply_to}"
-                        );
+                        eprintln!("channel/{channel}: no reply generated for {reply_to}");
                     }
                 }
             });
@@ -23742,7 +25308,11 @@ fn contact_turn_context(
     let Ok(store) = lock_store(state) else {
         return (None, false);
     };
-    let Some(id) = store.contact_id_by_identity(&channel, &sender).ok().flatten() else {
+    let Some(id) = store
+        .contact_id_by_identity(&channel, &sender)
+        .ok()
+        .flatten()
+    else {
         return (None, false);
     };
     let Some(contact) = store.contact_by_id(id).ok().flatten() else {
@@ -23757,7 +25327,10 @@ fn contact_turn_context(
     let tone_of_voice = if !contact.tone_of_voice.trim().is_empty() {
         contact.tone_of_voice.clone()
     } else {
-        profile.as_ref().map(|p| p.tone_of_voice.clone()).unwrap_or_default()
+        profile
+            .as_ref()
+            .map(|p| p.tone_of_voice.clone())
+            .unwrap_or_default()
     };
     let persona_instructions = {
         let mut parts: Vec<String> = Vec::new();
@@ -23827,7 +25400,12 @@ fn backfill_mentions(state: &AppState) {
             .unwrap_or_default()
             .into_iter()
             .filter(|m| !matches!(m.status, MemoryStatus::Deleted | MemoryStatus::Rejected))
-            .filter(|m| matches!(m.memory_type.as_str(), "fact" | "preference" | "decision" | "goal"))
+            .filter(|m| {
+                matches!(
+                    m.memory_type.as_str(),
+                    "fact" | "preference" | "decision" | "goal"
+                )
+            })
             .map(|m| (m.reference, m.text))
             .collect();
         if items.is_empty() {
@@ -23852,7 +25430,12 @@ fn backfill_mentions(state: &AppState) {
 /// never brings them back. Idempotent via a flag; runs before the startup regeneration.
 fn unify_owner_identity(state: &AppState) {
     if let Ok(store) = lock_store(state) {
-        if store.flag("owner_identity_unified_v1").ok().flatten().is_some() {
+        if store
+            .flag("owner_identity_unified_v1")
+            .ok()
+            .flatten()
+            .is_some()
+        {
             return;
         }
     } else {
@@ -23967,7 +25550,12 @@ fn unify_owner_identity(state: &AppState) {
             loser.metadata = serde_json::json!({ "merged_into": self_ref.to_string() });
         }
         let _ = facade.upsert_entity(&loser);
-        let _ = facade.tombstone_entity(&loser.reference, &user, &workspace, "merged into self (owner)");
+        let _ = facade.tombstone_entity(
+            &loser.reference,
+            &user,
+            &workspace,
+            "merged into self (owner)",
+        );
         merged += 1;
     }
     // The self-contact pointed at one of the merged entities — re-point it to the
@@ -24021,7 +25609,9 @@ fn backfill_contacts(state: &AppState) {
         let Ok(facade) = lock_memory_facade(state) else {
             return;
         };
-        facade.list_entities_for_ui(&user, &workspace).unwrap_or_default()
+        facade
+            .list_entities_for_ui(&user, &workspace)
+            .unwrap_or_default()
     };
     let Ok(store) = lock_store(state) else {
         return;
@@ -24036,7 +25626,11 @@ fn backfill_contacts(state: &AppState) {
         }
         let contact_type = {
             let t = contact_meta_str(&entity.metadata, "contact_type");
-            if t.is_empty() { "unknown".to_string() } else { t }
+            if t.is_empty() {
+                "unknown".to_string()
+            } else {
+                t
+            }
         };
         let notes = contact_meta_str(&entity.metadata, "notes");
         let is_self = contact_is_self(&entity);
@@ -24067,24 +25661,97 @@ fn backfill_contacts(state: &AppState) {
     let _ = store.set_flag("contacts_backfill_v1", "1");
 }
 
-fn record_channel_message(state: &AppState, channel: &str, message: &ChannelInbound) {
+fn ensure_owner_self_entity(
+    facade: &MemoryFacade,
+    user: &MemoryUserId,
+    workspace: &MemoryWorkspaceId,
+    handle: &str,
+    display: &str,
+) -> Option<MemoryRef> {
+    let existing = facade
+        .list_entities_for_ui(user, workspace)
+        .ok()
+        .and_then(|entities| {
+            entities
+                .into_iter()
+                .find(|e| e.canonical_key == "person:self")
+        });
+    let mut entity = existing.unwrap_or_else(|| MemoryEntity {
+        reference: MemoryRef::generated(MemoryRefKind::Entity, user.clone(), workspace.clone()),
+        user_id: user.clone(),
+        workspace_id: workspace.clone(),
+        entity_type: "person".to_string(),
+        name: "Tu".to_string(),
+        canonical_key: "person:self".to_string(),
+        aliases: Vec::new(),
+        privacy_domain: PrivacyDomain::new("personal"),
+        sensitivity: MemoryDataSensitivity::Private,
+        metadata: serde_json::json!({ "self": true }),
+    });
+    let mut aliases: std::collections::BTreeSet<String> = entity
+        .aliases
+        .iter()
+        .filter(|a| !a.trim().is_empty())
+        .cloned()
+        .collect();
+    aliases.insert(handle.to_string());
+    if !display.trim().is_empty() && display.trim() != handle {
+        aliases.insert(display.trim().to_string());
+        if entity.name == "Tu" || entity.name.trim().is_empty() {
+            entity.name = display.trim().to_string();
+        }
+    }
+    entity.aliases = aliases.into_iter().collect();
+    if let serde_json::Value::Object(map) = &mut entity.metadata {
+        map.insert("self".to_string(), serde_json::Value::Bool(true));
+        map.insert(
+            "source".to_string(),
+            serde_json::Value::String("owner_channel".to_string()),
+        );
+    } else {
+        entity.metadata = serde_json::json!({ "self": true, "source": "owner_channel" });
+    }
+    let reference = entity.reference.clone();
+    facade.upsert_entity(&entity).ok()?;
+    Some(reference)
+}
+
+fn record_channel_message(
+    state: &AppState,
+    channel: &str,
+    message: &ChannelInbound,
+    is_owner: bool,
+) {
     let display = if message.sender_name.is_empty() {
         message.sender.clone()
     } else {
         message.sender_name.clone()
     };
-    // Curated contact book (separate lock, released before the memory work below):
-    // someone who actually messages us IS a contact → ensure a row + channel identity.
-    // This is the curation boundary that keeps chat-mentioned people out of the rubrica.
-    if let Ok(store) = lock_store(state) {
-        let _ = store.ensure_contact_for_identity(channel, &message.sender, &display);
-    }
     let Ok(facade) = lock_memory_facade(state) else {
         return;
     };
     let user = gateway_memory_user_id();
     let workspace = MemoryWorkspaceId::new(PERSONAL_WORKSPACE);
     let handle = contact_handle(channel, &message.sender);
+    let owner_ref = if is_owner {
+        ensure_owner_self_entity(&facade, &user, &workspace, &handle, &display)
+    } else {
+        None
+    };
+    let owner_ref_string = owner_ref.as_ref().map(|reference| reference.to_string());
+    // Curated contact book (separate lock, released before the memory work below):
+    // someone who actually messages us IS a contact. If the sender is the owner,
+    // the row is marked self and points at person:self instead of creating a
+    // duplicate external Fabio.
+    if let Ok(store) = lock_store(state) {
+        let _ = store.ensure_contact_for_identity(
+            channel,
+            &message.sender,
+            &display,
+            is_owner,
+            owner_ref_string.as_deref(),
+        );
+    }
     let label = match channel {
         "whatsapp" => "WhatsApp",
         "telegram" => "Telegram",
@@ -24104,31 +25771,36 @@ fn record_channel_message(state: &AppState, channel: &str, message: &ChannelInbo
             })
         });
 
-    match existing {
-        Some(mut contact) => {
-            // Keep the handle recorded; don't clobber a user-curated name/type.
-            if !contact.aliases.iter().any(|a| a == &handle) {
-                contact.aliases.push(handle.clone());
-                let _ = facade.upsert_entity(&contact);
+    if is_owner {
+        // Owner channel handles are aliases of person:self; they must not create
+        // channel-keyed person nodes.
+    } else {
+        match existing {
+            Some(mut contact) => {
+                // Keep the handle recorded; don't clobber a user-curated name/type.
+                if !contact.aliases.iter().any(|a| a == &handle) {
+                    contact.aliases.push(handle.clone());
+                    let _ = facade.upsert_entity(&contact);
+                }
             }
-        }
-        None => {
-            persist_graph(
-                &facade,
-                &user,
-                &workspace,
-                vec![ExtractedEntity {
-                    entity_type: "person".to_string(),
-                    name: display.clone(),
-                    canonical_key: format!("person:{handle}"),
-                    aliases: vec![handle.clone()],
-                    privacy_domain: PrivacyDomain::new("personal"),
-                    sensitivity: MemoryDataSensitivity::Private,
-                    metadata: serde_json::json!({ "contact_type": "unknown" }),
-                }],
-                Vec::new(),
-                None,
-            );
+            None => {
+                persist_graph(
+                    &facade,
+                    &user,
+                    &workspace,
+                    vec![ExtractedEntity {
+                        entity_type: "person".to_string(),
+                        name: display.clone(),
+                        canonical_key: format!("person:{handle}"),
+                        aliases: vec![handle.clone()],
+                        privacy_domain: PrivacyDomain::new("personal"),
+                        sensitivity: MemoryDataSensitivity::Private,
+                        metadata: serde_json::json!({ "contact_type": "unknown" }),
+                    }],
+                    Vec::new(),
+                    None,
+                );
+            }
         }
     }
 
@@ -24220,7 +25892,9 @@ async fn run_agent_turn(
         .ok()?;
     // Drain the NDJSON stream in-process; the generation runs in a spawned task,
     // so to_bytes collects every event up to (and including) the `done` event.
-    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await.ok()?;
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .ok()?;
     let text = String::from_utf8_lossy(&bytes);
     let mut final_text: Option<String> = None;
     for line in text.lines() {
@@ -24241,7 +25915,11 @@ async fn run_agent_turn(
         .filter(|t| !t.is_empty())
 }
 
-async fn generate_channel_reply(state: &AppState, sender_name: &str, content: &str) -> Option<String> {
+async fn generate_channel_reply(
+    state: &AppState,
+    sender_name: &str,
+    content: &str,
+) -> Option<String> {
     let (base_url, model, api_key) = chat_openai_stream_config()?;
     let system = "You are the user's personal assistant replying to their chat messages. Be useful \
 and PROACTIVE: beyond answering, when relevant offer concrete help or ask a useful question (e.g. \
@@ -24336,9 +26014,9 @@ async fn channel_reply_once(
 /// The agent can only write where the user explicitly granted.
 fn resolve_destination(name: &str) -> Option<ArtifactDestination> {
     let needle = name.trim();
-    load_artifact_destinations().into_iter().find(|d| {
-        d.label.eq_ignore_ascii_case(needle) || d.path == needle
-    })
+    load_artifact_destinations()
+        .into_iter()
+        .find(|d| d.label.eq_ignore_ascii_case(needle) || d.path == needle)
 }
 
 #[derive(Debug, Serialize)]
@@ -24347,7 +26025,9 @@ struct ArtifactDestinationsResponse {
 }
 
 async fn list_artifact_destinations() -> Json<ArtifactDestinationsResponse> {
-    Json(ArtifactDestinationsResponse { destinations: load_artifact_destinations() })
+    Json(ArtifactDestinationsResponse {
+        destinations: load_artifact_destinations(),
+    })
 }
 
 #[derive(Debug, Deserialize)]
@@ -24421,12 +26101,16 @@ struct ArtifactFolderResponse {
 
 /// Host filesystem path of the artifacts folder (optionally a thread subfolder),
 /// so the desktop shell can reveal it in the Finder.
-async fn artifact_folder_path(Query(query): Query<ArtifactFolderQuery>) -> Json<ArtifactFolderResponse> {
+async fn artifact_folder_path(
+    Query(query): Query<ArtifactFolderQuery>,
+) -> Json<ArtifactFolderResponse> {
     let mut path = sandbox::artifacts_dir();
     if let Some(thread) = query.thread.as_ref().filter(|t| !t.trim().is_empty()) {
         path = path.join(artifact_thread_slug(Some(thread)));
     }
-    Json(ArtifactFolderResponse { path: path.to_string_lossy().to_string() })
+    Json(ArtifactFolderResponse {
+        path: path.to_string_lossy().to_string(),
+    })
 }
 
 #[derive(Debug, Serialize)]
@@ -24689,7 +26373,11 @@ fn read_memory_artifact_for_export(
     let path = metadata
         .get("project_path")
         .and_then(|value| value.as_str())
-        .or_else(|| metadata.get("managed_path").and_then(|value| value.as_str()))
+        .or_else(|| {
+            metadata
+                .get("managed_path")
+                .and_then(|value| value.as_str())
+        })
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
@@ -24825,7 +26513,11 @@ async fn artifacts_usage(State(state): State<AppState>) -> Json<ArtifactsUsage> 
             }
             files.sort_by(|a, b| a.name.cmp(&b.name));
             total += bytes;
-            threads.push(ArtifactThreadView { thread, bytes, files });
+            threads.push(ArtifactThreadView {
+                thread,
+                bytes,
+                files,
+            });
         }
     }
     let user = gateway_memory_user_id();
@@ -24924,19 +26616,22 @@ async fn memory_artifacts(
     Query(query): Query<MemoryArtifactsQuery>,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
     let user = gateway_memory_user_id();
-    let workspace =
-        if let Some(thread_id) = query.thread.as_deref().filter(|value| !value.trim().is_empty()) {
-            lock_store(&state)
-                .ok()
-                .and_then(|store| store.workspace_for_thread(thread_id).ok())
-                .filter(|value| !value.trim().is_empty())
-                .map(MemoryWorkspaceId::new)
-                .unwrap_or_else(gateway_memory_workspace_id)
-        } else if let Some(workspace) = query.workspace.filter(|value| !value.trim().is_empty()) {
-            MemoryWorkspaceId::new(workspace)
-        } else {
-            gateway_memory_workspace_id()
-        };
+    let workspace = if let Some(thread_id) = query
+        .thread
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+    {
+        lock_store(&state)
+            .ok()
+            .and_then(|store| store.workspace_for_thread(thread_id).ok())
+            .filter(|value| !value.trim().is_empty())
+            .map(MemoryWorkspaceId::new)
+            .unwrap_or_else(gateway_memory_workspace_id)
+    } else if let Some(workspace) = query.workspace.filter(|value| !value.trim().is_empty()) {
+        MemoryWorkspaceId::new(workspace)
+    } else {
+        gateway_memory_workspace_id()
+    };
     let facade = lock_memory_facade(&state)?;
     let mut artifacts: Vec<MemoryArtifactView> = facade
         .list_memories_for_ui(&user, &workspace)
@@ -25038,11 +26733,14 @@ async fn delete_memory_artifact(
     State(state): State<AppState>,
     Query(query): Query<DeleteMemoryArtifactQuery>,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
-    let reference = query.reference.parse::<MemoryRef>().map_err(|error| GatewayError {
-        status: StatusCode::BAD_REQUEST,
-        code: "artifact_bad_ref",
-        message: error,
-    })?;
+    let reference = query
+        .reference
+        .parse::<MemoryRef>()
+        .map_err(|error| GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "artifact_bad_ref",
+            message: error,
+        })?;
     let user = reference.user_id.clone();
     let workspace = reference.workspace_id.clone();
     let facade = lock_memory_facade(&state)?;
@@ -25068,7 +26766,11 @@ async fn delete_memory_artifact(
     let path = metadata
         .get("project_path")
         .and_then(|value| value.as_str())
-        .or_else(|| metadata.get("managed_path").and_then(|value| value.as_str()))
+        .or_else(|| {
+            metadata
+                .get("managed_path")
+                .and_then(|value| value.as_str())
+        })
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(PathBuf::from);
@@ -25079,7 +26781,8 @@ async fn delete_memory_artifact(
             return Err(GatewayError {
                 status: StatusCode::BAD_REQUEST,
                 code: "artifact_path_outside_scope",
-                message: "artifact path is outside the authorized project/artifact roots".to_string(),
+                message: "artifact path is outside the authorized project/artifact roots"
+                    .to_string(),
             });
         }
         if path.is_file() {
@@ -25110,12 +26813,7 @@ async fn delete_memory_artifact(
             workspace.clone(),
             format!("artifact:{thread_slug}:{name}"),
         );
-        let _ = facade.tombstone_entity(
-            &entity_ref,
-            &user,
-            &workspace,
-            "artifact deleted by user",
-        );
+        let _ = facade.tombstone_entity(&entity_ref, &user, &workspace, "artifact deleted by user");
     }
     Ok(Json(serde_json::json!({ "ok": true })))
 }
@@ -25125,8 +26823,13 @@ fn ok_json() -> Json<serde_json::Value> {
 }
 
 /// Deletes a single artifact file (anti path-traversal, scoped to its thread).
-async fn delete_artifact_file(Query(reference): Query<ArtifactRef>) -> Result<Json<serde_json::Value>, GatewayError> {
-    if reference.name.contains('/') || reference.name.contains("..") || reference.thread.contains('/') {
+async fn delete_artifact_file(
+    Query(reference): Query<ArtifactRef>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    if reference.name.contains('/')
+        || reference.name.contains("..")
+        || reference.thread.contains('/')
+    {
         return Err(GatewayError {
             status: StatusCode::FORBIDDEN,
             code: "bad_artifact_path",
@@ -25142,7 +26845,9 @@ async fn delete_artifact_file(Query(reference): Query<ArtifactRef>) -> Result<Js
 }
 
 /// Deletes all artifacts of one conversation.
-async fn delete_artifact_thread(Query(query): Query<ArtifactFolderQuery>) -> Json<serde_json::Value> {
+async fn delete_artifact_thread(
+    Query(query): Query<ArtifactFolderQuery>,
+) -> Json<serde_json::Value> {
     if let Some(thread) = query.thread.as_ref().filter(|t| !t.trim().is_empty()) {
         let dir = sandbox::artifacts_dir().join(artifact_thread_slug(Some(thread)));
         let _ = std::fs::remove_dir_all(&dir);
@@ -25166,13 +26871,21 @@ async fn clear_artifacts() -> Json<serde_json::Value> {
 /// Writes a model-authored text artifact to the conversation's managed output
 /// dir (so it stays downloadable/previewable) and, if a project is active, also
 /// to the project folder. Returns the byte size on success.
-fn write_text_artifact(thread_slug: &str, name: &str, content: &str) -> Result<(u64, bool), String> {
+fn write_text_artifact(
+    thread_slug: &str,
+    name: &str,
+    content: &str,
+) -> Result<(u64, bool), String> {
     write_artifact_bytes(thread_slug, name, content.as_bytes())
 }
 
 /// Writes an artifact from raw BYTES (same versioning + project mirror as the text
 /// path). Used for binary artifacts like rendered PDFs.
-fn write_artifact_bytes(thread_slug: &str, name: &str, bytes: &[u8]) -> Result<(u64, bool), String> {
+fn write_artifact_bytes(
+    thread_slug: &str,
+    name: &str,
+    bytes: &[u8],
+) -> Result<(u64, bool), String> {
     if name.is_empty() || name.contains('/') || name.contains('\\') || name.contains("..") {
         return Err("Invalid file name.".to_string());
     }
@@ -25246,7 +26959,11 @@ fn save_artifact_to_destination(thread_slug: &str, file: &str, dest_name: &str) 
             .join(", ");
         return format!(
             "Destination «{dest_name}» not authorized. Available: {}.",
-            if available.is_empty() { "none".to_string() } else { available }
+            if available.is_empty() {
+                "none".to_string()
+            } else {
+                available
+            }
         );
     };
     let src_dir = sandbox::artifacts_dir().join(thread_slug);
@@ -25270,7 +26987,13 @@ fn artifact_thread_slug(thread: Option<&str>) -> String {
     let raw = thread.unwrap_or("default").trim();
     let slug: String = raw
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '-'
+            }
+        })
         .collect();
     if slug.is_empty() {
         "default".to_string()
@@ -25594,7 +27317,12 @@ async fn task_queue(
     Query(query): Query<TaskQueueQuery>,
 ) -> Result<Json<TaskQueueResponse>, GatewayError> {
     let mut response = task_queue_response_for_state(&state)?;
-    if let Some(thread_id) = query.thread_id.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
+    if let Some(thread_id) = query
+        .thread_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+    {
         // Tasks belonging to THIS chat = the thread's primary task + its member
         // tasks (the Brain materializes N member tasks from one prompt).
         let allowed: std::collections::HashSet<String> = {
@@ -25612,7 +27340,9 @@ async fn task_queue(
         response.queued.retain(|t| allowed.contains(&t.task_id));
         response.active.retain(|t| allowed.contains(&t.task_id));
         response.blocked.retain(|t| allowed.contains(&t.task_id));
-        response.recent_failures.retain(|t| allowed.contains(&t.task_id));
+        response
+            .recent_failures
+            .retain(|t| allowed.contains(&t.task_id));
         response
             .waiting_approvals
             .retain(|a| allowed.contains(&a.task_id));
@@ -25648,7 +27378,10 @@ async fn cancel_task(
     {
         let store = lock_task_store(&state)?;
         let tid = local_first_task_runtime::TaskId::new(&task_id);
-        if let Some(task) = store.get_task(&tid, &user, &workspace).map_err(GatewayError::task)? {
+        if let Some(task) = store
+            .get_task(&tid, &user, &workspace)
+            .map_err(GatewayError::task)?
+        {
             let terminal = matches!(
                 task.status,
                 local_first_task_runtime::TaskStatus::Completed
@@ -26207,7 +27940,9 @@ fn start_task_executor_worker(state: AppState) {
         let worker_id = task_executor_worker_id(index);
         // Stagger the first tick across workers so they don't all hit SQLite at
         // once on startup; the interval stays shared afterwards.
-        let stagger = StdDuration::from_millis(TASK_EXECUTOR_POLL_INTERVAL_MS / count.max(1) as u64 * index as u64);
+        let stagger = StdDuration::from_millis(
+            TASK_EXECUTOR_POLL_INTERVAL_MS / count.max(1) as u64 * index as u64,
+        );
         tokio::spawn(async move {
             // Initial offset before the steady-state interval begins.
             tokio::time::sleep(stagger).await;
@@ -27566,10 +29301,11 @@ fn execute_capability_generic(
                 .map(str::to_string)
                 .unwrap_or_else(|| composio_base_url(None));
             let secret_ref =
-                SecretRef::new(user.as_str(), workspace.as_str(), "composio", "default")
-                    .map_err(|error| LocalTaskExecutionError {
+                SecretRef::new(user.as_str(), workspace.as_str(), "composio", "default").map_err(
+                    |error| LocalTaskExecutionError {
                         message: format!("secret ref: {error}"),
-                    })?;
+                    },
+                )?;
             let api_key = state
                 .secret_store
                 .get(&secret_ref)
@@ -27642,7 +29378,9 @@ fn mcp_stdio_config_from_metadata(
         .and_then(Value::as_object)
         .map(|map| {
             map.iter()
-                .filter_map(|(key, value)| value.as_str().map(|value| (key.clone(), value.to_string())))
+                .filter_map(|(key, value)| {
+                    value.as_str().map(|value| (key.clone(), value.to_string()))
+                })
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
@@ -27709,7 +29447,10 @@ impl McpTransport for McpAnyTransport {
 /// Builds the right transport from a connection's metadata `transport` field:
 /// `"http"` → remote streamable-HTTP, anything else → local stdio.
 fn build_mcp_transport(metadata: &Value) -> Result<McpAnyTransport, String> {
-    let kind = metadata.get("transport").and_then(Value::as_str).unwrap_or("stdio");
+    let kind = metadata
+        .get("transport")
+        .and_then(Value::as_str)
+        .unwrap_or("stdio");
     if kind == "http" {
         let url = metadata
             .get("url")
@@ -27726,8 +29467,9 @@ fn build_mcp_transport(metadata: &Value) -> Result<McpAnyTransport, String> {
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
-        let transport = mcp_http::McpHttpTransport::connect(mcp_http::McpHttpConfig { url, headers })
-            .map_err(|e| format!("MCP http start failed: {e}"))?;
+        let transport =
+            mcp_http::McpHttpTransport::connect(mcp_http::McpHttpConfig { url, headers })
+                .map_err(|e| format!("MCP http start failed: {e}"))?;
         Ok(McpAnyTransport::Http(transport))
     } else {
         let config = mcp_stdio_config_from_metadata(metadata).map_err(|e| e.message)?;
@@ -27833,7 +29575,10 @@ fn connect_mcp_blocking(
                 args: request.args,
                 env: request.env.into_iter().collect(),
             };
-            (mcp_stdio_config_to_metadata(&config), format!("stdio:{slug}"))
+            (
+                mcp_stdio_config_to_metadata(&config),
+                format!("stdio:{slug}"),
+            )
         }
     };
 
@@ -28034,7 +29779,11 @@ struct ConnectComposioResponse {
 fn composio_base_url(explicit: Option<String>) -> String {
     explicit
         .filter(|url| !url.trim().is_empty())
-        .or_else(|| env::var("HOMUN_COMPOSIO_BASE_URL").ok().filter(|url| !url.is_empty()))
+        .or_else(|| {
+            env::var("HOMUN_COMPOSIO_BASE_URL")
+                .ok()
+                .filter(|url| !url.is_empty())
+        })
         .unwrap_or_else(|| "https://backend.composio.dev/api/v3".to_string())
 }
 
@@ -28091,10 +29840,7 @@ fn connect_composio_blocking(
         })?;
     state
         .secret_store
-        .put(
-            secret_ref.clone(),
-            SecretMaterial::from_string(api_key),
-        )
+        .put(secret_ref.clone(), SecretMaterial::from_string(api_key))
         .map_err(|error| GatewayError {
             status: StatusCode::INTERNAL_SERVER_ERROR,
             code: "secret_store_failed",
@@ -28235,9 +29981,17 @@ fn composio_toolkits_blocking(state: &AppState) -> Result<ComposioToolkitsRespon
         .unwrap_or(items.len() as u64);
     let toolkits = items
         .iter()
-        .filter(|item| !item.get("deprecated").and_then(serde_json::Value::as_bool).unwrap_or(false))
+        .filter(|item| {
+            !item
+                .get("deprecated")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false)
+        })
         .filter_map(|item| {
-            let slug = item.get("slug").and_then(serde_json::Value::as_str)?.to_string();
+            let slug = item
+                .get("slug")
+                .and_then(serde_json::Value::as_str)?
+                .to_string();
             let name = item
                 .get("name")
                 .and_then(serde_json::Value::as_str)
@@ -28252,7 +30006,10 @@ fn composio_toolkits_blocking(state: &AppState) -> Result<ComposioToolkitsRespon
                         .any(|s| s.as_str().is_some_and(|s| s.eq_ignore_ascii_case("OAUTH2")))
                 })
                 .unwrap_or(false);
-            let no_auth = item.get("no_auth").and_then(serde_json::Value::as_bool).unwrap_or(false);
+            let no_auth = item
+                .get("no_auth")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false);
             // Composio v3 exposes display metadata under `meta`: logo URL, a short
             // description, and category tags (objects with a `name`, or bare strings).
             let meta = item.get("meta");
@@ -28279,7 +30036,15 @@ fn composio_toolkits_blocking(state: &AppState) -> Result<ComposioToolkitsRespon
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
-            Some(ComposioToolkit { slug, name, managed_oauth, no_auth, logo, description, categories })
+            Some(ComposioToolkit {
+                slug,
+                name,
+                managed_oauth,
+                no_auth,
+                logo,
+                description,
+                categories,
+            })
         })
         .collect::<Vec<_>>();
     Ok(ComposioToolkitsResponse { toolkits, total })
@@ -28353,14 +30118,42 @@ struct ComposioChatTools {
 /// write that must be confirmed.
 fn composio_tool_is_read(slug: &str) -> bool {
     const READ_VERBS: &[&str] = &[
-        "FETCH", "GET", "LIST", "SEARCH", "READ", "FIND", "RETRIEVE", "VIEW", "DOWNLOAD",
-        "CHECK", "COUNT", "QUERY", "LOOKUP", "DESCRIBE", "EXPORT",
+        "FETCH", "GET", "LIST", "SEARCH", "READ", "FIND", "RETRIEVE", "VIEW", "DOWNLOAD", "CHECK",
+        "COUNT", "QUERY", "LOOKUP", "DESCRIBE", "EXPORT",
     ];
     const WRITE_VERBS: &[&str] = &[
-        "SEND", "CREATE", "DELETE", "UPDATE", "REMOVE", "ADD", "INSERT", "MODIFY", "EDIT",
-        "ARCHIVE", "MOVE", "PATCH", "PUT", "POST", "REPLY", "FORWARD", "DRAFT", "TRASH",
-        "MARK", "SET", "CLEAR", "WRITE", "UPLOAD", "IMPORT", "ENABLE", "DISABLE", "REVOKE",
-        "GRANT", "CANCEL", "DUPLICATE", "RENAME", "PUBLISH",
+        "SEND",
+        "CREATE",
+        "DELETE",
+        "UPDATE",
+        "REMOVE",
+        "ADD",
+        "INSERT",
+        "MODIFY",
+        "EDIT",
+        "ARCHIVE",
+        "MOVE",
+        "PATCH",
+        "PUT",
+        "POST",
+        "REPLY",
+        "FORWARD",
+        "DRAFT",
+        "TRASH",
+        "MARK",
+        "SET",
+        "CLEAR",
+        "WRITE",
+        "UPLOAD",
+        "IMPORT",
+        "ENABLE",
+        "DISABLE",
+        "REVOKE",
+        "GRANT",
+        "CANCEL",
+        "DUPLICATE",
+        "RENAME",
+        "PUBLISH",
     ];
     let upper = slug.to_ascii_uppercase();
     // Drop the toolkit prefix (first token), classify the action tokens.
@@ -28398,7 +30191,9 @@ fn humanize_composio_tool(slug: &str) -> String {
     let capitalize = |w: &str| {
         let mut chars = w.chars();
         match chars.next() {
-            Some(first) => first.to_uppercase().collect::<String>() + &chars.as_str().to_lowercase(),
+            Some(first) => {
+                first.to_uppercase().collect::<String>() + &chars.as_str().to_lowercase()
+            }
             None => String::new(),
         }
     };
@@ -28406,7 +30201,13 @@ fn humanize_composio_tool(slug: &str) -> String {
     if action_parts.is_empty() {
         return toolkit;
     }
-    let action = capitalize(&action_parts.iter().map(|w| w.to_lowercase()).collect::<Vec<_>>().join(" "));
+    let action = capitalize(
+        &action_parts
+            .iter()
+            .map(|w| w.to_lowercase())
+            .collect::<Vec<_>>()
+            .join(" "),
+    );
     format!("{action} · {toolkit}")
 }
 
@@ -28422,7 +30223,11 @@ fn composio_connected_toolkits(transport: &GatewayComposioTransport) -> Vec<(Str
         )
         .ok();
     let mut by_slug: std::collections::BTreeMap<String, bool> = std::collections::BTreeMap::new();
-    if let Some(items) = resp.as_ref().and_then(|r| r.get("items")).and_then(|v| v.as_array()) {
+    if let Some(items) = resp
+        .as_ref()
+        .and_then(|r| r.get("items"))
+        .and_then(|v| v.as_array())
+    {
         for item in items {
             let active = item
                 .get("status")
@@ -28442,12 +30247,13 @@ fn composio_connected_toolkits(transport: &GatewayComposioTransport) -> Vec<(Str
     by_slug.into_iter().collect()
 }
 
-type ComposioCatalogCache =
-    std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<usize, (std::time::Instant, ComposioChatTools)>>>;
+type ComposioCatalogCache = std::sync::OnceLock<
+    std::sync::Mutex<std::collections::HashMap<usize, (std::time::Instant, ComposioChatTools)>>,
+>;
 
-fn composio_catalog_cache(
-) -> &'static std::sync::Mutex<std::collections::HashMap<usize, (std::time::Instant, ComposioChatTools)>>
-{
+fn composio_catalog_cache() -> &'static std::sync::Mutex<
+    std::collections::HashMap<usize, (std::time::Instant, ComposioChatTools)>,
+> {
     static CELL: ComposioCatalogCache = std::sync::OnceLock::new();
     CELL.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
 }
@@ -28524,7 +30330,11 @@ fn composio_chat_tools(state: &AppState, cap: usize) -> ComposioChatTools {
             Ok(resp) => resp,
             Err(_) => continue,
         };
-        let items = resp.get("items").and_then(serde_json::Value::as_array).cloned().unwrap_or_default();
+        let items = resp
+            .get("items")
+            .and_then(serde_json::Value::as_array)
+            .cloned()
+            .unwrap_or_default();
         for item in items {
             if out.schemas.len() >= cap {
                 break 'outer;
@@ -28532,7 +30342,11 @@ fn composio_chat_tools(state: &AppState, cap: usize) -> ComposioChatTools {
             let Some(tool_slug) = item.get("slug").and_then(serde_json::Value::as_str) else {
                 continue;
             };
-            if item.get("is_deprecated").and_then(serde_json::Value::as_bool).unwrap_or(false) {
+            if item
+                .get("is_deprecated")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false)
+            {
                 continue;
             }
             let description = item
@@ -28577,7 +30391,10 @@ fn parse_mcp_chat_name(name: &str) -> Option<(CapabilityProviderId, String)> {
     if slug.is_empty() || tool.is_empty() {
         return None;
     }
-    Some((CapabilityProviderId::new(format!("mcp:{slug}")), tool.to_string()))
+    Some((
+        CapabilityProviderId::new(format!("mcp:{slug}")),
+        tool.to_string(),
+    ))
 }
 
 /// MCP function tools to expose to the chat model, plus the subset that are
@@ -28629,7 +30446,12 @@ fn mcp_chat_tools(state: &AppState, cap: usize) -> McpChatTools {
             {
                 out.writes.insert(name.clone());
             }
-            let description = cached.tool.description.chars().take(300).collect::<String>();
+            let description = cached
+                .tool
+                .description
+                .chars()
+                .take(300)
+                .collect::<String>();
             let parameters = if cached.tool.input_schema.is_null() {
                 serde_json::json!({ "type": "object", "properties": {} })
             } else {
@@ -28681,15 +30503,16 @@ fn run_mcp_chat_tool(
         (connection, tool_policies, policy_context)
     };
     let transport = build_mcp_transport(&connection.metadata)?;
-    let provider =
-        McpCapabilityProvider::new(provider_id.clone(), true, transport, tool_policies);
+    let provider = McpCapabilityProvider::new(provider_id.clone(), true, transport, tool_policies);
     // MCP requires the initialize handshake before tools/call (strict servers
     // reject calls otherwise). Fresh transport per call → initialize exactly once.
     provider
         .initialize("2024-11-05")
         .map_err(|error| format!("handshake MCP: {error}"))?;
-    let mut facade =
-        CapabilityFacade::new(CapabilityPolicy::default(), InMemoryCapabilityAudit::default());
+    let mut facade = CapabilityFacade::new(
+        CapabilityPolicy::default(),
+        InMemoryCapabilityAudit::default(),
+    );
     facade.register_provider(provider);
     let call = CapabilityCall {
         provider_id: provider_id.clone(),
@@ -28710,17 +30533,17 @@ fn suggest_capabilities_tool_schema() -> serde_json::Value {
         "function": {
             "name": "suggest_capabilities",
             "description": "When the user wants to do something you might NOT already be able to do \
-(browser automation, access to a service/app, data, etc.), search the available connectors — \
-MCP servers (official registry), Skills (marketplace) and Composio (1000+ cloud services) — and propose \
-what to CONNECT. Use a short query on the intent (e.g. 'browser automation', 'google calendar', \
-'excel', 'github'). Returns suggestions to present to the user along with how to connect them.",
+    (browser automation, access to a service/app, data, etc.), search the available connectors — \
+    MCP servers (official registry), Skills (marketplace) and Composio (1000+ cloud services) — and propose \
+    what to CONNECT. Use a short query on the intent (e.g. 'browser automation', 'google calendar', \
+    'excel', 'github'). Returns suggestions to present to the user along with how to connect them.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "need": {
                         "type": "string",
                         "description": "What the user wants to do, in a few words/keywords (e.g. \
-'automate the browser', 'send email', 'read excel files')."
+    'automate the browser', 'send email', 'read excel files')."
                     }
                 },
                 "required": ["need"]
@@ -28747,12 +30570,15 @@ async fn suggest_capabilities(state: &AppState, need: &str) -> CapabilitySuggest
     let need = need.trim();
     if need.is_empty() {
         return CapabilitySuggestions {
-            model_text: "Specify what you want to do, so I can search for the right connectors.".to_string(),
+            model_text: "Specify what you want to do, so I can search for the right connectors."
+                .to_string(),
             card: None,
         };
     }
     // MCP registry (async network).
-    let mcp = mcp_registry::fetch_servers(&state.http, Some(need), 4).await.unwrap_or_default();
+    let mcp = mcp_registry::fetch_servers(&state.http, Some(need), 4)
+        .await
+        .unwrap_or_default();
     // Refresh the skills catalog if stale, so the search below has data.
     if let Some(path) = skills_catalog_path() {
         if !skills_catalog::load_cache(&path).is_some_and(|c| skills_catalog::cache_is_fresh(&c)) {
@@ -28768,8 +30594,11 @@ async fn suggest_capabilities(state: &AppState, need: &str) -> CapabilitySuggest
                 .and_then(|p| skills_catalog::load_cache(&p))
                 .map(|cache| skills_catalog::search(&cache, &need_owned, None, 4))
                 .unwrap_or_default();
-            let terms: Vec<String> =
-                need_owned.to_lowercase().split_whitespace().map(str::to_string).collect();
+            let terms: Vec<String> = need_owned
+                .to_lowercase()
+                .split_whitespace()
+                .map(str::to_string)
+                .collect();
             let composio = composio_toolkits_blocking(&st)
                 .map(|resp| {
                     resp.toolkits
@@ -28853,14 +30682,20 @@ async fn suggest_capabilities(state: &AppState, need: &str) -> CapabilitySuggest
         out.push_str(
             "\nNo connectors found. Try different keywords, or add an MCP server manually.",
         );
-        return CapabilitySuggestions { model_text: out, card: None };
+        return CapabilitySuggestions {
+            model_text: out,
+            card: None,
+        };
     }
     out.push_str(
         "\nPresent these options to the user, briefly explaining what each one does and how \
 to connect it (the paths in parentheses). Do NOT claim you have already connected them.",
     );
     let card = serde_json::json!({ "need": need, "items": items });
-    CapabilitySuggestions { model_text: out, card: Some(card) }
+    CapabilitySuggestions {
+        model_text: out,
+        card: Some(card),
+    }
 }
 
 /// Executes a Composio tool for the current entity and returns its raw output.
@@ -28949,9 +30784,7 @@ fn pending_approval_exists(state: &AppState, code: &str) -> bool {
 }
 
 fn approval_progress_reply(code: &str) -> String {
-    format!(
-        "⏳ Ricevuto ({code}). Verifico la card salvata e avvio l'azione…"
-    )
+    format!("⏳ Ricevuto ({code}). Verifico la card salvata e avvio l'azione…")
 }
 
 fn approval_action_target(args: &serde_json::Value) -> Option<String> {
@@ -28986,7 +30819,10 @@ fn remote_approval_thread_status(
             "⚠️ Azione approvata da Telegram fallita: `{}`{}.{}",
             approval.tool, target, detail
         ),
-        _ => format!("ℹ️ Stato approvazione Telegram: `{phase}` per `{}`{}.{detail}", approval.tool, target),
+        _ => format!(
+            "ℹ️ Stato approvazione Telegram: `{phase}` per `{}`{}.{detail}",
+            approval.tool, target
+        ),
     }
 }
 
@@ -29001,7 +30837,8 @@ fn append_remote_approval_thread_status(
     };
     let text = remote_approval_thread_status(approval, phase, detail);
     if let Ok(store) = lock_store(state) {
-        let _ = store.append_assistant_message(thread_id, &channel_chat_message("assistant", &text));
+        let _ =
+            store.append_assistant_message(thread_id, &channel_chat_message("assistant", &text));
     }
     publish_app_event(serde_json::json!({
         "type": "thread.updated",
@@ -29079,7 +30916,8 @@ fn resume_thread_after_approval(
     let tool = tool.to_string();
     let result = result.to_string();
     tokio::spawn(async move {
-        let source_user_text = approval_source_user_text(&st, &thread_id, source_message_id.as_deref());
+        let source_user_text =
+            approval_source_user_text(&st, &thread_id, source_message_id.as_deref());
         let prompt = approval_resume_prompt(
             &tool,
             &result,
@@ -29118,10 +30956,14 @@ async fn execute_pending_approval(state: &AppState, code: &str) -> String {
     };
     if pending.requires_source {
         let Some(thread_id) = pending.thread_id.as_deref() else {
-            return format!("Approval {code} is missing its origin thread; please retry in the app.");
+            return format!(
+                "Approval {code} is missing its origin thread; please retry in the app."
+            );
         };
         let Some(message_id) = pending.source_message_id.as_deref() else {
-            return format!("Approval {code} is not ready yet: the in-app confirmation card has not been saved.");
+            return format!(
+                "Approval {code} is not ready yet: the in-app confirmation card has not been saved."
+            );
         };
         let source_ok = lock_store(state)
             .ok()
@@ -29149,10 +30991,12 @@ async fn execute_pending_approval(state: &AppState, code: &str) -> String {
             );
         }
     }
-    match lock_store(state)
-        .ok()
-        .and_then(|store| store.claim_remote_approval(&pending.approval_id).ok().flatten())
-    {
+    match lock_store(state).ok().and_then(|store| {
+        store
+            .claim_remote_approval(&pending.approval_id)
+            .ok()
+            .flatten()
+    }) {
         Some(claimed) => {
             append_remote_approval_thread_status(state, &claimed, "running", None);
             let tool = claimed.tool.clone();
@@ -29162,15 +31006,17 @@ async fn execute_pending_approval(state: &AppState, code: &str) -> String {
             let source_message_id = claimed.source_message_id.clone();
             let st = state.clone();
             let tool_for_run = tool.clone();
-            let result: Result<serde_json::Value, String> = tokio::task::spawn_blocking(move || {
-                if let Some((prov, mtool)) = parse_mcp_chat_name(&tool_for_run) {
-                    run_mcp_chat_tool(&st, &prov, &mtool, args.clone()).map_err(|e| e.to_string())
-                } else {
-                    composio_execute_tool(&st, &tool_for_run, &args).map_err(|e| e.message)
-                }
-            })
-            .await
-            .unwrap_or_else(|_| Err("execution interrupted".to_string()));
+            let result: Result<serde_json::Value, String> =
+                tokio::task::spawn_blocking(move || {
+                    if let Some((prov, mtool)) = parse_mcp_chat_name(&tool_for_run) {
+                        run_mcp_chat_tool(&st, &prov, &mtool, args.clone())
+                            .map_err(|e| e.to_string())
+                    } else {
+                        composio_execute_tool(&st, &tool_for_run, &args).map_err(|e| e.message)
+                    }
+                })
+                .await
+                .unwrap_or_else(|_| Err("execution interrupted".to_string()));
             match result {
                 Ok(value) => match composio_execution_error(&value) {
                     None => {
@@ -29184,7 +31030,8 @@ async fn execute_pending_approval(state: &AppState, code: &str) -> String {
                                     } else {
                                         rewrite_confirm_to_done(&message.text, &claimed.tool)
                                     };
-                                    let _ = store.set_message_text(thread_id, message_id, &rewritten);
+                                    let _ =
+                                        store.set_message_text(thread_id, message_id, &rewritten);
                                 }
                                 publish_app_event(serde_json::json!({
                                     "type": "thread.updated",
@@ -29192,7 +31039,8 @@ async fn execute_pending_approval(state: &AppState, code: &str) -> String {
                                     "workspace": base_workspace_id(),
                                 }));
                             }
-                            let _ = store.complete_remote_approval(&claimed.approval_id, "executed");
+                            let _ =
+                                store.complete_remote_approval(&claimed.approval_id, "executed");
                         }
                         append_remote_approval_thread_status(
                             state,
@@ -29258,12 +31106,13 @@ async fn channel_send_buttons(
     }
 }
 
-async fn dispatch_remote_approval(
-    state: &AppState,
-    approval: &RemoteApprovalRow,
-) -> bool {
+async fn dispatch_remote_approval(state: &AppState, approval: &RemoteApprovalRow) -> bool {
     let prefs = load_user_prefs();
-    let channel = prefs.approval_channel.as_deref().unwrap_or("in_app").to_string();
+    let channel = prefs
+        .approval_channel
+        .as_deref()
+        .unwrap_or("in_app")
+        .to_string();
     let target = prefs.approval_target.unwrap_or_default();
     if target.trim().is_empty() || channel == "in_app" {
         return false;
@@ -29279,8 +31128,8 @@ async fn dispatch_remote_approval(
                 ["✅ Authorize".to_string(), format!("approve:{code}")],
                 ["❌ Cancel".to_string(), format!("cancel:{code}")],
             ];
-            let sent = telegram_send_buttons_with_rebind(state, target.trim(), &text, buttons)
-                .await;
+            let sent =
+                telegram_send_buttons_with_rebind(state, target.trim(), &text, buttons).await;
             if let Err(error) = &sent {
                 append_remote_approval_thread_status(
                     state,
@@ -29299,7 +31148,9 @@ Puoi usare la card in app o riconnettere Telegram."
                 "🔐 Homun is asking for your confirmation:\n{}\n\nAuthorize: OK {code}\nCancel: NO {code}\n(expires in 10 minutes)",
                 approval.label
             );
-            channel_send(state, WHATSAPP_HTTP_PORT, target.trim(), &text).await.is_ok()
+            channel_send(state, WHATSAPP_HTTP_PORT, target.trim(), &text)
+                .await
+                .is_ok()
         }
         _ => false,
     }
@@ -29378,8 +31229,18 @@ fn execute_send_message(
         .unwrap_or("whatsapp")
         .trim()
         .to_lowercase();
-    let to = args.get("to").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
-    let text = args.get("text").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    let to = args
+        .get("to")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let text = args
+        .get("text")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
     if to.is_empty() || text.is_empty() {
         return Ok(serde_json::json!({
             "successful": false,
@@ -29405,8 +31266,12 @@ fn execute_send_message(
     let sent = tokio::runtime::Handle::current()
         .block_on(async move { channel_send(&st, port, &recipient, &body).await });
     match sent {
-        Ok(()) => Ok(serde_json::json!({ "successful": true, "data": { "channel": channel, "to": to } })),
-        Err(e) => Ok(serde_json::json!({ "successful": false, "error": format!("Send failed: {e}") })),
+        Ok(()) => {
+            Ok(serde_json::json!({ "successful": true, "data": { "channel": channel, "to": to } }))
+        }
+        Err(e) => {
+            Ok(serde_json::json!({ "successful": false, "error": format!("Send failed: {e}") }))
+        }
     }
 }
 
@@ -29594,7 +31459,9 @@ fn composio_execution_error(output: &serde_json::Value) -> Option<String> {
 // ---- write-tool approval allow-list ("conferma sempre per questo tool") -------
 
 fn composio_tool_allow_path() -> Option<PathBuf> {
-    gateway_data_dir().ok().map(|dir| dir.join("composio-tool-allow.json"))
+    gateway_data_dir()
+        .ok()
+        .map(|dir| dir.join("composio-tool-allow.json"))
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -29634,7 +31501,9 @@ fn composio_tool_allowed(slug: &str) -> bool {
 
 fn write_composio_tool_allow(set: std::collections::BTreeSet<String>) -> Result<(), String> {
     let path = composio_tool_allow_path().ok_or_else(|| "data dir unavailable".to_string())?;
-    let value = ComposioToolAllow { always: set.into_iter().collect() };
+    let value = ComposioToolAllow {
+        always: set.into_iter().collect(),
+    };
     let json = serde_json::to_string_pretty(&value).map_err(|e| e.to_string())?;
     fs::write(path, json).map_err(|e| e.to_string())
 }
@@ -29654,7 +31523,9 @@ fn remove_composio_tool_allow(slug: &str) -> Result<(), String> {
 // ---- per-conversation linked folder ("@ file" context) -----------------------
 
 fn thread_folders_path() -> Option<PathBuf> {
-    gateway_data_dir().ok().map(|dir| dir.join("thread-folders.json"))
+    gateway_data_dir()
+        .ok()
+        .map(|dir| dir.join("thread-folders.json"))
 }
 
 fn load_thread_folders() -> std::collections::BTreeMap<String, String> {
@@ -29694,16 +31565,26 @@ fn path_within(root: &std::path::Path, candidate: &std::path::Path) -> bool {
 fn is_ignored_dir(name: &str) -> bool {
     matches!(
         name,
-        ".git" | "node_modules" | ".venv" | "venv" | "__pycache__" | ".next" | "dist" | "build"
-            | "target" | ".cache" | ".idea" | ".DS_Store"
+        ".git"
+            | "node_modules"
+            | ".venv"
+            | "venv"
+            | "__pycache__"
+            | ".next"
+            | "dist"
+            | "build"
+            | "target"
+            | ".cache"
+            | ".idea"
+            | ".DS_Store"
     )
 }
 
 fn looks_texty(name: &str) -> bool {
     let binary = [
         ".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".pdf", ".zip", ".gz", ".tar", ".mp4",
-        ".mov", ".mp3", ".wav", ".woff", ".woff2", ".ttf", ".otf", ".so", ".dylib", ".dll",
-        ".exe", ".bin", ".class", ".o", ".a", ".lock",
+        ".mov", ".mp3", ".wav", ".woff", ".woff2", ".ttf", ".otf", ".so", ".dylib", ".dll", ".exe",
+        ".bin", ".class", ".o", ".a", ".lock",
     ];
     let lower = name.to_lowercase();
     !binary.iter().any(|ext| lower.ends_with(ext))
@@ -29720,7 +31601,9 @@ fn search_folder_files(root: &std::path::Path, query: &str, limit: usize) -> Vec
         if out.len() >= limit || walked > 20_000 {
             break;
         }
-        let Ok(entries) = fs::read_dir(&dir) else { continue };
+        let Ok(entries) = fs::read_dir(&dir) else {
+            continue;
+        };
         for entry in entries.flatten() {
             walked += 1;
             let path = entry.path();
@@ -29737,7 +31620,11 @@ fn search_folder_files(root: &std::path::Path, query: &str, limit: usize) -> Vec
             if !looks_texty(&name) {
                 continue;
             }
-            let rel = path.strip_prefix(root).unwrap_or(&path).to_string_lossy().to_string();
+            let rel = path
+                .strip_prefix(root)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .to_string();
             if q.is_empty() || rel.to_lowercase().contains(&q) {
                 out.push(rel);
                 if out.len() >= limit {
@@ -29762,7 +31649,9 @@ struct SetThreadFolderRequest {
 }
 
 async fn get_thread_folder(Path(thread_id): Path<String>) -> Json<ThreadFolderResponse> {
-    Json(ThreadFolderResponse { path: effective_thread_folder(&thread_id) })
+    Json(ThreadFolderResponse {
+        path: effective_thread_folder(&thread_id),
+    })
 }
 
 async fn set_thread_folder(
@@ -29770,7 +31659,11 @@ async fn set_thread_folder(
     Json(request): Json<SetThreadFolderRequest>,
 ) -> Result<Json<ThreadFolderResponse>, GatewayError> {
     let mut map = load_thread_folders();
-    let cleaned = request.path.as_ref().map(|p| p.trim()).filter(|p| !p.is_empty());
+    let cleaned = request
+        .path
+        .as_ref()
+        .map(|p| p.trim())
+        .filter(|p| !p.is_empty());
     match cleaned {
         Some(path) => {
             let dir = PathBuf::from(path);
@@ -29792,7 +31685,9 @@ async fn set_thread_folder(
         code: "folder_store",
         message: e,
     })?;
-    Ok(Json(ThreadFolderResponse { path: thread_folder(&thread_id) }))
+    Ok(Json(ThreadFolderResponse {
+        path: thread_folder(&thread_id),
+    }))
 }
 
 #[derive(Debug, Deserialize)]
@@ -29868,7 +31763,11 @@ async fn read_thread_file(
     let truncated = bytes.len() > MAX_CONTEXT_FILE_BYTES;
     let slice = &bytes[..bytes.len().min(MAX_CONTEXT_FILE_BYTES)];
     let content = String::from_utf8_lossy(slice).to_string();
-    Ok(Json(ThreadFileResponse { path: rel, content, truncated }))
+    Ok(Json(ThreadFileResponse {
+        path: rel,
+        content,
+        truncated,
+    }))
 }
 
 #[derive(Debug, Serialize)]
@@ -29886,7 +31785,10 @@ struct AllowedToolsResponse {
 fn current_allowed_tools() -> AllowedToolsResponse {
     let tools = load_composio_tool_allow()
         .into_iter()
-        .map(|slug| AllowedToolView { name: humanize_composio_tool(&slug), slug })
+        .map(|slug| AllowedToolView {
+            name: humanize_composio_tool(&slug),
+            slug,
+        })
         .collect();
     AllowedToolsResponse { tools }
 }
@@ -29952,7 +31854,10 @@ fn confirm_marker_matches_approval(
     let Some(marker) = confirm_marker_value(text, open_tag, close_tag) else {
         return false;
     };
-    marker.get("approval_id").and_then(serde_json::Value::as_str) == Some(approval_id)
+    marker
+        .get("approval_id")
+        .and_then(serde_json::Value::as_str)
+        == Some(approval_id)
         && marker.get("tool").and_then(serde_json::Value::as_str) == Some(tool)
         && marker.get("arguments") == Some(arguments)
 }
@@ -29993,7 +31898,9 @@ fn rewrite_confirm_to_done(text: &str, tool: &str) -> String {
         return text.to_string();
     };
     let close = open + close_rel + COMPOSIO_CONFIRM_CLOSE.len();
-    let head_end = text[..open].rfind("I need your confirmation").unwrap_or(open);
+    let head_end = text[..open]
+        .rfind("I need your confirmation")
+        .unwrap_or(open);
     let mut out = text[..head_end].trim_end().to_string();
     let tail = text[close..].trim();
     if !tail.is_empty() {
@@ -30151,7 +32058,10 @@ fn mcp_connected_list(state: &AppState) -> Result<Vec<McpConnectedServer>, Gatew
             .flatten()
             .map(|c| c.display_name)
             .unwrap_or_else(|| conn.provider_id.as_str().to_string());
-        let tools = registry.cached_tools(&conn.provider_id).map(|t| t.len()).unwrap_or(0);
+        let tools = registry
+            .cached_tools(&conn.provider_id)
+            .map(|t| t.len())
+            .unwrap_or(0);
         out.push(McpConnectedServer {
             provider_id: conn.provider_id.as_str().to_string(),
             name,
@@ -30162,7 +32072,9 @@ fn mcp_connected_list(state: &AppState) -> Result<Vec<McpConnectedServer>, Gatew
 }
 
 /// Lists the connected MCP servers (for the catalog's "installed" section).
-async fn mcp_connected(State(state): State<AppState>) -> Result<Json<serde_json::Value>, GatewayError> {
+async fn mcp_connected(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
     let servers = tokio::task::spawn_blocking(move || mcp_connected_list(&state))
         .await
         .map_err(|e| GatewayError {
@@ -30195,11 +32107,13 @@ async fn mcp_disconnect(
     let removed = tokio::task::spawn_blocking(move || -> Result<usize, GatewayError> {
         let registry = lock_capability_registry(&state)?;
         let provider = CapabilityProviderId::new(pid);
-        match registry.provider_config(&provider).map_err(|e| GatewayError {
-            status: StatusCode::INTERNAL_SERVER_ERROR,
-            code: "mcp_disconnect",
-            message: e.to_string(),
-        })? {
+        match registry
+            .provider_config(&provider)
+            .map_err(|e| GatewayError {
+                status: StatusCode::INTERNAL_SERVER_ERROR,
+                code: "mcp_disconnect",
+                message: e.to_string(),
+            })? {
             Some(cfg) if cfg.provider_kind == CapabilityProviderKind::Mcp => {}
             Some(_) => {
                 return Err(GatewayError {
@@ -30210,11 +32124,13 @@ async fn mcp_disconnect(
             }
             None => return Ok(0),
         }
-        registry.remove_provider(&provider).map_err(|e| GatewayError {
-            status: StatusCode::INTERNAL_SERVER_ERROR,
-            code: "mcp_disconnect",
-            message: e.to_string(),
-        })
+        registry
+            .remove_provider(&provider)
+            .map_err(|e| GatewayError {
+                status: StatusCode::INTERNAL_SERVER_ERROR,
+                code: "mcp_disconnect",
+                message: e.to_string(),
+            })
     })
     .await
     .map_err(|e| GatewayError {
@@ -30302,8 +32218,10 @@ async fn fs_authorize(
             if let (Some(thread_id), Some(message_id)) = (&request.thread_id, &request.message_id) {
                 if let Ok(store) = lock_store(&state) {
                     if let Ok(Some(message)) = store.message(thread_id, message_id) {
-                        let rewritten =
-                            rewrite_fs_authorize_to_done(&message.text, &path.display().to_string());
+                        let rewritten = rewrite_fs_authorize_to_done(
+                            &message.text,
+                            &path.display().to_string(),
+                        );
                         let _ = store.set_message_text(thread_id, message_id, &rewritten);
                     }
                 }
@@ -30335,7 +32253,8 @@ fn rewrite_connect_suggest_mark(text: &str, kind: &str, item_ref: &str) -> Strin
         return text.to_string();
     };
     let json_end = json_start + close_rel;
-    let Ok(mut card) = serde_json::from_str::<serde_json::Value>(&text[json_start..json_end]) else {
+    let Ok(mut card) = serde_json::from_str::<serde_json::Value>(&text[json_start..json_end])
+    else {
         return text.to_string();
     };
     if let Some(items) = card.get_mut("items").and_then(|v| v.as_array_mut()) {
@@ -30345,7 +32264,9 @@ fn rewrite_connect_suggest_mark(text: &str, kind: &str, item_ref: &str) -> Strin
             }
             // MCP items are keyed by the registry server id; skill/Composio by slug.
             let matches = if kind == "mcp" {
-                item.get("server").and_then(|s| s.get("id")).and_then(|v| v.as_str())
+                item.get("server")
+                    .and_then(|s| s.get("id"))
+                    .and_then(|v| v.as_str())
                     == Some(item_ref)
             } else {
                 item.get("slug").and_then(|v| v.as_str()) == Some(item_ref)
@@ -30382,11 +32303,8 @@ async fn connect_mark(
     if let (Some(thread_id), Some(message_id)) = (&request.thread_id, &request.message_id) {
         if let Ok(store) = lock_store(&state) {
             if let Ok(Some(message)) = store.message(thread_id, message_id) {
-                let rewritten = rewrite_connect_suggest_mark(
-                    &message.text,
-                    &request.kind,
-                    &request.item_ref,
-                );
+                let rewritten =
+                    rewrite_connect_suggest_mark(&message.text, &request.kind, &request.item_ref);
                 let _ = store.set_message_text(thread_id, message_id, &rewritten);
             }
         }
@@ -30435,7 +32353,9 @@ fn rewrite_mcp_confirm_to_done(text: &str, tool: &str) -> String {
         return text.to_string();
     };
     let close = open + close_rel + MCP_CONFIRM_CLOSE.len();
-    let head_end = text[..open].rfind("I need your confirmation").unwrap_or(open);
+    let head_end = text[..open]
+        .rfind("I need your confirmation")
+        .unwrap_or(open);
     let mut out = text[..head_end].trim_end().to_string();
     let tail = text[close..].trim();
     if !tail.is_empty() {
@@ -30579,7 +32499,10 @@ async fn mcp_execute(
 
 /// Parse one field-set (`auth_config_creation` or `connected_account_initiation`) of a
 /// Composio scheme into UI field descriptors. Handles both snake_case and camelCase keys.
-fn parse_composio_fields(fields: Option<&serde_json::Value>, section: &str) -> Vec<serde_json::Value> {
+fn parse_composio_fields(
+    fields: Option<&serde_json::Value>,
+    section: &str,
+) -> Vec<serde_json::Value> {
     let Some(sect) = fields.and_then(|f| f.get(section)) else {
         return Vec::new();
     };
@@ -30654,7 +32577,10 @@ async fn composio_toolkit_auth(
         .unwrap_or_default();
 
     let mut schemes = Vec::new();
-    if let Some(details) = detail.get("auth_config_details").and_then(serde_json::Value::as_array) {
+    if let Some(details) = detail
+        .get("auth_config_details")
+        .and_then(serde_json::Value::as_array)
+    {
         for d in details {
             let mode = d
                 .get("mode")
@@ -30681,10 +32607,14 @@ async fn composio_toolkit_auth(
         || detail
             .get("auth_config_details")
             .and_then(serde_json::Value::as_array)
-            .map(|a| a.iter().any(|d| {
-                d.get("mode").or_else(|| d.get("name")).and_then(serde_json::Value::as_str)
-                    == Some("NO_AUTH")
-            }))
+            .map(|a| {
+                a.iter().any(|d| {
+                    d.get("mode")
+                        .or_else(|| d.get("name"))
+                        .and_then(serde_json::Value::as_str)
+                        == Some("NO_AUTH")
+                })
+            })
             .unwrap_or(false);
 
     Ok(Json(serde_json::json!({
@@ -30712,7 +32642,11 @@ fn composio_auth_config_resolve(
             .map(str::to_string)
     };
     let existing = transport
-        .request("GET", &format!("/auth_configs?toolkit_slug={toolkit_slug}"), None)
+        .request(
+            "GET",
+            &format!("/auth_configs?toolkit_slug={toolkit_slug}"),
+            None,
+        )
         .map_err(GatewayError::capability)?;
     let reusable = existing
         .get("items")
@@ -30752,7 +32686,9 @@ fn composio_auth_config_resolve(
                 if !obj.contains_key("oauth_redirect_uri") {
                     obj.insert(
                         "oauth_redirect_uri".to_string(),
-                        serde_json::json!("https://backend.composio.dev/api/v3.1/toolkits/auth/callback"),
+                        serde_json::json!(
+                            "https://backend.composio.dev/api/v3.1/toolkits/auth/callback"
+                        ),
                     );
                 }
             }
@@ -30795,14 +32731,24 @@ fn composio_link_blocking(
 ) -> Result<ComposioLinkResponse, GatewayError> {
     let transport = composio_transport_for(state)?;
 
-    let (auth_config_id, init_config) = if let Some(scheme) =
-        req.scheme.as_deref().map(str::to_ascii_uppercase).filter(|s| !s.is_empty())
+    let (auth_config_id, init_config) = if let Some(scheme) = req
+        .scheme
+        .as_deref()
+        .map(str::to_ascii_uppercase)
+        .filter(|s| !s.is_empty())
     {
         // Schema-driven.
         let managed = req.managed.unwrap_or(false);
-        let credentials = req.credentials.clone().unwrap_or_else(|| serde_json::json!({}));
-        let id = composio_auth_config_resolve(&transport, toolkit_slug, &scheme, managed, &credentials)?;
-        let init = req.initiation.clone().unwrap_or_else(|| serde_json::json!({}));
+        let credentials = req
+            .credentials
+            .clone()
+            .unwrap_or_else(|| serde_json::json!({}));
+        let id =
+            composio_auth_config_resolve(&transport, toolkit_slug, &scheme, managed, &credentials)?;
+        let init = req
+            .initiation
+            .clone()
+            .unwrap_or_else(|| serde_json::json!({}));
         let has_init = init.as_object().map(|o| !o.is_empty()).unwrap_or(false);
         let cfg = has_init.then(|| serde_json::json!({ "auth_scheme": scheme, "val": init }));
         (id, cfg)
@@ -30822,11 +32768,9 @@ fn composio_link_blocking(
             managed,
             &serde_json::json!({}),
         )?;
-        let cfg = req
-            .api_key
-            .as_ref()
-            .filter(|k| !k.trim().is_empty())
-            .map(|key| serde_json::json!({ "auth_scheme": "API_KEY", "val": { "api_key": key.trim() } }));
+        let cfg = req.api_key.as_ref().filter(|k| !k.trim().is_empty()).map(
+            |key| serde_json::json!({ "auth_scheme": "API_KEY", "val": { "api_key": key.trim() } }),
+        );
         (id, cfg)
     };
 
@@ -30868,13 +32812,13 @@ async fn composio_link(
         let slug = request.toolkit_slug.clone();
         composio_link_blocking(&state, &slug, request)
     })
-        .await
-        .map_err(|error| GatewayError {
-            status: StatusCode::INTERNAL_SERVER_ERROR,
-            code: "composio_link_join",
-            message: error.to_string(),
-        })?
-        .map(Json)
+    .await
+    .map_err(|error| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "composio_link_join",
+        message: error.to_string(),
+    })?
+    .map(Json)
 }
 
 fn composio_connections_blocking(
@@ -30895,7 +32839,10 @@ fn composio_connections_blocking(
             items
                 .iter()
                 .filter_map(|item| {
-                    let id = item.get("id").and_then(serde_json::Value::as_str)?.to_string();
+                    let id = item
+                        .get("id")
+                        .and_then(serde_json::Value::as_str)?
+                        .to_string();
                     let status = item
                         .get("status")
                         .and_then(serde_json::Value::as_str)
@@ -30908,7 +32855,11 @@ fn composio_connections_blocking(
                         .and_then(serde_json::Value::as_str)
                         .unwrap_or("")
                         .to_string();
-                    Some(ComposioConnection { id, toolkit_slug, status })
+                    Some(ComposioConnection {
+                        id,
+                        toolkit_slug,
+                        status,
+                    })
                 })
                 .collect::<Vec<_>>()
         })
@@ -30979,7 +32930,6 @@ async fn connect_composio(
         })?
         .map(Json)
 }
-
 
 fn task_execution_outcome_from_executor_result(
     task: &TaskRecord,
@@ -31319,7 +33269,10 @@ fn run_read_only_command(command: &str, args: &[&str]) -> Result<String, LocalTa
 fn brain_materialize_enabled() -> bool {
     match env::var("HOMUN_BRAIN_MATERIALIZE") {
         // Explicit override always wins.
-        Ok(value) => matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "on"),
+        Ok(value) => matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "on"
+        ),
         // A1.6: default ON. The only backends are capable cloud/router providers
         // (the weak local MLX/gemma path that this used to disable is gone), so
         // every configured setup plans through the Brain without a flag.
@@ -31478,7 +33431,10 @@ impl ComposioTransport for GatewayComposioTransport {
                 });
             return Err(CapabilityError::ProviderUnavailable(match detail {
                 Some(message) => format!("composio_status:{code}:{message}"),
-                None => format!("composio_status:{code}:{}", body_text.chars().take(300).collect::<String>()),
+                None => format!(
+                    "composio_status:{code}:{}",
+                    body_text.chars().take(300).collect::<String>()
+                ),
             }));
         }
         response
@@ -31522,8 +33478,10 @@ fn brain_materialize_tasks(
     // stay out, so no send/pay/write executes without an explicit user gate.
     policy_context.allowed_actions = vec![ActionClass::Read, ActionClass::Draft];
 
-    let mut facade =
-        CapabilityFacade::new(CapabilityPolicy::default(), InMemoryCapabilityAudit::default());
+    let mut facade = CapabilityFacade::new(
+        CapabilityPolicy::default(),
+        InMemoryCapabilityAudit::default(),
+    );
     for (provider_id, tools) in provider_tools {
         let kind = tools
             .first()
@@ -31532,19 +33490,19 @@ fn brain_materialize_tasks(
         facade.register_provider(CachedToolProvider::new(provider_id, kind, tools));
     }
 
-    let task_store = TaskStore::open(gateway_task_database_path().map_err(|error| {
-        LocalTaskExecutionError {
-            message: error.to_string(),
-        }
-    })?)
-    .map_err(|error| LocalTaskExecutionError {
-        message: format!("shared task store: {error}"),
-    })?;
+    let task_store =
+        TaskStore::open(
+            gateway_task_database_path().map_err(|error| LocalTaskExecutionError {
+                message: error.to_string(),
+            })?,
+        )
+        .map_err(|error| LocalTaskExecutionError {
+            message: format!("shared task store: {error}"),
+        })?;
 
     let router = build_browser_inference_router();
-    let budgets = brain_budgets_for_context_window(
-        router.active_context_window(&Requirements::default()),
-    );
+    let budgets =
+        brain_budgets_for_context_window(router.active_context_window(&Requirements::default()));
     let mut brain = OrchestratorBrain::new(
         router,
         open_brain_memory(),
@@ -31567,9 +33525,11 @@ fn brain_materialize_tasks(
     // the main chat agent drives the browser inline (granular tools). The Brain
     // here only materializes non-browser capability/subagent tasks.
     let task_ids = {
-        let outcome = brain.run(request).map_err(|error| LocalTaskExecutionError {
-            message: format!("brain run: {error}"),
-        })?;
+        let outcome = brain
+            .run(request)
+            .map_err(|error| LocalTaskExecutionError {
+                message: format!("brain run: {error}"),
+            })?;
         let mut ids = Vec::new();
         for summary in &outcome.enqueued_tasks {
             ids.push(summary.task_id.as_str().to_string());
@@ -31631,12 +33591,8 @@ fn link_brain_tasks_to_thread(
         false,
     )
     .map_err(local_task_gateway_error)?;
-    set_session_progress_total(
-        state,
-        &thread.computer_session_id,
-        task_ids.len() as u32,
-    )
-    .map_err(local_task_gateway_error)?;
+    set_session_progress_total(state, &thread.computer_session_id, task_ids.len() as u32)
+        .map_err(local_task_gateway_error)?;
 
     // Resolve every member task back to this thread.
     let chat_store = lock_store(state).map_err(local_task_gateway_error)?;
@@ -31749,7 +33705,11 @@ fn build_router_from(
         let provider = AnthropicProvider::new(descriptor, model.to_string(), api_key);
         return ModelRouter::new(PrivacyPolicy::allowing_cloud()).with_provider(Box::new(provider));
     }
-    let locality = if is_local { Locality::Local } else { Locality::Cloud };
+    let locality = if is_local {
+        Locality::Local
+    } else {
+        Locality::Cloud
+    };
     let descriptor = CapabilityDescriptor {
         id: format!("openai-compat:{model}"),
         locality,
@@ -31758,7 +33718,8 @@ fn build_router_from(
         context_window,
         approx_tokens_per_second: None,
     };
-    let provider = OpenAiCompatProvider::new(descriptor, base_url.to_string(), model.to_string(), api_key);
+    let provider =
+        OpenAiCompatProvider::new(descriptor, base_url.to_string(), model.to_string(), api_key);
     let policy = if is_local {
         PrivacyPolicy::local_only()
     } else {
@@ -31959,7 +33920,9 @@ fn skill_tree_hash(dir: &std::path::Path) -> Option<String> {
 fn seed_default_skills() {
     let Ok(dest) = skills_dir() else { return };
     let marker = dest.join(".defaults-seeded");
-    let Some(src) = default_skills_dir() else { return };
+    let Some(src) = default_skills_dir() else {
+        return;
+    };
 
     // Per-skill seed record (NOT a one-shot boolean): so NEW default skills added in an
     // app update still install on existing setups, while a default the user DELETED is
@@ -32030,10 +33993,7 @@ fn seed_default_skills() {
             if unedited && bundled.is_some() && bundled != on_disk {
                 if prev.is_none() {
                     // Unrecorded baseline — preserve the existing file just in case.
-                    let _ = fs::copy(
-                        target.join("SKILL.md"),
-                        target.join("SKILL.md.bak"),
-                    );
+                    let _ = fs::copy(target.join("SKILL.md"), target.join("SKILL.md.bak"));
                 }
                 if copy_dir_recursive(&from, &target).is_ok() {
                     updated += 1;
@@ -32080,12 +34040,17 @@ fn seed_default_skills() {
 
     let _ = fs::write(&marker, "1");
     if copied > 0 {
-        eprintln!("[homun] seeded {copied} default skill(s) into {}", dest.display());
+        eprintln!(
+            "[homun] seeded {copied} default skill(s) into {}",
+            dest.display()
+        );
     }
 }
 
 fn skills_state_path() -> Option<PathBuf> {
-    gateway_data_dir().ok().map(|dir| dir.join("skills-state.json"))
+    gateway_data_dir()
+        .ok()
+        .map(|dir| dir.join("skills-state.json"))
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -32109,7 +34074,9 @@ fn load_skills_disabled() -> std::collections::BTreeSet<String> {
 
 fn save_skills_disabled(disabled: &std::collections::BTreeSet<String>) -> Result<(), String> {
     let path = skills_state_path().ok_or_else(|| "data dir unavailable".to_string())?;
-    let state = SkillsState { disabled: disabled.iter().cloned().collect() };
+    let state = SkillsState {
+        disabled: disabled.iter().cloned().collect(),
+    };
     let json = serde_json::to_string_pretty(&state).map_err(|e| e.to_string())?;
     fs::write(path, json).map_err(|e| e.to_string())
 }
@@ -32127,7 +34094,9 @@ struct SetSkillEnabledRequest {
 }
 
 fn skills_origins_path() -> Option<PathBuf> {
-    gateway_data_dir().ok().map(|dir| dir.join("skills-origins.json"))
+    gateway_data_dir()
+        .ok()
+        .map(|dir| dir.join("skills-origins.json"))
 }
 
 /// Loads the id → source map (e.g. "github:anthropics/skills"). Skills not in
@@ -32142,9 +34111,7 @@ fn load_skills_origins() -> std::collections::BTreeMap<String, String> {
     serde_json::from_str(&raw).unwrap_or_default()
 }
 
-fn save_skills_origins(
-    origins: &std::collections::BTreeMap<String, String>,
-) -> Result<(), String> {
+fn save_skills_origins(origins: &std::collections::BTreeMap<String, String>) -> Result<(), String> {
     let path = skills_origins_path().ok_or_else(|| "data dir unavailable".to_string())?;
     let json = serde_json::to_string_pretty(origins).map_err(|e| e.to_string())?;
     fs::write(path, json).map_err(|e| e.to_string())
@@ -32167,7 +34134,9 @@ fn current_skills_response() -> SkillsResponse {
     }
     SkillsResponse {
         skills,
-        dir: dir.map(|d| d.to_string_lossy().to_string()).unwrap_or_default(),
+        dir: dir
+            .map(|d| d.to_string_lossy().to_string())
+            .unwrap_or_default(),
     }
 }
 
@@ -32183,9 +34152,7 @@ struct SkillDetailResponse {
     security: skill_security::SecurityReport,
 }
 
-async fn skill_detail(
-    Path(id): Path<String>,
-) -> Result<Json<SkillDetailResponse>, GatewayError> {
+async fn skill_detail(Path(id): Path<String>) -> Result<Json<SkillDetailResponse>, GatewayError> {
     let dir = skills_dir().map_err(|e| GatewayError {
         status: StatusCode::INTERNAL_SERVER_ERROR,
         code: "skills_dir_unavailable",
@@ -32231,7 +34198,9 @@ async fn set_skill_enabled(
 // ------------------------------------------------------------- skills catalog
 
 fn skills_catalog_path() -> Option<PathBuf> {
-    gateway_data_dir().ok().map(|dir| dir.join("clawhub-catalog.json"))
+    gateway_data_dir()
+        .ok()
+        .map(|dir| dir.join("clawhub-catalog.json"))
 }
 
 #[derive(Debug, Deserialize)]
@@ -32293,7 +34262,8 @@ async fn skill_catalog(
         code: "data_dir_unavailable",
         message: "data dir unavailable".to_string(),
     })?;
-    let fresh = skills_catalog::load_cache(&path).is_some_and(|c| skills_catalog::cache_is_fresh(&c));
+    let fresh =
+        skills_catalog::load_cache(&path).is_some_and(|c| skills_catalog::cache_is_fresh(&c));
     if !fresh {
         if let Err(error) = skills_catalog::refresh_cache(&state.http, &path).await {
             eprintln!("skill catalog refresh failed: {error}");
@@ -32326,7 +34296,14 @@ async fn skill_catalog_refresh(
         fetched_at: 0,
         entries: Vec::new(),
     });
-    Ok(Json(catalog_response(&cache, &CatalogQuery { q: None, category: None, limit: None })))
+    Ok(Json(catalog_response(
+        &cache,
+        &CatalogQuery {
+            q: None,
+            category: None,
+            limit: None,
+        },
+    )))
 }
 
 #[derive(Debug, Deserialize)]
@@ -32497,7 +34474,8 @@ fn valid_github_repo(repo: &str) -> bool {
             && s.len() <= 100
             && s != "."
             && s != ".."
-            && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+            && s.chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
     };
     ok(parts[0]) && ok(parts[1])
 }
@@ -32517,9 +34495,7 @@ fn github_token() -> Option<String> {
 }
 
 fn github_get(http: &reqwest::Client, url: &str) -> reqwest::RequestBuilder {
-    let mut builder = http
-        .get(url)
-        .header(reqwest::header::USER_AGENT, "homun");
+    let mut builder = http.get(url).header(reqwest::header::USER_AGENT, "homun");
     if let Some(token) = github_token() {
         builder = builder.bearer_auth(token);
     }
@@ -32527,7 +34503,11 @@ fn github_get(http: &reqwest::Client, url: &str) -> reqwest::RequestBuilder {
 }
 
 fn github_err(code: &'static str, message: impl Into<String>) -> GatewayError {
-    GatewayError { status: StatusCode::BAD_GATEWAY, code, message: message.into() }
+    GatewayError {
+        status: StatusCode::BAD_GATEWAY,
+        code,
+        message: message.into(),
+    }
 }
 
 async fn github_default_branch(http: &reqwest::Client, repo: &str) -> Result<String, GatewayError> {
@@ -32583,7 +34563,10 @@ async fn github_tree(
     Ok(tree
         .iter()
         .filter_map(|node| {
-            let path = node.get("path").and_then(serde_json::Value::as_str)?.to_string();
+            let path = node
+                .get("path")
+                .and_then(serde_json::Value::as_str)?
+                .to_string();
             let is_blob = node.get("type").and_then(serde_json::Value::as_str) == Some("blob");
             Some((path, is_blob))
         })
@@ -32645,8 +34628,11 @@ async fn registry_skills(
     }
     let branch = github_default_branch(&state.http, &repo).await?;
     let tree = github_tree(&state.http, &repo, &branch).await?;
-    let installed: std::collections::BTreeSet<String> =
-        current_skills_response().skills.into_iter().map(|s| s.id).collect();
+    let installed: std::collections::BTreeSet<String> = current_skills_response()
+        .skills
+        .into_iter()
+        .map(|s| s.id)
+        .collect();
 
     let mut skills = Vec::new();
     for (path, is_blob) in &tree {
@@ -32659,7 +34645,11 @@ async fn registry_skills(
         if skills.len() >= SKILL_REGISTRY_MAX {
             break;
         }
-        let folder = path.strip_suffix("SKILL.md").unwrap_or("").trim_end_matches('/').to_string();
+        let folder = path
+            .strip_suffix("SKILL.md")
+            .unwrap_or("")
+            .trim_end_matches('/')
+            .to_string();
         let id = skill_id_for(&repo, &folder);
         if !skills::is_safe_id(&id) {
             continue;
@@ -32667,12 +34657,21 @@ async fn registry_skills(
         let (name, description) = match github_raw_bytes(&state.http, &repo, &branch, path).await {
             Ok(bytes) => {
                 let (fm, _) = skills::split_frontmatter(&String::from_utf8_lossy(&bytes));
-                (fm.name.unwrap_or_else(|| id.clone()), fm.description.unwrap_or_default())
+                (
+                    fm.name.unwrap_or_else(|| id.clone()),
+                    fm.description.unwrap_or_default(),
+                )
             }
             Err(_) => (id.clone(), String::new()),
         };
         let installed = installed.contains(&id);
-        skills.push(RegistrySkill { id, path: folder, name, description, installed });
+        skills.push(RegistrySkill {
+            id,
+            path: folder,
+            name,
+            description,
+            installed,
+        });
     }
 
     Ok(Json(RegistryResponse {
@@ -32729,7 +34728,11 @@ async fn install_registry_skill(
 
     let branch = github_default_branch(&state.http, &request.repo).await?;
     let tree = github_tree(&state.http, &request.repo, &branch).await?;
-    let prefix = if folder.is_empty() { String::new() } else { format!("{folder}/") };
+    let prefix = if folder.is_empty() {
+        String::new()
+    } else {
+        format!("{folder}/")
+    };
     let blobs: Vec<String> = tree
         .iter()
         .filter(|(path, is_blob)| *is_blob && (prefix.is_empty() || path.starts_with(&prefix)))
@@ -32748,7 +34751,10 @@ async fn install_registry_skill(
         return Err(GatewayError {
             status: StatusCode::BAD_REQUEST,
             code: "skill_too_many_files",
-            message: format!("the skill has {} files (max {SKILL_INSTALL_MAX_FILES})", blobs.len()),
+            message: format!(
+                "the skill has {} files (max {SKILL_INSTALL_MAX_FILES})",
+                blobs.len()
+            ),
         });
     }
 
@@ -32851,7 +34857,11 @@ fn resolve_role_for_task(goal: &str, role: &str) -> Option<ResolvedRole> {
         .filter(|(pid, mid, ..)| !(mid.contains(":cloud") && provider_api_key(pid).is_none()))
         .cloned()
         .collect();
-    let candidates = if filtered.len() >= 2 { filtered } else { candidates };
+    let candidates = if filtered.len() >= 2 {
+        filtered
+    } else {
+        candidates
+    };
     let candidate_ids: Vec<String> = candidates.iter().map(|c| c.1.clone()).collect();
 
     // Decide (and remember which stage produced the choice).
@@ -32869,7 +34879,10 @@ fn resolve_role_for_task(goal: &str, role: &str) -> Option<ResolvedRole> {
                 } else {
                     strengths.as_str()
                 };
-                format!("{}. id=\"{mid}\" provider={pid} tier={tier} — {desc}", i + 1)
+                format!(
+                    "{}. id=\"{mid}\" provider={pid} tier={tier} — {desc}",
+                    i + 1
+                )
             })
             .collect::<Vec<_>>()
             .join("\n");
@@ -33184,7 +35197,10 @@ async fn runtime_models(
     if let Ok(base) = env::var("HOMUN_INFERENCE_BASE_URL") {
         if !base.is_empty() {
             let url = format!("{}/models", base.trim_end_matches('/'));
-            let mut request = state.http.get(&url).timeout(std::time::Duration::from_secs(4));
+            let mut request = state
+                .http
+                .get(&url)
+                .timeout(std::time::Duration::from_secs(4));
             if let Some(key) = resolve_inference_api_key() {
                 request = request.bearer_auth(key);
             }
@@ -33454,9 +35470,7 @@ async fn upsert_provider(
     Ok(Json(providers_response(&registry)))
 }
 
-async fn remove_provider(
-    Path(id): Path<String>,
-) -> Result<Json<ProvidersResponse>, GatewayError> {
+async fn remove_provider(Path(id): Path<String>) -> Result<Json<ProvidersResponse>, GatewayError> {
     let mut registry = load_provider_registry();
     if !registry.remove(&id) {
         return Err(GatewayError {
@@ -33507,7 +35521,10 @@ async fn refresh_provider_models(
     })?;
 
     let url = entry.models_endpoint();
-    let mut request = state.http.get(&url).timeout(std::time::Duration::from_secs(6));
+    let mut request = state
+        .http
+        .get(&url)
+        .timeout(std::time::Duration::from_secs(6));
     let key = provider_api_key(&id);
     if let Some(key) = key.as_deref() {
         match entry.kind {
@@ -33644,7 +35661,10 @@ async fn set_model_profile(
         return Err(GatewayError {
             status: StatusCode::NOT_FOUND,
             code: "model_not_found",
-            message: format!("model {} not found in {}", request.model, request.provider_id),
+            message: format!(
+                "model {} not found in {}",
+                request.model, request.provider_id
+            ),
         });
     }
     save_provider_registry(&registry).map_err(provider_registry_persist_error)?;
@@ -33964,7 +35984,9 @@ async fn memory_export(
         .map_err(GatewayError::memory)?;
     let user = gateway_memory_user_id();
     let personal = gateway_memory_workspace_id();
-    let memories = facade.list_memories_for_ui(&user, &personal).unwrap_or_default();
+    let memories = facade
+        .list_memories_for_ui(&user, &personal)
+        .unwrap_or_default();
     let items: Vec<serde_json::Value> = memories
         .into_iter()
         .filter(|m| !matches!(m.status, MemoryStatus::Deleted | MemoryStatus::Rejected))
@@ -34030,15 +36052,20 @@ async fn export_user_data(
         let mut all_threads = Vec::new();
         let mut all_messages = Vec::new();
         for ws in &file.workspaces {
-            let snapshot = store.threads(&ws.id).unwrap_or_else(|_| ChatThreadSnapshot {
-                active_thread_id: String::new(),
-                threads: Vec::new(),
-            });
-            for thread in &snapshot.threads {
-                let msgs = store.messages(&thread.thread_id).unwrap_or_else(|_| ChatMessagesSnapshot {
-                    thread_id: thread.thread_id.clone(),
-                    messages: Vec::new(),
+            let snapshot = store
+                .threads(&ws.id)
+                .unwrap_or_else(|_| ChatThreadSnapshot {
+                    active_thread_id: String::new(),
+                    threads: Vec::new(),
                 });
+            for thread in &snapshot.threads {
+                let msgs =
+                    store
+                        .messages(&thread.thread_id)
+                        .unwrap_or_else(|_| ChatMessagesSnapshot {
+                            thread_id: thread.thread_id.clone(),
+                            messages: Vec::new(),
+                        });
                 all_threads.push(serde_json::json!({
                     "thread_id": thread.thread_id,
                     "workspace_id": ws.id,
@@ -34133,7 +36160,10 @@ async fn memory_items(
     let mut push_scope = |workspace: &MemoryWorkspaceId, scope: &str, label: &str| {
         if let Ok(memories) = facade.list_memories_for_ui(&user, workspace) {
             for memory in memories {
-                if matches!(memory.status, MemoryStatus::Deleted | MemoryStatus::Rejected) {
+                if matches!(
+                    memory.status,
+                    MemoryStatus::Deleted | MemoryStatus::Rejected
+                ) {
                     continue;
                 }
                 out.push(MemoryItemView {
@@ -34158,13 +36188,25 @@ async fn memory_items(
         }
     };
     // Whole memory across scopes, so the explorer can filter by project / build a timeline.
-    push_scope(&MemoryWorkspaceId::new(PERSONAL_WORKSPACE), "personal", "Personal");
-    push_scope(&MemoryWorkspaceId::new(THREADS_WORKSPACE), "thread", "Conversations");
+    push_scope(
+        &MemoryWorkspaceId::new(PERSONAL_WORKSPACE),
+        "personal",
+        "Personal",
+    );
+    push_scope(
+        &MemoryWorkspaceId::new(THREADS_WORKSPACE),
+        "thread",
+        "Conversations",
+    );
     for workspace in load_workspaces_file().workspaces {
         if workspace.id == PERSONAL_WORKSPACE || workspace.id == THREADS_WORKSPACE {
             continue;
         }
-        push_scope(&MemoryWorkspaceId::new(workspace.id.clone()), "project", &workspace.name);
+        push_scope(
+            &MemoryWorkspaceId::new(workspace.id.clone()),
+            "project",
+            &workspace.name,
+        );
     }
     // Selectable scopes for the graph view: the memory scopes above PLUS every
     // folder-backed project even with zero memory — so a code project (e.g. "idra")
@@ -34188,7 +36230,11 @@ async fn memory_items(
         if workspace.id == PERSONAL_WORKSPACE || workspace.id == THREADS_WORKSPACE {
             continue;
         }
-        let has_folder = workspace.folder.as_deref().map(|f| !f.trim().is_empty()).unwrap_or(false);
+        let has_folder = workspace
+            .folder
+            .as_deref()
+            .map(|f| !f.trim().is_empty())
+            .unwrap_or(false);
         add_scope(&workspace.id, &workspace.name, "project", has_folder);
     }
     Ok(Json(serde_json::json!({ "items": out, "scopes": scopes })))
@@ -34236,6 +36282,29 @@ struct MemoryGraphResponse {
     total_nodes: usize,
 }
 
+fn resolve_memory_query_scope(state: &AppState, query: &MemoryGraphQuery) -> MemoryWorkspaceId {
+    if let Some(tid) = query.thread.as_deref().filter(|t| !t.trim().is_empty()) {
+        lock_store(state)
+            .ok()
+            .and_then(|store| store.workspace_for_thread(tid).ok())
+            .filter(|w| !w.trim().is_empty())
+            .map(MemoryWorkspaceId::new)
+            .unwrap_or_else(gateway_memory_workspace_id)
+    } else if let Some(workspace) = query.workspace.as_deref().filter(|w| !w.trim().is_empty()) {
+        MemoryWorkspaceId::new(workspace)
+    } else {
+        gateway_memory_workspace_id()
+    }
+}
+
+#[derive(Deserialize)]
+struct MemoryGraphMergeRequest {
+    survivor_ref: String,
+    absorbed_ref: String,
+    #[serde(default)]
+    reason: Option<String>,
+}
+
 fn graph_push_node(
     nodes: &mut Vec<GraphNode>,
     seen: &mut std::collections::HashSet<String>,
@@ -34252,6 +36321,127 @@ fn graph_push_node(
             label,
             detail,
             entity_type: entity_type.to_string(),
+        });
+    }
+}
+
+fn graph_entity_alias_detail(entity_name: &str, aliases: &[String]) -> String {
+    let self_key = normalized_entity_name(entity_name);
+    let mut seen = std::collections::HashSet::<String>::new();
+    let mut out = Vec::<String>::new();
+    for alias in aliases {
+        let trimmed = alias.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let key = normalized_entity_name(trimmed);
+        if key.is_empty() || key == self_key {
+            continue;
+        }
+        if seen.insert(key) {
+            out.push(trimmed.to_string());
+        }
+    }
+    out.join(", ")
+}
+
+fn project_graph_entity_duplicates_root(
+    entity: &MemoryEntity,
+    project_id: &str,
+    project_label: &str,
+) -> bool {
+    if entity.reference.to_string() == project_id || entity.entity_type != "project" {
+        return false;
+    }
+    let root_key = normalized_entity_name(project_label);
+    if root_key.is_empty() {
+        return false;
+    }
+    normalized_entity_name(&entity.name) == root_key
+        || entity
+            .aliases
+            .iter()
+            .any(|alias| normalized_entity_name(alias) == root_key)
+}
+
+fn dedupe_graph_edges(edges: &mut Vec<GraphEdge>) {
+    let mut seen = std::collections::HashSet::<(String, String, String)>::new();
+    edges
+        .retain(|edge| seen.insert((edge.source.clone(), edge.target.clone(), edge.label.clone())));
+}
+
+fn ensure_project_graph_connectivity(
+    project_id: &str,
+    nodes: &[GraphNode],
+    edges: &mut Vec<GraphEdge>,
+) {
+    if project_id.is_empty() {
+        return;
+    }
+    let node_ids: std::collections::HashSet<String> =
+        nodes.iter().map(|node| node.id.clone()).collect();
+    if !node_ids.contains(project_id) {
+        return;
+    }
+    let mut adjacency: std::collections::HashMap<String, Vec<String>> =
+        node_ids.iter().map(|id| (id.clone(), Vec::new())).collect();
+    for edge in edges.iter() {
+        if node_ids.contains(&edge.source) && node_ids.contains(&edge.target) {
+            adjacency
+                .entry(edge.source.clone())
+                .or_default()
+                .push(edge.target.clone());
+            adjacency
+                .entry(edge.target.clone())
+                .or_default()
+                .push(edge.source.clone());
+        }
+    }
+    let mut visited = std::collections::HashSet::<String>::new();
+    let existing: std::collections::HashSet<(String, String)> = edges
+        .iter()
+        .map(|edge| (edge.source.clone(), edge.target.clone()))
+        .collect();
+    for node in nodes {
+        if visited.contains(&node.id) {
+            continue;
+        }
+        let mut stack = vec![node.id.clone()];
+        let mut component = Vec::<String>::new();
+        let mut contains_root = false;
+        while let Some(id) = stack.pop() {
+            if !visited.insert(id.clone()) {
+                continue;
+            }
+            if id == project_id {
+                contains_root = true;
+            }
+            component.push(id.clone());
+            if let Some(neighbors) = adjacency.get(&id) {
+                for neighbor in neighbors {
+                    if !visited.contains(neighbor) {
+                        stack.push(neighbor.clone());
+                    }
+                }
+            }
+        }
+        if contains_root {
+            continue;
+        }
+        let Some(target) = component
+            .iter()
+            .find(|id| id.as_str() != project_id)
+            .cloned()
+        else {
+            continue;
+        };
+        if existing.contains(&(project_id.to_string(), target.clone())) {
+            continue;
+        }
+        edges.push(GraphEdge {
+            source: project_id.to_string(),
+            target,
+            label: "nel progetto".to_string(),
         });
     }
 }
@@ -34293,7 +36483,9 @@ async fn memory_graphify_import(
     let ws = MemoryWorkspaceId::new(&req.workspace_id);
     let facade = lock_memory_facade(&state)?;
     let (entities, rels) = import_graphify_value(&facade, &user, &ws, &graph);
-    Ok(Json(serde_json::json!({ "entities": entities, "relations": rels })))
+    Ok(Json(
+        serde_json::json!({ "entities": entities, "relations": rels }),
+    ))
 }
 
 /// Shared import: a Graphify `graph.json` value → entities + entity↔entity relations
@@ -34305,7 +36497,11 @@ fn import_graphify_value(
     ws: &MemoryWorkspaceId,
     graph: &serde_json::Value,
 ) -> (usize, usize) {
-    let nodes = graph.get("nodes").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+    let nodes = graph
+        .get("nodes")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
     let links = graph
         .get("links")
         .or_else(|| graph.get("edges"))
@@ -34315,12 +36511,18 @@ fn import_graphify_value(
     // Build entities + relations IN MEMORY first, then write them in ONE transaction.
     // At scale (a whole repo = tens of thousands of records) per-row autocommit would
     // take minutes; the batch is seconds.
-    let mut id_to_ref: std::collections::HashMap<String, MemoryRef> = std::collections::HashMap::new();
+    let mut id_to_ref: std::collections::HashMap<String, MemoryRef> =
+        std::collections::HashMap::new();
     let mut entities: Vec<MemoryEntity> = Vec::with_capacity(nodes.len());
     for node in &nodes {
-        let Some(id) = node.get("id").and_then(|v| v.as_str()) else { continue };
+        let Some(id) = node.get("id").and_then(|v| v.as_str()) else {
+            continue;
+        };
         let label = node.get("label").and_then(|v| v.as_str()).unwrap_or(id);
-        let file_type = node.get("file_type").and_then(|v| v.as_str()).unwrap_or("code");
+        let file_type = node
+            .get("file_type")
+            .and_then(|v| v.as_str())
+            .unwrap_or("code");
         // Type the code node by shape so the graph reads at a glance: functions/methods
         // (label ends in "()") vs files (a filename) vs docs/rationale.
         let entity_type = if label.trim_end().ends_with(')') {
@@ -34359,13 +36561,19 @@ fn import_graphify_value(
         ) else {
             continue;
         };
-        let (Some(src), Some(tgt)) = (id_to_ref.get(s), id_to_ref.get(t)) else { continue };
+        let (Some(src), Some(tgt)) = (id_to_ref.get(s), id_to_ref.get(t)) else {
+            continue;
+        };
         relations.push(MemoryRelation {
             reference: MemoryRef::generated(MemoryRefKind::Relation, user.clone(), ws.clone()),
             user_id: user.clone(),
             workspace_id: ws.clone(),
             source_ref: src.clone(),
-            relation_type: link.get("relation").and_then(|v| v.as_str()).unwrap_or("connects").to_string(),
+            relation_type: link
+                .get("relation")
+                .and_then(|v| v.as_str())
+                .unwrap_or("connects")
+                .to_string(),
             target_ref: tgt.clone(),
             confidence: 0.9,
             privacy_domain: PrivacyDomain::new("personal"),
@@ -34386,9 +36594,23 @@ fn import_graphify_value(
 fn is_noise_dir(name: &str) -> bool {
     matches!(
         name,
-        ".git" | "node_modules" | "site-packages" | "target" | "vendor" | ".venv" | "venv"
-            | ".tox" | ".mypy_cache" | ".pytest_cache" | ".ruff_cache" | ".next" | "coverage"
-            | "dist" | "build" | "__pycache__" | "graphify-out"
+        ".git"
+            | "node_modules"
+            | "site-packages"
+            | "target"
+            | "vendor"
+            | ".venv"
+            | "venv"
+            | ".tox"
+            | ".mypy_cache"
+            | ".pytest_cache"
+            | ".ruff_cache"
+            | ".next"
+            | "coverage"
+            | "dist"
+            | "build"
+            | "__pycache__"
+            | "graphify-out"
     ) || name.ends_with(".egg-info")
 }
 
@@ -34401,9 +36623,33 @@ fn is_code_file(name: &str) -> bool {
     };
     matches!(
         ext.as_str(),
-        "py" | "pyi" | "ts" | "tsx" | "js" | "jsx" | "mjs" | "cjs" | "rs" | "go" | "java"
-            | "rb" | "c" | "cc" | "cpp" | "cxx" | "h" | "hpp" | "cs" | "php" | "swift"
-            | "kt" | "kts" | "scala" | "m" | "lua" | "sh" | "bash"
+        "py" | "pyi"
+            | "ts"
+            | "tsx"
+            | "js"
+            | "jsx"
+            | "mjs"
+            | "cjs"
+            | "rs"
+            | "go"
+            | "java"
+            | "rb"
+            | "c"
+            | "cc"
+            | "cpp"
+            | "cxx"
+            | "h"
+            | "hpp"
+            | "cs"
+            | "php"
+            | "swift"
+            | "kt"
+            | "kts"
+            | "scala"
+            | "m"
+            | "lua"
+            | "sh"
+            | "bash"
     )
 }
 
@@ -34414,7 +36660,9 @@ fn project_newest_mtime(root: &std::path::Path) -> Option<std::time::SystemTime>
         if depth > 12 {
             return;
         }
-        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
         for entry in entries.flatten() {
             let name = entry.file_name();
             let name = name.to_string_lossy();
@@ -34482,7 +36730,9 @@ fn project_code_file_count_capped(root: &std::path::Path, cap: usize) -> usize {
         if *n >= cap || depth > 12 {
             return;
         }
-        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
         for entry in entries.flatten() {
             if *n >= cap {
                 return;
@@ -34577,8 +36827,12 @@ fn build_project_graph(state: &AppState, workspace_id: &str, folder: &str, subpa
         eprintln!("project-graph: build failed for {workspace_id}: {err}");
         return;
     }
-    let Ok(raw) = std::fs::read_to_string(&graph_path) else { return };
-    let Ok(graph) = serde_json::from_str::<serde_json::Value>(&raw) else { return };
+    let Ok(raw) = std::fs::read_to_string(&graph_path) else {
+        return;
+    };
+    let Ok(graph) = serde_json::from_str::<serde_json::Value>(&raw) else {
+        return;
+    };
     let user = gateway_memory_user_id();
     let ws = MemoryWorkspaceId::new(workspace_id);
     if let Ok(facade) = lock_memory_facade(state) {
@@ -34586,7 +36840,9 @@ fn build_project_graph(state: &AppState, workspace_id: &str, folder: &str, subpa
         eprintln!("project-graph: {workspace_id} → {n} nodi, {e} archi");
     }
     let _ = std::fs::write(&fp_path, &current_fp); // remember what we just extracted
-    publish_app_event(serde_json::json!({ "type": "project_graph.ready", "workspace": workspace_id }));
+    publish_app_event(
+        serde_json::json!({ "type": "project_graph.ready", "workspace": workspace_id }),
+    );
 }
 
 #[derive(Deserialize)]
@@ -34612,7 +36868,9 @@ async fn project_graph_ensure(
         .find(|w| w.id == req.workspace)
         .and_then(|w| w.folder);
     let Some(folder) = folder.filter(|f| !f.trim().is_empty()) else {
-        return Ok(Json(serde_json::json!({ "building": false, "reason": "no_folder" })));
+        return Ok(Json(
+            serde_json::json!({ "building": false, "reason": "no_folder" }),
+        ));
     };
     let st = state.clone();
     let ws = req.workspace.clone();
@@ -34626,7 +36884,11 @@ async fn project_graph_ensure(
         // Refresh the project BRIEF (goals + recent state) from current memory, so the
         // always-on injected briefing is fresh whenever the project is opened.
         if let Ok(facade) = lock_memory_facade(&st) {
-            rebuild_project_brief(&facade, &gateway_memory_user_id(), &MemoryWorkspaceId::new(&ws));
+            rebuild_project_brief(
+                &facade,
+                &gateway_memory_user_id(),
+                &MemoryWorkspaceId::new(&ws),
+            );
         }
     });
     Ok(Json(serde_json::json!({ "building": true })))
@@ -34668,7 +36930,10 @@ async fn project_graph_subdirs(
         }
     }
     subdirs.sort_by(|a, b| {
-        b["code_files"].as_u64().unwrap_or(0).cmp(&a["code_files"].as_u64().unwrap_or(0))
+        b["code_files"]
+            .as_u64()
+            .unwrap_or(0)
+            .cmp(&a["code_files"].as_u64().unwrap_or(0))
     });
     Ok(Json(serde_json::json!({ "subdirs": subdirs })))
 }
@@ -34746,7 +37011,10 @@ async fn memory_goals_promote(
     let mut promoted = 0usize;
     for raw in &req.refs {
         if let Ok(reference) = raw.parse::<MemoryRef>() {
-            if facade.set_memory_type(&reference, &user, &ws, "goal").is_ok() {
+            if facade
+                .set_memory_type(&reference, &user, &ws, "goal")
+                .is_ok()
+            {
                 promoted += 1;
             }
         }
@@ -34867,8 +37135,16 @@ async fn memory_goals_suggest(
     };
     let context = format!(
         "PROJECT: {name}\n\nDECISIONS MADE SO FAR:\n- {}\n\nOBJECTIVES ALREADY DEFINED (don't repeat them):\n- {}",
-        if decisions.is_empty() { "(none)".to_string() } else { decisions.join("\n- ") },
-        if existing.is_empty() { "(none)".to_string() } else { existing.join("\n- ") },
+        if decisions.is_empty() {
+            "(none)".to_string()
+        } else {
+            decisions.join("\n- ")
+        },
+        if existing.is_empty() {
+            "(none)".to_string()
+        } else {
+            existing.join("\n- ")
+        },
     );
     let system = "You are a product strategist. Given a project's context (name, decisions made), \
 propose 1 to 3 HIGH-LEVEL OBJECTIVES: the NORTH STAR — WHERE the project must arrive, or HOW a key \
@@ -34888,7 +37164,9 @@ language. Do not repeat already-defined objectives. Reply ONLY with JSON: \
             })
         })
         .unwrap_or_default();
-    Ok(Json(serde_json::json!({ "objectives": objectives, "workspace": ws.as_str() })))
+    Ok(Json(
+        serde_json::json!({ "objectives": objectives, "workspace": ws.as_str() }),
+    ))
 }
 
 async fn memory_graph(
@@ -34899,36 +37177,40 @@ async fn memory_graph(
     let user = gateway_memory_user_id();
     // Prefer the thread's project (so the Memoria tab shows the CONVERSATION's graph),
     // then an explicit workspace, then the active workspace.
-    let ws = if let Some(tid) = query.thread.as_deref().filter(|t| !t.trim().is_empty()) {
-        lock_store(&state)
-            .ok()
-            .and_then(|store| store.workspace_for_thread(tid).ok())
-            .filter(|w| !w.trim().is_empty())
-            .map(MemoryWorkspaceId::new)
-            .unwrap_or_else(gateway_memory_workspace_id)
-    } else if let Some(workspace) = query.workspace.filter(|w| !w.trim().is_empty()) {
-        MemoryWorkspaceId::new(workspace)
-    } else {
-        gateway_memory_workspace_id()
-    };
+    let ws = resolve_memory_query_scope(&state, &query);
 
     // Embed this scope's memories in the background (no-op once all have vectors), so
     // the semantic dedup/recall keeps improving. Non-blocking: this response uses the
     // vectors already stored.
     {
         let (st, scope_user, scope_ws) = (state.clone(), user.clone(), ws.clone());
-        tokio::spawn(async move { backfill_embeddings(&st, &scope_user, &scope_ws, 80).await; });
+        tokio::spawn(async move {
+            backfill_embeddings(&st, &scope_user, &scope_ws, 80).await;
+        });
+    }
+
+    let workspace_record = if ws.as_str() == PERSONAL_WORKSPACE || ws.as_str() == THREADS_WORKSPACE
+    {
+        None
+    } else {
+        load_workspaces_file()
+            .workspaces
+            .into_iter()
+            .find(|workspace| workspace.id == ws.as_str())
+    };
+    if let Some(workspace) = workspace_record.as_ref() {
+        if let Err(error) = upsert_workspace_root_memory_entity(&facade, workspace) {
+            eprintln!("memory graph workspace root sync failed: {error}");
+        }
     }
 
     // Root label per scope: the personal graph is "Personal", not "Project".
     let project_label = match ws.as_str() {
         PERSONAL_WORKSPACE => "Personal".to_string(),
         THREADS_WORKSPACE => "Conversations".to_string(),
-        other => load_workspaces_file()
-            .workspaces
-            .iter()
-            .find(|w| w.id == other)
-            .map(|w| w.name.clone())
+        _ => workspace_record
+            .as_ref()
+            .map(|workspace| workspace.name.clone())
             .unwrap_or_else(|| "Project".to_string()),
     };
 
@@ -34936,8 +37218,33 @@ async fn memory_graph(
     let mut edges: Vec<GraphEdge> = Vec::new();
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
 
-    let project_id = "project::root".to_string();
-    graph_push_node(&mut nodes, &mut seen, &project_id, "project", project_label, String::new(), "");
+    let entities_for_scope = facade.list_entities_for_ui(&user, &ws).unwrap_or_default();
+    let canonical_project_root =
+        if ws.as_str() == PERSONAL_WORKSPACE || ws.as_str() == THREADS_WORKSPACE {
+            None
+        } else {
+            let root_key = format!("workspace:{}", ws.as_str());
+            entities_for_scope
+                .iter()
+                .find(|entity| entity.canonical_key == root_key)
+                .map(|entity| entity.reference.to_string())
+        };
+    let project_id = canonical_project_root
+        .clone()
+        .unwrap_or_else(|| "project::root".to_string());
+    graph_push_node(
+        &mut nodes,
+        &mut seen,
+        &project_id,
+        "project",
+        project_label.clone(),
+        String::new(),
+        if canonical_project_root.is_some() {
+            "project"
+        } else {
+            ""
+        },
+    );
 
     let live: Vec<_> = facade
         .list_memories_for_ui(&user, &ws)
@@ -34958,7 +37265,8 @@ async fn memory_graph(
         let dedupe_kinds = ["decision", "fact", "preference"];
         let mut order: Vec<usize> = (0..live.len()).collect();
         order.sort_by_key(|&i| std::cmp::Reverse(live[i].text.chars().count()));
-        let mut kept: Vec<(String, std::collections::HashSet<String>, Option<Vec<f32>>)> = Vec::new();
+        let mut kept: Vec<(String, std::collections::HashSet<String>, Option<Vec<f32>>)> =
+            Vec::new();
         let mut drops: std::collections::HashSet<String> = std::collections::HashSet::new();
         for &i in &order {
             let memory = &live[i];
@@ -35008,17 +37316,42 @@ async fn memory_graph(
                             if option.is_empty() {
                                 continue;
                             }
-                            let why = alt.get("rejected_because").and_then(|w| w.as_str()).unwrap_or("");
+                            let why = alt
+                                .get("rejected_because")
+                                .and_then(|w| w.as_str())
+                                .unwrap_or("");
                             let alt_id = format!("alt::{node_id}::{option}");
-                            graph_push_node(&mut nodes, &mut seen, &alt_id, "alternative", option.to_string(), why.to_string(), "");
-                            edges.push(GraphEdge { source: node_id.clone(), target: alt_id, label: "scartata".to_string() });
+                            graph_push_node(
+                                &mut nodes,
+                                &mut seen,
+                                &alt_id,
+                                "alternative",
+                                option.to_string(),
+                                why.to_string(),
+                                "",
+                            );
+                            edges.push(GraphEdge {
+                                source: node_id.clone(),
+                                target: alt_id,
+                                label: "scartata".to_string(),
+                            });
                         }
                     }
                 }
-                graph_push_node(&mut nodes, &mut seen, &node_id, "decision", label, detail, "");
-                edges.push(GraphEdge { source: project_id.clone(), target: node_id.clone(), label: "decision".to_string() });
+                graph_push_node(
+                    &mut nodes, &mut seen, &node_id, "decision", label, detail, "",
+                );
+                edges.push(GraphEdge {
+                    source: project_id.clone(),
+                    target: node_id.clone(),
+                    label: "decision".to_string(),
+                });
                 // Files / artifacts the decision affects.
-                if let Some(affected) = memory.metadata.get("affects_labels").and_then(|a| a.as_array()) {
+                if let Some(affected) = memory
+                    .metadata
+                    .get("affects_labels")
+                    .and_then(|a| a.as_array())
+                {
                     for item in affected {
                         let Some(name) = item.as_str() else { continue };
                         if name.is_empty() {
@@ -35026,26 +37359,65 @@ async fn memory_graph(
                         }
                         let file_id = format!("file::{name}");
                         let kind = if name.contains('.') { "file" } else { "entity" };
-                        graph_push_node(&mut nodes, &mut seen, &file_id, kind, name.to_string(), String::new(), "file");
-                        edges.push(GraphEdge { source: node_id.clone(), target: file_id, label: "touches".to_string() });
+                        graph_push_node(
+                            &mut nodes,
+                            &mut seen,
+                            &file_id,
+                            kind,
+                            name.to_string(),
+                            String::new(),
+                            "file",
+                        );
+                        edges.push(GraphEdge {
+                            source: node_id.clone(),
+                            target: file_id,
+                            label: "touches".to_string(),
+                        });
                     }
                 }
             } else if kind == "fact" || kind == "preference" {
                 let node_id = memory.reference.to_string();
                 let label: String = memory.text.chars().take(70).collect();
-                graph_push_node(&mut nodes, &mut seen, &node_id, kind, label, memory.text.clone(), "");
-                edges.push(GraphEdge { source: project_id.clone(), target: node_id, label: kind.to_string() });
+                graph_push_node(
+                    &mut nodes,
+                    &mut seen,
+                    &node_id,
+                    kind,
+                    label,
+                    memory.text.clone(),
+                    "",
+                );
+                edges.push(GraphEdge {
+                    source: project_id.clone(),
+                    target: node_id,
+                    label: kind.to_string(),
+                });
             }
         }
     }
 
     // Explicit entity↔entity relations recorded for this workspace.
-    if let Ok(entities) = facade.list_entities_for_ui(&user, &ws) {
-        let mut ref_label: std::collections::HashMap<String, String> = std::collections::HashMap::new();
-        for entity in &entities {
+    {
+        let mut ref_label: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
+        for entity in &entities_for_scope {
+            if ws.as_str() != PERSONAL_WORKSPACE
+                && ws.as_str() != THREADS_WORKSPACE
+                && project_graph_entity_duplicates_root(entity, &project_id, &project_label)
+            {
+                continue;
+            }
             let id = entity.reference.to_string();
             ref_label.insert(id.clone(), entity.name.clone());
-            graph_push_node(&mut nodes, &mut seen, &id, "entity", entity.name.clone(), String::new(), &entity.entity_type);
+            graph_push_node(
+                &mut nodes,
+                &mut seen,
+                &id,
+                "entity",
+                entity.name.clone(),
+                graph_entity_alias_detail(&entity.name, &entity.aliases),
+                &entity.entity_type,
+            );
         }
         if let Ok(relations) = facade.list_relations_for_ui(&user, &ws) {
             for relation in relations {
@@ -35058,7 +37430,11 @@ async fn memory_graph(
                     } else {
                         relation.relation_type
                     };
-                    edges.push(GraphEdge { source, target, label });
+                    edges.push(GraphEdge {
+                        source,
+                        target,
+                        label,
+                    });
                 }
             }
         }
@@ -35107,6 +37483,11 @@ async fn memory_graph(
         }
     }
 
+    if ws.as_str() != PERSONAL_WORKSPACE && ws.as_str() != THREADS_WORKSPACE {
+        ensure_project_graph_connectivity(&project_id, &nodes, &mut edges);
+    }
+    dedupe_graph_edges(&mut edges);
+
     // Large code graphs (idra ~53k nodes) would freeze the force-graph. Render only the
     // most-connected "backbone": keep all non-entity nodes (project/facts/decisions —
     // always few) + the top entity nodes by degree, then drop edges to pruned nodes. The
@@ -35121,9 +37502,13 @@ async fn memory_graph(
             *degree.entry(edge.target.clone()).or_default() += 1;
         }
         // Entity nodes ranked by degree; everything else (the few non-entity nodes) kept.
-        let mut entity_nodes: Vec<&GraphNode> = nodes.iter().filter(|n| n.kind == "entity").collect();
+        let mut entity_nodes: Vec<&GraphNode> =
+            nodes.iter().filter(|n| n.kind == "entity").collect();
         entity_nodes.sort_by(|a, b| {
-            degree.get(&b.id).unwrap_or(&0).cmp(degree.get(&a.id).unwrap_or(&0))
+            degree
+                .get(&b.id)
+                .unwrap_or(&0)
+                .cmp(degree.get(&a.id).unwrap_or(&0))
         });
         let non_entity = total_nodes - entity_nodes.len();
         let entity_budget = GRAPH_RENDER_CAP.saturating_sub(non_entity);
@@ -35146,6 +37531,67 @@ async fn memory_graph(
         truncated,
         total_nodes,
     }))
+}
+
+async fn memory_graph_merge(
+    State(state): State<AppState>,
+    Json(request): Json<MemoryGraphMergeRequest>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let survivor_ref =
+        MemoryRef::from_str(&request.survivor_ref).map_err(|message| GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "memory_bad_survivor_ref",
+            message,
+        })?;
+    let absorbed_ref =
+        MemoryRef::from_str(&request.absorbed_ref).map_err(|message| GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "memory_bad_absorbed_ref",
+            message,
+        })?;
+    if survivor_ref.user_id != absorbed_ref.user_id
+        || survivor_ref.workspace_id != absorbed_ref.workspace_id
+    {
+        return Err(GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "memory_merge_scope_mismatch",
+            message: "Both entities must belong to the same memory scope.".to_string(),
+        });
+    }
+    let reason = request
+        .reason
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("merged from memory graph");
+    {
+        let facade = lock_memory_facade(&state)?;
+        facade
+            .merge_entities(
+                &survivor_ref,
+                &absorbed_ref,
+                &survivor_ref.user_id,
+                &survivor_ref.workspace_id,
+                reason,
+            )
+            .map_err(|error| GatewayError::memory(error.to_string()))?;
+    }
+    reconcile_memory_scope(&state, &survivor_ref.workspace_id);
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+async fn memory_hygiene_suggestions(
+    State(state): State<AppState>,
+    Query(query): Query<MemoryGraphQuery>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let user = gateway_memory_user_id();
+    let ws = resolve_memory_query_scope(&state, &query);
+    let facade = lock_memory_facade(&state)?;
+    let suggestions =
+        memory_hygiene_suggestions_for_scope(&facade, &user, &ws).map_err(GatewayError::memory)?;
+    Ok(Json(serde_json::json!({
+        "workspace": ws.as_str(),
+        "suggestions": suggestions,
+    })))
 }
 
 #[derive(Serialize)]
@@ -35179,11 +37625,17 @@ async fn memory_wiki(
     // it without needing a fresh turn (idempotent).
     rebuild_decisions_wiki(&facade, &user, &ws);
     rebuild_status_wiki(&facade, &user, &ws);
-    let pages = facade.list_wiki_pages_for_ui(&user, &ws).unwrap_or_default();
+    let pages = facade
+        .list_wiki_pages_for_ui(&user, &ws)
+        .unwrap_or_default();
     Ok(Json(
         pages
             .into_iter()
-            .map(|p| WikiPageView { path: p.path, title: p.title, body: p.body })
+            .map(|p| WikiPageView {
+                path: p.path,
+                title: p.title,
+                body: p.body,
+            })
             .collect(),
     ))
 }
@@ -35227,7 +37679,10 @@ async fn memory_wiki_save(
             .as_ref()
             .map(|p| p.reference.clone())
             .unwrap_or_else(|| MemoryRef::generated(MemoryRefKind::Wiki, user.clone(), ws.clone()));
-        let title = existing.as_ref().map(|p| p.title.clone()).unwrap_or_else(|| req.path.clone());
+        let title = existing
+            .as_ref()
+            .map(|p| p.title.clone())
+            .unwrap_or_else(|| req.path.clone());
         let linked_refs = existing.map(|p| p.linked_refs).unwrap_or_default();
         let page = WikiPage {
             reference,
@@ -35244,6 +37699,7 @@ async fn memory_wiki_save(
             .record_wiki_page_for_ui(&page)
             .map_err(|e| GatewayError::memory(e.to_string()))?;
     }
+    reconcile_memory_scope(&state, &ws);
     mark_wiki_edited(&ws, &req.path);
     // Re-ingest: scope the MEMORY workspace to this page, then extract memories from
     // the edited markdown into the structured store (non-empty `actions` bypasses the
@@ -35252,6 +37708,7 @@ async fn memory_wiki_save(
     set_memory_workspace(ws.as_str());
     let st = state.clone();
     let body = req.body.clone();
+    let reconcile_ws = ws.clone();
     tokio::spawn(async move {
         learn_from_exchange(
             &st,
@@ -35263,6 +37720,7 @@ async fn memory_wiki_save(
             None,
         )
         .await;
+        reconcile_memory_scope(&st, &reconcile_ws);
     });
     Ok(Json(serde_json::json!({ "ok": true })))
 }
@@ -35286,7 +37744,9 @@ async fn memory_consolidate(
         gateway_memory_workspace_id()
     };
     let (merged, dropped) = consolidate_scope(&state, &user, &ws).await;
-    Ok(Json(serde_json::json!({ "merged": merged, "dropped": dropped })))
+    Ok(Json(
+        serde_json::json!({ "merged": merged, "dropped": dropped }),
+    ))
 }
 
 // ------------------------------------------------------------------ contacts
@@ -35330,16 +37790,25 @@ struct ChannelProfileView {
 /// "contact_{id}" → id. Keeps the frontend's opaque-`reference` API contract while
 /// the source of truth moves to the curated `contacts` table.
 fn parse_contact_ref(reference: &str) -> Option<i64> {
-    reference.strip_prefix("contact_").and_then(|s| s.parse().ok())
+    reference
+        .strip_prefix("contact_")
+        .and_then(|s| s.parse().ok())
 }
 
 fn contact_meta_str(meta: &serde_json::Value, key: &str) -> String {
-    meta.get(key).and_then(|v| v.as_str()).unwrap_or("").to_string()
+    meta.get(key)
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string()
 }
 
 fn contact_is_self(entity: &MemoryEntity) -> bool {
     entity.canonical_key == "person:self"
-        || entity.metadata.get("self").and_then(|v| v.as_bool()).unwrap_or(false)
+        || entity
+            .metadata
+            .get("self")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
         || contact_meta_str(&entity.metadata, "contact_type") == "self"
 }
 
@@ -35440,7 +37909,12 @@ fn episode_refs_by_date(
                 .map(|t| set.contains(t))
                 .unwrap_or(false)
         })
-        .map(|m| (parse_memory_date(&m.created_at).unwrap_or_default(), m.reference))
+        .map(|m| {
+            (
+                parse_memory_date(&m.created_at).unwrap_or_default(),
+                m.reference,
+            )
+        })
         .collect()
 }
 
@@ -35478,7 +37952,10 @@ fn contact_view_from_stored(
             .channel_profile_overrides(c.id)
             .unwrap_or_default()
             .into_iter()
-            .map(|(channel, profile_id)| ChannelProfileView { channel, profile_id })
+            .map(|(channel, profile_id)| ChannelProfileView {
+                channel,
+                profile_id,
+            })
             .collect(),
     }
 }
@@ -35502,7 +37979,10 @@ async fn contacts_list(
         let facade = lock_memory_facade(&state)?;
         let threads = MemoryWorkspaceId::new(THREADS_WORKSPACE);
         let mut map: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-        for mem in facade.list_memories_for_ui(&user, &threads).unwrap_or_default() {
+        for mem in facade
+            .list_memories_for_ui(&user, &threads)
+            .unwrap_or_default()
+        {
             if let Some(t) = mem.metadata.get("thread_id").and_then(|v| v.as_str()) {
                 *map.entry(t.to_string()).or_insert(0) += 1;
             }
@@ -35668,8 +38148,16 @@ async fn contacts_merge(
 
     let (survivor, absorbed_entity_ref) = {
         let store = lock_store(&state)?;
-        let from = store.contact_by_id(from_id).ok().flatten().ok_or_else(not_found)?;
-        let into = store.contact_by_id(into_id).ok().flatten().ok_or_else(not_found)?;
+        let from = store
+            .contact_by_id(from_id)
+            .ok()
+            .flatten()
+            .ok_or_else(not_found)?;
+        let into = store
+            .contact_by_id(into_id)
+            .ok()
+            .flatten()
+            .ok_or_else(not_found)?;
         // Self protection: the user's own card always survives.
         let (survivor_id, absorbed) = if from.is_self {
             (from.id, into)
@@ -35684,28 +38172,55 @@ async fn contacts_merge(
                 code: "contact_merge",
                 message: error.to_string(),
             })?;
-        let survivor = store.contact_by_id(survivor_id).ok().flatten().ok_or_else(not_found)?;
+        let survivor = store
+            .contact_by_id(survivor_id)
+            .ok()
+            .flatten()
+            .ok_or_else(not_found)?;
         (survivor, absorbed_entity_ref)
     };
 
-    // Best-effort: tombstone the absorbed contact's memory entity so the knowledge
-    // graph stays consistent (the contacts table is already merged above).
+    // Best-effort: keep the canonical graph consistent with the contact merge. When
+    // both contacts have entity refs, merge graph entities so aliases and relations
+    // move to the survivor; otherwise keep the previous conservative tombstone.
     if let Some(eref) = absorbed_entity_ref {
         if let Ok(facade) = lock_memory_facade(&state) {
             let user = gateway_memory_user_id();
             let workspace = MemoryWorkspaceId::new(PERSONAL_WORKSPACE);
-            if let Ok(entities) = facade.list_entities_for_ui(&user, &workspace) {
-                if let Some(entity) = entities.into_iter().find(|e| e.reference.to_string() == eref) {
-                    let _ = facade.tombstone_entity(
-                        &entity.reference,
+            let survivor_ref = survivor
+                .entity_ref
+                .as_deref()
+                .and_then(|reference| MemoryRef::from_str(reference).ok());
+            let absorbed_ref = MemoryRef::from_str(&eref).ok();
+            match (survivor_ref, absorbed_ref) {
+                (Some(survivor_ref), Some(absorbed_ref)) => {
+                    let _ = facade.merge_entities(
+                        &survivor_ref,
+                        &absorbed_ref,
                         &user,
                         &workspace,
-                        "merged into contact",
+                        "merged via contacts",
                     );
+                }
+                _ => {
+                    if let Ok(entities) = facade.list_entities_for_ui(&user, &workspace) {
+                        if let Some(entity) = entities
+                            .into_iter()
+                            .find(|e| e.reference.to_string() == eref)
+                        {
+                            let _ = facade.tombstone_entity(
+                                &entity.reference,
+                                &user,
+                                &workspace,
+                                "merged into contact",
+                            );
+                        }
+                    }
                 }
             }
         }
     }
+    reconcile_memory_scope(&state, &MemoryWorkspaceId::new(PERSONAL_WORKSPACE));
     let store = lock_store(&state)?;
     Ok(Json(contact_view_from_stored(&store, &survivor, 0)))
 }
@@ -35736,7 +38251,13 @@ async fn contact_create(
     }
     let store = lock_store(&state)?;
     let id = store
-        .create_contact(name, request.contact_type.as_deref().unwrap_or("unknown"), false, "", None)
+        .create_contact(
+            name,
+            request.contact_type.as_deref().unwrap_or("unknown"),
+            false,
+            "",
+            None,
+        )
         .map_err(|error| GatewayError {
             status: StatusCode::INTERNAL_SERVER_ERROR,
             code: "contact_create",
@@ -35747,11 +38268,15 @@ async fn contact_create(
             let _ = store.add_identity(id, ch.trim(), ident.trim(), None);
         }
     }
-    let contact = store.contact_by_id(id).ok().flatten().ok_or_else(|| GatewayError {
-        status: StatusCode::INTERNAL_SERVER_ERROR,
-        code: "contact_create",
-        message: "contact not created".to_string(),
-    })?;
+    let contact = store
+        .contact_by_id(id)
+        .ok()
+        .flatten()
+        .ok_or_else(|| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "contact_create",
+            message: "contact not created".to_string(),
+        })?;
     Ok(Json(contact_view_from_stored(&store, &contact, 0)))
 }
 
@@ -35780,11 +38305,15 @@ fn contact_after_identity_change(
         code: "contact_identity",
         message: error.to_string(),
     })?;
-    let contact = store.contact_by_id(id).ok().flatten().ok_or_else(|| GatewayError {
-        status: StatusCode::NOT_FOUND,
-        code: "contact_not_found",
-        message: "contact not found".to_string(),
-    })?;
+    let contact = store
+        .contact_by_id(id)
+        .ok()
+        .flatten()
+        .ok_or_else(|| GatewayError {
+            status: StatusCode::NOT_FOUND,
+            code: "contact_not_found",
+            message: "contact not found".to_string(),
+        })?;
     Ok(Json(contact_view_from_stored(&store, &contact, 0)))
 }
 
@@ -35793,7 +38322,12 @@ async fn contact_identity_add(
     Json(request): Json<ContactIdentityRequest>,
 ) -> Result<Json<ContactView>, GatewayError> {
     contact_after_identity_change(&state, &request.reference, |store, id| {
-        store.add_identity(id, request.channel.trim(), request.identifier.trim(), request.label.as_deref())
+        store.add_identity(
+            id,
+            request.channel.trim(),
+            request.identifier.trim(),
+            request.label.as_deref(),
+        )
     })
 }
 
@@ -35889,11 +38423,13 @@ async fn contact_perimeter_set(
         can_see_calendar: request.perimeter.can_see_calendar,
     };
     let store = lock_store(&state)?;
-    store.set_perimeter(id, &stored).map_err(|error| GatewayError {
-        status: StatusCode::INTERNAL_SERVER_ERROR,
-        code: "contact_perimeter",
-        message: error.to_string(),
-    })?;
+    store
+        .set_perimeter(id, &stored)
+        .map_err(|error| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "contact_perimeter",
+            message: error.to_string(),
+        })?;
     let p = store.perimeter_or_default(id);
     Ok(Json(PerimeterView {
         memory_scope: p.memory_scope,
@@ -35924,7 +38460,9 @@ fn profile_view(p: chat_store::StoredProfile) -> ProfileView {
     }
 }
 
-async fn profiles_list(State(state): State<AppState>) -> Result<Json<Vec<ProfileView>>, GatewayError> {
+async fn profiles_list(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<ProfileView>>, GatewayError> {
     let store = lock_store(&state)?;
     let profiles = store.list_profiles().map_err(|error| GatewayError {
         status: StatusCode::INTERNAL_SERVER_ERROR,
@@ -35957,17 +38495,25 @@ async fn profile_create(
     }
     let store = lock_store(&state)?;
     let id = store
-        .create_profile(name, request.tone_of_voice.trim(), request.instructions.trim())
+        .create_profile(
+            name,
+            request.tone_of_voice.trim(),
+            request.instructions.trim(),
+        )
         .map_err(|error| GatewayError {
             status: StatusCode::INTERNAL_SERVER_ERROR,
             code: "profile_create",
             message: error.to_string(),
         })?;
-    let profile = store.profile_by_id(id).ok().flatten().ok_or_else(|| GatewayError {
-        status: StatusCode::INTERNAL_SERVER_ERROR,
-        code: "profile_create",
-        message: "profile not created".to_string(),
-    })?;
+    let profile = store
+        .profile_by_id(id)
+        .ok()
+        .flatten()
+        .ok_or_else(|| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "profile_create",
+            message: "profile not created".to_string(),
+        })?;
     Ok(Json(profile_view(profile)))
 }
 
@@ -36021,11 +38567,13 @@ async fn profile_delete(
     Json(request): Json<ProfileDeleteRequest>,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
     let store = lock_store(&state)?;
-    store.delete_profile(request.id).map_err(|error| GatewayError {
-        status: StatusCode::INTERNAL_SERVER_ERROR,
-        code: "profile_delete",
-        message: error.to_string(),
-    })?;
+    store
+        .delete_profile(request.id)
+        .map_err(|error| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "profile_delete",
+            message: error.to_string(),
+        })?;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
@@ -36060,11 +38608,15 @@ async fn contact_assign_profile(
         code: "contact_assign_profile",
         message: error.to_string(),
     })?;
-    let contact = store.contact_by_id(id).ok().flatten().ok_or_else(|| GatewayError {
-        status: StatusCode::NOT_FOUND,
-        code: "contact_not_found",
-        message: "contact not found".to_string(),
-    })?;
+    let contact = store
+        .contact_by_id(id)
+        .ok()
+        .flatten()
+        .ok_or_else(|| GatewayError {
+            status: StatusCode::NOT_FOUND,
+            code: "contact_not_found",
+            message: "contact not found".to_string(),
+        })?;
     Ok(Json(contact_view_from_stored(&store, &contact, 0)))
 }
 
@@ -36135,11 +38687,13 @@ async fn contact_relationship_add(
         });
     }
     let store = lock_store(&state)?;
-    store.add_relationship(from, to, kind).map_err(|error| GatewayError {
-        status: StatusCode::INTERNAL_SERVER_ERROR,
-        code: "relationship_add",
-        message: error.to_string(),
-    })?;
+    store
+        .add_relationship(from, to, kind)
+        .map_err(|error| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "relationship_add",
+            message: error.to_string(),
+        })?;
     let from_contact = store.contact_by_id(from).ok().flatten();
     let to_contact = store.contact_by_id(to).ok().flatten();
     drop(store);
@@ -36166,16 +38720,20 @@ async fn contact_relationship_remove(
     Json(request): Json<RelationshipRemoveRequest>,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
     let store = lock_store(&state)?;
-    let existing = store.relationship_by_id(request.id).map_err(|error| GatewayError {
-        status: StatusCode::INTERNAL_SERVER_ERROR,
-        code: "relationship_lookup",
-        message: error.to_string(),
-    })?;
-    store.remove_relationship(request.id).map_err(|error| GatewayError {
-        status: StatusCode::INTERNAL_SERVER_ERROR,
-        code: "relationship_remove",
-        message: error.to_string(),
-    })?;
+    let existing = store
+        .relationship_by_id(request.id)
+        .map_err(|error| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "relationship_lookup",
+            message: error.to_string(),
+        })?;
+    store
+        .remove_relationship(request.id)
+        .map_err(|error| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "relationship_remove",
+            message: error.to_string(),
+        })?;
     drop(store);
     if let Some(existing) = existing {
         if let Ok(facade) = lock_memory_facade(&state) {
@@ -36410,7 +38968,10 @@ language of the messages. If nothing important, {\"facts\":[]}.";
         ],
     });
     let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
-    let mut builder = state.http.post(&endpoint).timeout(std::time::Duration::from_secs(120));
+    let mut builder = state
+        .http
+        .post(&endpoint)
+        .timeout(std::time::Duration::from_secs(120));
     if let Some(key) = api_key.as_ref() {
         builder = builder.bearer_auth(key);
     }
@@ -36488,7 +39049,9 @@ fn contact_entity_refs(
     // Stable keys derived from the contact's channel handles ("whatsapp:123").
     let handle_keys: std::collections::HashSet<String> =
         handles.iter().map(|h| format!("person:{h}")).collect();
-    let name_lc = contact.map(|c| c.name.trim().to_lowercase()).filter(|n| !n.is_empty());
+    let name_lc = contact
+        .map(|c| c.name.trim().to_lowercase())
+        .filter(|n| !n.is_empty());
     if let Some(eref) = contact.and_then(|c| c.entity_ref.clone()) {
         refs.insert(eref);
     }
@@ -36526,7 +39089,9 @@ fn facts_from_graph(
         .list_relations_for_ui(user, &ws)
         .unwrap_or_default()
         .into_iter()
-        .filter(|r| r.relation_type == "mentions" && entity_refs.contains(&r.target_ref.to_string()))
+        .filter(|r| {
+            r.relation_type == "mentions" && entity_refs.contains(&r.target_ref.to_string())
+        })
         .map(|r| r.source_ref.to_string())
         .collect();
     if mem_refs.is_empty() {
@@ -36538,7 +39103,12 @@ fn facts_from_graph(
         .into_iter()
         .filter(|m| !matches!(m.status, MemoryStatus::Deleted | MemoryStatus::Rejected))
         .filter(|m| mem_refs.contains(&m.reference.to_string()))
-        .filter(|m| matches!(m.memory_type.as_str(), "fact" | "preference" | "decision" | "goal"))
+        .filter(|m| {
+            matches!(
+                m.memory_type.as_str(),
+                "fact" | "preference" | "decision" | "goal"
+            )
+        })
         .map(|m| {
             // Temporality is a PROPERTY of the fact (durable/transient/event), not its
             // epistemic certainty — read it from metadata when the distiller set it,
@@ -36615,7 +39185,10 @@ async fn contact_profile(
     let episode_count = episode_texts_by_handles(&facade, &user, &handles).len();
     let entity_refs = contact_entity_refs(&facade, &user, &handles, contact.as_ref());
     let facts = facts_from_graph(&facade, &user, &entity_refs);
-    Ok(Json(ContactProfile { facts, episode_count }))
+    Ok(Json(ContactProfile {
+        facts,
+        episode_count,
+    }))
 }
 
 /// "Genera/Aggiorna dai messaggi": distil the contact's episode history into clean
@@ -36634,11 +39207,15 @@ async fn contact_profile_refresh(
     })?;
     let (name, handles, contact) = {
         let store = lock_store(&state)?;
-        let contact = store.contact_by_id(id).ok().flatten().ok_or_else(|| GatewayError {
-            status: StatusCode::NOT_FOUND,
-            code: "contact_not_found",
-            message: "contact not found".to_string(),
-        })?;
+        let contact = store
+            .contact_by_id(id)
+            .ok()
+            .flatten()
+            .ok_or_else(|| GatewayError {
+                status: StatusCode::NOT_FOUND,
+                code: "contact_not_found",
+                message: "contact not found".to_string(),
+            })?;
         let handles = store.contact_handles(id).unwrap_or_default();
         (contact.name.clone(), handles, contact)
     };
@@ -36661,7 +39238,10 @@ async fn contact_profile_refresh(
     };
     let episode_count = episodes.len();
     if episode_count == 0 {
-        return Ok(Json(ContactProfile { facts: Vec::new(), episode_count: 0 }));
+        return Ok(Json(ContactProfile {
+            facts: Vec::new(),
+            episode_count: 0,
+        }));
     }
 
     // Slow LLM distillation — NO lock held.
@@ -36691,7 +39271,11 @@ async fn contact_profile_refresh(
                 .filter(|(d, _)| !f.date.is_empty() && d == &f.date)
                 .map(|(_, r)| r.clone())
                 .collect();
-            let certainty = if f.temporality == "event" { "committed" } else { "considered" };
+            let certainty = if f.temporality == "event" {
+                "committed"
+            } else {
+                "considered"
+            };
             let create = MemoryCreateRequest {
                 request: lifecycle.clone(),
                 memory_type: "fact".to_string(),
@@ -36721,7 +39305,10 @@ async fn contact_profile_refresh(
     let facade = lock_memory_facade(&state)?;
     let entity_refs = contact_entity_refs(&facade, &user, &handles, Some(&contact));
     let facts = facts_from_graph(&facade, &user, &entity_refs);
-    Ok(Json(ContactProfile { facts, episode_count }))
+    Ok(Json(ContactProfile {
+        facts,
+        episode_count,
+    }))
 }
 
 #[derive(Debug, Deserialize)]
@@ -36740,11 +39327,14 @@ async fn memory_decide(
     State(state): State<AppState>,
     Json(request): Json<MemoryDecideRequest>,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
-    let reference = request.reference.parse::<MemoryRef>().map_err(|error| GatewayError {
-        status: StatusCode::BAD_REQUEST,
-        code: "memory_bad_ref",
-        message: error,
-    })?;
+    let reference = request
+        .reference
+        .parse::<MemoryRef>()
+        .map_err(|error| GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "memory_bad_ref",
+            message: error,
+        })?;
     let facade = lock_memory_facade(&state)?;
     let lifecycle = MemoryLifecycleRequest {
         actor_id: "desktop-ui".to_string(),
@@ -36764,9 +39354,20 @@ async fn memory_decide(
                 .map_err(|error| GatewayError::memory(error.to_string()))?;
         }
         "delete" => {
-            facade
-                .delete_memory(&lifecycle, &reference, "user deleted")
-                .map_err(|error| GatewayError::memory(error.to_string()))?;
+            if reference.kind == MemoryRefKind::Entity {
+                facade
+                    .tombstone_entity(
+                        &reference,
+                        &reference.user_id,
+                        &reference.workspace_id,
+                        "user deleted",
+                    )
+                    .map_err(|error| GatewayError::memory(error.to_string()))?;
+            } else {
+                facade
+                    .delete_memory(&lifecycle, &reference, "user deleted")
+                    .map_err(|error| GatewayError::memory(error.to_string()))?;
+            }
         }
         "edit" => {
             let text = request.text.unwrap_or_default();
@@ -36777,7 +39378,10 @@ async fn memory_decide(
                     message: "empty text".to_string(),
                 });
             }
-            let patch = MemoryUpdatePatch { text: Some(text), ..Default::default() };
+            let patch = MemoryUpdatePatch {
+                text: Some(text),
+                ..Default::default()
+            };
             facade
                 .update_memory(&lifecycle, &reference, patch)
                 .map_err(|error| GatewayError::memory(error.to_string()))?;
@@ -36793,9 +39397,7 @@ async fn memory_decide(
     // G5: a deletion can orphan entities and leave dangling edges — re-optimize
     // the graph of the touched scope. Facade lock released first (non-reentrant).
     drop(facade);
-    if matches!(request.action.as_str(), "delete" | "reject") {
-        regenerate_graph_links(&state, &reference.workspace_id);
-    }
+    reconcile_memory_scope(&state, &reference.workspace_id);
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
@@ -36813,7 +39415,9 @@ async fn capability_snapshot(
 }
 
 async fn template_catalog() -> Json<TemplateCatalogResponse> {
-    Json(template_catalog_response_from_entries(template_catalog_entries()))
+    Json(template_catalog_response_from_entries(
+        template_catalog_entries(),
+    ))
 }
 
 fn task_queue_response_for_state(state: &AppState) -> Result<TaskQueueResponse, GatewayError> {
@@ -37215,10 +39819,20 @@ fn contained_container_detected() -> bool {
     static CACHE: OnceLock<Mutex<Probe>> = OnceLock::new();
     const TTL: Duration = Duration::from_secs(8);
 
-    let cache = CACHE
-        .get_or_init(|| Mutex::new(Probe { value: false, fetched_at: None, refreshing: false }));
-    let mut guard = cache.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    let fresh = guard.fetched_at.map(|at| at.elapsed() < TTL).unwrap_or(false);
+    let cache = CACHE.get_or_init(|| {
+        Mutex::new(Probe {
+            value: false,
+            fetched_at: None,
+            refreshing: false,
+        })
+    });
+    let mut guard = cache
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let fresh = guard
+        .fetched_at
+        .map(|at| at.elapsed() < TTL)
+        .unwrap_or(false);
     if fresh || guard.refreshing {
         return guard.value;
     }
@@ -37235,13 +39849,18 @@ fn contained_container_detected() -> bool {
     std::thread::spawn(|| {
         let up = sandbox::container_up();
         if let Some(cache) = CACHE.get() {
-            let mut guard = cache.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let mut guard = cache
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             guard.value = up;
             guard.fetched_at = Some(Instant::now());
             guard.refreshing = false;
         }
     });
-    cache.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).value
+    cache
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .value
 }
 
 /// Resolves the contained computer's CDP endpoint. An explicit env endpoint wins;
@@ -37328,14 +39947,22 @@ async fn local_computer_start() -> Json<LocalComputerActionResponse> {
         });
     }
     if sandbox::container_up() {
-        return Json(LocalComputerActionResponse { ok: true, enabled: true, message: None });
+        return Json(LocalComputerActionResponse {
+            ok: true,
+            enabled: true,
+            message: None,
+        });
     }
     std::thread::spawn(|| {
         if let Err(error) = sandbox::ensure_contained_computer() {
             eprintln!("[local-computer] start failed: {error}");
         }
     });
-    Json(LocalComputerActionResponse { ok: true, enabled: false, message: None })
+    Json(LocalComputerActionResponse {
+        ok: true,
+        enabled: false,
+        message: None,
+    })
 }
 
 /// Stops and removes the contained computer (`docker rm -f`). Quick.
@@ -37394,9 +40021,10 @@ async fn update_trigger(State(state): State<AppState>) -> Json<UpdateTriggerResp
         .send()
         .await
     {
-        Ok(response) if response.status().is_success() => {
-            Json(UpdateTriggerResponse { ok: true, message: None })
-        }
+        Ok(response) if response.status().is_success() => Json(UpdateTriggerResponse {
+            ok: true,
+            message: None,
+        }),
         Ok(response) => Json(UpdateTriggerResponse {
             ok: false,
             message: Some(format!("Webhook returned HTTP {}", response.status())),
@@ -37411,7 +40039,9 @@ async fn update_trigger(State(state): State<AppState>) -> Json<UpdateTriggerResp
 /// Reports whether the contained computer's live view is available, where to
 /// embed it, whether the browser is working RIGHT NOW, and the live step
 /// checklist. Polled by the desktop panel.
-async fn contained_computer_live(State(state): State<AppState>) -> Json<ContainedComputerLiveResponse> {
+async fn contained_computer_live(
+    State(state): State<AppState>,
+) -> Json<ContainedComputerLiveResponse> {
     // Watching the live view counts as activity. This endpoint is polled only while a
     // computer panel / the Local-computer page is open, so touching the idle timer here
     // keeps the container from being recycled out from under the user mid-view (the
@@ -37420,14 +40050,19 @@ async fn contained_computer_live(State(state): State<AppState>) -> Json<Containe
     let mut novnc_url = resolve_contained_computer_novnc(
         contained_computer_cdp_endpoint().is_some(),
         env::var("HOMUN_CONTAINED_COMPUTER_NOVNC").ok().as_deref(),
-        env::var("HOMUN_WEB_DIR").map(|v| !v.trim().is_empty()).unwrap_or(false),
+        env::var("HOMUN_WEB_DIR")
+            .map(|v| !v.trim().is_empty())
+            .unwrap_or(false),
     );
     // A proxied (relative) URL means server mode → bake a stable ticket so the
     // embed's WebSocket authorizes against the gateway proxy. Desktop uses the
     // direct loopback URL and needs no ticket.
     if let Some(url) = novnc_url.as_mut() {
         if url.starts_with('/') {
-            url.push_str(&format!("?ticket={}", novnc_proxy::current_view_ticket(&state)));
+            url.push_str(&format!(
+                "?ticket={}",
+                novnc_proxy::current_view_ticket(&state)
+            ));
         }
     }
     let activity_state = current_browser_activity();
@@ -37443,8 +40078,12 @@ async fn contained_computer_live(State(state): State<AppState>) -> Json<Containe
         .and_then(|state| state.thread_id.clone())
         .or_else(|| {
             if terminal_active {
-                current_sandbox_owner()
-                    .or_else(|| raw_terminal.iter().rev().find_map(|entry| entry.thread_id.clone()))
+                current_sandbox_owner().or_else(|| {
+                    raw_terminal
+                        .iter()
+                        .rev()
+                        .find_map(|entry| entry.thread_id.clone())
+                })
             } else {
                 None
             }
@@ -37587,13 +40226,22 @@ async fn system_status(State(state): State<AppState>) -> Json<SystemStatusRespon
             installed && run_cli("docker", &["info", "--format", "{{.ServerVersion}}"]).is_some();
         let filter = format!("name={CONTAINED_CONTAINER_NAME}");
         let container_up = running
-            && run_cli("docker", &["ps", "--filter", &filter, "--format", "{{.Names}}"])
-                .map(|names| names.contains(CONTAINED_CONTAINER_NAME))
-                .unwrap_or(false);
+            && run_cli(
+                "docker",
+                &["ps", "--filter", &filter, "--format", "{{.Names}}"],
+            )
+            .map(|names| names.contains(CONTAINED_CONTAINER_NAME))
+            .unwrap_or(false);
         let container_mb = if container_up {
             run_cli(
                 "docker",
-                &["stats", "--no-stream", "--format", "{{.MemUsage}}", CONTAINED_CONTAINER_NAME],
+                &[
+                    "stats",
+                    "--no-stream",
+                    "--format",
+                    "{{.MemUsage}}",
+                    CONTAINED_CONTAINER_NAME,
+                ],
             )
             .as_deref()
             .and_then(parse_docker_mem_mb)
@@ -37601,14 +40249,22 @@ async fn system_status(State(state): State<AppState>) -> Json<SystemStatusRespon
             None
         };
         (
-            DockerStatus { installed, running, container_up },
+            DockerStatus {
+                installed,
+                running,
+                container_up,
+            },
             gateway_memory_mb(),
             container_mb,
         )
     })
     .await
     .unwrap_or((
-        DockerStatus { installed: false, running: false, container_up: false },
+        DockerStatus {
+            installed: false,
+            running: false,
+            container_up: false,
+        },
         0,
         None,
     ));
@@ -37640,7 +40296,9 @@ async fn close_all_browsers(State(state): State<AppState>) -> Json<CloseAllBrows
     let closed_sessions = sessions.len();
     let _ = tokio::task::spawn_blocking(move || {
         for session in sessions {
-            let _ = session.client.call(BrowserMethod::Stop, serde_json::json!({}));
+            let _ = session
+                .client
+                .call(BrowserMethod::Stop, serde_json::json!({}));
         }
     })
     .await;
@@ -37679,7 +40337,10 @@ async fn close_all_browsers(State(state): State<AppState>) -> Json<CloseAllBrows
         }
     }
 
-    Json(CloseAllBrowsersResponse { closed_sessions, closed_tabs })
+    Json(CloseAllBrowsersResponse {
+        closed_sessions,
+        closed_tabs,
+    })
 }
 
 /// Env for the browser sidecar, shared by every spawn site so contained-computer
@@ -37722,10 +40383,7 @@ fn browser_sidecar_env_with_headless(headless: String) -> Vec<(String, String)> 
         ));
     }
     if let Some(endpoint) = contained_computer_cdp_endpoint() {
-        env.push((
-            "BROWSER_AUTOMATION_USER_CDP_ENDPOINT".to_string(),
-            endpoint,
-        ));
+        env.push(("BROWSER_AUTOMATION_USER_CDP_ENDPOINT".to_string(), endpoint));
         // Isolated context is OFF by default: measured that a fresh ("cold")
         // context regresses reliability (no cookies -> consent/geo walls ->
         // the worker wanders and burns iterations). The default warm shared
@@ -38093,11 +40751,7 @@ fn seed_default_capabilities(
     )?;
 
     for (name, action, description) in [
-        (
-            "browser.health",
-            ActionClass::Read,
-            "Local browser status",
-        ),
+        ("browser.health", ActionClass::Read, "Local browser status"),
         (
             "browser.tabs",
             ActionClass::Read,
@@ -38571,7 +41225,11 @@ static MEMORY_WORKSPACE: std::sync::RwLock<Option<String>> = std::sync::RwLock::
 
 fn set_memory_workspace(id: &str) {
     if let Ok(mut guard) = MEMORY_WORKSPACE.write() {
-        *guard = if id.trim().is_empty() { None } else { Some(id.trim().to_string()) };
+        *guard = if id.trim().is_empty() {
+            None
+        } else {
+            Some(id.trim().to_string())
+        };
     }
 }
 
@@ -38710,6 +41368,94 @@ fn save_workspaces_file(file: &WorkspacesFile) -> Result<(), std::io::Error> {
     fs::write(path, body)
 }
 
+fn workspace_memory_error(error: String) -> GatewayError {
+    GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "workspace_memory_sync_failed",
+        message: error,
+    }
+}
+
+fn upsert_workspace_root_memory_entity(
+    facade: &MemoryFacade,
+    workspace: &WorkspaceRecord,
+) -> Result<(), String> {
+    let user = gateway_memory_user_id();
+    let memory_workspace = MemoryWorkspaceId::new(workspace.id.clone());
+    let canonical_key = format!("workspace:{}", workspace.id);
+    let existing = facade
+        .list_entities_for_ui(&user, &memory_workspace)
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .find(|entity| entity.canonical_key == canonical_key);
+
+    let mut aliases = std::collections::BTreeSet::<String>::new();
+    if let Some(entity) = existing.as_ref() {
+        for alias in &entity.aliases {
+            if !alias.trim().is_empty() {
+                aliases.insert(alias.trim().to_string());
+            }
+        }
+        if !entity.name.trim().is_empty() {
+            aliases.insert(entity.name.trim().to_string());
+        }
+    }
+    if !workspace.name.trim().is_empty() {
+        aliases.insert(workspace.name.trim().to_string());
+    }
+    let folder = workspace
+        .folder
+        .as_ref()
+        .map(|value| value.trim().to_string());
+    if let Some(folder) = folder.as_ref().filter(|value| !value.is_empty()) {
+        aliases.insert(folder.clone());
+        if let Some(name) = std::path::Path::new(folder)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .filter(|name| !name.trim().is_empty())
+        {
+            aliases.insert(name.trim().to_string());
+        }
+    }
+
+    let previous_names: Vec<String> = aliases
+        .iter()
+        .filter(|alias| alias.as_str() != workspace.name.trim())
+        .cloned()
+        .collect();
+    let entity = MemoryEntity {
+        reference: MemoryRef::new(
+            MemoryRefKind::Entity,
+            user.clone(),
+            memory_workspace.clone(),
+            canonical_key.as_str(),
+        ),
+        user_id: user,
+        workspace_id: memory_workspace,
+        entity_type: "project".to_string(),
+        name: workspace.name.trim().to_string(),
+        canonical_key,
+        aliases: aliases.into_iter().collect(),
+        privacy_domain: PrivacyDomain::new("work"),
+        sensitivity: MemoryDataSensitivity::Private,
+        metadata: serde_json::json!({
+            "source": "workspace_registry",
+            "project_root": true,
+            "workspace_id": workspace.id,
+            "folder": folder.clone(),
+            "folder_basename": folder
+                .as_ref()
+                .and_then(|value| std::path::Path::new(value).file_name())
+                .and_then(|name| name.to_str())
+                .unwrap_or(""),
+            "previous_names": previous_names,
+        }),
+    };
+    facade
+        .upsert_entity(&entity)
+        .map_err(|error| error.to_string())
+}
+
 /// Sets the in-process active workspace from the persisted selection at startup.
 fn init_active_workspace_from_disk() {
     set_active_workspace(&load_workspaces_file().active);
@@ -38739,8 +41485,11 @@ fn open_gateway_secret_store()
 -> Result<EncryptedFileSecretStore<DevelopmentSecretKeyProvider>, std::io::Error> {
     let seed = gateway_secret_key_seed()?;
     let base = gateway_data_dir()?;
-    EncryptedFileSecretStore::open(base.join("secrets.json"), DevelopmentSecretKeyProvider::new(seed))
-        .map_err(|error| std::io::Error::other(error.to_string()))
+    EncryptedFileSecretStore::open(
+        base.join("secrets.json"),
+        DevelopmentSecretKeyProvider::new(seed),
+    )
+    .map_err(|error| std::io::Error::other(error.to_string()))
 }
 
 async fn workspaces_list() -> Json<WorkspacesResponse> {
@@ -38752,6 +41501,7 @@ async fn workspaces_list() -> Json<WorkspacesResponse> {
 }
 
 async fn create_workspace(
+    State(state): State<AppState>,
     Json(request): Json<CreateWorkspaceRequest>,
 ) -> Result<Json<WorkspacesResponse>, GatewayError> {
     let name = request.name.trim().to_string();
@@ -38765,7 +41515,11 @@ async fn create_workspace(
     // A project IS a folder: working inside a folder is its defining purpose
     // (drives @ search + where generated files land). The folder is REQUIRED and
     // must exist. (Only the base "Predefinito"/personal space is folderless.)
-    let folder = request.folder.as_ref().map(|f| f.trim()).filter(|f| !f.is_empty());
+    let folder = request
+        .folder
+        .as_ref()
+        .map(|f| f.trim())
+        .filter(|f| !f.is_empty());
     let Some(folder) = folder else {
         return Err(GatewayError {
             status: StatusCode::BAD_REQUEST,
@@ -38782,11 +41536,17 @@ async fn create_workspace(
     }
     let mut file = load_workspaces_file();
     let id = format!("workspace_{}", uuid::Uuid::new_v4().simple());
-    file.workspaces.push(WorkspaceRecord {
+    let workspace = WorkspaceRecord {
         id,
         name,
         folder: Some(folder.to_string()),
-    });
+    };
+    {
+        let facade = lock_memory_facade(&state)?;
+        upsert_workspace_root_memory_entity(&facade, &workspace).map_err(workspace_memory_error)?;
+    }
+    reconcile_memory_scope(&state, &MemoryWorkspaceId::new(workspace.id.clone()));
+    file.workspaces.push(workspace);
     save_workspaces_file(&file).map_err(|error| GatewayError {
         status: StatusCode::INTERNAL_SERVER_ERROR,
         code: "workspaces_write_failed",
@@ -38805,6 +41565,7 @@ struct SetWorkspaceFolderRequest {
 
 /// Sets (or changes) a project's folder — also for the legacy default project.
 async fn set_workspace_folder(
+    State(state): State<AppState>,
     Path(workspace_id): Path<String>,
     Json(request): Json<SetWorkspaceFolderRequest>,
 ) -> Result<Json<WorkspacesResponse>, GatewayError> {
@@ -38824,7 +41585,21 @@ async fn set_workspace_folder(
             message: format!("workspace not found: {workspace_id}"),
         });
     };
-    workspace.folder = if folder.is_empty() { None } else { Some(folder) };
+    workspace.folder = if folder.is_empty() {
+        None
+    } else {
+        Some(folder)
+    };
+    let updated_workspace = workspace.clone();
+    {
+        let facade = lock_memory_facade(&state)?;
+        upsert_workspace_root_memory_entity(&facade, &updated_workspace)
+            .map_err(workspace_memory_error)?;
+    }
+    reconcile_memory_scope(
+        &state,
+        &MemoryWorkspaceId::new(updated_workspace.id.clone()),
+    );
     save_workspaces_file(&file).map_err(|error| GatewayError {
         status: StatusCode::INTERNAL_SERVER_ERROR,
         code: "workspaces_write_failed",
@@ -38843,6 +41618,7 @@ struct RenameWorkspaceRequest {
 
 /// Renames a project.
 async fn rename_workspace(
+    State(state): State<AppState>,
     Path(workspace_id): Path<String>,
     Json(request): Json<RenameWorkspaceRequest>,
 ) -> Result<Json<WorkspacesResponse>, GatewayError> {
@@ -38863,6 +41639,16 @@ async fn rename_workspace(
         });
     };
     workspace.name = name;
+    let updated_workspace = workspace.clone();
+    {
+        let facade = lock_memory_facade(&state)?;
+        upsert_workspace_root_memory_entity(&facade, &updated_workspace)
+            .map_err(workspace_memory_error)?;
+    }
+    reconcile_memory_scope(
+        &state,
+        &MemoryWorkspaceId::new(updated_workspace.id.clone()),
+    );
     save_workspaces_file(&file).map_err(|error| GatewayError {
         status: StatusCode::INTERNAL_SERVER_ERROR,
         code: "workspaces_write_failed",
@@ -38927,8 +41713,12 @@ fn purge_workspace_data(state: &AppState, workspace_id: &str) {
             return;
         };
         match store.purge_workspace(workspace_id) {
-            Ok(count) => eprintln!("purge_workspace: removed {count} chat threads from {workspace_id}"),
-            Err(error) => eprintln!("purge_workspace: chat store error for {workspace_id}: {error}"),
+            Ok(count) => {
+                eprintln!("purge_workspace: removed {count} chat threads from {workspace_id}")
+            }
+            Err(error) => {
+                eprintln!("purge_workspace: chat store error for {workspace_id}: {error}")
+            }
         }
     }
     // Task store: tasks, dependencies, reservations (task-runtime types).
@@ -38937,8 +41727,12 @@ fn purge_workspace_data(state: &AppState, workspace_id: &str) {
         let task_workspace = WorkspaceId::new(workspace_id.to_string());
         if let Ok(store) = lock_task_store(state) {
             match store.purge_workspace(&task_user, &task_workspace) {
-                Ok(count) => eprintln!("purge_workspace: removed {count} tasks from {workspace_id}"),
-                Err(error) => eprintln!("purge_workspace: task store error for {workspace_id}: {error:?}"),
+                Ok(count) => {
+                    eprintln!("purge_workspace: removed {count} tasks from {workspace_id}")
+                }
+                Err(error) => {
+                    eprintln!("purge_workspace: task store error for {workspace_id}: {error:?}")
+                }
             }
         }
     }
@@ -38948,8 +41742,12 @@ fn purge_workspace_data(state: &AppState, workspace_id: &str) {
         let mem_workspace = MemoryWorkspaceId::new(workspace_id.to_string());
         if let Ok(facade) = lock_memory_facade(state) {
             match facade.purge_workspace(&mem_user, &mem_workspace) {
-                Ok(count) => eprintln!("purge_workspace: removed {count} memories from {workspace_id}"),
-                Err(error) => eprintln!("purge_workspace: memory store error for {workspace_id}: {error}"),
+                Ok(count) => {
+                    eprintln!("purge_workspace: removed {count} memories from {workspace_id}")
+                }
+                Err(error) => {
+                    eprintln!("purge_workspace: memory store error for {workspace_id}: {error}")
+                }
             }
         }
     }
@@ -38980,7 +41778,11 @@ async fn select_workspace(
     Path(workspace_id): Path<String>,
 ) -> Result<Json<WorkspacesResponse>, GatewayError> {
     let mut file = load_workspaces_file();
-    if !file.workspaces.iter().any(|workspace| workspace.id == workspace_id) {
+    if !file
+        .workspaces
+        .iter()
+        .any(|workspace| workspace.id == workspace_id)
+    {
         return Err(GatewayError {
             status: StatusCode::NOT_FOUND,
             code: "workspace_not_found",
@@ -39060,94 +41862,38 @@ impl IntoResponse for GatewayError {
 #[cfg(test)]
 mod tests {
     use super::{
-        adapt_skill_body,
-        active_llm_concurrency,
-        hybrid_memory_score,
-        memory_age_days,
-        MemoryCandidate,
-        build_plan_markdown,
-        merge_plan,
-        parse_plan_marker,
-        plan_done_count,
-        plan_incomplete_reason,
-        plan_is_complete,
-        plan_next_open,
-        plan_step_status,
-        extract_source_urls,
-        fonti_section,
-        format_memory_block,
-        humanize_task_kind,
-        is_auto_confirmable,
-        is_confirmation_reply,
-        is_internal_task_kind,
-        is_salient_exchange,
-        llm_concurrency_view,
-        normalize_for_dedup,
-        strip_json_fences,
-        inbound_action,
-        ChannelSettings,
-        InboundAction,
-        MemoryDataSensitivity,
-        skill_id_from_command,
-        TASK_EXECUTOR_DEFAULT_WORKER_COUNT,
-        task_executor_worker_count,
-        task_executor_worker_id,
-        browser_method_for_capability_tool,
-        browser_targets_for_goal,
-        browser_url_for_goal,
-        evaluate_simple_arithmetic,
-        redact_sensitive_text,
-        task_effective_goal,
-        task_execution_outcome_from_executor_result,
-        task_goal_summary,
-        aggregate_session_state_from_counts,
-        brain_budgets_for_context_window,
-        browser_error_indicates_dead_sidecar,
-        capability_call_completed_outcome,
-        collect_member_counts,
-        composio_tool_is_read,
-        tool_touches_calendar,
-        tool_touches_contacts,
-        classify_connector_error,
-        connector_error_hint,
-        mcp_error_hint,
-        ConnectorErrorKind,
-        resolve_active_model,
-        rewrite_confirm_to_done,
-        search_composio_catalog,
-        ActiveModelInputs,
-        default_browser_headless_value,
-        resolve_contained_computer_cdp,
-        resolve_contained_computer_novnc,
-        mcp_stdio_config_from_metadata,
-        mcp_stdio_config_to_metadata,
-        mcp_provider_slug,
-        sanitize_wiki_filename,
-        requeue_waiting_resource_tasks,
-        task_queue_response,
-        wiki_title_from_text,
-        prune_browser_history,
-        message_has_image_url,
-        browser_snapshot_text,
-        jail_in_root,
-        project_filesystem_mcp_instruction,
-        proactive_memory_request_for_suggestion_action,
-        should_try_tool_compatibility_fallback,
-        parse_review_suggestion,
-        sanitize_dedup_key,
-        scheduled_thread_sender_for_task_id,
-        scheduled_thread_title,
-        is_semantic_duplicate,
-        suggestion_choices_json,
-        legacy_dir_action,
-        LegacyDirAction,
+        ActiveModelInputs, ChannelSettings, ConnectorErrorKind, InboundAction, LegacyDirAction,
+        MemoryCandidate, MemoryDataSensitivity, TASK_EXECUTOR_DEFAULT_WORKER_COUNT,
+        active_llm_concurrency, adapt_skill_body, aggregate_session_state_from_counts,
+        brain_budgets_for_context_window, browser_error_indicates_dead_sidecar,
+        browser_method_for_capability_tool, browser_snapshot_text, browser_targets_for_goal,
+        browser_url_for_goal, build_plan_markdown, capability_call_completed_outcome,
+        classify_connector_error, collect_member_counts, composio_tool_is_read,
+        connector_error_hint, default_browser_headless_value, evaluate_simple_arithmetic,
+        extract_source_urls, fonti_section, format_memory_block, humanize_task_kind,
+        hybrid_memory_score, inbound_action, is_auto_confirmable, is_confirmation_reply,
+        is_internal_task_kind, is_salient_exchange, is_semantic_duplicate, jail_in_root,
+        legacy_dir_action, llm_concurrency_view, mcp_error_hint, mcp_provider_slug,
+        mcp_stdio_config_from_metadata, mcp_stdio_config_to_metadata, memory_age_days, merge_plan,
+        message_has_image_url, normalize_for_dedup, parse_plan_marker, parse_review_suggestion,
+        plan_done_count, plan_incomplete_reason, plan_is_complete, plan_next_open,
+        plan_step_status, proactive_memory_request_for_suggestion_action,
+        project_filesystem_mcp_instruction, prune_browser_history, redact_sensitive_text,
+        requeue_waiting_resource_tasks, resolve_active_model, resolve_contained_computer_cdp,
+        resolve_contained_computer_novnc, rewrite_confirm_to_done, sanitize_dedup_key,
+        sanitize_wiki_filename, scheduled_thread_sender_for_task_id, scheduled_thread_title,
+        search_composio_catalog, should_try_tool_compatibility_fallback, skill_id_from_command,
+        strip_json_fences, suggestion_choices_json, task_effective_goal,
+        task_execution_outcome_from_executor_result, task_executor_worker_count,
+        task_executor_worker_id, task_goal_summary, task_queue_response, tool_touches_calendar,
+        tool_touches_contacts, wiki_title_from_text,
     };
     use crate::browser_safety;
-    use local_first_capabilities::{CapabilityCallResult, ProviderId as CapProviderId};
     use crate::chat_store::{self, ChatStore};
     use local_first_browser_automation::BrowserAutomationError;
-    use local_first_local_computer_session::SessionStatus;
     use local_first_browser_automation::BrowserMethod;
+    use local_first_capabilities::{CapabilityCallResult, ProviderId as CapProviderId};
+    use local_first_local_computer_session::SessionStatus;
     use local_first_task_runtime::{
         ApprovalPolicy, ApprovalRequest, Automation, AutomationSource, AutomationTrigger,
         ExecutorResult, ResourceClass, ResourceGovernor, ResourceLimits, ResourceRequirement,
@@ -39159,7 +41905,10 @@ mod tests {
     #[test]
     fn proactive_dedup_key_is_semantic_and_stable() {
         // kind + anchor → "{kind}:{slug}"; paraphrases of the SAME anchor collapse.
-        assert_eq!(sanitize_dedup_key("Scadenza", "Contratto Acme"), "scadenza:contratto-acme");
+        assert_eq!(
+            sanitize_dedup_key("Scadenza", "Contratto Acme"),
+            "scadenza:contratto-acme"
+        );
         assert_eq!(
             sanitize_dedup_key("scadenza", "il contratto  ACME!!!"),
             "scadenza:il-contratto-acme"
@@ -39222,9 +41971,24 @@ mod tests {
         let root = std::env::temp_dir().join(format!("homun-scope-{}", std::process::id()));
         std::fs::create_dir_all(&root).expect("root");
         let args = serde_json::json!({ "path": root.join("note.md") });
-        assert!(super::workspace_scoped_mcp_write_for_root(Some(&root), "mcp:filesystem", "create", &args));
-        assert!(!super::workspace_scoped_mcp_write_for_root(None, "mcp:filesystem", "create", &args));
-        assert!(!super::workspace_scoped_mcp_write_for_root(Some(&root), "mcp:filesystem", "view", &args));
+        assert!(super::workspace_scoped_mcp_write_for_root(
+            Some(&root),
+            "mcp:filesystem",
+            "create",
+            &args
+        ));
+        assert!(!super::workspace_scoped_mcp_write_for_root(
+            None,
+            "mcp:filesystem",
+            "create",
+            &args
+        ));
+        assert!(!super::workspace_scoped_mcp_write_for_root(
+            Some(&root),
+            "mcp:filesystem",
+            "view",
+            &args
+        ));
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -39232,9 +41996,21 @@ mod tests {
     fn mcp_confirm_match_requires_exact_tool_and_arguments() {
         let text = "I need your confirmation\n‹‹MCP_CONFIRM››{\"tool\":\"mcp__filesystem__create\",\"arguments\":{\"path\":\"/tmp/a\",\"content\":\"x\"}}‹‹/MCP_CONFIRM››";
         let args = serde_json::json!({ "path": "/tmp/a", "content": "x" });
-        assert!(super::mcp_confirm_matches(text, "mcp__filesystem__create", &args));
-        assert!(!super::mcp_confirm_matches(text, "mcp__filesystem__create", &serde_json::json!({ "path": "/tmp/b", "content": "x" })));
-        assert!(!super::mcp_confirm_matches(text, "mcp__filesystem__insert", &args));
+        assert!(super::mcp_confirm_matches(
+            text,
+            "mcp__filesystem__create",
+            &args
+        ));
+        assert!(!super::mcp_confirm_matches(
+            text,
+            "mcp__filesystem__create",
+            &serde_json::json!({ "path": "/tmp/b", "content": "x" })
+        ));
+        assert!(!super::mcp_confirm_matches(
+            text,
+            "mcp__filesystem__insert",
+            &args
+        ));
     }
 
     #[test]
@@ -39271,12 +42047,16 @@ mod tests {
             "mcp__filesystem__create",
             "{\"ok\":true}",
             Some(&args),
-            Some("Usa il tool MCP filesystem per creare /Users/fabio/Desktop/path-b-telegram-bound.md con una riga: telegram-test."),
+            Some(
+                "Usa il tool MCP filesystem per creare /Users/fabio/Desktop/path-b-telegram-bound.md con una riga: telegram-test.",
+            ),
         );
         assert!(prompt.contains("ORIGINAL USER REQUEST"));
         assert!(prompt.contains("/Users/fabio/Desktop/path-b-telegram-bound.md"));
         assert!(prompt.contains("telegram-test"));
-        assert!(prompt.contains("Do not switch to any other file, path, task, memory, or open loop"));
+        assert!(
+            prompt.contains("Do not switch to any other file, path, task, memory, or open loop")
+        );
         assert!(prompt.contains("Do not mention or act on paths that are not in"));
     }
 
@@ -39347,7 +42127,10 @@ mod tests {
         assert_eq!(card.scope, "ws-idra");
         assert_eq!(card.kind, "Progetto fermo");
         assert_eq!(card.dedup_key, "progetto-fermo:idra");
-        assert_eq!(card.proposed_action.as_deref(), Some("Vuoi che controlli lo stato?"));
+        assert_eq!(
+            card.proposed_action.as_deref(),
+            Some("Vuoi che controlli lo stato?")
+        );
         // A non-string proposed_action is serialized, not dropped.
         let obj_action = serde_json::json!({
             "suggestion": {
@@ -39359,7 +42142,10 @@ mod tests {
         assert!(card2.proposed_action.unwrap().contains("create_automation"));
         // dedup_key falls back to the title when omitted.
         let no_key = serde_json::json!({ "suggestion": { "title": "Ciao Mondo", "body": "b" } });
-        assert_eq!(parse_review_suggestion(&no_key, "p").unwrap().dedup_key, "suggerimento:ciao-mondo");
+        assert_eq!(
+            parse_review_suggestion(&no_key, "p").unwrap().dedup_key,
+            "suggerimento:ciao-mondo"
+        );
     }
 
     #[test]
@@ -39373,18 +42159,31 @@ mod tests {
             }
         });
         let card = parse_review_suggestion(&q, "p").expect("card");
-        assert_eq!(card.choices.as_deref(), Some(r#"["Lavoro","Privato","Entrambi"]"#));
+        assert_eq!(
+            card.choices.as_deref(),
+            Some(r#"["Lavoro","Privato","Entrambi"]"#)
+        );
         assert_eq!(
             suggestion_choices_json(&card.choices),
             serde_json::json!(["Lavoro", "Privato", "Entrambi"])
         );
         // No choices / empty / non-array → None → null on the wire.
         let plain = serde_json::json!({ "suggestion": { "title": "T", "body": "B" } });
-        assert!(parse_review_suggestion(&plain, "p").unwrap().choices.is_none());
+        assert!(
+            parse_review_suggestion(&plain, "p")
+                .unwrap()
+                .choices
+                .is_none()
+        );
         let empty = serde_json::json!({
             "suggestion": { "title": "T", "body": "B", "choices": ["", "  "] }
         });
-        assert!(parse_review_suggestion(&empty, "p").unwrap().choices.is_none());
+        assert!(
+            parse_review_suggestion(&empty, "p")
+                .unwrap()
+                .choices
+                .is_none()
+        );
         assert_eq!(suggestion_choices_json(&None), serde_json::Value::Null);
     }
 
@@ -39393,15 +42192,33 @@ mod tests {
         // The exact key misses paraphrases; the fuzzy check must catch them while NOT
         // collapsing genuinely distinct cards (even when they share a `kind` prefix).
         let existing = vec![
-            ("curiosità:tappo-moto".to_string(), "Che tappo cerchi per la moto?".to_string()),
-            ("scadenza:contratto-acme".to_string(), "Contratto Acme in scadenza".to_string()),
+            (
+                "curiosità:tappo-moto".to_string(),
+                "Che tappo cerchi per la moto?".to_string(),
+            ),
+            (
+                "scadenza:contratto-acme".to_string(),
+                "Contratto Acme in scadenza".to_string(),
+            ),
         ];
         // Reworded anchor for the SAME thing → duplicate.
-        assert!(is_semantic_duplicate("curiosità:tappo-della-moto", "Quale tappo per la moto?", &existing));
+        assert!(is_semantic_duplicate(
+            "curiosità:tappo-della-moto",
+            "Quale tappo per la moto?",
+            &existing
+        ));
         // A different curiosità (shares only the kind token) → NOT a duplicate.
-        assert!(!is_semantic_duplicate("curiosità:vacanze-estive", "Dove vai in vacanza?", &existing));
+        assert!(!is_semantic_duplicate(
+            "curiosità:vacanze-estive",
+            "Dove vai in vacanza?",
+            &existing
+        ));
         // Distinct topic entirely → NOT a duplicate.
-        assert!(!is_semantic_duplicate("progetto-fermo:idra", "Idra è fermo", &existing));
+        assert!(!is_semantic_duplicate(
+            "progetto-fermo:idra",
+            "Idra è fermo",
+            &existing
+        ));
         // Empty board → nothing matches.
         assert!(!is_semantic_duplicate("curiosità:tappo-moto", "x", &[]));
     }
@@ -39440,7 +42257,10 @@ mod tests {
         assert_eq!(accepted.memory_type, "open_loop");
         assert!(accepted.text.contains("Open loop"));
         assert!(accepted.text.contains("Controlla Idra"));
-        assert_eq!(accepted.metadata["suggestion"]["dedup_key"], "follow-up:idra");
+        assert_eq!(
+            accepted.metadata["suggestion"]["dedup_key"],
+            "follow-up:idra"
+        );
 
         let dismissed = proactive_memory_request_for_suggestion_action(
             &row,
@@ -39465,14 +42285,10 @@ mod tests {
         assert_eq!(snoozed.memory_type, "open_loop");
         assert!(snoozed.text.contains("revisit later"));
 
-        assert!(proactive_memory_request_for_suggestion_action(
-            &row,
-            "unknown",
-            None,
-            None,
-            lifecycle,
-        )
-        .is_none());
+        assert!(
+            proactive_memory_request_for_suggestion_action(&row, "unknown", None, None, lifecycle,)
+                .is_none()
+        );
     }
 
     #[test]
@@ -39505,7 +42321,10 @@ mod tests {
         assert_eq!(legacy_dir_action(true, false), LegacyDirAction::Migrate);
         // BOTH present → can't rename; must warn (the collision that stranded data
         // behind a pre-existing ~/.homun), never silently use the empty one.
-        assert_eq!(legacy_dir_action(true, true), LegacyDirAction::WarnCollision);
+        assert_eq!(
+            legacy_dir_action(true, true),
+            LegacyDirAction::WarnCollision
+        );
     }
 
     #[test]
@@ -39564,24 +42383,52 @@ mod tests {
     fn connector_errors_classify_into_actionable_kinds() {
         use ConnectorErrorKind::*;
         // Auth (reconnect): HTTP 401, expired tokens, no connected account.
-        assert_eq!(classify_connector_error("HTTP 401 Unauthorized"), Some(Auth));
+        assert_eq!(
+            classify_connector_error("HTTP 401 Unauthorized"),
+            Some(Auth)
+        );
         assert_eq!(classify_connector_error("token has expired"), Some(Auth));
         assert_eq!(classify_connector_error("invalid_grant"), Some(Auth));
-        assert_eq!(classify_connector_error("no connected account for GMAIL"), Some(Auth));
+        assert_eq!(
+            classify_connector_error("no connected account for GMAIL"),
+            Some(Auth)
+        );
         // Rate limit (wait).
-        assert_eq!(classify_connector_error("429 Too Many Requests"), Some(RateLimit));
+        assert_eq!(
+            classify_connector_error("429 Too Many Requests"),
+            Some(RateLimit)
+        );
         // Forbidden (re-grant scopes).
-        assert_eq!(classify_connector_error("403 Forbidden: missing scope"), Some(Forbidden));
+        assert_eq!(
+            classify_connector_error("403 Forbidden: missing scope"),
+            Some(Forbidden)
+        );
         // Unavailable (server/service down).
-        assert_eq!(classify_connector_error("connection refused"), Some(Unavailable));
-        assert_eq!(classify_connector_error("ECONNREFUSED 127.0.0.1:7000"), Some(Unavailable));
-        assert_eq!(classify_connector_error("mcp server disconnected"), Some(Unavailable));
+        assert_eq!(
+            classify_connector_error("connection refused"),
+            Some(Unavailable)
+        );
+        assert_eq!(
+            classify_connector_error("ECONNREFUSED 127.0.0.1:7000"),
+            Some(Unavailable)
+        );
+        assert_eq!(
+            classify_connector_error("mcp server disconnected"),
+            Some(Unavailable)
+        );
         // Unknown → no hint (model just relays the raw error).
-        assert_eq!(classify_connector_error("weird domain-specific failure"), None);
+        assert_eq!(
+            classify_connector_error("weird domain-specific failure"),
+            None
+        );
 
         // Both formatters produce a hint for a classified error and none otherwise,
         // with the connector-appropriate reconnect path.
-        assert!(connector_error_hint("401").unwrap().contains("COMPOSIO_RECONNECT"));
+        assert!(
+            connector_error_hint("401")
+                .unwrap()
+                .contains("COMPOSIO_RECONNECT")
+        );
         assert!(mcp_error_hint("401").unwrap().contains("Settings"));
         assert!(connector_error_hint("ok, all good").is_none());
         assert!(mcp_error_hint("ok, all good").is_none());
@@ -39629,7 +42476,10 @@ mod tests {
         let mut plan = Vec::new();
         let claims = merge_plan(
             &mut plan,
-            &[sent_step("Generate images", "doing"), sent_step("Write deck.json", "todo")],
+            &[
+                sent_step("Generate images", "doing"),
+                sent_step("Write deck.json", "todo"),
+            ],
         );
         assert!(claims.is_empty());
         assert_eq!(plan.len(), 2);
@@ -39662,7 +42512,10 @@ mod tests {
         let mut plan = vec![serde_json::json!({
             "id": "s1", "title": "Render deck", "status": "doing", "detail": ""
         })];
-        let claims = merge_plan(&mut plan, &[serde_json::json!({ "id": "s1", "status": "done" })]);
+        let claims = merge_plan(
+            &mut plan,
+            &[serde_json::json!({ "id": "s1", "status": "done" })],
+        );
         assert_eq!(plan.len(), 1, "id-only update must not create a step");
         assert_eq!(plan[0]["title"], "Render deck", "title preserved");
         assert_eq!(claims, vec![0]);
@@ -39672,8 +42525,14 @@ mod tests {
     #[test]
     fn merge_plan_id_only_for_missing_step_is_ignored() {
         let mut plan: Vec<serde_json::Value> = Vec::new();
-        let claims = merge_plan(&mut plan, &[serde_json::json!({ "id": "s9", "status": "done" })]);
-        assert!(plan.is_empty(), "id-only for a non-existent step → no titleless step created");
+        let claims = merge_plan(
+            &mut plan,
+            &[serde_json::json!({ "id": "s9", "status": "done" })],
+        );
+        assert!(
+            plan.is_empty(),
+            "id-only for a non-existent step → no titleless step created"
+        );
         assert!(claims.is_empty());
     }
 
@@ -39686,7 +42545,10 @@ mod tests {
         // …then the model re-runs the skill and re-sends the WHOLE plan as todo.
         let claims = merge_plan(
             &mut plan,
-            &[sent_step("Generate images", "todo"), sent_step("Write deck.json", "todo")],
+            &[
+                sent_step("Generate images", "todo"),
+                sent_step("Write deck.json", "todo"),
+            ],
         );
         // The done step is NOT reopened (no regenerate loop); the new step is appended.
         assert_eq!(plan_step_status(&plan[0]), "done");
@@ -39818,11 +42680,15 @@ mod tests {
         assert_eq!(step.contract.as_deref(), Some("DeckWorkflow"));
         assert_eq!(step.timeout_seconds, Some(120));
         assert_eq!(
-            step.arguments.get("status").and_then(|value| value.as_str()),
+            step.arguments
+                .get("status")
+                .and_then(|value| value.as_str()),
             Some("blocked")
         );
         assert_eq!(
-            step.arguments.get("detail").and_then(|value| value.as_str()),
+            step.arguments
+                .get("detail")
+                .and_then(|value| value.as_str()),
             Some("Provider unavailable")
         );
     }
@@ -39839,8 +42705,7 @@ mod tests {
             Some(&serde_json::Value::Bool(false))
         );
         assert_eq!(
-            update_plan
-                .pointer("/function/parameters/properties/steps/items/additionalProperties"),
+            update_plan.pointer("/function/parameters/properties/steps/items/additionalProperties"),
             Some(&serde_json::Value::Bool(false))
         );
         assert_eq!(
@@ -39855,8 +42720,7 @@ mod tests {
             ]))
         );
         assert_eq!(
-            update_plan
-                .pointer("/function/parameters/properties/steps/items/properties/id/type"),
+            update_plan.pointer("/function/parameters/properties/steps/items/properties/id/type"),
             Some(&serde_json::json!(["string", "null"]))
         );
 
@@ -39916,7 +42780,10 @@ mod tests {
         );
 
         assert_eq!(definition.id, "make_deck");
-        assert_eq!(plan.route, local_first_orchestrator::OrchestratorRoute::MixedWorkflow);
+        assert_eq!(
+            plan.route,
+            local_first_orchestrator::OrchestratorRoute::MixedWorkflow
+        );
         assert_eq!(plan.steps.len(), 6);
         assert_eq!(plan.steps[0].step_id, "brand");
         assert_eq!(plan.steps[0].contract.as_deref(), Some("DeckWorkflow"));
@@ -39990,7 +42857,10 @@ mod tests {
         let validated =
             super::run_static_workflow_plan_through_brain("Quarterly results", plan).unwrap();
 
-        assert_eq!(validated.route, local_first_orchestrator::OrchestratorRoute::MixedWorkflow);
+        assert_eq!(
+            validated.route,
+            local_first_orchestrator::OrchestratorRoute::MixedWorkflow
+        );
         assert_eq!(validated.steps.len(), 6);
         assert_eq!(validated.steps[0].step_id, "brand");
         assert_eq!(validated.steps[5].step_id, "register_artifacts");
@@ -40011,7 +42881,10 @@ mod tests {
 
         assert_eq!(definition.id, "make_document");
         assert_eq!(definition.tool_name, "make_document");
-        assert_eq!(plan.route, local_first_orchestrator::OrchestratorRoute::MixedWorkflow);
+        assert_eq!(
+            plan.route,
+            local_first_orchestrator::OrchestratorRoute::MixedWorkflow
+        );
         assert_eq!(plan.steps.len(), 4);
         assert_eq!(plan.steps[0].step_id, "brief");
         assert_eq!(plan.steps[0].contract.as_deref(), Some("DocumentWorkflow"));
@@ -40041,11 +42914,17 @@ mod tests {
         let validated =
             super::run_static_workflow_plan_through_brain("Write onboarding memo", plan).unwrap();
 
-        assert_eq!(validated.route, local_first_orchestrator::OrchestratorRoute::MixedWorkflow);
+        assert_eq!(
+            validated.route,
+            local_first_orchestrator::OrchestratorRoute::MixedWorkflow
+        );
         assert_eq!(validated.steps.len(), 4);
         assert_eq!(validated.steps[0].step_id, "brief");
         assert_eq!(validated.steps[3].step_id, "register_artifact");
-        assert_eq!(validated.steps[3].contract.as_deref(), Some("DocumentWorkflow"));
+        assert_eq!(
+            validated.steps[3].contract.as_deref(),
+            Some("DocumentWorkflow")
+        );
     }
 
     #[tokio::test]
@@ -40067,7 +42946,10 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(validated.route, local_first_orchestrator::OrchestratorRoute::MixedWorkflow);
+        assert_eq!(
+            validated.route,
+            local_first_orchestrator::OrchestratorRoute::MixedWorkflow
+        );
         assert_eq!(validated.steps[3].step_id, "register_artifact");
     }
 
@@ -40087,7 +42969,10 @@ mod tests {
         );
         let instruction = super::workflow_router_instruction("Create a 6 slide deck")
             .expect("workflow instruction");
-        assert!(instruction.contains("Call `make_deck` exactly once"), "{instruction}");
+        assert!(
+            instruction.contains("Call `make_deck` exactly once"),
+            "{instruction}"
+        );
     }
 
     #[test]
@@ -40157,10 +43042,19 @@ mod tests {
             .expect("atomic routing instruction");
         let trace = super::capability_route_trace_line(&decision).expect("trace line");
 
-        assert!(instruction.contains("atomic capability `pdf_atomic`"), "{instruction}");
-        assert!(instruction.contains("Do not call end-to-end deliverable workflows"), "{instruction}");
+        assert!(
+            instruction.contains("atomic capability `pdf_atomic`"),
+            "{instruction}"
+        );
+        assert!(
+            instruction.contains("Do not call end-to-end deliverable workflows"),
+            "{instruction}"
+        );
         assert!(instruction.contains("`make_document`"), "{instruction}");
-        assert!(trace.contains("capability route: atomic pdf_atomic"), "{trace}");
+        assert!(
+            trace.contains("capability route: atomic pdf_atomic"),
+            "{trace}"
+        );
     }
 
     #[test]
@@ -40199,20 +43093,28 @@ mod tests {
         let entries = super::TemplateCatalogProvider::entries(&provider);
 
         assert!(entries.len() >= 11);
-        assert!(entries
-            .iter()
-            .any(|entry| entry.id == "monet/startup-pitch-clean-01"));
-        assert!(entries
-            .iter()
-            .any(|entry| entry.id == "monet/meeting-minutes-executive-01"));
-        assert!(entries
-            .iter()
-            .any(|entry| entry.id == "monet/customer-case-study-proof-01"));
+        assert!(
+            entries
+                .iter()
+                .any(|entry| entry.id == "monet/startup-pitch-clean-01")
+        );
+        assert!(
+            entries
+                .iter()
+                .any(|entry| entry.id == "monet/meeting-minutes-executive-01")
+        );
+        assert!(
+            entries
+                .iter()
+                .any(|entry| entry.id == "monet/customer-case-study-proof-01")
+        );
         assert!(entries.iter().all(|entry| entry.provider == "local_seed"));
-        assert!(entries.iter().all(|entry| entry
-            .preview_ref
-            .as_deref()
-            .is_some_and(|preview| preview.starts_with("builtin:template-preview/"))));
+        assert!(entries.iter().all(|entry| {
+            entry
+                .preview_ref
+                .as_deref()
+                .is_some_and(|preview| preview.starts_with("builtin:template-preview/"))
+        }));
         assert_eq!(
             super::TemplateCatalogProvider::get(&provider, "monet/sales-proposal-warm-01")
                 .map(|entry| entry.design_template),
@@ -40340,13 +43242,15 @@ mod tests {
                 }
             ]
         });
-        let provider = super::FileTemplateCatalogProvider::from_json_str(
-            manifest.to_string().as_str(),
-        )
-        .expect("file provider");
+        let provider =
+            super::FileTemplateCatalogProvider::from_json_str(manifest.to_string().as_str())
+                .expect("file provider");
         let entries = super::TemplateCatalogProvider::entries(&provider);
 
-        assert_eq!(super::TemplateCatalogProvider::provider_id(&provider), "monet_file");
+        assert_eq!(
+            super::TemplateCatalogProvider::provider_id(&provider),
+            "monet_file"
+        );
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].id, "monet_file/investor-pitch-01");
         assert_eq!(entries[0].provider, "monet_file");
@@ -40360,7 +43264,10 @@ mod tests {
             entries[0].tags,
             vec!["premium".to_string(), "investor".to_string()],
         );
-        assert_eq!(entries[0].preview_ref.as_deref(), Some("assets/investor-pitch.png"));
+        assert_eq!(
+            entries[0].preview_ref.as_deref(),
+            Some("assets/investor-pitch.png")
+        );
         assert_eq!(
             entries[0].source_ref.as_deref(),
             Some("https://example.com/templates/investor-pitch"),
@@ -40385,10 +43292,9 @@ mod tests {
                 }
             ]
         });
-        let provider = super::FileTemplateCatalogProvider::from_json_str(
-            manifest.to_string().as_str(),
-        )
-        .expect("file provider");
+        let provider =
+            super::FileTemplateCatalogProvider::from_json_str(manifest.to_string().as_str())
+                .expect("file provider");
         let entry = super::TemplateCatalogProvider::get(&provider, "monet_file/unsafe-preview-01")
             .expect("entry");
 
@@ -40398,25 +43304,26 @@ mod tests {
 
     #[test]
     fn template_catalog_response_exposes_read_only_gallery_metadata() {
-        let response = super::template_catalog_response_from_entries(vec![super::TemplateCatalogEntry {
-            provider: "external".to_string(),
-            id: "external/gallery-template-01".to_string(),
-            name: "Gallery Template".to_string(),
-            kind: "presentation".to_string(),
-            description: "Template prepared for gallery preview.".to_string(),
-            use_cases: vec!["pitch".to_string()],
-            audience: vec!["clients".to_string()],
-            design_template: "startup_pitch".to_string(),
-            design_theme: Some("clean_corporate".to_string()),
-            design_profile: Some("sales_pitch".to_string()),
-            design_components: vec!["kpi_grid".to_string()],
-            layout_archetypes: vec!["cover".to_string()],
-            tags: vec!["premium".to_string()],
-            preview_ref: Some("assets/gallery-template.png".to_string()),
-            source_ref: Some("https://example.com/gallery-template".to_string()),
-            license: Some("commercial".to_string()),
-            route_text: "gallery template".to_string(),
-        }]);
+        let response =
+            super::template_catalog_response_from_entries(vec![super::TemplateCatalogEntry {
+                provider: "external".to_string(),
+                id: "external/gallery-template-01".to_string(),
+                name: "Gallery Template".to_string(),
+                kind: "presentation".to_string(),
+                description: "Template prepared for gallery preview.".to_string(),
+                use_cases: vec!["pitch".to_string()],
+                audience: vec!["clients".to_string()],
+                design_template: "startup_pitch".to_string(),
+                design_theme: Some("clean_corporate".to_string()),
+                design_profile: Some("sales_pitch".to_string()),
+                design_components: vec!["kpi_grid".to_string()],
+                layout_archetypes: vec!["cover".to_string()],
+                tags: vec!["premium".to_string()],
+                preview_ref: Some("assets/gallery-template.png".to_string()),
+                source_ref: Some("https://example.com/gallery-template".to_string()),
+                license: Some("commercial".to_string()),
+                route_text: "gallery template".to_string(),
+            }]);
         let value = serde_json::to_value(&response).expect("json");
         let first = &value["templates"][0];
 
@@ -40443,10 +43350,10 @@ mod tests {
             ]
         });
 
-        assert!(super::FileTemplateCatalogProvider::from_json_str(
-            invalid.to_string().as_str()
-        )
-        .is_err());
+        assert!(
+            super::FileTemplateCatalogProvider::from_json_str(invalid.to_string().as_str())
+                .is_err()
+        );
     }
 
     #[test]
@@ -40480,7 +43387,10 @@ mod tests {
         let provider = super::FileTemplateCatalogProvider::from_path(&path).expect("provider");
         let _ = std::fs::remove_file(&path);
 
-        assert_eq!(super::TemplateCatalogProvider::provider_id(&provider), "file_path_catalog");
+        assert_eq!(
+            super::TemplateCatalogProvider::provider_id(&provider),
+            "file_path_catalog"
+        );
         assert_eq!(
             super::TemplateCatalogProvider::get(&provider, "file_path_catalog/project-plan-01")
                 .map(|entry| entry.design_template),
@@ -40501,7 +43411,10 @@ mod tests {
             }
         ));
         let trace = super::capability_route_trace_line(&decision).expect("trace line");
-        assert!(trace.contains("workflow make_document/make_document"), "{trace}");
+        assert!(
+            trace.contains("workflow make_document/make_document"),
+            "{trace}"
+        );
     }
 
     #[test]
@@ -40584,9 +43497,15 @@ mod tests {
     #[test]
     fn connector_search_returns_typed_toolkit_entries() {
         let index = vec![
-            catalog_entry("GMAIL_FETCH_EMAILS", "Fetch a list of email messages from Gmail"),
+            catalog_entry(
+                "GMAIL_FETCH_EMAILS",
+                "Fetch a list of email messages from Gmail",
+            ),
             catalog_entry("GMAIL_SEND_EMAIL", "Send an email message via Gmail"),
-            catalog_entry("GOOGLECALENDAR_EVENTS_LIST", "List calendar events in a time range"),
+            catalog_entry(
+                "GOOGLECALENDAR_EVENTS_LIST",
+                "List calendar events in a time range",
+            ),
         ];
 
         let hits = super::search_connector_capability_entries(&index, "send gmail email", 8);
@@ -40595,21 +43514,30 @@ mod tests {
         assert!(keys.contains(&"GMAIL_FETCH_EMAILS"));
         assert!(keys.contains(&"GMAIL_SEND_EMAIL"));
         assert!(!keys.contains(&"GOOGLECALENDAR_EVENTS_LIST"));
-        assert!(hits.iter().all(|entry| entry.source == super::CapabilitySource::ConnectorTool));
+        assert!(
+            hits.iter()
+                .all(|entry| entry.source == super::CapabilitySource::ConnectorTool)
+        );
         assert!(hits.iter().all(|entry| entry.schema.is_some()));
     }
 
     #[test]
     fn capability_discovery_trace_records_typed_sources() {
         let index = vec![
-            catalog_entry("GMAIL_FETCH_EMAILS", "Fetch a list of email messages from Gmail"),
+            catalog_entry(
+                "GMAIL_FETCH_EMAILS",
+                "Fetch a list of email messages from Gmail",
+            ),
             catalog_entry("GMAIL_SEND_EMAIL", "Send an email message via Gmail"),
         ];
         let hits = super::search_connector_capability_entries(&index, "read unread gmail", 8);
-        let trace = super::capability_discovery_trace_line("read unread gmail", &hits)
-            .expect("trace line");
+        let trace =
+            super::capability_discovery_trace_line("read unread gmail", &hits).expect("trace line");
 
-        assert!(trace.contains("capability discovery `read unread gmail`"), "{trace}");
+        assert!(
+            trace.contains("capability discovery `read unread gmail`"),
+            "{trace}"
+        );
         assert!(trace.contains("connector:GMAIL_FETCH_EMAILS"), "{trace}");
         assert!(trace.contains("connector:GMAIL_SEND_EMAIL"), "{trace}");
     }
@@ -40627,21 +43555,19 @@ mod tests {
             Some("capability execution connector:GMAIL_FETCH_EMAILS"),
         );
         assert_eq!(
-            super::connected_capability_execution_trace_line(
-                "mcp__filesystem__read_file",
-                &index,
-            )
-            .as_deref(),
+            super::connected_capability_execution_trace_line("mcp__filesystem__read_file", &index,)
+                .as_deref(),
             Some("capability execution mcp:mcp__filesystem__read_file"),
         );
-        assert!(super::connected_capability_execution_trace_line("run_in_sandbox", &index).is_none());
+        assert!(
+            super::connected_capability_execution_trace_line("run_in_sandbox", &index).is_none()
+        );
     }
 
     #[test]
     fn workflow_router_sends_document_requests_to_document_workflow() {
-        let decision = super::route_workflow_or_agent(
-            "Scrivi un documento operativo per onboarding clienti",
-        );
+        let decision =
+            super::route_workflow_or_agent("Scrivi un documento operativo per onboarding clienti");
 
         assert_eq!(
             decision,
@@ -40653,7 +43579,10 @@ mod tests {
         );
         let instruction = super::workflow_router_instruction("Write a document about onboarding")
             .expect("workflow instruction");
-        assert!(instruction.contains("Call `make_document` exactly once"), "{instruction}");
+        assert!(
+            instruction.contains("Call `make_document` exactly once"),
+            "{instruction}"
+        );
         assert_eq!(
             super::document_artifact_name(Some("../Customer Brief 2026")),
             "Customer-Brief-2026.md",
@@ -40733,10 +43662,12 @@ mod tests {
                 "proposal",
             ]),
         );
-        assert!(schema
-            .pointer("/function/parameters/properties/sections/items/type")
-            .and_then(|value| value.as_str())
-            == Some("string"));
+        assert!(
+            schema
+                .pointer("/function/parameters/properties/sections/items/type")
+                .and_then(|value| value.as_str())
+                == Some("string")
+        );
     }
 
     #[test]
@@ -40918,8 +43849,11 @@ mod tests {
         });
         let template_ref = super::deliverable_template_ref(&parsed);
         let catalog_template = super::template_catalog_by_id(template_ref.as_deref());
-        let design_template = super::deliverable_design_template(&parsed)
-            .or_else(|| catalog_template.as_ref().map(|entry| entry.design_template.clone()));
+        let design_template = super::deliverable_design_template(&parsed).or_else(|| {
+            catalog_template
+                .as_ref()
+                .map(|entry| entry.design_template.clone())
+        });
         let design_theme = super::deliverable_design_theme(&parsed).or_else(|| {
             catalog_template
                 .as_ref()
@@ -40932,8 +43866,7 @@ mod tests {
                     .and_then(|entry| entry.design_profile.clone())
             })
             .or_else(|| {
-                let (profile, _) =
-                    super::deliverable_template_defaults(design_template.as_deref());
+                let (profile, _) = super::deliverable_template_defaults(design_template.as_deref());
                 profile.map(String::from)
             });
         let design_components = super::resolved_deliverable_design_components_with_catalog(
@@ -40945,7 +43878,10 @@ mod tests {
                 .unwrap_or(&[]),
         );
 
-        assert_eq!(template_ref.as_deref(), Some("monet/startup-pitch-clean-01"));
+        assert_eq!(
+            template_ref.as_deref(),
+            Some("monet/startup-pitch-clean-01")
+        );
         assert_eq!(design_template.as_deref(), Some("startup_pitch"));
         assert_eq!(design_theme.as_deref(), Some("clean_corporate"));
         assert_eq!(design_profile.as_deref(), Some("sales_pitch"));
@@ -40969,11 +43905,23 @@ mod tests {
             "kimi-k2.6:cloud",
         );
 
-        assert!(message.contains("MAKE_DECK_CONTENT_PROVIDER_UNAVAILABLE"), "{message}");
+        assert!(
+            message.contains("MAKE_DECK_CONTENT_PROVIDER_UNAVAILABLE"),
+            "{message}"
+        );
         assert!(message.contains("resolved locally"), "{message}");
-        assert!(message.contains("does NOT require a Monet MCP connection"), "{message}");
-        assert!(message.contains("Provider endpoint: `http://127.0.0.1:11434/v1`"), "{message}");
-        assert!(message.contains("Do not create files manually"), "{message}");
+        assert!(
+            message.contains("does NOT require a Monet MCP connection"),
+            "{message}"
+        );
+        assert!(
+            message.contains("Provider endpoint: `http://127.0.0.1:11434/v1`"),
+            "{message}"
+        );
+        assert!(
+            message.contains("Do not create files manually"),
+            "{message}"
+        );
     }
 
     #[test]
@@ -41069,11 +44017,26 @@ mod tests {
 
         super::apply_deck_design_theme(&mut deck, Some("warm_editorial"), &brand);
 
-        assert_eq!(deck.pointer("/theme/organization").and_then(|v| v.as_str()), Some("Homun"));
-        assert_eq!(deck.pointer("/theme/primary").and_then(|v| v.as_str()), Some("#7c2d12"));
-        assert_eq!(deck.pointer("/theme/secondary").and_then(|v| v.as_str()), Some("#431407"));
-        assert_eq!(deck.pointer("/theme/accent").and_then(|v| v.as_str()), Some("#f97316"));
-        assert_eq!(deck.pointer("/theme/heading_font").and_then(|v| v.as_str()), Some("Georgia"));
+        assert_eq!(
+            deck.pointer("/theme/organization").and_then(|v| v.as_str()),
+            Some("Homun")
+        );
+        assert_eq!(
+            deck.pointer("/theme/primary").and_then(|v| v.as_str()),
+            Some("#7c2d12")
+        );
+        assert_eq!(
+            deck.pointer("/theme/secondary").and_then(|v| v.as_str()),
+            Some("#431407")
+        );
+        assert_eq!(
+            deck.pointer("/theme/accent").and_then(|v| v.as_str()),
+            Some("#f97316")
+        );
+        assert_eq!(
+            deck.pointer("/theme/heading_font").and_then(|v| v.as_str()),
+            Some("Georgia")
+        );
     }
 
     #[test]
@@ -41150,7 +44113,10 @@ mod tests {
         );
         assert_eq!(bullets.len(), 2, "{bullets:?}");
         assert_eq!(bullets[0].as_str(), Some("Automazioni ricorrenti locali"));
-        assert_eq!(bullets[1].as_str(), Some("Artifact editabili con provenienza"));
+        assert_eq!(
+            bullets[1].as_str(),
+            Some("Artifact editabili con provenienza")
+        );
     }
 
     #[test]
@@ -41161,14 +44127,22 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
 
         let failure = super::rendered_deck_qa_failure(output).expect("qa failure");
 
-        assert!(failure.contains("slide_overflow: slide 1 overflows"), "{failure}");
-        assert!(failure.contains("image_not_loaded: slide 1: image failed to load"), "{failure}");
+        assert!(
+            failure.contains("slide_overflow: slide 1 overflows"),
+            "{failure}"
+        );
+        assert!(
+            failure.contains("image_not_loaded: slide 1: image failed to load"),
+            "{failure}"
+        );
         assert!(failure.contains("low_contrast:"), "{failure}");
         assert!(failure.contains("text_too_small:"), "{failure}");
-        assert!(super::rendered_deck_qa_failure(
-            r#"DECK_QA_JSON:{"ok":true,"slide_count":1,"issues":[]}"#
-        )
-        .is_none());
+        assert!(
+            super::rendered_deck_qa_failure(
+                r#"DECK_QA_JSON:{"ok":true,"slide_count":1,"issues":[]}"#
+            )
+            .is_none()
+        );
     }
 
     #[test]
@@ -41217,12 +44191,24 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         let augmented = super::apply_document_design_components(markdown, &components);
 
         assert!(augmented.contains("## Key metrics"), "{augmented}");
-        assert!(augmented.contains("| Metric | Value | Implication |"), "{augmented}");
-        assert!(augmented.contains("ARR +42% from retained teams."), "{augmented}");
+        assert!(
+            augmented.contains("| Metric | Value | Implication |"),
+            "{augmented}"
+        );
+        assert!(
+            augmented.contains("ARR +42% from retained teams."),
+            "{augmented}"
+        );
         assert!(augmented.contains("## Timeline"), "{augmented}");
-        assert!(augmented.contains("| Phase | Detail | Outcome |"), "{augmented}");
+        assert!(
+            augmented.contains("| Phase | Detail | Outcome |"),
+            "{augmented}"
+        );
         assert!(augmented.contains("## Key principle"), "{augmented}");
-        assert!(augmented.contains("> ARR +42% from retained teams."), "{augmented}");
+        assert!(
+            augmented.contains("> ARR +42% from retained teams."),
+            "{augmented}"
+        );
     }
 
     #[test]
@@ -41248,7 +44234,8 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
 
     #[test]
     fn document_quality_guardrail_accepts_structured_markdown() {
-        let markdown = "# Brief\n\nExecutive summary.\n\n| Metric | Value |\n| --- | --- |\n| ARR | +42% |\n";
+        let markdown =
+            "# Brief\n\nExecutive summary.\n\n| Metric | Value |\n| --- | --- |\n| ARR | +42% |\n";
 
         assert!(super::document_quality_issues(markdown).is_empty());
     }
@@ -41262,11 +44249,15 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         let issues = super::document_quality_issues(&markdown);
 
         assert!(
-            issues.iter().any(|issue| issue.contains("long unbroken text")),
+            issues
+                .iter()
+                .any(|issue| issue.contains("long unbroken text")),
             "{issues:?}"
         );
         assert!(
-            issues.iter().any(|issue| issue.contains("table row has 3 cells but expected 2")),
+            issues
+                .iter()
+                .any(|issue| issue.contains("table row has 3 cells but expected 2")),
             "{issues:?}"
         );
     }
@@ -41300,7 +44291,10 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             super::document_quality_issues(&normalized).is_empty(),
             "{normalized}"
         );
-        assert!(normalized.contains("| Discovery | Product / extra context |"), "{normalized}");
+        assert!(
+            normalized.contains("| Discovery | Product / extra context |"),
+            "{normalized}"
+        );
         assert!(normalized.contains("| Build | - |"), "{normalized}");
     }
 
@@ -41363,18 +44357,45 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             directives.contains("Template reference: monet/sales-proposal-warm-01."),
             "{directives}"
         );
-        assert!(directives.contains("Document type: report."), "{directives}");
-        assert!(directives.contains("Audience: PMI italiana."), "{directives}");
+        assert!(
+            directives.contains("Document type: report."),
+            "{directives}"
+        );
+        assert!(
+            directives.contains("Audience: PMI italiana."),
+            "{directives}"
+        );
         assert!(directives.contains("Tone: executive."), "{directives}");
-        assert!(directives.contains("Layout profile: executive_brief."), "{directives}");
-        assert!(directives.contains("decision-ready headings"), "{directives}");
-        assert!(directives.contains("Design template: executive_update."), "{directives}");
-        assert!(directives.contains("Design theme: minimal_mono."), "{directives}");
-        assert!(directives.contains("Design profile: technical."), "{directives}");
-        assert!(directives.contains("implementation details"), "{directives}");
+        assert!(
+            directives.contains("Layout profile: executive_brief."),
+            "{directives}"
+        );
+        assert!(
+            directives.contains("decision-ready headings"),
+            "{directives}"
+        );
+        assert!(
+            directives.contains("Design template: executive_update."),
+            "{directives}"
+        );
+        assert!(
+            directives.contains("Design theme: minimal_mono."),
+            "{directives}"
+        );
+        assert!(
+            directives.contains("Design profile: technical."),
+            "{directives}"
+        );
+        assert!(
+            directives.contains("implementation details"),
+            "{directives}"
+        );
         assert!(directives.contains("Component: kpi_grid."), "{directives}");
         assert!(directives.contains("Component: timeline."), "{directives}");
-        assert!(directives.contains("Component: risks_table."), "{directives}");
+        assert!(
+            directives.contains("Component: risks_table."),
+            "{directives}"
+        );
         assert!(
             directives.contains("Required section order: Problema -> Soluzione -> Roadmap."),
             "{directives}"
@@ -41421,11 +44442,19 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             vec!["md".to_string(), "pdf".to_string()],
         );
         assert_eq!(
-            super::document_output_formats(&serde_json::json!({}), "brief-finale.pdf", "Scrivi un documento"),
+            super::document_output_formats(
+                &serde_json::json!({}),
+                "brief-finale.pdf",
+                "Scrivi un documento"
+            ),
             vec!["pdf".to_string()],
         );
         assert_eq!(
-            super::document_output_formats(&serde_json::json!({}), "brief-finale.md", "Genera anche un PDF"),
+            super::document_output_formats(
+                &serde_json::json!({}),
+                "brief-finale.md",
+                "Genera anche un PDF"
+            ),
             vec!["pdf".to_string()],
         );
     }
@@ -41508,22 +44537,36 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         .unwrap();
 
         assert!(document.contains("<w:tbl>"), "{document}");
-        assert!(document.contains(r#"<w:tblW w:w="5000" w:type="pct"/>"#), "{document}");
+        assert!(
+            document.contains(r#"<w:tblW w:w="5000" w:type="pct"/>"#),
+            "{document}"
+        );
         assert!(document.contains("<w:tblGrid>"), "{document}");
-        assert!(document.contains(r#"<w:tcW w:w="1750" w:type="pct"/>"#), "{document}");
-        assert!(document.contains(r#"<w:tcW w:w="3250" w:type="pct"/>"#), "{document}");
-        assert!(document.contains(r#"<w:shd w:fill="F2F2F2"/>"#), "{document}");
+        assert!(
+            document.contains(r#"<w:tcW w:w="1750" w:type="pct"/>"#),
+            "{document}"
+        );
+        assert!(
+            document.contains(r#"<w:tcW w:w="3250" w:type="pct"/>"#),
+            "{document}"
+        );
+        assert!(
+            document.contains(r#"<w:shd w:fill="F2F2F2"/>"#),
+            "{document}"
+        );
         assert!(document.contains("<w:tr>"), "{document}");
         assert!(document.contains("Metrica"), "{document}");
         assert!(document.contains("120 &lt; 150"), "{document}");
-        assert!(!document.contains(r#"<w:tcW w:w="0" w:type="auto"/>"#), "{document}");
+        assert!(
+            !document.contains(r#"<w:tcW w:w="0" w:type="auto"/>"#),
+            "{document}"
+        );
         assert!(!document.contains("---:"), "{document}");
     }
 
     #[test]
     fn markdown_to_docx_promotes_plain_first_line_to_title() {
-        let bytes =
-            super::markdown_to_docx("brief", "Titolo documento\n\n1. Primo passo").unwrap();
+        let bytes = super::markdown_to_docx("brief", "Titolo documento\n\n1. Primo passo").unwrap();
         let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
         let mut document = String::new();
         std::io::Read::read_to_string(
@@ -41532,23 +44575,34 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         )
         .unwrap();
 
-        assert!(document.contains(r#"<w:pStyle w:val="Heading1"/>"#), "{document}");
-        assert!(document.contains(r#"<w:pStyle w:val="ListParagraph"/>"#), "{document}");
+        assert!(
+            document.contains(r#"<w:pStyle w:val="Heading1"/>"#),
+            "{document}"
+        );
+        assert!(
+            document.contains(r#"<w:pStyle w:val="ListParagraph"/>"#),
+            "{document}"
+        );
         assert!(document.contains("1. Primo passo"), "{document}");
     }
 
     #[test]
     fn artifact_memories_do_not_participate_in_semantic_dedup() {
-        assert!(!super::memory_type_participates_in_semantic_dedup("artifact"));
-        assert!(super::memory_type_participates_in_semantic_dedup("decision"));
-        assert!(super::memory_type_participates_in_semantic_dedup("open_loop"));
+        assert!(!super::memory_type_participates_in_semantic_dedup(
+            "artifact"
+        ));
+        assert!(super::memory_type_participates_in_semantic_dedup(
+            "decision"
+        ));
+        assert!(super::memory_type_participates_in_semantic_dedup(
+            "open_loop"
+        ));
     }
 
     #[test]
     fn workflow_router_prunes_alternative_tools_for_document_workflow() {
-        let decision = super::route_workflow_or_agent(
-            "Scrivi un documento operativo per onboarding clienti",
-        );
+        let decision =
+            super::route_workflow_or_agent("Scrivi un documento operativo per onboarding clienti");
         let mut tools = vec![
             super::make_document_tool_schema(),
             super::run_in_sandbox_tool_schema(),
@@ -41559,7 +44613,11 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
 
         let names: Vec<&str> = tools
             .iter()
-            .filter_map(|schema| schema.pointer("/function/name").and_then(|value| value.as_str()))
+            .filter_map(|schema| {
+                schema
+                    .pointer("/function/name")
+                    .and_then(|value| value.as_str())
+            })
             .collect();
         assert_eq!(names, vec!["make_document"]);
     }
@@ -41574,15 +44632,15 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             super::workflow_route_blocked_tool_message(&route, "make_deck").is_none(),
             "workflow tool must remain allowed"
         );
-        let blocked =
-            super::workflow_route_blocked_tool_message(&route, "mcp__filesystem__create")
-                .expect("filesystem fallback must be blocked");
+        let blocked = super::workflow_route_blocked_tool_message(&route, "mcp__filesystem__create")
+            .expect("filesystem fallback must be blocked");
         assert!(blocked.contains("WORKFLOW_ROUTE_BLOCKED_TOOL"), "{blocked}");
         assert!(blocked.contains("make_deck"), "{blocked}");
 
         let generic = super::route_capability("spiegami cosa può fare Homun");
         assert!(
-            super::workflow_route_blocked_tool_message(&generic, "mcp__filesystem__create").is_none(),
+            super::workflow_route_blocked_tool_message(&generic, "mcp__filesystem__create")
+                .is_none(),
             "generic agent-loop turns keep normal tools"
         );
     }
@@ -41649,27 +44707,35 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         .expect("done event emits");
         let _ = rx.recv().await;
 
-        assert!(entry
-            .finished
-            .load(std::sync::atomic::Ordering::Relaxed));
+        assert!(entry.finished.load(std::sync::atomic::Ordering::Relaxed));
     }
 
     #[test]
     fn sandbox_terminal_owner_is_only_live_while_command_runs() {
         super::sandbox_clear(Some("thread-live-owner".to_string()));
-        super::sandbox_begin("echo live".to_string(), Some("thread-live-owner".to_string()));
+        super::sandbox_begin(
+            "echo live".to_string(),
+            Some("thread-live-owner".to_string()),
+        );
 
         let running = super::current_sandbox_activity();
         assert!(running.iter().any(|entry| entry.running));
-        assert_eq!(super::current_sandbox_owner().as_deref(), Some("thread-live-owner"));
+        assert_eq!(
+            super::current_sandbox_owner().as_deref(),
+            Some("thread-live-owner")
+        );
 
         super::sandbox_end("done".to_string());
         let finished = super::current_sandbox_activity();
         assert!(!finished.iter().any(|entry| entry.running));
         let terminal_active = finished.iter().any(|entry| entry.running);
         let live_owner = if terminal_active {
-            super::current_sandbox_owner()
-                .or_else(|| finished.iter().rev().find_map(|entry| entry.thread_id.clone()))
+            super::current_sandbox_owner().or_else(|| {
+                finished
+                    .iter()
+                    .rev()
+                    .find_map(|entry| entry.thread_id.clone())
+            })
         } else {
             None
         };
@@ -41732,7 +44798,8 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
         );
         let user = super::gateway_memory_user_id();
-        let workspace = local_first_memory::WorkspaceId::new(local_first_memory::PERSONAL_WORKSPACE);
+        let workspace =
+            local_first_memory::WorkspaceId::new(local_first_memory::PERSONAL_WORKSPACE);
         let from = test_contact(1, "Fabio", "entity:local:personal:person:fabio");
         let to = test_contact(2, "Laura", "entity:local:personal:person:laura");
 
@@ -41749,7 +44816,10 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             .expect("contact relationship mirrored into canonical graph");
         assert_eq!(relation.relation_type, "partner_of");
         assert_eq!(
-            relation.metadata.get("source").and_then(|value| value.as_str()),
+            relation
+                .metadata
+                .get("source")
+                .and_then(|value| value.as_str()),
             Some("contact_relationships")
         );
         assert_eq!(
@@ -41767,7 +44837,8 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
         );
         let user = super::gateway_memory_user_id();
-        let workspace = local_first_memory::WorkspaceId::new(local_first_memory::PERSONAL_WORKSPACE);
+        let workspace =
+            local_first_memory::WorkspaceId::new(local_first_memory::PERSONAL_WORKSPACE);
         let from = test_contact(1, "Fabio", "entity:local:personal:person:fabio");
         let to = test_contact(2, "Laura", "entity:local:personal:person:laura");
 
@@ -41811,7 +44882,7 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         let facade = local_first_memory::MemoryFacade::new(
             local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
         );
-        let user = local_first_memory::UserId::new("local");
+        let user = super::gateway_memory_user_id();
         let workspace = local_first_memory::WorkspaceId::new("project");
         let lifecycle = local_first_memory::MemoryLifecycleRequest {
             actor_id: "test".to_string(),
@@ -41854,16 +44925,28 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         let memories = facade.list_memories_for_ui(&user, &workspace).unwrap();
         let plan_memories: Vec<_> = memories
             .iter()
-            .filter(|memory| memory.metadata.get("source").and_then(|v| v.as_str()) == Some("runtime_plan"))
+            .filter(|memory| {
+                memory.metadata.get("source").and_then(|v| v.as_str()) == Some("runtime_plan")
+            })
             .collect();
         assert_eq!(plan_memories.len(), 1);
         let memory = plan_memories[0];
         assert_eq!(memory.memory_type, "open_loop");
         assert_eq!(memory.status, local_first_memory::MemoryStatus::Confirmed);
         assert!(memory.text.contains("2/3 steps done"), "{}", memory.text);
-        assert!(memory.text.contains("Next step: Run tests"), "{}", memory.text);
-        assert_eq!(memory.metadata.get("thread_id").and_then(|v| v.as_str()), Some("thread-1"));
-        assert_eq!(memory.metadata.get("next_step").and_then(|v| v.as_str()), Some("Run tests"));
+        assert!(
+            memory.text.contains("Next step: Run tests"),
+            "{}",
+            memory.text
+        );
+        assert_eq!(
+            memory.metadata.get("thread_id").and_then(|v| v.as_str()),
+            Some("thread-1")
+        );
+        assert_eq!(
+            memory.metadata.get("next_step").and_then(|v| v.as_str()),
+            Some("Run tests")
+        );
     }
 
     #[test]
@@ -41871,7 +44954,7 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         let facade = local_first_memory::MemoryFacade::new(
             local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
         );
-        let user = local_first_memory::UserId::new("local");
+        let user = super::gateway_memory_user_id();
         let workspace = local_first_memory::WorkspaceId::new("project");
         let lifecycle = local_first_memory::MemoryLifecycleRequest {
             actor_id: "test".to_string(),
@@ -41917,7 +45000,10 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             .find(|memory| memory.reference == reference)
             .expect("plan memory");
         assert_eq!(memory.status, local_first_memory::MemoryStatus::Stale);
-        assert_eq!(memory.metadata.get("status").and_then(|v| v.as_str()), Some("complete"));
+        assert_eq!(
+            memory.metadata.get("status").and_then(|v| v.as_str()),
+            Some("complete")
+        );
         assert!(!super::active_open_loop_record(&memory));
     }
 
@@ -41926,7 +45012,7 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         let facade = local_first_memory::MemoryFacade::new(
             local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
         );
-        let user = local_first_memory::UserId::new("local");
+        let user = super::gateway_memory_user_id();
         let workspace = local_first_memory::WorkspaceId::new("project");
         let lifecycle = local_first_memory::MemoryLifecycleRequest {
             actor_id: "test".to_string(),
@@ -41968,8 +45054,20 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             .find(|entity| entity.canonical_key == "runtime_plan:thread-graph")
             .expect("plan entity");
         assert_eq!(plan_entity.entity_type, "document");
-        assert_eq!(plan_entity.metadata.get("kind").and_then(|value| value.as_str()), Some("runtime_plan"));
-        assert_eq!(plan_entity.metadata.get("done_count").and_then(|value| value.as_u64()), Some(1));
+        assert_eq!(
+            plan_entity
+                .metadata
+                .get("kind")
+                .and_then(|value| value.as_str()),
+            Some("runtime_plan")
+        );
+        assert_eq!(
+            plan_entity
+                .metadata
+                .get("done_count")
+                .and_then(|value| value.as_u64()),
+            Some(1)
+        );
 
         let step_one = entities
             .iter()
@@ -41981,7 +45079,10 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             .expect("step s2");
         assert_eq!(step_two.entity_type, "asset");
         assert_eq!(
-            step_two.metadata.get("kind").and_then(|value| value.as_str()),
+            step_two
+                .metadata
+                .get("kind")
+                .and_then(|value| value.as_str()),
             Some("runtime_plan_step"),
         );
 
@@ -41995,7 +45096,11 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             relation.source_ref == plan_entity.reference
                 && relation.target_ref == step_two.reference
                 && relation.relation_type == "relates_to"
-                && relation.metadata.get("kind").and_then(|value| value.as_str()) == Some("has_step")
+                && relation
+                    .metadata
+                    .get("kind")
+                    .and_then(|value| value.as_str())
+                    == Some("has_step")
         }));
         assert!(relations.iter().any(|relation| {
             relation.source_ref == step_two.reference
@@ -42073,7 +45178,10 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             Some("Read docs"),
         );
         assert_eq!(
-            steps[1].get("depends_on").and_then(|value| value.as_array()).map(|items| items.len()),
+            steps[1]
+                .get("depends_on")
+                .and_then(|value| value.as_array())
+                .map(|items| items.len()),
             Some(1),
         );
     }
@@ -42121,12 +45229,18 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         )
         .unwrap();
 
-        assert_eq!(first, second, "same runtime step outcome should update in place");
+        assert_eq!(
+            first, second,
+            "same runtime step outcome should update in place"
+        );
         let memories = facade.list_memories_for_ui(&user, &workspace).unwrap();
         let outcomes: Vec<_> = memories
             .iter()
             .filter(|memory| {
-                memory.metadata.get("source").and_then(|value| value.as_str())
+                memory
+                    .metadata
+                    .get("source")
+                    .and_then(|value| value.as_str())
                     == Some("runtime_plan_step")
             })
             .collect();
@@ -42136,11 +45250,17 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         assert_eq!(memory.status, local_first_memory::MemoryStatus::Confirmed);
         assert!(memory.text.contains("Run focused tests"), "{}", memory.text);
         assert_eq!(
-            memory.metadata.get("thread_id").and_then(|value| value.as_str()),
+            memory
+                .metadata
+                .get("thread_id")
+                .and_then(|value| value.as_str()),
             Some("thread-step"),
         );
         assert_eq!(
-            memory.metadata.get("step_id").and_then(|value| value.as_str()),
+            memory
+                .metadata
+                .get("step_id")
+                .and_then(|value| value.as_str()),
             Some("s2"),
         );
         assert_eq!(
@@ -42225,15 +45345,24 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         assert_eq!(memory.memory_type, "fact");
         assert_eq!(memory.status, local_first_memory::MemoryStatus::Confirmed);
         assert_eq!(
-            memory.metadata.get("source").and_then(|value| value.as_str()),
+            memory
+                .metadata
+                .get("source")
+                .and_then(|value| value.as_str()),
             Some("runtime_plan_step"),
         );
         assert_eq!(
-            memory.metadata.get("thread_id").and_then(|value| value.as_str()),
+            memory
+                .metadata
+                .get("thread_id")
+                .and_then(|value| value.as_str()),
             Some("thread-subagent"),
         );
         assert_eq!(
-            memory.metadata.get("step_id").and_then(|value| value.as_str()),
+            memory
+                .metadata
+                .get("step_id")
+                .and_then(|value| value.as_str()),
             Some("subtask-1"),
         );
         assert!(
@@ -42313,7 +45442,11 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         assert!(body.contains(&second.to_string()));
         assert!(body.contains("Preventivo Rossi") || body.contains("Rossi: preventivo"));
         assert!(body.contains("Bug gateway browser"));
-        assert_eq!(linked.len(), 2, "paraphrased open loops should be collapsed in the page");
+        assert_eq!(
+            linked.len(),
+            2,
+            "paraphrased open loops should be collapsed in the page"
+        );
         assert!(linked.contains(&second));
         assert!(linked.contains(&first) || linked.contains(&duplicate));
     }
@@ -42391,32 +45524,51 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
 
         assert_eq!(first, second);
         assert_eq!(artifacts.len(), 1);
-        assert_eq!(artifacts[0].status, local_first_memory::MemoryStatus::Confirmed);
+        assert_eq!(
+            artifacts[0].status,
+            local_first_memory::MemoryStatus::Confirmed
+        );
         assert_eq!(artifacts[0].metadata["size_bytes"], serde_json::json!(456));
-        assert!(entities
-            .iter()
-            .any(|entity| entity.entity_type == "artifact" && entity.name == "report.pdf"));
-        assert!(entities
-            .iter()
-            .any(|entity| entity.entity_type == "project" && entity.name == "project"));
-        assert!(entities
-            .iter()
-            .any(|entity| entity.entity_type == "tool" && entity.name == "make_deck"));
-        assert!(entities
-            .iter()
-            .any(|entity| entity.entity_type == "file" && entity.name == "reports/report.pdf"));
-        assert!(relations
-            .iter()
-            .any(|relation| relation.relation_type == "describes"));
-        assert!(relations
-            .iter()
-            .any(|relation| relation.relation_type == "belongs_to_project"));
-        assert!(relations
-            .iter()
-            .any(|relation| relation.relation_type == "produced"));
-        assert!(relations
-            .iter()
-            .any(|relation| relation.relation_type == "relates_to"));
+        assert!(
+            entities
+                .iter()
+                .any(|entity| entity.entity_type == "artifact" && entity.name == "report.pdf")
+        );
+        assert!(
+            entities
+                .iter()
+                .any(|entity| entity.entity_type == "project" && entity.name == "project")
+        );
+        assert!(
+            entities
+                .iter()
+                .any(|entity| entity.entity_type == "tool" && entity.name == "make_deck")
+        );
+        assert!(
+            entities
+                .iter()
+                .any(|entity| entity.entity_type == "file" && entity.name == "reports/report.pdf")
+        );
+        assert!(
+            relations
+                .iter()
+                .any(|relation| relation.relation_type == "describes")
+        );
+        assert!(
+            relations
+                .iter()
+                .any(|relation| relation.relation_type == "belongs_to_project")
+        );
+        assert!(
+            relations
+                .iter()
+                .any(|relation| relation.relation_type == "produced")
+        );
+        assert!(
+            relations
+                .iter()
+                .any(|relation| relation.relation_type == "relates_to")
+        );
     }
 
     #[test]
@@ -42436,8 +45588,9 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             .create_memory_candidate(local_first_memory::MemoryCreateRequest {
                 request: lifecycle.clone(),
                 memory_type: "decision".to_string(),
-                text: "Generate the report artifact because the review needs a durable deliverable."
-                    .to_string(),
+                text:
+                    "Generate the report artifact because the review needs a durable deliverable."
+                        .to_string(),
                 aliases: vec!["reports/report.pdf".to_string()],
                 language_hints: Vec::new(),
                 confidence: 1.0,
@@ -42499,7 +45652,8 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             relation.relation_type == "derived_from"
                 && relation.source_ref == artifact_entity
                 && relation.target_ref == decision.reference
-                && relation.metadata["evidence"] == serde_json::json!("decision_affects_label_or_ref")
+                && relation.metadata["evidence"]
+                    == serde_json::json!("decision_affects_label_or_ref")
         }));
     }
 
@@ -42568,12 +45722,14 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         assert!(relations.iter().any(|relation| {
             relation.relation_type == "affects"
                 && relation.source_ref == decision.reference
-                && relation.metadata["evidence"] == serde_json::json!("decision_affects_label_or_ref")
+                && relation.metadata["evidence"]
+                    == serde_json::json!("decision_affects_label_or_ref")
         }));
         assert!(relations.iter().any(|relation| {
             relation.relation_type == "derived_from"
                 && relation.target_ref == decision.reference
-                && relation.metadata["evidence"] == serde_json::json!("decision_affects_label_or_ref")
+                && relation.metadata["evidence"]
+                    == serde_json::json!("decision_affects_label_or_ref")
         }));
         assert!(!relations.iter().any(|relation| {
             relation.relation_type == "derived_from"
@@ -42653,9 +45809,7 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             &outside
         ));
         assert!(!super::artifact_memory_delete_path_allowed(
-            None,
-            &managed,
-            &outside
+            None, &managed, &outside
         ));
 
         let _ = std::fs::remove_dir_all(&root);
@@ -42670,8 +45824,7 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             super::artifact_unique_zip_entry_name(&mut used, "memory:test/homun", "../note.md");
         let second =
             super::artifact_unique_zip_entry_name(&mut used, "memory:test/homun", "../note.md");
-        let weird =
-            super::artifact_unique_zip_entry_name(&mut used, "../../", "résumé?.md");
+        let weird = super::artifact_unique_zip_entry_name(&mut used, "../../", "résumé?.md");
 
         assert_eq!(first, "memory-test-homun/note.md");
         assert_eq!(second, "memory-test-homun/note-2.md");
@@ -42729,7 +45882,10 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
 
         let merged = super::deduplicate_open_loops(&facade, &user, &workspace);
         let memories = facade.list_memories_for_ui(&user, &workspace).unwrap();
-        let active = memories.iter().filter(|memory| super::active_open_loop_record(memory)).count();
+        let active = memories
+            .iter()
+            .filter(|memory| super::active_open_loop_record(memory))
+            .count();
         let superseded = memories
             .iter()
             .filter(|memory| memory.memory_type == "open_loop" && memory.superseded_by.is_some())
@@ -42789,10 +45945,16 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             &["Preventivo Rossi assistenza completato".to_string()],
         );
         let memories = facade.list_memories_for_ui(&user, &workspace).unwrap();
-        let active = memories.iter().filter(|memory| super::active_open_loop_record(memory)).count();
+        let active = memories
+            .iter()
+            .filter(|memory| super::active_open_loop_record(memory))
+            .count();
         let stale = memories
             .iter()
-            .filter(|memory| memory.memory_type == "open_loop" && memory.status == local_first_memory::MemoryStatus::Stale)
+            .filter(|memory| {
+                memory.memory_type == "open_loop"
+                    && memory.status == local_first_memory::MemoryStatus::Stale
+            })
             .count();
 
         assert_eq!(closed_none, 0);
@@ -42807,7 +45969,11 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             .map(|i| format!("fatto numero {i} con testo abbastanza lungo da occupare spazio"))
             .collect();
         let block = format_memory_block(&[], &many, &[], 300).expect("block");
-        assert!(block.len() < 600, "block should be bounded, got {}", block.len());
+        assert!(
+            block.len() < 600,
+            "block should be bounded, got {}",
+            block.len()
+        );
         assert!(block.contains("more available in memory"));
     }
 
@@ -42817,7 +45983,9 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         assert!(!is_salient_exchange("ok"));
         assert!(!is_salient_exchange("  Sì  "));
         assert!(!is_salient_exchange("ciao"));
-        assert!(is_salient_exchange("preferisco risposte brevi e in italiano"));
+        assert!(is_salient_exchange(
+            "preferisco risposte brevi e in italiano"
+        ));
         assert!(is_salient_exchange("ho due figli, Luca e Sara"));
     }
 
@@ -42846,28 +46014,482 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         // possessions as `private`, so the auto-confirm ceiling MUST be Private. An
         // `Internal` cap froze EVERY personal fact at `candidate`, invisible to the
         // always-on profile (which is confirmed-only).
-        assert!(is_auto_confirmable("fact", MemoryDataSensitivity::Private, 0.9));
-        assert!(is_auto_confirmable("preference", MemoryDataSensitivity::Private, 0.95));
-        assert!(is_auto_confirmable("decision", MemoryDataSensitivity::Private, 0.85));
-        assert!(is_auto_confirmable("goal", MemoryDataSensitivity::Private, 0.9));
+        assert!(is_auto_confirmable(
+            "fact",
+            MemoryDataSensitivity::Private,
+            0.9
+        ));
+        assert!(is_auto_confirmable(
+            "preference",
+            MemoryDataSensitivity::Private,
+            0.95
+        ));
+        assert!(is_auto_confirmable(
+            "decision",
+            MemoryDataSensitivity::Private,
+            0.85
+        ));
+        assert!(is_auto_confirmable(
+            "goal",
+            MemoryDataSensitivity::Private,
+            0.9
+        ));
         // Less sensitive levels still auto-confirm.
-        assert!(is_auto_confirmable("fact", MemoryDataSensitivity::Internal, 0.9));
-        assert!(is_auto_confirmable("fact", MemoryDataSensitivity::Public, 0.9));
+        assert!(is_auto_confirmable(
+            "fact",
+            MemoryDataSensitivity::Internal,
+            0.9
+        ));
+        assert!(is_auto_confirmable(
+            "fact",
+            MemoryDataSensitivity::Public,
+            0.9
+        ));
         // Real PII (codice fiscale, health, addresses) stays a candidate to confirm.
-        assert!(!is_auto_confirmable("fact", MemoryDataSensitivity::Confidential, 0.99));
-        assert!(!is_auto_confirmable("fact", MemoryDataSensitivity::Secret, 0.99));
+        assert!(!is_auto_confirmable(
+            "fact",
+            MemoryDataSensitivity::Confidential,
+            0.99
+        ));
+        assert!(!is_auto_confirmable(
+            "fact",
+            MemoryDataSensitivity::Secret,
+            0.99
+        ));
         // Low confidence never auto-confirms.
-        assert!(!is_auto_confirmable("fact", MemoryDataSensitivity::Private, 0.5));
+        assert!(!is_auto_confirmable(
+            "fact",
+            MemoryDataSensitivity::Private,
+            0.5
+        ));
         // Only durable knowledge types auto-confirm — not raw topics/entities.
-        assert!(!is_auto_confirmable("topic", MemoryDataSensitivity::Private, 0.95));
-        assert!(!is_auto_confirmable("entity", MemoryDataSensitivity::Private, 0.95));
+        assert!(!is_auto_confirmable(
+            "topic",
+            MemoryDataSensitivity::Private,
+            0.95
+        ));
+        assert!(!is_auto_confirmable(
+            "entity",
+            MemoryDataSensitivity::Private,
+            0.95
+        ));
+    }
+
+    #[test]
+    fn owner_channel_match_accepts_configured_approval_identity() {
+        let prefs = super::UserPrefs {
+            approval_channel: Some("telegram".to_string()),
+            approval_target: Some("8205578468".to_string()),
+            ..Default::default()
+        };
+
+        assert!(super::channel_message_is_from_owner(
+            &prefs,
+            "telegram",
+            "8205578468",
+            None,
+            None
+        ));
+        assert!(super::channel_message_is_from_owner(
+            &prefs,
+            "telegram",
+            "different",
+            Some("8205578468"),
+            None
+        ));
+        assert!(!super::channel_message_is_from_owner(
+            &prefs,
+            "whatsapp",
+            "8205578468",
+            None,
+            None
+        ));
+        assert!(!super::channel_message_is_from_owner(
+            &prefs, "telegram", "123", None, None
+        ));
+    }
+
+    #[test]
+    fn profile_wiki_excludes_candidate_memories() {
+        let facade = local_first_memory::MemoryFacade::new(
+            local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
+        );
+        let user = local_first_memory::UserId::new("local");
+        let workspace = local_first_memory::WorkspaceId::new("__personal__-profile-test");
+        let lifecycle = local_first_memory::MemoryLifecycleRequest {
+            actor_id: "test".to_string(),
+            user_id: user.clone(),
+            workspace_id: workspace.clone(),
+            purpose: "test".to_string(),
+        };
+        let confirmed = facade
+            .create_memory_candidate(local_first_memory::MemoryCreateRequest {
+                request: lifecycle.clone(),
+                memory_type: "fact".to_string(),
+                text: "Fabio vive a Pomigliano d'Arco.".to_string(),
+                aliases: Vec::new(),
+                language_hints: Vec::new(),
+                confidence: 0.95,
+                privacy_domain: local_first_memory::PrivacyDomain::new("personal"),
+                sensitivity: local_first_memory::DataSensitivity::Private,
+                evidence_refs: Vec::new(),
+                metadata: serde_json::json!({ "scope": "personal" }),
+            })
+            .unwrap();
+        facade
+            .confirm_memory(&lifecycle, &confirmed.reference, "test confirmed")
+            .unwrap();
+        facade
+            .create_memory_candidate(local_first_memory::MemoryCreateRequest {
+                request: lifecycle.clone(),
+                memory_type: "fact".to_string(),
+                text: "Fabio forse sta valutando una moto non confermata.".to_string(),
+                aliases: Vec::new(),
+                language_hints: Vec::new(),
+                confidence: 0.4,
+                privacy_domain: local_first_memory::PrivacyDomain::new("personal"),
+                sensitivity: local_first_memory::DataSensitivity::Private,
+                evidence_refs: Vec::new(),
+                metadata: serde_json::json!({ "scope": "personal" }),
+            })
+            .unwrap();
+
+        super::rebuild_profile_wiki(&facade, &user, &workspace);
+
+        let page = facade
+            .list_wiki_pages_for_ui(&user, &workspace)
+            .unwrap()
+            .into_iter()
+            .find(|page| page.path == "profilo.md")
+            .expect("profile page");
+        assert!(page.body.contains("Fabio vive a Pomigliano"));
+        assert!(!page.body.contains("forse sta valutando"));
+        assert_eq!(page.linked_refs, vec![confirmed.reference]);
+    }
+
+    #[test]
+    fn workspace_root_entity_keeps_stable_key_and_aliases_across_updates() {
+        let facade = local_first_memory::MemoryFacade::new(
+            local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
+        );
+        let workspace = super::WorkspaceRecord {
+            id: "workspace_test".to_string(),
+            name: "Homun".to_string(),
+            folder: Some("/Users/fabio/Projects/Homun/app".to_string()),
+        };
+
+        super::upsert_workspace_root_memory_entity(&facade, &workspace).unwrap();
+        super::upsert_workspace_root_memory_entity(
+            &facade,
+            &super::WorkspaceRecord {
+                id: workspace.id.clone(),
+                name: "Homun App".to_string(),
+                folder: Some("/Users/fabio/Projects/Homun".to_string()),
+            },
+        )
+        .unwrap();
+
+        let user = super::gateway_memory_user_id();
+        let workspace_scope = local_first_memory::WorkspaceId::new("workspace_test");
+        let entities = facade
+            .list_entities_for_ui(&user, &workspace_scope)
+            .unwrap();
+        let roots: Vec<_> = entities
+            .iter()
+            .filter(|entity| entity.canonical_key == "workspace:workspace_test")
+            .collect();
+        assert_eq!(roots.len(), 1);
+        let root = roots[0];
+        assert_eq!(root.name, "Homun App");
+        assert!(root.aliases.iter().any(|alias| alias == "Homun"));
+        assert!(root.aliases.iter().any(|alias| alias == "Homun App"));
+        assert!(root.aliases.iter().any(|alias| alias == "app"));
+        assert!(
+            root.aliases
+                .iter()
+                .any(|alias| alias == "/Users/fabio/Projects/Homun")
+        );
+    }
+
+    #[test]
+    fn project_scope_demotes_extracted_project_entities_that_are_not_workspace_root() {
+        let ws = local_first_memory::WorkspaceId::new("workspace_homun");
+        let entities = super::normalize_project_scope_entities(
+            &ws,
+            vec![
+                local_first_memory::ExtractedEntity {
+                    entity_type: "project".to_string(),
+                    name: "Homun".to_string(),
+                    canonical_key: "project:homun".to_string(),
+                    aliases: vec!["homun".to_string()],
+                    privacy_domain: local_first_memory::PrivacyDomain::new("work"),
+                    sensitivity: local_first_memory::DataSensitivity::Private,
+                    metadata: serde_json::json!({ "scope": "project" }),
+                },
+                local_first_memory::ExtractedEntity {
+                    entity_type: "project".to_string(),
+                    name: "Workspace Root".to_string(),
+                    canonical_key: "workspace:workspace_homun".to_string(),
+                    aliases: Vec::new(),
+                    privacy_domain: local_first_memory::PrivacyDomain::new("work"),
+                    sensitivity: local_first_memory::DataSensitivity::Private,
+                    metadata: serde_json::json!({ "scope": "project" }),
+                },
+            ],
+        );
+
+        assert_eq!(entities[0].entity_type, "topic");
+        assert_eq!(entities[0].canonical_key, "topic:homun");
+        assert_eq!(entities[1].entity_type, "project");
+        assert_eq!(entities[1].canonical_key, "workspace:workspace_homun");
+    }
+
+    #[test]
+    fn automation_memory_cleanup_tombstones_matching_records() {
+        let facade = local_first_memory::MemoryFacade::new(
+            local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
+        );
+        let user = local_first_memory::UserId::new("local");
+        let workspace = local_first_memory::WorkspaceId::new("workspace_auto");
+        let lifecycle = local_first_memory::MemoryLifecycleRequest {
+            actor_id: "test".to_string(),
+            user_id: user.clone(),
+            workspace_id: workspace.clone(),
+            purpose: "test".to_string(),
+        };
+        let record = facade
+            .create_memory_candidate(local_first_memory::MemoryCreateRequest {
+                request: lifecycle.clone(),
+                memory_type: "fact".to_string(),
+                text: "Automation Mondiali aggiorna il briefing.".to_string(),
+                aliases: Vec::new(),
+                language_hints: Vec::new(),
+                confidence: 0.95,
+                privacy_domain: local_first_memory::PrivacyDomain::new("work"),
+                sensitivity: local_first_memory::DataSensitivity::Private,
+                evidence_refs: Vec::new(),
+                metadata: serde_json::json!({ "automation_id": "auto_123" }),
+            })
+            .unwrap();
+        facade
+            .confirm_memory(&lifecycle, &record.reference, "test")
+            .unwrap();
+
+        let deleted =
+            super::tombstone_automation_memory_records(&facade, &user, &workspace, "auto_123")
+                .unwrap();
+
+        assert_eq!(deleted, 1);
+        assert!(
+            facade
+                .list_memories_for_ui(&user, &workspace)
+                .unwrap()
+                .into_iter()
+                .all(|memory| memory.reference != record.reference)
+        );
+    }
+
+    #[test]
+    fn hygiene_suggestions_find_same_person_names_without_auto_merge() {
+        let facade = local_first_memory::MemoryFacade::new(
+            local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
+        );
+        let user = local_first_memory::UserId::new("local");
+        let workspace = local_first_memory::WorkspaceId::new("workspace_hygiene");
+        let fabio_a = local_first_memory::MemoryEntity {
+            reference: local_first_memory::MemoryRef::new(
+                local_first_memory::MemoryRefKind::Entity,
+                user.clone(),
+                workspace.clone(),
+                "person:fabio-a",
+            ),
+            user_id: user.clone(),
+            workspace_id: workspace.clone(),
+            entity_type: "person".to_string(),
+            name: "Fabio".to_string(),
+            canonical_key: "person:fabio-a".to_string(),
+            aliases: vec!["Fabio".to_string()],
+            privacy_domain: local_first_memory::PrivacyDomain::new("personal"),
+            sensitivity: MemoryDataSensitivity::Private,
+            metadata: serde_json::json!({}),
+        };
+        let mut fabio_b = fabio_a.clone();
+        fabio_b.reference = local_first_memory::MemoryRef::new(
+            local_first_memory::MemoryRefKind::Entity,
+            user.clone(),
+            workspace.clone(),
+            "person:fabio-b",
+        );
+        fabio_b.canonical_key = "person:fabio-b".to_string();
+        fabio_b.aliases = vec!["fabio".to_string()];
+        facade.upsert_entity(&fabio_a).unwrap();
+        facade.upsert_entity(&fabio_b).unwrap();
+
+        let suggestions =
+            super::memory_hygiene_suggestions_for_scope(&facade, &user, &workspace).unwrap();
+
+        assert_eq!(suggestions.len(), 1);
+        assert!(!suggestions[0].safe_auto_merge);
+        assert_eq!(suggestions[0].reason, "same normalized person name");
+    }
+
+    #[test]
+    fn project_graph_projection_links_orphan_nodes_to_project_root() {
+        let root = "entity:project-root:local:workspace_test:workspace:workspace_test".to_string();
+        let orphan = "entity:project-root:local:workspace_test:topic:isolated".to_string();
+        let mut edges = Vec::new();
+        let nodes = vec![
+            super::GraphNode {
+                id: root.clone(),
+                kind: "project".to_string(),
+                label: "test-homun".to_string(),
+                detail: String::new(),
+                entity_type: "project".to_string(),
+            },
+            super::GraphNode {
+                id: orphan.clone(),
+                kind: "entity".to_string(),
+                label: "isolated".to_string(),
+                detail: String::new(),
+                entity_type: "topic".to_string(),
+            },
+        ];
+
+        super::ensure_project_graph_connectivity(&root, &nodes, &mut edges);
+
+        assert!(edges.iter().any(|edge| {
+            edge.source == root && edge.target == orphan && edge.label == "nel progetto"
+        }));
+    }
+
+    #[test]
+    fn project_graph_projection_links_detached_components_to_project_root() {
+        let root = "project::root".to_string();
+        let a = "entity:local:local-user:workspace_test:topic:a".to_string();
+        let b = "entity:local:local-user:workspace_test:topic:b".to_string();
+        let nodes = vec![
+            super::GraphNode {
+                id: root.clone(),
+                kind: "project".to_string(),
+                label: "test-homun".to_string(),
+                detail: String::new(),
+                entity_type: "project".to_string(),
+            },
+            super::GraphNode {
+                id: a.clone(),
+                kind: "entity".to_string(),
+                label: "A".to_string(),
+                detail: String::new(),
+                entity_type: "topic".to_string(),
+            },
+            super::GraphNode {
+                id: b.clone(),
+                kind: "entity".to_string(),
+                label: "B".to_string(),
+                detail: String::new(),
+                entity_type: "topic".to_string(),
+            },
+        ];
+        let mut edges = vec![super::GraphEdge {
+            source: a.clone(),
+            target: b.clone(),
+            label: "related".to_string(),
+        }];
+
+        super::ensure_project_graph_connectivity(&root, &nodes, &mut edges);
+
+        assert!(edges.iter().any(|edge| {
+            edge.source == root
+                && (edge.target == a || edge.target == b)
+                && edge.label == "nel progetto"
+        }));
+    }
+
+    #[test]
+    fn graph_entity_alias_detail_deduplicates_and_hides_self_aliases() {
+        let detail = super::graph_entity_alias_detail(
+            "Restituisce la somma di due numeri.",
+            &[
+                "Restituisce la somma di due numeri.".to_string(),
+                "hello_rationale_2".to_string(),
+                "rationale_for somma()".to_string(),
+                "rationale_for somma()".to_string(),
+                " rationale_for somma() ".to_string(),
+            ],
+        );
+
+        assert_eq!(detail, "hello_rationale_2, rationale_for somma()");
+    }
+
+    #[test]
+    fn project_graph_projection_hides_project_entities_that_duplicate_root_label() {
+        let root = "entity:local:local-user:workspace_test:workspace:workspace_test";
+        let duplicate = local_first_memory::MemoryEntity {
+            reference: local_first_memory::MemoryRef::new(
+                local_first_memory::MemoryRefKind::Entity,
+                local_first_memory::UserId::new("local-user"),
+                local_first_memory::WorkspaceId::new("__personal__"),
+                "project:test-homun",
+            ),
+            user_id: local_first_memory::UserId::new("local-user"),
+            workspace_id: local_first_memory::WorkspaceId::new("__personal__"),
+            entity_type: "project".to_string(),
+            name: "test-homun".to_string(),
+            canonical_key: "project:test-homun".to_string(),
+            aliases: Vec::new(),
+            privacy_domain: local_first_memory::PrivacyDomain::new("work"),
+            sensitivity: MemoryDataSensitivity::Private,
+            metadata: serde_json::json!({}),
+        };
+
+        assert!(super::project_graph_entity_duplicates_root(
+            &duplicate,
+            root,
+            "test-homun"
+        ));
+    }
+
+    #[test]
+    fn graph_projection_deduplicates_identical_edges() {
+        let mut edges = vec![
+            super::GraphEdge {
+                source: "entity:note".to_string(),
+                target: "entity:somma".to_string(),
+                label: "rationale_for".to_string(),
+            },
+            super::GraphEdge {
+                source: "entity:note".to_string(),
+                target: "entity:somma".to_string(),
+                label: "rationale_for".to_string(),
+            },
+            super::GraphEdge {
+                source: "entity:note".to_string(),
+                target: "entity:somma".to_string(),
+                label: "documents".to_string(),
+            },
+        ];
+
+        super::dedupe_graph_edges(&mut edges);
+
+        assert_eq!(edges.len(), 2);
+        assert_eq!(edges[0].label, "rationale_for");
+        assert_eq!(edges[1].label, "documents");
     }
 
     #[test]
     fn summarize_tool_action_captures_mutations_skips_reads() {
         // Reads / discovery → nothing to remember.
-        for read in ["read_file", "list_directory", "list_files", "recall_memory", "suggest_capabilities"] {
-            assert!(crate::summarize_tool_action(read, "{}").is_none(), "{read} should be skipped");
+        for read in [
+            "read_file",
+            "list_directory",
+            "list_files",
+            "recall_memory",
+            "suggest_capabilities",
+        ] {
+            assert!(
+                crate::summarize_tool_action(read, "{}").is_none(),
+                "{read} should be skipped"
+            );
         }
         // Mutations (any domain) → a one-line action with the target.
         assert!(
@@ -42880,17 +46502,28 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
                 .unwrap()
                 .contains("cargo build")
         );
-        assert!(crate::summarize_tool_action("save_artifact", "{\"name\":\"preventivo.pdf\"}").is_some());
+        assert!(
+            crate::summarize_tool_action("save_artifact", "{\"name\":\"preventivo.pdf\"}")
+                .is_some()
+        );
     }
 
     #[test]
     fn dedup_folds_paraphrased_decisions() {
         let a = crate::dedup_tokens("Scelto JSON come formato di salvataggio per taskline");
         let b = crate::dedup_tokens("taskline usa JSON come formato di salvataggio");
-        assert!(crate::jaccard(&a, &b) >= crate::DEDUP_JACCARD, "paraphrase: {}", crate::jaccard(&a, &b));
+        assert!(
+            crate::jaccard(&a, &b) >= crate::DEDUP_JACCARD,
+            "paraphrase: {}",
+            crate::jaccard(&a, &b)
+        );
         // A genuinely different decision in the same project must NOT be folded.
         let c = crate::dedup_tokens("Aggiunto supporto CLI con argparse e gestione errori");
-        assert!(crate::jaccard(&a, &c) < crate::DEDUP_JACCARD, "distinct: {}", crate::jaccard(&a, &c));
+        assert!(
+            crate::jaccard(&a, &c) < crate::DEDUP_JACCARD,
+            "distinct: {}",
+            crate::jaccard(&a, &c)
+        );
     }
 
     #[test]
@@ -42902,11 +46535,20 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             }
         });
         let out = crate::format_recall_entry("Applicato sconto 10% ad ACME", &meta);
-        assert!(out.contains("why: ACME è un cliente storico"), "rationale mancante: {out}");
-        assert!(out.contains("rejected alternatives"), "alternative mancanti: {out}");
+        assert!(
+            out.contains("why: ACME è un cliente storico"),
+            "rationale mancante: {out}"
+        );
+        assert!(
+            out.contains("rejected alternatives"),
+            "alternative mancanti: {out}"
+        );
         assert!(out.contains("sconto 5%") && out.contains("troppo basso"));
         // Non-decision memory → summary returned unchanged.
-        assert_eq!(crate::format_recall_entry("ciao", &serde_json::json!({})), "ciao");
+        assert_eq!(
+            crate::format_recall_entry("ciao", &serde_json::json!({})),
+            "ciao"
+        );
         // Rationale already in the summary → not duplicated.
         let meta2 = serde_json::json!({ "decision": { "rationale": "perché sì" } });
         let out2 = crate::format_recall_entry("Scelta X perché sì", &meta2);
@@ -42989,8 +46631,14 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         assert!(context.contains("reports/report.pdf"), "{context}");
         assert!(context.contains("mcp_filesystem"), "{context}");
         assert!(context.contains("Create reports/report.pdf"), "{context}");
-        assert!(context.contains("why: The review must survive a new chat"), "{context}");
-        assert!(context.contains("Leave the result only in chat"), "{context}");
+        assert!(
+            context.contains("why: The review must survive a new chat"),
+            "{context}"
+        );
+        assert!(
+            context.contains("Leave the result only in chat"),
+            "{context}"
+        );
     }
 
     #[test]
@@ -43047,9 +46695,15 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
 
         assert!(context.contains("deck.pptx"), "{context}");
         assert!(context.contains("local managed path"), "{context}");
-        assert!(context.contains("/Users/fabio/.homun/artifacts/thread-deck/deck.pptx"), "{context}");
+        assert!(
+            context.contains("/Users/fabio/.homun/artifacts/thread-deck/deck.pptx"),
+            "{context}"
+        );
         assert!(context.contains("produced by make_deck"), "{context}");
-        assert!(context.contains("derives from workflow make_deck"), "{context}");
+        assert!(
+            context.contains("derives from workflow make_deck"),
+            "{context}"
+        );
         assert!(context.contains("quality: warning"), "{context}");
         assert!(context.contains("low_contrast"), "{context}");
     }
@@ -43099,7 +46753,10 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
 
         assert!(context.contains("document.md"), "{context}");
         assert!(context.contains("produced by make_document"), "{context}");
-        assert!(context.contains("derives from workflow make_document / DocumentWorkflow"), "{context}");
+        assert!(
+            context.contains("derives from workflow make_document / DocumentWorkflow"),
+            "{context}"
+        );
     }
 
     #[test]
@@ -43204,15 +46861,24 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         )
         .expect("workflow status context");
 
-        assert!(context.contains("WORKFLOW STATUS FROM CANONICAL MEMORY"), "{context}");
+        assert!(
+            context.contains("WORKFLOW STATUS FROM CANONICAL MEMORY"),
+            "{context}"
+        );
         assert!(context.contains("Objectives"), "{context}");
         assert!(context.contains("memory guardrails"), "{context}");
         assert!(context.contains("Open loops"), "{context}");
-        assert!(context.contains("WS5.6 workflow status eval remains open"), "{context}");
+        assert!(
+            context.contains("WS5.6 workflow status eval remains open"),
+            "{context}"
+        );
         assert!(context.contains("Verified outcomes"), "{context}");
         assert!(context.contains("Render deck artifacts"), "{context}");
         assert!(context.contains("Recent decisions"), "{context}");
-        assert!(context.contains("why: New deliverables would reopen fragility"), "{context}");
+        assert!(
+            context.contains("why: New deliverables would reopen fragility"),
+            "{context}"
+        );
         assert!(context.contains("reports/status.md"), "{context}");
     }
 
@@ -43334,7 +47000,10 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             "Leave the board brief in chat",
             "local managed path",
         ] {
-            assert!(artifact_context.contains(expected), "missing {expected:?}: {artifact_context}");
+            assert!(
+                artifact_context.contains(expected),
+                "missing {expected:?}: {artifact_context}"
+            );
         }
 
         let status_context = super::workflow_status_context_for_query(
@@ -43357,7 +47026,10 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             "Evidence artifacts",
             "board-brief.docx",
         ] {
-            assert!(status_context.contains(expected), "missing {expected:?}: {status_context}");
+            assert!(
+                status_context.contains(expected),
+                "missing {expected:?}: {status_context}"
+            );
         }
     }
 
@@ -43392,14 +47064,19 @@ data: [DONE]\n";
         // Detection: local daemon + cloud are Ollama; Z.ai / OpenAI are not.
         assert!(crate::is_ollama_base("http://127.0.0.1:11434/v1"));
         assert!(crate::is_ollama_base("https://ollama.com/v1"));
-        assert!(!crate::is_ollama_base("https://api.z.ai/api/coding/paas/v4"));
+        assert!(!crate::is_ollama_base(
+            "https://api.z.ai/api/coding/paas/v4"
+        ));
         assert!(!crate::is_ollama_base("https://api.openai.com/v1"));
         // Endpoint: Ollama strips /v1 → native /api/chat; others → /chat/completions.
         assert_eq!(
             crate::chat_endpoint("http://127.0.0.1:11434/v1"),
             "http://127.0.0.1:11434/api/chat"
         );
-        assert_eq!(crate::chat_endpoint("https://ollama.com/v1"), "https://ollama.com/api/chat");
+        assert_eq!(
+            crate::chat_endpoint("https://ollama.com/v1"),
+            "https://ollama.com/api/chat"
+        );
         assert_eq!(
             crate::chat_endpoint("https://api.z.ai/api/coding/paas/v4"),
             "https://api.z.ai/api/coding/paas/v4/chat/completions"
@@ -43418,34 +47095,76 @@ data: [DONE]\n";
             }]
         })];
         let converted = crate::to_ollama_messages(&msgs);
-        assert_eq!(converted[0]["tool_calls"][0]["function"]["arguments"]["path"], "a.txt");
+        assert_eq!(
+            converted[0]["tool_calls"][0]["function"]["arguments"]["path"],
+            "a.txt"
+        );
     }
 
     #[test]
     fn auto_confirm_only_low_risk() {
-        assert!(is_auto_confirmable("preference", MemoryDataSensitivity::Internal, 0.9));
-        assert!(is_auto_confirmable("fact", MemoryDataSensitivity::Public, 0.85));
+        assert!(is_auto_confirmable(
+            "preference",
+            MemoryDataSensitivity::Internal,
+            0.9
+        ));
+        assert!(is_auto_confirmable(
+            "fact",
+            MemoryDataSensitivity::Public,
+            0.85
+        ));
         // Ordinary personal facts (possessions, family, city) are tagged `private` by
         // the extractor — they MUST auto-confirm, else they never reach the profile
         // and the assistant keeps re-asking what it already knows.
-        assert!(is_auto_confirmable("fact", MemoryDataSensitivity::Private, 0.9));
+        assert!(is_auto_confirmable(
+            "fact",
+            MemoryDataSensitivity::Private,
+            0.9
+        ));
         // Real PII (codice fiscale, health docs, addresses) → confidential/secret →
         // still waits for explicit user confirmation.
-        assert!(!is_auto_confirmable("fact", MemoryDataSensitivity::Secret, 0.99));
-        assert!(!is_auto_confirmable("fact", MemoryDataSensitivity::Confidential, 0.99));
+        assert!(!is_auto_confirmable(
+            "fact",
+            MemoryDataSensitivity::Secret,
+            0.99
+        ));
+        assert!(!is_auto_confirmable(
+            "fact",
+            MemoryDataSensitivity::Confidential,
+            0.99
+        ));
         // low confidence stays candidate
-        assert!(!is_auto_confirmable("preference", MemoryDataSensitivity::Internal, 0.5));
-        assert!(!is_auto_confirmable("fact", MemoryDataSensitivity::Private, 0.5));
+        assert!(!is_auto_confirmable(
+            "preference",
+            MemoryDataSensitivity::Internal,
+            0.5
+        ));
+        assert!(!is_auto_confirmable(
+            "fact",
+            MemoryDataSensitivity::Private,
+            0.5
+        ));
         // decisions are factual records of work → auto-confirm when confident + low-risk
-        assert!(is_auto_confirmable("decision", MemoryDataSensitivity::Internal, 0.9));
+        assert!(is_auto_confirmable(
+            "decision",
+            MemoryDataSensitivity::Internal,
+            0.9
+        ));
         // but a sensitive decision still waits for confirmation
-        assert!(!is_auto_confirmable("decision", MemoryDataSensitivity::Confidential, 0.99));
+        assert!(!is_auto_confirmable(
+            "decision",
+            MemoryDataSensitivity::Confidential,
+            0.99
+        ));
     }
 
     #[test]
     fn inbound_action_kill_switch_allowlist_and_master_toggle() {
         // Kill-switch off (default) → ignore everything.
-        assert_eq!(inbound_action(&ChannelSettings::default(), "alice"), InboundAction::Ignore);
+        assert_eq!(
+            inbound_action(&ChannelSettings::default(), "alice"),
+            InboundAction::Ignore
+        );
 
         let mut settings = ChannelSettings {
             enabled: true,
@@ -43465,10 +47184,22 @@ data: [DONE]\n";
     #[test]
     fn parse_approval_reply_parses_verb_and_code() {
         use super::parse_approval_reply;
-        assert_eq!(parse_approval_reply("OK 7F3"), Some((true, "7F3".to_string())));
-        assert_eq!(parse_approval_reply("si a1b"), Some((true, "A1B".to_string())));
-        assert_eq!(parse_approval_reply("NO 7F3"), Some((false, "7F3".to_string())));
-        assert_eq!(parse_approval_reply("annulla 7f3"), Some((false, "7F3".to_string())));
+        assert_eq!(
+            parse_approval_reply("OK 7F3"),
+            Some((true, "7F3".to_string()))
+        );
+        assert_eq!(
+            parse_approval_reply("si a1b"),
+            Some((true, "A1B".to_string()))
+        );
+        assert_eq!(
+            parse_approval_reply("NO 7F3"),
+            Some((false, "7F3".to_string()))
+        );
+        assert_eq!(
+            parse_approval_reply("annulla 7f3"),
+            Some((false, "7F3".to_string()))
+        );
         // Not a control reply → None (handled as a normal conversation message).
         assert_eq!(parse_approval_reply("ciao come stai"), None);
         assert_eq!(parse_approval_reply("ok"), None); // no code
@@ -43476,7 +47207,7 @@ data: [DONE]\n";
 
     #[test]
     fn bm25_rank_orders_by_relevance() {
-        use super::{bm25_rank, CapabilityEntry, CapabilitySource};
+        use super::{CapabilityEntry, CapabilitySource, bm25_rank};
         let entry = |key: &str, text: &str| CapabilityEntry {
             key: key.to_string(),
             desc: text.to_string(),
@@ -43487,7 +47218,10 @@ data: [DONE]\n";
         };
         let corpus = vec![
             entry("gmail_send", "send an email message via gmail"),
-            entry("calendar_list", "list upcoming calendar events and schedule"),
+            entry(
+                "calendar_list",
+                "list upcoming calendar events and schedule",
+            ),
             entry("weather", "current weather forecast and temperature"),
         ];
         // Query terms select the matching doc as #1.
@@ -43528,9 +47262,18 @@ data: [DONE]\n";
         assert!(!is_internal_task_kind("browser_task"));
         // Human labels.
         assert_eq!(humanize_task_kind("proactive_prompt"), "Automation");
-        assert_eq!(humanize_task_kind("capability.browser.snapshot"), "Browser: snapshot");
-        assert_eq!(humanize_task_kind("capability.github.find_repos"), "Github: find repos");
-        assert_eq!(humanize_task_kind("subagent.code_reviewer"), "Sub-agent: code_reviewer");
+        assert_eq!(
+            humanize_task_kind("capability.browser.snapshot"),
+            "Browser: snapshot"
+        );
+        assert_eq!(
+            humanize_task_kind("capability.github.find_repos"),
+            "Github: find repos"
+        );
+        assert_eq!(
+            humanize_task_kind("subagent.code_reviewer"),
+            "Sub-agent: code_reviewer"
+        );
     }
 
     #[test]
@@ -43538,13 +47281,18 @@ data: [DONE]\n";
         assert_eq!(strip_json_fences("```json\n{\"a\":1}\n```"), "{\"a\":1}");
         assert_eq!(strip_json_fences("```\n{\"a\":1}\n```"), "{\"a\":1}");
         assert_eq!(strip_json_fences("{\"a\":1}"), "{\"a\":1}");
-        assert_eq!(normalize_for_dedup("  Preferisce   risposte  BREVI "), "preferisce risposte brevi");
+        assert_eq!(
+            normalize_for_dedup("  Preferisce   risposte  BREVI "),
+            "preferisce risposte brevi"
+        );
     }
 
     #[test]
     fn skill_id_from_command_extracts_id() {
         assert_eq!(
-            skill_id_from_command("python3 /home/agent/skills/polymarket-trade/scripts/p.py search btc"),
+            skill_id_from_command(
+                "python3 /home/agent/skills/polymarket-trade/scripts/p.py search btc"
+            ),
             Some("polymarket-trade".to_string())
         );
         assert_eq!(skill_id_from_command("ls -la"), None);
@@ -43578,11 +47326,17 @@ data: [DONE]\n";
     fn deck_slide_image_prompt_avoids_rendering_title_text() {
         let prompt = super::deck_slide_image_prompt("Local-first AI for PMI 2026", "#14947d");
 
-        assert!(!prompt.contains("\"Local-first AI for PMI 2026\""), "{prompt}");
+        assert!(
+            !prompt.contains("\"Local-first AI for PMI 2026\""),
+            "{prompt}"
+        );
         assert!(!prompt.contains("PMI 2026"), "{prompt}");
         assert!(prompt.contains("themes:"), "{prompt}");
         assert!(prompt.contains("No typography of any kind"), "{prompt}");
-        assert!(prompt.contains("Do not render the topic words as visible text"), "{prompt}");
+        assert!(
+            prompt.contains("Do not render the topic words as visible text"),
+            "{prompt}"
+        );
     }
 
     #[test]
@@ -43617,7 +47371,10 @@ data: [DONE]\n";
     #[test]
     fn wiki_title_and_filename_helpers_are_safe() {
         // Title = first non-empty line, length-bounded with an ellipsis.
-        assert_eq!(wiki_title_from_text("\n  Prenota treno  \naltro"), "Prenota treno");
+        assert_eq!(
+            wiki_title_from_text("\n  Prenota treno  \naltro"),
+            "Prenota treno"
+        );
         let long = "x".repeat(100);
         let title = wiki_title_from_text(&long);
         assert!(title.chars().count() <= 60 && title.ends_with('…'));
@@ -43659,7 +47416,10 @@ data: [DONE]\n";
         let outcome = capability_call_completed_outcome(&task, &result);
         assert!(outcome.completed);
         // Raw output is preserved in the audited checkpoint...
-        assert_eq!(outcome.checkpoint_payload["output"]["contents"], "SECRET-CONTENTS");
+        assert_eq!(
+            outcome.checkpoint_payload["output"]["contents"],
+            "SECRET-CONTENTS"
+        );
         // ...but never leaks into the redacted checkpoint or the chat message.
         assert!(outcome.checkpoint_redacted.get("output").is_none());
         assert!(!outcome.chat_message.contains("SECRET-CONTENTS"));
@@ -43688,10 +47448,7 @@ data: [DONE]\n";
 
     #[test]
     fn normalize_browser_call_manages_tab_for_planner_steps() {
-        use super::{
-        BROWSER_MANAGED_TARGET,
-        normalize_browser_call,
-    };
+        use super::{BROWSER_MANAGED_TARGET, normalize_browser_call};
         use local_first_browser_automation::BrowserMethod;
 
         // navigate {url} with no target -> idempotent open of the managed tab.
@@ -43721,8 +47478,7 @@ data: [DONE]\n";
         assert_eq!(params["target_id"], "t7");
 
         // tabless calls pass through untouched.
-        let (method, params) =
-            normalize_browser_call(BrowserMethod::Tabs, serde_json::json!({}));
+        let (method, params) = normalize_browser_call(BrowserMethod::Tabs, serde_json::json!({}));
         assert_eq!(method, BrowserMethod::Tabs);
         assert!(params.get("target_id").is_none());
     }
@@ -43795,7 +47551,13 @@ data: [DONE]\n";
 
         // One completes -> Running, progress 1.
         tasks
-            .update_task_status(&TaskId::new("orch_s1"), &user, &workspace, TaskStatus::Completed, None)
+            .update_task_status(
+                &TaskId::new("orch_s1"),
+                &user,
+                &workspace,
+                TaskStatus::Completed,
+                None,
+            )
             .unwrap();
         let counts = collect_member_counts(&tasks, &member_ids, &user, &workspace).unwrap();
         assert_eq!(
@@ -43811,7 +47573,13 @@ data: [DONE]\n";
 
         // Remaining complete + one fails -> all terminal with a failure -> Failed.
         tasks
-            .update_task_status(&TaskId::new("orch_s2"), &user, &workspace, TaskStatus::Completed, None)
+            .update_task_status(
+                &TaskId::new("orch_s2"),
+                &user,
+                &workspace,
+                TaskStatus::Completed,
+                None,
+            )
             .unwrap();
         tasks
             .update_task_status(
@@ -44099,7 +47867,10 @@ data: [DONE]\n";
 ‹‹FS_AUTHORIZE››{\"path\":\"/Users/fabio/Projects\",\"op\":\"list\"}‹‹/FS_AUTHORIZE››\n";
         let out = crate::rewrite_fs_authorize_to_done(text, "/Users/fabio/Projects");
         assert!(!out.contains("FS_AUTHORIZE"), "marker removed");
-        assert!(!out.contains("I need your authorization"), "prompt line removed");
+        assert!(
+            !out.contains("I need your authorization"),
+            "prompt line removed"
+        );
         assert!(out.contains("✓ Access granted to /Users/fabio/Projects"));
         // No-op when the marker is absent (idempotent on already-rewritten text).
         assert_eq!(crate::rewrite_fs_authorize_to_done("hi", "/x"), "hi");
@@ -44115,8 +47886,7 @@ data: [DONE]\n";
 ]}‹‹/CONNECT_SUGGEST››\n";
         // Mark the MCP server by its registry id.
         let out = crate::rewrite_connect_suggest_mark(text, "mcp", "io.mcp/playwright");
-        let card = &out[out.find("‹‹CONNECT_SUGGEST››").unwrap()
-            + "‹‹CONNECT_SUGGEST››".len()
+        let card = &out[out.find("‹‹CONNECT_SUGGEST››").unwrap() + "‹‹CONNECT_SUGGEST››".len()
             ..out.find("‹‹/CONNECT_SUGGEST››").unwrap()];
         let parsed: serde_json::Value = serde_json::from_str(card).unwrap();
         let items = parsed["items"].as_array().unwrap();
@@ -44127,13 +47897,15 @@ data: [DONE]\n";
         assert!(out.contains("CONNECT_SUGGEST"));
         // Skill/Composio keyed by slug.
         let out2 = crate::rewrite_connect_suggest_mark(&out, "composio", "gmail");
-        let card2 = &out2[out2.find("‹‹CONNECT_SUGGEST››").unwrap()
-            + "‹‹CONNECT_SUGGEST››".len()
+        let card2 = &out2[out2.find("‹‹CONNECT_SUGGEST››").unwrap() + "‹‹CONNECT_SUGGEST››".len()
             ..out2.find("‹‹/CONNECT_SUGGEST››").unwrap()];
         let parsed2: serde_json::Value = serde_json::from_str(card2).unwrap();
         assert_eq!(parsed2["items"][2]["connected"], serde_json::json!(true));
         // No-op when the marker is absent.
-        assert_eq!(crate::rewrite_connect_suggest_mark("ciao", "mcp", "x"), "ciao");
+        assert_eq!(
+            crate::rewrite_connect_suggest_mark("ciao", "mcp", "x"),
+            "ciao"
+        );
     }
 
     #[test]
@@ -44150,7 +47922,10 @@ data: [DONE]\n";
         let roots = vec![base.clone()];
         assert!(crate::fs_path_authorized(&base, &roots), "root itself");
         assert!(crate::fs_path_authorized(&inside, &roots), "subdir");
-        assert!(!crate::fs_path_authorized(std::path::Path::new("/"), &roots), "outside");
+        assert!(
+            !crate::fs_path_authorized(std::path::Path::new("/"), &roots),
+            "outside"
+        );
         assert!(
             !crate::fs_path_authorized(&base.join("does-not-exist"), &roots),
             "non-existent can't be authorized"
@@ -44160,8 +47935,7 @@ data: [DONE]\n";
 
     #[test]
     fn mcp_chat_tool_name_round_trips_collision_safe() {
-        let provider =
-            local_first_capabilities::ProviderId::new("mcp:filesystem".to_string());
+        let provider = local_first_capabilities::ProviderId::new("mcp:filesystem".to_string());
         // Encode → namespaced, decode → original provider + tool.
         let name = crate::mcp_chat_tool_name(&provider, "read_file");
         assert_eq!(name, "mcp__filesystem__read_file");
@@ -44229,7 +48003,10 @@ data: [DONE]\n";
         // Off by default → use the on-host browser.
         assert_eq!(resolve_contained_computer_cdp(None, None), None);
         assert_eq!(resolve_contained_computer_cdp(None, Some("0")), None);
-        assert_eq!(resolve_contained_computer_cdp(Some("   "), Some("false")), None);
+        assert_eq!(
+            resolve_contained_computer_cdp(Some("   "), Some("false")),
+            None
+        );
         // Flag enables the default local endpoint.
         assert_eq!(
             resolve_contained_computer_cdp(None, Some("1")),
@@ -44299,17 +48076,29 @@ data: [DONE]\n";
     #[test]
     fn discovery_search_ranks_relevant_tools_first() {
         let index = vec![
-            catalog_entry("GMAIL_FETCH_EMAILS", "Fetch a list of email messages from Gmail"),
+            catalog_entry(
+                "GMAIL_FETCH_EMAILS",
+                "Fetch a list of email messages from Gmail",
+            ),
             catalog_entry("GMAIL_SEND_EMAIL", "Send an email message via Gmail"),
-            catalog_entry("GOOGLECALENDAR_EVENTS_LIST", "List calendar events in a time range"),
+            catalog_entry(
+                "GOOGLECALENDAR_EVENTS_LIST",
+                "List calendar events in a time range",
+            ),
         ];
         let hits = search_composio_catalog(&index, "unread emails", 5);
-        assert_eq!(hits.first().map(|(s, _)| s.as_str()), Some("GMAIL_FETCH_EMAILS"));
+        assert_eq!(
+            hits.first().map(|(s, _)| s.as_str()),
+            Some("GMAIL_FETCH_EMAILS")
+        );
         // Calendar tool has no overlap with "email" tokens → excluded.
         assert!(hits.iter().all(|(s, _)| s.starts_with("GMAIL")));
 
         let cal = search_composio_catalog(&index, "calendar events", 5);
-        assert_eq!(cal.first().map(|(s, _)| s.as_str()), Some("GOOGLECALENDAR_EVENTS_LIST"));
+        assert_eq!(
+            cal.first().map(|(s, _)| s.as_str()),
+            Some("GOOGLECALENDAR_EVENTS_LIST")
+        );
 
         // Empty query is a harmless browse (returns up to k), never panics.
         assert!(!search_composio_catalog(&index, "", 2).is_empty());
@@ -44353,7 +48142,10 @@ data: [DONE]\n";
         ];
         prune_browser_history(&mut messages, &ids);
         assert_eq!(messages[1]["content"], serde_json::json!("original"));
-        assert_eq!(messages[3]["content"], serde_json::json!(super::PRUNED_SNAPSHOT_STUB));
+        assert_eq!(
+            messages[3]["content"],
+            serde_json::json!(super::PRUNED_SNAPSHOT_STUB)
+        );
         assert_eq!(messages[4]["content"], serde_json::json!("composio result"));
         assert_eq!(messages[5]["content"], serde_json::json!("SNAP-NEW huge"));
     }
@@ -44382,9 +48174,8 @@ data: [DONE]\n";
     #[test]
     fn prune_noop_without_browser_ids() {
         let ids: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
-        let mut messages = vec![
-            serde_json::json!({ "role": "tool", "tool_call_id": "b1", "content": "snap" }),
-        ];
+        let mut messages =
+            vec![serde_json::json!({ "role": "tool", "tool_call_id": "b1", "content": "snap" })];
         let before = messages.clone();
         prune_browser_history(&mut messages, &ids);
         assert_eq!(messages, before);
@@ -44474,15 +48265,24 @@ data: [DONE]\n";
         unsafe {
             std::env::set_var("HOMUN_TASK_WORKER_COUNT", "0");
         }
-        assert_eq!(task_executor_worker_count(), TASK_EXECUTOR_DEFAULT_WORKER_COUNT);
+        assert_eq!(
+            task_executor_worker_count(),
+            TASK_EXECUTOR_DEFAULT_WORKER_COUNT
+        );
         unsafe {
             std::env::set_var("HOMUN_TASK_WORKER_COUNT", "99");
         }
-        assert_eq!(task_executor_worker_count(), TASK_EXECUTOR_DEFAULT_WORKER_COUNT);
+        assert_eq!(
+            task_executor_worker_count(),
+            TASK_EXECUTOR_DEFAULT_WORKER_COUNT
+        );
         unsafe {
             std::env::remove_var("HOMUN_TASK_WORKER_COUNT");
         }
-        assert_eq!(task_executor_worker_count(), TASK_EXECUTOR_DEFAULT_WORKER_COUNT);
+        assert_eq!(
+            task_executor_worker_count(),
+            TASK_EXECUTOR_DEFAULT_WORKER_COUNT
+        );
         unsafe {
             if let Some(value) = &restore {
                 std::env::set_var("HOMUN_TASK_WORKER_COUNT", value);
@@ -44492,8 +48292,14 @@ data: [DONE]\n";
 
     #[test]
     fn task_executor_worker_id_is_stable_per_index() {
-        assert_eq!(task_executor_worker_id(0), "desktop-gateway-background-worker-0");
-        assert_eq!(task_executor_worker_id(2), "desktop-gateway-background-worker-2");
+        assert_eq!(
+            task_executor_worker_id(0),
+            "desktop-gateway-background-worker-0"
+        );
+        assert_eq!(
+            task_executor_worker_id(2),
+            "desktop-gateway-background-worker-2"
+        );
     }
 
     #[test]
@@ -44535,7 +48341,13 @@ data: [DONE]\n";
             1
         );
         let ready = local_first_task_runtime::TaskScheduler::new()
-            .ready_tasks(&store, &user, &workspace, time::OffsetDateTime::now_utc(), 10)
+            .ready_tasks(
+                &store,
+                &user,
+                &workspace,
+                time::OffsetDateTime::now_utc(),
+                10,
+            )
             .unwrap();
 
         assert!(ready.iter().any(|task| task.task_id.as_str() == "blocked"));

@@ -247,7 +247,11 @@ fn layout(title: &str, blocks: &[Block]) -> Vec<Line> {
 
 /// Renders Markdown to a paginated A4 PDF and returns its bytes.
 pub fn markdown_to_pdf(title: &str, markdown: &str) -> Result<Vec<u8>, String> {
-    let doc_title = if title.trim().is_empty() { "Document" } else { title.trim() };
+    let doc_title = if title.trim().is_empty() {
+        "Document"
+    } else {
+        title.trim()
+    };
     let (doc, page1, layer1): (PdfDocumentReference, _, _) = printpdf::PdfDocument::new(
         doc_title,
         Mm(PAGE_W_MM as f32),
@@ -255,12 +259,15 @@ pub fn markdown_to_pdf(title: &str, markdown: &str) -> Result<Vec<u8>, String> {
         "Layer 1",
     );
 
-    let regular: IndirectFontRef =
-        doc.add_builtin_font(BuiltinFont::Helvetica).map_err(|e| e.to_string())?;
-    let bold: IndirectFontRef =
-        doc.add_builtin_font(BuiltinFont::HelveticaBold).map_err(|e| e.to_string())?;
-    let mono: IndirectFontRef =
-        doc.add_builtin_font(BuiltinFont::Courier).map_err(|e| e.to_string())?;
+    let regular: IndirectFontRef = doc
+        .add_builtin_font(BuiltinFont::Helvetica)
+        .map_err(|e| e.to_string())?;
+    let bold: IndirectFontRef = doc
+        .add_builtin_font(BuiltinFont::HelveticaBold)
+        .map_err(|e| e.to_string())?;
+    let mono: IndirectFontRef = doc
+        .add_builtin_font(BuiltinFont::Courier)
+        .map_err(|e| e.to_string())?;
 
     let blocks = parse_blocks(markdown);
     let lines = layout(title, &blocks);
@@ -286,7 +293,13 @@ pub fn markdown_to_pdf(title: &str, markdown: &str) -> Result<Vec<u8>, String> {
             } else {
                 &regular
             };
-            layer.use_text(&line.text, line.size as f32, Mm(MARGIN_MM as f32), Mm(y as f32), font);
+            layer.use_text(
+                &line.text,
+                line.size as f32,
+                Mm(MARGIN_MM as f32),
+                Mm(y as f32),
+                font,
+            );
         }
     }
 

@@ -20,14 +20,14 @@ use std::sync::atomic::{AtomicU64, Ordering};
 /// Tokenizes snake/kebab/camelCase. Kept in sync with the Composio verb lists.
 pub fn name_is_read_only(name: &str) -> bool {
     const READ_VERBS: &[&str] = &[
-        "search", "get", "list", "fetch", "find", "retrieve", "view", "read", "query",
-        "lookup", "describe", "count", "check", "export", "browse", "scan", "poll",
+        "search", "get", "list", "fetch", "find", "retrieve", "view", "read", "query", "lookup",
+        "describe", "count", "check", "export", "browse", "scan", "poll",
     ];
     const WRITE_VERBS: &[&str] = &[
-        "create", "update", "delete", "send", "add", "insert", "modify", "edit", "remove",
-        "set", "write", "upload", "import", "enable", "disable", "revoke", "grant", "cancel",
-        "rename", "publish", "reply", "forward", "archive", "move", "trash", "mark", "clear",
-        "patch", "run", "execute", "trigger", "approve", "submit", "pay", "buy",
+        "create", "update", "delete", "send", "add", "insert", "modify", "edit", "remove", "set",
+        "write", "upload", "import", "enable", "disable", "revoke", "grant", "cancel", "rename",
+        "publish", "reply", "forward", "archive", "move", "trash", "mark", "clear", "patch", "run",
+        "execute", "trigger", "approve", "submit", "pay", "buy",
     ];
     let mut tokens: Vec<String> = Vec::new();
     let mut cur = String::new();
@@ -409,7 +409,9 @@ impl<T: McpTransport> McpCapabilityProvider<T> {
             name: name.to_string(),
             provider_id: self.id.clone(),
             provider_kind: CapabilityProviderKind::Mcp,
-            action: policy.map(|policy| policy.action).unwrap_or(inferred_action),
+            action: policy
+                .map(|policy| policy.action)
+                .unwrap_or(inferred_action),
             description: tool
                 .get("description")
                 .and_then(|value| value.as_str())
@@ -437,8 +439,13 @@ mod tests {
     fn reads_are_read_only() {
         // Incl. noun homographs after a read verb (order/post/draft are nouns here).
         for name in [
-            "search_products", "get_order", "list_items", "fetch_prices", "searchProducts",
-            "get_post", "list_drafts",
+            "search_products",
+            "get_order",
+            "list_items",
+            "fetch_prices",
+            "searchProducts",
+            "get_post",
+            "list_drafts",
         ] {
             assert!(name_is_read_only(name), "{name} should be read-only");
         }
@@ -447,7 +454,13 @@ mod tests {
     #[test]
     fn writes_and_ambiguous_are_not() {
         // Leading write verb, or no read verb at all → stays confirmed.
-        for name in ["create_item", "delete_order", "send_message", "post_message", "process_order"] {
+        for name in [
+            "create_item",
+            "delete_order",
+            "send_message",
+            "post_message",
+            "process_order",
+        ] {
             assert!(!name_is_read_only(name), "{name} should NOT be read-only");
         }
     }

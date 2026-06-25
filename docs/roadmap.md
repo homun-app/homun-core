@@ -468,6 +468,13 @@ primo percorso locale verde e WS5 è chiusa localmente/gate:
     composer usa il linguaggio capability/context e mostra solo voci realmente
     applicabili.
 
+WS5 memory identity hygiene 2026-06-25: `MemoryFacade::merge_entities` e' il
+percorso canonico per unire entita': relazioni repointate, alias/metadata
+conservati, assorbito tombstonato. Owner channel/handle convergono su
+`person:self`; root progetto stabile `workspace:<id>` evita duplicati; graph/wiki
+vengono riconciliati dopo mutazioni e la UI memoria espone merge/suggerimenti
+espliciti senza auto-merge fragile per solo nome uguale.
+
 Prima di pubblicare/taggare resta prudente ripetere lo smoke manuale in-app su
 una automazione schedulata reale con il binario aggiornato. Il primo smoke ha
 trovato e corretto una falsa chiusura su piano non completato.

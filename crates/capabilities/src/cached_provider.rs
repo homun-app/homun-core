@@ -1,7 +1,7 @@
 use crate::{
     CapabilityCall, CapabilityCallResult, CapabilityConnection, CapabilityError,
-    CapabilityProvider, CapabilityProviderKind, CapabilityResult, CapabilityTool, CapabilityTrigger,
-    ManagedProviderMetadata, ProviderId,
+    CapabilityProvider, CapabilityProviderKind, CapabilityResult, CapabilityTool,
+    CapabilityTrigger, ManagedProviderMetadata, ProviderId,
 };
 
 /// A read-only capability provider that exposes a provider's cached tools for

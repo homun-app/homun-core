@@ -88,11 +88,13 @@ const DOCKER_CANDIDATES: &[&str] = &[
     "/Applications/Docker.app/Contents/Resources/bin/docker",
 ];
 #[cfg(target_os = "linux")]
-const DOCKER_CANDIDATES: &[&str] =
-    &["/usr/bin/docker", "/usr/local/bin/docker", "/opt/homebrew/bin/docker"];
+const DOCKER_CANDIDATES: &[&str] = &[
+    "/usr/bin/docker",
+    "/usr/local/bin/docker",
+    "/opt/homebrew/bin/docker",
+];
 #[cfg(target_os = "windows")]
-const DOCKER_CANDIDATES: &[&str] =
-    &[r"C:\Program Files\Docker\Docker\resources\bin\docker.exe"];
+const DOCKER_CANDIDATES: &[&str] = &[r"C:\Program Files\Docker\Docker\resources\bin\docker.exe"];
 #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
 const DOCKER_CANDIDATES: &[&str] = &[];
 
@@ -126,9 +128,16 @@ fn docker_bin() -> String {
 fn path_with_docker_dir() -> String {
     let current = std::env::var("PATH").unwrap_or_default();
     let docker = docker_bin();
-    if let Some(dir) = Path::new(&docker).parent().map(|d| d.to_string_lossy().into_owned()) {
+    if let Some(dir) = Path::new(&docker)
+        .parent()
+        .map(|d| d.to_string_lossy().into_owned())
+    {
         if !dir.is_empty() && !current.split(':').any(|p| p == dir) {
-            return if current.is_empty() { dir } else { format!("{dir}:{current}") };
+            return if current.is_empty() {
+                dir
+            } else {
+                format!("{dir}:{current}")
+            };
         }
     }
     current
@@ -140,7 +149,13 @@ pub fn docker_running() -> bool {
 
 pub fn container_up() -> bool {
     Command::new(docker_bin())
-        .args(["ps", "--filter", &format!("name={CONTAINER}"), "--format", "{{.Names}}"])
+        .args([
+            "ps",
+            "--filter",
+            &format!("name={CONTAINER}"),
+            "--format",
+            "{{.Names}}",
+        ])
         .output()
         .ok()
         .map(|o| String::from_utf8_lossy(&o.stdout).contains(CONTAINER))
@@ -254,11 +269,14 @@ fn start_docker_engine() -> Option<String> {
 
 fn docker_not_installed_msg() -> String {
     #[cfg(target_os = "macos")]
-    return "Docker is not installed. Install Docker Desktop (or Colima) to run skills.".to_string();
+    return "Docker is not installed. Install Docker Desktop (or Colima) to run skills."
+        .to_string();
     #[cfg(target_os = "windows")]
-    return "Docker is not installed. Install Docker Desktop for Windows to run skills.".to_string();
+    return "Docker is not installed. Install Docker Desktop for Windows to run skills."
+        .to_string();
     #[cfg(target_os = "linux")]
-    return "Docker is not installed. Install Docker Engine or Docker Desktop to run skills.".to_string();
+    return "Docker is not installed. Install Docker Engine or Docker Desktop to run skills."
+        .to_string();
     #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
     return "Docker is not installed. Install it to run skills.".to_string();
 }
@@ -269,11 +287,17 @@ fn docker_start_failed_msg(attempted: Option<&str>) -> String {
         None => " I couldn't find a way to start it automatically on this system.".to_string(),
     };
     #[cfg(target_os = "macos")]
-    return format!("Docker is installed but not ready.{tail} Open Docker Desktop (or start Colima) manually and try again.");
+    return format!(
+        "Docker is installed but not ready.{tail} Open Docker Desktop (or start Colima) manually and try again."
+    );
     #[cfg(target_os = "windows")]
-    return format!("Docker is installed but not ready.{tail} Open Docker Desktop manually and try again.");
+    return format!(
+        "Docker is installed but not ready.{tail} Open Docker Desktop manually and try again."
+    );
     #[cfg(target_os = "linux")]
-    return format!("Docker is installed but not ready.{tail} Start the service (e.g. `systemctl --user start docker-desktop` or `sudo systemctl start docker`) and try again.");
+    return format!(
+        "Docker is installed but not ready.{tail} Start the service (e.g. `systemctl --user start docker-desktop` or `sudo systemctl start docker`) and try again."
+    );
     #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
     return format!("Docker is installed but not ready.{tail}");
 }
@@ -319,7 +343,10 @@ fn up_script() -> Option<PathBuf> {
             return Some(path);
         }
     }
-    for base in ["runtimes/contained-computer/up.sh", "../runtimes/contained-computer/up.sh"] {
+    for base in [
+        "runtimes/contained-computer/up.sh",
+        "../runtimes/contained-computer/up.sh",
+    ] {
         let path = PathBuf::from(base);
         if path.is_file() {
             return Some(path);
@@ -396,7 +423,10 @@ pub fn ensure_contained_computer() -> Result<(), String> {
             .env("HOMUN_CC_PROFILE_DIR", cc_profile_dir())
             // Stamp the built image with the definition hash so a later update can
             // detect a stale running container and rebuild it.
-            .env("HOMUN_CC_HASH", contained_computer_def_hash().unwrap_or_default())
+            .env(
+                "HOMUN_CC_HASH",
+                contained_computer_def_hash().unwrap_or_default(),
+            )
             // Layer D: the container defaults to UTC (debian-slim ships no
             // /etc/localtime). Pass the user's effective IANA zone so `date`,
             // Python AND Chromium's clock inside the container match the user —
@@ -412,20 +442,47 @@ pub fn ensure_contained_computer() -> Result<(), String> {
             std::thread::sleep(Duration::from_secs(1));
         }
     }
-    Err("The contained computer (homun-cc) is not running and I couldn't start it. \
+    Err(
+        "The contained computer (homun-cc) is not running and I couldn't start it. \
 Start it with runtimes/contained-computer/up.sh."
-        .to_string())
+            .to_string(),
+    )
 }
 
 /// Source-tree noise excluded from extraction: vendored deps (site-packages catches
 /// any venv), build output, caches, and heavy data files + shell wrappers that aren't
 /// the project's program structure. Mirrors the gateway's `is_noise_dir`/`is_code_file`.
 const GRAPHIFY_EXCLUDES: &[&str] = &[
-    ".git", "node_modules", "site-packages", "target", "vendor", ".venv", "venv",
-    "*.egg-info", ".tox", ".mypy_cache", ".pytest_cache", ".ruff_cache", ".next",
-    "coverage", "dist", "build", "__pycache__", "graphify-out",
-    "*.csv", "*.log", "*.so", "*.mat", "*.sav", "*.db", "*.dat", "*.jsonl",
-    "*.parquet", "*.lock", "*.sh", "*.bash",
+    ".git",
+    "node_modules",
+    "site-packages",
+    "target",
+    "vendor",
+    ".venv",
+    "venv",
+    "*.egg-info",
+    ".tox",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".next",
+    "coverage",
+    "dist",
+    "build",
+    "__pycache__",
+    "graphify-out",
+    "*.csv",
+    "*.log",
+    "*.so",
+    "*.mat",
+    "*.sav",
+    "*.db",
+    "*.dat",
+    "*.jsonl",
+    "*.parquet",
+    "*.lock",
+    "*.sh",
+    "*.bash",
 ];
 
 /// PATH with `~/.local/bin` prepended — where `uv tool install` puts CLIs (graphify,
@@ -502,7 +559,11 @@ pub fn ensure_project_git(folder: &Path) -> bool {
     add.extend(["add", "-A"]);
     git(&add);
     let mut commit = identity.to_vec();
-    commit.extend(["commit", "-m", "Homun: initial baseline (versioning enabled)"]);
+    commit.extend([
+        "commit",
+        "-m",
+        "Homun: initial baseline (versioning enabled)",
+    ]);
     git(&commit);
     true
 }
@@ -559,7 +620,11 @@ pub fn run_graphify(project: &Path, out: &Path) -> Result<(), String> {
     // changed/vanished mid-copy" — expected on a live project. The real gate is whether
     // graphify produces a graph.json below.
     let mut rsync = Command::new("rsync");
-    rsync.arg("-a").arg("--inplace").arg("--delete").arg("--exclude=graphify-out");
+    rsync
+        .arg("-a")
+        .arg("--inplace")
+        .arg("--delete")
+        .arg("--exclude=graphify-out");
     for pattern in GRAPHIFY_EXCLUDES {
         rsync.arg(format!("--exclude={pattern}"));
     }
@@ -573,7 +638,10 @@ pub fn run_graphify(project: &Path, out: &Path) -> Result<(), String> {
     if !copied.status.success() {
         eprintln!(
             "project-graph: rsync reported files changed during the copy (continuing): {}",
-            String::from_utf8_lossy(&copied.stderr).lines().next_back().unwrap_or("")
+            String::from_utf8_lossy(&copied.stderr)
+                .lines()
+                .next_back()
+                .unwrap_or("")
         );
     }
 
@@ -603,9 +671,15 @@ pub fn run_graphify(project: &Path, out: &Path) -> Result<(), String> {
 pub fn sync_skill(skill_dir: &Path, skill_id: &str) {
     let docker = docker_bin();
     let dest = format!("{CONTAINER_SKILLS_DIR}/{skill_id}");
-    let _ = Command::new(&docker).args(["exec", CONTAINER, "mkdir", "-p", &dest]).output();
     let _ = Command::new(&docker)
-        .args(["cp", &format!("{}/.", skill_dir.display()), &format!("{CONTAINER}:{dest}")])
+        .args(["exec", CONTAINER, "mkdir", "-p", &dest])
+        .output();
+    let _ = Command::new(&docker)
+        .args([
+            "cp",
+            &format!("{}/.", skill_dir.display()),
+            &format!("{CONTAINER}:{dest}"),
+        ])
         .output();
 }
 

@@ -13,7 +13,7 @@
 use crate::MemoryRef;
 use crate::WorkspaceId;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 /// Reserved workspace id for the PERSONAL (global, cross-project) scope. Personal
 /// memory is private and local; it is never bound to a single project.
@@ -32,7 +32,10 @@ pub enum MemoryScope {
     /// Bound to a specific project/workspace.
     Project(WorkspaceId),
     /// Episodic memory of one conversation, kept under its project workspace.
-    Thread { project: WorkspaceId, thread_id: String },
+    Thread {
+        project: WorkspaceId,
+        thread_id: String,
+    },
 }
 
 impl MemoryScope {
@@ -99,9 +102,9 @@ pub enum EntityKind {
 #[serde(rename_all = "snake_case")]
 pub enum RelationKind {
     // Decision edges
-    DecidedFor,   // decision -> objective
-    Affects,      // decision -> artifact
-    InformedBy,   // decision -> evidence
+    DecidedFor, // decision -> objective
+    Affects,    // decision -> artifact
+    InformedBy, // decision -> evidence
     AlternativeTo,
     Supersedes,   // mirrors MemoryRecord.supersedes for graph traversal
     RationaleFor, // rationale/evidence -> decision/objective
@@ -253,7 +256,10 @@ mod tests {
 
     #[test]
     fn personal_scope_maps_to_reserved_workspace() {
-        assert_eq!(MemoryScope::Personal.workspace_id().as_str(), PERSONAL_WORKSPACE);
+        assert_eq!(
+            MemoryScope::Personal.workspace_id().as_str(),
+            PERSONAL_WORKSPACE
+        );
         assert!(MemoryScope::Personal.is_personal());
         let project = MemoryScope::Project(WorkspaceId::new("acme"));
         assert_eq!(project.workspace_id().as_str(), "acme");
@@ -282,10 +288,22 @@ mod tests {
             assert_eq!(MemoryKind::from_tag(kind.as_str()), Some(kind));
         }
         assert_eq!(EntityKind::from_tag("function"), Some(EntityKind::Function));
-        assert_eq!(RelationKind::from_tag("decided_for"), Some(RelationKind::DecidedFor));
-        assert_eq!(RelationKind::from_tag("rationale_for"), Some(RelationKind::RationaleFor));
-        assert_eq!(RelationKind::from_tag("produced"), Some(RelationKind::Produced));
-        assert_eq!(RelationKind::from_tag("derived_from"), Some(RelationKind::DerivedFrom));
+        assert_eq!(
+            RelationKind::from_tag("decided_for"),
+            Some(RelationKind::DecidedFor)
+        );
+        assert_eq!(
+            RelationKind::from_tag("rationale_for"),
+            Some(RelationKind::RationaleFor)
+        );
+        assert_eq!(
+            RelationKind::from_tag("produced"),
+            Some(RelationKind::Produced)
+        );
+        assert_eq!(
+            RelationKind::from_tag("derived_from"),
+            Some(RelationKind::DerivedFrom)
+        );
         assert_eq!(RelationKind::from_tag("nope"), None);
     }
 

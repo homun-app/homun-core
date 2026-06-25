@@ -78,21 +78,90 @@ struct ApiStats {
 pub fn derive_category(name: &str, description: &str) -> String {
     let hay = format!("{name} {description}").to_lowercase();
     let has = |needles: &[&str]| needles.iter().any(|n| hay.contains(n));
-    if has(&["unit test", "test suite", "e2e", "coverage", "pytest", "jest", "linter"]) {
+    if has(&[
+        "unit test",
+        "test suite",
+        "e2e",
+        "coverage",
+        "pytest",
+        "jest",
+        "linter",
+    ]) {
         "Testing"
-    } else if has(&["security", "secret", "vuln", "auth", "encrypt", "audit", "compliance", "owasp"]) {
+    } else if has(&[
+        "security",
+        "secret",
+        "vuln",
+        "auth",
+        "encrypt",
+        "audit",
+        "compliance",
+        "owasp",
+    ]) {
         "Security"
-    } else if has(&["deploy", "docker", "kubernetes", "k8s", "terraform", "infra", "ci/cd", "devops", "cloud", "aws", "gcp", "azure"]) {
+    } else if has(&[
+        "deploy",
+        "docker",
+        "kubernetes",
+        "k8s",
+        "terraform",
+        "infra",
+        "ci/cd",
+        "devops",
+        "cloud",
+        "aws",
+        "gcp",
+        "azure",
+    ]) {
         "Infrastructure"
-    } else if has(&["data", "sql", "etl", "pandas", "dataframe", "analytics", "database", "warehouse", "csv", "scrap"]) {
+    } else if has(&[
+        "data",
+        "sql",
+        "etl",
+        "pandas",
+        "dataframe",
+        "analytics",
+        "database",
+        "warehouse",
+        "csv",
+        "scrap",
+    ]) {
         "Data"
-    } else if has(&["design", "figma", "css", "tailwind", "brand", "layout", "icon", "image", "canvas", "frontend"]) {
+    } else if has(&[
+        "design", "figma", "css", "tailwind", "brand", "layout", "icon", "image", "canvas",
+        "frontend",
+    ]) {
         "Design"
-    } else if has(&["doc", "readme", "markdown", "writing", "pdf", "docx", "report", "slide", "pptx"]) {
+    } else if has(&[
+        "doc", "readme", "markdown", "writing", "pdf", "docx", "report", "slide", "pptx",
+    ]) {
         "Docs"
-    } else if has(&["llm", "agent", "prompt", "rag", "embedding", "model", "ai ", "ml ", "openai", "anthropic"]) {
+    } else if has(&[
+        "llm",
+        "agent",
+        "prompt",
+        "rag",
+        "embedding",
+        "model",
+        "ai ",
+        "ml ",
+        "openai",
+        "anthropic",
+    ]) {
         "AI Tools"
-    } else if has(&["code", "refactor", "git", "review", "debug", "compile", "typescript", "rust", "python", "api", "sdk"]) {
+    } else if has(&[
+        "code",
+        "refactor",
+        "git",
+        "review",
+        "debug",
+        "compile",
+        "typescript",
+        "rust",
+        "python",
+        "api",
+        "sdk",
+    ]) {
         "Development"
     } else {
         "Workflows"
@@ -165,7 +234,10 @@ pub async fn refresh_cache(http: &reqwest::Client, path: &Path) -> Result<usize,
         cursor = body.next_cursor;
     }
 
-    let cache = CatalogCache { fetched_at: now_secs(), entries };
+    let cache = CatalogCache {
+        fetched_at: now_secs(),
+        entries,
+    };
     let count = cache.entries.len();
     let json = serde_json::to_string(&cache).map_err(|e| e.to_string())?;
     std::fs::write(path, json).map_err(|e| e.to_string())?;
@@ -205,7 +277,11 @@ pub fn search(
         })
         .collect();
     scored.sort_by(|a, b| b.0.cmp(&a.0));
-    scored.into_iter().take(limit).map(|(_, e)| e.clone()).collect()
+    scored
+        .into_iter()
+        .take(limit)
+        .map(|(_, e)| e.clone())
+        .collect()
 }
 
 // ---- download + install (public ClawHub ZIP) -------------------------------
@@ -310,12 +386,30 @@ mod tests {
 
     #[test]
     fn category_classifier_buckets() {
-        assert_eq!(derive_category("pdf-extractor", "Extract text from PDF documents"), "Docs");
-        assert_eq!(derive_category("k8s-deployer", "Deploy to kubernetes clusters"), "Infrastructure");
-        assert_eq!(derive_category("rag-helper", "Build a RAG pipeline with embeddings"), "AI Tools");
-        assert_eq!(derive_category("pentest", "Scan for security vulnerabilities"), "Security");
-        assert_eq!(derive_category("coverage-bot", "Generate a test suite with coverage"), "Testing");
-        assert_eq!(derive_category("mystery", "helps with miscellaneous chores"), "Workflows");
+        assert_eq!(
+            derive_category("pdf-extractor", "Extract text from PDF documents"),
+            "Docs"
+        );
+        assert_eq!(
+            derive_category("k8s-deployer", "Deploy to kubernetes clusters"),
+            "Infrastructure"
+        );
+        assert_eq!(
+            derive_category("rag-helper", "Build a RAG pipeline with embeddings"),
+            "AI Tools"
+        );
+        assert_eq!(
+            derive_category("pentest", "Scan for security vulnerabilities"),
+            "Security"
+        );
+        assert_eq!(
+            derive_category("coverage-bot", "Generate a test suite with coverage"),
+            "Testing"
+        );
+        assert_eq!(
+            derive_category("mystery", "helps with miscellaneous chores"),
+            "Workflows"
+        );
     }
 
     #[test]
@@ -323,8 +417,22 @@ mod tests {
         let cache = CatalogCache {
             fetched_at: now_secs(),
             entries: vec![
-                CatalogEntry { slug: "a".into(), name: "PDF Tools".into(), description: "read pdf".into(), downloads: 1000, stars: 10, category: "Docs".into() },
-                CatalogEntry { slug: "b".into(), name: "K8s".into(), description: "deploy".into(), downloads: 5, stars: 0, category: "Infrastructure".into() },
+                CatalogEntry {
+                    slug: "a".into(),
+                    name: "PDF Tools".into(),
+                    description: "read pdf".into(),
+                    downloads: 1000,
+                    stars: 10,
+                    category: "Docs".into(),
+                },
+                CatalogEntry {
+                    slug: "b".into(),
+                    name: "K8s".into(),
+                    description: "deploy".into(),
+                    downloads: 5,
+                    stars: 0,
+                    category: "Infrastructure".into(),
+                },
             ],
         };
         let hits = search(&cache, "pdf", None, 10);

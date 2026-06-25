@@ -788,6 +788,16 @@ export type MemoryGraph = {
   total_nodes?: number;
 };
 
+export type MemoryHygieneSuggestion = {
+  survivor_ref: string;
+  absorbed_ref: string;
+  survivor_label: string;
+  absorbed_label: string;
+  reason: string;
+  safe_auto_merge: boolean;
+  confidence: number;
+};
+
 function scopeQuery(thread?: string, workspace?: string): string {
   const qs = new URLSearchParams();
   if (thread) qs.set("thread", thread);
@@ -798,6 +808,35 @@ function scopeQuery(thread?: string, workspace?: string): string {
 
 async function electronMemoryGraph(thread?: string, workspace?: string): Promise<MemoryGraph> {
   return gatewayGetJson<MemoryGraph>(`/api/memory/graph${scopeQuery(thread, workspace)}`);
+}
+
+async function electronMergeMemoryEntities(
+  survivorRef: string,
+  absorbedRef: string,
+  reason?: string,
+): Promise<void> {
+  const response = await fetch(`${DESKTOP_GATEWAY_URL}/api/memory/graph/merge`, {
+    method: "POST",
+    headers: { ...gatewayHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({
+      survivor_ref: survivorRef,
+      absorbed_ref: absorbedRef,
+      reason,
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(`Desktop Gateway memory graph merge HTTP ${response.status}`);
+  }
+}
+
+async function electronMemoryHygieneSuggestions(
+  thread?: string,
+  workspace?: string,
+): Promise<MemoryHygieneSuggestion[]> {
+  const { suggestions } = await gatewayGetJson<{ suggestions: MemoryHygieneSuggestion[] }>(
+    `/api/memory/hygiene/suggestions${scopeQuery(thread, workspace)}`,
+  );
+  return suggestions ?? [];
 }
 
 export type MemoryWikiPage = { path: string; title: string; body: string };
@@ -2468,6 +2507,10 @@ export const coreBridge = {
   saveArtifactContent: (thread: string, name: string, content: string) =>
     electronSaveArtifactContent(thread, name, content),
   memoryGraph: (thread?: string, workspace?: string) => electronMemoryGraph(thread, workspace),
+  mergeMemoryEntities: (survivorRef: string, absorbedRef: string, reason?: string) =>
+    electronMergeMemoryEntities(survivorRef, absorbedRef, reason),
+  memoryHygieneSuggestions: (thread?: string, workspace?: string) =>
+    electronMemoryHygieneSuggestions(thread, workspace),
   memoryWiki: (thread?: string, workspace?: string) => electronMemoryWiki(thread, workspace),
   saveMemoryWiki: (scope: { thread?: string; workspace?: string }, path: string, body: string) =>
     electronSaveMemoryWiki(scope, path, body),

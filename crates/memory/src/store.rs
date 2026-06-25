@@ -321,7 +321,8 @@ impl SQLiteMemoryStore {
                 row.get::<_, String>(0)
             })
             .map_err(|error| error.to_string())?;
-        rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|error| error.to_string())
     }
 
     pub fn search_memory_refs(
@@ -474,7 +475,12 @@ impl SQLiteMemoryStore {
             .execute(
                 "update memories set memory_type = ?1, updated_at = current_timestamp \
                  where ref = ?2 and user_id = ?3 and workspace_id = ?4",
-                params![new_type, reference.to_string(), user_id.as_str(), workspace_id.as_str()],
+                params![
+                    new_type,
+                    reference.to_string(),
+                    user_id.as_str(),
+                    workspace_id.as_str()
+                ],
             )
             .map_err(|error| error.to_string())?;
         Ok(())
@@ -483,7 +489,11 @@ impl SQLiteMemoryStore {
     /// Drop all imported code-graph data for a scope (entities + relations tagged
     /// `metadata.source = "graphify"`). Called before a re-import so a rebuilt project
     /// graph replaces the old one instead of accumulating. Derived data → hard delete.
-    pub fn clear_graphify(&self, user_id: &UserId, workspace_id: &WorkspaceId) -> Result<(), String> {
+    pub fn clear_graphify(
+        &self,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+    ) -> Result<(), String> {
         self.conn
             .execute(
                 "delete from relations where user_id = ?1 and workspace_id = ?2
@@ -530,7 +540,10 @@ impl SQLiteMemoryStore {
                and ({clauses}) \
              limit {limit}"
         );
-        let mut params: Vec<String> = vec![user_id.as_str().to_string(), workspace_id.as_str().to_string()];
+        let mut params: Vec<String> = vec![
+            user_id.as_str().to_string(),
+            workspace_id.as_str().to_string(),
+        ];
         for term in terms {
             params.push(format!("%{}%", term.to_lowercase()));
         }
@@ -564,7 +577,9 @@ impl SQLiteMemoryStore {
         entities: &[MemoryEntity],
         relations: &[MemoryRelation],
     ) -> Result<(usize, usize), String> {
-        self.conn.execute_batch("BEGIN").map_err(|e| e.to_string())?;
+        self.conn
+            .execute_batch("BEGIN")
+            .map_err(|e| e.to_string())?;
         let run = || -> Result<(usize, usize), String> {
             self.clear_graphify(user_id, workspace_id)?;
             for entity in entities {
@@ -577,7 +592,9 @@ impl SQLiteMemoryStore {
         };
         match run() {
             Ok(counts) => {
-                self.conn.execute_batch("COMMIT").map_err(|e| e.to_string())?;
+                self.conn
+                    .execute_batch("COMMIT")
+                    .map_err(|e| e.to_string())?;
                 Ok(counts)
             }
             Err(error) => {
@@ -598,7 +615,11 @@ impl SQLiteMemoryStore {
         self.conn
             .execute(
                 "delete from tombstones where ref = ?1 and user_id = ?2 and workspace_id = ?3",
-                params![reference.to_string(), user_id.as_str(), workspace_id.as_str()],
+                params![
+                    reference.to_string(),
+                    user_id.as_str(),
+                    workspace_id.as_str()
+                ],
             )
             .map_err(|error| error.to_string())?;
         Ok(())
@@ -949,7 +970,6 @@ impl SQLiteMemoryStore {
             .map_err(|error| error.to_string())
     }
 
-
     pub fn get_wiki_page(
         &self,
         reference: &MemoryRef,
@@ -1245,9 +1265,7 @@ impl SQLiteMemoryStore {
         ] {
             self.conn
                 .execute(
-                    &format!(
-                        "DELETE FROM {table} WHERE user_id = ?1 AND workspace_id = ?2"
-                    ),
+                    &format!("DELETE FROM {table} WHERE user_id = ?1 AND workspace_id = ?2"),
                     (uid, wid),
                 )
                 .map_err(|e| e.to_string())?;
@@ -1257,9 +1275,7 @@ impl SQLiteMemoryStore {
 
     /// Reclaims free space. Call periodically, NOT on every delete.
     pub fn vacuum(&self) -> Result<(), String> {
-        self.conn
-            .execute_batch("VACUUM")
-            .map_err(|e| e.to_string())
+        self.conn.execute_batch("VACUUM").map_err(|e| e.to_string())
     }
 
     fn is_tombstoned(

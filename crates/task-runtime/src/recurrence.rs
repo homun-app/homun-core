@@ -15,7 +15,10 @@ use time::{Duration, OffsetDateTime};
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Rule {
     Interval(Duration),
-    DailyAt { hour: i8, minute: i8 },
+    DailyAt {
+        hour: i8,
+        minute: i8,
+    },
     WeeklyAt {
         weekday: jiff::civil::Weekday,
         hour: i8,
@@ -82,15 +85,15 @@ fn parse(rule: &str) -> Option<Rule> {
         let rest = rest.trim_start_matches(['@', ' ']);
         let (days_str, times_str) = rest.split_once('@')?;
         let days_str = days_str.trim();
-        let weekdays: Vec<jiff::civil::Weekday> =
-            if matches!(days_str, "*" | "all" | "daily" | "") {
-                Vec::new()
-            } else {
-                days_str
-                    .split(',')
-                    .map(|d| parse_weekday(d.trim()))
-                    .collect::<Option<Vec<_>>>()?
-            };
+        let weekdays: Vec<jiff::civil::Weekday> = if matches!(days_str, "*" | "all" | "daily" | "")
+        {
+            Vec::new()
+        } else {
+            days_str
+                .split(',')
+                .map(|d| parse_weekday(d.trim()))
+                .collect::<Option<Vec<_>>>()?
+        };
         let times: Vec<(i8, i8)> = times_str
             .split(',')
             .map(|t| parse_hhmm(t.trim()))

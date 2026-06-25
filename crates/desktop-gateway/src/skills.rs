@@ -104,7 +104,11 @@ pub fn split_frontmatter(content: &str) -> (Frontmatter, String) {
         return (Frontmatter::default(), content.to_string());
     }
 
-    let body = lines.collect::<Vec<_>>().join("\n").trim_start().to_string();
+    let body = lines
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim_start()
+        .to_string();
     (parse_frontmatter(&fm_lines), body)
 }
 
@@ -301,7 +305,10 @@ fn summary_from(
         name: fm.name.unwrap_or_else(|| id.to_string()),
         description: fm.description.unwrap_or_default(),
         enabled: !disabled.contains(id),
-        source: origins.get(id).cloned().unwrap_or_else(|| "local".to_string()),
+        source: origins
+            .get(id)
+            .cloned()
+            .unwrap_or_else(|| "local".to_string()),
         version: fm.version,
         license: fm.license,
         allowed_tools: fm.allowed_tools,
@@ -330,7 +337,11 @@ pub fn load_detail(
     let (fm, body) = split_frontmatter(&content);
     let summary = summary_from(id, fm, disabled, origins);
     let files = build_file_tree(&dir, &dir, 0, &mut 0);
-    Ok(Some(SkillDetail { summary, body, files }))
+    Ok(Some(SkillDetail {
+        summary,
+        body,
+        files,
+    }))
 }
 
 /// Rejects ids that are not a single safe path segment (no separators, no `..`).
@@ -375,7 +386,12 @@ fn build_file_tree(root: &Path, dir: &Path, depth: usize, count: &mut usize) -> 
         } else {
             Vec::new()
         };
-        nodes.push(SkillFileNode { name, path: rel, is_dir, children });
+        nodes.push(SkillFileNode {
+            name,
+            path: rel,
+            is_dir,
+            children,
+        });
     }
     // Directories first, then files, each alphabetically.
     nodes.sort_by(|a, b| match (a.is_dir, b.is_dir) {

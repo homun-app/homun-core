@@ -198,8 +198,18 @@ struct RawEnv {
 /// Maps an npm/pypi/oci package to (runtime, command). `None` for unknown types.
 fn runtime_command(pkg: &RawPackage) -> Option<(&'static str, String)> {
     match pkg.registry_type.as_str() {
-        "npm" => Some(("node", pkg.runtime_hint.clone().unwrap_or_else(|| "npx".to_string()))),
-        "pypi" => Some(("python", pkg.runtime_hint.clone().unwrap_or_else(|| "uvx".to_string()))),
+        "npm" => Some((
+            "node",
+            pkg.runtime_hint
+                .clone()
+                .unwrap_or_else(|| "npx".to_string()),
+        )),
+        "pypi" => Some((
+            "python",
+            pkg.runtime_hint
+                .clone()
+                .unwrap_or_else(|| "uvx".to_string()),
+        )),
         "oci" => Some(("docker", "docker".to_string())),
         _ => None,
     }
@@ -220,7 +230,14 @@ fn normalize(entry: RawEntry) -> Option<McpRegistryServer> {
         .title
         .clone()
         .filter(|t| !t.trim().is_empty())
-        .unwrap_or_else(|| server.name.rsplit('/').next().unwrap_or(&server.name).to_string());
+        .unwrap_or_else(|| {
+            server
+                .name
+                .rsplit('/')
+                .next()
+                .unwrap_or(&server.name)
+                .to_string()
+        });
     let official = server.name.starts_with("io.modelcontextprotocol/");
     let version = server.version.clone().unwrap_or_default();
 
@@ -249,10 +266,10 @@ fn normalize(entry: RawEntry) -> Option<McpRegistryServer> {
     let Some(pkg) = pkg else {
         // No local stdio package — connect over a remote (streamable-HTTP) endpoint
         // if one exists. Auth headers become user inputs (target "header").
-        let remote = server
-            .remotes
-            .iter()
-            .find(|r| matches!(r.kind.as_str(), "streamable-http" | "http" | "sse") && !r.url.trim().is_empty());
+        let remote = server.remotes.iter().find(|r| {
+            matches!(r.kind.as_str(), "streamable-http" | "http" | "sse")
+                && !r.url.trim().is_empty()
+        });
         if let Some(remote) = remote {
             base.transport = "http".to_string();
             base.url = Some(remote.url.clone());
@@ -263,7 +280,10 @@ fn normalize(entry: RawEntry) -> Option<McpRegistryServer> {
                     continue; // fixed header value, not something the user supplies
                 }
                 base.inputs.push(McpRegistryInput {
-                    label: header.description.clone().unwrap_or_else(|| header.name.clone()),
+                    label: header
+                        .description
+                        .clone()
+                        .unwrap_or_else(|| header.name.clone()),
                     key: header.name.clone(),
                     target: "header".to_string(),
                     secret: header.is_secret,
@@ -368,11 +388,17 @@ pub async fn fetch_servers(
     if let Some(q) = search.map(str::trim).filter(|s| !s.is_empty()) {
         req = req.query(&[("search", q)]);
     }
-    let resp = req.send().await.map_err(|e| format!("registry unreachable: {e}"))?;
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| format!("registry unreachable: {e}"))?;
     if !resp.status().is_success() {
         return Err(format!("registry HTTP {}", resp.status()));
     }
-    let body: RawList = resp.json().await.map_err(|e| format!("parse registry: {e}"))?;
+    let body: RawList = resp
+        .json()
+        .await
+        .map_err(|e| format!("parse registry: {e}"))?;
     let mut out: Vec<McpRegistryServer> = body
         .servers
         .into_iter()

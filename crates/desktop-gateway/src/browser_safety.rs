@@ -13,13 +13,34 @@ use serde_json::Value;
 /// NOT here — running a search is allowed; buying/booking/logging in is not.
 const HIGH_RISK_LABEL_PATTERNS: &[&str] = &[
     // purchase / payment
-    "buy", "pay", "payment", "checkout", "purchase", "place order", "order now",
-    "add to cart", "acquista", "paga", "pagamento", "compra", "acquisto", "ordina",
-    "carrello", "procedi all'acquisto",
+    "buy",
+    "pay",
+    "payment",
+    "checkout",
+    "purchase",
+    "place order",
+    "order now",
+    "add to cart",
+    "acquista",
+    "paga",
+    "pagamento",
+    "compra",
+    "acquisto",
+    "ordina",
+    "carrello",
+    "procedi all'acquisto",
     // booking / reservation
-    "book now", "reserve", "prenota", "prenotazione",
+    "book now",
+    "reserve",
+    "prenota",
+    "prenotazione",
     // authentication
-    "log in", "login", "sign in", "signin", "accedi", "entra con",
+    "log in",
+    "login",
+    "sign in",
+    "signin",
+    "accedi",
+    "entra con",
 ];
 
 /// True if the action commits something potentially irreversible: a click, a
@@ -115,13 +136,17 @@ mod tests {
 
     #[test]
     fn allows_type_into_field() {
-        assert!(high_risk_reason(&json!({"kind":"type","ref":"e1","text":"Napoli"}), SNAP).is_none());
+        assert!(
+            high_risk_reason(&json!({"kind":"type","ref":"e1","text":"Napoli"}), SNAP).is_none()
+        );
     }
 
     #[test]
     fn committing_detects_enter_press() {
         assert!(is_committing_action(&json!({"kind":"press","key":"Enter"})));
-        assert!(!is_committing_action(&json!({"kind":"type","ref":"e1","text":"x"})));
+        assert!(!is_committing_action(
+            &json!({"kind":"type","ref":"e1","text":"x"})
+        ));
     }
 
     #[test]

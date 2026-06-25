@@ -5463,6 +5463,55 @@ body.resizing-drawer {
 .memory-graph-zoom button:hover {
   background: var(--surface-hover, #f1f5f9);
 }
+.memory-graph-zoom button.active {
+  border-color: var(--accent, #2563eb);
+  color: var(--accent, #2563eb);
+  background: color-mix(in srgb, var(--accent, #2563eb) 10%, transparent);
+}
+.memory-hygiene-panel {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border, #e2e8f0);
+}
+.memory-hygiene-status,
+.memory-hygiene-suggestion {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 26px;
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 6px;
+  padding: 0 8px;
+  font-size: 12px;
+  color: var(--muted, #64748b);
+  background: var(--surface, #fff);
+}
+.memory-hygiene-suggestion {
+  padding-right: 4px;
+}
+.memory-hygiene-suggestion button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  padding: 3px 4px;
+}
+.memory-hygiene-suggestion button:hover {
+  background: var(--surface-hover, #f1f5f9);
+}
+.memory-hygiene-suggestion strong {
+  color: var(--accent, #2563eb);
+  font-size: 10px;
+  text-transform: uppercase;
+}
 .memory-graph-canvas {
   position: relative;
   flex: 1;
@@ -5498,6 +5547,10 @@ body.resizing-drawer {
   border-radius: 10px;
   box-shadow: 0 6px 24px rgba(15, 23, 42, 0.12);
   padding: 12px 14px;
+}
+.memory-merge-preview {
+  left: 12px;
+  right: auto;
 }
 .memory-graph-detail-kind {
   font-size: 11px;

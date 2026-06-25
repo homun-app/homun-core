@@ -198,7 +198,9 @@ fn scheduler_does_not_schedule_overdue_tasks() {
     let mut overdue = task("overdue", &user, &workspace);
     overdue.deadline = Some(now - Duration::minutes(5));
     store.insert_task(&overdue).unwrap();
-    store.insert_task(&task("ready", &user, &workspace)).unwrap();
+    store
+        .insert_task(&task("ready", &user, &workspace))
+        .unwrap();
 
     let ready = TaskScheduler::new()
         .ready_tasks(&store, &user, &workspace, now, 10)
@@ -234,7 +236,11 @@ fn scheduler_materializes_next_recurring_occurrence() {
 
     // Non-recurring tasks produce nothing.
     let one_shot = task("oneshot", &user, &workspace);
-    assert!(TaskScheduler::new().next_recurrence(&one_shot, now).is_none());
+    assert!(
+        TaskScheduler::new()
+            .next_recurrence(&one_shot, now)
+            .is_none()
+    );
 }
 
 fn task(id: &str, user: &UserId, workspace: &WorkspaceId) -> TaskRecord {

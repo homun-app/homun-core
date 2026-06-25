@@ -209,8 +209,8 @@ pub fn invoicing_example() -> ProcessSkill {
         id: "invoicing".to_string(),
         name: "Invoicing".to_string(),
         version: 1,
-        description:
-            "Generates a compliant invoice draft (SdI/VAT) from the data of a request.".to_string(),
+        description: "Generates a compliant invoice draft (SdI/VAT) from the data of a request."
+            .to_string(),
         origin: Origin::Installed,
         trigger: Trigger::Channel {
             source: "whatsapp".to_string(),
@@ -219,7 +219,8 @@ pub fn invoicing_example() -> ProcessSkill {
             Step {
                 id: "collect".to_string(),
                 kind: StepKind::Agent,
-                description: "Collect customer, line items and amounts from the request".to_string(),
+                description: "Collect customer, line items and amounts from the request"
+                    .to_string(),
                 locked: false,
                 requires_approval: false,
             },
@@ -310,9 +311,10 @@ mod tests {
     fn overlay_on_open_field_is_valid_and_applies() {
         let skill = invoicing_example();
         let mut overlay = Overlay::default();
-        overlay
-            .changes
-            .insert("invoice_title".to_string(), Value::String("Ricevuta".to_string()));
+        overlay.changes.insert(
+            "invoice_title".to_string(),
+            Value::String("Ricevuta".to_string()),
+        );
 
         assert!(validate_overlay(&skill, &overlay).is_empty());
         let effective = apply_overlay(&skill, &overlay);
@@ -326,7 +328,9 @@ mod tests {
     fn overlay_on_locked_field_is_rejected_and_never_applied() {
         let skill = invoicing_example();
         let mut overlay = Overlay::default();
-        overlay.changes.insert("vat_rate".to_string(), serde_json::json!(10));
+        overlay
+            .changes
+            .insert("vat_rate".to_string(), serde_json::json!(10));
 
         let violations = validate_overlay(&skill, &overlay);
         assert_eq!(violations.len(), 1);
@@ -334,14 +338,19 @@ mod tests {
 
         // Defensive: apply must not mutate a locked invariant even if asked.
         let effective = apply_overlay(&skill, &overlay);
-        assert_eq!(effective.field("vat_rate").unwrap().value, serde_json::json!(22));
+        assert_eq!(
+            effective.field("vat_rate").unwrap().value,
+            serde_json::json!(22)
+        );
     }
 
     #[test]
     fn overlay_on_unknown_field_is_rejected() {
         let skill = invoicing_example();
         let mut overlay = Overlay::default();
-        overlay.changes.insert("nope".to_string(), Value::Bool(true));
+        overlay
+            .changes
+            .insert("nope".to_string(), Value::Bool(true));
         let violations = validate_overlay(&skill, &overlay);
         assert_eq!(violations.len(), 1);
         assert_eq!(violations[0].key, "nope");

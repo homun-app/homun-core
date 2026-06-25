@@ -1,16 +1,16 @@
 use crate::{
     AccessDecisionKind, AutomationCandidateCreateRequest, AutomationCandidateRecord,
-    AutomationCandidateStatus,
-    DataSensitivity, GraphifyArtifacts, GraphifyCli, GraphifyImport, GraphifyImportSummary,
-    GraphifyOperation, GraphifyQueryRequest, GraphifyQueryResult, MemoryAccessDecision,
-    MemoryAccessRequest, MemoryBackupReport, MemoryContextItem, MemoryContextPack,
-    MemoryCreateRequest, MemoryEntity, MemoryError, MemoryEvent, MemoryEvidence, MemoryExtraction,
-    MemoryExtractionSummary, MemoryHealth, MemoryLifecycleRequest, MemoryMaintenanceReport,
-    MemoryPolicyEngine, MemoryRecord, MemoryRef, MemoryRefKind, MemoryRelation, MemoryResult,
-    MemorySearchPage, MemorySearchRequest, MemorySearchResult, MemoryStatus, MemoryUpdatePatch,
-    PrivacyDomain, RoutineInference, RoutineInferenceSummary, RoutineRecord, RoutineStatus,
-    SQLiteMemoryStore, UserId, WikiCorrectionSyncReport, WikiFileStore, WikiPage, WorkspaceId,
-    current_timestamp, ensure_artifacts_inside_root, ensure_transition, parse_wiki_markdown,
+    AutomationCandidateStatus, DataSensitivity, GraphifyArtifacts, GraphifyCli, GraphifyImport,
+    GraphifyImportSummary, GraphifyOperation, GraphifyQueryRequest, GraphifyQueryResult,
+    MemoryAccessDecision, MemoryAccessRequest, MemoryBackupReport, MemoryContextItem,
+    MemoryContextPack, MemoryCreateRequest, MemoryEntity, MemoryError, MemoryEvent, MemoryEvidence,
+    MemoryExtraction, MemoryExtractionSummary, MemoryHealth, MemoryLifecycleRequest,
+    MemoryMaintenanceReport, MemoryPolicyEngine, MemoryRecord, MemoryRef, MemoryRefKind,
+    MemoryRelation, MemoryResult, MemorySearchPage, MemorySearchRequest, MemorySearchResult,
+    MemoryStatus, MemoryUpdatePatch, PrivacyDomain, RoutineInference, RoutineInferenceSummary,
+    RoutineRecord, RoutineStatus, SQLiteMemoryStore, UserId, WikiCorrectionSyncReport,
+    WikiFileStore, WikiPage, WorkspaceId, current_timestamp, ensure_artifacts_inside_root,
+    ensure_transition, parse_wiki_markdown,
 };
 use std::path::Path;
 use std::str::FromStr;
@@ -287,7 +287,9 @@ impl MemoryFacade {
         workspace_id: &WorkspaceId,
         limit: usize,
     ) -> MemoryResult<Vec<MemoryRef>> {
-        Ok(self.store.refs_without_embeddings(user_id, workspace_id, limit)?)
+        Ok(self
+            .store
+            .refs_without_embeddings(user_id, workspace_id, limit)?)
     }
 
     pub fn apply_extraction(
@@ -508,6 +510,79 @@ impl MemoryFacade {
             .repoint_relations(from_ref, to_ref, user_id, workspace_id)?)
     }
 
+    /// Canonical entity merge: keep `survivor_ref`, move graph edges from
+    /// `absorbed_ref`, fold aliases/metadata, and tombstone the absorbed node.
+    pub fn merge_entities(
+        &self,
+        survivor_ref: &MemoryRef,
+        absorbed_ref: &MemoryRef,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+        reason: &str,
+    ) -> MemoryResult<MemoryEntity> {
+        if survivor_ref == absorbed_ref {
+            return self
+                .store
+                .get_entity(survivor_ref, user_id, workspace_id)?
+                .ok_or_else(|| MemoryError::not_found(survivor_ref.to_string()));
+        }
+        let mut survivor = self
+            .store
+            .get_entity(survivor_ref, user_id, workspace_id)?
+            .ok_or_else(|| MemoryError::not_found(survivor_ref.to_string()))?;
+        let mut absorbed = self
+            .store
+            .get_entity(absorbed_ref, user_id, workspace_id)?
+            .ok_or_else(|| MemoryError::not_found(absorbed_ref.to_string()))?;
+
+        let mut aliases: std::collections::BTreeSet<String> = survivor
+            .aliases
+            .iter()
+            .filter(|a| !a.trim().is_empty())
+            .cloned()
+            .collect();
+        for value in absorbed
+            .aliases
+            .iter()
+            .chain(std::iter::once(&absorbed.name))
+            .chain(std::iter::once(&absorbed.canonical_key))
+        {
+            if !value.trim().is_empty() && value != &survivor.canonical_key {
+                aliases.insert(value.trim().to_string());
+            }
+        }
+        survivor.aliases = aliases.into_iter().collect();
+        merge_entity_metadata(
+            &mut survivor.metadata,
+            &absorbed.metadata,
+            absorbed_ref,
+            reason,
+        );
+        if let serde_json::Value::Object(map) = &mut absorbed.metadata {
+            map.insert(
+                "merged_into".to_string(),
+                serde_json::Value::String(survivor_ref.to_string()),
+            );
+            map.insert(
+                "merge_reason".to_string(),
+                serde_json::Value::String(reason.to_string()),
+            );
+        } else {
+            absorbed.metadata = serde_json::json!({
+                "merged_into": survivor_ref.to_string(),
+                "merge_reason": reason,
+            });
+        }
+
+        self.store.upsert_entity(&survivor)?;
+        self.store.upsert_entity(&absorbed)?;
+        self.store
+            .repoint_relations(absorbed_ref, survivor_ref, user_id, workspace_id)?;
+        self.store
+            .tombstone(absorbed_ref, user_id, workspace_id, reason)?;
+        Ok(survivor)
+    }
+
     /// Change a memory's type (e.g. promote a decision to a goal). User-driven, no LLM.
     pub fn set_memory_type(
         &self,
@@ -516,7 +591,9 @@ impl MemoryFacade {
         workspace_id: &WorkspaceId,
         new_type: &str,
     ) -> MemoryResult<()> {
-        Ok(self.store.set_memory_type(reference, user_id, workspace_id, new_type)?)
+        Ok(self
+            .store
+            .set_memory_type(reference, user_id, workspace_id, new_type)?)
     }
 
     /// Drop a scope's imported code-graph (entities/relations source="graphify"),
@@ -533,7 +610,9 @@ impl MemoryFacade {
         terms: &[String],
         limit: usize,
     ) -> MemoryResult<Vec<(String, String, String)>> {
-        Ok(self.store.search_code_entities(user_id, workspace_id, terms, limit)?)
+        Ok(self
+            .store
+            .search_code_entities(user_id, workspace_id, terms, limit)?)
     }
 
     /// Bulk-replace a scope's imported code graph in one transaction (clear + insert).
@@ -1077,5 +1156,38 @@ fn merge_reason(mut metadata: serde_json::Value, reason: &str) -> serde_json::Va
         metadata
     } else {
         serde_json::json!({ "previous_metadata": metadata, "last_lifecycle_reason": reason })
+    }
+}
+
+fn merge_entity_metadata(
+    survivor: &mut serde_json::Value,
+    absorbed: &serde_json::Value,
+    absorbed_ref: &MemoryRef,
+    reason: &str,
+) {
+    if !survivor.is_object() {
+        *survivor = serde_json::json!({ "previous_metadata": survivor.clone() });
+    }
+    let Some(object) = survivor.as_object_mut() else {
+        return;
+    };
+    object.insert(
+        "last_entity_merge_reason".to_string(),
+        serde_json::Value::String(reason.to_string()),
+    );
+    let merged = object
+        .entry("merged_entity_refs")
+        .or_insert_with(|| serde_json::Value::Array(Vec::new()));
+    if let Some(items) = merged.as_array_mut() {
+        let value = serde_json::Value::String(absorbed_ref.to_string());
+        if !items.iter().any(|item| item == &value) {
+            items.push(value);
+        }
+    }
+    let merged_meta = object
+        .entry("merged_entity_metadata")
+        .or_insert_with(|| serde_json::Value::Array(Vec::new()));
+    if let Some(items) = merged_meta.as_array_mut() {
+        items.push(absorbed.clone());
     }
 }

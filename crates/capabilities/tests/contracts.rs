@@ -242,9 +242,11 @@ fn plugin_registry_entry_verifies_install_candidate_policy() {
     entry.signature.public_key = trusted_key.clone();
     entry.signature.signature = hex_lower(&signature.to_bytes());
 
-    assert!(entry
-        .verify_install_candidate(package, "0.1.1046", false, &[trusted_key.clone()])
-        .is_ok());
+    assert!(
+        entry
+            .verify_install_candidate(package, "0.1.1046", false, &[trusted_key.clone()])
+            .is_ok()
+    );
     assert_eq!(
         entry.verify_install_candidate(package, "0.1.1046", false, &[]),
         Err(PluginRegistryValidationError::UntrustedPublicKey)
@@ -267,12 +269,14 @@ fn plugin_package_manifest_validates_safe_archive_layout() {
         files: vec![
             PluginPackageFile {
                 path: "plugin.json".to_string(),
-                sha256: "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824".to_string(),
+                sha256: "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+                    .to_string(),
                 size_bytes: 1024,
             },
             PluginPackageFile {
                 path: "skills/presentations/SKILL.md".to_string(),
-                sha256: "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824".to_string(),
+                sha256: "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+                    .to_string(),
                 size_bytes: 4096,
             },
         ],
@@ -316,7 +320,11 @@ fn plugin_license_token_verifies_offline_signature_and_expiry() {
         },
     };
 
-    assert!(token.verify_offline("presentations-pro", 1_800_000_000).is_ok());
+    assert!(
+        token
+            .verify_offline("presentations-pro", 1_800_000_000)
+            .is_ok()
+    );
     assert_eq!(
         token.verify_offline("other-plugin", 1_800_000_000),
         Err(PluginLicenseValidationError::PluginMismatch)

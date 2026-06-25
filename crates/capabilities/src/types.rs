@@ -415,7 +415,11 @@ impl PluginPackageManifest {
         if !is_safe_package_path(&self.manifest_path) {
             return Err(PluginPackageValidationError::UnsafePath);
         }
-        if !self.files.iter().any(|file| file.path == self.manifest_path) {
+        if !self
+            .files
+            .iter()
+            .any(|file| file.path == self.manifest_path)
+        {
             return Err(PluginPackageValidationError::MissingManifest);
         }
         for file in &self.files {
@@ -480,7 +484,11 @@ impl PluginLicenseToken {
         if self.claims.plugin_id != plugin_id {
             return Err(PluginLicenseValidationError::PluginMismatch);
         }
-        if self.claims.expires_at.is_some_and(|expires_at| now_unix > expires_at) {
+        if self
+            .claims
+            .expires_at
+            .is_some_and(|expires_at| now_unix > expires_at)
+        {
             return Err(PluginLicenseValidationError::Expired);
         }
         if self.signature.algorithm.to_ascii_lowercase() != "ed25519" {

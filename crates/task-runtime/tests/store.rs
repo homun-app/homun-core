@@ -151,7 +151,13 @@ fn automation_runs_record_recent_and_retention() {
         .record_automation_run("auto_x", base, true, false, None)
         .unwrap();
     store
-        .record_automation_run("auto_x", base + time::Duration::minutes(1), true, true, None)
+        .record_automation_run(
+            "auto_x",
+            base + time::Duration::minutes(1),
+            true,
+            true,
+            None,
+        )
         .unwrap();
     store
         .record_automation_run(
@@ -172,13 +178,27 @@ fn automation_runs_record_recent_and_retention() {
     assert!(runs[2].ok && !runs[2].late);
 
     // Scope isolation: another automation has its own history.
-    assert!(store.recent_automation_runs("auto_y", 10).unwrap().is_empty());
+    assert!(
+        store
+            .recent_automation_runs("auto_y", 10)
+            .unwrap()
+            .is_empty()
+    );
 
     // Retention: keep at most 50 per automation.
     for i in 0..60i64 {
         store
-            .record_automation_run("auto_z", base + time::Duration::seconds(i), true, false, None)
+            .record_automation_run(
+                "auto_z",
+                base + time::Duration::seconds(i),
+                true,
+                false,
+                None,
+            )
             .unwrap();
     }
-    assert_eq!(store.recent_automation_runs("auto_z", 100).unwrap().len(), 50);
+    assert_eq!(
+        store.recent_automation_runs("auto_z", 100).unwrap().len(),
+        50
+    );
 }

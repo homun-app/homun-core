@@ -86,10 +86,9 @@ fn task_runtime_requeues_waiting_resource_before_scheduling() {
         .with_resource(ResourceRequirement::new(ResourceClass::LlmInference, 1));
     store.insert_task(&running).unwrap();
     store.insert_task(&blocked).unwrap();
-    let governor =
-        local_first_task_runtime::ResourceGovernor::new(
-            ResourceLimits::new().with_limit(ResourceClass::LlmInference, 1),
-        );
+    let governor = local_first_task_runtime::ResourceGovernor::new(
+        ResourceLimits::new().with_limit(ResourceClass::LlmInference, 1),
+    );
 
     governor.reserve(&store, &running, "worker_a").unwrap();
     governor
@@ -148,10 +147,9 @@ fn task_runtime_recovers_resource_wait_across_worker_connections() {
     drop(seed);
 
     let owner_store = TaskStore::open(&path).unwrap();
-    let governor =
-        local_first_task_runtime::ResourceGovernor::new(
-            ResourceLimits::new().with_limit(ResourceClass::LlmInference, 1),
-        );
+    let governor = local_first_task_runtime::ResourceGovernor::new(
+        ResourceLimits::new().with_limit(ResourceClass::LlmInference, 1),
+    );
     let now = OffsetDateTime::now_utc();
     local_first_task_runtime::LeaseManager::new(Duration::minutes(5))
         .acquire(
@@ -190,7 +188,13 @@ fn task_runtime_recovers_resource_wait_across_worker_connections() {
     assert_eq!(blocked_waiting.status, TaskStatus::WaitingResource);
 
     owner_store
-        .update_task_status(&running.task_id, &user, &workspace, TaskStatus::Completed, None)
+        .update_task_status(
+            &running.task_id,
+            &user,
+            &workspace,
+            TaskStatus::Completed,
+            None,
+        )
         .unwrap();
     governor.release(&owner_store, &leased).unwrap();
 

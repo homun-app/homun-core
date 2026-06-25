@@ -397,7 +397,10 @@ fn brain_runs_static_execution_plan_without_planner_roundtrip() {
         .run_plan(request("workflow dichiarativo"), plan)
         .unwrap();
 
-    assert!(brain.runtime().requests().is_empty(), "planner must not be called");
+    assert!(
+        brain.runtime().requests().is_empty(),
+        "planner must not be called"
+    );
     assert_eq!(outcome.audit.planner_rounds, 0);
     assert_eq!(outcome.immediate_results.len(), 1);
     assert_eq!(outcome.enqueued_tasks.len(), 1);

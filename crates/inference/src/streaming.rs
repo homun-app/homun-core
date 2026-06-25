@@ -31,7 +31,10 @@ pub fn parse_openai_stream_data(data: &str) -> ChatStreamEvent {
         return ChatStreamEvent::Done;
     }
     match serde_json::from_str::<Value>(data) {
-        Ok(value) => match value.pointer("/choices/0/delta/content").and_then(Value::as_str) {
+        Ok(value) => match value
+            .pointer("/choices/0/delta/content")
+            .and_then(Value::as_str)
+        {
             Some(content) if !content.is_empty() => ChatStreamEvent::Delta(content.to_string()),
             _ => ChatStreamEvent::Ignore,
         },
@@ -84,16 +87,18 @@ mod tests {
 
     #[test]
     fn malformed_and_empty_lines_are_ignored() {
-        assert_eq!(parse_openai_stream_data("not json"), ChatStreamEvent::Ignore);
+        assert_eq!(
+            parse_openai_stream_data("not json"),
+            ChatStreamEvent::Ignore
+        );
         assert_eq!(parse_openai_stream_data(""), ChatStreamEvent::Ignore);
         assert_eq!(parse_openai_sse_line(": comment"), ChatStreamEvent::Ignore);
     }
 
     #[test]
     fn full_line_roundtrip() {
-        let event = parse_openai_sse_line(
-            "data: {\"choices\":[{\"delta\":{\"content\":\" mondo\"}}]}\n",
-        );
+        let event =
+            parse_openai_sse_line("data: {\"choices\":[{\"delta\":{\"content\":\" mondo\"}}]}\n");
         assert_eq!(event, ChatStreamEvent::Delta(" mondo".to_string()));
     }
 }

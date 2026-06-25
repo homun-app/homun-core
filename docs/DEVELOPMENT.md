@@ -62,6 +62,13 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   converge nel `MemoryFacade` quando ha `entity_ref` espliciti; `ChatStore`
   dichiara una boundary audit per ogni tabella locale, così nuovi read-model
   devono dichiarare se sono solo UX/ops o convergono nella memoria canonica.
+  Follow-up 2026-06-25 locale/verde: identity hygiene memoria. `MemoryFacade`
+  espone merge canonico entita' con repoint relazioni, alias/metadata preservati
+  e tombstone dell'assorbito; owner channel/handle convergono su `person:self`
+  invece di creare persone Telegram/WhatsApp parallele; root progetto stabile
+  `workspace:<id>` evita progetti duplicati; reconciliation rigenera graph/wiki
+  dopo merge/correzioni/delete/rename; la UI grafo espone merge esplicito e
+  suggerimenti hygiene senza auto-merge same-name-only.
   Gate di chiusura: `python3 scripts/pre_release_gate.py` verde, inclusi i test
   WS5.6 e il nuovo `local_store_tables_have_explicit_memory_boundary_audit`.
   **WS1 core chiusa localmente:** oltre a piano→memoria/grafo, `ExecutionPlan`

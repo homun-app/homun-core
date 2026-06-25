@@ -144,10 +144,26 @@ Fatto:
 
 Mancante:
 
-- nessun blocco WS5 locale: artifact, piano, decisioni, outcome, open loop e
-  read-model graph-like corrente convergono nel `MemoryFacade` canonico con gate
-  deterministici. Restano validazioni in-app mirate prima delle release e
-  l'estensione futura del grafo a nuovi domini/adapter quando appariranno.
+- nessun blocco WS5 locale: artifact, piano, decisioni, outcome, open loop,
+  identity hygiene e read-model graph-like corrente convergono nel
+  `MemoryFacade` canonico con gate deterministici. Restano validazioni in-app
+  mirate prima delle release e l'estensione futura del grafo a nuovi
+  domini/adapter quando appariranno.
+
+### Identity hygiene — locale/verde 2026-06-25
+
+- merge entita' canonico in `MemoryFacade::merge_entities`: il survivor conserva
+  alias/metadata, le relazioni dell'assorbito vengono ripuntate e l'assorbito
+  viene tombstonato con `merged_into`;
+- gli handle owner dei canali non creano persone parallele: convergono su
+  `person:self` e l'apprendimento inbound resta attribuito all'utente;
+- ogni workspace ha una root progetto stabile `workspace:<workspace_id>`, con
+  nomi/cartelle come alias o metadata, cosi' l'estrattore non crea project root
+  concorrenti;
+- dopo merge, correzioni, delete, rename/folder e mutazioni wiki passa un
+  percorso unico di reconciliation che rigenera graph/wiki derivati;
+- la UI grafo espone merge esplicito e suggerimenti hygiene; same-name-only non
+  viene mai fuso automaticamente.
 
 ## Prossimo blocco
 

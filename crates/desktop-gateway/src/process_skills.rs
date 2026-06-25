@@ -11,7 +11,7 @@
 //! invariants are rejected, never saved.
 
 use local_first_process_skill::{
-    apply_overlay, invoicing_example, validate_overlay, Overlay, ProcessSkill, Violation,
+    Overlay, ProcessSkill, Violation, apply_overlay, invoicing_example, validate_overlay,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -108,7 +108,10 @@ enum CustomizeError {
 /// Merges field changes into the stored overlay for an addon, validating the whole
 /// overlay against the contract. Nothing is saved if any change hits a locked or
 /// unknown field. Returns the effective addon on success.
-fn customize(addon_id: &str, changes: BTreeMap<String, Value>) -> Result<ProcessSkill, CustomizeError> {
+fn customize(
+    addon_id: &str,
+    changes: BTreeMap<String, Value>,
+) -> Result<ProcessSkill, CustomizeError> {
     let base = base_skill(addon_id).ok_or(CustomizeError::NotFound)?;
     let mut overlays = load_overlays();
     let mut overlay = overlays.overlays.get(addon_id).cloned().unwrap_or_default();
@@ -135,7 +138,10 @@ pub fn addons_list_text() -> String {
     }
     let mut lines = vec!["Installed addons:".to_string()];
     for skill in skills {
-        lines.push(format!("- {} (id={}) — {}", skill.name, skill.id, skill.description));
+        lines.push(format!(
+            "- {} (id={}) — {}",
+            skill.name, skill.id, skill.description
+        ));
     }
     lines.push("Use show_addon(id) to see its fields, customize_addon to adapt it.".to_string());
     lines.join("\n")
@@ -150,11 +156,7 @@ pub fn addon_show_text(addon_id: &str) -> String {
         skill.name, skill.id, skill.version, skill.description
     );
     for field in &skill.config {
-        let zone = if field.editable {
-            "OPEN"
-        } else {
-            "LOCKED"
-        };
+        let zone = if field.editable { "OPEN" } else { "LOCKED" };
         out.push_str(&format!(
             "\n- {} «{}» = {} · {zone}",
             field.key, field.label, field.value

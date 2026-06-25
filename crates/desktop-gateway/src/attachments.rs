@@ -82,8 +82,10 @@ pub fn ingest_attachments(attachments: &[AttachmentInput]) -> IngestedAttachment
     for file in ingest_each(attachments) {
         if let Some(text) = &file.text {
             if !text.trim().is_empty() {
-                out.text
-                    .push_str(&format!("\n\n[Attachment: {}]\n{}", file.display_name, text));
+                out.text.push_str(&format!(
+                    "\n\n[Attachment: {}]\n{}",
+                    file.display_name, text
+                ));
             }
         }
         out.images.extend(file.images);
@@ -106,7 +108,10 @@ fn ingest_one(att: &AttachmentInput) -> Result<One, String> {
         return Err("not a file".to_string());
     }
     if meta.len() > MAX_ATTACHMENT_BYTES {
-        return Err(format!("too large (max {} MB)", MAX_ATTACHMENT_BYTES / 1024 / 1024));
+        return Err(format!(
+            "too large (max {} MB)",
+            MAX_ATTACHMENT_BYTES / 1024 / 1024
+        ));
     }
 
     let mime = att.mime_type.to_lowercase();
@@ -121,7 +126,10 @@ fn ingest_one(att: &AttachmentInput) -> Result<One, String> {
         return Err("SVG image not supported by vision models; export to PNG/JPEG".to_string());
     }
     if mime.starts_with("image/") || is_image_ext(&ext) {
-        return Ok(One { text: None, images: vec![image_data_url(path, &mime, &ext)?] });
+        return Ok(One {
+            text: None,
+            images: vec![image_data_url(path, &mime, &ext)?],
+        });
     }
     if mime == "application/pdf" || ext == "pdf" {
         return ingest_pdf(path);
@@ -130,7 +138,10 @@ fn ingest_one(att: &AttachmentInput) -> Result<One, String> {
         let bytes = read_file_capped(path)?;
         let mut text = String::from_utf8_lossy(&bytes).into_owned();
         truncate_chars(&mut text, MAX_TEXT_CHARS);
-        return Ok(One { text: Some(text), images: Vec::new() });
+        return Ok(One {
+            text: Some(text),
+            images: Vec::new(),
+        });
     }
     Err("type not yet supported for analysis (for now: PDF, images, text/code)".to_string())
 }
@@ -155,7 +166,10 @@ fn ingest_pdf(path: &Path) -> Result<One, String> {
     let meaningful = text.chars().filter(|c| !c.is_whitespace()).count();
     if meaningful >= MIN_PDF_TEXT_CHARS {
         truncate_chars(&mut text, MAX_TEXT_CHARS);
-        return Ok(One { text: Some(text), images: Vec::new() });
+        return Ok(One {
+            text: Some(text),
+            images: Vec::new(),
+        });
     }
 
     // Sparse text → treat as a scan and rasterize pages for the vision model.
@@ -171,7 +185,10 @@ fn ingest_pdf(path: &Path) -> Result<One, String> {
     } else {
         "(scanned PDF: pages provided as images for visual analysis)".to_string()
     };
-    Ok(One { text: Some(note), images })
+    Ok(One {
+        text: Some(note),
+        images,
+    })
 }
 
 /// Renders a PDF FILE's pages to JPEG data-URL images, for a clean document-style
@@ -238,9 +255,7 @@ fn pdfium_lib_dir() -> Option<std::path::PathBuf> {
         }
     }
     let home = std::env::var("HOME").ok()?;
-    let dir = std::path::PathBuf::from(home)
-        .join(".homun")
-        .join("pdfium");
+    let dir = std::path::PathBuf::from(home).join(".homun").join("pdfium");
     if dir.is_dir() {
         return Some(dir);
     }
@@ -257,7 +272,10 @@ fn read_file_capped(path: &Path) -> Result<Vec<u8>, String> {
         .read_to_end(&mut buf)
         .map_err(|e| e.to_string())?;
     if buf.len() as u64 > MAX_ATTACHMENT_BYTES {
-        return Err(format!("too large (max {} MB)", MAX_ATTACHMENT_BYTES / 1024 / 1024));
+        return Err(format!(
+            "too large (max {} MB)",
+            MAX_ATTACHMENT_BYTES / 1024 / 1024
+        ));
     }
     Ok(buf)
 }
@@ -396,7 +414,10 @@ mod tests {
             out.text.chars().count(),
             out.images.len()
         );
-        eprintln!("INGEST text_head={}", out.text.chars().take(200).collect::<String>());
+        eprintln!(
+            "INGEST text_head={}",
+            out.text.chars().take(200).collect::<String>()
+        );
         assert!(
             !out.text.trim().is_empty() || !out.images.is_empty(),
             "pdfium ingestion produced no text and no images"

@@ -1,6 +1,7 @@
 use crate::{
-    ApprovalRequest, Automation, AutomationRun, ResourceClass, TaskCheckpoint, TaskDependencyOutput,
-    TaskId, TaskRecord, TaskRuntimeError, TaskRuntimeResult, TaskStatus, UserId, WorkspaceId,
+    ApprovalRequest, Automation, AutomationRun, ResourceClass, TaskCheckpoint,
+    TaskDependencyOutput, TaskId, TaskRecord, TaskRuntimeError, TaskRuntimeResult, TaskStatus,
+    UserId, WorkspaceId,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::Value;
@@ -373,10 +374,10 @@ impl TaskStore {
             ORDER BY created_at DESC, id ASC
             ",
         )?;
-        let rows = statement.query_map(
-            params![user_id.as_str(), workspace_id.as_str()],
-            |row| row.get::<_, String>(0),
-        )?;
+        let rows = statement
+            .query_map(params![user_id.as_str(), workspace_id.as_str()], |row| {
+                row.get::<_, String>(0)
+            })?;
         let mut out = Vec::new();
         for row in rows {
             out.push(serde_json::from_str::<Automation>(&row?)?);
@@ -438,7 +439,13 @@ impl TaskStore {
         self.connection.execute(
             "INSERT INTO automation_runs (automation_id, ran_at, ok, late, detail)
              VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![automation_id, ran_at.unix_timestamp(), ok as i64, late as i64, detail],
+            params![
+                automation_id,
+                ran_at.unix_timestamp(),
+                ok as i64,
+                late as i64,
+                detail
+            ],
         )?;
         self.connection.execute(
             "DELETE FROM automation_runs

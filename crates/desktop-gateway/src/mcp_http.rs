@@ -52,7 +52,10 @@ impl McpHttpTransport {
             .client
             .post(&self.url)
             .header(reqwest::header::CONTENT_TYPE, "application/json")
-            .header(reqwest::header::ACCEPT, "application/json, text/event-stream");
+            .header(
+                reqwest::header::ACCEPT,
+                "application/json, text/event-stream",
+            );
         for (key, value) in &self.headers {
             req = req.header(key.as_str(), value.as_str());
         }
@@ -125,7 +128,10 @@ impl McpHttpTransport {
                     "mcp_http_rpc_error:{error}"
                 )));
             }
-            return Ok(msg.get("result").cloned().unwrap_or(serde_json::Value::Null));
+            return Ok(msg
+                .get("result")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null));
         }
         Err(CapabilityError::ProviderUnavailable(
             "mcp_http_no_matching_response".to_string(),

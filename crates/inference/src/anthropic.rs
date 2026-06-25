@@ -89,7 +89,10 @@ impl InferenceProvider for AnthropicProvider {
 
 /// Pure parse of an Anthropic Messages response into our JSON contract.
 /// Separated from the HTTP call so it is testable without a network.
-pub fn parse_anthropic_message(body: &Value, request: &GenerateJsonRequest) -> GenerateJsonResponse {
+pub fn parse_anthropic_message(
+    body: &Value,
+    request: &GenerateJsonRequest,
+) -> GenerateJsonResponse {
     // Concatenate all text content blocks (`content: [{type:"text", text:...}]`).
     let content = body
         .get("content")

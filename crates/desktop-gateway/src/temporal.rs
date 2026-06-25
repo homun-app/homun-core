@@ -156,7 +156,12 @@ fn base_date(day: &DayRef, anchor: &jiff::Zoned) -> Result<jiff::civil::Date, Te
     out.map_err(|e| TemporalError::Invalid(e.to_string()))
 }
 
-fn at(date: jiff::civil::Date, hour: i8, minute: i8, tz: &jiff::tz::TimeZone) -> Result<jiff::Zoned, TemporalError> {
+fn at(
+    date: jiff::civil::Date,
+    hour: i8,
+    minute: i8,
+    tz: &jiff::tz::TimeZone,
+) -> Result<jiff::Zoned, TemporalError> {
     date.at(hour, minute, 0, 0)
         .to_zoned(tz.clone())
         .map_err(|e| TemporalError::Invalid(e.to_string()))
@@ -327,7 +332,10 @@ pub fn intent_from_json(args: &serde_json::Value) -> Result<TemporalIntent, Temp
 
     let day = match kind.as_str() {
         "relative_day" => {
-            let off = args.get("offset_days").and_then(|v| v.as_i64()).unwrap_or(0);
+            let off = args
+                .get("offset_days")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(0);
             DayRef::RelativeDay(off)
         }
         "weekday" => {
@@ -335,7 +343,9 @@ pub fn intent_from_json(args: &serde_json::Value) -> Result<TemporalIntent, Temp
                 .get("weekday")
                 .and_then(|v| v.as_str())
                 .and_then(parse_weekday)
-                .ok_or_else(|| TemporalError::Invalid("weekday missing or not recognized".into()))?;
+                .ok_or_else(|| {
+                    TemporalError::Invalid("weekday missing or not recognized".into())
+                })?;
             // Absent → Upcoming (soonest), the intuitive default for a bare weekday.
             let which = match args.get("which").and_then(|v| v.as_str()).unwrap_or("") {
                 "this" | "questo" | "questa" | "esta" | "ce" | "diese" => Which::This,
@@ -368,13 +378,21 @@ pub fn intent_from_json(args: &serde_json::Value) -> Result<TemporalIntent, Temp
         other => {
             return Err(TemporalError::Invalid(format!(
                 "unknown kind: «{other}» (use relative_day|weekday|relative_unit|absolute)"
-            )))
+            )));
         }
     };
 
-    let time = if let Some((h, m)) = args.get("time").and_then(|v| v.as_str()).and_then(parse_time) {
+    let time = if let Some((h, m)) = args
+        .get("time")
+        .and_then(|v| v.as_str())
+        .and_then(parse_time)
+    {
         TimeSpec::At { hour: h, minute: m }
-    } else if let Some(part) = args.get("part").and_then(|v| v.as_str()).and_then(parse_part) {
+    } else if let Some(part) = args
+        .get("part")
+        .and_then(|v| v.as_str())
+        .and_then(parse_part)
+    {
         TimeSpec::Part(part)
     } else {
         TimeSpec::None
@@ -470,7 +488,14 @@ mod tests {
             day: DayRef::RelativeDay(0),
             time: TimeSpec::At { hour: 7, minute: 0 },
         };
-        let err = resolve(&intent, &anchor(), ResolveOpts { must_be_future: true }).unwrap_err();
+        let err = resolve(
+            &intent,
+            &anchor(),
+            ResolveOpts {
+                must_be_future: true,
+            },
+        )
+        .unwrap_err();
         assert!(matches!(err, TemporalError::Past { .. }));
     }
 
@@ -493,9 +518,25 @@ mod tests {
             day: DayRef::Weekday(jiff::civil::Weekday::Monday, Which::This),
             time: TimeSpec::None,
         };
-        let lenient = resolve(&intent, &anchor(), ResolveOpts { must_be_future: false }).unwrap();
+        let lenient = resolve(
+            &intent,
+            &anchor(),
+            ResolveOpts {
+                must_be_future: false,
+            },
+        )
+        .unwrap();
         assert_eq!(lenient.iso, "2026-06-08");
         assert!(!lenient.is_future);
-        assert!(resolve(&intent, &anchor(), ResolveOpts { must_be_future: true }).is_err());
+        assert!(
+            resolve(
+                &intent,
+                &anchor(),
+                ResolveOpts {
+                    must_be_future: true
+                }
+            )
+            .is_err()
+        );
     }
 }

@@ -758,11 +758,7 @@ impl ChatStore {
 
     /// Point a thread's displayed path at a specific leaf (the ‹ n/m › switcher).
     /// `None` clears the pointer (the read path then falls back to rowid order).
-    pub fn set_active_leaf(
-        &self,
-        thread_id: &str,
-        leaf_id: Option<&str>,
-    ) -> rusqlite::Result<()> {
+    pub fn set_active_leaf(&self, thread_id: &str, leaf_id: Option<&str>) -> rusqlite::Result<()> {
         self.conn.execute(
             "update chat_threads set active_leaf_id = ?1 where thread_id = ?2",
             params![leaf_id, thread_id],
@@ -798,11 +794,7 @@ impl ChatStore {
     }
 
     /// Children of a node (or the roots, when `parent` is `None`), in creation order.
-    fn children_of(
-        &self,
-        thread_id: &str,
-        parent: Option<&str>,
-    ) -> rusqlite::Result<Vec<String>> {
+    fn children_of(&self, thread_id: &str, parent: Option<&str>) -> rusqlite::Result<Vec<String>> {
         match parent {
             Some(parent) => {
                 let mut stmt = self.conn.prepare(
@@ -819,7 +811,8 @@ impl ChatStore {
                       where thread_id = ?1 and parent_id is null
                       order by rowid asc",
                 )?;
-                stmt.query_map(params![thread_id], |row| row.get(0))?.collect()
+                stmt.query_map(params![thread_id], |row| row.get(0))?
+                    .collect()
             }
         }
     }
@@ -853,7 +846,11 @@ impl ChatStore {
         Ok(cur)
     }
 
-    fn branch_label_of(&self, thread_id: &str, message_id: &str) -> rusqlite::Result<Option<String>> {
+    fn branch_label_of(
+        &self,
+        thread_id: &str,
+        message_id: &str,
+    ) -> rusqlite::Result<Option<String>> {
         Ok(self
             .conn
             .query_row(
@@ -972,10 +969,7 @@ impl ChatStore {
     /// Store a remote approval before a card is streamed. It is deliberately
     /// not executable until a chat-originated request has later been bound to
     /// the assistant message that contains its exact marker.
-    pub fn create_remote_approval(
-        &self,
-        input: &RemoteApprovalInput<'_>,
-    ) -> rusqlite::Result<()> {
+    pub fn create_remote_approval(&self, input: &RemoteApprovalInput<'_>) -> rusqlite::Result<()> {
         self.conn.execute(
             "insert into remote_approvals (
                 approval_id, code, tool, arguments_json, label, thread_id,
@@ -1067,10 +1061,7 @@ impl ChatStore {
         Ok(())
     }
 
-    pub fn cancel_remote_approval_by_code(
-        &self,
-        code: &str,
-    ) -> rusqlite::Result<bool> {
+    pub fn cancel_remote_approval_by_code(&self, code: &str) -> rusqlite::Result<bool> {
         let changed = self.conn.execute(
             "update remote_approvals
                 set status = 'cancelled', resolved_at = ?1
@@ -1082,10 +1073,7 @@ impl ChatStore {
 
     /// An in-app confirmation wins over its remote counterpart, preventing a
     /// later Telegram tap from replaying the same action.
-    pub fn supersede_remote_approval(
-        &self,
-        approval_id: &str,
-    ) -> rusqlite::Result<()> {
+    pub fn supersede_remote_approval(&self, approval_id: &str) -> rusqlite::Result<()> {
         self.conn.execute(
             "update remote_approvals
                 set status = 'superseded', resolved_at = ?1
@@ -1095,10 +1083,7 @@ impl ChatStore {
         Ok(())
     }
 
-    pub fn mark_remote_approval_dispatched(
-        &self,
-        approval_id: &str,
-    ) -> rusqlite::Result<()> {
+    pub fn mark_remote_approval_dispatched(&self, approval_id: &str) -> rusqlite::Result<()> {
         self.conn.execute(
             "update remote_approvals
                 set dispatched_at = ?1
@@ -1177,7 +1162,10 @@ impl ChatStore {
     }
 
     pub fn set_plugin_enabled(&self, id: &str, enabled: bool) -> rusqlite::Result<()> {
-        self.set_flag(&format!("plugin:{id}:enabled"), if enabled { "1" } else { "0" })
+        self.set_flag(
+            &format!("plugin:{id}:enabled"),
+            if enabled { "1" } else { "0" },
+        )
     }
 
     pub fn contact_id_by_identity(
@@ -1242,12 +1230,29 @@ impl ChatStore {
         channel: &str,
         identifier: &str,
         display: &str,
+        is_self: bool,
+        entity_ref: Option<&str>,
     ) -> rusqlite::Result<i64> {
         if let Some(id) = self.contact_id_by_identity(channel, identifier)? {
+            if is_self {
+                let now = Self::now_secs();
+                self.conn.execute(
+                    "update contacts
+                     set contact_type = 'self', is_self = 1, entity_ref = coalesce(?1, entity_ref),
+                         updated_at = ?2
+                     where id = ?3",
+                    params![entity_ref, now, id],
+                )?;
+            }
             return Ok(id);
         }
-        let name = if display.trim().is_empty() { identifier } else { display.trim() };
-        let id = self.create_contact(name, "unknown", false, "", None)?;
+        let name = if display.trim().is_empty() {
+            identifier
+        } else {
+            display.trim()
+        };
+        let contact_type = if is_self { "self" } else { "unknown" };
+        let id = self.create_contact(name, contact_type, is_self, "", entity_ref)?;
         self.add_identity(id, channel, identifier, None)?;
         Ok(id)
     }
@@ -1366,7 +1371,9 @@ impl ChatStore {
     }
 
     pub fn list_contacts(&self) -> rusqlite::Result<Vec<StoredContact>> {
-        let mut stmt = self.conn.prepare("select id from contacts order by lower(name)")?;
+        let mut stmt = self
+            .conn
+            .prepare("select id from contacts order by lower(name)")?;
         let ids: Vec<i64> = stmt
             .query_map([], |row| row.get(0))?
             .collect::<rusqlite::Result<_>>()?;
@@ -1390,8 +1397,10 @@ impl ChatStore {
     ) -> rusqlite::Result<()> {
         let now = Self::now_secs();
         if let Some(v) = name {
-            self.conn
-                .execute("update contacts set name = ?1, updated_at = ?2 where id = ?3", params![v, now, id])?;
+            self.conn.execute(
+                "update contacts set name = ?1, updated_at = ?2 where id = ?3",
+                params![v, now, id],
+            )?;
         }
         if let Some(v) = nickname {
             self.conn.execute(
@@ -1400,8 +1409,10 @@ impl ChatStore {
             )?;
         }
         if let Some(v) = notes {
-            self.conn
-                .execute("update contacts set notes = ?1, updated_at = ?2 where id = ?3", params![v, now, id])?;
+            self.conn.execute(
+                "update contacts set notes = ?1, updated_at = ?2 where id = ?3",
+                params![v, now, id],
+            )?;
         }
         if let Some(v) = contact_type {
             // Keep the owner flag in sync with the user-facing type ("Sono io").
@@ -1429,9 +1440,9 @@ impl ChatStore {
         if survivor == absorbed {
             return Ok(());
         }
-        let mut stmt = self
-            .conn
-            .prepare("select channel, identifier, label from contact_identities where contact_id = ?1")?;
+        let mut stmt = self.conn.prepare(
+            "select channel, identifier, label from contact_identities where contact_id = ?1",
+        )?;
         let moved: Vec<(String, String, Option<String>)> = stmt
             .query_map(params![absorbed], |row| {
                 Ok((row.get(0)?, row.get(1)?, row.get(2)?))
@@ -1453,8 +1464,10 @@ impl ChatStore {
     /// Remove a contact and its channel identities (explicit cascade — SQLite FK
     /// enforcement isn't assumed to be on).
     pub fn delete_contact(&self, id: i64) -> rusqlite::Result<()> {
-        self.conn
-            .execute("delete from contact_identities where contact_id = ?1", params![id])?;
+        self.conn.execute(
+            "delete from contact_identities where contact_id = ?1",
+            params![id],
+        )?;
         self.conn
             .execute("delete from contacts where id = ?1", params![id])?;
         Ok(())
@@ -1568,7 +1581,8 @@ impl ChatStore {
     }
 
     pub fn set_perimeter(&self, contact_id: i64, p: &StoredPerimeter) -> rusqlite::Result<()> {
-        let to_json = |list: &Vec<String>| serde_json::to_string(list).unwrap_or_else(|_| "[]".into());
+        let to_json =
+            |list: &Vec<String>| serde_json::to_string(list).unwrap_or_else(|_| "[]".into());
         self.conn.execute(
             "insert into contact_perimeters(
                 contact_id, memory_scope, knowledge_folders, tools_allowed, tools_denied,
@@ -1654,8 +1668,10 @@ impl ChatStore {
     ) -> rusqlite::Result<()> {
         let now = Self::now_secs();
         if let Some(v) = name {
-            self.conn
-                .execute("update profiles set name = ?1, updated_at = ?2 where id = ?3", params![v, now, id])?;
+            self.conn.execute(
+                "update profiles set name = ?1, updated_at = ?2 where id = ?3",
+                params![v, now, id],
+            )?;
         }
         if let Some(v) = tone_of_voice {
             self.conn.execute(
@@ -1682,11 +1698,16 @@ impl ChatStore {
             "delete from contact_channel_profiles where profile_id = ?1",
             params![id],
         )?;
-        self.conn.execute("delete from profiles where id = ?1", params![id])?;
+        self.conn
+            .execute("delete from profiles where id = ?1", params![id])?;
         Ok(())
     }
 
-    pub fn set_contact_profile(&self, contact_id: i64, profile_id: Option<i64>) -> rusqlite::Result<()> {
+    pub fn set_contact_profile(
+        &self,
+        contact_id: i64,
+        profile_id: Option<i64>,
+    ) -> rusqlite::Result<()> {
         self.conn.execute(
             "update contacts set profile_id = ?1, updated_at = ?2 where id = ?3",
             params![profile_id, Self::now_secs(), contact_id],
@@ -1720,7 +1741,10 @@ impl ChatStore {
         Ok(())
     }
 
-    pub fn channel_profile_overrides(&self, contact_id: i64) -> rusqlite::Result<Vec<(String, i64)>> {
+    pub fn channel_profile_overrides(
+        &self,
+        contact_id: i64,
+    ) -> rusqlite::Result<Vec<(String, i64)>> {
         let mut stmt = self.conn.prepare(
             "select channel, profile_id from contact_channel_profiles where contact_id = ?1",
         )?;
@@ -1774,8 +1798,10 @@ impl ChatStore {
     }
 
     pub fn remove_relationship(&self, id: i64) -> rusqlite::Result<()> {
-        self.conn
-            .execute("delete from contact_relationships where id = ?1", params![id])?;
+        self.conn.execute(
+            "delete from contact_relationships where id = ?1",
+            params![id],
+        )?;
         Ok(())
     }
 
@@ -1818,7 +1844,11 @@ impl ChatStore {
         rows.collect()
     }
 
-    pub fn set_contact_birthday(&self, contact_id: i64, birthday: Option<&str>) -> rusqlite::Result<()> {
+    pub fn set_contact_birthday(
+        &self,
+        contact_id: i64,
+        birthday: Option<&str>,
+    ) -> rusqlite::Result<()> {
         self.conn.execute(
             "update contacts set birthday = ?1, updated_at = ?2 where id = ?3",
             params![birthday, Self::now_secs(), contact_id],
@@ -2139,8 +2169,10 @@ impl ChatStore {
                 .execute("alter table chat_messages add column parent_id text", [])?;
         }
         if !self.column_exists("chat_threads", "active_leaf_id")? {
-            self.conn
-                .execute("alter table chat_threads add column active_leaf_id text", [])?;
+            self.conn.execute(
+                "alter table chat_threads add column active_leaf_id text",
+                [],
+            )?;
         }
         self.conn.execute(
             "create index if not exists idx_chat_messages_parent
@@ -2210,9 +2242,7 @@ impl ChatStore {
     }
 
     fn column_exists(&self, table: &str, column: &str) -> rusqlite::Result<bool> {
-        let mut stmt = self
-            .conn
-            .prepare(&format!("pragma table_info({table})"))?;
+        let mut stmt = self.conn.prepare(&format!("pragma table_info({table})"))?;
         let mut found = false;
         let mut rows = stmt.query([])?;
         while let Some(row) = rows.next()? {
@@ -2290,7 +2320,12 @@ impl ChatStore {
                 let text: Option<String> = row.get(2)?;
                 let images_json: String = row.get(3)?;
                 let images: Vec<String> = serde_json::from_str(&images_json).unwrap_or_default();
-                Ok(StoredAttachment { display_name, mime_type, text, images })
+                Ok(StoredAttachment {
+                    display_name,
+                    mime_type,
+                    text,
+                    images,
+                })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(rows)
@@ -2457,7 +2492,9 @@ impl ChatStore {
             "select scope, count(*) from suggestions where status = 'pending' group by scope",
         )?;
         let rows = stmt
-            .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)))?
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(rows)
     }
@@ -2498,7 +2535,11 @@ impl ChatStore {
              order by updated_at desc limit ?2",
         )?;
         let rows = stmt.query_map(params![scope, limit as i64], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
         })?;
         rows.collect()
     }
@@ -2906,24 +2947,37 @@ mod tests {
         };
         // Insert two in a project scope + one personal.
         let id1 = store.insert_suggestion(&mk("proj", "k1", "Primo")).unwrap();
-        store.insert_suggestion(&mk("proj", "k2", "Secondo")).unwrap();
-        store.insert_suggestion(&mk("__personal__", "p1", "Personale")).unwrap();
+        store
+            .insert_suggestion(&mk("proj", "k2", "Secondo"))
+            .unwrap();
+        store
+            .insert_suggestion(&mk("__personal__", "p1", "Personale"))
+            .unwrap();
 
         // Dedup is per (scope, key), any status.
         assert!(store.suggestion_dedup_exists("proj", "k1").unwrap());
         assert!(!store.suggestion_dedup_exists("proj", "kX").unwrap());
 
         // Pending list scoped + counts.
-        assert_eq!(store.pending_suggestions(Some("proj"), 50).unwrap().len(), 2);
+        assert_eq!(
+            store.pending_suggestions(Some("proj"), 50).unwrap().len(),
+            2
+        );
         assert_eq!(store.pending_suggestions(None, 50).unwrap().len(), 3);
         let counts = store.pending_suggestion_counts().unwrap();
-        assert_eq!(counts.iter().find(|(s, _)| s == "proj").map(|(_, n)| *n), Some(2));
+        assert_eq!(
+            counts.iter().find(|(s, _)| s == "proj").map(|(_, n)| *n),
+            Some(2)
+        );
 
         // Dismiss one → drops out of pending but dedup still blocks it (durable no-repeat).
         store
             .set_suggestion_status(id1, "dismissed", Some("disliked"), None)
             .unwrap();
-        assert_eq!(store.pending_suggestions(Some("proj"), 50).unwrap().len(), 1);
+        assert_eq!(
+            store.pending_suggestions(Some("proj"), 50).unwrap().len(),
+            1
+        );
         assert!(store.suggestion_dedup_exists("proj", "k1").unwrap());
     }
 
@@ -2990,13 +3044,25 @@ mod tests {
             dedup_key: key.to_string(),
             ..Default::default()
         };
-        let liked = store.insert_suggestion(&mk("proj", "k1", "Useful")).unwrap();
+        let liked = store
+            .insert_suggestion(&mk("proj", "k1", "Useful"))
+            .unwrap();
         let disliked = store.insert_suggestion(&mk("proj", "k2", "Noise")).unwrap();
-        store.insert_suggestion(&mk("proj", "k3", "Untouched")).unwrap();
-        let personal = store.insert_suggestion(&mk("__personal__", "p1", "Other scope")).unwrap();
-        store.set_suggestion_status(liked, "accepted", Some("liked"), None).unwrap();
-        store.set_suggestion_status(disliked, "dismissed", Some("disliked"), None).unwrap();
-        store.set_suggestion_status(personal, "dismissed", Some("disliked"), None).unwrap();
+        store
+            .insert_suggestion(&mk("proj", "k3", "Untouched"))
+            .unwrap();
+        let personal = store
+            .insert_suggestion(&mk("__personal__", "p1", "Other scope"))
+            .unwrap();
+        store
+            .set_suggestion_status(liked, "accepted", Some("liked"), None)
+            .unwrap();
+        store
+            .set_suggestion_status(disliked, "dismissed", Some("disliked"), None)
+            .unwrap();
+        store
+            .set_suggestion_status(personal, "dismissed", Some("disliked"), None)
+            .unwrap();
 
         // Only acted cards of the scope, newest first; the untouched one is excluded.
         let fb = store.recent_feedback("proj", 10).unwrap();
@@ -3043,7 +3109,10 @@ mod tests {
             .commit_prompt_result(&thread.thread_id, &user, &assistant, None)
             .unwrap();
         assert_eq!(messages.messages.len(), 3);
-        assert_eq!(store.threads("default").unwrap().active_thread_id, thread.thread_id);
+        assert_eq!(
+            store.threads("default").unwrap().active_thread_id,
+            thread.thread_id
+        );
         assert!(
             store
                 .threads("default")
@@ -3057,11 +3126,15 @@ mod tests {
     #[test]
     fn chat_thread_title_is_synthesized_from_first_user_prompt() {
         assert_eq!(
-            compact_thread_title("Crea una presentazione pitch per Homun usando il template_ref monet/startup"),
+            compact_thread_title(
+                "Crea una presentazione pitch per Homun usando il template_ref monet/startup"
+            ),
             "presentazione pitch Homun template ref"
         );
         assert_eq!(
-            compact_thread_title("Dimmi che versione di Homun sto usando e se ci sono aggiornamenti disponibili."),
+            compact_thread_title(
+                "Dimmi che versione di Homun sto usando e se ci sono aggiornamenti disponibili."
+            ),
             "versione Homun aggiornamenti disponibili"
         );
     }
@@ -3143,7 +3216,10 @@ mod tests {
             .bind_remote_approval_source(approval_id, &thread.thread_id, &assistant.id)
             .unwrap()
             .unwrap();
-        assert_eq!(bound.source_message_id.as_deref(), Some("assistant_confirm"));
+        assert_eq!(
+            bound.source_message_id.as_deref(),
+            Some("assistant_confirm")
+        );
 
         assert!(store.claim_remote_approval(approval_id).unwrap().is_some());
         assert!(store.claim_remote_approval(approval_id).unwrap().is_none());
@@ -3304,7 +3380,10 @@ mod tests {
             .into_iter()
             .map(|m| m.id)
             .collect();
-        assert_eq!(ids, vec!["m1".to_string(), "m2".to_string(), "m3".to_string()]);
+        assert_eq!(
+            ids,
+            vec!["m1".to_string(), "m2".to_string(), "m3".to_string()]
+        );
     }
 
     #[test]
@@ -3331,7 +3410,10 @@ mod tests {
                 None,
             )
             .unwrap();
-        assert_eq!(path(&store), vec![seed_id.clone(), "u1".into(), "a1".into()]);
+        assert_eq!(
+            path(&store),
+            vec![seed_id.clone(), "u1".into(), "a1".into()]
+        );
 
         // Edit the user message → a SIBLING turn; the old branch is preserved.
         store
@@ -3342,14 +3424,21 @@ mod tests {
                 Some("u1"),
             )
             .unwrap();
-        assert_eq!(path(&store), vec![seed_id.clone(), "u1b".into(), "a1b".into()]);
+        assert_eq!(
+            path(&store),
+            vec![seed_id.clone(), "u1b".into(), "a1b".into()]
+        );
 
         // The switcher sees two alternatives at the user node.
         let points = store.branch_options(&tid).unwrap();
         assert_eq!(points.len(), 1);
         assert_eq!(points[0].node_id, "u1b");
         assert_eq!(points[0].active_index, 1);
-        let children: Vec<&str> = points[0].options.iter().map(|o| o.child_id.as_str()).collect();
+        let children: Vec<&str> = points[0]
+            .options
+            .iter()
+            .map(|o| o.child_id.as_str())
+            .collect();
         assert_eq!(children, vec!["u1", "u1b"]);
         // Selecting the first option activates the ORIGINAL branch's leaf.
         assert_eq!(points[0].options[0].leaf_id, "a1");
@@ -3358,13 +3447,19 @@ mod tests {
         store
             .set_active_leaf(&tid, Some(&points[0].options[0].leaf_id))
             .unwrap();
-        assert_eq!(path(&store), vec![seed_id.clone(), "u1".into(), "a1".into()]);
+        assert_eq!(
+            path(&store),
+            vec![seed_id.clone(), "u1".into(), "a1".into()]
+        );
 
         // Regenerate the answer under u1 → a sibling answer.
         store
             .commit_regenerated_answer(&tid, "u1", &mk_message("a1r", "assistant"))
             .unwrap();
-        assert_eq!(path(&store), vec![seed_id.clone(), "u1".into(), "a1r".into()]);
+        assert_eq!(
+            path(&store),
+            vec![seed_id.clone(), "u1".into(), "a1r".into()]
+        );
         let points = store.branch_options(&tid).unwrap();
         // Two branch points now: the user node and the answer node.
         assert_eq!(points.len(), 2);
@@ -3375,7 +3470,9 @@ mod tests {
         assert_eq!(answer_children, vec!["a1", "a1r"]);
 
         // Phase 4: a named branch surfaces its label in the switcher.
-        store.set_branch_label(&tid, "a1r", Some("variante B")).unwrap();
+        store
+            .set_branch_label(&tid, "a1r", Some("variante B"))
+            .unwrap();
         let points = store.branch_options(&tid).unwrap();
         let answer = points.iter().find(|p| p.node_id == "a1r").unwrap();
         let labelled = answer.options.iter().find(|o| o.child_id == "a1r").unwrap();
@@ -3387,9 +3484,13 @@ mod tests {
         let store = ChatStore::in_memory().unwrap();
         let tid = "thread_x";
         store
-            .upsert_thread_attachment(tid, "patente.pdf", "application/pdf", Some("(scan)"), &[
-                "data:image/jpeg;base64,AAA".to_string(),
-            ])
+            .upsert_thread_attachment(
+                tid,
+                "patente.pdf",
+                "application/pdf",
+                Some("(scan)"),
+                &["data:image/jpeg;base64,AAA".to_string()],
+            )
             .unwrap();
         store
             .upsert_thread_attachment(tid, "note.txt", "text/plain", Some("ciao"), &[])
@@ -3401,11 +3502,24 @@ mod tests {
         assert_eq!(all[1].text.as_deref(), Some("ciao"));
         // Re-attaching the same filename REPLACES (one row per name).
         store
-            .upsert_thread_attachment(tid, "patente.pdf", "application/pdf", Some("(updated)"), &[])
+            .upsert_thread_attachment(
+                tid,
+                "patente.pdf",
+                "application/pdf",
+                Some("(updated)"),
+                &[],
+            )
             .unwrap();
         let all = store.thread_attachments(tid).unwrap();
-        assert_eq!(all.len(), 2, "still 2 files, patente.pdf replaced not duplicated");
-        let patente = all.iter().find(|a| a.display_name == "patente.pdf").unwrap();
+        assert_eq!(
+            all.len(),
+            2,
+            "still 2 files, patente.pdf replaced not duplicated"
+        );
+        let patente = all
+            .iter()
+            .find(|a| a.display_name == "patente.pdf")
+            .unwrap();
         assert_eq!(patente.text.as_deref(), Some("(updated)"));
         assert!(patente.images.is_empty());
         // Empty thread_id is a no-op (no global bucket).
@@ -3426,9 +3540,24 @@ mod tests {
         let beta_view = store.threads("project_beta").unwrap();
 
         // Each project sees only its own thread — no cross-project leakage.
-        assert!(alpha_view.threads.iter().all(|t| t.thread_id == alpha.thread_id));
-        assert!(beta_view.threads.iter().all(|t| t.thread_id == beta.thread_id));
-        assert!(!alpha_view.threads.iter().any(|t| t.thread_id == beta.thread_id));
+        assert!(
+            alpha_view
+                .threads
+                .iter()
+                .all(|t| t.thread_id == alpha.thread_id)
+        );
+        assert!(
+            beta_view
+                .threads
+                .iter()
+                .all(|t| t.thread_id == beta.thread_id)
+        );
+        assert!(
+            !alpha_view
+                .threads
+                .iter()
+                .any(|t| t.thread_id == beta.thread_id)
+        );
 
         // Active pointer is independent per project.
         assert_eq!(alpha_view.active_thread_id, alpha.thread_id);
@@ -3436,8 +3565,12 @@ mod tests {
 
         // The seeded 'default' project is isolated from both.
         let default_view = store.threads("default").unwrap();
-        assert!(!default_view.threads.iter().any(|t| t.thread_id == alpha.thread_id
-            || t.thread_id == beta.thread_id));
+        assert!(
+            !default_view
+                .threads
+                .iter()
+                .any(|t| t.thread_id == alpha.thread_id || t.thread_id == beta.thread_id)
+        );
 
         // Deleting alpha's only thread reseeds alpha (never empty) without
         // touching beta.

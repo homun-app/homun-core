@@ -386,17 +386,29 @@ impl CapabilityRegistryStore {
     pub fn remove_provider(&self, provider_id: &ProviderId) -> CapabilityResult<usize> {
         let id = provider_id.as_str();
         self.connection
-            .execute("DELETE FROM capability_tool_cache WHERE provider_id = ?1", params![id])
+            .execute(
+                "DELETE FROM capability_tool_cache WHERE provider_id = ?1",
+                params![id],
+            )
             .map_err(to_store_error)?;
         self.connection
-            .execute("DELETE FROM capability_connection_configs WHERE provider_id = ?1", params![id])
+            .execute(
+                "DELETE FROM capability_connection_configs WHERE provider_id = ?1",
+                params![id],
+            )
             .map_err(to_store_error)?;
         self.connection
-            .execute("DELETE FROM capability_provider_grants WHERE provider_id = ?1", params![id])
+            .execute(
+                "DELETE FROM capability_provider_grants WHERE provider_id = ?1",
+                params![id],
+            )
             .map_err(to_store_error)?;
         let removed = self
             .connection
-            .execute("DELETE FROM capability_provider_configs WHERE provider_id = ?1", params![id])
+            .execute(
+                "DELETE FROM capability_provider_configs WHERE provider_id = ?1",
+                params![id],
+            )
             .map_err(to_store_error)?;
         Ok(removed)
     }

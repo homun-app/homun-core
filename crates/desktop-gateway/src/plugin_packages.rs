@@ -497,8 +497,7 @@ mod tests {
     use super::*;
     use ed25519_dalek::{Signer, SigningKey};
     use local_first_capabilities::{
-        PluginChannel, PluginEntitlement, PluginLicenseClaims, PluginLicenseToken,
-        PluginSignature,
+        PluginChannel, PluginEntitlement, PluginLicenseClaims, PluginLicenseToken, PluginSignature,
     };
     use std::io::Write;
 

@@ -46,7 +46,11 @@ impl OpenAiCompatProvider {
     /// POST the body to the chat-completions endpoint with the request's
     /// timeout + auth. Factored out so `generate_json` can retry (strict schema
     /// → json_object fallback) without duplicating the builder setup.
-    fn send(&self, body: &Value, timeout_seconds: Option<f64>) -> Result<reqwest::blocking::Response, RuntimeClientError> {
+    fn send(
+        &self,
+        body: &Value,
+        timeout_seconds: Option<f64>,
+    ) -> Result<reqwest::blocking::Response, RuntimeClientError> {
         let mut builder = self.http.post(self.chat_completions_url());
         if let Some(seconds) = timeout_seconds {
             if seconds > 0.0 {
@@ -56,7 +60,10 @@ impl OpenAiCompatProvider {
         if let Some(api_key) = self.api_key.as_ref() {
             builder = builder.bearer_auth(api_key);
         }
-        builder.json(body).send().map_err(RuntimeClientError::Request)
+        builder
+            .json(body)
+            .send()
+            .map_err(RuntimeClientError::Request)
     }
 }
 

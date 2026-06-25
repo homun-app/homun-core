@@ -150,7 +150,17 @@ fn infer_profile(lower: &str, modality: &str) -> ModelProfile {
         return curated(ModelTier::Balanced, "Image generation.");
     }
     // Small/fast tiers FIRST (so "gpt-4o-mini" → fast, not balanced).
-    let fast_name_markers = ["mini", "haiku", "flash", "small", "ministral", "gemma", "lite", "nano", "tiny"];
+    let fast_name_markers = [
+        "mini",
+        "haiku",
+        "flash",
+        "small",
+        "ministral",
+        "gemma",
+        "lite",
+        "nano",
+        "tiny",
+    ];
     if fast_name_markers.iter().any(|m| lower.contains(m)) || has_small_param_size(lower) {
         return curated(
             ModelTier::Fast,
@@ -232,9 +242,18 @@ impl ModelEntry {
 
 /// Heuristic: an extended-reasoning ("thinking") model.
 fn is_reasoning_model(lower: &str) -> bool {
-    ["opus", "o1", "o3", "o4", "-r1", "deepseek-r", "reasoner", "thinking"]
-        .iter()
-        .any(|m| lower.contains(m))
+    [
+        "opus",
+        "o1",
+        "o3",
+        "o4",
+        "-r1",
+        "deepseek-r",
+        "reasoner",
+        "thinking",
+    ]
+    .iter()
+    .any(|m| lower.contains(m))
 }
 
 /// True if the model id carries a SMALL parameter-size token (≤ 13B), e.g.
@@ -545,7 +564,11 @@ impl ProviderRegistry {
         };
         provider.enabled = enabled;
         if !enabled && self.active_provider_id.as_deref() == Some(id) {
-            self.active_provider_id = self.providers.iter().find(|p| p.enabled).map(|p| p.id.clone());
+            self.active_provider_id = self
+                .providers
+                .iter()
+                .find(|p| p.enabled)
+                .map(|p| p.id.clone());
         }
         true
     }
@@ -592,7 +615,9 @@ impl ProviderRegistry {
         let pid = binding.provider_id.as_deref().filter(|s| !s.is_empty())?;
         let model = binding.model.as_deref().filter(|s| !s.is_empty())?;
         let provider = self.get(pid)?;
-        provider.enabled.then(|| (provider.id.clone(), model.to_string()))
+        provider
+            .enabled
+            .then(|| (provider.id.clone(), model.to_string()))
     }
 
     /// Resolves the model for a role: an explicit (valid) manual binding wins,
@@ -675,9 +700,7 @@ impl ProviderRegistry {
                         .cmp(&ma.context_window.unwrap_or(0)),
                 )
                 // 3) prefer the active provider
-                .then(
-                    (active == Some(pb.id.as_str())).cmp(&(active == Some(pa.id.as_str()))),
-                )
+                .then((active == Some(pb.id.as_str())).cmp(&(active == Some(pa.id.as_str()))))
         });
         if let Some((provider, model)) = candidates.first() {
             return Some(ResolvedRole {
@@ -730,7 +753,6 @@ impl ProviderRegistry {
         }
         false
     }
-
 }
 
 /// Slugifies a free-text label into a stable, url/file-safe provider id.
@@ -877,7 +899,10 @@ mod tests {
     #[test]
     fn parse_ollama_and_openai_lists() {
         let ollama = serde_json::json!({"models":[{"name":"a"},{"model":"b"}]});
-        assert_eq!(parse_models_response(ProviderKind::Ollama, &ollama), vec!["a", "b"]);
+        assert_eq!(
+            parse_models_response(ProviderKind::Ollama, &ollama),
+            vec!["a", "b"]
+        );
         let oai = serde_json::json!({"data":[{"id":"gpt-4o"},{"id":"gpt-4o-mini"}]});
         assert_eq!(
             parse_models_response(ProviderKind::OpenaiCompat, &oai),
@@ -894,7 +919,7 @@ mod tests {
             "http://127.0.0.1:11434/v1".into(),
         );
         ollama.models = vec![
-            ModelEntry::inferred("llama3.1:8b"),       // tools, ctx None
+            ModelEntry::inferred("llama3.1:8b"),        // tools, ctx None
             ModelEntry::inferred("minimax-m2.7:cloud"), // tools, ctx 200k
             ModelEntry::inferred("nomic-embed-text"),   // embedding
         ];
@@ -929,8 +954,14 @@ mod tests {
         reg.upsert(p);
 
         // orchestrator prefers Reasoning → opus; browser prefers Balanced → sonnet.
-        assert_eq!(reg.resolve_role("orchestrator").unwrap().model, "claude-opus-4");
-        assert_eq!(reg.resolve_role("browser").unwrap().model, "claude-sonnet-4");
+        assert_eq!(
+            reg.resolve_role("orchestrator").unwrap().model,
+            "claude-opus-4"
+        );
+        assert_eq!(
+            reg.resolve_role("browser").unwrap().model,
+            "claude-sonnet-4"
+        );
     }
 
     #[test]
@@ -1067,15 +1098,28 @@ mod tests {
             },
         );
         let resolved = reg.resolve_role("browser").unwrap();
-        assert!(resolved.auto, "binding to a disabled provider must fall back to auto");
+        assert!(
+            resolved.auto,
+            "binding to a disabled provider must fall back to auto"
+        );
         assert_eq!(resolved.provider_id, "ollama");
     }
 
     #[test]
     fn remove_reassigns_active() {
         let mut reg = ProviderRegistry::default();
-        reg.upsert(ProviderEntry::new("a".into(), "A".into(), ProviderKind::Ollama, "u".into()));
-        reg.upsert(ProviderEntry::new("b".into(), "B".into(), ProviderKind::OpenaiCompat, "u".into()));
+        reg.upsert(ProviderEntry::new(
+            "a".into(),
+            "A".into(),
+            ProviderKind::Ollama,
+            "u".into(),
+        ));
+        reg.upsert(ProviderEntry::new(
+            "b".into(),
+            "B".into(),
+            ProviderKind::OpenaiCompat,
+            "u".into(),
+        ));
         reg.active_provider_id = Some("a".into());
         assert!(reg.remove("a"));
         assert_eq!(reg.active_provider_id.as_deref(), Some("b"));

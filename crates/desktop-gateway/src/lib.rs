@@ -268,10 +268,10 @@ pub fn compact_thread_title(text: &str) -> String {
         .collect::<String>();
     let words = normalized.split_whitespace().collect::<Vec<_>>();
     let stop_words = [
-        "a", "ad", "al", "alla", "anche", "che", "con", "crea", "creare", "dai", "dammi",
-        "ci", "del", "della", "di", "dimmi", "e", "fai", "fare", "il", "in", "la", "le",
-        "lo", "mi", "per", "puoi", "se", "sono", "sto", "su", "sui", "una", "usando",
-        "usa", "using", "with", "the", "for", "to", "create", "make", "me", "tell", "give",
+        "a", "ad", "al", "alla", "anche", "che", "con", "crea", "creare", "dai", "dammi", "ci",
+        "del", "della", "di", "dimmi", "e", "fai", "fare", "il", "in", "la", "le", "lo", "mi",
+        "per", "puoi", "se", "sono", "sto", "su", "sui", "una", "usando", "usa", "using", "with",
+        "the", "for", "to", "create", "make", "me", "tell", "give",
     ];
     let keywords = words
         .iter()
@@ -410,22 +410,18 @@ mod tests {
             max_context_chars: Some(1_000),
         });
 
-        assert!(
-            response
-                .runtime_prompt
-                .contains("Recent chat context")
-        );
-        assert!(
-            response
-                .runtime_prompt
-                .contains("User: tell me a joke")
-        );
+        assert!(response.runtime_prompt.contains("Recent chat context"));
+        assert!(response.runtime_prompt.contains("User: tell me a joke"));
         assert!(
             response
                 .runtime_prompt
                 .contains("Assistant: Why do scientists")
         );
-        assert!(response.runtime_prompt.contains("User: tell me another one"));
+        assert!(
+            response
+                .runtime_prompt
+                .contains("User: tell me another one")
+        );
     }
 
     #[test]
@@ -504,5 +500,4 @@ mod tests {
         assert!(response.runtime_prompt.contains("User: continue"));
         assert!(response.compression.output_chars <= 500);
     }
-
 }

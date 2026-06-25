@@ -139,7 +139,8 @@ impl TaskScheduler {
         now: OffsetDateTime,
     ) -> Option<TaskRecord> {
         let rule = completed.recurrence.as_deref()?;
-        let next = crate::recurrence::next_occurrence(rule, completed.recurrence_tz.as_deref(), now)?;
+        let next =
+            crate::recurrence::next_occurrence(rule, completed.recurrence_tz.as_deref(), now)?;
         let id = completed.task_id.as_str();
         let root = id.split("@occ@").next().unwrap_or(id);
 

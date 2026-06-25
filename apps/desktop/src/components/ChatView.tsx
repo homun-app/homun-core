@@ -28,6 +28,7 @@ import {
   FileSpreadsheet,
   FileText,
   FolderOpen,
+  GitMerge,
   AlertTriangle,
   Globe2,
   HardDrive,
@@ -90,6 +91,7 @@ import {
   type MemoryGraph,
   type MemoryGraphEdge,
   type MemoryGraphNode,
+  type MemoryHygieneSuggestion,
   type MemoryWikiPage,
   type ProjectSubdir,
   modelIsCloud,
@@ -3967,6 +3969,16 @@ export function MemoryGraphPanel({
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [hoverId, setHoverId] = useState<string | null>(null);
+  const [mergeMode, setMergeMode] = useState(false);
+  const [mergeFirst, setMergeFirst] = useState<string | null>(null);
+  const [pendingMerge, setPendingMerge] = useState<{
+    survivor: MemoryGraphNode;
+    absorbed: MemoryGraphNode;
+    reason: string;
+  } | null>(null);
+  const [merging, setMerging] = useState(false);
+  const [hygieneSuggestions, setHygieneSuggestions] = useState<MemoryHygieneSuggestion[]>([]);
+  const [ignoredSuggestionKeys, setIgnoredSuggestionKeys] = useState<Set<string>>(new Set());
   const [buildingGraph, setBuildingGraph] = useState(false);
   const [tooLarge, setTooLarge] = useState(false);
   const [subdirs, setSubdirs] = useState<ProjectSubdir[]>([]);
@@ -4020,7 +4032,14 @@ export function MemoryGraphPanel({
     setWiki(null);
     coreBridge
       .memoryGraph(threadId, workspace)
-      .then((g) => setGraph(g))
+      .then((g) => {
+        setGraph(g);
+        setMergeFirst(null);
+        return coreBridge
+          .memoryHygieneSuggestions(threadId, workspace)
+          .then(setHygieneSuggestions)
+          .catch(() => setHygieneSuggestions([]));
+      })
       .catch((e) => setError(String(e)))
       .finally(() => setLoading(false));
   }, [threadId, workspace]);
@@ -4028,6 +4047,16 @@ export function MemoryGraphPanel({
   useEffect(() => {
     reload();
   }, [reload]);
+
+  useEffect(() => {
+    if (!graph?.workspace) return;
+    try {
+      const raw = window.localStorage.getItem(`homun.memory.ignore.${graph.workspace}`);
+      setIgnoredSuggestionKeys(new Set(raw ? JSON.parse(raw) : []));
+    } catch {
+      setIgnoredSuggestionKeys(new Set());
+    }
+  }, [graph?.workspace]);
 
   // Transparent project map: on opening a project graph, ensure its code map is
   // fresh (built behind the scenes if missing/stale). Show a neutral "building"
@@ -4129,6 +4158,16 @@ export function MemoryGraphPanel({
   );
 
   useEffect(() => {
+    const graphApi = fgRef.current;
+    if (!graphApi || mode !== "graph") return;
+    const linkForce = graphApi.d3Force?.("link");
+    linkForce?.distance?.((link: any) => (link.label === "nel progetto" ? 48 : 34));
+    linkForce?.strength?.((link: any) => (link.label === "nel progetto" ? 0.95 : 0.72));
+    graphApi.d3Force?.("charge")?.strength?.(-46);
+    graphApi.d3ReheatSimulation?.();
+  }, [graphData, mode]);
+
+  useEffect(() => {
     if (mode !== "graph" || !graph || size.w <= 0 || size.h <= 0) return undefined;
     let firstFrame = 0;
     let secondFrame = 0;
@@ -4147,6 +4186,59 @@ export function MemoryGraphPanel({
   }, [fitMemoryGraph, graph, layoutSignal, mode, size.h, size.w]);
 
   const selectedNode = selected ? nodeById.get(selected) ?? null : null;
+  const relationCountFor = (nodeId: string) =>
+    graph?.edges.filter((edge) => edge.source === nodeId || edge.target === nodeId).length ?? 0;
+  const suggestionKey = (suggestion: MemoryHygieneSuggestion) =>
+    `${suggestion.survivor_ref}|${suggestion.absorbed_ref}`;
+  const visibleHygieneSuggestions = hygieneSuggestions.filter(
+    (suggestion) => !ignoredSuggestionKeys.has(suggestionKey(suggestion)),
+  );
+  const ignoreSuggestion = (suggestion: MemoryHygieneSuggestion, persist: boolean) => {
+    const key = suggestionKey(suggestion);
+    setIgnoredSuggestionKeys((current) => {
+      const next = new Set(current);
+      next.add(key);
+      if (persist && graph?.workspace) {
+        window.localStorage.setItem(
+          `homun.memory.ignore.${graph.workspace}`,
+          JSON.stringify([...next]),
+        );
+      }
+      return next;
+    });
+  };
+  const isMergeableNode = (
+    node: MemoryGraphNode | null | undefined,
+  ): node is MemoryGraphNode => node?.kind === "entity" && node.id.startsWith("entity:");
+  const proposeMerge = useCallback(
+    (survivorId: string, absorbedId: string, reason: string) => {
+      if (survivorId === absorbedId) return;
+      const survivor = nodeById.get(survivorId);
+      const absorbed = nodeById.get(absorbedId);
+      if (!isMergeableNode(survivor) || !isMergeableNode(absorbed)) return;
+      setPendingMerge({ survivor, absorbed, reason });
+    },
+    [nodeById],
+  );
+  const confirmMerge = useCallback(() => {
+    if (!pendingMerge) return;
+    setMerging(true);
+    coreBridge
+      .mergeMemoryEntities(
+        pendingMerge.survivor.id,
+        pendingMerge.absorbed.id,
+        pendingMerge.reason,
+      )
+      .then(() => {
+        setPendingMerge(null);
+        setMergeFirst(null);
+        setSelected(null);
+        setWiki(null);
+        reload();
+      })
+      .catch((error) => setError(String(error)))
+      .finally(() => setMerging(false));
+  }, [pendingMerge, reload]);
   const selectedEdges = useMemo(() => {
     if (!graph || !selected) return [];
     return graph.edges
@@ -4229,6 +4321,18 @@ export function MemoryGraphPanel({
         </span>
         {mode === "graph" && (
           <div className="memory-graph-zoom">
+            <button
+              type="button"
+              className={mergeMode ? "active" : ""}
+              onClick={() => {
+                setMergeMode((value) => !value);
+                setMergeFirst(null);
+              }}
+              aria-label="Merge entities"
+              title="Merge entities"
+            >
+              <GitMerge size={14} />
+            </button>
             <button type="button" onClick={() => fgRef.current?.zoom((fgRef.current?.zoom() ?? 1) * 1.3, 300)} aria-label="Zoom +">
               +
             </button>
@@ -4298,6 +4402,45 @@ export function MemoryGraphPanel({
         </div>
       ) : (
         <>
+      {(mergeMode || visibleHygieneSuggestions.length > 0) && (
+        <div className="memory-hygiene-panel">
+          {mergeMode && (
+            <span className="memory-hygiene-status">
+              <GitMerge size={14} />
+              {mergeFirst
+                ? `Selected: ${nodeById.get(mergeFirst)?.label ?? "entity"}`
+                : "Merge mode"}
+            </span>
+          )}
+          {visibleHygieneSuggestions.slice(0, 4).map((suggestion) => (
+            <span
+              key={`${suggestion.survivor_ref}-${suggestion.absorbed_ref}`}
+              className="memory-hygiene-suggestion"
+            >
+              <button
+                type="button"
+                onClick={() =>
+                  proposeMerge(
+                    suggestion.survivor_ref,
+                    suggestion.absorbed_ref,
+                    suggestion.reason,
+                  )
+                }
+              >
+                <GitMerge size={13} />
+                {suggestion.survivor_label} ← {suggestion.absorbed_label}
+              </button>
+              {suggestion.safe_auto_merge && <strong>safe</strong>}
+              <button type="button" onClick={() => ignoreSuggestion(suggestion, false)}>
+                Ignore
+              </button>
+              <button type="button" onClick={() => ignoreSuggestion(suggestion, true)}>
+                Never
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
       <div className="memory-graph-canvas" ref={canvasRef}>
         {graph?.truncated && (
           <div className="memory-graph-truncated">
@@ -4318,11 +4461,38 @@ export function MemoryGraphPanel({
           cooldownTicks={140}
           onEngineStop={() => fitMemoryGraph(400, 60)}
           onNodeClick={(n: any) => {
+            if (mergeMode) {
+              const node = nodeById.get(n.id);
+              if (!isMergeableNode(node)) return;
+              if (!mergeFirst) {
+                setMergeFirst(n.id);
+                setSelected(n.id);
+                return;
+              }
+              proposeMerge(mergeFirst, n.id, "merged from graph selection");
+              return;
+            }
             setSelected(n.id);
             // Focus: centre + zoom onto the clicked node and its neighbourhood.
             if (typeof n.x === "number" && typeof n.y === "number") {
               fgRef.current?.centerAt(n.x, n.y, 600);
               fgRef.current?.zoom(2.4, 600);
+            }
+          }}
+          onNodeDragEnd={(n: any) => {
+            if (!mergeMode || typeof n.x !== "number" || typeof n.y !== "number") return;
+            const nodes = fgRef.current?.graphData?.().nodes ?? [];
+            let nearest: { id: string; d: number } | null = null;
+            for (const candidate of nodes) {
+              if (candidate.id === n.id) continue;
+              if (typeof candidate.x !== "number" || typeof candidate.y !== "number") continue;
+              const dx = candidate.x - n.x;
+              const dy = candidate.y - n.y;
+              const d = dx * dx + dy * dy;
+              if (!nearest || d < nearest.d) nearest = { id: candidate.id, d };
+            }
+            if (nearest && nearest.d < 900) {
+              proposeMerge(nearest.id, n.id, "merged by graph drag");
             }
           }}
           onNodeHover={(n: any) => setHoverId(n?.id ?? null)}
@@ -4414,6 +4584,42 @@ export function MemoryGraphPanel({
               )}
               <button type="button" className="ghost-button" onClick={() => setSelected(null)}>
                 {t("common.close")}
+              </button>
+            </div>
+          </div>
+        )}
+        {pendingMerge && (
+          <div className="memory-graph-detail memory-merge-preview">
+            <div className="memory-graph-detail-kind">
+              <GitMerge size={14} /> Merge
+            </div>
+            <div className="memory-graph-detail-title">
+              {pendingMerge.survivor.label} ← {pendingMerge.absorbed.label}
+            </div>
+            <p className="memory-graph-detail-body">
+              {pendingMerge.reason}
+              {pendingMerge.survivor.detail ? `\n${pendingMerge.survivor.detail}` : ""}
+              {pendingMerge.absorbed.detail ? `\n${pendingMerge.absorbed.detail}` : ""}
+              {`\n${relationCountFor(pendingMerge.survivor.id)} + ${relationCountFor(
+                pendingMerge.absorbed.id,
+              )} links`}
+            </p>
+            <div className="memory-graph-detail-actions">
+              <button
+                type="button"
+                className="ghost-button"
+                disabled={merging}
+                onClick={confirmMerge}
+              >
+                {merging ? "Merging…" : "Merge"}
+              </button>
+              <button
+                type="button"
+                className="ghost-button"
+                disabled={merging}
+                onClick={() => setPendingMerge(null)}
+              >
+                {t("common.cancel")}
               </button>
             </div>
           </div>

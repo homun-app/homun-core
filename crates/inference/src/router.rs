@@ -67,12 +67,12 @@ impl ModelRouter {
         requirements: &Requirements,
         request: &GenerateJsonRequest,
     ) -> Result<GenerateJsonResponse, RuntimeClientError> {
-        let provider = self.select(requirements).ok_or_else(|| {
-            RuntimeClientError::Runtime {
+        let provider = self
+            .select(requirements)
+            .ok_or_else(|| RuntimeClientError::Runtime {
                 code: "no_provider_available".to_string(),
                 message: no_provider_message(requirements, &self.policy),
-            }
-        })?;
+            })?;
         provider.generate_json(request)
     }
 }

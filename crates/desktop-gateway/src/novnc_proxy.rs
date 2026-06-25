@@ -17,8 +17,8 @@ use std::time::{Duration, Instant};
 use axum::{
     body::Body,
     extract::{
-        ws::{Message, WebSocket, WebSocketUpgrade},
         Path, Query, State,
+        ws::{Message, WebSocket, WebSocketUpgrade},
     },
     http::StatusCode,
     response::{IntoResponse, Json, Response},
@@ -74,7 +74,11 @@ pub(crate) fn current_view_ticket(state: &AppState) -> String {
 /// `HOMUN_CONTAINED_COMPUTER_NOVNC` on a server (e.g. `http://homun-cc:6080/...`),
 /// else the desktop loopback `http://127.0.0.1:6080`.
 fn novnc_origin() -> String {
-    parse_novnc_origin(std::env::var("HOMUN_CONTAINED_COMPUTER_NOVNC").ok().as_deref())
+    parse_novnc_origin(
+        std::env::var("HOMUN_CONTAINED_COMPUTER_NOVNC")
+            .ok()
+            .as_deref(),
+    )
 }
 
 fn parse_novnc_origin(raw: Option<&str>) -> String {
@@ -101,13 +105,19 @@ pub(crate) struct TicketQuery {
 /// part (the live pixel stream) is the WebSocket, which IS ticket-gated. Leaving the
 /// assets unticketed lets the page's relative `./core/*.js` imports load without
 /// threading a ticket through every request.
-pub(crate) async fn novnc_asset(State(state): State<AppState>, Path(path): Path<String>) -> Response {
+pub(crate) async fn novnc_asset(
+    State(state): State<AppState>,
+    Path(path): Path<String>,
+) -> Response {
     let url = format!("{}/{}", novnc_origin(), path);
     let upstream = match state.http.get(&url).send().await {
         Ok(r) => r,
-        Err(_) => return (StatusCode::BAD_GATEWAY, "contained computer unreachable").into_response(),
+        Err(_) => {
+            return (StatusCode::BAD_GATEWAY, "contained computer unreachable").into_response();
+        }
     };
-    let status = StatusCode::from_u16(upstream.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+    let status =
+        StatusCode::from_u16(upstream.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
     let content_type = upstream
         .headers()
         .get(reqwest::header::CONTENT_TYPE)

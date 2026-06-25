@@ -388,7 +388,10 @@ mod plan_step_tests {
             "allowed_actions": ["read", "analyze", "draft", "frobnicate"]
         }))
         .unwrap();
-        assert_eq!(step.allowed_actions, vec![AllowedAction::Read, AllowedAction::Draft]);
+        assert_eq!(
+            step.allowed_actions,
+            vec![AllowedAction::Read, AllowedAction::Draft]
+        );
     }
 
     #[test]

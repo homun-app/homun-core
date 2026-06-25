@@ -71,18 +71,22 @@ fn resource_governor_requeues_waiting_task_when_capacity_returns() {
         ResourceGovernor::new(ResourceLimits::new().with_limit(ResourceClass::LlmInference, 1));
 
     governor.reserve(&store, &running, "worker_a").unwrap();
-    assert!(governor
-        .mark_waiting_if_unavailable(&store, &blocked)
-        .unwrap());
+    assert!(
+        governor
+            .mark_waiting_if_unavailable(&store, &blocked)
+            .unwrap()
+    );
     governor.release(&store, &running).unwrap();
 
     let blocked = store
         .get_task(&TaskId::new("blocked"), &user, &workspace)
         .unwrap()
         .unwrap();
-    assert!(governor
-        .requeue_waiting_if_available(&store, &blocked)
-        .unwrap());
+    assert!(
+        governor
+            .requeue_waiting_if_available(&store, &blocked)
+            .unwrap()
+    );
     let reloaded = store
         .get_task(&TaskId::new("blocked"), &user, &workspace)
         .unwrap()
