@@ -402,6 +402,19 @@ struct TemplateCatalogResponse {
     templates: Vec<TemplateCatalogEntryResponse>,
 }
 
+#[derive(Debug, Clone, serde::Deserialize)]
+struct ImportPptxTemplateRequest {
+    source_path: String,
+    name: String,
+    source_provider: Option<String>,
+    source_url: Option<String>,
+    license: Option<String>,
+    attribution_required: Option<bool>,
+    attribution_text: Option<String>,
+    redistribution_policy: Option<String>,
+    tags: Option<Vec<String>>,
+}
+
 #[derive(Debug, serde::Deserialize)]
 struct RejectApprovalRequest {
     reason: String,
@@ -765,6 +778,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/skills/catalog/install", post(install_catalog_skill))
         .route("/api/skills/catalog/preview", get(preview_catalog_skill))
         .route("/api/templates/catalog", get(template_catalog))
+        .route("/api/templates/import-pptx", post(import_pptx_template))
         .route("/api/skills/{id}", get(skill_detail))
         .route("/api/skills/{id}/enabled", post(set_skill_enabled))
         .route("/api/tasks/queue", get(task_queue))
@@ -7440,9 +7454,10 @@ fn file_template_catalog_provider() -> Option<FileTemplateCatalogProvider> {
 }
 
 fn imported_template_pack_root() -> Option<PathBuf> {
-    gateway_data_dir()
+    std::env::var("HOMUN_TEMPLATE_PACK_ROOT")
         .ok()
-        .map(|dir| dir.join("template-packs"))
+        .map(PathBuf::from)
+        .or_else(|| gateway_data_dir().ok().map(|dir| dir.join("template-packs")))
 }
 
 fn imported_template_pack_provider() -> Option<ImportedTemplatePackProvider> {
@@ -7457,6 +7472,132 @@ fn imported_template_pack_provider() -> Option<ImportedTemplatePackProvider> {
             None
         }
     }
+}
+
+fn slugify_template_pack_name(name: &str) -> Option<String> {
+    let slug = name
+        .trim()
+        .to_ascii_lowercase()
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() {
+                ch
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>()
+        .split('-')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("-");
+    if slug.is_empty() {
+        None
+    } else {
+        Some(slug)
+    }
+}
+
+fn next_template_pack_slug(root: &std::path::Path, base_slug: &str) -> Result<String, String> {
+    for index in 1..1000 {
+        let slug = if index == 1 {
+            base_slug.to_string()
+        } else {
+            format!("{base_slug}-{index}")
+        };
+        if !root.join(&slug).exists() {
+            return Ok(slug);
+        }
+    }
+    Err("could not allocate a unique template pack name".to_string())
+}
+
+fn import_pptx_template_pack(
+    root: &std::path::Path,
+    request: ImportPptxTemplateRequest,
+) -> Result<TemplateCatalogEntry, String> {
+    let name = request.name.trim();
+    if name.is_empty() {
+        return Err("template name is required".to_string());
+    }
+    let source_path = fs_expand_abs(&request.source_path)
+        .ok_or_else(|| "source_path must be an absolute path".to_string())?;
+    if !source_path.is_file() {
+        return Err("source_path does not point to a file".to_string());
+    }
+    let extension = source_path
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| value.to_ascii_lowercase())
+        .ok_or_else(|| "template source must be a .pptx or .potx file".to_string())?;
+    if !matches!(extension.as_str(), "pptx" | "potx") {
+        return Err("template source must be a .pptx or .potx file".to_string());
+    }
+
+    fs::create_dir_all(root).map_err(|error| {
+        format!(
+            "could not create template pack root {}: {error}",
+            root.display()
+        )
+    })?;
+    let base_slug =
+        slugify_template_pack_name(name).ok_or_else(|| "template name is invalid".to_string())?;
+    let slug = next_template_pack_slug(root, &base_slug)?;
+    let pack_root = root.join(&slug);
+    fs::create_dir_all(&pack_root).map_err(|error| {
+        format!(
+            "could not create template pack {}: {error}",
+            pack_root.display()
+        )
+    })?;
+    let source_file_name = format!("source.{extension}");
+    let target_source = pack_root.join(source_file_name);
+    fs::copy(&source_path, &target_source).map_err(|error| {
+        format!(
+            "could not copy template source {}: {error}",
+            source_path.display()
+        )
+    })?;
+
+    let source_provider = request
+        .source_provider
+        .as_deref()
+        .and_then(clean_template_catalog_id);
+    let tags = request
+        .tags
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|tag| clean_template_catalog_text(Some(&serde_json::Value::String(tag)), 40))
+        .collect::<Vec<_>>();
+    let route_text = std::iter::once(name.to_string())
+        .chain(tags.iter().cloned())
+        .chain(source_provider.iter().cloned())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let manifest = serde_json::json!({
+        "id": format!("local/{slug}"),
+        "name": name,
+        "kind": "presentation",
+        "description": format!("Imported PowerPoint template: {name}."),
+        "source_provider": source_provider,
+        "source_url": request.source_url,
+        "license": request.license,
+        "attribution_required": request.attribution_required.unwrap_or(false),
+        "attribution_text": request.attribution_text,
+        "redistribution_policy": request.redistribution_policy,
+        "design_template": "startup_pitch",
+        "design_theme": "clean_corporate",
+        "design_profile": "sales_pitch",
+        "tags": tags,
+        "route_text": route_text,
+    });
+    let manifest_bytes =
+        serde_json::to_vec_pretty(&manifest).map_err(|error| error.to_string())?;
+    fs::write(pack_root.join("manifest.json"), manifest_bytes)
+        .map_err(|error| format!("could not write template manifest: {error}"))?;
+
+    parse_imported_template_pack(&pack_root)
+        .ok_or_else(|| "imported template manifest could not be loaded".to_string())
 }
 
 fn template_catalog_entries() -> Vec<TemplateCatalogEntry> {
@@ -39698,6 +39839,28 @@ async fn template_catalog() -> Json<TemplateCatalogResponse> {
     ))
 }
 
+async fn import_pptx_template(
+    Json(request): Json<ImportPptxTemplateRequest>,
+) -> Result<Json<TemplateCatalogEntryResponse>, GatewayError> {
+    let root = imported_template_pack_root().ok_or_else(|| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "template_pack_root_unavailable",
+        message: "Template pack root is unavailable.".to_string(),
+    })?;
+    let entry = import_pptx_template_pack(&root, request).map_err(|message| GatewayError {
+        status: StatusCode::BAD_REQUEST,
+        code: "template_import_failed",
+        message,
+    })?;
+    let mut response = template_catalog_response_from_entries(vec![entry]);
+    let entry = response.templates.pop().ok_or_else(|| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "template_import_empty_response",
+        message: "Imported template response is empty.".to_string(),
+    })?;
+    Ok(Json(entry))
+}
+
 fn task_queue_response_for_state(state: &AppState) -> Result<TaskQueueResponse, GatewayError> {
     let user = gateway_user_id();
     let workspace = gateway_workspace_id();
@@ -43591,6 +43754,67 @@ mod tests {
         assert_eq!(imported_json["is_imported"], true);
         assert!(imported_json.get("source_path").is_none());
         assert!(imported_json.get("template_pack_root").is_none());
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn import_pptx_template_pack_copies_source_and_writes_manifest() {
+        let root = std::env::temp_dir().join(format!(
+            "homun-import-root-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis()
+        ));
+        let source = root.join("source-files/template.pptx");
+        std::fs::create_dir_all(source.parent().unwrap()).expect("source dir");
+        std::fs::write(&source, b"pptx").expect("source");
+        let target_root = root.join("packs");
+
+        let imported = super::import_pptx_template_pack(
+            &target_root,
+            super::ImportPptxTemplateRequest {
+                source_path: source.to_string_lossy().to_string(),
+                name: "Customer Pitch".to_string(),
+                source_provider: Some("slidescarnival".to_string()),
+                source_url: Some(
+                    "https://www.slidescarnival.com/template/customer-pitch/123".to_string(),
+                ),
+                license: Some("Creative Commons Attribution 4.0".to_string()),
+                attribution_required: Some(true),
+                attribution_text: Some("Template by SlidesCarnival".to_string()),
+                redistribution_policy: Some("generated_decks_only".to_string()),
+                tags: Some(vec![
+                    "pitch".to_string(),
+                    "slidescarnival".to_string(),
+                ]),
+            },
+        )
+        .expect("imported");
+
+        assert!(imported.source_path.as_ref().is_some_and(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name == "source.pptx")
+        }));
+        assert!(target_root.join("customer-pitch/source.pptx").exists());
+        assert!(target_root.join("customer-pitch/manifest.json").exists());
+        assert_eq!(imported.id, "local/customer-pitch");
+        assert_eq!(imported.source_provider.as_deref(), Some("slidescarnival"));
+        assert_eq!(
+            imported.source_ref.as_deref(),
+            Some("https://www.slidescarnival.com/template/customer-pitch/123")
+        );
+        assert!(imported.attribution_required);
+
+        let response = super::template_catalog_response_from_entries(vec![imported]);
+        let value = serde_json::to_value(&response).expect("json");
+        let first = &value["templates"][0];
+        assert_eq!(first["is_imported"], true);
+        assert!(first.get("source_path").is_none());
+        assert!(first.get("template_pack_root").is_none());
 
         let _ = std::fs::remove_dir_all(root);
     }
