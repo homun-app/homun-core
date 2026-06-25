@@ -2677,6 +2677,11 @@ function MessageActionBar({
     });
   }
 
+  function runMessageMenuAction(action: () => void) {
+    setMenuOpen(false);
+    action();
+  }
+
   return (
     <div className="message-action-bar" aria-label={t("chat.messageActions")}>
       {canEdit && (
@@ -2725,18 +2730,18 @@ function MessageActionBar({
           {menuOpen && (
             <div className={`message-action-menu ${menuPlacement}`} role="menu">
               {canExpand && (
-                <button type="button" role="menuitem" onClick={onExpand}>
+                <button type="button" role="menuitem" onClick={() => runMessageMenuAction(onExpand)}>
                   <Play size={14} />
                   <span>{t("chat.action.expand")}</span>
                 </button>
               )}
               {contentKind === "code" && (
                 <>
-                  <button type="button" role="menuitem" onClick={onExplainCode}>
+                  <button type="button" role="menuitem" onClick={() => runMessageMenuAction(onExplainCode)}>
                     <SquareTerminal size={14} />
                     <span>{t("chat.action.explainCode")}</span>
                   </button>
-                  <button type="button" role="menuitem" onClick={onImproveCode}>
+                  <button type="button" role="menuitem" onClick={() => runMessageMenuAction(onImproveCode)}>
                     <WandSparkles size={14} />
                     <span>{t("chat.action.improveCode")}</span>
                   </button>
@@ -2744,18 +2749,18 @@ function MessageActionBar({
               )}
               {contentKind === "diagram" && (
                 <>
-                  <button type="button" role="menuitem" onClick={onExplainDiagram}>
+                  <button type="button" role="menuitem" onClick={() => runMessageMenuAction(onExplainDiagram)}>
                     <FileText size={14} />
                     <span>{t("chat.action.explainDiagram")}</span>
                   </button>
-                  <button type="button" role="menuitem" onClick={onReviseDiagram}>
+                  <button type="button" role="menuitem" onClick={() => runMessageMenuAction(onReviseDiagram)}>
                     <WandSparkles size={14} />
                     <span>{t("chat.action.editDiagram")}</span>
                   </button>
                 </>
               )}
               {canRegenerate && (
-                <button type="button" role="menuitem" onClick={onRegenerate}>
+                <button type="button" role="menuitem" onClick={() => runMessageMenuAction(onRegenerate)}>
                   <RotateCcw size={14} />
                   <span>{t("chat.action.regenerate")}</span>
                 </button>
@@ -2765,14 +2770,14 @@ function MessageActionBar({
                   className={savedToMemory ? "active" : ""}
                   type="button"
                   role="menuitem"
-                  onClick={onSaveToMemory}
+                  onClick={() => runMessageMenuAction(onSaveToMemory)}
                 >
                   <BookMarked size={14} />
                   <span>{savedToMemory ? t("chat.savedToMemory") : t("chat.saveToMemory")}</span>
                 </button>
               )}
               {canSaveAsGoal && (
-                <button type="button" role="menuitem" onClick={onSaveAsGoal}>
+                <button type="button" role="menuitem" onClick={() => runMessageMenuAction(onSaveAsGoal)}>
                   <Target size={14} />
                   <span>{t("chat.action.saveAsGoal")}</span>
                 </button>
@@ -7897,7 +7902,10 @@ function Composer({
                       }}
                     >
                       <I size={16} />
-                      <span>{m.label}</span>
+                      <span className="composer-mode-text">
+                        <strong>{m.label}</strong>
+                        {m.desc && <small>{m.desc}</small>}
+                      </span>
                       {active && <Check size={14} className="composer-add-check" />}
                     </button>
                   );

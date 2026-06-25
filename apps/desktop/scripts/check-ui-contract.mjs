@@ -269,6 +269,7 @@ assertContains("src/components/ChatView.tsx", "onExplainCode", "code responses m
 assertContains("src/components/ChatView.tsx", "onImproveCode", "code responses must expose code improvement action");
 assertContains("src/components/ChatView.tsx", "reply-context-card", "composer must show the active reply context before submit");
 assertContains("src/components/ChatView.tsx", "message-action-menu", "secondary message actions must stay behind a compact menu");
+assertContains("src/components/ChatView.tsx", "runMessageMenuAction", "message overflow actions must close the menu before running");
 assertContains("src/components/ChatView.tsx", "message-latency-summary", "message metrics must be visible without dominating the answer");
 assertContains("src/components/ChatView.tsx", "normalizeGoalText", "goals manager must normalize goal text before comparing suggestions");
 assertContains("src/components/ChatView.tsx", "dedupeGoalDrafts", "goals manager must dedupe suggested goals against existing project goals");
@@ -286,6 +287,8 @@ assertNotContains("src/components/ChatView.tsx", "t(\"chat.searchSkill\")", "com
 assertContains("src/components/ChatView.tsx", "t(\"chat.searchCapability\")", "composer capability picker must search capabilities");
 assertContains("src/components/ChatView.tsx", "t(\"chat.noCapabilities\")", "composer capability picker must use capability empty state");
 assertContains("src/components/ChatView.tsx", "t(\"chat.forcedCapabilityNextMessage\")", "forced capability chip must use user-facing capability terminology");
+assertContains("src/components/ChatView.tsx", "{m.desc && <small>{m.desc}</small>}", "composer mode picker must explain what each mode does");
+assertContains("src/components/ChatView.tsx", "!m.projectOnly || linkedFolder != null", "composer must hide project-only modes without a linked project folder");
 assertContains("src/i18n/locales/en.json", "\"searchCapability\"", "English chat locale must include capability search label");
 assertContains("src/i18n/locales/it.json", "\"searchCapability\"", "Italian chat locale must include capability search label");
 assertContains("src/components/ChatView.tsx", "value.trim() && (", "composer improve prompt action must only render when there is prompt text to improve");
