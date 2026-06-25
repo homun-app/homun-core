@@ -324,6 +324,11 @@ primo percorso locale verde e WS5 è chiusa localmente/gate:
     layout archetype, componenti) invece di scegliere da sole card testuali. I
     cataloghi esterni senza `preview_ref` restano sul fallback contract-only; il
     registry rimane la fonte unica e i template non diventano tool callable.
+    Follow-up WS7 template selection notes: `/api/templates/catalog` espone
+    `selection_notes` derivate da use case, audience, visual contract e struttura;
+    le stesse note entrano nel testo BM25 del template catalog e la gallery le
+    mostra sulle card, così modello e utente scelgono da evidenza esplicita
+    invece che da keyword isolate.
     Follow-up WS7 deck QA metadata: `make_deck` e `render_deck` allegano agli
     artifact gestiti metadata strutturati derivati da `DECK_QA_JSON`
     (`quality_status`, `quality_slide_count`, `quality_issues`), così un deck

@@ -257,6 +257,11 @@ function TemplateCatalogGallery() {
                 <span>{entry.kind === "presentation" ? "PPTX" : "DOCX"}</span>
               </div>
               <p>{entry.description}</p>
+              <div className="template-card-fit" aria-label="Template selection notes">
+                {entry.selection_notes.slice(0, 2).map((note) => (
+                  <span key={note}>{note}</span>
+                ))}
+              </div>
               <div className="template-card-meta">
                 {[entry.design_theme, entry.design_profile, ...entry.design_components.slice(0, 3)]
                   .filter(Boolean)

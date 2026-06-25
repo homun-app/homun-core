@@ -215,7 +215,12 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   locale/verde: i seed locali `monet/*` dichiarano ora `preview_ref`
   `builtin:template-preview/*`; la UI materializza una preview compatta dai token
   `design_theme`/layout/componenti già nel catalogo e mantiene il fallback
-  contract-only per cataloghi esterni senza preview. Prossimo asse: preview
+  contract-only per cataloghi esterni senza preview. Follow-up WS7 locale/verde:
+  il payload `/api/templates/catalog` espone anche `selection_notes` derivate dai
+  token canonici del template (use case, audience, tema, layout/componenti) e le
+  stesse note entrano nel testo indicizzato da `find_capability`; la gallery le
+  mostra sulle card per rendere esplicito perché scegliere un template senza
+  introdurre euristiche fragili o un secondo catalogo. Prossimo asse: preview
   asset/thumbnail reali per pack esterni e QA ancora più profonda.
   Correzione UX post-smoke: il menu modelli distingue ora i modelli cloud
   instradati tramite endpoint locale Ollama (`☁ via local`) dai provider cloud

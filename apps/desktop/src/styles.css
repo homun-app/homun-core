@@ -10886,6 +10886,18 @@ body.resizing-drawer {
   font-size: 12px;
   line-height: 1.45;
 }
+.template-card-fit {
+  display: grid;
+  gap: 5px;
+  margin-top: 2px;
+}
+.template-card-fit span {
+  border-left: 2px solid color-mix(in srgb, var(--accent) 65%, transparent);
+  color: var(--text);
+  font-size: 11px;
+  line-height: 1.35;
+  padding-left: 7px;
+}
 .template-card-meta {
   display: flex;
   flex-wrap: wrap;

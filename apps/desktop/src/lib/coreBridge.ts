@@ -2091,6 +2091,7 @@ export interface TemplateCatalogEntry {
   design_components: string[];
   layout_archetypes: string[];
   tags: string[];
+  selection_notes: string[];
   preview_ref: string | null;
   source_ref: string | null;
   license: string | null;

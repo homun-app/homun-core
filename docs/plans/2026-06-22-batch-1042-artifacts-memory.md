@@ -914,6 +914,15 @@ ragionato il contratto degli strumenti `make_*` creati dall'harness. ADR 0011
   read-only del registry unico, non tool callable né secondo renderer. Gate:
   `cargo test -p local-first-desktop-gateway template_catalog -- --nocapture`,
   `npm run test:ui-contract`, `npm run build`.
+  **Follow-up WS7 selection notes (2026-06-25, locale/verde):**
+  `/api/templates/catalog` espone `selection_notes` derivate solo da metadati già
+  canonici del template (use case, audience, design theme/profile/componenti e
+  layout archetype). Le stesse note sono indicizzate nel corpus BM25 del template
+  catalog e mostrate sulle card della gallery, così template discovery e scelta
+  visuale condividono la stessa evidenza senza euristiche parallele. Gate:
+  `cargo test -p local-first-desktop-gateway template_catalog -- --nocapture`,
+  `cargo check -p local-first-desktop-gateway`, `npm run test:ui-contract`,
+  `npm run build`.
   **Correzione smoke provider (2026-06-23):** quando un modello `*:cloud` passa
   dal provider locale Ollama, la UI lo etichetta `☁ via local` invece di cloud
   generico; se Ollama locale non risponde il workflow fallisce correttamente

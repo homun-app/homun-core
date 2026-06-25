@@ -386,6 +386,7 @@ struct TemplateCatalogEntryResponse {
     design_components: Vec<String>,
     layout_archetypes: Vec<String>,
     tags: Vec<String>,
+    selection_notes: Vec<String>,
     preview_ref: Option<String>,
     source_ref: Option<String>,
     license: Option<String>,
@@ -7353,56 +7354,111 @@ fn template_catalog_response_from_entries(
     TemplateCatalogResponse {
         templates: entries
             .into_iter()
-            .map(|entry| TemplateCatalogEntryResponse {
-                provider: entry.provider,
-                id: entry.id,
-                name: entry.name,
-                kind: entry.kind,
-                description: entry.description,
-                use_cases: entry.use_cases,
-                audience: entry.audience,
-                design_template: entry.design_template,
-                design_theme: entry.design_theme,
-                design_profile: entry.design_profile,
-                design_components: entry.design_components,
-                layout_archetypes: entry.layout_archetypes,
-                tags: entry.tags,
-                preview_ref: entry.preview_ref,
-                source_ref: entry.source_ref,
-                license: entry.license,
+            .map(|entry| {
+                let selection_notes = template_catalog_selection_notes(&entry);
+                TemplateCatalogEntryResponse {
+                    provider: entry.provider,
+                    id: entry.id,
+                    name: entry.name,
+                    kind: entry.kind,
+                    description: entry.description,
+                    use_cases: entry.use_cases,
+                    audience: entry.audience,
+                    design_template: entry.design_template,
+                    design_theme: entry.design_theme,
+                    design_profile: entry.design_profile,
+                    design_components: entry.design_components,
+                    layout_archetypes: entry.layout_archetypes,
+                    tags: entry.tags,
+                    selection_notes,
+                    preview_ref: entry.preview_ref,
+                    source_ref: entry.source_ref,
+                    license: entry.license,
+                }
             })
             .collect(),
     }
 }
 
+fn template_catalog_selection_notes(entry: &TemplateCatalogEntry) -> Vec<String> {
+    let mut notes = Vec::new();
+    if !entry.use_cases.is_empty() {
+        notes.push(format!(
+            "Best when the request asks for {}.",
+            entry.use_cases.join(", ")
+        ));
+    }
+    if !entry.audience.is_empty() {
+        notes.push(format!("Designed for {}.", entry.audience.join(", ")));
+    }
+    let mut visual = Vec::new();
+    visual.push(entry.design_template.replace('_', " "));
+    if let Some(theme) = entry.design_theme.as_deref() {
+        visual.push(theme.replace('_', " "));
+    }
+    if let Some(profile) = entry.design_profile.as_deref() {
+        visual.push(profile.replace('_', " "));
+    }
+    if !entry.design_components.is_empty() {
+        visual.push(format!(
+            "components: {}",
+            entry
+                .design_components
+                .iter()
+                .take(3)
+                .map(|component| component.replace('_', " "))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+    notes.push(format!("Visual contract: {}.", visual.join(" / ")));
+    if !entry.layout_archetypes.is_empty() {
+        notes.push(format!(
+            "Structure: {}.",
+            entry
+                .layout_archetypes
+                .iter()
+                .take(6)
+                .map(|layout| layout.replace('_', " "))
+                .collect::<Vec<_>>()
+                .join(" -> ")
+        ));
+    }
+    notes
+}
+
 fn template_catalog_capability_entries() -> Vec<CapabilityEntry> {
     template_catalog_entries()
         .into_iter()
-        .map(|entry| CapabilityEntry {
-            key: entry.id.to_string(),
-            desc: entry.description.to_string(),
-            text: format!(
-                "template catalog {} {} {} {} {} {} {} {} {} {} {} {} {} {} {} {}",
-                entry.provider,
-                entry.id,
-                entry.name,
-                entry.kind,
-                entry.description,
-                entry.use_cases.join(" "),
-                entry.audience.join(" "),
-                entry.layout_archetypes.join(" "),
-                entry.tags.join(" "),
-                entry.preview_ref.as_deref().unwrap_or(""),
-                entry.source_ref.as_deref().unwrap_or(""),
-                entry.license.as_deref().unwrap_or(""),
-                entry.design_template,
-                entry.design_theme.as_deref().unwrap_or(""),
-                entry.design_profile.as_deref().unwrap_or(""),
-                entry.route_text
-            ),
-            schema: None,
-            is_skill: false,
-            source: CapabilitySource::TemplateCatalog,
+        .map(|entry| {
+            let selection_notes = template_catalog_selection_notes(&entry).join(" ");
+            CapabilityEntry {
+                key: entry.id.to_string(),
+                desc: entry.description.to_string(),
+                text: format!(
+                    "template catalog {} {} {} {} {} {} {} {} {} {} {} {} {} {} {} {} Selection notes: {}",
+                    entry.provider,
+                    entry.id,
+                    entry.name,
+                    entry.kind,
+                    entry.description,
+                    entry.use_cases.join(" "),
+                    entry.audience.join(" "),
+                    entry.layout_archetypes.join(" "),
+                    entry.tags.join(" "),
+                    entry.preview_ref.as_deref().unwrap_or(""),
+                    entry.source_ref.as_deref().unwrap_or(""),
+                    entry.license.as_deref().unwrap_or(""),
+                    entry.design_template,
+                    entry.design_theme.as_deref().unwrap_or(""),
+                    entry.design_profile.as_deref().unwrap_or(""),
+                    entry.route_text,
+                    selection_notes
+                ),
+                schema: None,
+                is_skill: false,
+                source: CapabilitySource::TemplateCatalog,
+            }
         })
         .collect()
 }
@@ -43412,6 +43468,51 @@ mod tests {
         assert_eq!(first["tags"][0], "premium");
         assert!(first.get("schema").is_none());
         assert!(first.get("callable").is_none());
+    }
+
+    #[test]
+    fn template_catalog_response_exposes_selection_notes_for_gallery() {
+        let response = super::template_catalog_response_from_entries(
+            super::TemplateCatalogProvider::entries(&super::LocalTemplateCatalogProvider),
+        );
+        let value = serde_json::to_value(&response).expect("json");
+        let startup = value["templates"]
+            .as_array()
+            .expect("templates")
+            .iter()
+            .find(|entry| entry["id"] == "monet/startup-pitch-clean-01")
+            .expect("startup pitch");
+        let notes = startup["selection_notes"]
+            .as_array()
+            .expect("selection notes");
+
+        assert!(
+            notes
+                .iter()
+                .any(|note| note.as_str().is_some_and(|text| text.contains("pitch"))),
+            "selection notes should explain why this template fits a request"
+        );
+        assert!(
+            notes
+                .iter()
+                .any(|note| note.as_str().is_some_and(|text| text.contains("investors"))),
+            "selection notes should expose audience fit"
+        );
+    }
+
+    #[test]
+    fn template_catalog_capability_text_includes_selection_notes() {
+        let corpus = super::template_catalog_capability_entries();
+        let startup = corpus
+            .iter()
+            .find(|entry| entry.key == "monet/startup-pitch-clean-01")
+            .expect("startup pitch");
+
+        assert!(
+            startup.text.contains("Selection notes"),
+            "capability search should see template selection rationale"
+        );
+        assert!(startup.text.contains("investors"));
     }
 
     #[test]
