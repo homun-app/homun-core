@@ -170,6 +170,7 @@ assertContains("src/components/BrandKitPanel.tsx", "builtin:template-preview/", 
 assertContains("src/components/BrandKitPanel.tsx", "TemplateCardPreview", "template gallery cards must route preview rendering through a dedicated component");
 assertContains("src/components/BrandKitPanel.tsx", "template-card-contract", "template gallery must keep the metadata contract fallback for catalogs without preview_ref");
 assertContains("src/components/BrandKitPanel.tsx", "selection_notes", "template gallery must expose catalog selection rationale, not only visual decoration");
+assertContains("src/components/BrandKitPanel.tsx", "entry.selection_notes ?? []", "template gallery must tolerate legacy catalog entries without selection_notes");
 
 assertContains("src/components/ChatView.tsx", "coreBridge.submitChatPromptStream", "composer must submit prompts through the local chat transport");
 assertContains("src/lib/coreBridge.ts", "submitBrowserRuntimeChatPromptStream", "Electron bridge must stream from the local Gemma runtime through Electron-safe transport");

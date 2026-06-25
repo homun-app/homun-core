@@ -139,6 +139,9 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   Electron riavviato con gateway `local-first-desktop-gateway` in ascolto su
   `127.0.0.1:18765`. Follow-up WS7 chiuso e committato: il template catalog
   espone `selection_notes` condivise da gallery e BM25 capability search.
+  Hotfix runtime Presentations: la gallery tollera cataloghi legacy senza
+  `selection_notes`, evitando il crash al click su Presentations quando il
+  gateway espone ancora payload pre-rationale.
   **Prossimo passo unico:** continuare WS7 con preview asset/thumbnail reali per
   template pack esterni e QA visuale della gallery; UX.2 resta da rifinire solo
   con review visuale dell'utente, senza riaprire memoria/WS1/WS8 salvo

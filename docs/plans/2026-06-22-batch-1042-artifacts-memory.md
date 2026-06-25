@@ -1038,6 +1038,10 @@ feature laterali né una dashboard generica.
   Artifacts usa controlli coerenti con Settings e i gruppi artifact sono
   identificati da metadati backend (`title`, `workspace`, `chat_missing`) o dal
   manifest del bundle, non dal solo nome cartella `thread_*`.
+- ✅ **WS7 template rationale runtime hotfix (2026-06-25):** la gallery
+  Presentations usa `selection_notes` quando presenti ma resta compatibile con
+  cataloghi legacy senza quel campo; il gate evita regressioni in cui cliccare
+  Presentations crasha il plugin prima del rendering dei template.
 
 ## WS9 — Distribuzione plugin & marketplace
 

@@ -334,6 +334,9 @@ primo percorso locale verde e WS5 è chiusa localmente/gate:
     (`quality_status`, `quality_slide_count`, `quality_issues`), così un deck
     prodotto con warning resta ispezionabile/recuperabile anche dalla memoria;
     il provenance context artifact espone `quality: warning` e i codici issue.
+    Hotfix runtime: la gallery tollera cataloghi legacy senza `selection_notes`,
+    quindi il click su Presentations non crasha quando gateway/app e catalogo
+    sono temporaneamente disallineati.
 74. WS8 gateway contract eval — `scripts/eval_suite.py` può ora, se configurato
     con `HOMUN_EVAL_GATEWAY_BASE` e token, verificare anche il gateway reale:
     `/api/templates/catalog` deve esporre template non-callable con preview

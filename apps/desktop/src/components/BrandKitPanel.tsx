@@ -248,39 +248,44 @@ function TemplateCatalogGallery() {
       </header>
 
       <div className="template-gallery-grid">
-        {visible.map((entry) => (
-          <article className="template-card" key={entry.id}>
-            <TemplateCardPreview entry={entry} />
-            <div className="template-card-body">
-              <div className="template-card-title-row">
-                <h4>{entry.name}</h4>
-                <span>{entry.kind === "presentation" ? "PPTX" : "DOCX"}</span>
+        {visible.map((entry) => {
+          const selectionNotes = entry.selection_notes ?? [];
+          return (
+            <article className="template-card" key={entry.id}>
+              <TemplateCardPreview entry={entry} />
+              <div className="template-card-body">
+                <div className="template-card-title-row">
+                  <h4>{entry.name}</h4>
+                  <span>{entry.kind === "presentation" ? "PPTX" : "DOCX"}</span>
+                </div>
+                <p>{entry.description}</p>
+                {selectionNotes.length > 0 && (
+                  <div className="template-card-fit" aria-label="Template selection notes">
+                    {selectionNotes.slice(0, 2).map((note) => (
+                      <span key={note}>{note}</span>
+                    ))}
+                  </div>
+                )}
+                <div className="template-card-meta">
+                  {[entry.design_theme, entry.design_profile, ...entry.design_components.slice(0, 3)]
+                    .filter(Boolean)
+                    .map((item) => (
+                      <span key={item}>{String(item).replaceAll("_", " ")}</span>
+                    ))}
+                </div>
               </div>
-              <p>{entry.description}</p>
-              <div className="template-card-fit" aria-label="Template selection notes">
-                {entry.selection_notes.slice(0, 2).map((note) => (
-                  <span key={note}>{note}</span>
-                ))}
-              </div>
-              <div className="template-card-meta">
-                {[entry.design_theme, entry.design_profile, ...entry.design_components.slice(0, 3)]
-                  .filter(Boolean)
-                  .map((item) => (
-                    <span key={item}>{String(item).replaceAll("_", " ")}</span>
-                  ))}
-              </div>
-            </div>
-            <button
-              type="button"
-              className="template-copy"
-              onClick={() => void copyTemplateRef(entry.id)}
-              title={t("presentations:copyTemplateRef")}
-            >
-              <Copy size={14} aria-hidden />
-              {copied === entry.id ? t("presentations:copied") : entry.id}
-            </button>
-          </article>
-        ))}
+              <button
+                type="button"
+                className="template-copy"
+                onClick={() => void copyTemplateRef(entry.id)}
+                title={t("presentations:copyTemplateRef")}
+              >
+                <Copy size={14} aria-hidden />
+                {copied === entry.id ? t("presentations:copied") : entry.id}
+              </button>
+            </article>
+          );
+        })}
       </div>
     </section>
   );
