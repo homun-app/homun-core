@@ -92,6 +92,38 @@ assertMatches(
 assertContains("src/styles.css", ":root[data-theme=\"dark\"]", "dark surface theme must define CSS tokens");
 assertContains("src/styles.css", "color-scheme: dark", "dark surface theme must advertise dark controls to the browser");
 assertContains("src/components/SettingsView.tsx", "dark:", "Appearance picker previews must include literal dark swatch values");
+assertContains("src/styles.css", "background: color-mix(in srgb, var(--surface) 94%, transparent);", "Workspace Island pill must inherit the active surface theme");
+assertContains("src/styles.css", "background: color-mix(in srgb, var(--surface) 96%, transparent);", "Workspace Island panel/menu must inherit the active surface theme");
+assertContains("src/styles.css", ".cc-dock {\n  position: absolute;", "Computer dock contract must target the chat computer island");
+assertContains("src/styles.css", "background: color-mix(in srgb, var(--surface) 95%, transparent);", "Computer dock must inherit the active surface theme");
+assertNotContains("src/styles.css", "background: rgba(255, 255, 255, 0.98);", "Workspace Island pill must not force a light background");
+assertNotContains("src/styles.css", "background: rgba(255, 255, 255, 0.985);", "Workspace Island panel must not force a light background");
+assertNotContains("src/styles.css", "background: rgba(255, 255, 255, 0.99);", "Workspace Island menu must not force a light background");
+assertNotContains("src/styles.css", "background: rgba(255, 255, 255, 0.97);", "Computer dock must not force a light background");
+assertContains("src/styles.css", "background: color-mix(in srgb, var(--surface) 96%, transparent);", "Workbench chrome must inherit the active surface theme");
+assertContains("src/styles.css", "background: linear-gradient(180deg, var(--surface-muted), var(--surface));", "Workbench body must inherit the active surface theme");
+assertContains("src/styles.css", "background: color-mix(in srgb, var(--surface) 82%, transparent);", "Embedded artifact list must inherit the active surface theme");
+assertContains("src/styles.css", "color: var(--text);\n  background: var(--surface-muted);\n  font-family: ui-monospace", "inline markdown code must stay readable in dark theme");
+assertContains("src/styles.css", "color: var(--text);\n  font-family: ui-monospace", "markdown code blocks must use theme text color");
+assertContains("src/styles.css", "background: var(--surface-muted);\n}\n\n.rich-code-block figcaption", "markdown code blocks must use theme surfaces");
+assertNotMatches(
+  "src/styles.css",
+  /\.rich-inline-code\s*\{[\s\S]*?color: #3b4149;[\s\S]*?\}/m,
+  "markdown inline code must not force dark text",
+);
+assertNotMatches(
+  "src/styles.css",
+  /\.rich-code-block pre,\n\.rich-mermaid-block pre\s*\{[\s\S]*?color: #24272d;[\s\S]*?\}/m,
+  "markdown code blocks must not force dark text",
+);
+assertNotMatches(
+  "src/styles.css",
+  /\.code-view-body\s*\{[\s\S]*?color: #24272d;[\s\S]*?\}/m,
+  "Workbench code viewer must not force dark text",
+);
+assertNotContains("src/styles.css", "background: rgba(255, 255, 255, 0.96);", "Workbench/artifact chrome must not force a light background");
+assertNotContains("src/styles.css", "background: rgba(255, 255, 255, 0.82);", "Embedded artifact list must not force a light background");
+assertNotContains("src/styles.css", "background: rgba(248, 248, 247, 0.72), rgba(255, 255, 255, 0.96)", "Workbench body must not force a light gradient");
 
 assertContains("src/components/Sidebar.tsx", "nav-drawer", "expanded navigation must be a drawer");
 assertContains("src/components/Shell.tsx", "window-chrome", "desktop shell must render a custom draggable window chrome");
