@@ -2095,10 +2095,27 @@ export interface TemplateCatalogEntry {
   preview_ref: string | null;
   source_ref: string | null;
   license: string | null;
+  source_provider: string | null;
+  attribution_required: boolean;
+  attribution_text: string | null;
+  redistribution_policy: string | null;
+  is_imported: boolean;
 }
 
 export interface TemplateCatalogResponse {
   templates: TemplateCatalogEntry[];
+}
+
+export interface ImportPptxTemplateRequest {
+  source_path: string;
+  name: string;
+  source_provider?: string;
+  source_url?: string;
+  license?: string;
+  attribution_required?: boolean;
+  attribution_text?: string;
+  redistribution_policy?: string;
+  tags?: string[];
 }
 
 async function electronSkillsCatalog(
@@ -2114,6 +2131,12 @@ async function electronSkillsCatalog(
 
 async function electronTemplateCatalog(): Promise<TemplateCatalogResponse> {
   return gatewayGetJson<TemplateCatalogResponse>("/api/templates/catalog");
+}
+
+async function electronImportPptxTemplate(
+  payload: ImportPptxTemplateRequest,
+): Promise<TemplateCatalogEntry> {
+  return gatewayPostJson<TemplateCatalogEntry>("/api/templates/import-pptx", payload);
 }
 
 export interface CatalogPreview {
@@ -2290,6 +2313,8 @@ export const coreBridge = {
     electronInstallRegistrySkills(repo, path),
   skillCatalog: (query?: string, category?: string) => electronSkillsCatalog(query, category),
   templateCatalog: () => electronTemplateCatalog(),
+  importPptxTemplate: (payload: ImportPptxTemplateRequest) =>
+    electronImportPptxTemplate(payload),
   catalogPreview: (slug: string) => electronCatalogPreview(slug),
   catalogInstall: (slug: string) => electronCatalogInstall(slug),
   chatThreads: (workspace?: string) => chatApi.chatThreads(workspace),

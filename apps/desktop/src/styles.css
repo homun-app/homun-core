@@ -10631,6 +10631,25 @@ body.resizing-drawer {
   margin: 2px 0 0;
   font-size: 1.15rem;
 }
+.template-gallery-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.template-import-button {
+  min-height: 34px;
+  cursor: pointer;
+}
+.template-import-button input {
+  display: none;
+}
+.template-import-error {
+  margin: -4px 0 12px;
+  color: var(--danger);
+  font-size: 12px;
+}
 .template-gallery-tabs {
   display: flex;
   gap: 6px;
@@ -10897,6 +10916,20 @@ body.resizing-drawer {
   font-size: 11px;
   line-height: 1.35;
   padding-left: 7px;
+}
+.template-card-source {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.template-card-source span {
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+  color: var(--text);
+  padding: 3px 6px;
+  font-size: 10px;
+  font-weight: 700;
 }
 .template-card-meta {
   display: flex;

@@ -1,8 +1,9 @@
 import { type ChangeEvent, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Copy, FileText, ImageIcon, Presentation, Save } from "lucide-react";
+import { Copy, FileText, ImageIcon, Presentation, Save, Upload } from "lucide-react";
 import { copyText } from "../lib/clipboard";
 import { coreBridge, type BrandKit, type TemplateCatalogEntry } from "../lib/coreBridge";
+import { fileLocalPathFromBridge } from "../lib/gatewayConfig";
 
 const DEFAULT_KIT: BrandKit = {
   organization: "",
@@ -206,6 +207,8 @@ function TemplateCatalogGallery() {
   const [templates, setTemplates] = useState<TemplateCatalogEntry[]>([]);
   const [filter, setFilter] = useState<"all" | "presentation" | "document">("all");
   const [copied, setCopied] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -218,6 +221,40 @@ function TemplateCatalogGallery() {
   }, []);
 
   const visible = templates.filter((entry) => filter === "all" || entry.kind === filter);
+
+  async function refreshTemplates() {
+    const catalog = await coreBridge.templateCatalog();
+    setTemplates(catalog.templates);
+  }
+
+  async function importPptxTemplate(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    setImportError(null);
+    const sourcePath = fileLocalPathFromBridge(file) || (file as File & { path?: string }).path || "";
+    if (!sourcePath) {
+      setImportError("Import PPTX is available in the desktop app for local files.");
+      return;
+    }
+    const name = file.name.replace(/\.(pptx|potx)$/i, "");
+    setImporting(true);
+    try {
+      await coreBridge.importPptxTemplate({
+        source_path: sourcePath,
+        name,
+        source_provider: "user_upload",
+        attribution_required: false,
+        redistribution_policy: "owned_by_user",
+        tags: ["imported", "pptx"],
+      });
+      await refreshTemplates();
+    } catch (error) {
+      setImportError(error instanceof Error ? error.message : "Could not import PPTX template.");
+    } finally {
+      setImporting(false);
+    }
+  }
 
   async function copyTemplateRef(id: string) {
     const ok = await copyText(id);
@@ -233,23 +270,37 @@ function TemplateCatalogGallery() {
           <p className="eyebrow">{t("presentations:templatesEyebrow")}</p>
           <h3 id="template-gallery-title">{t("presentations:templatesTitle")}</h3>
         </div>
-        <div className="template-gallery-tabs" role="tablist" aria-label={t("presentations:templatesTitle")}>
-          {(["all", "presentation", "document"] as const).map((key) => (
-            <button
-              key={key}
-              type="button"
-              className={filter === key ? "active" : ""}
-              onClick={() => setFilter(key)}
-            >
-              {t(`presentations:filter_${key}`)}
-            </button>
-          ))}
+        <div className="template-gallery-controls">
+          <label className="auto-btn template-import-button">
+            <Upload size={14} aria-hidden />
+            {importing ? "Importing..." : "Import PPTX"}
+            <input
+              type="file"
+              accept=".pptx,.potx,application/vnd.openxmlformats-officedocument.presentationml.presentation,application/vnd.ms-powerpoint.template.macroEnabled.12"
+              onChange={(event) => void importPptxTemplate(event)}
+              disabled={importing}
+            />
+          </label>
+          <div className="template-gallery-tabs" role="tablist" aria-label={t("presentations:templatesTitle")}>
+            {(["all", "presentation", "document"] as const).map((key) => (
+              <button
+                key={key}
+                type="button"
+                className={filter === key ? "active" : ""}
+                onClick={() => setFilter(key)}
+              >
+                {t(`presentations:filter_${key}`)}
+              </button>
+            ))}
+          </div>
         </div>
       </header>
+      {importError && <p className="template-import-error">{importError}</p>}
 
       <div className="template-gallery-grid">
         {visible.map((entry) => {
           const selectionNotes = entry.selection_notes ?? [];
+          const sourceBadges = templateSourceBadges(entry);
           return (
             <article className="template-card" key={entry.id}>
               <TemplateCardPreview entry={entry} />
@@ -263,6 +314,13 @@ function TemplateCatalogGallery() {
                   <div className="template-card-fit" aria-label="Template selection notes">
                     {selectionNotes.slice(0, 2).map((note) => (
                       <span key={note}>{note}</span>
+                    ))}
+                  </div>
+                )}
+                {sourceBadges.length > 0 && (
+                  <div className="template-card-source">
+                    {sourceBadges.map((badge) => (
+                      <span key={badge}>{badge}</span>
                     ))}
                   </div>
                 )}
@@ -289,6 +347,18 @@ function TemplateCatalogGallery() {
       </div>
     </section>
   );
+}
+
+function templateSourceBadges(entry: TemplateCatalogEntry) {
+  const badges: string[] = [];
+  if (entry.is_imported) badges.push("Local");
+  if (entry.source_provider === "slidescarnival") {
+    badges.push("SlidesCarnival");
+  } else if (entry.source_provider) {
+    badges.push(entry.source_provider.replaceAll("_", " "));
+  }
+  if (entry.attribution_required) badges.push("Attribution required");
+  return badges;
 }
 
 function TemplateCardPreview({ entry }: { entry: TemplateCatalogEntry }) {
