@@ -559,7 +559,8 @@ impl ChatStore {
         // can be resolved as the path root→active_leaf without extra queries.
         let mut stmt = self.conn.prepare(
             "select id, role, text, timestamp, metadata, metrics_json, feedback,
-                    saved_memory_ref, linked_task_id, linked_automation_ref, parent_id
+                    saved_memory_ref, linked_task_id, linked_automation_ref, attachments_json,
+                    parent_id
                from chat_messages
               where thread_id = ?1
               order by rowid asc",
@@ -568,7 +569,7 @@ impl ChatStore {
         let mut parents: HashMap<String, Option<String>> = HashMap::new();
         let mut by_id: HashMap<String, ChatMessage> = HashMap::new();
         let rows = stmt.query_map(params![thread_id], |row| {
-            let parent: Option<String> = row.get(10)?;
+            let parent: Option<String> = row.get(11)?;
             Ok((message_from_row(row)?, parent))
         })?;
         for row in rows {
@@ -1892,6 +1893,7 @@ impl ChatStore {
                 saved_memory_ref text,
                 linked_task_id text,
                 linked_automation_ref text,
+                attachments_json text,
                 foreign key(thread_id) references chat_threads(thread_id) on delete cascade
             );
 
@@ -2184,6 +2186,12 @@ impl ChatStore {
         if !self.column_exists("chat_messages", "branch_label")? {
             self.conn
                 .execute("alter table chat_messages add column branch_label text", [])?;
+        }
+        if !self.column_exists("chat_messages", "attachments_json")? {
+            self.conn.execute(
+                "alter table chat_messages add column attachments_json text",
+                [],
+            )?;
         }
         self.backfill_chat_tree()?;
         Ok(())
@@ -2706,8 +2714,9 @@ impl ChatStore {
         let inserted = self.conn.execute(
             "insert or ignore into chat_messages (
                 id, thread_id, role, text, timestamp, metadata, metrics_json, feedback,
-                saved_memory_ref, linked_task_id, linked_automation_ref, parent_id
-            ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                saved_memory_ref, linked_task_id, linked_automation_ref, attachments_json,
+                parent_id
+            ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
             params![
                 message.id,
                 thread_id,
@@ -2720,6 +2729,7 @@ impl ChatStore {
                 message.saved_memory_ref,
                 message.linked_task_id,
                 message.linked_automation_ref,
+                attachments_to_json(message)?,
                 parent_id,
             ],
         )?;
@@ -2745,8 +2755,8 @@ impl ChatStore {
             "update chat_messages
                 set role = ?1, text = ?2, timestamp = ?3, metadata = ?4, metrics_json = ?5,
                     feedback = ?6, saved_memory_ref = ?7, linked_task_id = ?8,
-                    linked_automation_ref = ?9
-              where id = ?10 and thread_id = ?11",
+                    linked_automation_ref = ?9, attachments_json = ?10
+              where id = ?11 and thread_id = ?12",
             params![
                 message.role,
                 message.text,
@@ -2757,6 +2767,7 @@ impl ChatStore {
                 message.saved_memory_ref,
                 message.linked_task_id,
                 message.linked_automation_ref,
+                attachments_to_json(message)?,
                 message_id,
                 thread_id,
             ],
@@ -2882,7 +2893,7 @@ fn message_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChatMessage> {
         saved_memory_ref: row.get(7)?,
         linked_task_id: row.get(8)?,
         linked_automation_ref: row.get(9)?,
-        attachments: Vec::new(),
+        attachments: attachments_from_row(row, 10)?,
     })
 }
 
@@ -2910,6 +2921,28 @@ fn metrics_to_json(message: &ChatMessage) -> rusqlite::Result<Option<String>> {
         .map(serde_json::to_string)
         .transpose()
         .map_err(json_error)
+}
+
+fn attachments_to_json(message: &ChatMessage) -> rusqlite::Result<Option<String>> {
+    if message.attachments.is_empty() {
+        Ok(None)
+    } else {
+        serde_json::to_string(&message.attachments)
+            .map(Some)
+            .map_err(json_error)
+    }
+}
+
+fn attachments_from_row(
+    row: &rusqlite::Row<'_>,
+    index: usize,
+) -> rusqlite::Result<Vec<serde_json::Value>> {
+    let attachments_json: Option<String> = row.get(index)?;
+    attachments_json
+        .filter(|json| !json.trim().is_empty())
+        .map(|json| serde_json::from_str(&json).map_err(json_error))
+        .transpose()
+        .map(|attachments| attachments.unwrap_or_default())
 }
 
 fn json_error(error: serde_json::Error) -> rusqlite::Error {
@@ -3121,6 +3154,46 @@ mod tests {
                 .iter()
                 .any(|item| item.title == "joke")
         );
+    }
+
+    #[test]
+    fn committed_chat_message_attachments_survive_reload() {
+        let store = ChatStore::in_memory().unwrap();
+        let thread = store.create_thread("default").unwrap();
+        let attachment = serde_json::json!({
+            "artifact_id": "pending_1",
+            "title_redacted": "Sales Kickoff Slides.pptx",
+            "kind": "file",
+            "size_bytes": 27600,
+            "preview_available": false,
+            "privacy_domain": "local_files"
+        });
+        let user = ChatMessage {
+            id: "user_with_file".to_string(),
+            role: "user".to_string(),
+            text: "use this template".to_string(),
+            timestamp: current_timestamp_seconds(),
+            metadata: None,
+            metrics: None,
+            feedback: None,
+            saved_memory_ref: None,
+            linked_task_id: None,
+            linked_automation_ref: None,
+            attachments: vec![attachment.clone()],
+        };
+        let assistant = mk_message("assistant_after_file", "assistant");
+
+        store
+            .commit_prompt_result(&thread.thread_id, &user, &assistant, None)
+            .unwrap();
+        let reloaded = store.messages(&thread.thread_id).unwrap();
+
+        let persisted_user = reloaded
+            .messages
+            .iter()
+            .find(|message| message.id == "user_with_file")
+            .unwrap();
+        assert_eq!(persisted_user.attachments, vec![attachment]);
     }
 
     #[test]

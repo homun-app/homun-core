@@ -194,9 +194,13 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   tramite `/api/templates/delete`, confinato alla root dei template pack. `Use
   template` apre la nuova chat mostrando subito il prompt visibile e il chip
   PPTX allegato, mentre l'analisi/piano continua nello stream: non resta piu'
-  una fase muta fino alla fine dell'analisi del PowerPoint. Gate: `cargo test
-  -p local-first-desktop-gateway template -- --nocapture`, `npm run build`
-  da `apps/desktop`.
+  una fase muta fino alla fine dell'analisi del PowerPoint. Hotfix successivo:
+  gli allegati dei messaggi chat sono persistiti in `chat_messages.attachments_json`
+  e sopravvivono a snapshot/reload, quindi non spariscono quando il messaggio
+  ottimistico viene sostituito dal gateway. Gate: `cargo test -p
+  local-first-desktop-gateway committed_chat_message_attachments_survive_reload
+  -- --nocapture`, `cargo test -p local-first-desktop-gateway chat_store --
+  --nocapture`, `npm run build` da `apps/desktop`.
   WS7 Presentations studio redesign locale/verde:
   la pagina Presentations non e' piu' un form settings verticale; ora usa un
   layout studio con brand kit compatto a sinistra e template workspace a destra,

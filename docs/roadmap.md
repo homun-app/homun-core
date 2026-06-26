@@ -409,8 +409,13 @@ primo percorso locale verde e WS5 è chiusa localmente/gate:
     caricata via fetch autenticato del bridge (blob URL, non `<img>` non
     autorizzato), delete esplicito dei soli pack locali tramite
     `/api/templates/delete`, e `Use template` che apre subito una chat con prompt
-    visibile e chip PPTX allegato prima dell'analisi/piano. Gate locale:
+    visibile e chip PPTX allegato prima dell'analisi/piano. Follow-up: gli
+    allegati dei messaggi chat sono durevoli in `chat_messages.attachments_json`,
+    quindi restano visibili dopo reload/snapshot e non solo nel messaggio
+    ottimistico locale. Gate locale:
     `cargo test -p local-first-desktop-gateway template -- --nocapture`,
+    `cargo test -p local-first-desktop-gateway
+    committed_chat_message_attachments_survive_reload -- --nocapture`,
     `npm run build` da `apps/desktop`.
 83. UX agentic workspace principle — Homun assume il modello "workspace agentico
     operativo con chat al centro": sidebar per orientamento, chat come comando e
