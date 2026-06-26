@@ -220,7 +220,11 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   periodici da backend non sovrascrivono piu' i messaggi locali ottimistici di
   thread busy/pending prima del commit gateway; l'avvio template e gli invii
   in-app restano quindi visibilmente ancorati alla chat proprietaria invece di
-  lampeggiare sulla empty state e riapparire solo a risposta finita. Follow-up:
+  lampeggiare sulla empty state e riapparire solo a risposta finita. Secondo
+  hotfix runtime: `Use template` non avvia piu' uno stream parallelo da
+  `App.tsx`; crea la chat e consegna un `autoSubmit` monouso a `ChatView`, che
+  usa la pipeline canonica `submitPrompt` con messaggio assistant locale,
+  listener delta, reasoning/progress e WorkspaceIsland live. Follow-up:
   verificare che Telegram/WhatsApp/automation materializzino un placeholder
   iniziale equivalente quando avviano lavoro in background.
   **Prossimo passo unico:** smoke runtime

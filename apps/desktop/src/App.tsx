@@ -544,6 +544,15 @@ export default function App() {
     useState<TaskDetailItem | null>(null);
   const [taskDetailLoading, setTaskDetailLoading] = useState(false);
   const [approvalBusyId, setApprovelBusyId] = useState<string | null>(null);
+  const [pendingTemplateAutoSubmit, setPendingTemplateAutoSubmit] = useState<{
+    id: string;
+    threadId: string;
+    prompt: string;
+    visibleText: string;
+    attachments: ChatAttachmentInput[];
+    visibleAttachments?: ChatAttachment[];
+    mode?: string;
+  } | null>(null);
   // The thread currently generating a chat answer (real-time signal from ChatView,
   // sub-polling cadence). Used to mark the thread busy in the sidebar immediately,
   // before the 2.5s taskQueue polling catches up.
@@ -853,68 +862,36 @@ export default function App() {
       "Then propose a concise plan and wait for confirmation before using make_deck.",
       `When the user confirms execution, use make_deck with template_ref="${input.template.id}".`,
     ].join("\n");
-    let startedThreadId: string | null = null;
     try {
       const created = mapCoreChatThread(await coreBridge.createChatThread());
-      startedThreadId = created.threadId;
       const messages = await coreBridge.chatMessages(created.threadId);
-      const localUserMessage: ChatMessage = {
-        id: `local_template_user_${Date.now()}`,
-        role: "user",
-        text: visiblePrompt,
-        timestamp: currentTimestampSeconds(),
-        attachments: input.attachment ? [pendingChatAttachmentFromInput(input.attachment)] : [],
-      };
-      pendingLocalMessageThreadIdsRef.current.add(created.threadId);
+      const timestamp = currentTimestampSeconds();
       setChatThreads((current) => [
         {
           ...created,
           title: summarizeThreadTitle(visiblePrompt),
-          messageCount: Math.max(created.messageCount, messages.messages.length + 1),
-          updatedAt: localUserMessage.timestamp,
+          messageCount: Math.max(created.messageCount, messages.messages.length),
+          updatedAt: timestamp,
         },
         ...current.filter((thread) => thread.threadId !== created.threadId),
       ]);
-      setThreadMessages((current) => ({
-        ...current,
-        [created.threadId]: [...messages.messages.map(mapCoreChatMessage), localUserMessage],
-      }));
+      setThreadMessagesFromBackend(created.threadId, messages.messages.map(mapCoreChatMessage));
       setActiveThreadId(created.threadId);
       setSelectedTaskId(created.taskId);
       setActiveView("chat");
-      setStreamingThreadId(created.threadId);
-      const requestId = `template_workflow_${Date.now()}_${Math.random()
-        .toString(36)
-        .slice(2)}`;
-      await coreBridge.submitChatPromptStream(
-        requestId,
-        created.threadId,
-        created.computerSessionId,
-        operativePrompt,
-        input.attachment ? [input.attachment] : [],
-        visiblePrompt,
-        undefined,
-        undefined,
-        "plan",
-      );
-      const refreshed = await coreBridge.chatMessages(created.threadId);
-      const mappedMessages = refreshed.messages.map(mapCoreChatMessage);
-      pendingLocalMessageThreadIdsRef.current.delete(created.threadId);
-      setThreadMessagesFromBackend(created.threadId, mappedMessages, { force: true });
-      setChatThreads((current) =>
-        current.map((thread) =>
-          thread.threadId === created.threadId
-            ? updateThreadPreview(thread, mappedMessages, { advanceActivity: true })
-            : thread,
-        ),
-      );
-      await refreshChatReadModels(created.threadId);
+      setPendingTemplateAutoSubmit({
+        id: `template_auto_submit_${created.threadId}_${Date.now()}`,
+        threadId: created.threadId,
+        prompt: operativePrompt,
+        visibleText: visiblePrompt,
+        attachments: input.attachment ? [input.attachment] : [],
+        visibleAttachments: input.attachment
+          ? [pendingChatAttachmentFromInput(input.attachment)]
+          : undefined,
+        mode: "plan",
+      });
     } catch (error) {
       console.warn("start_template_workflow unavailable", error);
-    } finally {
-      setStreamingThreadId((current) =>
-        startedThreadId && current === startedThreadId ? null : current,
-      );
     }
   }
 
@@ -1402,6 +1379,16 @@ export default function App() {
             thread={activeThread}
             onMessagesChange={(messages) =>
               handleMessagesChange(activeThread.threadId, messages)
+            }
+            autoSubmit={
+              pendingTemplateAutoSubmit?.threadId === activeThread.threadId
+                ? pendingTemplateAutoSubmit
+                : null
+            }
+            onAutoSubmitConsumed={(id) =>
+              setPendingTemplateAutoSubmit((current) =>
+                current?.id === id ? null : current,
+              )
             }
             onOpenTasks={() => setActiveView("tasks")}
             onApproveApprovel={handleApproveApprovel}

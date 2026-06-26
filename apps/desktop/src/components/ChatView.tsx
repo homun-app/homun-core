@@ -156,6 +156,8 @@ interface ChatViewProps {
   // Pre-fill the composer (e.g. engaging a proactivity card opens a chat seeded
   // with the card's context). The nonce re-applies the same text.
   seed?: { text: string; nonce: number } | null;
+  autoSubmit?: ChatAutoSubmit | null;
+  onAutoSubmitConsumed?: (id: string) => void;
 }
 
 const surfaceIcons: Record<ComputerSurfaceKind, typeof Globe2> = {
@@ -182,6 +184,16 @@ interface ChatStreamStatus {
   detail: string;
 }
 
+interface ChatAutoSubmit {
+  id: string;
+  threadId: string;
+  prompt: string;
+  visibleText: string;
+  attachments: ChatAttachmentInput[];
+  visibleAttachments?: ChatAttachment[];
+  mode?: string;
+}
+
 export function ChatView({
   approvals,
   approvalBusyId,
@@ -198,6 +210,8 @@ export function ChatView({
   onThreadChanged,
   onStreamingChange,
   seed,
+  autoSubmit,
+  onAutoSubmitConsumed,
 }: ChatViewProps) {
   const { t } = useTranslation();
   const [computerSession, setComputerSession] = useState<ComputerSession>(() =>
@@ -254,6 +268,7 @@ export function ChatView({
   const [followUpsFor, setFollowUpsFor] = useState<string | null>(null);
   const titledThreadsRef = useRef<Set<string>>(new Set());
   const resumedThreadsRef = useRef<Set<string>>(new Set());
+  const consumedAutoSubmitIdsRef = useRef<Set<string>>(new Set());
   const conversationRef = useRef<HTMLDivElement>(null);
   const shouldStickToBottomRef = useRef(true);
   const streamingUserPinnedRef = useRef(false);
@@ -758,6 +773,28 @@ export function ChatView({
       clearResumeMarker(thread.threadId);
     }
   }
+
+  useEffect(() => {
+    if (!autoSubmit) return;
+    if (autoSubmit.threadId !== thread.threadId) return;
+    if (promptSubmitting || streamingAssistantId) return;
+    if (consumedAutoSubmitIdsRef.current.has(autoSubmit.id)) return;
+    consumedAutoSubmitIdsRef.current.add(autoSubmit.id);
+    onAutoSubmitConsumed?.(autoSubmit.id);
+    void submitPrompt(
+      autoSubmit.prompt,
+      autoSubmit.attachments,
+      autoSubmit.visibleAttachments,
+      autoSubmit.visibleText,
+      undefined,
+      undefined,
+      undefined,
+      autoSubmit.mode,
+    );
+    // submitPrompt intentionally owns the live streaming lifecycle. This effect
+    // only bridges externally-created threads into that canonical chat pipeline.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoSubmit, promptSubmitting, streamingAssistantId, thread.threadId]);
 
   function cancelActiveStreaming() {
     cancelStreamingRequestRef.current?.();

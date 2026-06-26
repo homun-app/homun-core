@@ -365,7 +365,11 @@ assertContains("src/App.tsx", "task.status === \"running\" || task.status === \"
 assertContains("src/App.tsx", "pendingLocalMessageThreadIdsRef", "chat polling must know which threads have optimistic local messages");
 assertContains("src/App.tsx", "shouldPreserveLocalMessages", "backend refresh must not wipe visible local messages before gateway persistence");
 assertContains("src/App.tsx", "setThreadMessagesFromBackend", "backend chat snapshots must pass through the stale-safe message updater");
-assertContains("src/App.tsx", "setThreadMessagesFromBackend(created.threadId, mappedMessages, { force: true })", "final gateway snapshots must replace optimistic local state once persistence completes");
+assertContains("src/App.tsx", "pendingTemplateAutoSubmit", "template workflows must be handed to the visible chat renderer");
+assertContains("src/App.tsx", "onAutoSubmitConsumed", "template auto-submit triggers must be consumed after entering the chat pipeline");
+assertContains("src/components/ChatView.tsx", "autoSubmit?: ChatAutoSubmit | null", "ChatView must accept external chat-start triggers without bypassing streaming UI");
+assertContains("src/components/ChatView.tsx", "submitPrompt(\n      autoSubmit.prompt", "external chat-start triggers must reuse the normal visible submit pipeline");
+assertNotContains("src/App.tsx", "template_workflow_", "template workflows must not start a parallel invisible stream from App");
 
 assertContains("src/types.ts", "\"learning\"", "auto-learning must be a first-class view");
 assertContains("src/components/LearningView.tsx", "learning-view", "auto-learning must have a dedicated page");
