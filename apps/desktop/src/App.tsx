@@ -90,6 +90,7 @@ function mapCoreChatThread(thread: CoreChatThread): ChatThread {
     updatedAt: thread.updated_at,
     messageCount: thread.message_count,
     source: thread.source ?? null,
+    channelRecipient: thread.channel_recipient ?? null,
   };
 }
 

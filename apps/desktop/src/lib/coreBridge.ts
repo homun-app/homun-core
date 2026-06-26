@@ -41,6 +41,7 @@ export interface CoreChatThread {
   updated_at: string;
   message_count: number;
   source?: string | null;
+  channel_recipient?: string | null;
 }
 
 export interface CoreChatThreadSnapshot {

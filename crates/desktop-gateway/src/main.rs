@@ -1890,6 +1890,7 @@ async fn commit_prompt_result(
         )
         .map_err(GatewayError::store)?;
     activate_remote_approvals_from_message(&state, &thread_id, &request.assistant_message).await;
+    mirror_app_reply_to_channel_thread(&state, &thread_id, &request.assistant_message).await;
     Ok(Json(snapshot))
 }
 
@@ -1902,6 +1903,7 @@ async fn commit_continuation_result(
         .commit_continuation_result(&thread_id, &message_id, &request.assistant_message)
         .map_err(GatewayError::store)?;
     activate_remote_approvals_from_message(&state, &thread_id, &request.assistant_message).await;
+    mirror_app_reply_to_channel_thread(&state, &thread_id, &request.assistant_message).await;
     Ok(Json(snapshot))
 }
 
@@ -1918,7 +1920,86 @@ async fn commit_regenerated_result(
         )
         .map_err(GatewayError::store)?;
     activate_remote_approvals_from_message(&state, &thread_id, &request.assistant_message).await;
+    mirror_app_reply_to_channel_thread(&state, &thread_id, &request.assistant_message).await;
     Ok(Json(snapshot))
+}
+
+async fn mirror_app_reply_to_channel_thread(
+    state: &AppState,
+    thread_id: &str,
+    assistant_message: &ChatMessage,
+) {
+    if assistant_message.role != "assistant" {
+        return;
+    }
+    let text = assistant_message.text.trim();
+    if text.is_empty() || text == "…" {
+        return;
+    }
+    let thread = match lock_store(state)
+        .and_then(|store| store.thread(thread_id).map_err(GatewayError::store))
+    {
+        Ok(Some(thread)) => thread,
+        Ok(None) => return,
+        Err(error) => {
+            eprintln!(
+                "channel/app-mirror: unable to load thread {thread_id}: {}",
+                error.message
+            );
+            return;
+        }
+    };
+    let Some(target) = app_channel_reply_target(&thread) else {
+        return;
+    };
+    let result = match target.channel.as_str() {
+        "whatsapp" => channel_send(state, WHATSAPP_HTTP_PORT, &target.recipient, text).await,
+        "telegram" => telegram_send_with_rebind(state, &target.recipient, text).await,
+        _ => return,
+    };
+    match result {
+        Ok(()) => eprintln!(
+            "channel/{}: app reply mirrored to {} from thread {}",
+            target.channel, target.recipient, thread_id
+        ),
+        Err(error) => eprintln!(
+            "channel/{}: app reply mirror FAILED to {} from thread {}: {}",
+            target.channel, target.recipient, thread_id, error
+        ),
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AppChannelReplyTarget {
+    channel: String,
+    recipient: String,
+}
+
+fn app_channel_reply_target(thread: &ChatThread) -> Option<AppChannelReplyTarget> {
+    let channel = thread.source.as_deref()?;
+    if !matches!(channel, "whatsapp" | "telegram") {
+        return None;
+    }
+    let recipient = thread
+        .channel_recipient
+        .as_deref()
+        .map(str::trim)
+        .filter(|recipient| !recipient.is_empty())
+        .map(str::to_string)
+        .or_else(|| fallback_channel_recipient_from_thread_id(channel, &thread.thread_id))?;
+    Some(AppChannelReplyTarget {
+        channel: channel.to_string(),
+        recipient,
+    })
+}
+
+fn fallback_channel_recipient_from_thread_id(channel: &str, thread_id: &str) -> Option<String> {
+    let prefix = format!("channel_{channel}_");
+    thread_id
+        .strip_prefix(&prefix)
+        .map(str::trim)
+        .filter(|recipient| !recipient.is_empty())
+        .map(str::to_string)
 }
 
 async fn activate_remote_approvals_from_message(
@@ -25781,15 +25862,19 @@ async fn handle_channel_inbound(
                 // persistent thread per contact, tagged with its origin so the app
                 // badges it. The agent runs on it with history + tools.
                 let thread_id = match lock_store(&st) {
-                    Ok(store) => store
-                        .find_or_create_channel_thread(
-                            &base_workspace_id(),
-                            channel,
-                            &sender,
-                            &format!("{label} · {name}"),
-                        )
-                        .ok()
-                        .map(|thread| thread.thread_id),
+                    Ok(store) => match store.find_or_create_channel_thread(
+                        &base_workspace_id(),
+                        channel,
+                        &sender,
+                        &format!("{label} · {name}"),
+                    ) {
+                        Ok(thread) => {
+                            let _ = store
+                                .set_channel_thread_recipient(&thread.thread_id, &reply_to);
+                            Some(thread.thread_id)
+                        }
+                        Err(_) => None,
+                    },
                     Err(_) => None,
                 };
 
@@ -50186,6 +50271,68 @@ data: [DONE]\n";
         assert_eq!(first.thread_id, "channel_scheduled_autorun_abc");
         assert_eq!(second.thread_id, first.thread_id);
         assert_eq!(second.source.as_deref(), Some("scheduled"));
+    }
+
+    fn test_thread(
+        thread_id: &str,
+        source: Option<&str>,
+        channel_recipient: Option<&str>,
+    ) -> super::ChatThread {
+        super::ChatThread {
+            thread_id: thread_id.to_string(),
+            title: "Thread".to_string(),
+            subtitle: String::new(),
+            status: "active".to_string(),
+            pinned: false,
+            computer_session_id: "computer".to_string(),
+            task_id: "task".to_string(),
+            updated_at: "2026-06-26T00:00:00Z".to_string(),
+            message_count: 0,
+            source: source.map(str::to_string),
+            channel_recipient: channel_recipient.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn app_channel_reply_target_uses_persisted_recipient() {
+        let thread = test_thread(
+            "channel_whatsapp_sender-lid",
+            Some("whatsapp"),
+            Some("393331234567@s.whatsapp.net"),
+        );
+
+        assert_eq!(
+            super::app_channel_reply_target(&thread),
+            Some(super::AppChannelReplyTarget {
+                channel: "whatsapp".to_string(),
+                recipient: "393331234567@s.whatsapp.net".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn app_channel_reply_target_supports_legacy_threads_and_skips_non_channels() {
+        let telegram = test_thread("channel_telegram_8205578468", Some("telegram"), None);
+        assert_eq!(
+            super::app_channel_reply_target(&telegram),
+            Some(super::AppChannelReplyTarget {
+                channel: "telegram".to_string(),
+                recipient: "8205578468".to_string(),
+            })
+        );
+
+        assert_eq!(
+            super::app_channel_reply_target(&test_thread(
+                "channel_scheduled_autorun_abc",
+                Some("scheduled"),
+                Some("autorun_abc"),
+            )),
+            None
+        );
+        assert_eq!(
+            super::app_channel_reply_target(&test_thread("thread_normal", None, None)),
+            None
+        );
     }
 
     #[test]

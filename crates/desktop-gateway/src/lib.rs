@@ -120,6 +120,10 @@ pub struct ChatThread {
     /// Lets the UI badge channel-originated conversations.
     #[serde(default)]
     pub source: Option<String>,
+    /// Reply target for channel-originated conversations. When present, app-side
+    /// replies in this thread can be mirrored back to the originating channel.
+    #[serde(default)]
+    pub channel_recipient: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

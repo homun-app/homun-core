@@ -954,6 +954,11 @@ ragionato il contratto degli strumenti `make_*` creati dall'harness. ADR 0011
   sono renderizzati progressivamente come nel messaggio finale. **Guardrail WS4
   aggiunto (2026-06-24):** `test:ui-contract` blocca la regressione del pannello
   inline e il dock Computer passa a polling adattivo (600ms attivo, 2500ms idle).
+  **Follow-up continuita' canale (2026-06-26):** i thread WhatsApp/Telegram
+  persistono `channel_recipient` dal miglior target inbound e le risposte
+  assistant committate dalla chat desktop vengono reinviate best-effort al
+  canale originario. Questo mantiene un unico thread bidirezionale tra app e
+  canale; `scheduled` resta escluso dal mirror.
 - ☐ **7.1b (futuro)** Portare ricerca/meeting al livello del deck solo dopo il
   chiarimento sul contratto strumenti: `make_research` e `make_meeting` non sono
   essenziali per la prossima release.

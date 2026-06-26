@@ -438,6 +438,14 @@ primo percorso locale verde e WS5 è chiusa localmente/gate:
     thread proprietario. Direzione strutturale: chat, canali, automazioni, approval
     callback e subagent devono diventare client dello stesso lifecycle `turn_id`
     invece di flussi separati che ricostruiscono la UI a fine lavoro.
+82b. Conversation channel continuity — un thread nato da WhatsApp/Telegram deve
+    restare bidirezionale anche quando l'utente continua da desktop. Il gateway
+    persiste sul thread il reply target del canale (`channel_recipient`) e il
+    commit canonico della risposta assistant (`commit_prompt_result`,
+    continuation, regenerate) reinvia best-effort la risposta al canale
+    originario. Sono esclusi `scheduled` e thread in-app. Gate mirati:
+    `channel_thread_remembers_reply_recipient_for_app_side_continuity` e
+    `app_channel_reply_target`.
 82c. WS7 provider-agnostic template sourcing — Presentations non tratta piu'
     SlidesCarnival o altri provider esterni come catalogo installato. Il
     catalogo operativo resta `Homun` + template locali importati; una directory

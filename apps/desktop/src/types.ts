@@ -102,6 +102,8 @@ export interface ChatThread {
   messageCount: number;
   /** Channel origin ("whatsapp"/"telegram") or null for an in-app chat. */
   source?: string | null;
+  /** Durable channel reply target for channel-originated conversations. */
+  channelRecipient?: string | null;
 }
 
 export interface BrainStep {

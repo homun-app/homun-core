@@ -372,7 +372,7 @@ impl ChatStore {
         };
         let mut stmt = self.conn.prepare(
             "select thread_id, title, subtitle, status, pinned, computer_session_id, task_id,
-                    updated_at, message_count, source
+                    updated_at, message_count, source, channel_recipient
                from chat_threads
               where workspace_id = ?1 and thread_id <> 'homun'
               order by pinned desc, cast(updated_at as integer) desc, rowid desc",
@@ -400,6 +400,7 @@ impl ChatStore {
             updated_at: timestamp.clone(),
             message_count: 1,
             source: None,
+            channel_recipient: None,
         };
         self.insert_thread(&thread, workspace_id)?;
         self.insert_message(
@@ -436,9 +437,38 @@ impl ChatStore {
             updated_at: timestamp,
             message_count: 0,
             source: Some(source.to_string()),
+            channel_recipient: None,
         };
         self.insert_thread(&thread, workspace_id)?;
         Ok(thread)
+    }
+
+    pub fn set_channel_thread_recipient(
+        &self,
+        thread_id: &str,
+        recipient: &str,
+    ) -> rusqlite::Result<()> {
+        let recipient = recipient.trim();
+        if recipient.is_empty() {
+            return Ok(());
+        }
+        let current = self
+            .conn
+            .query_row(
+                "select channel_recipient from chat_threads where thread_id = ?1",
+                params![thread_id],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()?
+            .flatten();
+        if !should_replace_channel_recipient(current.as_deref(), recipient) {
+            return Ok(());
+        }
+        self.conn.execute(
+            "update chat_threads set channel_recipient = ?1 where thread_id = ?2",
+            params![recipient, thread_id],
+        )?;
+        Ok(())
     }
 
     pub fn select_thread(&self, thread_id: &str) -> rusqlite::Result<ChatThreadSnapshot> {
@@ -654,7 +684,7 @@ impl ChatStore {
         self.conn
             .query_row(
                 "select thread_id, title, subtitle, status, pinned, computer_session_id, task_id,
-                        updated_at, message_count, source
+                        updated_at, message_count, source, channel_recipient
                    from chat_threads
                   where thread_id = ?1",
                 params![thread_id],
@@ -669,7 +699,7 @@ impl ChatStore {
             .conn
             .query_row(
                 "select thread_id, title, subtitle, status, pinned, computer_session_id, task_id,
-                        updated_at, message_count, source
+                        updated_at, message_count, source, channel_recipient
                    from chat_threads
                   where task_id = ?1",
                 params![task_id],
@@ -2121,6 +2151,13 @@ impl ChatStore {
             self.conn
                 .execute("alter table chat_threads add column source text", [])?;
         }
+        // Channel-originated threads also remember where app-side replies should
+        // be mirrored. This is intentionally thread-scoped: a WhatsApp/Telegram
+        // conversation in the app must continue on the originating channel.
+        if !self.column_exists("chat_threads", "channel_recipient")? {
+            self.conn
+                .execute("alter table chat_threads add column channel_recipient text", [])?;
+        }
         // Contacts P2: per-contact persona/tone + response mode. response_mode '' =
         // inherit the channel/global default (backward compatible: existing contacts
         // keep today's allowlist behavior until the user customizes them).
@@ -2625,6 +2662,7 @@ impl ChatStore {
             updated_at: timestamp.clone(),
             message_count: 1,
             source: None,
+            channel_recipient: None,
         };
         self.insert_thread(&thread, "default")?;
         self.insert_message(
@@ -2650,6 +2688,7 @@ impl ChatStore {
             updated_at: timestamp.clone(),
             message_count: 1,
             source: None,
+            channel_recipient: None,
         };
         self.insert_thread(&thread, workspace_id)?;
         self.insert_message(
@@ -2663,8 +2702,8 @@ impl ChatStore {
         self.conn.execute(
             "insert or replace into chat_threads (
                 thread_id, title, subtitle, status, pinned, computer_session_id, task_id,
-                updated_at, message_count, workspace_id, source
-            ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                updated_at, message_count, workspace_id, source, channel_recipient
+            ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             params![
                 thread.thread_id,
                 thread.title,
@@ -2677,6 +2716,7 @@ impl ChatStore {
                 thread.message_count,
                 workspace_id,
                 thread.source,
+                thread.channel_recipient,
             ],
         )?;
         Ok(())
@@ -2875,7 +2915,24 @@ fn thread_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChatThread> {
         updated_at: row.get(7)?,
         message_count: row.get::<_, i64>(8)? as u32,
         source: row.get::<_, Option<String>>(9)?,
+        channel_recipient: row.get::<_, Option<String>>(10)?,
     })
+}
+
+fn should_replace_channel_recipient(current: Option<&str>, next: &str) -> bool {
+    let next = next.trim();
+    if next.is_empty() {
+        return false;
+    }
+    let Some(current) = current.map(str::trim).filter(|value| !value.is_empty()) else {
+        return true;
+    };
+    let current_is_whatsapp_pn = current.ends_with("@s.whatsapp.net");
+    let next_is_whatsapp_pn = next.ends_with("@s.whatsapp.net");
+    if current_is_whatsapp_pn && !next_is_whatsapp_pn {
+        return false;
+    }
+    true
 }
 
 fn message_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChatMessage> {
@@ -3237,6 +3294,66 @@ mod tests {
 
         assert_eq!(snap.active_thread_id, first.thread_id);
         assert_eq!(after, before);
+    }
+
+    #[test]
+    fn channel_thread_remembers_reply_recipient_for_app_side_continuity() {
+        let store = ChatStore::in_memory().unwrap();
+        let thread = store
+            .find_or_create_channel_thread("default", "whatsapp", "sender-lid", "WhatsApp · Fabio")
+            .unwrap();
+        assert_eq!(thread.source.as_deref(), Some("whatsapp"));
+        assert_eq!(thread.channel_recipient, None);
+
+        store
+            .set_channel_thread_recipient(&thread.thread_id, "393331234567@s.whatsapp.net")
+            .unwrap();
+        let reloaded = store.thread(&thread.thread_id).unwrap().unwrap();
+        assert_eq!(
+            reloaded.channel_recipient.as_deref(),
+            Some("393331234567@s.whatsapp.net")
+        );
+
+        store
+            .set_channel_thread_recipient(&thread.thread_id, "393331234567@lid")
+            .unwrap();
+        let updated = store.thread(&thread.thread_id).unwrap().unwrap();
+        assert_eq!(
+            updated.channel_recipient.as_deref(),
+            Some("393331234567@s.whatsapp.net")
+        );
+
+        let scheduled = store
+            .find_or_create_channel_thread("default", "scheduled", "task", "Scheduled")
+            .unwrap();
+        store
+            .set_channel_thread_recipient(&scheduled.thread_id, "task")
+            .unwrap();
+        assert_eq!(
+            store.thread(&scheduled.thread_id)
+                .unwrap()
+                .unwrap()
+                .channel_recipient
+                .as_deref(),
+            Some("task")
+        );
+    }
+
+    #[test]
+    fn channel_thread_recipient_does_not_downgrade_whatsapp_pn_to_lid() {
+        assert!(super::should_replace_channel_recipient(None, "393@s.whatsapp.net"));
+        assert!(super::should_replace_channel_recipient(
+            Some("393@lid"),
+            "393@s.whatsapp.net"
+        ));
+        assert!(!super::should_replace_channel_recipient(
+            Some("393@s.whatsapp.net"),
+            "393@lid"
+        ));
+        assert!(super::should_replace_channel_recipient(
+            Some("telegram-old"),
+            "telegram-new"
+        ));
     }
 
     #[test]

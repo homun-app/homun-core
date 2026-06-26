@@ -248,6 +248,18 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   **Smoke runtime esterno passato (2026-06-26):** prompt inbound, placeholder,
   Workspace/Computer e risposta progressiva risultano visibili nel thread
   proprietario; Workspace e Computer non si sovrappongono nello stack live.
+  **Follow-up continuita' canale app→canale (2026-06-26):** i thread creati da
+  WhatsApp/Telegram persistono ora il `channel_recipient` migliore visto in
+  inbound (PN WhatsApp > chat id > sender). Quando l'utente continua dalla chat
+  desktop dentro quel thread, il commit canonico della risposta assistant la
+  salva in app e la reinvia best-effort al canale originario; `scheduled` e chat
+  normali sono esclusi. Gate mirati passati:
+  `cargo test -p local-first-desktop-gateway
+  channel_thread_remembers_reply_recipient_for_app_side_continuity -- --nocapture`
+  e `cargo test -p local-first-desktop-gateway app_channel_reply_target -- --nocapture`.
+  Gate finale: `cargo test -p local-first-desktop-gateway -- --nocapture`
+  (312 passati, 1 ignorato), `npm run build` da `apps/desktop`,
+  `git diff --check`.
   **WS7 provider-agnostic template sourcing locale/verde (2026-06-26):**
   Presentations separa ora il catalogo operativo (`Homun` + template locali
   importati) da una directory di fonti esterne provider-agnostica
