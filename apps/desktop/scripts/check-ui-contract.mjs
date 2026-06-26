@@ -103,6 +103,9 @@ assertNotContains("src/styles.css", "background: rgba(255, 255, 255, 0.97);", "C
 assertContains("src/styles.css", "background: color-mix(in srgb, var(--surface) 96%, transparent);", "Workbench chrome must inherit the active surface theme");
 assertContains("src/styles.css", "background: linear-gradient(180deg, var(--surface-muted), var(--surface));", "Workbench body must inherit the active surface theme");
 assertContains("src/styles.css", "background: color-mix(in srgb, var(--surface) 82%, transparent);", "Embedded artifact list must inherit the active surface theme");
+assertContains("src/styles.css", "background: color-mix(in srgb, var(--red-soft) 42%, var(--surface));", "Settings danger zone must inherit the active surface theme");
+assertNotContains("src/styles.css", "background: #fffafa;", "Settings danger zone must not force a light background");
+assertNotContains("src/styles.css", "border: 1px solid #f1c4c6;", "Settings danger zone must not force a light border");
 assertContains("src/styles.css", "color: var(--text);\n  background: var(--surface-muted);\n  font-family: ui-monospace", "inline markdown code must stay readable in dark theme");
 assertContains("src/styles.css", "color: var(--text);\n  font-family: ui-monospace", "markdown code blocks must use theme text color");
 assertContains("src/styles.css", "background: var(--surface-muted);\n}\n\n.rich-code-block figcaption", "markdown code blocks must use theme surfaces");
