@@ -135,9 +135,12 @@ Tutto è **scoped per `workspace_id` (progetto) + `user_id`**.
    automazione e nello stesso lifecycle visibile. Prima di ogni evento
    project-scoped c'e' un perimetro progetto: contatti/canali autorizzati,
    contact perimeter, policy regola, capability policy e approval compongono una
-   sola decisione fail-closed. Gli addon sono capability nel registry unico: una
-   regola puo' invocare Presentations/Documents/PDF/etc. solo attraverso accesso
-   progetto, policy, approval, memoria e provenance canoniche. Vedi
+   sola decisione fail-closed. Il contatto `Me`/owner e' l'unica eccezione:
+   ha accesso progetto implicito e completo, senza grant esplicito, perche'
+   rappresenta il proprietario del workspace. Gli addon sono capability nel
+   registry unico: una regola puo' invocare Presentations/Documents/PDF/etc.
+   solo attraverso accesso progetto, policy, approval, memoria e provenance
+   canoniche. Vedi
    [Homun Evented Automations Design](superpowers/specs/2026-06-26-evented-automations-design.md).
 11. **Comprensione senza keyword/regex; verità verificabile.** Il core non capisce le
    richieste con regex/keyword (de-gemma/capable-first); la verifica è deterministica

@@ -101,6 +101,9 @@ Resolution rules:
   to Personal unless the rule names a project explicitly.
 - **Explicit project on rule**: the contact/channel must be authorized for that
   project before the rule can fire.
+- **Owner/self contact**: `Me` is implicit full access for every project and is
+  not represented as a normal grant. Project grants are for other
+  contact/channel pairs.
 - **Deny wins** across contact perimeter, project access, capability policy and
   runtime approval.
 

@@ -273,8 +273,9 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   **Prima slice Project Access locale/verde:** aggiunto store operativo
   `project-access.json`, API `/api/workspaces/:id/access`, bridge desktop e
   dialog "Manage access" nel menu progetto. Il resolver compone grant progetto
-  e contact perimeter con default deny/deny-win, senza introdurre memoria
-  parallela. Gate passati:
+  e contact perimeter con default deny/deny-win; il contatto `Me`/owner ha
+  accesso progetto implicito completo e non viene trattato come grant
+  modificabile, senza introdurre memoria parallela. Gate passati:
   `cargo test -p local-first-desktop-gateway project_ -- --nocapture` e
   `npm run build` da `apps/desktop`.
   Gate finale continuita' canale: `cargo test -p local-first-desktop-gateway -- --nocapture`

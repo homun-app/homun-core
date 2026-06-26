@@ -39,6 +39,10 @@
 
 This milestone must ship before event rules fire. It creates the project/contact/channel access contract and makes it visible to the user.
 
+Implementation note: `Me`/owner is not a normal grant. It has implicit full
+project access across projects and should be shown as built-in access in the UI,
+while all editable grants are reserved for other contacts/channels.
+
 ### Task 1: Backend Project Access Store
 
 **Files:**

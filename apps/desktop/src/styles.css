@@ -1479,6 +1479,11 @@ body.resizing-drawer {
   background: color-mix(in srgb, var(--surface) 92%, var(--surface-muted));
 }
 
+.project-access-row.is-self {
+  border-style: dashed;
+  background: color-mix(in srgb, var(--surface-muted) 72%, var(--surface));
+}
+
 .project-access-contact {
   min-width: 150px;
   display: grid;

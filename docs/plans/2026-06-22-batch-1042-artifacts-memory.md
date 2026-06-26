@@ -973,7 +973,8 @@ ragionato il contratto degli strumenti `make_*` creati dall'harness. ADR 0011
   - 🟡 **Prima slice Project Access (2026-06-26, locale/verde):** store
     operativo `project-access.json`, API workspace access, bridge desktop,
     dialog "Manage access" nel menu progetto e resolver default-deny che compone
-    grant progetto + contact perimeter. Gate: `cargo test -p
+    grant progetto + contact perimeter. Il contatto `Me`/owner e' implicito:
+    accesso progetto completo, nessun grant modificabile. Gate: `cargo test -p
     local-first-desktop-gateway project_ -- --nocapture`, `npm run build`.
 - ☐ **7.1b (futuro)** Portare ricerca/meeting al livello del deck solo dopo il
   chiarimento sul contratto strumenti: `make_research` e `make_meeting` non sono

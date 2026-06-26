@@ -27,16 +27,29 @@ export function ProjectAccessDialog({ workspace, onClose }: ProjectAccessDialogP
     setError(null);
     void Promise.all([coreBridge.contacts(), coreBridge.projectAccess(workspace.id)])
       .then(([nextContacts, nextGrants]) => {
+        const grantableContacts = nextContacts.filter((contact) => !contact.is_self);
         setContacts(nextContacts);
         setGrants(nextGrants);
-        setContactReference((current) => current || nextContacts[0]?.reference || "");
+        setContactReference((current) =>
+          current && grantableContacts.some((contact) => contact.reference === current)
+            ? current
+            : grantableContacts[0]?.reference || "",
+        );
       })
       .catch((err) => setError((err as Error).message));
   }, [workspace]);
 
+  const selfContact = useMemo(
+    () => contacts.find((contact) => contact.is_self),
+    [contacts],
+  );
+  const grantableContacts = useMemo(
+    () => contacts.filter((contact) => !contact.is_self),
+    [contacts],
+  );
   const selectedContact = useMemo(
-    () => contacts.find((contact) => contact.reference === contactReference),
-    [contacts, contactReference],
+    () => grantableContacts.find((contact) => contact.reference === contactReference),
+    [grantableContacts, contactReference],
   );
 
   if (!workspace) return null;
@@ -106,8 +119,10 @@ export function ProjectAccessDialog({ workspace, onClose }: ProjectAccessDialogP
             value={contactReference}
             onChange={(event) => setContactReference(event.target.value)}
           >
-            {contacts.length === 0 ? <option value="">No contacts</option> : null}
-            {contacts.map((contact) => (
+            {grantableContacts.length === 0 ? (
+              <option value="">No contacts to authorize</option>
+            ) : null}
+            {grantableContacts.map((contact) => (
               <option key={contact.reference} value={contact.reference}>
                 {contact.name}
               </option>
@@ -134,6 +149,20 @@ export function ProjectAccessDialog({ workspace, onClose }: ProjectAccessDialogP
         {error ? <p className="project-access-error">{error}</p> : null}
 
         <div className="project-access-list">
+          {selfContact ? (
+            <article className="project-access-row is-self">
+              <Shield size={16} />
+              <div className="project-access-contact">
+                <strong>{selfContact.name || "You"}</strong>
+                <span>Owner</span>
+              </div>
+              <div className="project-access-flags">
+                <span>All channels</span>
+                <span>Full project access</span>
+                <span>No grant required</span>
+              </div>
+            </article>
+          ) : null}
           {grants.length === 0 ? (
             <p className="drawer-empty">No contacts are authorized for this project yet.</p>
           ) : (

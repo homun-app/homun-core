@@ -42738,7 +42738,20 @@ fn resolve_project_contact_policy(
     contact_reference: &str,
     channel: &str,
     perimeter: &chat_store::StoredPerimeter,
+    is_self_contact: bool,
 ) -> EffectiveProjectContactPolicy {
+    if is_self_contact {
+        return EffectiveProjectContactPolicy {
+            authorized: true,
+            can_trigger_automations: true,
+            can_use_project_memory: true,
+            can_receive_replies: true,
+            can_receive_artifacts: true,
+            tools_denied: Vec::new(),
+            denied_reason: String::new(),
+        };
+    }
+
     let contact_reference = contact_reference.trim();
     let channel = channel.trim().to_ascii_lowercase();
     let grant = list_project_access(workspace_id).into_iter().find(|grant| {
@@ -43496,12 +43509,44 @@ mod tests {
             "contact_missing",
             "whatsapp",
             &chat_store::StoredPerimeter::default(),
+            false,
         );
 
         assert!(!resolved.authorized);
         assert!(!resolved.can_trigger_automations);
         assert!(!resolved.can_use_project_memory);
         assert!(resolved.denied_reason.contains("not authorized"));
+    }
+
+    #[test]
+    fn project_policy_allows_self_contact_without_project_grant() {
+        let temp = isolated_gateway_test_dir("project-policy-self");
+        let _guard = TestGatewayDataDir::new(&temp);
+
+        let perimeter = chat_store::StoredPerimeter {
+            memory_scope: "contact_only".to_string(),
+            knowledge_folders: Vec::new(),
+            tools_allowed: Vec::new(),
+            tools_denied: vec!["browser".to_string(), "filesystem".to_string()],
+            can_see_contacts: false,
+            can_see_calendar: false,
+        };
+
+        let resolved = super::resolve_project_contact_policy(
+            "workspace_alpha",
+            "contact_self",
+            "whatsapp",
+            &perimeter,
+            true,
+        );
+
+        assert!(resolved.authorized);
+        assert!(resolved.can_trigger_automations);
+        assert!(resolved.can_use_project_memory);
+        assert!(resolved.can_receive_replies);
+        assert!(resolved.can_receive_artifacts);
+        assert!(resolved.tools_denied.is_empty());
+        assert!(resolved.denied_reason.is_empty());
     }
 
     #[test]
@@ -43537,6 +43582,7 @@ mod tests {
             "contact_123",
             "WhatsApp",
             &perimeter,
+            false,
         );
 
         assert!(resolved.authorized);
