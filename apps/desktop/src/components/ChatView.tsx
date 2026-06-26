@@ -135,7 +135,10 @@ interface ChatViewProps {
   health: RuntimeHealth[];
   task: TaskItem;
   thread: ChatThread;
-  onMessagesChange: (messages: ChatMessage[]) => void;
+  onMessagesChange: (
+    messages: ChatMessage[],
+    options?: { advanceActivity?: boolean },
+  ) => void;
   onOpenTasks: () => void;
   onApproveApprovel: (
     approvalId: string,
@@ -703,7 +706,7 @@ export function ChatView({
         finalAssistantMessage,
       ];
       setOptimisticMessages(finalMessages);
-      onMessagesChange(finalMessages);
+      onMessagesChange(finalMessages, { advanceActivity: true });
       if (isLikelyIncompleteMessage(finalAssistantMessage)) {
         finalMessages = await autoContinueAssistantResponse(
           finalAssistantMessage,
@@ -711,7 +714,7 @@ export function ChatView({
         );
       }
       setOptimisticMessages(finalMessages);
-      onMessagesChange(finalMessages);
+      onMessagesChange(finalMessages, { advanceActivity: true });
       await refreshAfterChatSubmit();
       setOptimisticMessages(null);
     } catch (error) {
@@ -824,7 +827,7 @@ export function ChatView({
       const finalMessages = [...promptMessages, finalAssistant];
       setOptimisticMessages(finalMessages);
       if (options?.commitResult !== false) {
-        onMessagesChange(finalMessages);
+        onMessagesChange(finalMessages, { advanceActivity: true });
       }
       if (options?.commitResult === false) {
         await new Promise((resolve) => window.setTimeout(resolve, 350));
@@ -1420,7 +1423,7 @@ export function ChatView({
       setComputerCardCollapsed(true);
       setTimelineCollapsed(!result.plan);
       setOptimisticMessages(nextMessages);
-      onMessagesChange(nextMessages);
+      onMessagesChange(nextMessages, { advanceActivity: true });
       return nextMessages;
     } finally {
       cancelScheduledStreamingFrame();

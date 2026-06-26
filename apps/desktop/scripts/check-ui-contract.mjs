@@ -174,8 +174,10 @@ assertNotContains("src/components/Sidebar.tsx", "threadMenu.thread.pinned ? \"Re
 assertNotContains("src/components/Sidebar.tsx", "runThreadAction(() => onArchiveChatThread(threadMenu.thread.threadId))", "thread overflow menu must not duplicate hover archive action");
 assertNotContains("src/components/Sidebar.tsx", "setSwitcherOpen", "project navigation must not be primarily driven by a workspace dropdown");
 assertContains("src/App.tsx", "summarizeThreadTitle", "frontend optimistic chat titles must be synthesized, not first-prompt slices");
-assertContains("src/App.tsx", "nextActivityMessageCount > thread.messageCount", "chat preview ordering must advance only when new messages are added");
+assertContains("src/App.tsx", "advanceActivity === true", "chat preview ordering must advance only from explicit completed assistant turns");
+assertNotContains("src/App.tsx", "nextActivityMessageCount > thread.messageCount", "opening/loading an existing chat must not infer new activity from message count");
 assertContains("src/components/ChatView.tsx", "onMessagesChange(promptMessages)", "chat title must update as soon as the user prompt is accepted");
+assertContains("src/components/ChatView.tsx", "advanceActivity: true", "completed assistant turns must explicitly advance chat activity ordering");
 assertContains("src/plugins/registry.tsx", "navSection?: \"work\" | \"create\" | \"workspace\" | \"more\"", "plugin manifest must declare sidebar placement by operational role");
 assertContains("src/plugins/presentations/index.tsx", "navSection: \"create\"", "presentations addon must be promoted into the create section");
 assertContains("src/plugins/proattivita/index.tsx", "navSection: \"work\"", "proactivity addon must be promoted into the work section");

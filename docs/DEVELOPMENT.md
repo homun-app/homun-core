@@ -214,6 +214,9 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   template` e il prompt operativo di default sono in inglese; il gateway non
   forza piu' la lingua dei Settings, ma chiede al modello di rispondere nella
   lingua dell'ultimo messaggio utente e usa la preferenza solo come fallback.
+  Hotfix ordine chat: aprire/leggere una chat aggiorna titolo/preview locale ma
+  non `updatedAt`; l'ordine sidebar avanza solo su risposta assistant completata
+  o snapshot backend di attivita' reale.
   **Prossimo passo unico:** smoke runtime
   Electron import→placeholder→catalogo→preview reale→delete/use template→chat
   con allegato visibile→make_deck verificando che `deck.pptx` mantenga il

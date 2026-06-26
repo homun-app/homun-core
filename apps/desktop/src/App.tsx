@@ -217,14 +217,14 @@ function summarizeThreadTitle(text: string): string {
 function updateThreadPreview(
   thread: ChatThread,
   messages: ChatMessage[],
+  options: { advanceActivity?: boolean } = {},
 ): ChatThread {
   const lastMessage = messages.at(-1);
   const firstUserMessage = messages.find((message) => message.role === "user");
   const userTitle = firstUserMessage ? summarizeThreadTitle(firstUserMessage.text) : "";
   const isPlaceholderTitle = thread.title === "New task" || thread.title === "Nuovo compito";
-  const nextActivityMessageCount = messages.length;
   const hasNewAssistantActivity =
-    nextActivityMessageCount > thread.messageCount && lastMessage?.role === "assistant";
+    options.advanceActivity === true && lastMessage?.role === "assistant";
   return {
     ...thread,
     title: isPlaceholderTitle && userTitle ? userTitle : thread.title,
@@ -865,7 +865,7 @@ export default function App() {
       setChatThreads((current) =>
         current.map((thread) =>
           thread.threadId === created.threadId
-            ? updateThreadPreview(thread, mappedMessages)
+            ? updateThreadPreview(thread, mappedMessages, { advanceActivity: true })
             : thread,
         ),
       );
@@ -1011,7 +1011,11 @@ export default function App() {
     }
   }
 
-  function handleMessagesChange(threadId: string, messages: ChatMessage[]) {
+  function handleMessagesChange(
+    threadId: string,
+    messages: ChatMessage[],
+    options: { advanceActivity?: boolean } = {},
+  ) {
     setThreadMessages((current) => ({
       ...current,
       [threadId]: messages,
@@ -1019,7 +1023,7 @@ export default function App() {
     setChatThreads((current) =>
       current.map((thread) =>
         thread.threadId === threadId
-          ? updateThreadPreview(thread, messages)
+          ? updateThreadPreview(thread, messages, options)
           : thread,
       ),
     );
