@@ -216,7 +216,10 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   lingua dell'ultimo messaggio utente e usa la preferenza solo come fallback.
   Hotfix ordine chat: aprire/leggere una chat aggiorna titolo/preview locale ma
   non `updatedAt`; l'ordine sidebar avanza solo su risposta assistant completata
-  o snapshot backend di attivita' reale. Hotfix live chat state: i refresh
+  o snapshot backend di attivita' reale. Follow-up anti-regressione: l'auto-title
+  non e' piu' un effetto al mount su messaggi storici, ma parte solo dal submit
+  stream appena completato; il gateway `autotitle` resta no-op sui titoli gia'
+  non-placeholder. Hotfix live chat state: i refresh
   periodici da backend non sovrascrivono piu' i messaggi locali ottimistici di
   thread busy/pending prima del commit gateway; l'avvio template e gli invii
   in-app restano quindi visibilmente ancorati alla chat proprietaria invece di

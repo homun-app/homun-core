@@ -12764,12 +12764,31 @@ async fn autotitle_chat_thread(
     Path(thread_id): Path<String>,
     Json(request): Json<AutoTitleRequest>,
 ) -> Result<Json<ChatThreadSnapshot>, GatewayError> {
+    {
+        let store = lock_store(&state)?;
+        if let Some(thread) = store.thread(&thread_id).map_err(GatewayError::store)? {
+            if !is_placeholder_chat_title(&thread.title) {
+                return Ok(Json(
+                    store
+                        .select_thread(&thread_id)
+                        .map_err(GatewayError::store)?,
+                ));
+            }
+        }
+    }
     let title = generate_thread_title(&state, &request.prompt, &request.answer).await;
     Ok(Json(
         lock_store(&state)?
             .rename_thread(&thread_id, &title)
             .map_err(GatewayError::store)?,
     ))
+}
+
+fn is_placeholder_chat_title(title: &str) -> bool {
+    matches!(
+        title.trim().to_ascii_lowercase().as_str(),
+        "new task" | "nuovo compito"
+    )
 }
 
 #[derive(Debug, Deserialize)]

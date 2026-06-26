@@ -178,6 +178,10 @@ assertContains("src/App.tsx", "advanceActivity === true", "chat preview ordering
 assertNotContains("src/App.tsx", "nextActivityMessageCount > thread.messageCount", "opening/loading an existing chat must not infer new activity from message count");
 assertContains("src/components/ChatView.tsx", "onMessagesChange(promptMessages)", "chat title must update as soon as the user prompt is accepted");
 assertContains("src/components/ChatView.tsx", "advanceActivity: true", "completed assistant turns must explicitly advance chat activity ordering");
+assertContains("src/components/ChatView.tsx", "const shouldAutoTitleAfterSubmit = isPlaceholderThreadTitle(thread.title)", "auto-title must be authorized only by a real submitted turn, not by opening a historical chat");
+assertContains("src/components/ChatView.tsx", "persistAutoTitleForCompletedTurn(", "auto-title must persist from the completed chat stream path");
+assertNotContains("src/components/ChatView.tsx", "coreBridge\n      .autoTitleThread", "auto-title must not be driven by a mount/update effect on historical messages");
+assertRepoContains("crates/desktop-gateway/src/main.rs", "is_placeholder_chat_title(&thread.title)", "autotitle endpoint must be a no-op for already titled chats");
 assertContains("src/plugins/registry.tsx", "navSection?: \"work\" | \"create\" | \"workspace\" | \"more\"", "plugin manifest must declare sidebar placement by operational role");
 assertContains("src/plugins/presentations/index.tsx", "navSection: \"create\"", "presentations addon must be promoted into the create section");
 assertContains("src/plugins/proattivita/index.tsx", "navSection: \"work\"", "proactivity addon must be promoted into the work section");

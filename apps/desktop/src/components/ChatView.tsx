@@ -530,6 +530,7 @@ export function ChatView({
     const text = prompt.trim();
     if (!text) return;
     const conversationBase = baseMessages ?? threadMessages;
+    const shouldAutoTitleAfterSubmit = isPlaceholderThreadTitle(thread.title);
     const userVisibleText = (visibleText ?? text).trim();
     if (!userVisibleText) return;
     const visiblePrompt = userVisibleText === text ? undefined : userVisibleText;
@@ -686,6 +687,12 @@ export function ChatView({
       if (cancelledStreamIdsRef.current.has(requestId)) {
         return;
       }
+      streamedText = result.assistant_message.text || streamedText;
+      await persistAutoTitleForCompletedTurn(
+        promptMessages,
+        streamedText,
+        shouldAutoTitleAfterSubmit,
+      );
       // The user may have navigated to another thread while we awaited. The
       // gateway already persisted the answer (submitChatPromptStream commits
       // server-side), so we only need to stop touching THIS instance's UI — the
@@ -693,7 +700,6 @@ export function ChatView({
       if (!isMountedRef.current) {
         return;
       }
-      streamedText = result.assistant_message.text || streamedText;
       cancelScheduledStreamingFrame();
       debugStream("paint_done_before_commit");
       if (cancelledStreamIdsRef.current.has(requestId)) {
@@ -804,6 +810,7 @@ export function ChatView({
   // the buffered events from the gateway and continues live, then persists.
   async function resumeActiveStream(marker: ResumeMarker, options?: { commitResult?: boolean }) {
     if (promptSubmitting || streamingAssistantId) return;
+    const shouldAutoTitleAfterResume = isPlaceholderThreadTitle(thread.title);
     const requestId = marker.requestId;
     const userMessage: ChatMessage = {
       id: `resume_user_${Date.now()}`,
@@ -859,6 +866,13 @@ export function ChatView({
         options?.commitResult ?? true,
       );
       streamedText = result.assistant_message.text || streamedText;
+      if (options?.commitResult !== false) {
+        await persistAutoTitleForCompletedTurn(
+          promptMessages,
+          streamedText,
+          shouldAutoTitleAfterResume,
+        );
+      }
       cancelScheduledStreamingFrame();
       const finalAssistant = chatMessageFromAssistantResult(result, streamedText);
       const finalMessages = [...promptMessages, finalAssistant];
@@ -897,6 +911,25 @@ export function ChatView({
       await onThreadChanged();
     } catch (error) {
       console.warn("chat read model refresh unavailable", error);
+    }
+  }
+
+  async function persistAutoTitleForCompletedTurn(
+    promptMessages: ChatMessage[],
+    assistantText: string,
+    shouldAutoTitle: boolean,
+  ) {
+    if (!shouldAutoTitle) return;
+    if (titledThreadsRef.current.has(thread.threadId)) return;
+    const firstUser = promptMessages.find(
+      (message) => message.role === "user" && Boolean(message.text?.trim()),
+    );
+    if (!firstUser || !assistantText.trim()) return;
+    titledThreadsRef.current.add(thread.threadId);
+    try {
+      await coreBridge.autoTitleThread(thread.threadId, firstUser.text, assistantText);
+    } catch {
+      /* keep existing title on failure */
     }
   }
 
@@ -1647,27 +1680,6 @@ export function ChatView({
     void resumeActiveStream(marker, { commitResult });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [thread.threadId]);
-
-  // Auto-title a thread (LLM) once its first exchange is complete; persisted by
-  // the gateway, then the thread list refreshes. Once per thread.
-  useEffect(() => {
-    if (streamingAssistantId) return;
-    if (titledThreadsRef.current.has(thread.threadId)) return;
-    const firstUser = threadMessages.find(
-      (message) => message.role === "user" && Boolean(message.text?.trim()),
-    );
-    const latestAssistant = [...threadMessages]
-      .reverse()
-      .find((message) => message.role === "assistant" && Boolean(message.text?.trim()));
-    if (!firstUser || !latestAssistant) return;
-    titledThreadsRef.current.add(thread.threadId);
-    void coreBridge
-      .autoTitleThread(thread.threadId, firstUser.text, latestAssistant.text)
-      .then(() => onRuntimeChanged())
-      .catch(() => {
-        /* keep existing title on failure */
-      });
-  }, [threadMessages, streamingAssistantId, thread.threadId, onRuntimeChanged]);
 
   useEffect(() => {
     const handleResize = () => scrollConversationToBottomIfPinned("auto");
@@ -2582,6 +2594,11 @@ function messageRoleLabel(role: ChatMessage["role"]) {
   if (role === "assistant") return "assistant";
   if (role === "system") return "system";
   return "user";
+}
+
+function isPlaceholderThreadTitle(title: string) {
+  const normalized = title.trim().toLowerCase();
+  return normalized === "new task" || normalized === "nuovo compito";
 }
 
 function currentTimestampSeconds() {
