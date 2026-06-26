@@ -204,7 +204,7 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   WS7 Presentations studio redesign locale/verde:
   la pagina Presentations non e' piu' un form settings verticale; ora usa un
   layout studio con brand kit compatto a sinistra e template workspace a destra,
-  ricerca testuale, filtri fonte (`Local`, `SlidesCarnival`, `Homun`) e card
+  ricerca testuale, filtri fonte installati (`Local`, `Homun`) e card
   piu' visuali con CTA unica `Use template`. Nessun cambio API/runtime: import,
   catalogo e avvio chat guidata restano sul registry canonico esistente. Gate:
   `npm run test:ui-contract`, `npm run build`, `git diff --check`, smoke
@@ -248,10 +248,24 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   **Smoke runtime esterno passato (2026-06-26):** prompt inbound, placeholder,
   Workspace/Computer e risposta progressiva risultano visibili nel thread
   proprietario; Workspace e Computer non si sovrappongono nello stack live.
-  **Prossimo passo unico:** continuare WS7 Presentations con preview HTML/PDF,
-  loading/delete dei template importati e catalogo "Powered by SlidesCarnival"
-  con ricerca/filtri/import esplicito.
-  Spec: [Real PPTX Template Import and SlidesCarnival-Powered Catalog](superpowers/specs/2026-06-25-real-pptx-template-import-design.md).
+  **WS7 provider-agnostic template sourcing locale/verde (2026-06-26):**
+  Presentations separa ora il catalogo operativo (`Homun` + template locali
+  importati) da una directory di fonti esterne provider-agnostica
+  (SlidesCarnival, Microsoft Create, Slidesgo, Envato, estendibile). I provider
+  sono solo link dove trovare/scaricare/acquistare template `.pptx`/`.potx`; un
+  template diventa usabile solo dopo import locale esplicito. Rimossa la fonte
+  SlidesCarnival come filtro hard-coded del catalogo installato. Gate:
+  `npm run test:ui-contract`, `npm run build`, `git diff --check`, smoke browser
+  su `127.0.0.1:1420` (Presentations apre, 4 fonti esterne visibili, nessun
+  filtro `SlidesCarnival` nel catalogo installato).
+  **WS7 chiusa localmente per lo scope non-SlidesCarnival:** import locale,
+  preview, delete, uso in chat, renderer PPTX reale prima slice, studio UI e
+  directory fonti provider-agnostica sono coperti. Il miglioramento futuro è
+  qualità renderer/template pack (parità HTML/PDF e slot detection più ricca),
+  non un vincolo per chiudere WS7.
+  **Prossimo passo unico:** tornare alla scaletta generale post-WS7 e scegliere
+  tra WS9 plugin packaging/marketplace, UX polish residuo o release build.
+  Spec: [Real PPTX Template Import and Provider-Agnostic Catalog](superpowers/specs/2026-06-25-real-pptx-template-import-design.md).
   UX spec: [Presentations Studio Redesign](superpowers/specs/2026-06-25-presentations-studio-redesign-design.md).
 - **Direzione WS7 aggiornata:** l'obiettivo deliverable non è una gallery statica
   clonata tool-per-tool, ma un **design system dichiarativo condiviso** per
@@ -335,8 +349,9 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   introdurre euristiche fragili o un secondo catalogo. Prossimo asse approvato:
   template PowerPoint reali importabili (`.pptx`/`.potx`) come pack locali con
   manifest, thumbnail, licenza/attribuzione e pipeline `make_deck` che clona il
-  template reale invece di imitarlo da token sintetici; SlidesCarnival è sorgente
-  "powered by" con attribuzione, non redistribuzione di template grezzi.
+  template reale invece di imitarlo da token sintetici; i provider esterni sono
+  fonti esplicite da cui l'utente scarica/acquista/importa, non un catalogo
+  operativo parallelo.
   Correzione UX post-smoke: il menu modelli distingue ora i modelli cloud
   instradati tramite endpoint locale Ollama (`☁ via local`) dai provider cloud
   diretti; in quel caso serve Ollama locale acceso oppure una binding sul

@@ -245,6 +245,9 @@ assertContains("src/components/BrandKitPanel.tsx", "template-card-contract", "te
 assertContains("src/components/BrandKitPanel.tsx", "selection_notes", "template gallery must expose catalog selection rationale, not only visual decoration");
 assertContains("src/components/BrandKitPanel.tsx", "entry.selection_notes ?? []", "template gallery must tolerate legacy catalog entries without selection_notes");
 assertContains("src/components/BrandKitPanel.tsx", "Import PPTX", "Presentations must expose manual PPTX template import");
+assertContains("src/components/BrandKitPanel.tsx", "TEMPLATE_SOURCE_LINKS", "Presentations must keep provider-agnostic template source links");
+assertContains("src/components/BrandKitPanel.tsx", "TemplateSourceDirectory", "Presentations must separate external template sources from installed templates");
+assertNotContains("src/components/BrandKitPanel.tsx", "sourceFilter === \"slidescarnival\"", "SlidesCarnival must not be a hard-coded installed-catalog source filter");
 assertContains("src/components/BrandKitPanel.tsx", "attribution_required", "Presentations must surface attribution state for imported/source templates");
 assertContains("src/components/BrandKitPanel.tsx", "TemplateDetailModal", "template gallery must expose a catalog detail view before use");
 assertContains("src/components/BrandKitPanel.tsx", "useTemplate(entry", "template gallery must start chat workflows from the selected catalog entry");

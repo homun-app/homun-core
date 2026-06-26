@@ -1,4 +1,4 @@
-# Real PPTX Template Import and SlidesCarnival-Powered Catalog
+# Real PPTX Template Import and Provider-Agnostic Catalog
 
 ## Goal
 
@@ -18,25 +18,28 @@ Presentations has three layers:
 1. Brand kit: organization name, logo, colors, fonts and product/context notes.
 2. Local template packs: imported `.pptx`/`.potx` assets stored under Homun's
    template directory with thumbnails, manifest and attribution metadata.
-3. Powered by SlidesCarnival catalog: a searchable source browser that links to
-   SlidesCarnival template pages, lets the user import a selected template, and
-   records the source/license attribution in the local template pack.
+3. Template source directory: a provider-agnostic list of places where the user
+   can find, buy, download or create `.pptx`/`.potx` templates. A template only
+   becomes actionable in Homun after explicit local import.
 
-The initial implementation should ship local import first. The SlidesCarnival
-browser comes after the import/render path is reliable.
+The implementation ships local import first. External providers are source
+links, not a mirrored catalog, until there is an explicit provider integration
+with licensing and download rules for that provider.
 
 ## Licensing Boundary
 
-SlidesCarnival can be used as a template source, but Homun must not become an
-unauthorized mirror of raw template files.
+SlidesCarnival, Microsoft Create, Slidesgo, Envato Elements and similar services
+can be used as template sources, but Homun must not become an unauthorized
+mirror of raw template files from any provider.
 
 Rules:
 
-- Homun may link to SlidesCarnival template pages and show source metadata.
-- Homun may let the user import/download a template for their local use.
+- Homun may link to provider template pages and show source metadata.
+- Homun may let the user import a downloaded/acquired template for their local
+  use.
 - Homun must preserve attribution metadata and include attribution in generated
-  decks when a SlidesCarnival template is used.
-- Homun must not silently bundle or redistribute unmodified SlidesCarnival
+  decks when a source requires it.
+- Homun must not silently bundle, mirror or redistribute unmodified third-party
   templates as standalone assets.
 - If a source page requires attribution, the generated deck keeps a credits slide
   or an equivalent subtle attribution link/citation.
@@ -45,7 +48,7 @@ Rules:
 
 Every imported template pack stores:
 
-- `source_provider`: `slidescarnival`, `user_upload`, or another provider.
+- `source_provider`: `user_upload`, `homun`, or another explicit provider.
 - `source_url`: original template page URL when known.
 - `license`: human-readable license label.
 - `attribution_required`: boolean.
@@ -94,18 +97,19 @@ For manual import:
 5. Homun creates an editable manifest draft.
 6. The template appears in Presentations and in `/api/templates/catalog`.
 
-For SlidesCarnival import:
+For provider-sourced import:
 
-1. User searches/browses the SlidesCarnival-powered catalog.
-2. Homun opens the canonical template page or downloads through a user-visible
-   import action when allowed.
-3. Homun records SlidesCarnival attribution metadata.
+1. User opens a provider/source page from the source directory or supplies their
+   own source.
+2. User downloads, buys or creates a `.pptx`/`.potx` outside Homun when needed.
+3. User imports the local file into Homun.
+4. Homun records provider, URL, license and attribution metadata when available.
 4. Homun runs the same local import pipeline.
 5. The generated deck preserves attribution.
 
-If automated download is fragile or not allowed by the source page, Homun should
-fall back to "Open source page" + "Import downloaded PPTX" rather than scraping
-aggressively.
+Automated download/scraping is not part of the current contract. If it is added
+later for a specific provider, it must be explicit, source-compliant and fall
+back to "Open source page" + "Import downloaded PPTX".
 
 ## Generation Pipeline
 
@@ -150,7 +154,9 @@ The Presentations page should become a compact working surface:
   default.
 - Search and filters for template discovery.
 - Real thumbnails, not synthetic cards.
-- Source badges: `Local`, `SlidesCarnival`, `Homun`.
+- Source badges: `Local`, `Homun`, and the recorded provider for imported packs.
+- Template source directory with provider links and clear copy: "find/download or
+  buy a PPTX, then import it".
 - License/attribution badge visible before import/use.
 - Primary actions:
   - `Use template`
@@ -191,7 +197,7 @@ Minimum gates for the first implementation slice:
 
 Runtime smoke:
 
-1. Import one SlidesCarnival-downloaded PPTX manually.
+1. Import one third-party or user-owned PPTX manually.
 2. Confirm it appears with real thumbnail.
 3. Generate a branded Homun pitch deck from that template.
 4. Open the `.pptx` and verify it preserves visual design, logo/brand data,
@@ -199,13 +205,14 @@ Runtime smoke:
 
 ## Initial Slice
 
-Do not start with full SlidesCarnival search/scraping. Start with:
+Do not start with provider search/scraping or automated downloads. Start with:
 
 1. Manual PPTX import into local template pack.
 2. Manifest + thumbnail generation.
 3. Catalog API exposure.
 4. `make_deck` real-template resolution path.
-5. One runtime smoke with a SlidesCarnival PPTX imported by the user.
+5. One runtime smoke with a provider-sourced PPTX imported by the user.
 
-After that is reliable, add the SlidesCarnival-powered browser/search and direct
-import affordance.
+After that is reliable, grow Homun-owned templates and optionally add explicit
+provider integrations one by one. No provider becomes the default catalog unless
+it satisfies licensing, attribution and UX requirements.

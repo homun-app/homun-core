@@ -4,7 +4,7 @@
 
 **Goal:** Rework the Presentations addon into a compact studio workspace with a brand rail and a template-first catalog.
 
-**Architecture:** Keep existing runtime/API contracts. Refactor only the React structure and CSS for `BrandKitPanel`, adding local search/source filters without changing `templateCatalog`, import, or `startTemplateWorkflow` semantics.
+**Architecture:** Keep existing runtime/API contracts. Refactor only the React structure and CSS for `BrandKitPanel`, adding local search/source filters and a provider-agnostic template source directory without changing `templateCatalog`, import, or `startTemplateWorkflow` semantics. External providers are links/sources only; a template is actionable only after explicit local import.
 
 **Tech Stack:** React, TypeScript, existing `coreBridge`, CSS tokens in `apps/desktop/src/styles.css`, existing UI contract script.
 
@@ -21,7 +21,7 @@ Add `query` and `sourceFilter` state next to the existing `filter` state:
 
 ```ts
 const [query, setQuery] = useState("");
-const [sourceFilter, setSourceFilter] = useState<"all" | "local" | "slidescarnival" | "homun">("all");
+const [sourceFilter, setSourceFilter] = useState<"all" | "local" | "homun">("all");
 ```
 
 - [ ] **Step 2: Replace visible template filtering**
@@ -34,8 +34,7 @@ const visible = templates.filter((entry) => {
   const matchesSource =
     sourceFilter === "all" ||
     (sourceFilter === "local" && entry.is_imported) ||
-    (sourceFilter === "slidescarnival" && entry.source_provider === "slidescarnival") ||
-    (sourceFilter === "homun" && !entry.is_imported && entry.source_provider !== "slidescarnival");
+    (sourceFilter === "homun" && !entry.is_imported);
   const haystack = [
     entry.name,
     entry.description,
@@ -62,9 +61,9 @@ const visible = templates.filter((entry) => {
 
 Wrap the panel in `presentation-studio`, move the brand form into `presentation-brand-rail`, and keep catalog in `presentation-template-workspace`.
 
-- [ ] **Step 4: Add search and source chips**
+- [ ] **Step 4: Add search, installed-source chips and provider source directory**
 
-Add a search input and source chips above the catalog grid. Keep `Import PPTX` visible in the workspace header.
+Add a search input and installed-source chips above the catalog grid. Keep `Import PPTX` visible in the workspace header. Add a separate provider-agnostic source directory for links such as SlidesCarnival, Microsoft Create, Slidesgo and Envato; these links must not appear as installed templates until imported.
 
 - [ ] **Step 5: Add empty state**
 

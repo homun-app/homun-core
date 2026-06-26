@@ -1,6 +1,16 @@
 import { type ChangeEvent, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { FileText, ImageIcon, Loader2, Presentation, Save, Search, Trash2, Upload } from "lucide-react";
+import {
+  ExternalLink,
+  FileText,
+  ImageIcon,
+  Loader2,
+  Presentation,
+  Save,
+  Search,
+  Trash2,
+  Upload,
+} from "lucide-react";
 import { coreBridge, type BrandKit, type TemplateCatalogEntry } from "../lib/coreBridge";
 import { fileLocalPathFromBridge } from "../lib/gatewayConfig";
 import type { PluginHost } from "../plugins/registry";
@@ -16,6 +26,33 @@ const DEFAULT_KIT: BrandKit = {
 };
 
 const COLOR_KEYS = ["primary_color", "secondary_color", "accent_color"] as const;
+
+const TEMPLATE_SOURCE_LINKS = [
+  {
+    name: "SlidesCarnival",
+    url: "https://www.slidescarnival.com/",
+    descriptionKey: "presentations:sourceSlidesCarnivalBody",
+    tags: ["free", "education", "business"],
+  },
+  {
+    name: "Microsoft Create",
+    url: "https://create.microsoft.com/en-us/templates/presentations",
+    descriptionKey: "presentations:sourceMicrosoftBody",
+    tags: ["pptx", "office", "business"],
+  },
+  {
+    name: "Slidesgo",
+    url: "https://slidesgo.com/",
+    descriptionKey: "presentations:sourceSlidesgoBody",
+    tags: ["free", "themes", "visual"],
+  },
+  {
+    name: "Envato Elements",
+    url: "https://elements.envato.com/presentation-templates",
+    descriptionKey: "presentations:sourceEnvatoBody",
+    tags: ["paid", "premium", "commercial"],
+  },
+] as const;
 
 /** The Presentations plugin's panel: the persistent BRAND KIT (colours, fonts, logo)
  *  that the on-brand deck/document generators apply. Stored gateway-side. */
@@ -211,7 +248,7 @@ function TemplateCatalogGallery({ host }: { host: PluginHost }) {
   const [templates, setTemplates] = useState<TemplateCatalogEntry[]>([]);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<"all" | "presentation" | "document">("all");
-  const [sourceFilter, setSourceFilter] = useState<"all" | "local" | "slidescarnival" | "homun">("all");
+  const [sourceFilter, setSourceFilter] = useState<"all" | "local" | "homun">("all");
   const [importing, setImporting] = useState(false);
   const [importingName, setImportingName] = useState<string | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
@@ -234,8 +271,7 @@ function TemplateCatalogGallery({ host }: { host: PluginHost }) {
     const matchesSource =
       sourceFilter === "all" ||
       (sourceFilter === "local" && entry.is_imported) ||
-      (sourceFilter === "slidescarnival" && entry.source_provider === "slidescarnival") ||
-      (sourceFilter === "homun" && !entry.is_imported && entry.source_provider !== "slidescarnival");
+      (sourceFilter === "homun" && !entry.is_imported);
     const haystack = [
       entry.name,
       entry.description,
@@ -376,7 +412,7 @@ function TemplateCatalogGallery({ host }: { host: PluginHost }) {
           />
         </label>
         <div className="template-source-tabs" aria-label="Template source">
-          {(["all", "local", "slidescarnival", "homun"] as const).map((key) => (
+          {(["all", "local", "homun"] as const).map((key) => (
             <button
               key={key}
               type="button"
@@ -388,6 +424,7 @@ function TemplateCatalogGallery({ host }: { host: PluginHost }) {
           ))}
         </div>
       </div>
+      <TemplateSourceDirectory />
       {importError && <p className="template-import-error">{importError}</p>}
 
       {visible.length === 0 && !importingName ? (
@@ -479,6 +516,35 @@ function TemplateCatalogGallery({ host }: { host: PluginHost }) {
           onDelete={() => void deleteTemplate(selectedTemplate)}
         />
       )}
+    </section>
+  );
+}
+
+function TemplateSourceDirectory() {
+  const { t } = useTranslation();
+  return (
+    <section className="template-source-directory" aria-labelledby="template-source-directory-title">
+      <div className="template-source-directory-copy">
+        <p className="eyebrow">{t("presentations:sourceDirectoryEyebrow")}</p>
+        <h4 id="template-source-directory-title">{t("presentations:sourceDirectoryTitle")}</h4>
+        <p>{t("presentations:sourceDirectoryBody")}</p>
+      </div>
+      <div className="template-source-directory-list">
+        {TEMPLATE_SOURCE_LINKS.map((source) => (
+          <a href={source.url} target="_blank" rel="noreferrer" className="template-source-link" key={source.name}>
+            <span>
+              <strong>{source.name}</strong>
+              <small>{t(source.descriptionKey)}</small>
+            </span>
+            <span className="template-source-link-tags">
+              {source.tags.slice(0, 2).map((tag) => (
+                <i key={tag}>{tag}</i>
+              ))}
+            </span>
+            <ExternalLink size={13} aria-hidden />
+          </a>
+        ))}
+      </div>
     </section>
   );
 }

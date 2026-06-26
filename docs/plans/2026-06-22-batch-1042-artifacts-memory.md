@@ -1067,8 +1067,8 @@ feature laterali né una dashboard generica.
   --nocapture`, `npm run test:ui-contract`, `npm run build`, `git diff
   --check`. Resta da fare: smoke runtime import→catalogo→use template→chat/plan
   in Electron verificando che il modello citi contenuti reali delle slide,
-  thumbnail reali, catalogo "Powered by SlidesCarnival" con ricerca/filtri/import
-  esplicito e, dopo, vero slide-cloning del PPTX importato.
+  thumbnail reali, directory provider-agnostica di fonti template (link esterni +
+  import manuale esplicito) e, dopo, vero slide-cloning del PPTX importato.
   Spec:
   `docs/superpowers/specs/2026-06-25-real-pptx-template-import-design.md`.
 - ✅ **WS7 real PPTX renderer — prima slice locale/verde (2026-06-25):**
@@ -1106,9 +1106,14 @@ feature laterali né una dashboard generica.
   template` crea subito la chat con prompt visibile e chip PPTX allegato prima
   dell'analisi/plan, evitando il vuoto percettivo mentre il gateway legge il
   PowerPoint. Gate: `cargo test -p local-first-desktop-gateway template --
-  --nocapture`, `npm run build` da `apps/desktop`. Resta da fare: smoke Electron
-  import→preview→delete/use→make_deck e catalogo SlidesCarnival con ricerca e
-  import esplicito.
+  --nocapture`, `npm run build` da `apps/desktop`. Follow-up provider-agnostic:
+  la pagina Presentations separa il catalogo operativo (`Homun` + import locali)
+  da una directory di fonti esterne dove trovare/scaricare/acquistare template
+  PowerPoint; nessun provider esterno e' trattato come catalogo unico o come
+  template disponibile finche' non viene importato localmente. Gate:
+  `npm run test:ui-contract`, `npm run build`, `git diff --check`, smoke browser
+  su `127.0.0.1:1420` (directory fonti visibile, filtro installato senza
+  `SlidesCarnival` hard-coded).
 
 ## WS9 — Distribuzione plugin & marketplace
 

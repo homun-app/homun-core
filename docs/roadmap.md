@@ -340,8 +340,10 @@ primo percorso locale verde e WS5 è chiusa localmente/gate:
     Nuovo asse approvato: Presentations deve usare template PowerPoint reali,
     importabili come pack locali con `source.pptx`, thumbnail, manifest,
     licenza/attribuzione e risoluzione da `make_deck(template_ref=...)`.
-    SlidesCarnival entra come catalogo "powered by" con ricerca/filtri/import
-    esplicito e attribution, non come mirror di file redistribuiti.
+    Il catalogo template resta provider-agnostic: Homun espone template propri e
+    pack locali importati; i provider esterni (SlidesCarnival, Microsoft Create,
+    Slidesgo, Envato, ecc.) sono fonti/link da cui l'utente scarica o acquista
+    `.pptx`/`.potx` prima dell'import, non un secondo catalogo operativo.
     Prima slice locale/verde: import manuale `.pptx`/`.potx` in template pack
     locali sotto il registry canonico, API/bridge con metadata sicuri
     (`source_provider`, licenza/attribuzione, `redistribution_policy`,
@@ -364,7 +366,8 @@ primo percorso locale verde e WS5 è chiusa localmente/gate:
     `thumbnails/slide-001.png` dal file reale con LibreOffice/Poppler, il gateway
     serve l'immagine da `/api/templates/preview` senza path locali e la gallery
     Presentations usa quella preview reale per i template importati. Resta da
-    fare smoke Electron end-to-end e catalogo SlidesCarnival con import esplicito.
+    fare smoke Electron end-to-end e directory fonti provider-agnostica con
+    import manuale esplicito.
 74. WS8 gateway contract eval — `scripts/eval_suite.py` può ora, se configurato
     con `HOMUN_EVAL_GATEWAY_BASE` e token, verificare anche il gateway reale:
     `/api/templates/catalog` deve esporre template non-callable con preview
@@ -399,9 +402,11 @@ primo percorso locale verde e WS5 è chiusa localmente/gate:
 81. WS7 Presentations studio redesign — la pagina Presentations passa da layout
     settings verticale a workspace studio: brand kit compatto in rail sinistra,
     catalogo template come superficie principale, ricerca testuale, filtri fonte
-    (`Local`, `SlidesCarnival`, `Homun`), card piu' visuali e CTA unica
-    `Use template`. API e runtime restano invariati: import PPTX, registry
-    template e avvio chat guidata continuano a usare il contratto esistente.
+    installati (`Local`, `Homun`), card piu' visuali e CTA unica `Use template`.
+    I provider esterni vivono in una directory fonti separata e diventano
+    template solo dopo import locale. API e runtime restano invariati: import
+    PPTX, registry template e avvio chat guidata continuano a usare il contratto
+    esistente.
     Gate locale: `npm run test:ui-contract`, `npm run build`, `git diff
     --check`, smoke Playwright su `127.0.0.1:1420`.
 82. WS7 imported template lifecycle UX — i template PPTX importati diventano
@@ -433,6 +438,14 @@ primo percorso locale verde e WS5 è chiusa localmente/gate:
     thread proprietario. Direzione strutturale: chat, canali, automazioni, approval
     callback e subagent devono diventare client dello stesso lifecycle `turn_id`
     invece di flussi separati che ricostruiscono la UI a fine lavoro.
+82c. WS7 provider-agnostic template sourcing — Presentations non tratta piu'
+    SlidesCarnival o altri provider esterni come catalogo installato. Il
+    catalogo operativo resta `Homun` + template locali importati; una directory
+    separata espone link a fonti esterne (SlidesCarnival, Microsoft Create,
+    Slidesgo, Envato) da cui l'utente puo' scaricare/acquistare `.pptx`/`.potx`
+    e poi importarli. Gate locale: `npm run test:ui-contract`, `npm run build`,
+    `git diff --check`, smoke browser su `127.0.0.1:1420` con directory fonti
+    visibile e nessun filtro catalogo hard-coded su SlidesCarnival.
 83. UX agentic workspace principle — Homun assume il modello "workspace agentico
     operativo con chat al centro": sidebar per orientamento, chat come comando e
     timeline, dock contestuale per piano/computer/activity, artifact come output
@@ -637,8 +650,8 @@ nel dettaglio apre una nuova chat con piano guidato e `template_ref`, allegando
 il PPTX solo quando esiste un source locale autorizzato. L'ingestion degli
 allegati PowerPoint estrae ora testo per slide dal pacchetto OOXML, così il
 modello puo' ragionare sul template allegato invece di dedurre dal filename.
-Prossimo asse: smoke runtime Electron, catalogo "Powered by SlidesCarnival" con
-ricerca/filtri/import esplicito, thumbnail reali e poi vero slide-cloning da
-PPTX importato.
+Prossimo asse: smoke runtime Electron, directory fonti template provider-agnostic
+con import manuale esplicito, thumbnail reali e poi vero slide-cloning da PPTX
+importato. SlidesCarnival resta una fonte possibile, non il catalogo di Homun.
 `make_research` e `make_meeting` restano futuri.
 Il contratto corrente della memoria è in [MEMORIA.md](MEMORIA.md).
