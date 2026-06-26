@@ -341,6 +341,14 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   l'azione naturale. La serializzazione runtime resta invariata e continua a
   passare dal registry/capability layer; e' una slice di chiarezza/guardrail UI.
   Gate: `npm run test:ui-contract`, `npm run build`.
+  **Follow-up ConnectorPoll event envelope (2026-06-26):** anche gli eventi
+  polling da connettori/MCP materializzano nel task un envelope normalizzato
+  (`source_kind=connector`, `provider_id`, `event_type=item.detected`,
+  `dedup_key`, payload item e visibility), allineato al contratto
+  `ChannelMessage`. Questo evita una biforcazione tra push e polling quando
+  Gmail/Calendar/MCP vengono usati come event source. Gate mirato:
+  `cargo test -p local-first-desktop-gateway
+  connector_poll_event_envelope_is_stable_and_visible -- --nocapture`.
   Gate finale continuita' canale: `cargo test -p local-first-desktop-gateway -- --nocapture`
   (312 passati, 1 ignorato), `npm run build` da `apps/desktop`,
   `git diff --check`.

@@ -1030,6 +1030,12 @@ ragionato il contratto degli strumenti `make_*` creati dall'harness. ADR 0011
     Nessun cambio al trigger JSON/runtime; serve a evitare euristiche opache e
     a rendere leggibile cosa verra' valutato. Gate: `npm run test:ui-contract`,
     `npm run build`.
+  - 🟡 **ConnectorPoll event envelope (2026-06-26, locale/verde mirato):** i
+    polling event da connettori/MCP aggiungono al task lo stesso envelope
+    normalizzato dei channel event (`source_kind=connector`, `provider_id`,
+    `event_type=item.detected`, `dedup_key`, payload item, visibility). Gate:
+    `cargo test -p local-first-desktop-gateway
+    connector_poll_event_envelope_is_stable_and_visible -- --nocapture`.
 - ☐ **7.1b (futuro)** Portare ricerca/meeting al livello del deck solo dopo il
   chiarimento sul contratto strumenti: `make_research` e `make_meeting` non sono
   essenziali per la prossima release.

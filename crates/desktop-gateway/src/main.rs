@@ -10063,6 +10063,52 @@ async fn connector_poll_tick(state: &AppState) {
     }
 }
 
+fn connector_poll_event_key(tool: &str, key_field: &str, item: &serde_json::Value) -> String {
+    let key_value = item
+        .get(key_field)
+        .and_then(|value| value.as_str().map(str::to_string).or_else(|| Some(value.to_string())))
+        .unwrap_or_default();
+    format!("connector:{tool}:{key_field}:{key_value}")
+}
+
+fn connector_poll_event_envelope(
+    automation: &Automation,
+    tool: &str,
+    label: &str,
+    key_field: &str,
+    item: &serde_json::Value,
+) -> serde_json::Value {
+    let key_value = item
+        .get(key_field)
+        .and_then(|value| value.as_str().map(str::to_string).or_else(|| Some(value.to_string())))
+        .unwrap_or_default();
+    let dedup_key = connector_poll_event_key(tool, key_field, item);
+    serde_json::json!({
+        "event_id": dedup_key,
+        "source_kind": "connector",
+        "provider_id": tool,
+        "event_type": "item.detected",
+        "occurred_at": OffsetDateTime::now_utc().unix_timestamp(),
+        "workspace_id": automation.workspace_id,
+        "actor": {
+            "contact_ref": null,
+            "display_name": label,
+            "channel": null,
+            "identifier": tool,
+        },
+        "payload": {
+            "key_field": key_field,
+            "key_value": key_value,
+            "item": item,
+        },
+        "dedup_key": dedup_key,
+        "visibility": {
+            "thread_id": null,
+            "title": format!("Automation · {label}"),
+        }
+    })
+}
+
 /// Materialize a one-shot run for a fired ConnectorPoll item (the item is the event context).
 fn connector_fire_run(
     state: &AppState,
@@ -10079,6 +10125,16 @@ fn connector_fire_run(
         .chars()
         .take(2000)
         .collect();
+    let (tool, key_field) = match &automation.trigger {
+        AutomationTrigger::Event {
+            event:
+                EventTrigger::ConnectorPoll {
+                    tool, key_field, ..
+                },
+        } => (tool.as_str(), key_field.as_str()),
+        _ => ("connector", "id"),
+    };
+    let event = connector_poll_event_envelope(automation, tool, label, key_field, item);
     let goal = format!(
         "{}\n\n[Triggering event: {label}]\nEvent data (JSON):\n{item_str}",
         automation.prompt
@@ -10093,6 +10149,7 @@ fn connector_fire_run(
             "automation_id": automation.id,
             "approval": automation.approval,
             "source": "connector_poll",
+            "event": event,
             "thread_title": format!("Automation · {label}"),
         }),
     );
@@ -51167,6 +51224,58 @@ data: [DONE]\n";
         assert_eq!(envelope["visibility"]["title"], "WhatsApp · Elena");
         assert_eq!(envelope["payload"]["message_id"], "wamid.42");
         assert_eq!(envelope["payload"]["has_content"], true);
+    }
+
+    #[test]
+    fn connector_poll_event_envelope_is_stable_and_visible() {
+        let now = time::OffsetDateTime::now_utc();
+        let automation = Automation {
+            id: "auto_connector".to_string(),
+            user_id: UserId::new("user"),
+            workspace_id: WorkspaceId::new("workspace_project"),
+            title: "Unread Gmail".to_string(),
+            trigger: AutomationTrigger::Event {
+                event: local_first_task_runtime::EventTrigger::ConnectorPoll {
+                    tool: "GMAIL_FETCH_EMAILS".to_string(),
+                    args: serde_json::json!({"query": "is:unread"}),
+                    key_field: "messageId".to_string(),
+                    label: Some("Gmail".to_string()),
+                },
+            },
+            prompt: "Summarize it".to_string(),
+            approval: ApprovalPolicy::Confirm,
+            enabled: true,
+            source: AutomationSource::Manual,
+            task_id: None,
+            created_at: now,
+            updated_at: now,
+            last_fired_at: None,
+            state: None,
+        };
+        let item = serde_json::json!({
+            "messageId": "msg_42",
+            "subject": "Quarterly update"
+        });
+        let envelope = super::connector_poll_event_envelope(
+            &automation,
+            "GMAIL_FETCH_EMAILS",
+            "Gmail",
+            "messageId",
+            &item,
+        );
+
+        assert_eq!(envelope["event_id"], "connector:GMAIL_FETCH_EMAILS:messageId:msg_42");
+        assert_eq!(envelope["dedup_key"], "connector:GMAIL_FETCH_EMAILS:messageId:msg_42");
+        assert_eq!(envelope["source_kind"], "connector");
+        assert_eq!(envelope["provider_id"], "GMAIL_FETCH_EMAILS");
+        assert_eq!(envelope["event_type"], "item.detected");
+        assert_eq!(envelope["workspace_id"], "workspace_project");
+        assert_eq!(envelope["actor"]["display_name"], "Gmail");
+        assert_eq!(envelope["actor"]["identifier"], "GMAIL_FETCH_EMAILS");
+        assert_eq!(envelope["payload"]["key_field"], "messageId");
+        assert_eq!(envelope["payload"]["key_value"], "msg_42");
+        assert_eq!(envelope["payload"]["item"]["subject"], "Quarterly update");
+        assert_eq!(envelope["visibility"]["title"], "Automation · Gmail");
     }
 
     #[test]

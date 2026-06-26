@@ -483,6 +483,9 @@ primo percorso locale verde e WS5 è chiusa localmente/gate:
     Follow-up builder clarity: the Automations composer now presents event
     rules as IF source, FILTER sender/provider query and THEN action, without
     changing the runtime trigger contract.
+    Follow-up connector envelope: ConnectorPoll tasks now carry the same
+    normalized event envelope shape as channel events, so polling providers do
+    not become a second event model.
     Spec: `docs/superpowers/specs/2026-06-26-evented-automations-design.md`.
     Slice consigliata: prima Project Access Surface, poi `ChannelMessage`
     WhatsApp/Telegram, poi `ConnectorPoll` generico per Gmail/Composio/MCP,
