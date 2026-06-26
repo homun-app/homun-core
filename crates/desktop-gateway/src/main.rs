@@ -25793,17 +25793,18 @@ async fn handle_channel_inbound(
                     Err(_) => None,
                 };
 
-                if let Some(tid) = thread_id.as_deref() {
-                    // Tell the desktop app to create the card and jump to it NOW,
-                    // before the (possibly slow) agent turn fills in the messages.
-                    publish_app_event(serde_json::json!({
-                        "type": "thread.upserted",
-                        "thread_id": tid,
-                        "workspace": base_workspace_id(),
-                        "channel": channel,
-                        "title": format!("{label} · {name}"),
-                    }));
-                }
+                let title = format!("{label} · {name}");
+                let visible_turn = thread_id.as_deref().and_then(|tid| {
+                    start_visible_conversation_turn(
+                        &st,
+                        tid,
+                        &base_workspace_id(),
+                        channel,
+                        Some(channel),
+                        &title,
+                        &content,
+                    )
+                });
 
                 // Typing indicator while the agent works (refreshed; expires on its
                 // own). Cleared automatically when the message is sent.
@@ -25822,33 +25823,47 @@ async fn handle_channel_inbound(
                 });
 
                 // Full agent turn on the thread (read-only tools); fall back to the
-                // stateless reply if there's no thread or the agent yields nothing.
-                let reply = match thread_id.as_deref() {
-                    Some(tid) => run_agent_turn(&st, tid, &content, "read_only").await,
-                    None => None,
+                // stateless reply only after the visible placeholder exists. If
+                // persistence failed, fail closed: no invisible tool/browser work
+                // and no invisible outbound auto-reply.
+                let reply = match (thread_id.as_deref(), visible_turn.as_ref()) {
+                    (Some(tid), Some(turn)) => {
+                        run_agent_turn_into_message(
+                            &st,
+                            tid,
+                            &content,
+                            "read_only",
+                            &turn.user_message_id,
+                            &turn.assistant_message_id,
+                        )
+                        .await
+                    }
+                    _ => None,
                 };
                 let reply = match reply {
                     Some(reply) => Some(reply),
-                    None => generate_channel_reply(&st, &name, &content).await,
+                    None if visible_turn.is_some() => {
+                        generate_channel_reply(&st, &name, &content).await
+                    }
+                    None => None,
                 };
                 keepalive.abort();
 
-                // Persist the exchange into the thread so it appears in the app.
-                if let Some(tid) = thread_id.as_deref() {
-                    if let Ok(store) = lock_store(&st) {
-                        let _ = store
-                            .append_assistant_message(tid, &channel_chat_message("user", &content));
-                        if let Some(reply) = reply.as_deref() {
-                            let _ = store.append_assistant_message(
-                                tid,
-                                &channel_chat_message("assistant", reply),
-                            );
-                        }
-                    }
+                // If the full threaded agent turn failed and the stateless fallback
+                // produced a reply, replace the placeholder instead of appending a
+                // second assistant bubble.
+                if let (Some(tid), Some(turn), Some(reply)) = (
+                    thread_id.as_deref(),
+                    visible_turn.as_ref(),
+                    reply.as_deref(),
+                ) {
+                    update_channel_assistant_message(&st, tid, &turn.assistant_message_id, reply);
                 }
 
                 if let Some(tid) = thread_id.as_deref() {
-                    // Messages persisted: nudge the app to refresh the thread if open.
+                    // Messages are already persisted/streamed: nudge the app once
+                    // more so a background channel turn refreshes if it completed
+                    // while the user was elsewhere.
                     publish_app_event(serde_json::json!({
                         "type": "thread.updated",
                         "thread_id": tid,
@@ -26477,47 +26492,247 @@ fn channel_chat_message(role: &str, text: &str) -> ChatMessage {
     }
 }
 
-/// Runs ONE full agent turn (tools + memory + history) headless on `thread_id`
-/// and returns the final assistant text. Reuses the exact app pipeline
-/// (`stream_chat_via_openai`): builds a chat request with the thread's prior
-/// messages as context, runs it, and drains the NDJSON stream for the `done`
-/// event. `tool_policy` ("read_only" for channels) restricts side-effecting tools.
-async fn run_agent_turn(
+fn channel_chat_message_with_id(role: &str, text: &str, message_id: &str) -> ChatMessage {
+    let mut message = channel_chat_message(role, text);
+    message.id = message_id.to_string();
+    message
+}
+
+#[derive(Debug, Clone)]
+struct VisibleConversationTurn {
+    turn_id: String,
+    user_message_id: String,
+    assistant_message_id: String,
+}
+
+fn thread_turn_started_event(
+    thread_id: &str,
+    workspace: &str,
+    source: &str,
+    channel: Option<&str>,
+    title: &str,
+    turn: &VisibleConversationTurn,
+) -> serde_json::Value {
+    let mut event = serde_json::json!({
+        "type": "thread.turn_started",
+        "thread_id": thread_id,
+        "workspace": workspace,
+        "source": source,
+        "title": title,
+        "turn_id": turn.turn_id,
+        "user_message_id": turn.user_message_id,
+        "assistant_message_id": turn.assistant_message_id,
+    });
+    if let Some(channel) = channel {
+        event["channel"] = serde_json::Value::String(channel.to_string());
+    }
+    event
+}
+
+fn start_visible_conversation_turn(
+    state: &AppState,
+    thread_id: &str,
+    workspace: &str,
+    source: &str,
+    channel: Option<&str>,
+    title: &str,
+    user_text: &str,
+) -> Option<VisibleConversationTurn> {
+    let user_message = channel_chat_message("user", user_text);
+    let assistant_message = channel_chat_message("assistant", "…");
+    let turn = VisibleConversationTurn {
+        turn_id: format!(
+            "turn_{}_{}",
+            now_epoch_secs(),
+            uuid::Uuid::new_v4().simple()
+        ),
+        user_message_id: user_message.id.clone(),
+        assistant_message_id: assistant_message.id.clone(),
+    };
+    match lock_store(state) {
+        Ok(store) => {
+            store
+                .append_assistant_message(thread_id, &user_message)
+                .ok()?;
+            store
+                .append_assistant_message(thread_id, &assistant_message)
+                .ok()?;
+        }
+        Err(_) => return None,
+    }
+    publish_app_event(thread_turn_started_event(
+        thread_id, workspace, source, channel, title, &turn,
+    ));
+    Some(turn)
+}
+
+fn agent_turn_context(
+    state: &AppState,
+    thread_id: &str,
+    skip_message_ids: &[&str],
+) -> Option<Vec<ChatContextMessage>> {
+    let skip: std::collections::HashSet<&str> = skip_message_ids.iter().copied().collect();
+    let Ok(store) = lock_store(state) else {
+        return None;
+    };
+    let snapshot = store.messages(thread_id).ok()?;
+    let mut msgs: Vec<ChatContextMessage> = snapshot
+        .messages
+        .into_iter()
+        .filter(|m| matches!(m.role.as_str(), "user" | "assistant"))
+        .filter(|m| !skip.contains(m.id.as_str()))
+        .map(|m| ChatContextMessage {
+            role: if m.role == "assistant" {
+                ChatContextRole::Assistant
+            } else {
+                ChatContextRole::User
+            },
+            text: m.text,
+        })
+        .collect();
+    let len = msgs.len();
+    if len > 16 {
+        msgs.drain(0..len - 16);
+    }
+    Some(msgs)
+}
+
+fn apply_agent_stream_line(
+    line: &str,
+    streamed_text: &mut String,
+    final_text: &mut Option<String>,
+) -> bool {
+    let line = line.trim();
+    if line.is_empty() {
+        return false;
+    }
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
+        return false;
+    };
+    match value.get("type").and_then(|t| t.as_str()) {
+        Some("delta") => {
+            if let Some(text) = value.get("text").and_then(|t| t.as_str()) {
+                streamed_text.push_str(text);
+            }
+            false
+        }
+        Some("done") => {
+            if let Some(text) = value.get("text").and_then(|t| t.as_str()) {
+                *final_text = Some(text.to_string());
+            } else if !streamed_text.trim().is_empty() {
+                *final_text = Some(streamed_text.clone());
+            }
+            true
+        }
+        Some("error") => true,
+        _ => false,
+    }
+}
+
+fn update_channel_assistant_message(
+    state: &AppState,
+    thread_id: &str,
+    message_id: &str,
+    text: &str,
+) {
+    if let Ok(store) = lock_store(state) {
+        let _ = store.set_message_text(thread_id, message_id, text);
+    }
+    publish_app_event(serde_json::json!({
+        "type": "thread.updated",
+        "thread_id": thread_id,
+        "workspace": base_workspace_id(),
+    }));
+}
+
+async fn drain_agent_stream_into_message(
+    state: &AppState,
+    thread_id: &str,
+    assistant_message_id: &str,
+    entry: std::sync::Arc<StreamEntry>,
+) -> Option<String> {
+    let mut streamed_text = String::new();
+    let mut final_text: Option<String> = None;
+    let mut last_flush = std::time::Instant::now();
+    let mut last_flushed_len = 0usize;
+
+    let (snapshot, mut brx) = {
+        let buf = entry.lines.lock().expect("stream lines lock");
+        (buf.clone(), entry.tx.subscribe())
+    };
+    for line in snapshot {
+        let terminal = apply_agent_stream_line(&line, &mut streamed_text, &mut final_text);
+        if streamed_text.len() != last_flushed_len
+            && last_flush.elapsed() >= std::time::Duration::from_millis(200)
+        {
+            update_channel_assistant_message(
+                state,
+                thread_id,
+                assistant_message_id,
+                &streamed_text,
+            );
+            last_flush = std::time::Instant::now();
+            last_flushed_len = streamed_text.len();
+        }
+        if terminal {
+            break;
+        }
+    }
+
+    while final_text.is_none() {
+        match brx.recv().await {
+            Ok(line) => {
+                let terminal = apply_agent_stream_line(&line, &mut streamed_text, &mut final_text);
+                if streamed_text.len() != last_flushed_len
+                    && last_flush.elapsed() >= std::time::Duration::from_millis(200)
+                {
+                    update_channel_assistant_message(
+                        state,
+                        thread_id,
+                        assistant_message_id,
+                        &streamed_text,
+                    );
+                    last_flush = std::time::Instant::now();
+                    last_flushed_len = streamed_text.len();
+                }
+                if terminal {
+                    break;
+                }
+            }
+            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+            Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+        }
+    }
+
+    let final_text = final_text.unwrap_or(streamed_text);
+    let final_text = final_text.trim().to_string();
+    if final_text.is_empty() {
+        return None;
+    }
+    update_channel_assistant_message(state, thread_id, assistant_message_id, &final_text);
+    Some(final_text)
+}
+
+/// Runs an agent turn for channel-originated work while keeping the owning chat
+/// visible: the inbound user message and assistant placeholder already exist,
+/// and this function streams deltas into that assistant message.
+async fn run_agent_turn_into_message(
     state: &AppState,
     thread_id: &str,
     prompt: &str,
     tool_policy: &str,
+    source_user_message_id: &str,
+    assistant_message_id: &str,
 ) -> Option<String> {
     let (base_url, model, api_key) = chat_role_config_for_thread(state, Some(thread_id))?;
-    // Prior conversation on this thread (oldest→newest), user/assistant only,
-    // capped to the last 16 turns. The current inbound is passed as `prompt`, so
-    // it is NOT yet in the thread (the handler appends it after the reply).
-    let context: Vec<ChatContextMessage> = {
-        let Ok(store) = lock_store(state) else {
-            return None;
-        };
-        let snapshot = store.messages(thread_id).ok()?;
-        let mut msgs: Vec<ChatContextMessage> = snapshot
-            .messages
-            .into_iter()
-            .filter(|m| matches!(m.role.as_str(), "user" | "assistant"))
-            .map(|m| ChatContextMessage {
-                role: if m.role == "assistant" {
-                    ChatContextRole::Assistant
-                } else {
-                    ChatContextRole::User
-                },
-                text: m.text,
-            })
-            .collect();
-        let len = msgs.len();
-        if len > 16 {
-            msgs.drain(0..len - 16);
-        }
-        msgs
-    };
+    let context = agent_turn_context(
+        state,
+        thread_id,
+        &[source_user_message_id, assistant_message_id],
+    )?;
+    let request_id = format!("agentturn-{thread_id}-{}", now_epoch_secs());
     let request = ChatGenerateStreamRequest {
-        request_id: format!("agentturn-{thread_id}-{}", now_epoch_secs()),
+        request_id: request_id.clone(),
         prompt: prompt.to_string(),
         thread_id: Some(thread_id.to_string()),
         context,
@@ -26535,29 +26750,26 @@ async fn run_agent_turn(
     let response = stream_chat_via_openai(state, request, base_url, model, api_key)
         .await
         .ok()?;
-    // Drain the NDJSON stream in-process; the generation runs in a spawned task,
-    // so to_bytes collects every event up to (and including) the `done` event.
-    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
-        .await
-        .ok()?;
-    let text = String::from_utf8_lossy(&bytes);
-    let mut final_text: Option<String> = None;
-    for line in text.lines() {
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
+    let entry = stream_registry()
+        .lock()
+        .ok()
+        .and_then(|map| map.get(&request_id).cloned());
+
+    let body_task = tokio::spawn(async move {
+        let _ = axum::body::to_bytes(response.into_body(), usize::MAX).await;
+    });
+
+    let result = match entry {
+        Some(entry) => {
+            drain_agent_stream_into_message(state, thread_id, assistant_message_id, entry).await
         }
-        if let Ok(value) = serde_json::from_str::<serde_json::Value>(line) {
-            if value.get("type").and_then(|t| t.as_str()) == Some("done") {
-                if let Some(t) = value.get("text").and_then(|t| t.as_str()) {
-                    final_text = Some(t.to_string());
-                }
-            }
+        None => {
+            let _ = body_task.await;
+            return None;
         }
-    }
-    final_text
-        .map(|t| t.trim().to_string())
-        .filter(|t| !t.is_empty())
+    };
+    let _ = body_task.await;
+    result
 }
 
 async fn generate_channel_reply(
@@ -29604,15 +29816,6 @@ fn execute_proactive_prompt_task(
         });
     };
 
-    // Surface the (possibly new) thread immediately, like an inbound channel msg.
-    publish_app_event(serde_json::json!({
-        "type": "thread.upserted",
-        "thread_id": thread_id,
-        "workspace": base_workspace_id(),
-        "channel": "scheduled",
-        "title": title,
-    }));
-
     // Automation runs (input_json carries `automation_id`) may ACT. Three policies:
     // - `autonomous`  → the rule is marked Autonomous: side-effecting tools execute directly.
     // - `full`        → the rule needs confirmation: writes PROPOSE a confirm card.
@@ -29630,17 +29833,41 @@ fn execute_proactive_prompt_task(
     } else {
         "read_only"
     };
+
+    // Safety boundary: scheduled/automation work must be visible in its owning
+    // chat before any model/tool/browser work starts. If the durable turn cannot
+    // be persisted, fail closed instead of running invisible background work.
+    let visible_turn = start_visible_conversation_turn(
+        state,
+        &thread_id,
+        &base_workspace_id(),
+        "scheduled",
+        Some("scheduled"),
+        &title,
+        &goal,
+    )
+    .ok_or_else(|| LocalTaskExecutionError {
+        message: "could not start a visible scheduled turn".to_string(),
+    })?;
+
     let answer = tokio::runtime::Handle::current()
-        .block_on(run_agent_turn(state, &thread_id, &goal, policy))
+        .block_on(run_agent_turn_into_message(
+            state,
+            &thread_id,
+            &goal,
+            policy,
+            &visible_turn.user_message_id,
+            &visible_turn.assistant_message_id,
+        ))
         .unwrap_or_else(|| "No reply generated for the scheduled task.".to_string());
     let incomplete_reason = agent_output_incomplete_reason(&answer);
 
-    if let Ok(store) = lock_store(state) {
-        // The goal documents what the scheduled task was asked — keep it as a user bubble.
-        let _ = store.append_assistant_message(&thread_id, &channel_chat_message("user", &goal));
-        let _ =
-            store.append_assistant_message(&thread_id, &channel_chat_message("assistant", &answer));
-    }
+    update_channel_assistant_message(
+        state,
+        &thread_id,
+        &visible_turn.assistant_message_id,
+        &answer,
+    );
     publish_app_event(serde_json::json!({
         "type": "thread.updated",
         "thread_id": thread_id,
@@ -31658,6 +31885,15 @@ fn approval_source_user_text(
         .map(|message| message.text.clone())
 }
 
+fn approval_continuation_visible_text(tool: &str) -> String {
+    let tool: String = tool.trim().chars().take(80).collect();
+    if tool.is_empty() {
+        "Continue after the approved action.".to_string()
+    } else {
+        format!("Continue after approved action `{tool}`.")
+    }
+}
+
 fn resume_thread_after_approval(
     state: &AppState,
     thread_id: Option<String>,
@@ -31681,24 +31917,45 @@ fn resume_thread_after_approval(
             approved_args.as_ref(),
             source_user_text.as_deref(),
         );
-        // `run_agent_turn` DRAINS the stream in-process and does NOT persist — so, exactly like the
-        // channel-inbound path (see `// Persist the exchange into the thread`), we persist its
-        // output and publish `thread.updated` so the IN-APP chat surfaces the continuation even
-        // when the approval came from Telegram (no live frontend turn to stream it). If the
-        // continuation stops at the NEXT confirm, that card text is in the returned text → the new
-        // card reappears in-app (and remote delivery is activated only after this persisted message), so the
-        // multi-step / multi-write chain advances one approval at a time.
-        if let Some(reply) = run_agent_turn(&st, &thread_id, &prompt, "full").await {
-            let assistant_message = channel_chat_message("assistant", &reply);
-            if let Ok(store) = lock_store(&st) {
-                let _ = store.append_assistant_message(&thread_id, &assistant_message);
-            }
+        let Some(visible_turn) = start_visible_conversation_turn(
+            &st,
+            &thread_id,
+            &base_workspace_id(),
+            "approval",
+            Some("approval"),
+            "Approved action continuation",
+            &approval_continuation_visible_text(&tool),
+        ) else {
+            return;
+        };
+        if let Some(reply) = run_agent_turn_into_message(
+            &st,
+            &thread_id,
+            &prompt,
+            "full",
+            &visible_turn.user_message_id,
+            &visible_turn.assistant_message_id,
+        )
+        .await
+        {
+            let assistant_message = channel_chat_message_with_id(
+                "assistant",
+                &reply,
+                &visible_turn.assistant_message_id,
+            );
             activate_remote_approvals_from_message(&st, &thread_id, &assistant_message).await;
             publish_app_event(serde_json::json!({
                 "type": "thread.updated",
                 "thread_id": thread_id,
                 "workspace": base_workspace_id(),
             }));
+        } else {
+            update_channel_assistant_message(
+                &st,
+                &thread_id,
+                &visible_turn.assistant_message_id,
+                "No continuation was generated after the approved action.",
+            );
         }
     });
 }
@@ -46195,6 +46452,32 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
     }
 
     #[test]
+    fn channel_agent_stream_lines_accumulate_delta_and_done_text() {
+        let mut streamed = String::new();
+        let mut final_text = None;
+
+        assert!(!super::apply_agent_stream_line(
+            r#"{"type":"delta","text":"hello "}"#,
+            &mut streamed,
+            &mut final_text,
+        ));
+        assert!(!super::apply_agent_stream_line(
+            r#"{"type":"delta","text":"world"}"#,
+            &mut streamed,
+            &mut final_text,
+        ));
+        assert_eq!(streamed, "hello world");
+        assert!(final_text.is_none());
+
+        assert!(super::apply_agent_stream_line(
+            r#"{"type":"done","text":"final answer","metrics":{}}"#,
+            &mut streamed,
+            &mut final_text,
+        ));
+        assert_eq!(final_text.as_deref(), Some("final answer"));
+    }
+
+    #[test]
     fn sandbox_terminal_owner_is_only_live_while_command_runs() {
         super::sandbox_clear(Some("thread-live-owner".to_string()));
         super::sandbox_begin(
@@ -49903,6 +50186,51 @@ data: [DONE]\n";
         assert_eq!(first.thread_id, "channel_scheduled_autorun_abc");
         assert_eq!(second.thread_id, first.thread_id);
         assert_eq!(second.source.as_deref(), Some("scheduled"));
+    }
+
+    #[test]
+    fn thread_turn_started_event_carries_visible_message_ids() {
+        let turn = super::VisibleConversationTurn {
+            turn_id: "turn_1".to_string(),
+            user_message_id: "msg_user".to_string(),
+            assistant_message_id: "msg_assistant".to_string(),
+        };
+
+        let event = super::thread_turn_started_event(
+            "thread_1",
+            "__personal__",
+            "whatsapp",
+            Some("whatsapp"),
+            "WhatsApp · Fabio",
+            &turn,
+        );
+
+        assert_eq!(event["type"], "thread.turn_started");
+        assert_eq!(event["thread_id"], "thread_1");
+        assert_eq!(event["workspace"], "__personal__");
+        assert_eq!(event["source"], "whatsapp");
+        assert_eq!(event["channel"], "whatsapp");
+        assert_eq!(event["title"], "WhatsApp · Fabio");
+        assert_eq!(event["turn_id"], "turn_1");
+        assert_eq!(event["user_message_id"], "msg_user");
+        assert_eq!(event["assistant_message_id"], "msg_assistant");
+    }
+
+    #[test]
+    fn approval_continuation_visible_text_is_short_and_explicit() {
+        assert_eq!(
+            super::approval_continuation_visible_text("mcp__filesystem__create"),
+            "Continue after approved action `mcp__filesystem__create`."
+        );
+        assert_eq!(
+            super::approval_continuation_visible_text("   "),
+            "Continue after the approved action."
+        );
+
+        let long_tool = "x".repeat(120);
+        let text = super::approval_continuation_visible_text(&long_tool);
+        assert!(text.contains(&"x".repeat(80)));
+        assert!(!text.contains(&"x".repeat(81)));
     }
 
     #[test]

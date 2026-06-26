@@ -558,6 +558,7 @@ export default function App() {
   // before the 2.5s taskQueue polling catches up.
   const [streamingThreadId, setStreamingThreadId] = useState<string | null>(null);
   const pendingLocalMessageThreadIdsRef = useRef<Set<string>>(new Set());
+  const pendingEventThreadIdsRef = useRef<Set<string>>(new Set());
   const busyThreadIdsRef = useRef<Set<string>>(new Set());
   // Thread ids generating in the BACKGROUND (a chat left mid-answer while another is
   // on screen). Polled from the gateway's resume registry so the sidebar dots light
@@ -677,7 +678,10 @@ export default function App() {
   // Navigate to a thread that may live in ANOTHER workspace (e.g. a channel
   // thread in Personal): select_thread is workspace-aware and returns that
   // workspace's snapshot, so applying it switches context for us.
-  async function navigateToThread(threadId: string) {
+  async function navigateToThread(
+    threadId: string,
+    options: { forceMessages?: boolean } = {},
+  ) {
     try {
       const snapshot = await coreBridge.selectChatThread(threadId);
       const mappedThreads = snapshot.threads.map(mapCoreChatThread);
@@ -687,7 +691,11 @@ export default function App() {
         defaultChatThread;
       const messages = await coreBridge.chatMessages(threadId);
       setChatThreads(mappedThreads.length ? mappedThreads : chatThreads);
-      setThreadMessagesFromBackend(threadId, messages.messages.map(mapCoreChatMessage));
+      setThreadMessagesFromBackend(
+        threadId,
+        messages.messages.map(mapCoreChatMessage),
+        { force: options.forceMessages === true },
+      );
       setActiveThreadId(threadId);
       setSelectedTaskId(selectedThread.taskId);
       setActiveView("chat");
@@ -707,7 +715,10 @@ export default function App() {
     if (event.thread_id === "homun") {
       return;
     }
-    if (event.type === "thread.upserted") {
+    const eventThreadId = event.thread_id;
+    const isVisibleTurn = event.type === "thread.turn_started";
+    const isThreadCreated = event.type === "thread.upserted";
+    if (isVisibleTurn || isThreadCreated) {
       // Alert the user when something arrived/finished while the app wasn't in
       // front (a channel message, or a scheduled task that produced a result).
       // Skip when focused — the thread list + bell already surface it there.
@@ -727,9 +738,22 @@ export default function App() {
           onClick: () => void navigateToThread(threadId),
         });
       }
-      void navigateToThread(event.thread_id);
-    } else if (event.type === "thread.updated" && event.thread_id === activeThreadId) {
-      void refreshChatReadModels(activeThreadId);
+      if (isVisibleTurn) {
+        pendingEventThreadIdsRef.current.add(eventThreadId);
+      }
+      void navigateToThread(eventThreadId, { forceMessages: isVisibleTurn }).finally(() => {
+        if (isVisibleTurn) {
+          window.setTimeout(() => {
+            pendingEventThreadIdsRef.current.delete(eventThreadId);
+          }, 1_500);
+        }
+      });
+    } else if (
+      event.type === "thread.updated" &&
+      (eventThreadId === activeThreadId ||
+        pendingEventThreadIdsRef.current.has(eventThreadId))
+    ) {
+      void refreshChatReadModels(eventThreadId);
     }
   };
   useEffect(() => {

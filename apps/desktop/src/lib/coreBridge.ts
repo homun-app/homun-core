@@ -427,14 +427,18 @@ export interface AppEvent {
   thread_id?: string;
   workspace?: string;
   channel?: string;
+  source?: string;
   title?: string;
+  turn_id?: string;
+  user_message_id?: string;
+  assistant_message_id?: string;
 }
 
 /**
  * Subscribes to the gateway's real-time event stream (NDJSON over HTTP, the same
  * push idiom the chat stream uses). Invokes `onEvent` for each event — e.g.
- * `thread.upserted` when an inbound Telegram/WhatsApp message creates a thread,
- * so the app can show the card and jump to it without a manual refresh.
+ * `thread.turn_started` when an inbound Telegram/WhatsApp/scheduled turn has
+ * already persisted its visible user bubble and assistant placeholder.
  * Auto-reconnects on drop. Returns an unsubscribe function.
  */
 export function subscribeAppEvents(onEvent: (event: AppEvent) => void): () => void {

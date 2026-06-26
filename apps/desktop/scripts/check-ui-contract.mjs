@@ -43,6 +43,13 @@ function assertRepoContains(file, text, description) {
   }
 }
 
+function assertRepoNotContains(file, text, description) {
+  const source = readFromRepo(file);
+  if (source.includes(text)) {
+    throw new Error(`${description}: expected ${file} not to contain ${text}`);
+  }
+}
+
 function assertMatches(file, pattern, description) {
   const source = read(file);
   if (!pattern.test(source)) {
@@ -106,6 +113,10 @@ assertContains("src/styles.css", "background: color-mix(in srgb, var(--surface) 
 assertContains("src/styles.css", "background: color-mix(in srgb, var(--red-soft) 42%, var(--surface));", "Settings danger zone must inherit the active surface theme");
 assertNotContains("src/styles.css", "background: #fffafa;", "Settings danger zone must not force a light background");
 assertNotContains("src/styles.css", "border: 1px solid #f1c4c6;", "Settings danger zone must not force a light border");
+assertContains("src/styles.css", ".settings-workspace .set-modal-overlay", "Settings modals must stay inside the settings content island");
+assertContains("src/styles.css", ".set-contact.is-me {\n  border-color: var(--line-strong);\n  background: var(--surface);\n}", "Contacts self card must use neutral surface tokens");
+assertNotContains("src/styles.css", ".set-contact.is-me { border-color: var(--brand-soft); background: var(--brand-soft); }", "Contacts self card must not force a light brand background");
+assertNotContains("src/styles.css", "background: color-mix(in srgb, var(--brand-soft) 38%, var(--surface));", "Contacts self card must not tint the full card with brand color");
 assertContains("src/styles.css", "color: var(--text);\n  background: var(--surface-muted);\n  font-family: ui-monospace", "inline markdown code must stay readable in dark theme");
 assertContains("src/styles.css", "color: var(--text);\n  font-family: ui-monospace", "markdown code blocks must use theme text color");
 assertContains("src/styles.css", "background: var(--surface-muted);\n}\n\n.rich-code-block figcaption", "markdown code blocks must use theme surfaces");
@@ -185,6 +196,16 @@ assertContains("src/components/ChatView.tsx", "const shouldAutoTitleAfterSubmit 
 assertContains("src/components/ChatView.tsx", "persistAutoTitleForCompletedTurn(", "auto-title must persist from the completed chat stream path");
 assertNotContains("src/components/ChatView.tsx", "coreBridge\n      .autoTitleThread", "auto-title must not be driven by a mount/update effect on historical messages");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "is_placeholder_chat_title(&thread.title)", "autotitle endpoint must be a no-op for already titled chats");
+assertRepoContains("crates/desktop-gateway/src/main.rs", "\"type\": \"thread.turn_started\"", "external turns must publish a visible-turn event after messages are persisted");
+assertRepoContains("crates/desktop-gateway/src/main.rs", "start_visible_conversation_turn", "external channels and scheduled work must use the shared visible-turn helper");
+assertRepoContains("crates/desktop-gateway/src/main.rs", "\"approval\"", "remote approval continuations must identify their visible-turn source");
+assertRepoContains("crates/desktop-gateway/src/main.rs", "approval_continuation_visible_text", "remote approval continuations must create an explicit visible user bubble");
+assertNotContains("src/App.tsx", "runAgentTurnHeadless", "frontend must not expose a headless agent-turn path");
+assertRepoNotContains("crates/desktop-gateway/src/main.rs", "async fn run_agent_turn(", "backend must not keep a headless agent-turn helper that can bypass visible placeholders");
+assertRepoContains("crates/desktop-gateway/src/main.rs", "run_agent_turn_into_message", "backend agent turns must stream into persisted assistant messages");
+assertContains("src/App.tsx", "pendingEventThreadIdsRef", "event-driven thread navigation must not drop updates while React is switching active threads");
+assertContains("src/App.tsx", "event.type === \"thread.turn_started\"", "desktop client must handle visible turn start events");
+assertContains("src/lib/coreBridge.ts", "assistant_message_id?: string", "app event contract must expose persisted assistant message ids");
 assertContains("src/plugins/registry.tsx", "navSection?: \"work\" | \"create\" | \"workspace\" | \"more\"", "plugin manifest must declare sidebar placement by operational role");
 assertContains("src/plugins/presentations/index.tsx", "navSection: \"create\"", "presentations addon must be promoted into the create section");
 assertContains("src/plugins/proattivita/index.tsx", "navSection: \"work\"", "proactivity addon must be promoted into the work section");

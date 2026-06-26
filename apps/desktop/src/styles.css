@@ -10111,9 +10111,9 @@ body.resizing-drawer {
   font-weight: 700;
 }
 .set-contact-avatar.lg.is-me {
-  background: var(--brand-soft);
-  border-color: var(--brand-soft);
-  color: var(--brand-strong);
+  background: var(--surface-muted);
+  border-color: var(--line-strong);
+  color: var(--text);
 }
 
 /* Two-up field grid inside the sheet (anagrafica, persona, perimetro). */
@@ -12166,6 +12166,14 @@ body.resizing-drawer {
   justify-content: center;
   padding: 28px;
 }
+.settings-workspace .set-modal-overlay {
+  left: calc(var(--drawer-island-gap) + var(--drawer-width, 292px) + var(--drawer-island-gap));
+}
+@media (max-width: 860px) {
+  .settings-workspace .set-modal-overlay {
+    left: 0;
+  }
+}
 .set-modal-overlay > .set-modal-scrim {
   position: absolute;
   inset: 0;
@@ -12334,7 +12342,10 @@ body.resizing-drawer {
   font: inherit;
   width: 100%;
 }
-.set-contact.is-me { border-color: var(--brand-soft); background: var(--brand-soft); }
+.set-contact.is-me {
+  border-color: var(--line-strong);
+  background: var(--surface);
+}
 .set-contact-avatar {
   width: 30px;
   height: 30px;
@@ -12349,12 +12360,16 @@ body.resizing-drawer {
   color: var(--muted);
   flex: none;
 }
-.set-contact.is-me .set-contact-avatar { background: var(--surface); border-color: var(--brand-soft); color: var(--brand-strong); }
+.set-contact.is-me .set-contact-avatar {
+  background: var(--surface-muted);
+  border-color: var(--line-strong);
+  color: var(--text);
+}
 .set-contact-body { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .set-contact-name { font-size: 13.5px; font-weight: 600; }
-.set-contact.is-me .set-contact-name { color: var(--brand-strong); }
+.set-contact.is-me .set-contact-name { color: var(--text); }
 .set-contact-sub { font-size: 11.5px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.set-contact.is-me .set-contact-sub { color: var(--brand-strong); }
+.set-contact.is-me .set-contact-sub { color: var(--muted); }
 .set-contact-count {
   font-size: 11px;
   color: var(--muted);
@@ -12363,7 +12378,11 @@ body.resizing-drawer {
   padding: 1px 7px;
   flex: none;
 }
-.set-contact.is-me .set-contact-count { color: var(--brand-strong); background: var(--surface); border: 1px solid var(--brand-soft); }
+.set-contact.is-me .set-contact-count {
+  color: var(--text);
+  background: var(--surface-muted);
+  border: 1px solid var(--line-strong);
+}
 
 /* Channel card (Canali grid). */
 .set-channel {

@@ -420,6 +420,17 @@ primo percorso locale verde e WS5 è chiusa localmente/gate:
     `cargo test -p local-first-desktop-gateway
     committed_chat_message_attachments_survive_reload -- --nocapture`,
     `npm run build` da `apps/desktop`.
+82a. Conversation Runtime visibility safety — i turni avviati fuori dall'app
+    (Telegram/WhatsApp e scheduled oggi; mobile/API/Slack/Discord domani) devono
+    essere osservabili in tempo reale nel thread proprietario. Prima slice:
+    helper gateway `start_visible_conversation_turn`, evento
+    `thread.turn_started` emesso solo dopo il commit di messaggio inbound +
+    placeholder assistente, pending event-thread set nel client per non perdere
+    update durante la navigazione, continuazioni post-approvazione remota
+    agganciate allo stesso lifecycle, e fail-closed se il turno non puo' essere
+    persistito. Direzione strutturale: chat, canali, automazioni, approval
+    callback e subagent devono diventare client dello stesso lifecycle `turn_id`
+    invece di flussi separati che ricostruiscono la UI a fine lavoro.
 83. UX agentic workspace principle — Homun assume il modello "workspace agentico
     operativo con chat al centro": sidebar per orientamento, chat come comando e
     timeline, dock contestuale per piano/computer/activity, artifact come output

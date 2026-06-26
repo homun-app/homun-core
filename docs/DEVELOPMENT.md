@@ -227,13 +227,24 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   hotfix runtime: `Use template` non avvia piu' uno stream parallelo da
   `App.tsx`; crea la chat e consegna un `autoSubmit` monouso a `ChatView`, che
   usa la pipeline canonica `submitPrompt` con messaggio assistant locale,
-  listener delta, reasoning/progress e WorkspaceIsland live. Follow-up:
-  verificare che Telegram/WhatsApp/automation materializzino un placeholder
-  iniziale equivalente quando avviano lavoro in background.
-  **Prossimo passo unico:** smoke runtime
-  Electron import→placeholder→catalogo→preview reale→delete/use template→chat
-  con allegato visibile→make_deck verificando che `deck.pptx` mantenga il
-  layout del template importato; poi riallineare preview HTML/PDF e catalogo
+  listener delta, reasoning/progress e WorkspaceIsland live. Hotfix sicurezza
+  canali/runtime: i turni avviati fuori dall'app ora passano da un contratto
+  `thread.turn_started`: il gateway persiste prima messaggio utente e
+  placeholder assistente, poi pubblica l'evento con `turn_id` e message id. Il
+  client mantiene una pending set durante la navigazione, così non perde
+  `thread.updated` mentre React cambia chat. Telegram/WhatsApp e scheduled task
+  usano lo stesso helper `start_visible_conversation_turn`; anche le
+  continuazioni dopo approvazione remota aprono un turno visibile prima di
+  riprendere l'agente. Il vecchio helper headless che drenava l'agente e
+  appendeva solo la risposta finale e' stato rimosso. Se il turno visibile non
+  viene persistito, il lavoro fallisce chiuso e non parte in background
+  invisibile. Gate locale passato: `cargo test -p local-first-desktop-gateway
+  -- --nocapture` (308 passati, 1 ignorato), `npm run test:ui-contract`,
+  `npm run build`, `git diff --check`.
+  **Prossimo passo unico:** smoke runtime Electron su sorgente esterna
+  (WhatsApp/Telegram o scheduled) verificando che prompt inbound, placeholder,
+  Workspace/Computer e markdown/plan si aggiornino in streaming nel thread
+  proprietario; poi continuare con preview HTML/PDF e catalogo
   "Powered by SlidesCarnival" con ricerca/filtri/import esplicito.
   Spec: [Real PPTX Template Import and SlidesCarnival-Powered Catalog](superpowers/specs/2026-06-25-real-pptx-template-import-design.md).
   UX spec: [Presentations Studio Redesign](superpowers/specs/2026-06-25-presentations-studio-redesign-design.md).
@@ -1110,27 +1121,29 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   più stretto*: stop multi-step **senza** confirm-gate (tool usati, niente piano). **NON**
   risolve `demo-piano` (`pending_confirm` rompe a :13518, *prima* del suo guard) → **in-app NON
   verificata**, non ha passato il gate. ⚠️ Side-note UI: turni cloud etichettati "Local model".
-- **WS6 6.1b (APPROVAL-RESUME) — cut #2 persist+publish (commit `6b0b9c7`), GATE IN-APP PENDENTE:** dopo
-  un'azione confirm-gated approvata, rientrare nel loop del thread via **`run_agent_turn(state,
-  thread_id, prompt, policy)`** (:17078, già usato da :16528 canale e :19360 autorun). Due rami:
-  (a) **in-app** `mcp_execute` (:22259) ha già `thread_id`+`message_id` → `spawn(run_agent_turn)`
-  dopo exec; (b) **Telegram** → aggiungere `thread_id` a `PendingApproval` (:21063) propagato da
-  `create_pending_approval` (:21078) ← `deliver_remote_approval` (:21082) ← :13362, poi
-  `run_agent_turn`. Frizione "approva ogni scrittura" già coperta da **Policy B `allow_server`**
+- **WS6 6.1b (APPROVAL-RESUME) — STATO STORICO, SUPERATO DAL CONTRATTO VISIBLE-TURN:** dopo
+  un'azione confirm-gated approvata, il resume rientrava nel loop del thread con un helper
+  headless server-side. Dal 2026-06-26 quel percorso e' stato sostituito da
+  `start_visible_conversation_turn` + `run_agent_turn_into_message`: prima vengono persistiti
+  user bubble e placeholder assistente, poi la continuation streamma nello stesso message id.
+  Due rami originari:
+  (a) **in-app** `mcp_execute` (:22259) ha già `thread_id`+`message_id`; (b) **Telegram** →
+  `thread_id` in `PendingApproval` (:21063) propagato da `create_pending_approval` (:21078) ←
+  `deliver_remote_approval` (:21082) ← :13362. Frizione "approva ogni scrittura" già coperta da
+  **Policy B `allow_server`**
   (:22273). Blocca **ogni** deliverable che scrive file → **priorità su slice 3 / WS2**.
   **IMPLEMENTATO:** `thread_id` in `PendingApproval` + helper `resume_thread_after_approval` →
-  `run_agent_turn(...,"full")`; agganciato a `mcp_execute` (in-app) e `execute_pending_approval`
-  (Telegram). **Gate:** riavviare `electron:dev` (codice nuovo), gemma, cancellare `~/demo-piano`,
+  continuation visibile con placeholder persistito; agganciato a `mcp_execute` (in-app) e
+  `execute_pending_approval` (Telegram). **Gate:** riavviare `electron:dev` (codice nuovo),
+  gemma, cancellare `~/demo-piano`,
   prompt demo-piano, **approvare la 1ª scrittura** (con "always allow this server" per non
   confermare ogni step) → il task deve **continuare** fino a **5/5**.
-  **cut #1 GATE FALLITO (2026-06-22):** `run_agent_turn` drena lo stream e il resume **scartava**
+  **cut #1 GATE FALLITO (2026-06-22):** il vecchio helper headless drenava lo stream e il resume **scartava**
   il risultato → niente in chat ("approva su Telegram ma non cambia nulla"). **cut #2 FATTO
-  (commit `6b0b9c7`):** il resume ora **persiste** il risultato (`append_assistant_message`) +
-  **pubblica `thread.updated`** (pattern del canale inbound :16544) → la chat si aggiorna via
-  **refresh**, per approvazioni **sia in-app sia Telegram** (server-side, no frontend). Catena
-  multi-scrittura: la continuazione si ferma alla 2ª confirm → la card è nel testo persistito →
-  riappare in-app + nuovo msg Telegram → approvi → riprende, un'approvazione per volta.
-  *(Limite noto: refresh, non token-live; nessun indicatore "sta lavorando" durante il turno.)*
+  (commit `6b0b9c7`):** il resume persisteva il risultato (`append_assistant_message`) +
+  **pubblicava `thread.updated`** (pattern del canale inbound :16544). **SUPERATO:** ora non c'e'
+  piu' refresh-only finale; la continuation deve essere visibile e token-live nel thread
+  proprietario.
   **Blocco Telegram diagnosticato (2026-06-22):** il bridge attivo era un processo orfano della
   build installata (19 giugno), rimasto in ascolto su `:18767` durante il run dev. Inviava le
   card ma conservava un `TG_GATEWAY_TOKEN` diverso da quello del gateway locale corrente. Prova
