@@ -9582,8 +9582,8 @@ fn materialize_automation_task(
     let task_id = format!("autorun_{}", uuid::Uuid::new_v4().simple());
     let mut task = TaskRecord::new(
         task_id.clone(),
-        gateway_user_id(),
-        gateway_workspace_id(),
+        automation.user_id.clone(),
+        automation.workspace_id.clone(),
         "proactive_prompt",
         automation.prompt.clone(),
         serde_json::json!({ "automation_id": automation.id, "approval": automation.approval }),
@@ -10069,25 +10069,77 @@ fn connector_fire_run(
     );
     let mut task = TaskRecord::new(
         format!("autorun_{}", uuid::Uuid::new_v4().simple()),
-        gateway_user_id(),
-        gateway_workspace_id(),
+        automation.user_id.clone(),
+        automation.workspace_id.clone(),
         "proactive_prompt",
         goal,
-        serde_json::json!({ "automation_id": automation.id, "approval": automation.approval }),
+        serde_json::json!({
+            "automation_id": automation.id,
+            "approval": automation.approval,
+            "source": "connector_poll",
+            "thread_title": format!("Automation · {label}"),
+        }),
     );
     task.not_before = Some(OffsetDateTime::now_utc());
     let _ = store.insert_task(&task);
+}
+
+fn channel_reply_target_for_message(message: &ChannelInbound) -> String {
+    let non_empty = |s: &String| !s.trim().is_empty();
+    message
+        .sender_pn
+        .clone()
+        .filter(&non_empty)
+        .or_else(|| message.chat.clone().filter(&non_empty))
+        .unwrap_or_else(|| message.sender.clone())
+}
+
+fn channel_project_contact_policy(
+    state: &AppState,
+    workspace_id: &str,
+    channel: &str,
+    message: &ChannelInbound,
+) -> EffectiveProjectContactPolicy {
+    let denied = |reason: &str| EffectiveProjectContactPolicy {
+        authorized: false,
+        can_trigger_automations: false,
+        can_use_project_memory: false,
+        can_receive_replies: false,
+        can_receive_artifacts: false,
+        tools_denied: Vec::new(),
+        denied_reason: reason.to_string(),
+    };
+    let Ok(store) = lock_store(state) else {
+        return denied("contact store unavailable");
+    };
+    let Some(contact_id) = store
+        .contact_id_by_identity(channel, &message.sender)
+        .ok()
+        .flatten()
+    else {
+        return denied("contact/channel is not authorized for this project");
+    };
+    let Some(contact) = store.contact_by_id(contact_id).ok().flatten() else {
+        return denied("contact/channel is not authorized for this project");
+    };
+    let perimeter = store.perimeter_or_default(contact_id);
+    let contact_reference = format!("contact_{contact_id}");
+    resolve_project_contact_policy(
+        workspace_id,
+        &contact_reference,
+        channel,
+        &perimeter,
+        contact.is_self,
+    )
 }
 
 /// Fire enabled Event automations matching an inbound channel message: each materializes a
 /// ONE-SHOT run (proactive_prompt) carrying the automation's prompt + the message as context.
 /// Independent of the auto-reply/draft policy — these are explicit user rules. Best-effort.
 fn fire_channel_event_automations(state: &AppState, channel: &str, message: &ChannelInbound) {
-    let store = match lock_task_store(state) {
-        Ok(store) => store,
-        Err(_) => return,
-    };
-    let automations = match store.list_enabled_event_automations(&gateway_user_id()) {
+    let automations = match lock_task_store(state)
+        .and_then(|store| store.list_enabled_event_automations(&gateway_user_id()).map_err(GatewayError::task))
+    {
         Ok(list) => list,
         Err(_) => return,
     };
@@ -10120,28 +10172,94 @@ fn fire_channel_event_automations(state: &AppState, channel: &str, message: &Cha
                 continue;
             }
         }
+        let policy = channel_project_contact_policy(state, automation.workspace_id.as_str(), channel, message);
+        if !policy.authorized || !policy.can_trigger_automations {
+            if let Ok(store) = lock_task_store(state) {
+                let detail = if policy.denied_reason.is_empty() {
+                    "project access denied: automations disabled for this contact/channel"
+                } else {
+                    policy.denied_reason.as_str()
+                };
+                let _ = store.record_automation_run(&automation.id, now, false, false, Some(detail));
+            }
+            eprintln!(
+                "automation/{}: denied on {channel} message from {speaker}: {}",
+                automation.id,
+                if policy.denied_reason.is_empty() {
+                    "automations disabled"
+                } else {
+                    policy.denied_reason.as_str()
+                }
+            );
+            continue;
+        }
         let task_id = format!("autorun_{}", uuid::Uuid::new_v4().simple());
         let goal = format!(
             "{}\n\n[Triggering event: {channel} message from {speaker}]\nMessage content: {}",
             automation.prompt, message.content
         );
+        let label = match channel {
+            "whatsapp" => "WhatsApp",
+            "telegram" => "Telegram",
+            other => other,
+        };
+        let title = format!("{label} · {speaker}");
+        let reply_to = channel_reply_target_for_message(message);
+        let thread_id = match lock_store(state) {
+            Ok(store) => store
+                .find_or_create_channel_thread(
+                    automation.workspace_id.as_str(),
+                    channel,
+                    &message.sender,
+                    &title,
+                )
+                .ok()
+                .map(|thread| {
+                    let _ = store.set_channel_thread_recipient(&thread.thread_id, &reply_to);
+                    let _ = store.link_task_to_thread(&task_id, &thread.thread_id);
+                    thread.thread_id
+                }),
+            Err(_) => None,
+        };
+        let Some(thread_id) = thread_id else {
+            if let Ok(store) = lock_task_store(state) {
+                let _ = store.record_automation_run(
+                    &automation.id,
+                    now,
+                    false,
+                    false,
+                    Some("could not create visible event thread"),
+                );
+            }
+            continue;
+        };
         let mut task = TaskRecord::new(
             task_id,
-            gateway_user_id(),
-            gateway_workspace_id(),
+            automation.user_id.clone(),
+            automation.workspace_id.clone(),
             "proactive_prompt",
             goal,
             serde_json::json!({
                 "automation_id": automation.id,
                 "approval": automation.approval,
+                "source": "channel_event",
+                "thread_id": thread_id,
+                "thread_source": channel,
+                "thread_channel": channel,
+                "thread_title": title,
                 "event": { "channel": channel, "from": speaker, "message_id": message.message_id },
             }),
         );
         task.not_before = Some(now);
-        if store.insert_task(&task).is_ok() {
+        if lock_task_store(state)
+            .and_then(|store| store.insert_task(&task).map_err(GatewayError::task))
+            .is_ok()
+        {
             let mut fired = automation;
             fired.last_fired_at = Some(now);
-            let _ = store.upsert_automation(&fired);
+            if let Ok(store) = lock_task_store(state) {
+                let _ = store.upsert_automation(&fired);
+            }
             eprintln!(
                 "automation/{}: fired on {channel} message from {speaker}",
                 fired.id
@@ -29884,6 +30002,64 @@ fn agent_output_incomplete_reason(answer: &str) -> Option<String> {
         .map(|reason| format!("agent output stopped before finishing: {reason}"))
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ProactiveThreadPlan {
+    thread_id: Option<String>,
+    workspace_id: String,
+    source: String,
+    channel: Option<String>,
+    title: String,
+    scheduled_root: Option<String>,
+}
+
+fn proactive_thread_plan(task: &TaskRecord, goal: &str) -> ProactiveThreadPlan {
+    let workspace_id = task
+        .input_json
+        .get("workspace_id")
+        .and_then(|v| v.as_str())
+        .filter(|v| !v.trim().is_empty())
+        .unwrap_or_else(|| task.workspace_id.as_str())
+        .to_string();
+    let thread_id = task
+        .input_json
+        .get("thread_id")
+        .and_then(|v| v.as_str())
+        .filter(|v| !v.trim().is_empty())
+        .map(str::to_string);
+    let source = task
+        .input_json
+        .get("thread_source")
+        .or_else(|| task.input_json.get("source"))
+        .and_then(|v| v.as_str())
+        .filter(|v| !v.trim().is_empty())
+        .unwrap_or("scheduled")
+        .to_string();
+    let channel = task
+        .input_json
+        .get("thread_channel")
+        .and_then(|v| v.as_str())
+        .filter(|v| !v.trim().is_empty())
+        .map(str::to_string);
+    let title = task
+        .input_json
+        .get("thread_title")
+        .and_then(|v| v.as_str())
+        .filter(|v| !v.trim().is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| scheduled_thread_title(goal));
+    let scheduled_root = thread_id
+        .is_none()
+        .then(|| scheduled_thread_sender_for_task_id(task.task_id.as_str()));
+    ProactiveThreadPlan {
+        thread_id,
+        workspace_id,
+        source,
+        channel,
+        title,
+        scheduled_root,
+    }
+}
+
 /// Executes a scheduled/recurring "proactive prompt": runs a full agent turn on
 /// the task's goal in a stable per-schedule chat thread, persists the exchange,
 /// and pushes a live `/api/events` update so the desktop app surfaces it — the
@@ -29896,20 +30072,34 @@ fn execute_proactive_prompt_task(
     task: &TaskRecord,
 ) -> Result<TaskExecutionOutcome, LocalTaskExecutionError> {
     let goal = task.goal.clone();
-    let root = scheduled_thread_sender_for_task_id(task.task_id.as_str());
-    let title = scheduled_thread_title(&goal);
+    let thread_plan = proactive_thread_plan(task, &goal);
 
-    // A proactive task gets its own per-schedule "scheduled" thread.
-    let thread_id = match lock_store(state) {
-        Ok(store) => store
-            .find_or_create_channel_thread(&base_workspace_id(), "scheduled", &root, &title)
-            .ok()
-            .map(|thread| thread.thread_id),
-        Err(_) => None,
+    // Scheduled tasks get a stable per-schedule thread. Evented tasks can carry
+    // their owning thread explicitly (channel, connector, addon), so the visible
+    // run lands where the trigger happened instead of in a generic background chat.
+    let thread_id = if let Some(thread_id) = thread_plan.thread_id.clone() {
+        Some(thread_id)
+    } else {
+        let root = thread_plan
+            .scheduled_root
+            .clone()
+            .unwrap_or_else(|| scheduled_thread_sender_for_task_id(task.task_id.as_str()));
+        match lock_store(state) {
+            Ok(store) => store
+                .find_or_create_channel_thread(
+                    &thread_plan.workspace_id,
+                    "scheduled",
+                    &root,
+                    &thread_plan.title,
+                )
+                .ok()
+                .map(|thread| thread.thread_id),
+            Err(_) => None,
+        }
     };
     let Some(thread_id) = thread_id else {
         return Err(LocalTaskExecutionError {
-            message: "could not create the scheduled thread".to_string(),
+            message: "could not create the automation thread".to_string(),
         });
     };
 
@@ -29937,14 +30127,14 @@ fn execute_proactive_prompt_task(
     let visible_turn = start_visible_conversation_turn(
         state,
         &thread_id,
-        &base_workspace_id(),
-        "scheduled",
-        Some("scheduled"),
-        &title,
+        &thread_plan.workspace_id,
+        &thread_plan.source,
+        thread_plan.channel.as_deref(),
+        &thread_plan.title,
         &goal,
     )
     .ok_or_else(|| LocalTaskExecutionError {
-        message: "could not start a visible scheduled turn".to_string(),
+        message: "could not start a visible automation turn".to_string(),
     })?;
 
     let answer = tokio::runtime::Handle::current()
@@ -29968,8 +30158,8 @@ fn execute_proactive_prompt_task(
     publish_app_event(serde_json::json!({
         "type": "thread.updated",
         "thread_id": thread_id,
-        "workspace": base_workspace_id(),
-        "channel": "scheduled",
+        "workspace": thread_plan.workspace_id,
+        "channel": thread_plan.channel.as_deref().unwrap_or(thread_plan.source.as_str()),
     }));
 
     let completed = incomplete_reason.is_none();
@@ -50653,8 +50843,8 @@ data: [DONE]\n";
         let now = time::OffsetDateTime::now_utc();
         let automation = Automation {
             id: "auto_sched".to_string(),
-            user_id: super::gateway_user_id(),
-            workspace_id: super::gateway_workspace_id(),
+            user_id: UserId::new("user_auto"),
+            workspace_id: WorkspaceId::new("workspace_auto"),
             title: "Daily check".to_string(),
             trigger: AutomationTrigger::Schedule {
                 recurrence: "every 1d".to_string(),
@@ -50677,14 +50867,16 @@ data: [DONE]\n";
         let task = store
             .get_task(
                 &TaskId::new(task_id.clone()),
-                &super::gateway_user_id(),
-                &super::gateway_workspace_id(),
+                &UserId::new("user_auto"),
+                &WorkspaceId::new("workspace_auto"),
             )
             .unwrap()
             .expect("driving task is persisted");
 
         assert!(task_id.starts_with("autorun_"));
         assert_eq!(task.kind, "proactive_prompt");
+        assert_eq!(task.user_id.as_str(), "user_auto");
+        assert_eq!(task.workspace_id.as_str(), "workspace_auto");
         assert_eq!(task.goal, automation.prompt);
         assert_eq!(task.recurrence.as_deref(), Some("every 1d"));
         assert!(task.not_before.expect("first run scheduled") > now);
@@ -50692,6 +50884,55 @@ data: [DONE]\n";
         assert_eq!(task.input_json["approval"], "confirm");
         assert_eq!(task.retry_policy.max_attempts, 3);
         assert_eq!(task.retry_policy.backoff_seconds, 120);
+    }
+
+    #[test]
+    fn evented_proactive_task_uses_owning_thread_metadata() {
+        let task = TaskRecord::new(
+            "autorun_event",
+            UserId::new("user_auto"),
+            WorkspaceId::new("workspace_project"),
+            "proactive_prompt",
+            "Summarize the inbound WhatsApp message",
+            serde_json::json!({
+                "automation_id": "auto_channel",
+                "source": "channel_event",
+                "thread_id": "channel_whatsapp_39333",
+                "thread_source": "whatsapp",
+                "thread_channel": "whatsapp",
+                "thread_title": "WhatsApp · Elena",
+            }),
+        );
+
+        let plan = super::proactive_thread_plan(&task, &task.goal);
+
+        assert_eq!(plan.thread_id.as_deref(), Some("channel_whatsapp_39333"));
+        assert_eq!(plan.workspace_id, "workspace_project");
+        assert_eq!(plan.source, "whatsapp");
+        assert_eq!(plan.channel.as_deref(), Some("whatsapp"));
+        assert_eq!(plan.title, "WhatsApp · Elena");
+        assert!(plan.scheduled_root.is_none());
+    }
+
+    #[test]
+    fn scheduled_proactive_task_keeps_stable_scheduled_thread_plan() {
+        let task = TaskRecord::new(
+            "autorun_sched@occ@123",
+            UserId::new("user_auto"),
+            WorkspaceId::new("workspace_project"),
+            "proactive_prompt",
+            "Check the project status",
+            serde_json::json!({ "automation_id": "auto_sched" }),
+        );
+
+        let plan = super::proactive_thread_plan(&task, &task.goal);
+
+        assert!(plan.thread_id.is_none());
+        assert_eq!(plan.workspace_id, "workspace_project");
+        assert_eq!(plan.source, "scheduled");
+        assert_eq!(plan.channel, None);
+        assert_eq!(plan.title, "Pianificato · Check the project status");
+        assert_eq!(plan.scheduled_root.as_deref(), Some("autorun_sched"));
     }
 
     #[test]

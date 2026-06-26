@@ -278,6 +278,19 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   modificabile, senza introdurre memoria parallela. Gate passati:
   `cargo test -p local-first-desktop-gateway project_ -- --nocapture` e
   `npm run build` da `apps/desktop`.
+  **Follow-up Evented runtime ownership (2026-06-26):** i run evento non
+  materializzano piu' task generici nello scope gateway/scheduled: i task
+  ereditano `user_id`/`workspace_id` dell'automazione e, per messaggi
+  WhatsApp/Telegram, portano `thread_id`, source/channel e titolo del thread
+  proprietario. L'executor `proactive_prompt` usa quel thread se presente,
+  mantenendo il fallback scheduled solo per schedule/connector senza thread
+  esplicito. Prima di materializzare un channel-event run viene risolta la
+  Project Access Surface del contatto/canale sul workspace della regola: default
+  deny, `can_trigger_automations` richiesto, `Me` implicito. Gate passati:
+  `cargo test -p local-first-desktop-gateway proactive_task -- --nocapture`,
+  `cargo test -p local-first-desktop-gateway project_ -- --nocapture`,
+  `cargo test -p local-first-desktop-gateway -- --nocapture`, `npm run build`,
+  `npm run test:ui-contract`, `git diff --check`.
   Gate finale continuita' canale: `cargo test -p local-first-desktop-gateway -- --nocapture`
   (312 passati, 1 ignorato), `npm run build` da `apps/desktop`,
   `git diff --check`.

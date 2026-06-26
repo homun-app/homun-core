@@ -397,6 +397,12 @@ Wire `EventTrigger::ChannelMessage` to inbound WhatsApp/Telegram events. Match
 sender/channel filters, create a visible automation run and show it in the
 owning thread.
 
+Implementation requirement: the materialized task must inherit the automation's
+`user_id` and `workspace_id`, and channel-triggered tasks must carry the owning
+thread metadata (`thread_id`, channel/source, title) so the normal visible turn
+pipeline renders the run in that channel/project thread. A channel event must
+resolve Project Access before task creation; no grant means no project run.
+
 **Slice D: Polling rules**
 
 Implement generic `ConnectorPoll`/MCP polling: run a read-only capability on an

@@ -976,6 +976,16 @@ ragionato il contratto degli strumenti `make_*` creati dall'harness. ADR 0011
     grant progetto + contact perimeter. Il contatto `Me`/owner e' implicito:
     accesso progetto completo, nessun grant modificabile. Gate: `cargo test -p
     local-first-desktop-gateway project_ -- --nocapture`, `npm run build`.
+  - 🟡 **Evented runtime ownership (2026-06-26, locale/verde mirato):** i
+    channel-event run materializzano task nel workspace dell'automazione,
+    linkati al thread WhatsApp/Telegram proprietario; `proactive_prompt` usa
+    il `thread_id` evented quando presente invece del thread `scheduled`.
+    Prima del task viene applicata Project Access (`can_trigger_automations`,
+    default deny, `Me` implicito). Gate: `cargo test -p
+    local-first-desktop-gateway proactive_task -- --nocapture`, `cargo test -p
+    local-first-desktop-gateway project_ -- --nocapture`, `cargo test -p
+    local-first-desktop-gateway -- --nocapture`, `npm run build`, `npm run
+    test:ui-contract`, `git diff --check`.
 - ☐ **7.1b (futuro)** Portare ricerca/meeting al livello del deck solo dopo il
   chiarimento sul contratto strumenti: `make_research` e `make_meeting` non sono
   essenziali per la prossima release.
