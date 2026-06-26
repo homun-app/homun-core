@@ -245,11 +245,12 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   condividono un unico `chat-status-stack`; il Computer non usa piu' coordinate
   assolute indipendenti e Workspace appare anche quando il primo segnale reale
   del thread e' il Computer live, prima che arrivino plan/activity dal testo.
-  **Prossimo passo unico:** smoke runtime Electron su sorgente esterna
-  (WhatsApp/Telegram o scheduled) verificando che prompt inbound, placeholder,
-  Workspace/Computer e markdown/plan si aggiornino in streaming nel thread
-  proprietario; poi continuare con preview HTML/PDF e catalogo
-  "Powered by SlidesCarnival" con ricerca/filtri/import esplicito.
+  **Smoke runtime esterno passato (2026-06-26):** prompt inbound, placeholder,
+  Workspace/Computer e risposta progressiva risultano visibili nel thread
+  proprietario; Workspace e Computer non si sovrappongono nello stack live.
+  **Prossimo passo unico:** continuare WS7 Presentations con preview HTML/PDF,
+  loading/delete dei template importati e catalogo "Powered by SlidesCarnival"
+  con ricerca/filtri/import esplicito.
   Spec: [Real PPTX Template Import and SlidesCarnival-Powered Catalog](superpowers/specs/2026-06-25-real-pptx-template-import-design.md).
   UX spec: [Presentations Studio Redesign](superpowers/specs/2026-06-25-presentations-studio-redesign-design.md).
 - **Direzione WS7 aggiornata:** l'obiettivo deliverable non è una gallery statica

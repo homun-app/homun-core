@@ -428,7 +428,9 @@ primo percorso locale verde e WS5 è chiusa localmente/gate:
     placeholder assistente, pending event-thread set nel client per non perdere
     update durante la navigazione, continuazioni post-approvazione remota
     agganciate allo stesso lifecycle, e fail-closed se il turno non puo' essere
-    persistito. Direzione strutturale: chat, canali, automazioni, approval
+    persistito. Smoke runtime esterno passato il 2026-06-26: prompt inbound,
+    placeholder, Workspace/Computer live e risposta progressiva sono visibili nel
+    thread proprietario. Direzione strutturale: chat, canali, automazioni, approval
     callback e subagent devono diventare client dello stesso lifecycle `turn_id`
     invece di flussi separati che ricostruiscono la UI a fine lavoro.
 83. UX agentic workspace principle — Homun assume il modello "workspace agentico
