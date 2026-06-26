@@ -17392,10 +17392,10 @@ of text. ALWAYS use markdown: each item in a list goes on its OWN LINE with `- `
 (dash) — do not paste multiple entries on the same line. For day/item lists with \
 labels use `**Label**: value` with a blank line between entries, or a table if there \
 are ≥3 fields. Put a blank line between paragraphs. Use `### ` for section headings \
-when the answer is long. Reply in {language}, clear and well-structured.",
+when the answer is long. {language_instruction} Clear and well-structured.",
         now = now_block(),
         home = std::env::var("HOME").unwrap_or_else(|_| "~".to_string()),
-        language = language_display_name(&effective_user_language()),
+        language_instruction = response_language_instruction(&effective_user_language()),
     );
     // Code-map steering: if THIS project has an imported code graph, tell the
     // orchestrator to query it FIRST for structure/dependency questions instead of
@@ -22091,7 +22091,8 @@ struct UserPrefs {
     #[serde(default)]
     timezone: Option<String>,
     /// ISO-639-1 language code (e.g. "en", "it"). None/empty → "en" default.
-    /// Drives the "Reply in {language}" instruction injected into every system prompt.
+    /// Drives the fallback language for prompts when the latest user message is
+    /// ambiguous or language-neutral.
     #[serde(default)]
     language: Option<String>,
     /// Whether the onboarding wizard has been completed. False/absent → show wizard
@@ -22184,9 +22185,9 @@ fn user_tz() -> jiff::tz::TimeZone {
     jiff::tz::TimeZone::get(&name).unwrap_or_else(|_| jiff::tz::TimeZone::system())
 }
 
-/// The language the assistant replies in (ISO-639-1). User preference wins, but
-/// must be a supported code; else "en" (the app's default language). This is the
-/// single source injected into every system prompt as "Reply in {language}".
+/// The preferred fallback language (ISO-639-1). User preference wins, but must be
+/// a supported code; else "en" (the app's default language). The runtime still
+/// asks the assistant to match the latest user message language when it is clear.
 fn effective_user_language() -> String {
     let code = load_user_prefs()
         .language
@@ -22196,6 +22197,13 @@ fn effective_user_language() -> String {
         Some(c) if is_supported_language(&c) => c,
         _ => "en".to_string(),
     }
+}
+
+fn response_language_instruction(fallback_language_code: &str) -> String {
+    format!(
+        "Reply in the same language as the user's latest message whenever that language is clear. If the latest message is ambiguous or language-neutral, reply in {}.",
+        language_display_name(fallback_language_code)
+    )
 }
 
 /// A human-readable name for a language code (for UI display).
@@ -42766,7 +42774,7 @@ mod tests {
         strip_json_fences, suggestion_choices_json, task_effective_goal,
         task_execution_outcome_from_executor_result, task_executor_worker_count,
         task_executor_worker_id, task_goal_summary, task_queue_response, tool_touches_calendar,
-        tool_touches_contacts, wiki_title_from_text,
+        tool_touches_contacts, response_language_instruction, wiki_title_from_text,
     };
     use crate::browser_safety;
     use crate::chat_store::{self, ChatStore};
@@ -42799,6 +42807,21 @@ mod tests {
             return None;
         }
         Some(python)
+    }
+
+    #[test]
+    fn response_language_instruction_matches_latest_user_message_first() {
+        let instruction = response_language_instruction("it");
+
+        assert!(
+            instruction.contains("same language as the user's latest message"),
+            "{instruction}"
+        );
+        assert!(instruction.contains("Italiano"), "{instruction}");
+        assert!(
+            !instruction.contains("Reply in Italiano"),
+            "{instruction}"
+        );
     }
 
     fn write_test_pptx(path: &std::path::Path, title: &str) -> bool {

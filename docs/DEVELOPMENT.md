@@ -209,7 +209,12 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   catalogo e avvio chat guidata restano sul registry canonico esistente. Gate:
   `npm run test:ui-contract`, `npm run build`, `git diff --check`, smoke
   Playwright su `127.0.0.1:1420` (Presentations apre, `sales` filtra a 6 card,
-  input file logo nativo non visibile). **Prossimo passo unico:** smoke runtime
+  input file logo nativo non visibile). Hotfix UX/lingua: i chip allegato usano
+  token tema e restano leggibili in dark mode; il prompt visibile di `Use
+  template` e il prompt operativo di default sono in inglese; il gateway non
+  forza piu' la lingua dei Settings, ma chiede al modello di rispondere nella
+  lingua dell'ultimo messaggio utente e usa la preferenza solo come fallback.
+  **Prossimo passo unico:** smoke runtime
   Electron import→placeholder→catalogo→preview reale→delete/use template→chat
   con allegato visibile→make_deck verificando che `deck.pptx` mantenga il
   layout del template importato; poi riallineare preview HTML/PDF e catalogo

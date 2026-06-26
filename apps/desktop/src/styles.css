@@ -2867,8 +2867,14 @@ body.resizing-drawer {
   align-items: center;
   gap: 6px;
   color: var(--text);
-  background: #ffffff;
+  background: color-mix(in srgb, var(--surface) 92%, var(--text) 8%);
   font-size: 12px;
+  box-shadow: var(--shadow-soft);
+}
+
+.message-attachment-chip svg {
+  color: var(--muted);
+  flex: 0 0 auto;
 }
 
 .message-attachment-chip > span {

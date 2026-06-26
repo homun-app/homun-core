@@ -221,7 +221,8 @@ assertContains("src/components/BrandKitPanel.tsx", "await refreshTemplates()", "
 assertContains("src/plugins/registry.tsx", "startTemplateWorkflow", "plugin host must expose a typed template workflow handoff");
 assertContains("src/App.tsx", "handleStartTemplateWorkflow", "App must own the template workflow chat creation path");
 assertContains("src/App.tsx", "template_ref=", "template workflow prompt must preserve the canonical template reference");
-assertContains("src/App.tsx", "Non generare ancora il deck.", "template workflow must start with discovery and planning, not immediate deck generation");
+assertContains("src/App.tsx", "Do not generate the deck yet.", "template workflow must start with discovery and planning, not immediate deck generation");
+assertNotContains("src/App.tsx", "Aiutami a creare una presentazione", "template workflow default visible prompt must remain English");
 assertContains("src/lib/coreBridge.ts", "importPptxTemplate", "Desktop bridge must expose PPTX template import");
 assertContains("src/lib/coreBridge.ts", "templateSourceAttachment", "Desktop bridge must resolve local template attachments without exposing paths in the catalog");
 assertContains("src/lib/coreBridge.ts", "attachments?: CoreChatAttachment[]", "streamed prompt commits must be able to preserve user attachments");
@@ -364,6 +365,8 @@ assertContains("src/types.ts", "\"learning\"", "auto-learning must be a first-cl
 assertContains("src/components/LearningView.tsx", "learning-view", "auto-learning must have a dedicated page");
 assertContains("src/components/LearningView.tsx", "habit-card", "learning page must expose learned habits");
 assertContains("src/components/LearningView.tsx", "automation-proposal", "learning page must expose possible automations");
+assertNotContains("src/components/AutomationsView.tsx", "totali", "automations summary total label must use i18n");
+assertNotContains("src/components/AutomationsView.tsx", "attive", "automations summary active label must use i18n");
 assertContains("src/styles.css", "@media (max-width: 860px)", "responsive shell must define tablet/mobile behavior");
 
 assertRepoContains("Cargo.toml", "\"crates/desktop-gateway\"", "workspace must include the desktop gateway crate");

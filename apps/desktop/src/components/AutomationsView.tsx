@@ -383,11 +383,11 @@ export function AutomationsView({
         <div className="learning-summary" aria-label={t("automations.summaryAria")}>
           <span>
             <strong>{automations.length}</strong>
-            totali
+            {t("automations.total")}
           </span>
           <span>
             <strong>{active}</strong>
-            attive
+            {t("automations.active")}
           </span>
         </div>
       </header>

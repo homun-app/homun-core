@@ -797,9 +797,9 @@ export default function App() {
     template: TemplateCatalogEntry;
     attachment?: ChatAttachmentInput;
   }) {
-    const visiblePrompt = `Aiutami a creare una presentazione usando il template scelto "${input.template.name}".`;
+    const visiblePrompt = `Help me create a presentation using the selected template "${input.template.name}".`;
     const operativePrompt = [
-      `L'utente ha scelto un template dal catalogo Presentations e vuole usarlo per creare una nuova presentazione.`,
+      "The user selected a template from the Presentations catalog and wants to use it to create a new presentation.",
       `template_ref=${input.template.id}`,
       `template_name=${input.template.name}`,
       `source_provider=${input.template.source_provider ?? "user_upload"}`,
@@ -807,11 +807,11 @@ export default function App() {
         ? `attached_file=${input.attachment.displayName}`
         : "attached_file=none; use the catalog template_ref and metadata as the style constraint.",
       "",
-      "Non generare ancora il deck.",
-      "Analizza il template scelto come vincolo di stile, layout e tono visivo.",
-      "Fai prima 2-4 domande essenziali per capire obiettivo, pubblico, contenuti disponibili, numero di slide e tono.",
-      "Poi proponi un piano sintetico e attendi conferma prima di usare make_deck.",
-      `Quando l'utente conferma l'esecuzione, usa make_deck con template_ref="${input.template.id}".`,
+      "Do not generate the deck yet.",
+      "Analyze the selected template as a constraint for style, layout and visual tone.",
+      "First ask 2-4 essential questions to understand objective, audience, available content, slide count and tone.",
+      "Then propose a concise plan and wait for confirmation before using make_deck.",
+      `When the user confirms execution, use make_deck with template_ref="${input.template.id}".`,
     ].join("\n");
     let startedThreadId: string | null = null;
     try {

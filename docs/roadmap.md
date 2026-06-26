@@ -412,7 +412,10 @@ primo percorso locale verde e WS5 è chiusa localmente/gate:
     visibile e chip PPTX allegato prima dell'analisi/piano. Follow-up: gli
     allegati dei messaggi chat sono durevoli in `chat_messages.attachments_json`,
     quindi restano visibili dopo reload/snapshot e non solo nel messaggio
-    ottimistico locale. Gate locale:
+    ottimistico locale. Follow-up dark/language: i chip allegato sono
+    theme-aware, i prompt default di template workflow sono in inglese, e il
+    gateway risponde nella lingua dell'ultimo messaggio utente usando la lingua
+    Settings solo come fallback. Gate locale:
     `cargo test -p local-first-desktop-gateway template -- --nocapture`,
     `cargo test -p local-first-desktop-gateway
     committed_chat_message_attachments_survive_reload -- --nocapture`,

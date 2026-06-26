@@ -136,6 +136,11 @@ Tutto è **scoped per `workspace_id` (progetto) + `user_id`**.
    incompiuto resta richiamabile finché non è chiuso. Obiettivo: un cervello che
    sopravvive alle chat e sa sempre il perché — **verificabile via eval**. Vedi
    [MEMORIA.md](MEMORIA.md) e [memory-vision.md](memory-vision.md).
+12. **Lingua UI/prompt e lingua di risposta sono contratti separati.** I prompt
+   predefiniti e le istruzioni operative interne possono restare in inglese per
+   coerenza di prodotto e routing. La risposta all'utente deve invece seguire la
+   lingua dell'ultimo messaggio quando è chiara; la lingua scelta nei Settings è
+   solo fallback per messaggi ambigui o language-neutral.
 
 > Questi capisaldi sono il filtro di ogni decisione nel
 > [backlog](plans/2026-06-22-batch-1042-artifacts-memory.md) e nella
