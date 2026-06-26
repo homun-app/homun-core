@@ -465,7 +465,10 @@ primo percorso locale verde e WS5 è chiusa localmente/gate:
     dedup/watermark ma lo presenta all'utente come evento logico. Le azioni
     possono invocare capability/addon come Presentations/Documents/PDF solo
     tramite project access, policy, approval, run visibile, memoria e artifact
-    provenance.
+    provenance. Follow-up runtime: channel events now materialize a normalized
+    event envelope into the task input and `TaskStore` keeps per-rule event
+    idempotency (`automation_id`, `event_key`) so repeated delivery cannot fire
+    the same rule twice.
     Spec: `docs/superpowers/specs/2026-06-26-evented-automations-design.md`.
     Slice consigliata: prima Project Access Surface, poi `ChannelMessage`
     WhatsApp/Telegram, poi `ConnectorPoll` generico per Gmail/Composio/MCP,

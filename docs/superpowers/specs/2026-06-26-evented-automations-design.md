@@ -402,6 +402,11 @@ Implementation requirement: the materialized task must inherit the automation's
 thread metadata (`thread_id`, channel/source, title) so the normal visible turn
 pipeline renders the run in that channel/project thread. A channel event must
 resolve Project Access before task creation; no grant means no project run.
+The task input must also carry the normalized event envelope (`source_kind`,
+`provider_id`, `event_type`, `dedup_key`, actor, payload, visibility), and the
+runtime must mark `(automation_id, event_key)` seen before creating another run
+for the same rule/event. Idempotency is operational runtime state in `TaskStore`,
+not semantic memory.
 
 **Slice D: Polling rules**
 

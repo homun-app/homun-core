@@ -291,6 +291,19 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   `cargo test -p local-first-desktop-gateway project_ -- --nocapture`,
   `cargo test -p local-first-desktop-gateway -- --nocapture`, `npm run build`,
   `npm run test:ui-contract`, `git diff --check`.
+  **Follow-up Event envelope/dedup (2026-06-26):** `TaskStore` ha ora
+  idempotency runtime per `(automation_id, event_key)` (`schema_version=3`) e i
+  `ChannelMessage` materializzano nell'input del task un envelope normalizzato
+  (`source_kind=channel`, `provider_id`, `event_type=message.received`,
+  `dedup_key`, actor, payload minimale e visibility thread). La chiave usa il
+  `message_id` nativo quando presente, altrimenti una fingerprint SHA-256 stabile
+  del payload visibile. Questo prepara push e polling nello stesso contratto
+  senza store paralleli e blocca doppi fire della stessa regola sullo stesso
+  evento. Gate passati: `cargo test -p local-first-task-runtime -- --nocapture`,
+  `cargo test -p local-first-desktop-gateway channel_message_event --
+  --nocapture`, `cargo test -p local-first-desktop-gateway proactive_task --
+  --nocapture`, `cargo test -p local-first-desktop-gateway automation --
+  --nocapture`.
   Gate finale continuita' canale: `cargo test -p local-first-desktop-gateway -- --nocapture`
   (312 passati, 1 ignorato), `npm run build` da `apps/desktop`,
   `git diff --check`.

@@ -136,8 +136,18 @@ impl TaskStore {
             CREATE INDEX IF NOT EXISTS idx_automation_runs
                 ON automation_runs(automation_id, ran_at DESC);
 
+            CREATE TABLE IF NOT EXISTS automation_event_dedup (
+                automation_id TEXT NOT NULL,
+                event_key TEXT NOT NULL,
+                seen_at INTEGER NOT NULL,
+                PRIMARY KEY (automation_id, event_key)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_automation_event_dedup_seen
+                ON automation_event_dedup(automation_id, seen_at DESC);
+
             INSERT INTO task_runtime_metadata(key, value)
-            VALUES ('schema_version', '2')
+            VALUES ('schema_version', '3')
             ON CONFLICT(key) DO UPDATE SET value = excluded.value;
             ",
         )?;
@@ -423,7 +433,37 @@ impl TaskStore {
             "DELETE FROM automation_runs WHERE automation_id = ?1",
             params![id],
         )?;
+        self.connection.execute(
+            "DELETE FROM automation_event_dedup WHERE automation_id = ?1",
+            params![id],
+        )?;
         Ok(())
+    }
+
+    /// Mark an event as seen for one automation rule. Returns true only for the
+    /// first observation of `(automation_id, event_key)`; later deliveries are
+    /// duplicates and should not materialize another run.
+    pub fn mark_automation_event_seen(
+        &self,
+        automation_id: &str,
+        event_key: &str,
+        seen_at: OffsetDateTime,
+    ) -> TaskRuntimeResult<bool> {
+        let inserted = self.connection.execute(
+            "INSERT OR IGNORE INTO automation_event_dedup (automation_id, event_key, seen_at)
+             VALUES (?1, ?2, ?3)",
+            params![automation_id, event_key, seen_at.unix_timestamp()],
+        )?;
+        self.connection.execute(
+            "DELETE FROM automation_event_dedup
+              WHERE automation_id = ?1 AND rowid NOT IN (
+                  SELECT rowid FROM automation_event_dedup
+                   WHERE automation_id = ?1
+                   ORDER BY seen_at DESC, event_key DESC LIMIT 500
+              )",
+            params![automation_id],
+        )?;
+        Ok(inserted == 1)
     }
 
     /// Append one execution to an automation's run history (when it fired + outcome),

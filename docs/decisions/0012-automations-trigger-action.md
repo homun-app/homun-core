@@ -25,8 +25,11 @@ list of automations.
 `crates/task-runtime/src/types.rs`: `Automation { id, title, trigger, prompt, approval, enabled,
 source, task_id, state, …ts }`. A Schedule-automation OWNS one recurring `proactive_prompt`
 TaskRecord (1:1, `task_id`); an Event-automation MATERIALIZES a one-shot run when it fires.
-Persisted in the `automations` table (`store.rs`, schema_version 2) with CRUD
-(upsert/get/list/list_enabled_event/delete).
+Persisted in the `automations` table (`store.rs`, schema_version 3) with CRUD
+(upsert/get/list/list_enabled_event/delete). `schema_version=3` also includes
+`automation_event_dedup`, operational idempotency keyed by
+`(automation_id, event_key)` so repeated delivery of the same event cannot fire
+the same rule twice.
 
 **2. Triggers = IFTTT-legible.** `AutomationTrigger::Schedule { recurrence, tz } | Event { EventTrigger }`.
 - `EventTrigger::ChannelMessage { channel?, from? }` — wired (fired from `handle_channel_inbound`

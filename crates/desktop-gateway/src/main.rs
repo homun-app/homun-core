@@ -101,6 +101,7 @@ use local_first_task_runtime::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use std::{
     collections::HashSet,
     env, fs,
@@ -10094,6 +10095,65 @@ fn channel_reply_target_for_message(message: &ChannelInbound) -> String {
         .unwrap_or_else(|| message.sender.clone())
 }
 
+fn channel_message_event_key(channel: &str, message: &ChannelInbound) -> String {
+    if let Some(message_id) = message.message_id.as_deref().map(str::trim) {
+        if !message_id.is_empty() {
+            return format!("{channel}:message:{message_id}");
+        }
+    }
+
+    let ts = message.ts.map(|ts| ts.to_string()).unwrap_or_default();
+    let mut hasher = Sha256::new();
+    for part in [
+        channel,
+        message.sender.as_str(),
+        message.chat.as_deref().unwrap_or(""),
+        message.sender_pn.as_deref().unwrap_or(""),
+        ts.as_str(),
+        message.content.as_str(),
+    ] {
+        hasher.update(part.as_bytes());
+        hasher.update([0]);
+    }
+    let digest = hasher.finalize();
+    format!("{channel}:message:sha256:{digest:x}")
+}
+
+fn channel_message_event_envelope(
+    channel: &str,
+    message: &ChannelInbound,
+    workspace_id: &str,
+    thread_id: &str,
+    title: &str,
+    actor_display_name: &str,
+) -> serde_json::Value {
+    let dedup_key = channel_message_event_key(channel, message);
+    serde_json::json!({
+        "event_id": dedup_key,
+        "dedup_key": dedup_key,
+        "source_kind": "channel",
+        "provider_id": channel,
+        "event_type": "message.received",
+        "occurred_at": message
+            .ts
+            .unwrap_or_else(|| OffsetDateTime::now_utc().unix_timestamp()),
+        "workspace_id": workspace_id,
+        "actor": {
+            "display_name": actor_display_name,
+            "channel": channel,
+            "identifier": message.sender,
+        },
+        "payload": {
+            "message_id": message.message_id.clone(),
+            "has_content": !message.content.trim().is_empty(),
+        },
+        "visibility": {
+            "thread_id": thread_id,
+            "title": title,
+        },
+    })
+}
+
 fn channel_project_contact_policy(
     state: &AppState,
     workspace_id: &str,
@@ -10205,6 +10265,28 @@ fn fire_channel_event_automations(state: &AppState, channel: &str, message: &Cha
         };
         let title = format!("{label} · {speaker}");
         let reply_to = channel_reply_target_for_message(message);
+        let event_key = channel_message_event_key(channel, message);
+        let event_is_new = match lock_task_store(state).and_then(|store| {
+            store
+                .mark_automation_event_seen(&automation.id, &event_key, now)
+                .map_err(GatewayError::task)
+        }) {
+            Ok(is_new) => is_new,
+            Err(error) => {
+                eprintln!(
+                    "automation/{}: event dedup failed for {event_key}: {error:?}",
+                    automation.id
+                );
+                true
+            }
+        };
+        if !event_is_new {
+            eprintln!(
+                "automation/{}: duplicate event {event_key} skipped",
+                automation.id
+            );
+            continue;
+        }
         let thread_id = match lock_store(state) {
             Ok(store) => store
                 .find_or_create_channel_thread(
@@ -10233,6 +10315,14 @@ fn fire_channel_event_automations(state: &AppState, channel: &str, message: &Cha
             }
             continue;
         };
+        let event = channel_message_event_envelope(
+            channel,
+            message,
+            automation.workspace_id.as_str(),
+            &thread_id,
+            &title,
+            speaker,
+        );
         let mut task = TaskRecord::new(
             task_id,
             automation.user_id.clone(),
@@ -10247,7 +10337,7 @@ fn fire_channel_event_automations(state: &AppState, channel: &str, message: &Cha
                 "thread_source": channel,
                 "thread_channel": channel,
                 "thread_title": title,
-                "event": { "channel": channel, "from": speaker, "message_id": message.message_id },
+                "event": event,
             }),
         );
         task.not_before = Some(now);
@@ -50912,6 +51002,43 @@ data: [DONE]\n";
         assert_eq!(plan.channel.as_deref(), Some("whatsapp"));
         assert_eq!(plan.title, "WhatsApp · Elena");
         assert!(plan.scheduled_root.is_none());
+    }
+
+    #[test]
+    fn channel_message_event_envelope_is_stable_and_visible() {
+        let message = super::ChannelInbound {
+            sender: "393331234567@lid".to_string(),
+            sender_name: "Elena".to_string(),
+            content: "Please summarize this".to_string(),
+            chat: Some("393331234567@lid".to_string()),
+            sender_pn: Some("393331234567@s.whatsapp.net".to_string()),
+            message_id: Some("wamid.42".to_string()),
+            ts: Some(1_782_500_000),
+        };
+
+        let key = super::channel_message_event_key("whatsapp", &message);
+        let envelope = super::channel_message_event_envelope(
+            "whatsapp",
+            &message,
+            "workspace_project",
+            "channel_whatsapp_elena",
+            "WhatsApp · Elena",
+            "Elena",
+        );
+
+        assert_eq!(key, "whatsapp:message:wamid.42");
+        assert_eq!(envelope["event_id"], key);
+        assert_eq!(envelope["dedup_key"], key);
+        assert_eq!(envelope["source_kind"], "channel");
+        assert_eq!(envelope["provider_id"], "whatsapp");
+        assert_eq!(envelope["event_type"], "message.received");
+        assert_eq!(envelope["workspace_id"], "workspace_project");
+        assert_eq!(envelope["actor"]["display_name"], "Elena");
+        assert_eq!(envelope["actor"]["identifier"], "393331234567@lid");
+        assert_eq!(envelope["visibility"]["thread_id"], "channel_whatsapp_elena");
+        assert_eq!(envelope["visibility"]["title"], "WhatsApp · Elena");
+        assert_eq!(envelope["payload"]["message_id"], "wamid.42");
+        assert_eq!(envelope["payload"]["has_content"], true);
     }
 
     #[test]

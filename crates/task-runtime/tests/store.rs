@@ -7,9 +7,9 @@ use serde_json::json;
 #[test]
 fn store_creates_schema_and_migrations_are_idempotent() {
     let store = TaskStore::open_in_memory().unwrap();
-    assert_eq!(store.schema_version().unwrap(), 2);
+    assert_eq!(store.schema_version().unwrap(), 3);
     store.run_migrations().unwrap();
-    assert_eq!(store.schema_version().unwrap(), 2);
+    assert_eq!(store.schema_version().unwrap(), 3);
 }
 
 #[test]
@@ -200,5 +200,28 @@ fn automation_runs_record_recent_and_retention() {
     assert_eq!(
         store.recent_automation_runs("auto_z", 100).unwrap().len(),
         50
+    );
+}
+
+#[test]
+fn automation_event_dedup_is_scoped_per_rule() {
+    use time::OffsetDateTime;
+    let store = TaskStore::open_in_memory().unwrap();
+    let now = OffsetDateTime::from_unix_timestamp(1_700_000_000).unwrap();
+
+    assert!(
+        store
+            .mark_automation_event_seen("auto_a", "whatsapp:message:42", now)
+            .unwrap()
+    );
+    assert!(
+        !store
+            .mark_automation_event_seen("auto_a", "whatsapp:message:42", now)
+            .unwrap()
+    );
+    assert!(
+        store
+            .mark_automation_event_seen("auto_b", "whatsapp:message:42", now)
+            .unwrap()
     );
 }

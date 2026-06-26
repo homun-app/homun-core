@@ -986,6 +986,16 @@ ragionato il contratto degli strumenti `make_*` creati dall'harness. ADR 0011
     local-first-desktop-gateway project_ -- --nocapture`, `cargo test -p
     local-first-desktop-gateway -- --nocapture`, `npm run build`, `npm run
     test:ui-contract`, `git diff --check`.
+  - 🟡 **Event envelope + rule idempotency (2026-06-26, locale/verde
+    mirato):** `TaskStore` passa a `schema_version=3` con dedup operativo per
+    `(automation_id, event_key)`. I `ChannelMessage` producono un envelope
+    normalizzato (`source_kind`, `provider_id`, `event_type`, `dedup_key`,
+    actor, payload minimale, visibility) dentro `task.input_json.event`, usando
+    `message_id` nativo o fingerprint SHA-256 stabile. Gate: `cargo test -p
+    local-first-task-runtime -- --nocapture`, `cargo test -p
+    local-first-desktop-gateway channel_message_event -- --nocapture`,
+    `cargo test -p local-first-desktop-gateway proactive_task -- --nocapture`,
+    `cargo test -p local-first-desktop-gateway automation -- --nocapture`.
 - ☐ **7.1b (futuro)** Portare ricerca/meeting al livello del deck solo dopo il
   chiarimento sul contratto strumenti: `make_research` e `make_meeting` non sono
   essenziali per la prossima release.
