@@ -548,6 +548,8 @@ export default function App() {
   // sub-polling cadence). Used to mark the thread busy in the sidebar immediately,
   // before the 2.5s taskQueue polling catches up.
   const [streamingThreadId, setStreamingThreadId] = useState<string | null>(null);
+  const pendingLocalMessageThreadIdsRef = useRef<Set<string>>(new Set());
+  const busyThreadIdsRef = useRef<Set<string>>(new Set());
   // Thread ids generating in the BACKGROUND (a chat left mid-answer while another is
   // on screen). Polled from the gateway's resume registry so the sidebar dots light
   // up on every working chat, not only the active one.
@@ -575,6 +577,9 @@ export default function App() {
     }
     return ids;
   }, [streamingThreadId, backgroundStreamIds, chatThreads, taskItems]);
+  useEffect(() => {
+    busyThreadIdsRef.current = busyThreadIds;
+  }, [busyThreadIds]);
   const selectedTask = useMemo(
     () =>
       taskItems.find((task) => task.id === selectedTaskId) ?? {
@@ -589,6 +594,47 @@ export default function App() {
   const activeMessages =
     threadMessages[activeThread.threadId] ?? starterMessages(activeThread);
   const isSettings = activeView === "settings";
+
+  function hasPendingLocalMessages(messages: ChatMessage[]): boolean {
+    return messages.some((message) => message.id.startsWith("local_"));
+  }
+
+  function shouldPreserveLocalMessages(
+    threadId: string,
+    currentMessages: ChatMessage[] | undefined,
+    incomingMessages: ChatMessage[],
+  ): boolean {
+    if (!currentMessages?.length) return false;
+    const isProtected =
+      pendingLocalMessageThreadIdsRef.current.has(threadId) ||
+      busyThreadIdsRef.current.has(threadId);
+    if (!isProtected) return false;
+    const incomingIds = new Set(incomingMessages.map((message) => message.id));
+    return currentMessages.some(
+      (message) => message.id.startsWith("local_") && !incomingIds.has(message.id),
+    );
+  }
+
+  function setThreadMessagesFromBackend(
+    threadId: string,
+    incomingMessages: ChatMessage[],
+    options: { force?: boolean } = {},
+  ) {
+    setThreadMessages((current) => {
+      const currentMessages = current[threadId];
+      if (
+        options.force !== true &&
+        shouldPreserveLocalMessages(threadId, currentMessages, incomingMessages)
+      ) {
+        return current;
+      }
+      pendingLocalMessageThreadIdsRef.current.delete(threadId);
+      return {
+        ...current,
+        [threadId]: incomingMessages,
+      };
+    });
+  }
 
   function handleNavigate(view: ViewId) {
     if (view === "settings" && activeView !== "settings") {
@@ -607,10 +653,7 @@ export default function App() {
         mappedThreads.find((item) => item.threadId === threadId) ?? thread;
       const messages = await coreBridge.chatMessages(threadId);
       setChatThreads(mappedThreads.length ? mappedThreads : chatThreads);
-      setThreadMessages((current) => ({
-        ...current,
-        [threadId]: messages.messages.map(mapCoreChatMessage),
-      }));
+      setThreadMessagesFromBackend(threadId, messages.messages.map(mapCoreChatMessage));
       setActiveThreadId(threadId);
       setSelectedTaskId(selectedThread.taskId);
       setActiveView("chat");
@@ -635,10 +678,7 @@ export default function App() {
         defaultChatThread;
       const messages = await coreBridge.chatMessages(threadId);
       setChatThreads(mappedThreads.length ? mappedThreads : chatThreads);
-      setThreadMessages((current) => ({
-        ...current,
-        [threadId]: messages.messages.map(mapCoreChatMessage),
-      }));
+      setThreadMessagesFromBackend(threadId, messages.messages.map(mapCoreChatMessage));
       setActiveThreadId(threadId);
       setSelectedTaskId(selectedThread.taskId);
       setActiveView("chat");
@@ -825,6 +865,7 @@ export default function App() {
         timestamp: currentTimestampSeconds(),
         attachments: input.attachment ? [pendingChatAttachmentFromInput(input.attachment)] : [],
       };
+      pendingLocalMessageThreadIdsRef.current.add(created.threadId);
       setChatThreads((current) => [
         {
           ...created,
@@ -858,10 +899,8 @@ export default function App() {
       );
       const refreshed = await coreBridge.chatMessages(created.threadId);
       const mappedMessages = refreshed.messages.map(mapCoreChatMessage);
-      setThreadMessages((current) => ({
-        ...current,
-        [created.threadId]: mappedMessages,
-      }));
+      pendingLocalMessageThreadIdsRef.current.delete(created.threadId);
+      setThreadMessagesFromBackend(created.threadId, mappedMessages, { force: true });
       setChatThreads((current) =>
         current.map((thread) =>
           thread.threadId === created.threadId
@@ -1016,6 +1055,11 @@ export default function App() {
     messages: ChatMessage[],
     options: { advanceActivity?: boolean } = {},
   ) {
+    if (options.advanceActivity === true) {
+      pendingLocalMessageThreadIdsRef.current.delete(threadId);
+    } else if (hasPendingLocalMessages(messages)) {
+      pendingLocalMessageThreadIdsRef.current.add(threadId);
+    }
     setThreadMessages((current) => ({
       ...current,
       [threadId]: messages,
@@ -1146,10 +1190,10 @@ export default function App() {
     setChatThreads(mappedThreads.length ? mappedThreads : [defaultChatThread]);
     setActiveThreadId(selectedThread.threadId);
     setSelectedTaskId(selectedThread.taskId);
-    setThreadMessages((current) => ({
-      ...current,
-      [selectedThread.threadId]: messages.messages.map(mapCoreChatMessage),
-    }));
+    setThreadMessagesFromBackend(
+      selectedThread.threadId,
+      messages.messages.map(mapCoreChatMessage),
+    );
   }
 
   async function refreshSelectedTaskDetail(taskId: string) {
@@ -1304,11 +1348,7 @@ export default function App() {
         setChatThreads(mapped.length ? mapped : [defaultChatThread]);
         setActiveThreadId(selectedThread.threadId);
         setSelectedTaskId(selectedThread.taskId);
-        setThreadMessages((current) => {
-          const next = { ...current };
-          next[selectedThread.threadId] = selectedMessages;
-          return next;
-        });
+        setThreadMessagesFromBackend(selectedThread.threadId, selectedMessages);
       } catch (error) {
         console.warn("chat_thread_snapshot unavailable", error);
       }

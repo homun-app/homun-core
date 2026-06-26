@@ -362,6 +362,10 @@ assertNotContains(
 assertContains("src/App.tsx", "const ids = new Set<string>(backgroundStreamIds)", "sidebar busy state must include durable background stream ids");
 assertContains("src/App.tsx", "if (streamingThreadId) ids.add(streamingThreadId)", "sidebar busy state must include the active visible stream");
 assertContains("src/App.tsx", "task.status === \"running\" || task.status === \"queued\"", "sidebar busy state must ignore completed or failed tasks");
+assertContains("src/App.tsx", "pendingLocalMessageThreadIdsRef", "chat polling must know which threads have optimistic local messages");
+assertContains("src/App.tsx", "shouldPreserveLocalMessages", "backend refresh must not wipe visible local messages before gateway persistence");
+assertContains("src/App.tsx", "setThreadMessagesFromBackend", "backend chat snapshots must pass through the stale-safe message updater");
+assertContains("src/App.tsx", "setThreadMessagesFromBackend(created.threadId, mappedMessages, { force: true })", "final gateway snapshots must replace optimistic local state once persistence completes");
 
 assertContains("src/types.ts", "\"learning\"", "auto-learning must be a first-class view");
 assertContains("src/components/LearningView.tsx", "learning-view", "auto-learning must have a dedicated page");
