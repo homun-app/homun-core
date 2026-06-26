@@ -128,15 +128,23 @@ Tutto è **scoped per `workspace_id` (progetto) + `user_id`**.
    capability dal registry unico → esecuzione → evidenza → artifact → ripresa/
    correzione. Vedi
    [Homun Agentic Workspace UX Design](superpowers/specs/2026-06-24-agentic-workspace-ux-design.md).
-10. **Comprensione senza keyword/regex; verità verificabile.** Il core non capisce le
+10. **Automazioni = regole evento → filtro → azione, non solo schedule.** Il
+   tempo resta un trigger first-class, ma e' anche il fallback tecnico per fonti
+   che non possono fare push (polling). Channels, Composio, MCP, skills/addon,
+   local computer e scheduler devono convergere nello stesso modello di
+   automazione e nello stesso lifecycle visibile. Gli addon sono capability nel
+   registry unico: una regola puo' invocare Presentations/Documents/PDF/etc. solo
+   attraverso policy, approval, memoria e provenance canoniche. Vedi
+   [Homun Evented Automations Design](superpowers/specs/2026-06-26-evented-automations-design.md).
+11. **Comprensione senza keyword/regex; verità verificabile.** Il core non capisce le
    richieste con regex/keyword (de-gemma/capable-first); la verifica è deterministica
    dove possibile.
-11. **La memoria cattura il PERCHÉ e i LOOP APERTI, non solo i fatti, e collega TUTTO
+12. **La memoria cattura il PERCHÉ e i LOOP APERTI, non solo i fatti, e collega TUTTO
    nel grafo** (codice, decisioni, artefatti, piano), con archi causali. Il lavoro
    incompiuto resta richiamabile finché non è chiuso. Obiettivo: un cervello che
    sopravvive alle chat e sa sempre il perché — **verificabile via eval**. Vedi
    [MEMORIA.md](MEMORIA.md) e [memory-vision.md](memory-vision.md).
-12. **Lingua UI/prompt e lingua di risposta sono contratti separati.** I prompt
+13. **Lingua UI/prompt e lingua di risposta sono contratti separati.** I prompt
    predefiniti e le istruzioni operative interne possono restare in inglese per
    coerenza di prodotto e routing. La risposta all'utente deve invece seguire la
    lingua dell'ultimo messaggio quando è chiara; la lingua scelta nei Settings è

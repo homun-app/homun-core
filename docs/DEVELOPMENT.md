@@ -24,7 +24,8 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
 6. Stato e control-flow di **codice**; il modello riempie slot vincolati (3 invarianti del piano).
 7. Capability activation da **registry unico**, non keyword sparse.
 8. Niente keyword/regex; verità verificabile.
-9. La memoria cattura il **PERCHÉ** e i **loop aperti**, e collega TUTTO nel grafo (verificabile via eval).
+9. Automazioni = **evento → filtro → azione**; schedule e polling sono event source.
+10. La memoria cattura il **PERCHÉ** e i **loop aperti**, e collega TUTTO nel grafo (verificabile via eval).
 
 ## Mappa della documentazione (una fonte per ogni cosa)
 
@@ -42,7 +43,7 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
 
 > Se il contesto si è compattato: rileggi QUESTO blocco + il
 > [backlog](plans/2026-06-22-batch-1042-artifacts-memory.md) (gli stati ☐/✅ = i loop
-> aperti) e sei di nuovo sul filo. Stesso principio della memoria di Homun (caposaldo #10).
+> aperti) e sei di nuovo sul filo. Stesso principio della memoria di Homun (caposaldo #12).
 
 ### Cruscotto operativo attuale
 
@@ -257,7 +258,15 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   `cargo test -p local-first-desktop-gateway
   channel_thread_remembers_reply_recipient_for_app_side_continuity -- --nocapture`
   e `cargo test -p local-first-desktop-gateway app_channel_reply_target -- --nocapture`.
-  Gate finale: `cargo test -p local-first-desktop-gateway -- --nocapture`
+  **Design Evented Automations approvato/documentato (2026-06-26):** le
+  automazioni non sono piu' concettualmente solo schedule: diventano regole
+  `event source -> filter -> action`. Il tempo resta trigger first-class e
+  fallback di polling per fonti senza push; Channels, Composio, MCP, skills,
+  addon e local computer convergono nello stesso registry/lifecycle visibile.
+  Gli addon come Presentations sono azioni di capability governate da policy e
+  approval, non sottosistemi paralleli. Spec:
+  [Homun Evented Automations Design](superpowers/specs/2026-06-26-evented-automations-design.md).
+  Gate finale continuita' canale: `cargo test -p local-first-desktop-gateway -- --nocapture`
   (312 passati, 1 ignorato), `npm run build` da `apps/desktop`,
   `git diff --check`.
   **Hotfix Account profile photo (2026-06-26):** il caricamento immagine profilo

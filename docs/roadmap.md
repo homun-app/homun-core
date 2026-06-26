@@ -454,6 +454,18 @@ primo percorso locale verde e WS5 è chiusa localmente/gate:
     e poi importarli. Gate locale: `npm run test:ui-contract`, `npm run build`,
     `git diff --check`, smoke browser su `127.0.0.1:1420` con directory fonti
     visibile e nessun filtro catalogo hard-coded su SlidesCarnival.
+82d. Evented Automations — le automazioni diventano regole IFTTT-style
+    `event source -> filter -> action`, mantenendo le schedule esistenti come
+    event source time-based. Channels, Composio, MCP, skills/addon, local
+    computer e scheduler dichiarano trigger/event source nel registry unico;
+    quando un provider non supporta push, Homun usa polling schedulato con
+    dedup/watermark ma lo presenta all'utente come evento logico. Le azioni
+    possono invocare capability/addon come Presentations/Documents/PDF solo
+    tramite policy, approval, run visibile, memoria e artifact provenance.
+    Spec: `docs/superpowers/specs/2026-06-26-evented-automations-design.md`.
+    Slice consigliata: prima `ChannelMessage` WhatsApp/Telegram, poi
+    `ConnectorPoll` generico per Gmail/Composio/MCP, infine UI builder
+    IF/FILTER/THEN.
 83. UX agentic workspace principle — Homun assume il modello "workspace agentico
     operativo con chat al centro": sidebar per orientamento, chat come comando e
     timeline, dock contestuale per piano/computer/activity, artifact come output
