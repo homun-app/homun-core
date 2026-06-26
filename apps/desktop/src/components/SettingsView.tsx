@@ -639,13 +639,26 @@ function AccountPane({
   const [computerMsg, setComputerMsg] = useState<string | null>(null);
   const [profileImage, setProfileImage] = useSetting<string>("profileImage", "");
   const [profileImageError, setProfileImageError] = useState<string | null>(null);
+  const [profileImageMenuOpen, setProfileImageMenuOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const openProfileImagePicker = () => {
+    setProfileImageMenuOpen(false);
+    fileInputRef.current?.click();
+  };
+
+  const clearProfileImage = () => {
+    setProfileImage("");
+    setProfileImageError(null);
+    setProfileImageMenuOpen(false);
+  };
 
   const onProfileImageSelected = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.target.value = ""; // allow re-picking the same file
     if (!file) return;
     setProfileImageError(null);
+    setProfileImageMenuOpen(false);
     const reader = new FileReader();
     reader.onload = () => {
       const img = new Image();
@@ -678,40 +691,55 @@ function AccountPane({
           <div>
             <div className="tt">{t("settings.profileImage")}</div>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div
+            className="profile-image-controls"
+            onBlur={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                setProfileImageMenuOpen(false);
+              }
+            }}
+          >
             {profileImage && (
-              <button
-                type="button"
-                className="set-btn"
-                onClick={() => {
-                  setProfileImage("");
-                  setProfileImageError(null);
-                }}
-              >
+              <button type="button" className="set-btn" onClick={clearProfileImage}>
                 {t("settings.profileImageRemove")}
               </button>
             )}
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              aria-label={t("settings.profileImage")}
-              style={{ padding: 0, border: "none", background: "none", cursor: "pointer" }}
-            >
-              {profileImage ? (
-                <img
-                  src={profileImage}
-                  alt=""
-                  className="set-profile-avatar"
-                  style={{ objectFit: "cover" }}
-                />
-              ) : (
-                <span className="set-profile-avatar" />
+            <div className="profile-image-menu-anchor">
+              <button
+                type="button"
+                className="profile-image-button"
+                onClick={() => setProfileImageMenuOpen((open) => !open)}
+                aria-label={t("settings.profileImage")}
+                aria-expanded={profileImageMenuOpen}
+              >
+                {profileImage ? (
+                  <img
+                    src={profileImage}
+                    alt=""
+                    className="set-profile-avatar"
+                    style={{ objectFit: "cover" }}
+                  />
+                ) : (
+                  <span className="set-profile-avatar" />
+                )}
+              </button>
+              {profileImageMenuOpen && (
+                <div className="profile-image-menu" role="menu">
+                  <button type="button" role="menuitem" onClick={openProfileImagePicker}>
+                    {t("settings.profileImageUpload")}
+                  </button>
+                  {profileImage && (
+                    <button type="button" role="menuitem" onClick={clearProfileImage}>
+                      {t("settings.profileImageRemove")}
+                    </button>
+                  )}
+                </div>
               )}
-            </button>
+            </div>
             <button
               type="button"
               className="set-btn"
-              onClick={() => fileInputRef.current?.click()}
+              onClick={openProfileImagePicker}
             >
               {t("settings.profileImageUpload")}
             </button>

@@ -1309,6 +1309,7 @@ export function SettingsDrawer({
   const { t } = useTranslation();
   const [displayName] = useSetting("displayName", "");
   const [workspaceName] = useSetting("workspaceName", "Personal");
+  const [profileImage] = useSetting("profileImage", "");
   const groups: Array<"account" | "capabilities"> = ["account", "capabilities"];
   return (
     <aside className="nav-drawer settings-drawer set-nav" aria-label={t("sidebar.settings")}>
@@ -1318,7 +1319,11 @@ export function SettingsDrawer({
       </button>
 
       <div className="set-nav-profile">
-        <span className="set-nav-avatar" aria-hidden />
+        {profileImage ? (
+          <img className="set-nav-avatar set-nav-avatar-img" src={profileImage} alt="" />
+        ) : (
+          <span className="set-nav-avatar" aria-hidden />
+        )}
         <span className="set-nav-id">
           <span className="n">{displayName || t("sidebar.account")}</span>
           <span className="w">{workspaceName || "Personal"}</span>

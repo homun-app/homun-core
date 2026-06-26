@@ -264,7 +264,10 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   non e' piu' nascosto solo dietro l'avatar vuoto: Account espone un pulsante
   `Upload photo` esplicito, resetta gli errori al nuovo tentativo e mostra un
   warning theme-aware se il file non e' leggibile o se Chromium non decodifica
-  il formato (es. HEIC), indicando PNG/JPEG/WebP. Gate:
+  il formato (es. HEIC), indicando PNG/JPEG/WebP. Follow-up: l'avatar salvato
+  viene riusato anche nella sidebar Settings; cliccare sull'immagine apre un
+  menu contestuale per sostituirla o rimuoverla, mantenendo comunque il pulsante
+  esplicito `Upload photo`. Gate:
   `npm run test:ui-contract`, `npm run build` da `apps/desktop`,
   `git diff --check`.
   **WS7 provider-agnostic template sourcing locale/verde (2026-06-26):**
