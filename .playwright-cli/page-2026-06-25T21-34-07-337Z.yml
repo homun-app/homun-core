@@ -1,0 +1,5 @@
+- generic [ref=e4]:
+  - heading "Homun" [level=1] [ref=e5]
+  - paragraph [ref=e6]: Enter your access token to continue.
+  - textbox "Access token" [active] [ref=e7]
+  - button "Unlock" [disabled] [ref=e8]

@@ -1,0 +1,430 @@
+- generic [ref=e3]:
+  - complementary "Main menu" [ref=e673]:
+    - generic [ref=e674]:
+      - button "New chat" [ref=e675] [cursor=pointer]:
+        - img [ref=e676]
+        - generic [ref=e679]: New chat
+      - button "Search" [ref=e680] [cursor=pointer]:
+        - img
+        - generic [ref=e681]: Search
+    - navigation "Workspace navigation" [ref=e682]:
+      - generic [ref=e683]:
+        - button "Work" [ref=e684] [cursor=pointer]:
+          - img [ref=e685]
+          - generic [ref=e687]: Work
+        - button "Automations" [ref=e688] [cursor=pointer]:
+          - img [ref=e689]
+          - generic [ref=e693]: Automations
+        - button "Proactivity" [ref=e694] [cursor=pointer]:
+          - img [ref=e695]
+          - generic [ref=e697]: Proactivity
+      - generic [ref=e698]:
+        - button "Create" [ref=e699] [cursor=pointer]:
+          - img [ref=e700]
+          - generic [ref=e702]: Create
+        - button "Presentations" [ref=e703] [cursor=pointer]:
+          - img [ref=e704]
+          - generic [ref=e707]: Presentations
+    - generic [ref=e708]:
+      - generic [ref=e709]:
+        - generic [ref=e710]:
+          - button "Personal" [ref=e711] [cursor=pointer]:
+            - img [ref=e712]
+            - generic [ref=e714]: Personal
+          - button "New chat" [ref=e715] [cursor=pointer]:
+            - img [ref=e716]
+        - generic [ref=e717]:
+          - generic [ref=e718]:
+            - button "Aiutami a creare una presentazione usando il tem 4 m" [ref=e1127] [cursor=pointer]:
+              - generic [ref=e720]: Aiutami a creare una presentazione usando il tem
+              - generic [ref=e721]: 4 m
+            - generic "Thread actions":
+              - button "Pin chat":
+                - img
+              - button "Archive":
+                - img
+              - button "More message actions":
+                - img
+          - generic [ref=e722]:
+            - button "Telegram Aggiornami sui Mondiali di calcio 1 h" [ref=e1126] [cursor=pointer]:
+              - generic "Telegram" [ref=e724]:
+                - img [ref=e725]
+              - generic [ref=e727]: Aggiornami sui Mondiali di calcio
+              - generic [ref=e728]: 1 h
+            - generic "Thread actions":
+              - button "Pin chat":
+                - img
+              - button "Archive":
+                - img
+              - button "More message actions":
+                - img
+          - generic [ref=e729]:
+            - button "cosa ho su Notion? 6 h" [ref=e730] [cursor=pointer]:
+              - generic [ref=e731]: cosa ho su Notion?
+              - generic [ref=e732]: 6 h
+            - generic "Thread actions":
+              - button "Pin chat":
+                - img
+              - button "Archive":
+                - img
+              - button "More message actions":
+                - img
+          - generic [ref=e733]:
+            - button "Crea una presentazione pptx di 6 slide per prese 7 h" [ref=e734] [cursor=pointer]:
+              - generic [ref=e735]: Crea una presentazione pptx di 6 slide per prese
+              - generic [ref=e736]: 7 h
+            - generic "Thread actions":
+              - button "Pin chat":
+                - img
+              - button "Archive":
+                - img
+              - button "More message actions":
+                - img
+          - generic [ref=e737]:
+            - button "orari visita fiscale 7 h" [ref=e738] [cursor=pointer]:
+              - generic [ref=e739]: orari visita fiscale
+              - generic [ref=e740]: 7 h
+            - generic "Thread actions":
+              - button "Pin chat":
+                - img
+              - button "Archive":
+                - img
+              - button "More message actions":
+                - img
+          - generic [ref=e741]:
+            - button "cosa puoi fare? 10 h" [ref=e742] [cursor=pointer]:
+              - generic [ref=e743]: cosa puoi fare?
+              - generic [ref=e744]: 10 h
+            - generic "Thread actions":
+              - button "Pin chat":
+                - img
+              - button "Archive":
+                - img
+              - button "More message actions":
+                - img
+          - generic [ref=e745]:
+            - button "Scheduled Recupera un aggiornamento mattutino sui Mondiali 10 h" [ref=e746] [cursor=pointer]:
+              - generic "Scheduled" [ref=e747]:
+                - img [ref=e748]
+              - generic [ref=e751]: Recupera un aggiornamento mattutino sui Mondiali
+              - generic [ref=e752]: 10 h
+            - generic "Thread actions":
+              - button "Pin chat":
+                - img
+              - button "Archive":
+                - img
+              - button "More message actions":
+                - img
+      - generic [ref=e753]:
+        - generic [ref=e754]:
+          - button "Projects" [ref=e755] [cursor=pointer]:
+            - img [ref=e756]
+            - generic [ref=e758]: Projects
+          - button "New project" [ref=e759] [cursor=pointer]:
+            - img [ref=e760]
+        - generic [ref=e762]:
+          - button "test-homun" [ref=e763] [cursor=pointer]:
+            - img [ref=e764]
+            - img [ref=e766]
+            - generic [ref=e768]: test-homun
+          - button "New chat in test-homun" [ref=e769] [cursor=pointer]:
+            - img [ref=e770]
+          - button "Project menu for test-homun" [ref=e773] [cursor=pointer]:
+            - img [ref=e774]
+        - generic [ref=e779]:
+          - button "idra" [ref=e780] [cursor=pointer]:
+            - img [ref=e781]
+            - img [ref=e783]
+            - generic [ref=e785]: idra
+          - button "New chat in idra" [ref=e786] [cursor=pointer]:
+            - img [ref=e787]
+          - button "Project menu for idra" [ref=e790] [cursor=pointer]:
+            - img [ref=e791]
+        - generic [ref=e796]:
+          - button "taskline" [ref=e797] [cursor=pointer]:
+            - img [ref=e798]
+            - img [ref=e800]
+            - generic [ref=e802]: taskline
+          - button "New chat in taskline" [ref=e803] [cursor=pointer]:
+            - img [ref=e804]
+          - button "Project menu for taskline" [ref=e807] [cursor=pointer]:
+            - img [ref=e808]
+    - generic "Persistent actions" [ref=e813]:
+      - button "Notifications" [ref=e814] [cursor=pointer]:
+        - img
+      - button "Settings" [ref=e815] [cursor=pointer]:
+        - img
+      - button "Collapse sidebar" [ref=e816] [cursor=pointer]:
+        - img
+  - separator "Resize the sidebar" [ref=e150]
+  - main "Main workspace" [ref=e151]:
+    - region "Aiutami a creare una presentazione usando il tem" [ref=e817]:
+      - generic [ref=e821]: Aiutami a creare una presentazione usando il tem
+      - group "Workspace status" [ref=e1099]:
+        - generic [ref=e1100]:
+          - generic [ref=e1101]:
+            - strong [ref=e1102]: Workspace
+            - generic [ref=e1103]: thread
+          - generic [ref=e1104]:
+            - button "Workspace island options" [ref=e1105] [cursor=pointer]:
+              - img [ref=e1106]
+            - button "Collapse status" [ref=e1110] [cursor=pointer]:
+              - img [ref=e1111]
+        - button "Artifacts 3" [active] [ref=e1113] [cursor=pointer]:
+          - img [ref=e1114]
+          - generic [ref=e1117]: Artifacts
+          - strong [ref=e1118]: "3"
+        - button "Export chat (copy)" [ref=e1120] [cursor=pointer]:
+          - img [ref=e1121]
+          - generic [ref=e1124]: Export chat (copy)
+      - generic "Active thread" [ref=e829]:
+        - generic [ref=e831]:
+          - article [ref=e833]:
+            - paragraph [ref=e835]: Aiutami a creare una presentazione usando il template scelto "sales_templates_Sales Kickoff Slides".
+            - generic "Message actions" [ref=e836]:
+              - button "Edit message" [ref=e837] [cursor=pointer]:
+                - img [ref=e838]
+                - generic [ref=e841]: Edit
+              - button "Reply to message" [ref=e842] [cursor=pointer]:
+                - img [ref=e843]
+                - generic [ref=e846]: Reply
+              - button "Copy message" [ref=e847] [cursor=pointer]:
+                - img [ref=e848]
+                - generic [ref=e851]: Copy
+            - generic [ref=e853]: 17:54
+          - article [ref=e855]:
+            - generic [ref=e856]:
+              - paragraph [ref=e857]:
+                - text: Ho analizzato il template
+                - strong [ref=e858]: Sales Kickoff Slides
+                - text: ": 16 slide, stile corporate pulito con accenti arancio (#ED7843), font Inter, layout a blocchi con KPI, agenda numerata, slide citazione, visione e next steps. Il tono è motivazionale, professionale e data-driven."
+              - paragraph [ref=e859]: "Prima di generare il deck, ho bisogno di 4 informazioni essenziali:"
+              - list [ref=e860]:
+                - listitem [ref=e861]:
+                  - strong [ref=e862]: Obiettivo
+                  - text: ": che tipo di presentazione vuoi creare? (es. kickoff annuale, lancio prodotto, review trimestrale, pitch interno)"
+                - listitem [ref=e863]:
+                  - strong [ref=e864]: Pubblico
+                  - text: ": a chi è destinata? (team vendite, management, clienti, investitori, dipartimenti)"
+                - listitem [ref=e865]:
+                  - strong [ref=e866]: Contenuti disponibili
+                  - text: ": hai già testi, numeri/KPI, nomi, date, quote o devo usare placeholder coerenti con il template?"
+                - listitem [ref=e867]:
+                  - strong [ref=e868]: Slide e tono
+                  - text: ": quante slide desideri (il template ne ha 16, ma possiamo adattare) e preferisci un tono formale, energico o più sobrio?"
+              - paragraph [ref=e869]:
+                - text: Una volta che mi dai questi dettagli, ti propongo un piano sintetico e, dopo la tua conferma, genero il deck con
+                - code [ref=e870]: template_ref="local/sales-templates-sales-kickoff-slides"
+                - text: .
+            - generic "Message actions" [ref=e871]:
+              - button "Reply to message" [ref=e872] [cursor=pointer]:
+                - img [ref=e873]
+                - generic [ref=e876]: Reply
+              - button "Copy message" [ref=e877] [cursor=pointer]:
+                - img [ref=e878]
+                - generic [ref=e881]: Copy
+              - button "More message actions" [ref=e883] [cursor=pointer]:
+                - img [ref=e884]
+            - generic [ref=e888]:
+              - generic [ref=e889]: 17:54
+              - generic [ref=e890]: 13s · 251 token
+          - article [ref=e892]:
+            - paragraph [ref=e894]:
+              - generic [ref=e895]: 1) Homun
+              - generic [ref=e896]: 2) Investitori
+              - generic [ref=e897]: 3) Usa tutte le info che hai già sul progetto
+              - text: 4) Valuta quelle che servono con uin tono energico
+            - generic "Message actions" [ref=e898]:
+              - button "Edit message" [ref=e899] [cursor=pointer]:
+                - img [ref=e900]
+                - generic [ref=e903]: Edit
+              - button "Reply to message" [ref=e904] [cursor=pointer]:
+                - img [ref=e905]
+                - generic [ref=e908]: Reply
+              - button "Copy message" [ref=e909] [cursor=pointer]:
+                - img [ref=e910]
+                - generic [ref=e913]: Copy
+            - generic [ref=e915]: 17:56
+          - article [ref=e917]:
+            - generic [ref=e918]:
+              - paragraph [ref=e919]:
+                - text: Perfetto, ho le 4 risposte. Costruisco un pitch per investitori su
+                - strong [ref=e920]: Homun
+                - text: con il template
+                - strong [ref=e921]: Sales Kickoff Slides
+                - text: ", adattandolo da kickoff sales a deck di funding: tono energico, data-driven, focus su"
+                - emphasis [ref=e922]: local-first
+                - text: come vantaggio competitivo.
+              - paragraph [ref=e923]:
+                - strong [ref=e924]: "Piano sintetico (8 slide):"
+              - list [ref=e925]:
+                - listitem [ref=e926]:
+                  - strong [ref=e927]: Cover
+                  - text: "— Homun: the local-first personal assistant"
+                - listitem [ref=e928]:
+                  - strong [ref=e929]: Agenda / The Ask
+                  - text: — obiettivo, round, uso dei fondi
+                - listitem [ref=e930]:
+                  - strong [ref=e931]: La frase/visione
+                  - text: — “La tua AI resta tua”
+                - listitem [ref=e932]:
+                  - strong [ref=e933]: Problema
+                  - text: — cloud lock-in, privacy, costi ricorrenti
+                - listitem [ref=e934]:
+                  - strong [ref=e935]: Soluzione
+                  - text: — i 4 pilastri Homun (privacy totale, automazioni locali, deliverable concreti, browsing non invasivo)
+                - listitem [ref=e936]:
+                  - strong [ref=e937]: Tecnologia & Traction
+                  - text: — stack Rust/Python, modelli locali/cloud, KPI/placeholder
+                - listitem [ref=e938]:
+                  - strong [ref=e939]: Visione & Roadmap
+                  - text: — mercato, crescita, next steps
+                - listitem [ref=e940]:
+                  - strong [ref=e941]: CTA / Contatti
+                  - text: — demo, investimento, call to action
+              - paragraph [ref=e942]: Uso i dati che ho già sul progetto (local-first, dati sul device, automazioni, deliverables con Ollama/cloud, gateway Rust con browser headless). Per numeri finanziari/user base userò placeholder realistici a meno che tu non mi dia cifre precise.
+            - generic [ref=e943]:
+              - paragraph [ref=e944]: Confermi questo piano e procedo con la generazione del deck?
+              - generic [ref=e945]:
+                - button "Sì, genera il deck" [ref=e946] [cursor=pointer]:
+                  - generic [ref=e947]: Sì, genera il deck
+                - button "Modifica prima il piano" [ref=e948] [cursor=pointer]:
+                  - generic [ref=e949]: Modifica prima il piano
+            - generic "Message actions" [ref=e950]:
+              - button "Reply to message" [ref=e951] [cursor=pointer]:
+                - img [ref=e952]
+                - generic [ref=e955]: Reply
+              - button "Copy message" [ref=e956] [cursor=pointer]:
+                - img [ref=e957]
+                - generic [ref=e960]: Copy
+              - button "More message actions" [ref=e962] [cursor=pointer]:
+                - img [ref=e963]
+            - generic [ref=e967]:
+              - generic [ref=e968]: 17:56
+              - generic [ref=e969]: 8.9s · 311 token
+          - article [ref=e971]:
+            - paragraph [ref=e973]: Sì, genera il deck
+            - generic "Message actions" [ref=e974]:
+              - button "Edit message" [ref=e975] [cursor=pointer]:
+                - img [ref=e976]
+                - generic [ref=e979]: Edit
+              - button "Reply to message" [ref=e980] [cursor=pointer]:
+                - img [ref=e981]
+                - generic [ref=e984]: Reply
+              - button "Copy message" [ref=e985] [cursor=pointer]:
+                - img [ref=e986]
+                - generic [ref=e989]: Copy
+            - generic [ref=e991]: 18:02
+          - article [ref=e993]:
+            - generic [ref=e994]:
+              - paragraph [ref=e995]:
+                - text: Deck Homun per investitori generato con il template
+                - strong [ref=e996]: Sales Kickoff Slides
+                - text: — 8 slide, tono energico, focus
+                - emphasis [ref=e997]: local-first
+                - text: .
+              - paragraph [ref=e998]:
+                - strong [ref=e999]: "File pronti:"
+              - list [ref=e1000]:
+                - listitem [ref=e1001]:
+                  - code [ref=e1002]: deck.pptx
+                  - text: (editabile)
+                - listitem [ref=e1003]:
+                  - code [ref=e1004]: deck.html
+                  - text: (anteprima)
+                - listitem [ref=e1005]:
+                  - code [ref=e1006]: deck.pdf
+                  - text: (anteprima)
+              - paragraph [ref=e1007]:
+                - strong [ref=e1008]: "Problemi QA visivi rilevati:"
+              - list [ref=e1009]:
+                - listitem [ref=e1010]: Overflow testo su slide 1
+                - listitem [ref=e1011]: Contrasto basso su slide 2 (sottotitolo round seed)
+                - listitem [ref=e1012]: Contrasto basso su slide 3 (titoli “Now” / “Next”)
+                - listitem [ref=e1013]: Contrasto basso su slide 4 (divisore “—”)
+              - paragraph [ref=e1014]: Vuoi che rigeneri il deck correggendo questi difetti visivi? Se sì, posso fare un terzo tentativo accorciando i testi e forzando colori più contrastati nel brief. Altrimenti ti esporto i file in Projects/Downloads e correggi direttamente tu il .pptx. Quale preferisci?
+            - generic "Generated files" [ref=e1015]:
+              - generic [ref=e1016]:
+                - generic [ref=e1017]:
+                  - img [ref=e1019]
+                  - button "deck.pptx" [ref=e1022] [cursor=pointer]:
+                    - generic [ref=e1023]: deck.pptx
+                  - button "Download" [ref=e1024] [cursor=pointer]:
+                    - img [ref=e1025]
+                  - button "Expand preview" [ref=e1028] [cursor=pointer]:
+                    - img [ref=e1029]
+                - generic "/Users/fabio/.homun/artifacts/thread_1782402872_1782402872296815000/deck.pptx" [ref=e1031]
+              - generic [ref=e1032]:
+                - generic [ref=e1033]:
+                  - img [ref=e1035]
+                  - button "deck.html" [ref=e1040] [cursor=pointer]:
+                    - generic [ref=e1041]: deck.html
+                  - button "Download" [ref=e1042] [cursor=pointer]:
+                    - img [ref=e1043]
+                  - button "Expand preview" [ref=e1046] [cursor=pointer]:
+                    - img [ref=e1047]
+                - generic "/Users/fabio/.homun/artifacts/thread_1782402872_1782402872296815000/deck.html" [ref=e1049]
+              - generic [ref=e1050]:
+                - generic [ref=e1051]:
+                  - img [ref=e1053]
+                  - button "deck.pdf" [ref=e1056] [cursor=pointer]:
+                    - generic [ref=e1057]: deck.pdf
+                  - button "Download" [ref=e1058] [cursor=pointer]:
+                    - img [ref=e1059]
+                  - button "Expand preview" [ref=e1062] [cursor=pointer]:
+                    - img [ref=e1063]
+                - generic "/Users/fabio/.homun/artifacts/thread_1782402872_1782402872296815000/deck.pdf" [ref=e1065]
+            - generic "Message actions" [ref=e1066]:
+              - button "Reply to message" [ref=e1067] [cursor=pointer]:
+                - img [ref=e1068]
+                - generic [ref=e1071]: Reply
+              - button "Copy message" [ref=e1072] [cursor=pointer]:
+                - img [ref=e1073]
+                - generic [ref=e1076]: Copy
+              - button "More message actions" [ref=e1078] [cursor=pointer]:
+                - img [ref=e1079]
+            - generic [ref=e1083]:
+              - generic [ref=e1084]: 18:02
+              - generic [ref=e1085]: 21s · 1076 token
+      - complementary "Workbench" [ref=e1128]:
+        - separator "Resize panel" [ref=e1129]
+        - generic [ref=e1130]:
+          - generic [ref=e1131]: Review
+          - generic [ref=e1132]:
+            - button "Fullscreen" [ref=e1133] [cursor=pointer]:
+              - img [ref=e1134]
+            - button "Close panel" [ref=e1139] [cursor=pointer]:
+              - img [ref=e1140]
+        - complementary "Project files" [ref=e1144]:
+          - generic [ref=e1145]:
+            - list [ref=e1146]:
+              - listitem [ref=e1147]:
+                - button "deck.pptx" [ref=e1148] [cursor=pointer]:
+                  - img [ref=e1149]
+                  - generic [ref=e1152]: deck.pptx
+              - listitem [ref=e1153]:
+                - button "deck.html" [ref=e1154] [cursor=pointer]:
+                  - img [ref=e1155]
+                  - generic [ref=e1158]: deck.html
+              - listitem [ref=e1159]:
+                - button "deck.pdf" [ref=e1160] [cursor=pointer]:
+                  - img [ref=e1161]
+                  - generic [ref=e1164]: deck.pdf
+            - generic [ref=e1165]:
+              - generic [ref=e1166]:
+                - generic "deck.pptx" [ref=e1167]
+                - button "Download" [ref=e1168] [cursor=pointer]:
+                  - img [ref=e1169]
+                  - generic [ref=e1172]: Download
+                - button "Open folder" [ref=e1173] [cursor=pointer]:
+                  - img [ref=e1174]
+              - paragraph [ref=e1177]: Preview not available for this type. Use “Download”.
+      - form "Operational prompt" [ref=e1086]:
+        - textbox "Request for the assistant" [ref=e1087]:
+          - /placeholder: Send a message or add task instructions
+        - generic [ref=e1089]:
+          - button "Add" [ref=e1091] [cursor=pointer]:
+            - img [ref=e1092]
+          - button "Choose the model" [ref=e1094] [cursor=pointer]:
+            - generic [ref=e1096]: kimi-k2.7-code
+            - img [ref=e1097]

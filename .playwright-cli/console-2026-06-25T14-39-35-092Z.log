@@ -1,0 +1,219 @@
+[ 1697695ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://127.0.0.1:1420/node_modules/.vite/deps/react-dom_client.js?v=4945a810:20102
+[ 1712418ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://127.0.0.1:1420/node_modules/.vite/deps/react-dom_client.js?v=4945a810:20102
+[ 2902135ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://127.0.0.1:1420/node_modules/.vite/deps/react-dom_client.js?v=4945a810:20102
+[ 3046162ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://127.0.0.1:1420/node_modules/.vite/deps/react-dom_client.js?v=4945a810:20102
+[ 3061229ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://127.0.0.1:1420/node_modules/.vite/deps/react-dom_client.js?v=4945a810:20102
+[ 3407053ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/system/status:0
+[ 3407053ms] [ERROR] Failed to load resource: net::ERR_INCOMPLETE_CHUNKED_ENCODING @ http://127.0.0.1:18765/api/events:0
+[ 3407063ms] [LOG] [vite] server connection lost. Polling for restart... @ http://127.0.0.1:1420/@vite/client:864
+[ 3407484ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/local-computer/live:0
+[ 3408556ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/events:0
+[ 3409000ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/tasks/queue:0
+[ 3409025ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/tasks/task_channel_telegram_8205578468:0
+[ 3409052ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/chat/threads:0
+[ 3409052ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/tasks/task_channel_telegram_8205578468:0
+[ 3409077ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/chat/threads/channel_telegram_8205578468/messages:0
+[ 3409100ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/chat/threads/channel_telegram_8205578468/branches:0
+[ 3409100ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/artifacts/memory?thread=channel_telegram_8205578468:0
+[ 3409283ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/tasks/queue:0
+[ 3409283ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/chat/active_streams:0
+[ 3409501ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/local-computer/sessions/computer_channel_telegram_8205578468:0
+[ 3409987ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/local-computer/live:0
+[ 3410058ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/events:0
+[ 3411501ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/tasks/queue:0
+[ 3411537ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/tasks/task_channel_telegram_8205578468:0
+[ 3411538ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/chat/threads:0
+[ 3411538ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/chat/threads/channel_telegram_8205578468/messages:0
+[ 3411563ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/chat/threads/channel_telegram_8205578468/branches:0
+[ 3411563ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/artifacts/memory?thread=channel_telegram_8205578468:0
+[ 3411563ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/events:0
+[ 3412488ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/local-computer/live:0
+[ 3413066ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/events:0
+[ 3413282ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/chat/active_streams:0
+[ 3413309ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/tasks/queue:0
+[ 3413502ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/local-computer/sessions/computer_channel_telegram_8205578468:0
+[ 3414000ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/tasks/queue:0
+[ 3414026ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/tasks/task_channel_telegram_8205578468:0
+[ 3414027ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/chat/threads:0
+[ 3414028ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/chat/threads/channel_telegram_8205578468/messages:0
+[ 3414036ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/chat/threads/channel_telegram_8205578468/branches:0
+[ 3414041ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/artifacts/memory?thread=channel_telegram_8205578468:0
+[ 3414568ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/events:0
+[ 3414991ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/local-computer/live:0
+[ 3416070ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/events:0
+[ 3416502ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/tasks/queue:0
+[ 3416536ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/tasks/task_channel_telegram_8205578468:0
+[ 3416537ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/chat/threads:0
+[ 3416542ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/chat/threads/channel_telegram_8205578468/messages:0
+[ 3416595ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/chat/threads/channel_telegram_8205578468/branches:0
+[ 3416596ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/artifacts/memory?thread=channel_telegram_8205578468:0
+[ 3417285ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/tasks/queue:0
+[ 3417286ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/chat/active_streams:0
+[ 3417497ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/local-computer/live:0
+[ 3417503ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/local-computer/sessions/computer_channel_telegram_8205578468:0
+[ 3417598ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/events:0
+[ 3419002ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/tasks/queue:0
+[ 3419112ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/tasks/task_channel_telegram_8205578468:0
+[ 3419115ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/chat/threads:0
+[ 3419116ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/events:0
+[ 3419116ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/chat/threads/channel_telegram_8205578468/messages:0
+[ 3419232ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/chat/threads/channel_telegram_8205578468/branches:0
+[ 3419232ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/artifacts/memory?thread=channel_telegram_8205578468:0
+[ 3420000ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/local-computer/live:0
+[ 3420618ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/events:0
+[ 3421287ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/tasks/queue:0
+[ 3421288ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/chat/active_streams:0
+[ 3421457ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/system/status:0
+[ 3421500ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/tasks/queue:0
+[ 3421502ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/local-computer/sessions/computer_channel_telegram_8205578468:0
+[ 3421616ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/tasks/task_channel_telegram_8205578468:0
+[ 3421619ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/chat/threads:0
+[ 3421620ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/chat/threads/channel_telegram_8205578468/messages:0
+[ 3421731ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/chat/threads/channel_telegram_8205578468/branches:0
+[ 3421731ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/artifacts/memory?thread=channel_telegram_8205578468:0
+[ 3422121ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/events:0
+[ 3422503ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/local-computer/live:0
+[ 3423623ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/events:0
+[ 3424008ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/tasks/queue:0
+[ 3424115ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://127.0.0.1:1420/node_modules/.vite/deps/react-dom_client.js?v=4945a810:20102
+[ 3424166ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/chat/threads:0
+[ 3424166ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/events:0
+[ 3424166ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/setup/status:0
+[ 3424166ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/plugins:0
+[ 3424167ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/memory/dashboard:0
+[ 3424167ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/tasks/queue:0
+[ 3424169ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/automations:0
+[ 3424169ms] [WARNING] automations unavailable TypeError: Failed to fetch
+    at electronAutomations (http://127.0.0.1:1420/src/lib/coreBridge.ts:237:26)
+    at Object.automations (http://127.0.0.1:1420/src/lib/coreBridge.ts:931:22)
+    at loadAutomations (http://127.0.0.1:1420/src/App.tsx:817:43)
+    at http://127.0.0.1:1420/src/App.tsx:940:10
+    at Object.react_stack_bottom_frame (http://127.0.0.1:1420/node_modules/.vite/deps/react-dom_client.js?v=4945a810:18567:20)
+    at runWithFiberInDEV (http://127.0.0.1:1420/node_modules/.vite/deps/react-dom_client.js?v=4945a810:997:72)
+    at commitHookEffectListMount (http://127.0.0.1:1420/node_modules/.vite/deps/react-dom_client.js?v=4945a810:9411:163)
+    at commitHookPassiveMountEffects (http://127.0.0.1:1420/node_modules/.vite/deps/react-dom_client.js?v=4945a810:9465:60)
+    at commitPassiveMountOnFiber (http://127.0.0.1:1420/node_modules/.vite/deps/react-dom_client.js?v=4945a810:11040:29)
+    at recursivelyTraversePassiveMountEffects (http://127.0.0.1:1420/node_modules/.vite/deps/react-dom_client.js?v=4945a810:11010:13) @ http://127.0.0.1:1420/src/App.tsx:818
+[ 3424336ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/chat/active_streams:0
+[ 3424336ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/tasks/task_prompt_session:0
+[ 3424336ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/chat/threads:0
+[ 3424336ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/chat/threads:0
+[ 3424336ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/events:0
+[ 3424337ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/setup/status:0
+[ 3424337ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/plugins:0
+[ 3424337ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/memory/dashboard:0
+[ 3424337ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/tasks/queue:0
+[ 3424337ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/automations:0
+[ 3424337ms] [WARNING] automations unavailable TypeError: Failed to fetch
+    at electronAutomations (http://127.0.0.1:1420/src/lib/coreBridge.ts:237:26)
+    at Object.automations (http://127.0.0.1:1420/src/lib/coreBridge.ts:931:22)
+    at loadAutomations (http://127.0.0.1:1420/src/App.tsx:817:43)
+    at http://127.0.0.1:1420/src/App.tsx:940:10
+    at Object.react_stack_bottom_frame (http://127.0.0.1:1420/node_modules/.vite/deps/react-dom_client.js?v=4945a810:18567:20)
+    at runWithFiberInDEV (http://127.0.0.1:1420/node_modules/.vite/deps/react-dom_client.js?v=4945a810:997:72)
+    at commitHookEffectListMount (http://127.0.0.1:1420/node_modules/.vite/deps/react-dom_client.js?v=4945a810:9411:163)
+    at commitHookPassiveMountEffects (http://127.0.0.1:1420/node_modules/.vite/deps/react-dom_client.js?v=4945a810:9465:60)
+    at reconnectPassiveEffects (http://127.0.0.1:1420/node_modules/.vite/deps/react-dom_client.js?v=4945a810:11273:13)
+    at recursivelyTraverseReconnectPassiveEffects (http://127.0.0.1:1420/node_modules/.vite/deps/react-dom_client.js?v=4945a810:11240:11) @ http://127.0.0.1:1420/src/App.tsx:818
+[ 3424338ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/chat/active_streams:0
+[ 3424338ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/tasks/task_prompt_session:0
+[ 3424338ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/chat/threads:0
+[ 3424338ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/capabilities/snapshot:0
+[ 3424359ms] [VERBOSE] [DOM] Password forms should have (optionally hidden) username fields for accessibility: (More info: https://goo.gl/9p2vKq) %o @ http://127.0.0.1:1420/:0
+[ 3424361ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/capabilities/snapshot:0
+[ 3424361ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/chat/threads/thread_active_prompt/messages:0
+[ 4469600ms] [ERROR] Failed to load resource: net::ERR_INCOMPLETE_CHUNKED_ENCODING @ http://127.0.0.1:18765/api/events:0
+[ 4469615ms] [LOG] [vite] server connection lost. Polling for restart... @ http://127.0.0.1:1420/@vite/client:864
+[ 4471102ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/events:0
+[ 4471779ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/tasks/queue:0
+[ 4471780ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/tasks/task_channel_telegram_8205578468:0
+[ 4471780ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/tasks/task_channel_telegram_8205578468:0
+[ 4471781ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/chat/threads:0
+[ 4471781ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/chat/threads/channel_telegram_8205578468/messages:0
+[ 4472222ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/tasks/queue:0
+[ 4472222ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/chat/active_streams:0
+[ 4472605ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/events:0
+[ 4474107ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/events:0
+[ 4474279ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/tasks/queue:0
+[ 4474281ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/tasks/task_channel_telegram_8205578468:0
+[ 4474282ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/chat/threads:0
+[ 4474283ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/chat/threads/channel_telegram_8205578468/messages:0
+[ 4475609ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/events:0
+[ 4476222ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/tasks/queue:0
+[ 4476222ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/chat/active_streams:0
+[ 4476778ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/tasks/queue:0
+[ 4476779ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/tasks/task_channel_telegram_8205578468:0
+[ 4476779ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/chat/threads:0
+[ 4476780ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/chat/threads/channel_telegram_8205578468/messages:0
+[ 4477111ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/events:0
+[ 4478614ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/events:0
+[ 4479279ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/tasks/queue:0
+[ 4479279ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/tasks/task_channel_telegram_8205578468:0
+[ 4479280ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/chat/threads:0
+[ 4479280ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/chat/threads/channel_telegram_8205578468/messages:0
+[ 4480117ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/events:0
+[ 4480221ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/tasks/queue:0
+[ 4480221ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/chat/active_streams:0
+[ 4481619ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/events:0
+[ 4481779ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/tasks/queue:0
+[ 4481780ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/tasks/task_channel_telegram_8205578468:0
+[ 4481780ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/chat/threads:0
+[ 4481781ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/chat/threads/channel_telegram_8205578468/messages:0
+[ 4483121ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/events:0
+[ 4484222ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/tasks/queue:0
+[ 4484222ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/chat/active_streams:0
+[ 4484278ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/tasks/queue:0
+[ 4484279ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/tasks/task_channel_telegram_8205578468:0
+[ 4484279ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/chat/threads:0
+[ 4484280ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/chat/threads/channel_telegram_8205578468/messages:0
+[ 4484793ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://127.0.0.1:1420/node_modules/.vite/deps/react-dom_client.js?v=4945a810:20102
+[ 4484840ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/chat/threads:0
+[ 4484840ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/events:0
+[ 4484840ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/setup/status:0
+[ 4484840ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/plugins:0
+[ 4484840ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/memory/dashboard:0
+[ 4484840ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/tasks/queue:0
+[ 4484840ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/automations:0
+[ 4484840ms] [WARNING] automations unavailable TypeError: Failed to fetch
+    at electronAutomations (http://127.0.0.1:1420/src/lib/coreBridge.ts:237:26)
+    at Object.automations (http://127.0.0.1:1420/src/lib/coreBridge.ts:931:22)
+    at loadAutomations (http://127.0.0.1:1420/src/App.tsx:817:43)
+    at http://127.0.0.1:1420/src/App.tsx:940:10
+    at Object.react_stack_bottom_frame (http://127.0.0.1:1420/node_modules/.vite/deps/react-dom_client.js?v=4945a810:18567:20)
+    at runWithFiberInDEV (http://127.0.0.1:1420/node_modules/.vite/deps/react-dom_client.js?v=4945a810:997:72)
+    at commitHookEffectListMount (http://127.0.0.1:1420/node_modules/.vite/deps/react-dom_client.js?v=4945a810:9411:163)
+    at commitHookPassiveMountEffects (http://127.0.0.1:1420/node_modules/.vite/deps/react-dom_client.js?v=4945a810:9465:60)
+    at commitPassiveMountOnFiber (http://127.0.0.1:1420/node_modules/.vite/deps/react-dom_client.js?v=4945a810:11040:29)
+    at recursivelyTraversePassiveMountEffects (http://127.0.0.1:1420/node_modules/.vite/deps/react-dom_client.js?v=4945a810:11010:13) @ http://127.0.0.1:1420/src/App.tsx:818
+[ 4484841ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/chat/active_streams:0
+[ 4484841ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/tasks/task_prompt_session:0
+[ 4484841ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/chat/threads:0
+[ 4484841ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/chat/threads:0
+[ 4484847ms] [VERBOSE] [DOM] Password forms should have (optionally hidden) username fields for accessibility: (More info: https://goo.gl/9p2vKq) %o @ http://127.0.0.1:1420/:0
+[ 4484847ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/events:0
+[ 4484847ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/setup/status:0
+[ 4484847ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/plugins:0
+[ 4484848ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/memory/dashboard:0
+[ 4484848ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/tasks/queue:0
+[ 4484848ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/automations:0
+[ 4484848ms] [WARNING] automations unavailable TypeError: Failed to fetch
+    at electronAutomations (http://127.0.0.1:1420/src/lib/coreBridge.ts:237:26)
+    at Object.automations (http://127.0.0.1:1420/src/lib/coreBridge.ts:931:22)
+    at loadAutomations (http://127.0.0.1:1420/src/App.tsx:817:43)
+    at http://127.0.0.1:1420/src/App.tsx:940:10
+    at Object.react_stack_bottom_frame (http://127.0.0.1:1420/node_modules/.vite/deps/react-dom_client.js?v=4945a810:18567:20)
+    at runWithFiberInDEV (http://127.0.0.1:1420/node_modules/.vite/deps/react-dom_client.js?v=4945a810:997:72)
+    at commitHookEffectListMount (http://127.0.0.1:1420/node_modules/.vite/deps/react-dom_client.js?v=4945a810:9411:163)
+    at commitHookPassiveMountEffects (http://127.0.0.1:1420/node_modules/.vite/deps/react-dom_client.js?v=4945a810:9465:60)
+    at reconnectPassiveEffects (http://127.0.0.1:1420/node_modules/.vite/deps/react-dom_client.js?v=4945a810:11273:13)
+    at recursivelyTraverseReconnectPassiveEffects (http://127.0.0.1:1420/node_modules/.vite/deps/react-dom_client.js?v=4945a810:11240:11) @ http://127.0.0.1:1420/src/App.tsx:818
+[ 4484848ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/chat/active_streams:0
+[ 4484848ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/tasks/task_prompt_session:0
+[ 4484848ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/chat/threads:0
+[ 4484848ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/capabilities/snapshot:0
+[ 4484851ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/capabilities/snapshot:0
+[ 4484851ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/chat/threads/thread_active_prompt/messages:0
+[ 4486350ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18765/api/events:0
+[ 5363309ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://127.0.0.1:1420/node_modules/.vite/deps/react-dom_client.js?v=4945a810:20102
+[ 5387565ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://127.0.0.1:1420/node_modules/.vite/deps/react-dom_client.js?v=4945a810:20102
+[ 5390450ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://127.0.0.1:1420/node_modules/.vite/deps/react-dom_client.js?v=4945a810:20102

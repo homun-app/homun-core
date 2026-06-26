@@ -1,0 +1,102 @@
+- generic [ref=e3]:
+  - complementary "Settings" [ref=e434]:
+    - button "Back to app" [ref=e435] [cursor=pointer]:
+      - img [ref=e436]
+      - generic [ref=e438]: Back to app
+    - generic [ref=e441]:
+      - generic [ref=e442]: Account
+      - generic [ref=e443]: Personal
+    - navigation [ref=e444]:
+      - generic [ref=e445]:
+        - generic [ref=e446]: Account
+        - button "Account" [ref=e448] [cursor=pointer]:
+          - img [ref=e449]
+          - generic [ref=e452]: Account
+        - button "General" [ref=e454] [cursor=pointer]:
+          - img [ref=e455]
+          - generic [ref=e456]: General
+        - button "Appearance" [active] [ref=e458] [cursor=pointer]:
+          - img [ref=e459]
+          - generic [ref=e465]: Appearance
+        - button "Model & Runtime" [ref=e467] [cursor=pointer]:
+          - img [ref=e468]
+          - generic [ref=e471]: Model & Runtime
+        - button "Privacy" [ref=e473] [cursor=pointer]:
+          - img [ref=e474]
+          - generic [ref=e477]: Privacy
+        - button "Memory" [ref=e479] [cursor=pointer]:
+          - img [ref=e480]
+          - generic [ref=e488]: Memory
+        - button "Artifacts" [ref=e490] [cursor=pointer]:
+          - img [ref=e491]
+          - generic [ref=e494]: Artifacts
+        - button "Contacts" [ref=e496] [cursor=pointer]:
+          - img [ref=e497]
+          - generic [ref=e502]: Contacts
+      - generic [ref=e503]:
+        - generic [ref=e504]: Capabilities
+        - button "Channels" [ref=e506] [cursor=pointer]:
+          - img [ref=e507]
+          - generic [ref=e509]: Channels
+        - button "Connectors" [ref=e511] [cursor=pointer]:
+          - img [ref=e512]
+          - generic [ref=e514]: Connectors
+        - button "Skills" [ref=e516] [cursor=pointer]:
+          - img [ref=e517]
+          - generic [ref=e520]: Skills
+        - button "Addons" [ref=e522] [cursor=pointer]:
+          - img [ref=e523]
+          - generic [ref=e526]: Addons
+        - button "Local computer" [ref=e528] [cursor=pointer]:
+          - img [ref=e529]
+          - generic [ref=e532]: Local computer
+  - separator "Resize the sidebar" [ref=e150]
+  - main "Main workspace" [ref=e151]:
+    - region "Appearance" [ref=e590]:
+      - generic [ref=e535]:
+        - heading "Appearance" [level=2] [ref=e591]
+        - generic [ref=e592]:
+          - generic [ref=e593]: Theme · surface
+          - paragraph [ref=e594]: The interface background tones. The accent stays the one chosen below — the two choices combine.
+          - generic [ref=e595]:
+            - button "Cold" [ref=e596] [cursor=pointer]:
+              - generic [ref=e602]: Cold
+            - button "Ivory" [ref=e603] [cursor=pointer]:
+              - generic [ref=e609]: Ivory
+            - button "Neutral" [ref=e610] [cursor=pointer]:
+              - generic [ref=e616]: Neutral
+            - button "Sand" [ref=e617] [cursor=pointer]:
+              - generic [ref=e623]: Sand
+            - button "Dark" [ref=e624] [cursor=pointer]:
+              - generic [ref=e630]:
+                - text: Dark
+                - img [ref=e631]
+          - generic [ref=e633]: Accent
+          - paragraph [ref=e634]: The brand accent is teal. You can make it yours — it applies to the whole app right away.
+          - generic [ref=e635]:
+            - button "Teal" [ref=e636] [cursor=pointer]:
+              - generic [ref=e638]: Teal
+              - img [ref=e639]
+            - button "Indigo" [ref=e641] [cursor=pointer]:
+              - generic [ref=e643]: Indigo
+            - button "Terracotta" [ref=e644] [cursor=pointer]:
+              - generic [ref=e646]: Terracotta
+            - button "Amber" [ref=e647] [cursor=pointer]:
+              - generic [ref=e649]: Amber
+            - button "Green" [ref=e650] [cursor=pointer]:
+              - generic [ref=e652]: Green
+            - button "Blue" [ref=e653] [cursor=pointer]:
+              - generic [ref=e655]: Blue
+            - button "Violet" [ref=e656] [cursor=pointer]:
+              - generic [ref=e658]: Violet
+            - button "Rose" [ref=e659] [cursor=pointer]:
+              - generic [ref=e661]: Rose
+            - button "Graphite" [ref=e662] [cursor=pointer]:
+              - generic [ref=e664]: Graphite
+            - generic "Pick a custom color" [ref=e665] [cursor=pointer]:
+              - img [ref=e667]
+              - generic [ref=e668]: Custom
+              - textbox "Pick a custom color" [ref=e669]: "#157a6e"
+          - generic [ref=e670]:
+            - button "Primary button" [ref=e671]
+            - generic [ref=e672]: colored link
