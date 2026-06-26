@@ -19,6 +19,10 @@ export function ProjectAccessDialog({ workspace, onClose }: ProjectAccessDialogP
   const [grants, setGrants] = useState<ProjectAccessGrant[]>([]);
   const [contactReference, setContactReference] = useState("");
   const [channel, setChannel] = useState("whatsapp");
+  const [canTriggerAutomations, setCanTriggerAutomations] = useState(true);
+  const [canUseProjectMemory, setCanUseProjectMemory] = useState(true);
+  const [canReceiveReplies, setCanReceiveReplies] = useState(true);
+  const [canReceiveArtifacts, setCanReceiveArtifacts] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -63,10 +67,10 @@ export function ProjectAccessDialog({ workspace, onClose }: ProjectAccessDialogP
         contact_reference: selectedContact.reference,
         contact_name: selectedContact.name,
         channel,
-        can_trigger_automations: true,
-        can_use_project_memory: true,
-        can_receive_replies: true,
-        can_receive_artifacts: false,
+        can_trigger_automations: canTriggerAutomations,
+        can_use_project_memory: canUseProjectMemory,
+        can_receive_replies: canReceiveReplies,
+        can_receive_artifacts: canReceiveArtifacts,
         capability_denies: [],
       });
       setGrants(next);
@@ -144,6 +148,41 @@ export function ProjectAccessDialog({ workspace, onClose }: ProjectAccessDialogP
             <UserPlus size={15} />
             Authorize
           </button>
+        </div>
+
+        <div className="project-access-permissions" aria-label="Project access permissions">
+          <label>
+            <input
+              type="checkbox"
+              checked={canTriggerAutomations}
+              onChange={(event) => setCanTriggerAutomations(event.target.checked)}
+            />
+            <span>Can trigger automations</span>
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              checked={canUseProjectMemory}
+              onChange={(event) => setCanUseProjectMemory(event.target.checked)}
+            />
+            <span>Can use project memory</span>
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              checked={canReceiveReplies}
+              onChange={(event) => setCanReceiveReplies(event.target.checked)}
+            />
+            <span>Can receive replies</span>
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              checked={canReceiveArtifacts}
+              onChange={(event) => setCanReceiveArtifacts(event.target.checked)}
+            />
+            <span>Can receive artifacts</span>
+          </label>
         </div>
 
         {error ? <p className="project-access-error">{error}</p> : null}

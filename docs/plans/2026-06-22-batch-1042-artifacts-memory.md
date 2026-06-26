@@ -1016,6 +1016,14 @@ ragionato il contratto degli strumenti `make_*` creati dall'harness. ADR 0011
     gateway globale. Gate: `cargo test -p local-first-desktop-gateway
     automation_workspace_scope_defaults_and_trims -- --nocapture`, `npm run
     test:ui-contract`, `npm run build`.
+  - 🟡 **Project Access permission controls (2026-06-26, locale/verde
+    frontend):** il dialog "Manage access" espone i permessi reali del grant
+    (`can_trigger_automations`, `can_use_project_memory`, `can_receive_replies`,
+    `can_receive_artifacts`) invece di creare accessi tutti uguali. Questo
+    rende la Project Access Surface utilizzabile come gate esplicito prima delle
+    automazioni evento/filtro/azione. Gate: `npm run test:ui-contract`,
+    `npm run build`, `cargo test -p local-first-desktop-gateway project_access
+    -- --nocapture`.
 - ☐ **7.1b (futuro)** Portare ricerca/meeting al livello del deck solo dopo il
   chiarimento sul contratto strumenti: `make_research` e `make_meeting` non sono
   essenziali per la prossima release.

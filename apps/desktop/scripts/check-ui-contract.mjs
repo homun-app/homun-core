@@ -247,6 +247,11 @@ assertNotContains("src/components/SettingsView.tsx", "className=\"set-btn\" onCl
 assertNotContains("src/components/SettingsView.tsx", "className=\"set-btn\"\n              onClick={openProfileImagePicker}", "Account profile image upload action must not be duplicated outside the avatar menu");
 assertContains("src/components/Sidebar.tsx", "useSetting(\"profileImage\"", "Settings sidebar profile header must read the saved profile photo");
 assertContains("src/components/Sidebar.tsx", "set-nav-avatar-img", "Settings sidebar profile header must render the saved profile photo");
+assertContains("src/components/ProjectAccessDialog.tsx", "project-access-permissions", "Project Access must expose explicit per-contact permission toggles");
+assertContains("src/components/ProjectAccessDialog.tsx", "can_trigger_automations: canTriggerAutomations", "Project Access grants must use the selected automation permission");
+assertContains("src/components/ProjectAccessDialog.tsx", "can_use_project_memory: canUseProjectMemory", "Project Access grants must use the selected memory permission");
+assertContains("src/components/ProjectAccessDialog.tsx", "can_receive_replies: canReceiveReplies", "Project Access grants must use the selected reply permission");
+assertContains("src/components/ProjectAccessDialog.tsx", "can_receive_artifacts: canReceiveArtifacts", "Project Access grants must use the selected artifact permission");
 assertContains("src/components/BrandKitPanel.tsx", "builtin:template-preview/", "template gallery must render built-in previews when the catalog declares preview_ref");
 assertContains("src/components/BrandKitPanel.tsx", "TemplateCardPreview", "template gallery cards must route preview rendering through a dedicated component");
 assertContains("src/components/BrandKitPanel.tsx", "template-card-contract", "template gallery must keep the metadata contract fallback for catalogs without preview_ref");

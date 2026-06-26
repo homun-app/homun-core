@@ -327,6 +327,14 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   inferenze client-side. Gate mirati: `cargo test -p
   local-first-desktop-gateway automation_workspace_scope_defaults_and_trims --
   --nocapture`, `npm run test:ui-contract`, `npm run build`.
+  **Follow-up Project Access permission controls (2026-06-26):** il dialog
+  "Manage access" non crea piu' grant opachi con permessi fissi: per ogni
+  contatto/canale espone toggles espliciti per `can_trigger_automations`,
+  `can_use_project_memory`, `can_receive_replies` e `can_receive_artifacts`.
+  Il modello dati resta lo stesso e il resolver resta fail-closed/deny-win; la
+  UI ora permette di restringere il progetto prima di collegare regole
+  evento->filtro->azione. Gate: `npm run test:ui-contract`, `npm run build`,
+  `cargo test -p local-first-desktop-gateway project_access -- --nocapture`.
   Gate finale continuita' canale: `cargo test -p local-first-desktop-gateway -- --nocapture`
   (312 passati, 1 ignorato), `npm run build` da `apps/desktop`,
   `git diff --check`.

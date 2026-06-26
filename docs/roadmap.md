@@ -477,6 +477,9 @@ primo percorso locale verde e WS5 è chiusa localmente/gate:
     list/create/update/toggle/delete now accept the thread/project
     `workspace_id`, and chat threads expose `workspace_id` to the desktop
     client, so rule management no longer falls back to the gateway-global scope.
+    Follow-up Project Access UI: "Manage access" now exposes the actual grant
+    permissions for trigger, project memory, replies and artifacts, so evented
+    rules can be narrowed per contact/channel before execution.
     Spec: `docs/superpowers/specs/2026-06-26-evented-automations-design.md`.
     Slice consigliata: prima Project Access Surface, poi `ChannelMessage`
     WhatsApp/Telegram, poi `ConnectorPoll` generico per Gmail/Composio/MCP,
