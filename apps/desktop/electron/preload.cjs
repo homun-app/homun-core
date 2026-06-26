@@ -30,6 +30,9 @@ contextBridge.exposeInMainWorld("localFirstDesktop", {
   // releaseNotes}; install downloads the new version and restarts.
   checkForUpdate: () => ipcRenderer.invoke("lfpa:update-check"),
   installUpdate: () => ipcRenderer.invoke("lfpa:update-install"),
+  // Unsigned platforms (Windows/Linux): open the releases page for a manual
+  // download instead of auto-installing.
+  openUpdateDownload: () => ipcRenderer.invoke("lfpa:update-open-download"),
   // Bring the app window to the front (notification click).
   focusWindow: () => ipcRenderer.invoke("lfpa:focus-window"),
   // Subscribe to download progress ({percent,transferred,total}); returns an

@@ -897,6 +897,8 @@
     "updateAvailable": "Update available: {{version}}",
     "updateInstall": "Download & install",
     "updateInstalling": "Installing… {{percent}}%",
+    "updateDownload": "Download",
+    "updateDownloadHint": "On Windows and Linux the update is a manual download: it opens the releases page where you download and run the installer.",
     "updateCheckUnavailable": "Update check isn't available in this build.",
     "updateFailedGeneric": "Update failed.",
     "groupUpdateFailed": "Group update failed: {{message}}",

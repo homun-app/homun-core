@@ -17,9 +17,13 @@ interface LocalFirstDesktopConfig {
     version: string | null;
     current?: string | null;
     releaseNotes?: string | null;
+    /** macOS (signed) can auto-install; Windows/Linux are unsigned → download-only. */
+    canAutoInstall?: boolean;
     error?: string;
   }>;
   installUpdate?: () => Promise<{ ok: boolean; error?: string }>;
+  /** Open the releases page for a manual download (unsigned platforms). */
+  openUpdateDownload?: () => Promise<{ ok: boolean; error?: string }>;
   /** Subscribe to download progress; returns an unsubscribe fn. */
   onUpdateProgress?: (
     cb: (p: { percent: number; transferred: number; total: number }) => void,
@@ -189,6 +193,7 @@ export async function checkDesktopUpdate(): Promise<{
   version: string | null;
   current: string | null;
   releaseNotes: string | null;
+  canAutoInstall: boolean;
 } | null> {
   const check = desktopConfig?.checkForUpdate;
   if (!check) return null;
@@ -199,6 +204,9 @@ export async function checkDesktopUpdate(): Promise<{
       version: result.version ?? null,
       current: result.current ?? null,
       releaseNotes: result.releaseNotes ?? null,
+      // Default true (mac) when the field is absent (older shells), so the signed
+      // mac flow is never accidentally downgraded.
+      canAutoInstall: result.canAutoInstall ?? true,
     };
   } catch {
     return null;
@@ -211,6 +219,18 @@ export async function installDesktopUpdate(): Promise<{ ok: boolean; error?: str
   if (!install) return { ok: false, error: "unavailable" };
   try {
     return await install();
+  } catch (error) {
+    return { ok: false, error: String((error as Error)?.message ?? error) };
+  }
+}
+
+/** Desktop only: open the releases page for a manual download (unsigned
+ *  platforms — Windows/Linux — that must not auto-install). */
+export async function openDesktopUpdateDownload(): Promise<{ ok: boolean; error?: string }> {
+  const open = desktopConfig?.openUpdateDownload;
+  if (!open) return { ok: false, error: "unavailable" };
+  try {
+    return await open();
   } catch (error) {
     return { ok: false, error: String((error as Error)?.message ?? error) };
   }

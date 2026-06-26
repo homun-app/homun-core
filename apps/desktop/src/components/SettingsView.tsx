@@ -105,6 +105,7 @@ import {
   checkDesktopUpdate,
   installDesktopUpdate,
   onDesktopUpdateProgress,
+  openDesktopUpdateDownload,
 } from "../lib/gatewayConfig";
 
 // Literal neutrals per surface theme — for the mini-previews in the Appearance picker
@@ -849,6 +850,8 @@ function AboutVersionRow() {
   const [error, setError] = useState<string | null>(null);
   const [installing, setInstalling] = useState(false);
   const [progress, setProgress] = useState(0);
+  // mac (signed) auto-installs; Windows/Linux (unsigned) only get a download link.
+  const [canAutoInstall, setCanAutoInstall] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
@@ -876,7 +879,14 @@ function AboutVersionRow() {
     if (r.current) setVersion(r.current);
     setLatest(r.version);
     setNotes(r.releaseNotes);
+    setCanAutoInstall(r.canAutoInstall);
     setPhase(r.available ? "available" : "current");
+  };
+
+  // Unsigned platforms (Windows/Linux): open the releases page to download the
+  // installer manually instead of auto-installing.
+  const download = async () => {
+    await openDesktopUpdateDownload();
   };
 
   const install = async () => {
@@ -932,20 +942,34 @@ function AboutVersionRow() {
               style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}
             >
               <strong>{t("settings.updateAvailable", { version: latest })}</strong>
-              <button
-                type="button"
-                className="set-btn primary"
-                onClick={() => void install()}
-                disabled={installing}
-              >
-                <Download size={14} />
-                <span style={{ marginLeft: 6 }}>
-                  {installing
-                    ? t("settings.updateInstalling", { percent: progress })
-                    : t("settings.updateInstall")}
-                </span>
-              </button>
+              {canAutoInstall ? (
+                <button
+                  type="button"
+                  className="set-btn primary"
+                  onClick={() => void install()}
+                  disabled={installing}
+                >
+                  <Download size={14} />
+                  <span style={{ marginLeft: 6 }}>
+                    {installing
+                      ? t("settings.updateInstalling", { percent: progress })
+                      : t("settings.updateInstall")}
+                  </span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="set-btn primary"
+                  onClick={() => void download()}
+                >
+                  <Download size={14} />
+                  <span style={{ marginLeft: 6 }}>{t("settings.updateDownload")}</span>
+                </button>
+              )}
             </div>
+            {!canAutoInstall && (
+              <p className="set-hint">{t("settings.updateDownloadHint")}</p>
+            )}
             {notes && (
               <div className="set-release-notes">
                 <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>

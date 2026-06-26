@@ -544,17 +544,44 @@ function flattenReleaseNotes(notes) {
   return null;
 }
 
+// Only macOS ships a signed + notarized build, so only macOS may silently
+// auto-install an update. Windows/Linux are unsigned: the app must NOT auto-run
+// their binaries — it detects the new version and points the user to the download
+// page instead (see `update-open-download`). This flag tells the renderer which
+// affordance to show ("Install" vs "Download").
+const CAN_AUTO_INSTALL = process.platform === "darwin";
+
 ipcMain.handle("lfpa:update-check", async () => {
   const current = app.getVersion();
-  if (!app.isPackaged) return { available: false, version: null, current };
+  if (!app.isPackaged)
+    return { available: false, version: null, current, canAutoInstall: CAN_AUTO_INSTALL };
   try {
     const result = await autoUpdater.checkForUpdates();
     const version = result?.updateInfo?.version ?? null;
     const available = version ? autoUpdater.currentVersion.compare(version) < 0 : false;
     const releaseNotes = flattenReleaseNotes(result?.updateInfo?.releaseNotes);
-    return { available, version, current, releaseNotes };
+    return { available, version, current, releaseNotes, canAutoInstall: CAN_AUTO_INSTALL };
   } catch (error) {
-    return { available: false, version: null, current, error: String(error?.message ?? error) };
+    return {
+      available: false,
+      version: null,
+      current,
+      canAutoInstall: CAN_AUTO_INSTALL,
+      error: String(error?.message ?? error),
+    };
+  }
+});
+
+// Unsigned platforms (Windows/Linux): open the releases page so the user
+// downloads + installs the new version manually. We never auto-execute an
+// unsigned binary (the supply-chain risk electron-updater's silent install would
+// carry). macOS uses the signed auto-install flow above instead.
+ipcMain.handle("lfpa:update-open-download", async () => {
+  try {
+    await shell.openExternal(RELEASES_URL);
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: String(error?.message ?? error) };
   }
 });
 

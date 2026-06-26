@@ -897,6 +897,8 @@
     "updateAvailable": "Aggiornamento disponibile: {{version}}",
     "updateInstall": "Scarica e installa",
     "updateInstalling": "Installazione… {{percent}}%",
+    "updateDownload": "Scarica",
+    "updateDownloadHint": "Su Windows e Linux l'aggiornamento è un download manuale: apre la pagina release dove scarichi ed esegui l'installer.",
     "updateCheckUnavailable": "Il controllo aggiornamenti non è disponibile in questa build.",
     "updateFailedGeneric": "Aggiornamento non riuscito.",
     "groupUpdateFailed": "Aggiornamento gruppo non riuscito: {{message}}",

@@ -118,11 +118,8 @@ jobs:
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
 
-      # Unsigned platforms build as downloadable artifacts only — they NEVER
-      # publish to the auto-update feed (`--publish never`), because shipping an
-      # unsigned binary that the updater would silently execute is a supply-chain
-      # risk. Enable publishing per-platform once it has real code signing
-      # (mac: MAC_CSC_LINK; Windows: a code-signing cert + win.publisherName).
+      # macOS unsigned (no Apple cert): build as artifact only, never publish — an
+      # unsigned mac build must not reach the signed auto-update channel.
       - name: Build installer (macOS · unsigned — Apple cert not configured)
         if: matrix.platform == 'mac' && steps.signing.outputs.has_cert != 'true'
         working-directory: apps/desktop
@@ -130,15 +127,27 @@ jobs:
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
 
-      - name: Build installer (Windows · unsigned)
+      # Windows/Linux are UNSIGNED but DO publish their installer + latest*.yml to
+      # the release, so the app can detect a new version and offer a DOWNLOAD. This
+      # is safe because the app never AUTO-INSTALLS unsigned platforms: only macOS
+      # (signed) auto-installs; on Windows/Linux the updater is notify-only and
+      # opens the releases page for a manual download (see main.cjs CAN_AUTO_INSTALL
+      # + update-open-download). No silent execution of an unsigned binary. Promote
+      # to full auto-install per-platform once it has real signing (Windows: Azure
+      # Trusted Signing + win.publisherName; Linux AppImage can verify via sha512).
+      - name: Build installer (Windows · unsigned, download-only)
         if: matrix.platform == 'win'
         working-directory: apps/desktop
-        run: npx electron-builder --win --publish never
+        run: npx electron-builder --win --publish ${{ startsWith(github.ref, 'refs/tags/v') && 'always' || 'never' }}
+        env:
+          GH_TOKEN: ${{ startsWith(github.ref, 'refs/tags/v') && secrets.RELEASES_TOKEN || '' }}
 
-      - name: Build installer (Linux)
+      - name: Build installer (Linux · unsigned, download-only)
         if: matrix.platform == 'linux'
         working-directory: apps/desktop
-        run: npx electron-builder --linux --publish never
+        run: npx electron-builder --linux --publish ${{ startsWith(github.ref, 'refs/tags/v') && 'always' || 'never' }}
+        env:
+          GH_TOKEN: ${{ startsWith(github.ref, 'refs/tags/v') && secrets.RELEASES_TOKEN || '' }}
 
       # Keep a copy of the raw installers as workflow artifacts too — useful for
       # inspecting dispatch (non-tag) runs that don't publish a release.
