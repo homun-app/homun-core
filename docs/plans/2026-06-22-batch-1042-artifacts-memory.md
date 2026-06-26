@@ -996,6 +996,12 @@ ragionato il contratto degli strumenti `make_*` creati dall'harness. ADR 0011
     local-first-desktop-gateway channel_message_event -- --nocapture`,
     `cargo test -p local-first-desktop-gateway proactive_task -- --nocapture`,
     `cargo test -p local-first-desktop-gateway automation -- --nocapture`.
+  - 🟡 **Builder/UI access clarity (2026-06-26, locale/verde frontend):**
+    `/api/automations/event-sources` espone gruppi dati stabili
+    (`connected_services`) e non label localizzate; la UI localizza
+    `channels`/`connected_services`, elimina literal hardcoded residui e mostra
+    nel builder evento il vincolo Project Access (`can_trigger_automations`,
+    default deny). Gate: `npm run test:ui-contract`, `npm run build`.
 - ☐ **7.1b (futuro)** Portare ricerca/meeting al livello del deck solo dopo il
   chiarimento sul contratto strumenti: `make_research` e `make_meeting` non sono
   essenziali per la prossima release.

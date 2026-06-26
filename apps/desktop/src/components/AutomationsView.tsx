@@ -320,7 +320,7 @@ export function AutomationsView({
     reset();
   };
 
-  // Event sources, filtered by query + grouped (Canali / Composio / MCP) — like the model menu.
+  // Event sources, filtered by query + grouped (channels / connected services) — like the model menu.
   const sourceGroups = useMemo(() => {
     const q = srcQuery.trim().toLowerCase();
     const groups: Array<{
@@ -334,7 +334,7 @@ export function AutomationsView({
         label: c.label,
         sel: { kind: "channel" as const, id: c.id, label: c.label },
       }));
-    if (channels.length) groups.push({ group: "Canali", items: channels });
+    if (channels.length) groups.push({ group: "channels", items: channels });
     const byGroup = new Map<
       string,
       Array<{ key: string; label: string; sel: SelectedSource }>
@@ -354,6 +354,14 @@ export function AutomationsView({
     for (const [g, items] of byGroup) groups.push({ group: g, items });
     return groups;
   }, [eventSources, srcQuery]);
+
+  const sourceGroupLabel = (group: string): string => {
+    if (group === "channels") return t("automations.channelsGroup");
+    if (group === "connected_services" || group === "Servizi collegati") {
+      return t("automations.connectedServicesGroup");
+    }
+    return group;
+  };
 
   const pickSource = (sel: SelectedSource) => {
     setSource(sel);
@@ -449,7 +457,7 @@ export function AutomationsView({
                   className={scheduleMode === "interval" ? "active" : ""}
                   onClick={() => setScheduleMode("interval")}
                 >
-                  Intervallo
+                  {t("automations.interval")}
                 </button>
               </div>
 
@@ -555,7 +563,7 @@ export function AutomationsView({
                         )}
                         {sourceGroups.map((g) => (
                           <div key={g.group} className="auto-src-group">
-                            <div className="auto-src-group-label">{g.group}</div>
+                            <div className="auto-src-group-label">{sourceGroupLabel(g.group)}</div>
                             {g.items.map((it) => (
                               <button
                                 key={it.key}
@@ -600,6 +608,7 @@ export function AutomationsView({
                   <p className="auto-hint">{t("automations.whenTriggerHint", { connectorKey })}</p>
                 </div>
               )}
+              <p className="auto-hint">{t("automations.eventAccessHint")}</p>
             </div>
           )}
 
@@ -624,7 +633,7 @@ export function AutomationsView({
 
           <div className="auto-editor-actions">
             <button className="auto-btn" onClick={reset}>
-              Cancel
+              {t("common.cancel")}
             </button>
             <button className="auto-btn-accent" onClick={save} disabled={!canSave}>
               {editingId ? t("automations.saveChanges") : t("automations.createAutomation")}
@@ -732,7 +741,7 @@ export function AutomationsView({
       {scheduled.length > 0 && (
         <div className="auto-list" aria-label={t("automations.scheduledTasks")}>
           <div className="auto-section-label" style={{ marginTop: 4 }}>
-            Task pianificati ({scheduled.length})
+            {t("automations.scheduledTasks")} ({scheduled.length})
           </div>
           <p className="auto-empty" style={{ marginTop: 0 }}>{t("automations.scheduledHint")}</p>
           {scheduled.map((task) => (
@@ -749,7 +758,7 @@ export function AutomationsView({
               <div className="auto-card-actions">
                 <button
                   className="auto-icon danger"
-                  title="Delete"
+                  title={t("common.delete")}
                   aria-label={t("automations.deleteScheduled")}
                   onClick={() => cancelScheduled(task.task_id)}
                 >

@@ -148,6 +148,8 @@
     "pickSource": "Scegli una sorgente…",
     "searchSources": "Cerca canali, Composio, MCP…",
     "noSources": "Nessuna sorgente",
+    "channelsGroup": "Canali",
+    "connectedServicesGroup": "Servizi collegati",
     "fromLabel": "Da (nome o numero, opzionale)",
     "fromPlaceholder": "es. Mario Rossi",
     "whenTriggerLabel": "Quando deve scattare? (descrivi, opzionale)",
@@ -175,7 +177,8 @@
     "deleteScheduled": "Elimina task pianificato",
     "fromChat": "da chat",
     "suggested": "suggerita",
-    "whenTriggerHint": "Descrivilo a parole: lo traduco io. Il campo tecnico per evitare doppioni è impostato in automatico ({{connectorKey}}). Per setup precisi, chiedimelo in chat."
+    "whenTriggerHint": "Descrivilo a parole: lo traduco io. Il campo tecnico per evitare doppioni e' impostato in automatico ({{connectorKey}}). Per setup precisi, chiedimelo in chat.",
+    "eventAccessHint": "Le regole evento partono solo per contatti/canali autorizzati sul progetto selezionato. Senza accesso, il default e' deny."
   },
   "sidebar": {
     "railAriaLabel": "Navigazione rapida",

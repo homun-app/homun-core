@@ -304,6 +304,13 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   --nocapture`, `cargo test -p local-first-desktop-gateway proactive_task --
   --nocapture`, `cargo test -p local-first-desktop-gateway automation --
   --nocapture`.
+  **Follow-up Automation builder access clarity (2026-06-26):** l'endpoint
+  `/api/automations/event-sources` usa ora gruppi provider-agnostic stabili
+  (`connected_services`) invece di label localizzate come chiavi dati; il builder
+  Automations localizza i gruppi in UI e mostra sempre l'hint Project Access
+  sulle regole evento, cioe' contatti/canali devono essere autorizzati sul
+  progetto e il default resta deny. Gate passati: `npm run test:ui-contract`,
+  `npm run build`.
   Gate finale continuita' canale: `cargo test -p local-first-desktop-gateway -- --nocapture`
   (312 passati, 1 ignorato), `npm run build` da `apps/desktop`,
   `git diff --check`.

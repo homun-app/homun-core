@@ -148,6 +148,8 @@
     "pickSource": "Pick a source…",
     "searchSources": "Search channels, Composio, MCP…",
     "noSources": "No source",
+    "channelsGroup": "Channels",
+    "connectedServicesGroup": "Connected services",
     "fromLabel": "From (name or number, optional)",
     "fromPlaceholder": "e.g. Mario Rossi",
     "whenTriggerLabel": "When should it trigger? (describe, optional)",
@@ -175,7 +177,8 @@
     "deleteScheduled": "Delete scheduled task",
     "fromChat": "from chat",
     "suggested": "suggested",
-    "whenTriggerHint": "Describe it in words: I translate it. The technical field to avoid duplicates is set automatically ({{connectorKey}}). For precise setups, ask me in chat."
+    "whenTriggerHint": "Describe it in words: I translate it. The technical field to avoid duplicates is set automatically ({{connectorKey}}). For precise setups, ask me in chat.",
+    "eventAccessHint": "Event rules run only for contacts/channels authorized on the selected project. Missing access is denied by default."
   },
   "sidebar": {
     "railAriaLabel": "Quick navigation",

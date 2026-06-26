@@ -10518,7 +10518,7 @@ async fn automation_event_sources(State(state): State<AppState>) -> Json<serde_j
         .map(|(service, tools)| {
             let tool = pick_poll_tool(&tools);
             serde_json::json!({
-                "group": "Servizi collegati",
+                "group": "connected_services",
                 "tool": tool,
                 "label": service,
                 "key_field": guess_key_field(&tool),
