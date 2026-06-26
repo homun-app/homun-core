@@ -638,12 +638,14 @@ function AccountPane({
   const [accountEmail, setAccountEmail] = useSetting<string>("email", "");
   const [computerMsg, setComputerMsg] = useState<string | null>(null);
   const [profileImage, setProfileImage] = useSetting<string>("profileImage", "");
+  const [profileImageError, setProfileImageError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const onProfileImageSelected = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.target.value = ""; // allow re-picking the same file
     if (!file) return;
+    setProfileImageError(null);
     const reader = new FileReader();
     reader.onload = () => {
       const img = new Image();
@@ -661,8 +663,10 @@ function AccountPane({
         ctx.drawImage(img, (size - w) / 2, (size - h) / 2, w, h);
         setProfileImage(canvas.toDataURL("image/jpeg", 0.85));
       };
+      img.onerror = () => setProfileImageError(t("settings.profileImageDecodeError"));
       img.src = reader.result as string;
     };
+    reader.onerror = () => setProfileImageError(t("settings.profileImageReadError"));
     reader.readAsDataURL(file);
   };
 
@@ -676,8 +680,15 @@ function AccountPane({
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             {profileImage && (
-              <button type="button" className="set-btn" onClick={() => setProfileImage("")}>
-                Remove
+              <button
+                type="button"
+                className="set-btn"
+                onClick={() => {
+                  setProfileImage("");
+                  setProfileImageError(null);
+                }}
+              >
+                {t("settings.profileImageRemove")}
               </button>
             )}
             <button
@@ -697,6 +708,13 @@ function AccountPane({
                 <span className="set-profile-avatar" />
               )}
             </button>
+            <button
+              type="button"
+              className="set-btn"
+              onClick={() => fileInputRef.current?.click()}
+            >
+              {t("settings.profileImageUpload")}
+            </button>
             <input
               ref={fileInputRef}
               type="file"
@@ -706,6 +724,12 @@ function AccountPane({
             />
           </div>
         </div>
+        {profileImageError && (
+          <div className="set-inline-warning" role="status">
+            <AlertTriangle size={14} />
+            <span>{profileImageError}</span>
+          </div>
+        )}
         <div className="set-trow">
           <div>
             <div className="tt">{t("settings.fullName")}</div>

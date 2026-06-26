@@ -260,6 +260,13 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   Gate finale: `cargo test -p local-first-desktop-gateway -- --nocapture`
   (312 passati, 1 ignorato), `npm run build` da `apps/desktop`,
   `git diff --check`.
+  **Hotfix Account profile photo (2026-06-26):** il caricamento immagine profilo
+  non e' piu' nascosto solo dietro l'avatar vuoto: Account espone un pulsante
+  `Upload photo` esplicito, resetta gli errori al nuovo tentativo e mostra un
+  warning theme-aware se il file non e' leggibile o se Chromium non decodifica
+  il formato (es. HEIC), indicando PNG/JPEG/WebP. Gate:
+  `npm run test:ui-contract`, `npm run build` da `apps/desktop`,
+  `git diff --check`.
   **WS7 provider-agnostic template sourcing locale/verde (2026-06-26):**
   Presentations separa ora il catalogo operativo (`Homun` + template locali
   importati) da una directory di fonti esterne provider-agnostica
