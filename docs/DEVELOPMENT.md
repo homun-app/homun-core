@@ -304,6 +304,13 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   --nocapture`, `cargo test -p local-first-desktop-gateway proactive_task --
   --nocapture`, `cargo test -p local-first-desktop-gateway automation --
   --nocapture`.
+  **Follow-up Evented run history scope (2026-06-26):** run history,
+  `last_fired_at` e suggestion di failure non cercano piu' l'automazione nello
+  scope gateway globale, ma nello scope reale del task (`task.user_id` /
+  `task.workspace_id`). Questo chiude una perdita silenziosa per automazioni
+  evento create su progetti. Test mirato:
+  `cargo test -p local-first-desktop-gateway
+  automation_run_updates_rule_in_task_scope_not_gateway_scope -- --nocapture`.
   **Follow-up Automation builder access clarity (2026-06-26):** l'endpoint
   `/api/automations/event-sources` usa ora gruppi provider-agnostic stabili
   (`connected_services`) invece di label localizzate come chiavi dati; il builder

@@ -468,9 +468,12 @@ primo percorso locale verde e WS5 è chiusa localmente/gate:
     provenance. Follow-up runtime: channel events now materialize a normalized
     event envelope into the task input and `TaskStore` keeps per-rule event
     idempotency (`automation_id`, `event_key`) so repeated delivery cannot fire
-    the same rule twice. Follow-up UI/API: event-source groups are now stable
-    data keys (`connected_services`) and the Automations builder localizes them
-    while surfacing the Project Access default-deny guard on event rules.
+    the same rule twice. Follow-up runtime: run history, `last_fired_at` and
+    automation-failure suggestions resolve the rule in the task's
+    user/workspace scope instead of the gateway default scope. Follow-up UI/API:
+    event-source groups are now stable data keys (`connected_services`) and the
+    Automations builder localizes them while surfacing the Project Access
+    default-deny guard on event rules.
     Spec: `docs/superpowers/specs/2026-06-26-evented-automations-design.md`.
     Slice consigliata: prima Project Access Surface, poi `ChannelMessage`
     WhatsApp/Telegram, poi `ConnectorPoll` generico per Gmail/Composio/MCP,

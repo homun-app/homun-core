@@ -996,6 +996,12 @@ ragionato il contratto degli strumenti `make_*` creati dall'harness. ADR 0011
     local-first-desktop-gateway channel_message_event -- --nocapture`,
     `cargo test -p local-first-desktop-gateway proactive_task -- --nocapture`,
     `cargo test -p local-first-desktop-gateway automation -- --nocapture`.
+  - 🟡 **Run history nello scope task (2026-06-26, locale/verde mirato):**
+    completamento/failure dei task automation aggiorna `last_fired_at` cercando
+    la regola nello stesso `user_id`/`workspace_id` del task, non nello scope
+    gateway. Gate: `cargo test -p local-first-desktop-gateway
+    automation_run_updates_rule_in_task_scope_not_gateway_scope --
+    --nocapture`.
   - 🟡 **Builder/UI access clarity (2026-06-26, locale/verde frontend):**
     `/api/automations/event-sources` espone gruppi dati stabili
     (`connected_services`) e non label localizzate; la UI localizza

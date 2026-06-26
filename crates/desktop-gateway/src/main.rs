@@ -29518,21 +29518,32 @@ fn record_automation_run_for_task(state: &AppState, task: &TaskRecord, ok: bool,
         return;
     };
     let now = OffsetDateTime::now_utc();
+    if let Ok(store) = lock_task_store(state) {
+        record_automation_run_in_store(&store, &automation_id, task, ok, detail, now);
+    }
+}
+
+fn record_automation_run_in_store(
+    store: &TaskStore,
+    automation_id: &str,
+    task: &TaskRecord,
+    ok: bool,
+    detail: &str,
+    now: OffsetDateTime,
+) {
     // "Late" = ran well after its scheduled time — a catch-up after the app was off.
     let late = task
         .not_before
         .map(|nb| (now - nb).whole_seconds() > 120)
         .unwrap_or(false);
     let detail_opt = (!detail.is_empty()).then_some(detail);
-    if let Ok(store) = lock_task_store(state) {
-        let _ = store.record_automation_run(&automation_id, now, ok, late, detail_opt);
-        if let Ok(Some(mut automation)) =
-            store.get_automation(&automation_id, &gateway_user_id(), &gateway_workspace_id())
-        {
-            automation.last_fired_at = Some(now);
-            automation.updated_at = now;
-            let _ = store.upsert_automation(&automation);
-        }
+    let _ = store.record_automation_run(automation_id, now, ok, late, detail_opt);
+    if let Ok(Some(mut automation)) =
+        store.get_automation(automation_id, &task.user_id, &task.workspace_id)
+    {
+        automation.last_fired_at = Some(now);
+        automation.updated_at = now;
+        let _ = store.upsert_automation(&automation);
     }
 }
 
@@ -29549,7 +29560,7 @@ fn notify_automation_failure(state: &AppState, task: &TaskRecord, reason: &str) 
     };
     let (title, scope) = match lock_task_store(state).ok().and_then(|store| {
         store
-            .get_automation(&automation_id, &gateway_user_id(), &gateway_workspace_id())
+            .get_automation(&automation_id, &task.user_id, &task.workspace_id)
             .ok()
             .flatten()
     }) {
@@ -51002,6 +51013,85 @@ data: [DONE]\n";
         assert_eq!(plan.channel.as_deref(), Some("whatsapp"));
         assert_eq!(plan.title, "WhatsApp · Elena");
         assert!(plan.scheduled_root.is_none());
+    }
+
+    #[test]
+    fn automation_run_updates_rule_in_task_scope_not_gateway_scope() {
+        let store = TaskStore::open_in_memory().unwrap();
+        let now = time::OffsetDateTime::now_utc();
+        let mut project_automation = Automation {
+            id: "auto_channel".to_string(),
+            user_id: UserId::new("user_auto"),
+            workspace_id: WorkspaceId::new("workspace_project"),
+            title: "Summarize Elena".to_string(),
+            trigger: AutomationTrigger::Event {
+                event: local_first_task_runtime::EventTrigger::ChannelMessage {
+                    channel: Some("whatsapp".to_string()),
+                    from: Some("Elena".to_string()),
+                },
+            },
+            prompt: "Summarize the inbound WhatsApp message".to_string(),
+            approval: ApprovalPolicy::Confirm,
+            enabled: true,
+            source: AutomationSource::Manual,
+            task_id: None,
+            created_at: now,
+            updated_at: now,
+            last_fired_at: None,
+            state: None,
+        };
+        let mut gateway_automation = project_automation.clone();
+        gateway_automation.user_id = super::gateway_user_id();
+        gateway_automation.workspace_id = super::gateway_workspace_id();
+        gateway_automation.title = "Gateway shadow".to_string();
+        store.upsert_automation(&project_automation).unwrap();
+        store.upsert_automation(&gateway_automation).unwrap();
+
+        let task = TaskRecord::new(
+            "autorun_event",
+            project_automation.user_id.clone(),
+            project_automation.workspace_id.clone(),
+            "proactive_prompt",
+            &project_automation.prompt,
+            serde_json::json!({
+                "automation_id": project_automation.id,
+                "source": "channel_event",
+            }),
+        );
+        super::record_automation_run_in_store(
+            &store,
+            "auto_channel",
+            &task,
+            true,
+            "",
+            now + time::Duration::seconds(3),
+        );
+
+        project_automation = store
+            .get_automation(
+                "auto_channel",
+                &UserId::new("user_auto"),
+                &WorkspaceId::new("workspace_project"),
+            )
+            .unwrap()
+            .expect("project automation");
+        gateway_automation = store
+            .get_automation(
+                "auto_channel",
+                &super::gateway_user_id(),
+                &super::gateway_workspace_id(),
+            )
+            .unwrap()
+            .expect("gateway automation");
+
+        assert!(project_automation.last_fired_at.is_some());
+        assert!(gateway_automation.last_fired_at.is_none());
+        assert_eq!(
+            store.recent_automation_runs("auto_channel", 10)
+                .unwrap()
+                .len(),
+            1
+        );
     }
 
     #[test]
