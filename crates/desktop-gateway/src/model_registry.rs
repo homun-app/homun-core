@@ -532,6 +532,11 @@ pub struct ResolvedRole {
     pub kind: ProviderKind,
     pub base_url: String,
     pub auto: bool,
+    /// Capability tier of the resolved model. Drives the adaptive scaffolding
+    /// floor (ADR 0018): the harness keeps everything AROUND the loop uniform but
+    /// scales the IN-loop constraint inverse to this tier. Selection is unchanged;
+    /// this just carries the tier the picker already knew downstream.
+    pub tier: ModelTier,
 }
 
 impl ProviderRegistry {
@@ -620,6 +625,36 @@ impl ProviderRegistry {
             .then(|| (provider.id.clone(), model.to_string()))
     }
 
+    /// The capability tier of a (provider, model): the catalog profile if present,
+    /// else inferred from the model id. Unknown → Balanced (safe middle). Used to
+    /// stamp `ResolvedRole.tier` so the adaptive floor (ADR 0018) can read it.
+    pub fn tier_for(&self, provider_id: &str, model_id: &str) -> ModelTier {
+        if let Some(provider) = self.get(provider_id)
+            && let Some(entry) = provider.models.iter().find(|m| m.id == model_id)
+        {
+            if let Some(profile) = entry.profile.as_ref() {
+                return profile.tier;
+            }
+            return infer_profile(&model_id.to_ascii_lowercase(), &entry.modality).tier;
+        }
+        infer_profile(&model_id.to_ascii_lowercase(), "text").tier
+    }
+
+    /// Tier of a model id by searching EVERY provider's catalog (when the caller
+    /// has the model string but not its provider — e.g. the chat turn), falling
+    /// back to inference from the id. Unknown → Balanced.
+    pub fn tier_for_model(&self, model_id: &str) -> ModelTier {
+        for provider in &self.providers {
+            if let Some(entry) = provider.models.iter().find(|m| m.id == model_id) {
+                if let Some(profile) = entry.profile.as_ref() {
+                    return profile.tier;
+                }
+                return infer_profile(&model_id.to_ascii_lowercase(), &entry.modality).tier;
+            }
+        }
+        infer_profile(&model_id.to_ascii_lowercase(), "text").tier
+    }
+
     /// Resolves the model for a role: an explicit (valid) manual binding wins,
     /// otherwise the capability auto-matcher picks the best available model.
     pub fn resolve_role(&self, role: &str) -> Option<ResolvedRole> {
@@ -638,6 +673,7 @@ impl ProviderRegistry {
                 kind: provider.kind,
                 base_url: provider.base_url.clone(),
                 auto: false,
+                tier: self.tier_for(&provider.id, model),
             });
         }
         self.auto_role(role)
@@ -703,6 +739,11 @@ impl ProviderRegistry {
                 .then((active == Some(pb.id.as_str())).cmp(&(active == Some(pa.id.as_str()))))
         });
         if let Some((provider, model)) = candidates.first() {
+            let tier = model
+                .profile
+                .as_ref()
+                .map(|p| p.tier)
+                .unwrap_or_else(|| infer_profile(&model.id.to_ascii_lowercase(), &model.modality).tier);
             return Some(ResolvedRole {
                 role: role.to_string(),
                 provider_id: provider.id.clone(),
@@ -710,12 +751,14 @@ impl ProviderRegistry {
                 kind: provider.kind,
                 base_url: provider.base_url.clone(),
                 auto: true,
+                tier,
             });
         }
         // No catalog yet: use the active provider's current model so roles still
         // resolve before "Aggiorna modelli" has run.
         let provider = self.active()?;
         let model = provider.effective_model()?;
+        let tier = self.tier_for(&provider.id, &model);
         Some(ResolvedRole {
             role: role.to_string(),
             provider_id: provider.id.clone(),
@@ -723,6 +766,7 @@ impl ProviderRegistry {
             kind: provider.kind,
             base_url: provider.base_url.clone(),
             auto: true,
+            tier,
         })
     }
 

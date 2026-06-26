@@ -1266,6 +1266,65 @@ type ProviderPreset = (typeof PROVIDER_PRESETS)[number];
 /// LLM concurrency control: how many inference requests the ResourceGovernor lets
 /// run in parallel. Auto follows locality (loopback 1, cloud 4); the user can force
 /// a value — useful for Ollama on a big GPU, or to cap cloud spend.
+// Adaptive scaffolding floor (ADR 0018): persisted Off/On toggle. The harness
+// keeps the loop uniform for all models but, when ON, scales the in-loop
+// constraint to model capability (weak → more scaffolding, capable → freer). The
+// "shadow" mode (compute + log without acting) is reachable via the
+// HOMUN_ADAPTIVE_FLOOR env var only; the toggle here controls the persisted setting.
+function AdaptiveFloorBlock() {
+  const { t } = useTranslation();
+  const [mode, setMode] = useState<string>("off");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const settings = await coreBridge.runtimeSettings();
+        if (!cancelled) setMode(settings.adaptive_floor || "off");
+      } catch {
+        /* leave off */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const change = async (next: boolean) => {
+    const value = next ? "on" : "off";
+    setMode(value);
+    setBusy(true);
+    try {
+      const saved = await coreBridge.setRuntimeSettings({ adaptive_floor: value });
+      setMode(saved.adaptive_floor || "off");
+    } catch {
+      /* a later read corrects the optimistic state */
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="set-trow" aria-busy={busy}>
+      <div>
+        <div className="tt">
+          {t("settings.adaptiveFloorTitle")}
+          <span className="set-badge muted" style={{ marginLeft: 8 }}>
+            {t("settings.experimental")}
+          </span>
+        </div>
+        <div className="td">
+          {mode === "shadow"
+            ? t("settings.adaptiveFloorShadow")
+            : t("settings.adaptiveFloorDesc")}
+        </div>
+      </div>
+      <Toggle on={mode !== "off"} onChange={(next) => void change(next)} />
+    </div>
+  );
+}
+
 function ConcurrencyBlock() {
   const { t } = useTranslation();
   const [view, setView] = useState<LlmConcurrencyView | null>(null);
@@ -1613,6 +1672,7 @@ function RuntimePane({
             })
           )}
           <ConcurrencyBlock />
+          <AdaptiveFloorBlock />
         </>
       )}
 

@@ -5,6 +5,7 @@ mod browser_safety;
 mod chat_store;
 // Multi-provider inference registry (Phase 1 of per-role model routing).
 mod model_registry;
+mod scaffold;
 // Local scanner for Anthropic "Agent Skills" (SKILL.md folders).
 mod skills;
 // Skill catalog (ClawHub/OpenClaw) — cached + searchable, ported from Homun.
@@ -723,6 +724,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             get(runtime_model).post(set_runtime_model),
         )
         .route("/api/runtime/models", get(runtime_models))
+        .route(
+            "/api/runtime/settings",
+            get(get_runtime_settings).post(set_runtime_settings),
+        )
         .route(
             "/api/runtime/llm-concurrency",
             get(get_llm_concurrency).post(set_llm_concurrency),
@@ -8367,6 +8372,28 @@ fn capability_route_trace_line(decision: &CapabilityRouteDecision) -> Option<Str
     }
 }
 
+/// Adaptive floor (ADR 0018, Fase 2): relax a Workflow route to AgentLoop for a
+/// CAPABLE model so it is not forced into the one-shot workflow box. The workflow
+/// tool stays OFFERED elsewhere; this only drops the pruning + "exactly once"
+/// binding + blocked-tool guard. Weak/Balanced or `floor_on == false` are
+/// unchanged; AtomicTool is never relaxed. Pure so it can be unit-tested.
+fn relax_route_for_tier(
+    route: CapabilityRouteDecision,
+    bias: scaffold::WorkflowBias,
+    floor_on: bool,
+) -> CapabilityRouteDecision {
+    if floor_on
+        && bias == scaffold::WorkflowBias::AllowAgentic
+        && matches!(route, CapabilityRouteDecision::Workflow { .. })
+    {
+        return CapabilityRouteDecision::AgentLoop {
+            reason: "Adaptive floor: capable model kept on the agent loop with the workflow tool still available."
+                .to_string(),
+        };
+    }
+    route
+}
+
 fn prune_tools_for_workflow_route(
     tools: &mut Vec<serde_json::Value>,
     route: &WorkflowRouteDecision,
@@ -13592,6 +13619,29 @@ fn step_verification_enabled() -> bool {
     )
 }
 
+/// Effective adaptive-floor mode (ADR 0018): `off` | `shadow` | `on`. The
+/// `HOMUN_ADAPTIVE_FLOOR` env var OVERRIDES the persisted user setting (for
+/// dev/testing); otherwise the setting from `runtime-settings.json` applies;
+/// default `off` so behaviour is unchanged out of the box. `on` = the tier
+/// modulates the in-loop knobs; `shadow` = compute + log the decision without
+/// acting (A/B on the trace before flipping on). Resolved ONCE per turn (not per
+/// call) by the chat path to keep the file read out of the hot loop.
+fn adaptive_floor_mode() -> &'static str {
+    fn normalize(raw: &str) -> &'static str {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "on" | "1" | "true" => "on",
+            "shadow" => "shadow",
+            _ => "off",
+        }
+    }
+    if let Ok(env) = std::env::var("HOMUN_ADAPTIVE_FLOOR")
+        && !env.trim().is_empty()
+    {
+        return normalize(&env);
+    }
+    normalize(&load_runtime_settings().adaptive_floor)
+}
+
 fn orchestration_completion_judge_schema() -> serde_json::Value {
     serde_json::json!({
         "type": "object",
@@ -17668,6 +17718,28 @@ async fn stream_chat_via_openai(
     mut model: String,
     mut api_key: Option<String>,
 ) -> Result<Response, GatewayError> {
+    // Adaptive scaffolding floor (ADR 0018): resolve the turn model's capability
+    // tier ONCE, so the in-loop knobs (verify depth now; format/workflow-bias in
+    // later phases) can scale with it. Behind HOMUN_ADAPTIVE_FLOOR: `off` (default)
+    // keeps the old uniform behaviour, `shadow` logs the decision without acting,
+    // `on` lets it modulate. The Pavimento (memory, context, tool envelope, stop)
+    // stays uniform regardless.
+    let turn_tier = load_provider_registry().tier_for_model(&model);
+    let turn_scaffold = scaffold::scaffold_for(turn_tier);
+    // Resolve the floor mode ONCE per turn (env override > user setting > off).
+    let floor_mode = adaptive_floor_mode();
+    let floor_acting = floor_mode == "on";
+    let floor_observing = floor_mode != "off";
+    if floor_observing {
+        eprintln!(
+            "adaptive-floor: model={model} tier={} verify={:?} workflow_bias={:?} slot={:?} format={:?} acting={floor_acting}",
+            turn_tier.as_str(),
+            turn_scaffold.verify_depth,
+            turn_scaffold.workflow_bias,
+            turn_scaffold.slot,
+            turn_scaffold.format,
+        );
+    }
     // Scope MEMORY to THIS conversation's project (profile injection, recall, per-file
     // recall, extractor). Uses a dedicated memory scope — NOT the global active
     // workspace — so Composio's entity and the user's selected workspace are untouched.
@@ -18228,7 +18300,22 @@ in-progress plan (some steps done, others not), CONTINUE it — re-emit the plan
 keeping the completed steps as done, and proceed from the first not-done step; do NOT restart \
 from scratch or re-propose."
     );
-    let capability_route = route_capability(&request.prompt);
+    // Adaptive floor (ADR 0018), Fase 2: for a CAPABLE model, relax a Workflow
+    // route to AgentLoop (the workflow tool stays offered; the model just isn't
+    // forced into it). Weak/Balanced and flag-off keep the forced behaviour.
+    let routed = route_capability(&request.prompt);
+    let was_workflow = matches!(routed, CapabilityRouteDecision::Workflow { .. });
+    let capability_route =
+        relax_route_for_tier(routed, turn_scaffold.workflow_bias, floor_acting);
+    if floor_observing
+        && was_workflow
+        && matches!(capability_route, CapabilityRouteDecision::AgentLoop { .. })
+    {
+        eprintln!(
+            "adaptive-floor: capable tier ({}) → workflow route relaxed to agent loop (workflow tool still offered)",
+            turn_tier.as_str()
+        );
+    }
     let workflow_route = workflow_route_from_capability(&capability_route);
     let system = match capability_router_instruction_for_decision(&capability_route) {
         Some(instruction) => format!("{system}\n\n{instruction}"),
@@ -21303,7 +21390,20 @@ an uncertain date.",
                         } else {
                             // F2 gate: verify each newly-claimed-done step before it counts
                             // (using the evidence gathered since the last completed step).
-                            let verify = step_verification_enabled();
+                            // Adaptive floor (ADR 0018): when ON, the model tier modulates
+                            // depth — capable models skip the extra verify round on steps
+                            // with NO external action (nothing to verify against, low risk);
+                            // weak models (Always) still verify everything. OFF → unchanged.
+                            let verify = step_verification_enabled()
+                                && if floor_acting {
+                                    match turn_scaffold.verify_depth {
+                                        scaffold::VerifyDepth::Always => true,
+                                        scaffold::VerifyDepth::OnRisk => !step_evidence.is_empty(),
+                                        scaffold::VerifyDepth::Off => false,
+                                    }
+                                } else {
+                                    true
+                                };
                             let mut rejection: Option<String> = None;
                             for i in claims {
                                 let title = plan_step_title(&plan_steps[i]).to_string();
@@ -25238,6 +25338,74 @@ async fn set_channel_settings(
     save_channel_settings(&settings).map_err(|message| GatewayError {
         status: StatusCode::INTERNAL_SERVER_ERROR,
         code: "channel_settings_save",
+        message,
+    })?;
+    Ok(Json(settings))
+}
+
+/// User-editable runtime/behaviour settings persisted in the data dir. The chat
+/// path reads these live (the adaptive floor is resolved from here unless the
+/// `HOMUN_ADAPTIVE_FLOOR` env var overrides). One small JSON, separate from the
+/// channel settings.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct RuntimeSettings {
+    /// Adaptive scaffolding floor (ADR 0018): `off` (default) | `shadow` | `on`.
+    #[serde(default = "default_adaptive_floor")]
+    adaptive_floor: String,
+}
+
+fn default_adaptive_floor() -> String {
+    "off".to_string()
+}
+
+impl Default for RuntimeSettings {
+    fn default() -> Self {
+        Self {
+            adaptive_floor: default_adaptive_floor(),
+        }
+    }
+}
+
+fn runtime_settings_path() -> Option<PathBuf> {
+    gateway_data_dir()
+        .ok()
+        .map(|dir| dir.join("runtime-settings.json"))
+}
+
+fn load_runtime_settings() -> RuntimeSettings {
+    runtime_settings_path()
+        .and_then(|p| fs::read_to_string(p).ok())
+        .and_then(|raw| serde_json::from_str(&raw).ok())
+        .unwrap_or_default()
+}
+
+fn save_runtime_settings(settings: &RuntimeSettings) -> Result<(), String> {
+    let path = runtime_settings_path().ok_or_else(|| "data dir unavailable".to_string())?;
+    let json = serde_json::to_string_pretty(settings).map_err(|e| e.to_string())?;
+    fs::write(path, json).map_err(|e| e.to_string())
+}
+
+fn normalize_adaptive_floor(raw: &str) -> String {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "on" | "1" | "true" => "on",
+        "shadow" => "shadow",
+        _ => "off",
+    }
+    .to_string()
+}
+
+async fn get_runtime_settings() -> Json<RuntimeSettings> {
+    Json(load_runtime_settings())
+}
+
+async fn set_runtime_settings(
+    Json(mut settings): Json<RuntimeSettings>,
+) -> Result<Json<RuntimeSettings>, GatewayError> {
+    // Normalize so the chat path never sees an unknown mode.
+    settings.adaptive_floor = normalize_adaptive_floor(&settings.adaptive_floor);
+    save_runtime_settings(&settings).map_err(|message| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "runtime_settings_save",
         message,
     })?;
     Ok(Json(settings))
@@ -36434,7 +36602,7 @@ fn resolve_role_for_task(goal: &str, role: &str) -> Option<ResolvedRole> {
             Ok(response) if response.valid => {
                 let chosen = response.json.get("model_id").and_then(Value::as_str);
                 if let Some(chosen) = chosen
-                    && let Some((pid, mid, _, _, kind, base_url)) =
+                    && let Some((pid, mid, tier_str, _, kind, base_url)) =
                         candidates.iter().find(|c| c.1 == chosen)
                 {
                     (
@@ -36445,6 +36613,10 @@ fn resolve_role_for_task(goal: &str, role: &str) -> Option<ResolvedRole> {
                             kind: *kind,
                             base_url: base_url.clone(),
                             auto: true,
+                            // The candidate carries the tier as a string (from the
+                            // catalog profile); recover it, unknown → Balanced.
+                            tier: model_registry::ModelTier::parse(tier_str)
+                                .unwrap_or(model_registry::ModelTier::Balanced),
                         }),
                         "semantic",
                     )
@@ -47304,6 +47476,51 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             })
             .collect();
         assert_eq!(names, vec!["make_document"]);
+    }
+
+    #[test]
+    fn adaptive_floor_relaxes_workflow_route_only_for_capable_tier() {
+        use super::scaffold::WorkflowBias;
+        let deck = super::route_capability("Crea una presentazione pitch per Homun");
+        assert!(
+            matches!(deck, super::CapabilityRouteDecision::Workflow { .. }),
+            "precondition: a deck request routes to a workflow"
+        );
+
+        // Capable + floor ON → relaxed to the agent loop.
+        let relaxed =
+            super::relax_route_for_tier(deck.clone(), WorkflowBias::AllowAgentic, true);
+        assert!(matches!(
+            relaxed,
+            super::CapabilityRouteDecision::AgentLoop { .. }
+        ));
+
+        // Capable but floor OFF → unchanged (still forced).
+        assert!(matches!(
+            super::relax_route_for_tier(deck.clone(), WorkflowBias::AllowAgentic, false),
+            super::CapabilityRouteDecision::Workflow { .. }
+        ));
+
+        // Weak/Balanced tiers stay forced even with the floor ON.
+        assert!(matches!(
+            super::relax_route_for_tier(deck.clone(), WorkflowBias::ForceWorkflow, true),
+            super::CapabilityRouteDecision::Workflow { .. }
+        ));
+        assert!(matches!(
+            super::relax_route_for_tier(deck, WorkflowBias::Prefer, true),
+            super::CapabilityRouteDecision::Workflow { .. }
+        ));
+
+        // AtomicTool (PDF) is never relaxed — it's the right tool regardless of tier.
+        let pdf = super::route_capability("estrai testo da questo PDF");
+        assert!(matches!(
+            pdf,
+            super::CapabilityRouteDecision::AtomicTool { .. }
+        ));
+        assert!(matches!(
+            super::relax_route_for_tier(pdf, WorkflowBias::AllowAgentic, true),
+            super::CapabilityRouteDecision::AtomicTool { .. }
+        ));
     }
 
     #[test]

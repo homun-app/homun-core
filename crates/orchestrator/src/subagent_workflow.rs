@@ -1,6 +1,6 @@
 use crate::{
     EnqueuedSubagentTaskSummary, OrchestratorError, OrchestratorRequest, OrchestratorResult,
-    PlanStep, StepExecutionPolicy,
+    PlanStep, PlanStepKind, StepExecutionPolicy,
     execution::{task_id_for_step, task_user_id, task_workspace_id},
 };
 use local_first_capabilities::ActionClass;
@@ -8,7 +8,7 @@ use local_first_subagents::{
     AllowedAction, PermissionEnvelope, SubagentTask, TaskBudgets, WorkflowTaskSpec,
 };
 use local_first_task_runtime::{TaskId, TaskStore, WorkflowId};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 pub(crate) fn workflow_id_for_request(request_id: &str) -> WorkflowId {
     WorkflowId::new(format!("orchestrator_{}", sanitize_id(request_id)))
@@ -149,6 +149,87 @@ fn policy_allows_subagent_action(policy_actions: &[ActionClass], action: &Allowe
     }
 }
 
+/// Single-threaded writes (ADR 0018 Pilastro 3; Cognition "Multi-Agents: What's
+/// Actually Working"; caposaldo #1). A subagent limited to Read/Draft produces a
+/// PROPOSAL with no external side-effect → safe to fan out in parallel with
+/// siblings (intelligence gathering). One that can execute an external write
+/// (`WriteWithConfirmation` / `ApprovedAutomation`) makes a world-state decision →
+/// it must be single-threaded. NB: Draft is intentionally parallel-safe — the
+/// canonical `Planner→Risk→Memory‖Tool→Review` workflow fans out Draft proposals
+/// that ReviewAgent reconciles before any execution.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SubagentWriteMode {
+    ReadGather,
+    WriteDecide,
+}
+
+pub(crate) fn subagent_write_mode(actions: &[AllowedAction]) -> SubagentWriteMode {
+    let writes = actions.iter().any(|action| {
+        matches!(
+            action,
+            AllowedAction::WriteWithConfirmation | AllowedAction::ApprovedAutomation
+        )
+    });
+    if writes {
+        SubagentWriteMode::WriteDecide
+    } else {
+        SubagentWriteMode::ReadGather
+    }
+}
+
+/// Enforce single-threaded writes across a plan's subagent steps: no two
+/// `WriteDecide` subagent steps may be able to run in parallel — one must
+/// transitively depend on the other. `ReadGather` steps fan out freely. Relies on
+/// the plan being acyclic with deps pointing to earlier steps (already validated
+/// by `validate_plan`). Pure so it is unit-tested.
+pub(crate) fn validate_single_threaded_writes(steps: &[PlanStep]) -> OrchestratorResult<()> {
+    let writers: Vec<&PlanStep> = steps
+        .iter()
+        .filter(|step| {
+            step.kind == PlanStepKind::SubagentTask
+                && subagent_write_mode(&step.allowed_actions) == SubagentWriteMode::WriteDecide
+        })
+        .collect();
+    if writers.len() < 2 {
+        return Ok(());
+    }
+    let closure = transitive_dependencies(steps);
+    for (index, first) in writers.iter().enumerate() {
+        for second in &writers[index + 1..] {
+            let first_after_second = closure
+                .get(&first.step_id)
+                .is_some_and(|deps| deps.contains(&second.step_id));
+            let second_after_first = closure
+                .get(&second.step_id)
+                .is_some_and(|deps| deps.contains(&first.step_id));
+            if !first_after_second && !second_after_first {
+                return Err(OrchestratorError::Planner(format!(
+                    "parallel_subagent_writes:{}:{}",
+                    first.step_id, second.step_id
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// `step_id` → the set of all step_ids it transitively depends on. A single
+/// forward pass suffices because deps point to earlier steps (validated upstream).
+fn transitive_dependencies(steps: &[PlanStep]) -> BTreeMap<String, BTreeSet<String>> {
+    let mut closure: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for step in steps {
+        let mut deps: BTreeSet<String> = BTreeSet::new();
+        for direct in &step.depends_on {
+            deps.insert(direct.clone());
+            if let Some(inherited) = closure.get(direct) {
+                deps.extend(inherited.iter().cloned());
+            }
+        }
+        closure.insert(step.step_id.clone(), deps);
+    }
+    closure
+}
+
 fn sanitize_id(value: &str) -> String {
     value
         .chars()
@@ -160,4 +241,92 @@ fn sanitize_id(value: &str) -> String {
             }
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn subagent_step(id: &str, deps: &[&str], actions: &[&str]) -> PlanStep {
+        serde_json::from_value(serde_json::json!({
+            "step_id": id,
+            "kind": "subagent_task",
+            "depends_on": deps,
+            "execution_policy": "durable_task",
+            "risk_level": "low",
+            "expected_duration_seconds": 10,
+            "agent_id": "ToolAgent",
+            "goal": "g",
+            "contract": "c",
+            "allowed_actions": actions,
+        }))
+        .expect("valid plan step")
+    }
+
+    #[test]
+    fn write_mode_classifies_only_external_writes_as_decide() {
+        assert_eq!(
+            subagent_write_mode(&[AllowedAction::Read, AllowedAction::Draft]),
+            SubagentWriteMode::ReadGather
+        );
+        assert_eq!(subagent_write_mode(&[]), SubagentWriteMode::ReadGather);
+        assert_eq!(
+            subagent_write_mode(&[AllowedAction::WriteWithConfirmation]),
+            SubagentWriteMode::WriteDecide
+        );
+        assert_eq!(
+            subagent_write_mode(&[AllowedAction::ApprovedAutomation]),
+            SubagentWriteMode::WriteDecide
+        );
+    }
+
+    #[test]
+    fn read_draft_gatherers_may_fan_out() {
+        // The canonical Memory‖Tool fan-out: Draft proposals in parallel are fine.
+        let steps = vec![
+            subagent_step("s1", &[], &["read", "draft"]),
+            subagent_step("s2", &[], &["read", "draft"]),
+        ];
+        assert!(validate_single_threaded_writes(&steps).is_ok());
+    }
+
+    #[test]
+    fn parallel_external_writers_are_rejected() {
+        let steps = vec![
+            subagent_step("w1", &[], &["write_with_confirmation"]),
+            subagent_step("w2", &[], &["approved_automation"]),
+        ];
+        let err = validate_single_threaded_writes(&steps).unwrap_err();
+        assert!(format!("{err:?}").contains("parallel_subagent_writes"));
+    }
+
+    #[test]
+    fn directly_serialized_writers_are_allowed() {
+        let steps = vec![
+            subagent_step("w1", &[], &["write_with_confirmation"]),
+            subagent_step("w2", &["w1"], &["write_with_confirmation"]),
+        ];
+        assert!(validate_single_threaded_writes(&steps).is_ok());
+    }
+
+    #[test]
+    fn transitively_serialized_writers_are_allowed() {
+        // w3 → w2 → w1: w3 transitively depends on w1, so they never run together.
+        let steps = vec![
+            subagent_step("w1", &[], &["write_with_confirmation"]),
+            subagent_step("w2", &["w1"], &["read"]),
+            subagent_step("w3", &["w2"], &["write_with_confirmation"]),
+        ];
+        assert!(validate_single_threaded_writes(&steps).is_ok());
+    }
+
+    #[test]
+    fn one_writer_among_gatherers_is_fine() {
+        let steps = vec![
+            subagent_step("g1", &[], &["read"]),
+            subagent_step("g2", &[], &["read", "draft"]),
+            subagent_step("w1", &[], &["write_with_confirmation"]),
+        ];
+        assert!(validate_single_threaded_writes(&steps).is_ok());
+    }
 }

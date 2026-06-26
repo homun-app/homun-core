@@ -8,7 +8,9 @@ use crate::{
         task_workspace_id, tool_for_step, tool_name_for_step,
     },
     planner::{planner_prompt, planner_schema},
-    subagent_workflow::{enqueue_subagent_spec, subagent_workflow_spec},
+    subagent_workflow::{
+        enqueue_subagent_spec, subagent_workflow_spec, validate_single_threaded_writes,
+    },
 };
 use local_first_capabilities::{
     CapabilityCall, CapabilityCallResult, CapabilityFacade, CapabilityTool, PolicyContext,
@@ -403,6 +405,9 @@ impl<R: JsonRuntime, M: MemoryContextProvider> OrchestratorBrain<R, M> {
                 }
             }
         }
+        // ADR 0018 Pilastro 3: writes stay single-threaded — no two write-capable
+        // subagent steps may run in parallel. Read/Draft gatherers fan out freely.
+        validate_single_threaded_writes(&plan.steps)?;
         Ok(())
     }
 
