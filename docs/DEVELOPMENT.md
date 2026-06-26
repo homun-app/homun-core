@@ -349,9 +349,9 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   Gmail/Calendar/MCP vengono usati come event source. Gate mirato:
   `cargo test -p local-first-desktop-gateway
   connector_poll_event_envelope_is_stable_and_visible -- --nocapture`.
-  Gate finale continuita' canale: `cargo test -p local-first-desktop-gateway -- --nocapture`
-  (312 passati, 1 ignorato), `npm run build` da `apps/desktop`,
-  `git diff --check`.
+  Gate finale Evented/Project Access: `cargo test -p local-first-desktop-gateway -- --nocapture`
+  (323 passati, 1 ignorato), `npm run test:ui-contract`, `npm run build`,
+  `git diff --check` e `python3 scripts/pre_release_gate.py`.
   **Hotfix Account profile photo (2026-06-26):** il caricamento immagine profilo
   non e' piu' nascosto solo dietro l'avatar vuoto: Account espone un pulsante
   `Upload photo` esplicito, resetta gli errori al nuovo tentativo e mostra un
