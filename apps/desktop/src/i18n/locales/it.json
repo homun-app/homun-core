@@ -134,6 +134,8 @@
     "newAutomation": "Nuova automazione",
     "titlePlaceholder": "Titolo (opzionale)",
     "when": "Quando",
+    "ifThis": "Se succede questo",
+    "filter": "Filtro",
     "schedule": "A orario",
     "event": "A un evento",
     "everyDay": "Ogni giorno",

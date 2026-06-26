@@ -1024,6 +1024,12 @@ ragionato il contratto degli strumenti `make_*` creati dall'harness. ADR 0011
     automazioni evento/filtro/azione. Gate: `npm run test:ui-contract`,
     `npm run build`, `cargo test -p local-first-desktop-gateway project_access
     -- --nocapture`.
+  - 🟡 **IF/FILTER/THEN builder clarity (2026-06-26, locale/verde frontend):**
+    il composer Automations mostra la grammatica IFTTT decisa: sorgente evento
+    come `IF`, mittente/query provider come `FILTER`, prompt azione come `THEN`.
+    Nessun cambio al trigger JSON/runtime; serve a evitare euristiche opache e
+    a rendere leggibile cosa verra' valutato. Gate: `npm run test:ui-contract`,
+    `npm run build`.
 - ☐ **7.1b (futuro)** Portare ricerca/meeting al livello del deck solo dopo il
   chiarimento sul contratto strumenti: `make_research` e `make_meeting` non sono
   essenziali per la prossima release.

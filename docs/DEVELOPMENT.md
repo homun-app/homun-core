@@ -335,6 +335,12 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   UI ora permette di restringere il progetto prima di collegare regole
   evento->filtro->azione. Gate: `npm run test:ui-contract`, `npm run build`,
   `cargo test -p local-first-desktop-gateway project_access -- --nocapture`.
+  **Follow-up IF/FILTER/THEN builder clarity (2026-06-26):** il composer
+  Automations ora rende esplicita la grammatica delle regole evento: `IF this
+  happens` per la sorgente, `FILTER` per mittente/query provider e `THEN` per
+  l'azione naturale. La serializzazione runtime resta invariata e continua a
+  passare dal registry/capability layer; e' una slice di chiarezza/guardrail UI.
+  Gate: `npm run test:ui-contract`, `npm run build`.
   Gate finale continuita' canale: `cargo test -p local-first-desktop-gateway -- --nocapture`
   (312 passati, 1 ignorato), `npm run build` da `apps/desktop`,
   `git diff --check`.

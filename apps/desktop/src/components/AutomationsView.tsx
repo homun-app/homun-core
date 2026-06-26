@@ -421,7 +421,8 @@ export function AutomationsView({
           />
 
           <div className="auto-section-label">
-            <Bolt size={13} aria-hidden /> {t("automations.when")}
+            <Bolt size={13} aria-hidden />{" "}
+            {triggerKind === "event" ? t("automations.ifThis") : t("automations.when")}
           </div>
           <div className="auto-seg" role="tablist">
             <button
@@ -588,25 +589,35 @@ export function AutomationsView({
               </div>
 
               {source?.kind === "channel" && (
-                <div className="auto-field">
-                  <label>{t("automations.fromLabel")}</label>
-                  <input
-                    value={eventFrom}
-                    onChange={(e) => setEventFrom(e.target.value)}
-                    placeholder={t("automations.fromPlaceholder")}
-                  />
-                </div>
+                <>
+                  <div className="auto-section-label compact">
+                    {t("automations.filter")}
+                  </div>
+                  <div className="auto-field">
+                    <label>{t("automations.fromLabel")}</label>
+                    <input
+                      value={eventFrom}
+                      onChange={(e) => setEventFrom(e.target.value)}
+                      placeholder={t("automations.fromPlaceholder")}
+                    />
+                  </div>
+                </>
               )}
               {source?.kind === "connector" && (
-                <div className="auto-field">
-                  <label>{t("automations.whenTriggerLabel")}</label>
-                  <input
-                    value={connectorArgs}
-                    onChange={(e) => setConnectorArgs(e.target.value)}
-                    placeholder={t("automations.whenTriggerPlaceholder")}
-                  />
-                  <p className="auto-hint">{t("automations.whenTriggerHint", { connectorKey })}</p>
-                </div>
+                <>
+                  <div className="auto-section-label compact">
+                    {t("automations.filter")}
+                  </div>
+                  <div className="auto-field">
+                    <label>{t("automations.whenTriggerLabel")}</label>
+                    <input
+                      value={connectorArgs}
+                      onChange={(e) => setConnectorArgs(e.target.value)}
+                      placeholder={t("automations.whenTriggerPlaceholder")}
+                    />
+                    <p className="auto-hint">{t("automations.whenTriggerHint", { connectorKey })}</p>
+                  </div>
+                </>
               )}
               <p className="auto-hint">{t("automations.eventAccessHint")}</p>
             </div>

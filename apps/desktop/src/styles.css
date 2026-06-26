@@ -10516,6 +10516,13 @@ body.resizing-drawer {
   color: var(--muted);
   margin-top: 4px;
 }
+
+.auto-section-label.compact {
+  margin-top: 10px;
+  font-size: 10.5px;
+  color: var(--faint);
+}
+
 .auto-seg {
   display: inline-flex;
   border: 1px solid var(--line);

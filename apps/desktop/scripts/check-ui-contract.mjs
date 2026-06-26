@@ -252,6 +252,10 @@ assertContains("src/components/ProjectAccessDialog.tsx", "can_trigger_automation
 assertContains("src/components/ProjectAccessDialog.tsx", "can_use_project_memory: canUseProjectMemory", "Project Access grants must use the selected memory permission");
 assertContains("src/components/ProjectAccessDialog.tsx", "can_receive_replies: canReceiveReplies", "Project Access grants must use the selected reply permission");
 assertContains("src/components/ProjectAccessDialog.tsx", "can_receive_artifacts: canReceiveArtifacts", "Project Access grants must use the selected artifact permission");
+assertContains("src/components/AutomationsView.tsx", "t(\"automations.ifThis\")", "Event automation builder must expose the IF part explicitly");
+assertContains("src/components/AutomationsView.tsx", "t(\"automations.filter\")", "Event automation builder must expose the FILTER part explicitly");
+assertContains("src/i18n/locales/en.json", "\"ifThis\": \"If this happens\"", "Event automation IF label must be localized in English");
+assertContains("src/i18n/locales/en.json", "\"filter\": \"Filter\"", "Event automation FILTER label must be localized in English");
 assertContains("src/components/BrandKitPanel.tsx", "builtin:template-preview/", "template gallery must render built-in previews when the catalog declares preview_ref");
 assertContains("src/components/BrandKitPanel.tsx", "TemplateCardPreview", "template gallery cards must route preview rendering through a dedicated component");
 assertContains("src/components/BrandKitPanel.tsx", "template-card-contract", "template gallery must keep the metadata contract fallback for catalogs without preview_ref");
