@@ -1008,6 +1008,18 @@ ragionato il contratto degli strumenti `make_*` creati dall'harness. ADR 0011
     `channels`/`connected_services`, elimina literal hardcoded residui e mostra
     nel builder evento il vincolo Project Access (`can_trigger_automations`,
     default deny). Gate: `npm run test:ui-contract`, `npm run build`.
+  - 🟡 **Project Access capability denies + chat-created scope (2026-06-26,
+    locale/verde mirato):** il dialog "Manage access" espone deny capability
+    modificabili (`browser`, `filesystem`, `make_deck`, `make_document`,
+    `connector`) in creazione grant e sui grant esistenti, usando
+    `capability_denies` gia' composto dal resolver con il contact perimeter.
+    Le automazioni create/aggiornate da chat tramite `create_automation` e
+    `update_automation` usano ora lo scope del thread attivo per dedup, lookup
+    e persistenza, evitando fallback nello scope gateway. Gate: `npm run
+    test:ui-contract`, `npm run build`, `cargo test -p
+    local-first-desktop-gateway create_automation_from_chat_uses_active_scope
+    -- --nocapture`, `cargo test -p local-first-desktop-gateway automation --
+    --nocapture`.
   - 🟡 **Automation management workspace scope (2026-06-26, locale/verde
     mirato):** le API `list/create/update/toggle/delete` e il bridge desktop
     accettano `workspace_id`, mentre la UI Automations usa lo scope della chat

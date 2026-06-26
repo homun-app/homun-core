@@ -252,6 +252,9 @@ assertContains("src/components/ProjectAccessDialog.tsx", "can_trigger_automation
 assertContains("src/components/ProjectAccessDialog.tsx", "can_use_project_memory: canUseProjectMemory", "Project Access grants must use the selected memory permission");
 assertContains("src/components/ProjectAccessDialog.tsx", "can_receive_replies: canReceiveReplies", "Project Access grants must use the selected reply permission");
 assertContains("src/components/ProjectAccessDialog.tsx", "can_receive_artifacts: canReceiveArtifacts", "Project Access grants must use the selected artifact permission");
+assertContains("src/components/ProjectAccessDialog.tsx", "project-access-denies", "Project Access must expose explicit capability deny controls");
+assertContains("src/components/ProjectAccessDialog.tsx", "capability_denies: selectedCapabilityDenies", "Project Access grants must persist selected capability denies");
+assertContains("src/components/ProjectAccessDialog.tsx", "updateGrantCapabilityDeny", "Project Access must allow editing capability denies on existing grants");
 assertContains("src/components/AutomationsView.tsx", "t(\"automations.ifThis\")", "Event automation builder must expose the IF part explicitly");
 assertContains("src/components/AutomationsView.tsx", "t(\"automations.filter\")", "Event automation builder must expose the FILTER part explicitly");
 assertContains("src/i18n/locales/en.json", "\"ifThis\": \"If this happens\"", "Event automation IF label must be localized in English");

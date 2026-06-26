@@ -486,6 +486,10 @@ primo percorso locale verde e WS5 è chiusa localmente/gate:
     Follow-up connector envelope: ConnectorPoll tasks now carry the same
     normalized event envelope shape as channel events, so polling providers do
     not become a second event model.
+    Follow-up Project Access hardening: grants now expose editable capability
+    denies for browser/filesystem/presentations/documents/connectors and
+    chat-created automations use the active thread workspace for dedup, lookup
+    and persistence instead of the gateway fallback scope.
     Spec: `docs/superpowers/specs/2026-06-26-evented-automations-design.md`.
     Slice consigliata: prima Project Access Surface, poi `ChannelMessage`
     WhatsApp/Telegram, poi `ConnectorPoll` generico per Gmail/Composio/MCP,

@@ -1493,6 +1493,57 @@ body.resizing-drawer {
   accent-color: var(--brand);
 }
 
+.project-access-denies {
+  margin: 10px 0 0;
+  padding: 10px 12px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--surface-muted) 58%, var(--surface));
+}
+
+.project-access-denies legend {
+  padding: 0 5px;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.project-access-denies p {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.project-access-denies > div,
+.project-access-row-denies {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.project-access-denies label,
+.project-access-row-denies label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+}
+
+.project-access-denies input,
+.project-access-row-denies input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--brand);
+}
+
 .project-access-list {
   display: grid;
   gap: 8px;
@@ -1500,6 +1551,7 @@ body.resizing-drawer {
 }
 
 .project-access-row {
+  flex-wrap: wrap;
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 10px;
@@ -1535,6 +1587,11 @@ body.resizing-drawer {
   border-radius: 999px;
   padding: 3px 7px;
   background: var(--surface);
+}
+
+.project-access-row-denies {
+  width: 100%;
+  padding-left: 28px;
 }
 
 .project-access-error {

@@ -349,8 +349,21 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   Gmail/Calendar/MCP vengono usati come event source. Gate mirato:
   `cargo test -p local-first-desktop-gateway
   connector_poll_event_envelope_is_stable_and_visible -- --nocapture`.
+  **Follow-up capability denies + chat-created scope (2026-06-26):** Project
+  Access espone ora anche deny capability espliciti (`browser`, `filesystem`,
+  `make_deck`, `make_document`, `connector`) sia in creazione grant sia su grant
+  esistenti. I deny vengono salvati nello stesso `capability_denies` operativo e
+  composti dal resolver con il contact perimeter, senza store paralleli.
+  Inoltre `create_automation`/`update_automation` invocati dalla chat non usano
+  piu' lo scope gateway di default: dedup, lookup e persistenza passano dallo
+  `workspace_id` del thread attivo, quindi una regola creata in un progetto
+  resta dentro quel progetto e nella sua Project Access Surface. Gate:
+  `npm run test:ui-contract`, `npm run build`, `cargo test -p
+  local-first-desktop-gateway create_automation_from_chat_uses_active_scope --
+  --nocapture`, `cargo test -p local-first-desktop-gateway automation --
+  --nocapture`.
   Gate finale Evented/Project Access: `cargo test -p local-first-desktop-gateway -- --nocapture`
-  (323 passati, 1 ignorato), `npm run test:ui-contract`, `npm run build`,
+  (324 passati, 1 ignorato), `npm run test:ui-contract`, `npm run build`,
   `git diff --check` e `python3 scripts/pre_release_gate.py`.
   **Hotfix Account profile photo (2026-06-26):** il caricamento immagine profilo
   non e' piu' nascosto solo dietro l'avatar vuoto: Account espone un pulsante

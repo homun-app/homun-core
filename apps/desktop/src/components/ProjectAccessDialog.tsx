@@ -13,6 +13,13 @@ type ProjectAccessDialogProps = {
 };
 
 const CHANNELS = ["whatsapp", "telegram", "email"];
+const CAPABILITY_DENY_OPTIONS = [
+  { value: "browser", label: "Computer/browser" },
+  { value: "filesystem", label: "Filesystem" },
+  { value: "make_deck", label: "Presentations" },
+  { value: "make_document", label: "Documents" },
+  { value: "connector", label: "Connectors" },
+];
 
 export function ProjectAccessDialog({ workspace, onClose }: ProjectAccessDialogProps) {
   const [contacts, setContacts] = useState<CoreContact[]>([]);
@@ -23,6 +30,7 @@ export function ProjectAccessDialog({ workspace, onClose }: ProjectAccessDialogP
   const [canUseProjectMemory, setCanUseProjectMemory] = useState(true);
   const [canReceiveReplies, setCanReceiveReplies] = useState(true);
   const [canReceiveArtifacts, setCanReceiveArtifacts] = useState(false);
+  const [selectedCapabilityDenies, setSelectedCapabilityDenies] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -71,7 +79,7 @@ export function ProjectAccessDialog({ workspace, onClose }: ProjectAccessDialogP
         can_use_project_memory: canUseProjectMemory,
         can_receive_replies: canReceiveReplies,
         can_receive_artifacts: canReceiveArtifacts,
-        capability_denies: [],
+        capability_denies: selectedCapabilityDenies,
       });
       setGrants(next);
     } catch (err) {
@@ -91,6 +99,43 @@ export function ProjectAccessDialog({ workspace, onClose }: ProjectAccessDialogP
         grant.contact_reference,
         grant.channel,
       );
+      setGrants(next);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function toggleSelectedCapabilityDeny(value: string, denied: boolean) {
+    setSelectedCapabilityDenies((current) => {
+      const next = denied ? [...current, value] : current.filter((item) => item !== value);
+      return Array.from(new Set(next)).sort();
+    });
+  }
+
+  async function updateGrantCapabilityDeny(
+    grant: ProjectAccessGrant,
+    capability: string,
+    denied: boolean,
+  ) {
+    if (!workspace) return;
+    setSaving(true);
+    setError(null);
+    const capability_denies = denied
+      ? Array.from(new Set([...grant.capability_denies, capability])).sort()
+      : grant.capability_denies.filter((item) => item !== capability);
+    try {
+      const next = await coreBridge.upsertProjectAccess(workspace.id, {
+        contact_reference: grant.contact_reference,
+        contact_name: grant.contact_name,
+        channel: grant.channel,
+        can_trigger_automations: grant.can_trigger_automations,
+        can_use_project_memory: grant.can_use_project_memory,
+        can_receive_replies: grant.can_receive_replies,
+        can_receive_artifacts: grant.can_receive_artifacts,
+        capability_denies,
+      });
       setGrants(next);
     } catch (err) {
       setError((err as Error).message);
@@ -185,6 +230,28 @@ export function ProjectAccessDialog({ workspace, onClose }: ProjectAccessDialogP
           </label>
         </div>
 
+        <fieldset className="project-access-denies" aria-label="Denied capabilities">
+          <legend>Denied capabilities</legend>
+          <p>
+            Optional: narrow this project grant further. Denials compose with the
+            contact perimeter and denial wins.
+          </p>
+          <div>
+            {CAPABILITY_DENY_OPTIONS.map((option) => (
+              <label key={option.value}>
+                <input
+                  type="checkbox"
+                  checked={selectedCapabilityDenies.includes(option.value)}
+                  onChange={(event) =>
+                    toggleSelectedCapabilityDeny(option.value, event.target.checked)
+                  }
+                />
+                <span>{option.label}</span>
+              </label>
+            ))}
+          </div>
+        </fieldset>
+
         {error ? <p className="project-access-error">{error}</p> : null}
 
         <div className="project-access-list">
@@ -220,6 +287,24 @@ export function ProjectAccessDialog({ workspace, onClose }: ProjectAccessDialogP
                   {grant.can_use_project_memory ? <span>Project memory</span> : null}
                   {grant.can_receive_replies ? <span>Replies</span> : null}
                   {grant.can_receive_artifacts ? <span>Artifacts</span> : null}
+                  {grant.capability_denies.map((deny) => (
+                    <span key={deny}>Deny {deny}</span>
+                  ))}
+                </div>
+                <div className="project-access-row-denies" aria-label="Edit denied capabilities">
+                  {CAPABILITY_DENY_OPTIONS.map((option) => (
+                    <label key={option.value}>
+                      <input
+                        type="checkbox"
+                        checked={grant.capability_denies.includes(option.value)}
+                        disabled={saving}
+                        onChange={(event) =>
+                          void updateGrantCapabilityDeny(grant, option.value, event.target.checked)
+                        }
+                      />
+                      <span>{option.label}</span>
+                    </label>
+                  ))}
                 </div>
                 <button
                   className="icon-button"

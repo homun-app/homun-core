@@ -9680,7 +9680,12 @@ fn update_automation_tool_schema() -> serde_json::Value {
 /// Edit an existing automation from a chat tool call: resolve it by id or title
 /// fragment, apply the given changes, re-sync the driving recurring task (so a new
 /// prompt/recurrence takes effect next run), and persist. Returns a user-facing line.
-fn update_automation_from_chat(state: &AppState, args_raw: &str) -> String {
+fn update_automation_from_chat(
+    state: &AppState,
+    args_raw: &str,
+    user_id: &UserId,
+    workspace_id: &WorkspaceId,
+) -> String {
     let args: serde_json::Value =
         serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
     let opt = |k: &str| {
@@ -9695,14 +9700,14 @@ fn update_automation_from_chat(state: &AppState, args_raw: &str) -> String {
     };
     // Resolve the target automation by id, else by a title fragment.
     let mut automation = if let Some(id) = opt("id") {
-        match store.get_automation(&id, &gateway_user_id(), &gateway_workspace_id()) {
+        match store.get_automation(&id, user_id, workspace_id) {
             Ok(Some(a)) => a,
             _ => return format!("I couldn't find an automation with id {id}."),
         }
     } else if let Some(needle) = opt("match") {
         let needle = needle.to_lowercase();
         let all = store
-            .list_automations(&gateway_user_id(), &gateway_workspace_id())
+            .list_automations(user_id, workspace_id)
             .unwrap_or_default();
         let mut hits: Vec<Automation> = all
             .into_iter()
@@ -9782,7 +9787,25 @@ fn update_automation_from_chat(state: &AppState, args_raw: &str) -> String {
 /// Create a first-class Automation from a chat tool call (source=chat). Builds the trigger,
 /// dedups against existing automations (same kind + high prompt overlap), materializes the
 /// driving task for schedules, and persists it so it shows in the Automazioni view.
-fn create_automation_from_chat(state: &AppState, args_raw: &str) -> String {
+fn create_automation_from_chat(
+    state: &AppState,
+    args_raw: &str,
+    user_id: &UserId,
+    workspace_id: &WorkspaceId,
+) -> String {
+    let store = match lock_task_store(state) {
+        Ok(store) => store,
+        Err(_) => return "Task store unavailable.".to_string(),
+    };
+    create_automation_from_chat_with_store(&store, args_raw, user_id, workspace_id)
+}
+
+fn create_automation_from_chat_with_store(
+    store: &TaskStore,
+    args_raw: &str,
+    user_id: &UserId,
+    workspace_id: &WorkspaceId,
+) -> String {
     let args: serde_json::Value =
         serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
     let s = |k: &str| {
@@ -9850,10 +9873,6 @@ fn create_automation_from_chat(state: &AppState, args_raw: &str) -> String {
     } else {
         ApprovalPolicy::Autonomous
     };
-    let store = match lock_task_store(state) {
-        Ok(store) => store,
-        Err(_) => return "Task store unavailable.".to_string(),
-    };
     // Dedup: a near-identical existing automation (same trigger kind + >0.6 prompt overlap).
     let new_kind = match &trigger {
         AutomationTrigger::Schedule { .. } => "schedule",
@@ -9861,7 +9880,7 @@ fn create_automation_from_chat(state: &AppState, args_raw: &str) -> String {
     };
     let new_tokens: std::collections::BTreeSet<String> =
         cap_tokenize(&prompt).into_iter().collect();
-    if let Ok(existing) = store.list_automations(&gateway_user_id(), &gateway_workspace_id()) {
+    if let Ok(existing) = store.list_automations(user_id, workspace_id) {
         for a in &existing {
             if a.trigger_kind() != new_kind {
                 continue;
@@ -9881,8 +9900,8 @@ fn create_automation_from_chat(state: &AppState, args_raw: &str) -> String {
     let now = OffsetDateTime::now_utc();
     let mut automation = Automation {
         id: format!("auto_{}", uuid::Uuid::new_v4().simple()),
-        user_id: gateway_user_id(),
-        workspace_id: gateway_workspace_id(),
+        user_id: user_id.clone(),
+        workspace_id: workspace_id.clone(),
         title,
         trigger,
         prompt,
@@ -18611,6 +18630,16 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
     // Thread this chat belongs to: lets browser work reuse a persistent
     // per-thread browser session (search → then book on the same tab).
     let thread_id = request.thread_id.clone();
+    let automation_user_id = gateway_user_id();
+    let automation_workspace_id = thread_id
+        .as_deref()
+        .and_then(|tid| {
+            lock_store(state)
+                .ok()
+                .and_then(|store| store.workspace_for_thread(tid).ok())
+        })
+        .map(WorkspaceId::new)
+        .unwrap_or_else(gateway_workspace_id);
     // Raw user message captured for post-turn memory extraction (M2).
     let memory_user_message = request.prompt.clone();
     // The assistant's most recent prior turn (the question a short "sì" would answer),
@@ -21377,7 +21406,12 @@ an uncertain date.",
                             },
                         )
                         .await;
-                        create_automation_from_chat(&state_owned, args_raw)
+                        create_automation_from_chat(
+                            &state_owned,
+                            args_raw,
+                            &automation_user_id,
+                            &automation_workspace_id,
+                        )
                     } else if name == "update_automation" {
                         let _ = emit_stream_event(
                             &tx,
@@ -21386,7 +21420,12 @@ an uncertain date.",
                             },
                         )
                         .await;
-                        update_automation_from_chat(&state_owned, args_raw)
+                        update_automation_from_chat(
+                            &state_owned,
+                            args_raw,
+                            &automation_user_id,
+                            &automation_workspace_id,
+                        )
                     } else if name == "find_capability" {
                         // Tool Search: discover DEFERRED native tools by intent and activate
                         // them (push into the live tool set) so the model calls them next
@@ -21523,6 +21562,8 @@ loaded with use_skill):\n{}",
                             // Route through the first-class Automation model so a chat-
                             // scheduled task shows up in the Automazioni view (not a hidden run).
                             let st = state_owned.clone();
+                            let user_id = automation_user_id.clone();
+                            let workspace_id = automation_workspace_id.clone();
                             let title: String = goal.chars().take(48).collect();
                             let auto_args = serde_json::json!({
                                 "title": title,
@@ -21533,7 +21574,12 @@ loaded with use_skill):\n{}",
                             })
                             .to_string();
                             tokio::task::spawn_blocking(move || {
-                                create_automation_from_chat(&st, &auto_args)
+                                create_automation_from_chat(
+                                    &st,
+                                    &auto_args,
+                                    &user_id,
+                                    &workspace_id,
+                                )
                             })
                             .await
                             .unwrap_or_else(|e| format!("Scheduling error: {e}"))
@@ -51186,6 +51232,44 @@ data: [DONE]\n";
         assert_eq!(
             super::automation_workspace_scope(Some("project_alpha")).as_str(),
             "project_alpha"
+        );
+    }
+
+    #[test]
+    fn create_automation_from_chat_uses_active_scope() {
+        let store = TaskStore::open_in_memory().unwrap();
+        let args = serde_json::json!({
+            "title": "Project channel summary",
+            "prompt": "Summarize inbound project messages.",
+            "trigger_type": "event",
+            "event_channel": "whatsapp",
+            "event_from": "Elena"
+        })
+        .to_string();
+
+        let response = super::create_automation_from_chat_with_store(
+            &store,
+            &args,
+            &UserId::new("user_project"),
+            &WorkspaceId::new("workspace_project"),
+        );
+
+        assert!(response.contains("Automation created"), "{response}");
+        assert!(
+            store
+                .list_automations(
+                    &UserId::new("user_project"),
+                    &WorkspaceId::new("workspace_project"),
+                )
+                .unwrap()
+                .iter()
+                .any(|automation| automation.title == "Project channel summary")
+        );
+        assert!(
+            store
+                .list_automations(&super::gateway_user_id(), &super::gateway_workspace_id())
+                .unwrap()
+                .is_empty()
         );
     }
 
