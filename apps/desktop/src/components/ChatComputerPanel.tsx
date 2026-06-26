@@ -27,7 +27,13 @@ const IDLE: ContainedComputerLive = {
 // Manus-style: a short card DOCKED above the prompt (same width), shown ONLY
 // while the contained browser is working. Header + live "Activity progress"
 // checklist; expand to the live view; fullscreen for the overlay. Hidden idle.
-export function ChatComputerPanel({ threadId }: { threadId: string }) {
+export function ChatComputerPanel({
+  threadId,
+  onLiveChange,
+}: {
+  threadId: string;
+  onLiveChange?: (live: { active: boolean; activity: string | null }) => void;
+}) {
   const { t } = useTranslation();
   const [live, setLive] = useState<ContainedComputerLive | null>(null);
   // "bar" (collapsed, default) | "expanded" (live inline) | "full" (overlay)
@@ -75,6 +81,12 @@ export function ChatComputerPanel({ threadId }: { threadId: string }) {
   const terminalRunning = Boolean(live?.terminal_active || terminal.some((entry) => entry.running));
   const hasLiveActivity = browserRunning || terminalRunning;
   const ownedLiveActivity = hasLiveActivity && live?.thread_id === threadId;
+  useEffect(() => {
+    onLiveChange?.({
+      active: Boolean(ownedLiveActivity),
+      activity: ownedLiveActivity ? (live?.activity ?? null) : null,
+    });
+  }, [live?.activity, onLiveChange, ownedLiveActivity]);
   if (!ownedLiveActivity) return null;
 
   // Terminal-only mode: CLI skill running, no browser GUI to show. Completed

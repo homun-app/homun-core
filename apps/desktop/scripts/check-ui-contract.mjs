@@ -101,7 +101,9 @@ assertContains("src/styles.css", "color-scheme: dark", "dark surface theme must 
 assertContains("src/components/SettingsView.tsx", "dark:", "Appearance picker previews must include literal dark swatch values");
 assertContains("src/styles.css", "background: color-mix(in srgb, var(--surface) 94%, transparent);", "Workspace Island pill must inherit the active surface theme");
 assertContains("src/styles.css", "background: color-mix(in srgb, var(--surface) 96%, transparent);", "Workspace Island panel/menu must inherit the active surface theme");
-assertContains("src/styles.css", ".cc-dock {\n  position: absolute;", "Computer dock contract must target the chat computer island");
+assertContains("src/components/ChatView.tsx", "chat-status-stack", "Workspace and Computer islands must share one status stack");
+assertContains("src/styles.css", ".chat-status-stack", "Workspace and Computer islands must be laid out by one stack");
+assertContains("src/styles.css", ".cc-dock {\n  position: relative;", "Computer dock must not use an independent absolute position that overlaps Workspace Island");
 assertContains("src/styles.css", "background: color-mix(in srgb, var(--surface) 95%, transparent);", "Computer dock must inherit the active surface theme");
 assertNotContains("src/styles.css", "background: rgba(255, 255, 255, 0.98);", "Workspace Island pill must not force a light background");
 assertNotContains("src/styles.css", "background: rgba(255, 255, 255, 0.985);", "Workspace Island panel must not force a light background");
@@ -321,7 +323,7 @@ assertContains("src/components/ChatView.tsx", "Workspace island options", "works
 assertContains("src/components/ChatView.tsx", "wi-progress", "workspace island must render collapsible progress inside the island");
 assertContains("src/components/ChatView.tsx", "if (!hasWorkspaceState) return null", "workspace island must stay hidden when a thread has no real workspace state");
 assertContains("src/components/ChatView.tsx", "threadHasMessages={threadMessages.length > 0}", "workspace island must not treat project memory artifacts as state for an empty new chat");
-assertContains("src/components/ChatView.tsx", "(threadHasMessages || streaming) &&", "workspace island must require thread-owned content unless a stream is live");
+assertContains("src/components/ChatView.tsx", "(threadHasMessages || streaming || computerLive) &&", "workspace island must appear for thread-owned content, stream, or owned live computer work");
 assertContains("src/components/ChatView.tsx", "onOpenWorkbench={(tab) =>", "workspace island must be the single launcher for workbench tabs");
 assertContains("src/components/ChatView.tsx", "onClick={() => onOpenWorkbench(\"artifacts\")}", "workspace island artifact count must open the Review workbench");
 assertContains("src/components/ChatView.tsx", "onClick={() => onOpenWorkbench(\"plan\")}", "workspace island plan progress must open the Plan workbench");

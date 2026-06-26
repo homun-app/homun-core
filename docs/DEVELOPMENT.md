@@ -241,6 +241,10 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   invisibile. Gate locale passato: `cargo test -p local-first-desktop-gateway
   -- --nocapture` (308 passati, 1 ignorato), `npm run test:ui-contract`,
   `npm run build`, `git diff --check`.
+  Follow-up UX runtime post-smoke: Workspace Island e Computer live ora
+  condividono un unico `chat-status-stack`; il Computer non usa piu' coordinate
+  assolute indipendenti e Workspace appare anche quando il primo segnale reale
+  del thread e' il Computer live, prima che arrivino plan/activity dal testo.
   **Prossimo passo unico:** smoke runtime Electron su sorgente esterna
   (WhatsApp/Telegram o scheduled) verificando che prompt inbound, placeholder,
   Workspace/Computer e markdown/plan si aggiornino in streaming nel thread

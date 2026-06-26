@@ -1782,13 +1782,26 @@ body.resizing-drawer {
   color: var(--brand);
 }
 
-/* Workspace Island — compact operational state, inspired by Zed/Zcode status
-   panels: the pill expands in place into a lightweight thread card. */
-.workspace-island {
+.chat-status-stack {
   position: absolute;
   top: 52px;
   right: 24px;
   z-index: 32;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+  max-width: min(360px, calc(100vw - 390px));
+  pointer-events: none;
+}
+.chat-status-stack:has(.cc-dock.expanded) {
+  max-width: min(620px, calc(100vw - 390px));
+}
+
+/* Workspace Island — compact operational state, inspired by Zed/Zcode status
+   panels: the pill expands in place into a lightweight thread card. */
+.workspace-island {
+  position: relative;
   pointer-events: none;
 }
 
@@ -1799,7 +1812,7 @@ body.resizing-drawer {
 
 .workspace-island-pill {
   min-width: 0;
-  max-width: min(360px, calc(100vw - 390px));
+  max-width: 100%;
   height: 34px;
   display: inline-flex;
   align-items: center;
@@ -1855,6 +1868,7 @@ body.resizing-drawer {
 
 .workspace-island-panel {
   width: 320px;
+  max-width: 100%;
   max-height: min(520px, calc(100vh - 128px));
   overflow: auto;
   padding: 12px 10px;
@@ -7037,12 +7051,10 @@ body.resizing-drawer {
 /* Computer Island — live, thread-owned browser/terminal preview. It sits under
    Workspace Island and disappears when the contained computer is idle. */
 .cc-dock {
-  position: absolute;
-  top: 102px;
-  right: 16px;
+  position: relative;
   z-index: 31;
   width: 320px;
-  max-width: calc(100% - 32px);
+  max-width: 100%;
   margin: 0;
   border: 1px solid var(--line);
   border-radius: 18px;

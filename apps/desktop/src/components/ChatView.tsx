@@ -264,6 +264,10 @@ export function ChatView({
   const [projectGoalCount, setProjectGoalCount] = useState(0);
   const [projectMemoryCount, setProjectMemoryCount] = useState(0);
   const [goalSeed, setGoalSeed] = useState<string | null>(null);
+  const [computerLiveStatus, setComputerLiveStatus] = useState<{
+    active: boolean;
+    activity: string | null;
+  }>({ active: false, activity: null });
   const [followUps, setFollowUps] = useState<string[]>([]);
   const [followUpsFor, setFollowUpsFor] = useState<string | null>(null);
   const titledThreadsRef = useRef<Set<string>>(new Set());
@@ -1743,24 +1747,29 @@ export function ChatView({
 
       </header>
 
-      <WorkspaceIsland
-        activitySteps={conversationActivity}
-        artifacts={workbenchArtifacts}
-        fileCount={uploadedFiles.length}
-        goalCount={projectGoalCount}
-        memoryCount={projectMemoryCount}
-        planSteps={workspacePlanSteps}
-        streaming={promptSubmitting || Boolean(streamingAssistantId)}
-        status={streamStatus}
-        threadHasMessages={threadMessages.length > 0}
-        onCaptureScreenshot={IS_DESKTOP ? () => void captureScreenshot() : undefined}
-        onExportChat={() => void exportChatMarkdown()}
-        onOpenWorkbench={(tab) => {
-          setArtifactsInitial(null);
-          setWorkbenchTab(tab);
-          setArtifactsOpen(true);
-        }}
-      />
+      <div className="chat-status-stack" aria-label="Live workspace status">
+        <WorkspaceIsland
+          activitySteps={conversationActivity}
+          artifacts={workbenchArtifacts}
+          computerActivity={computerLiveStatus.activity}
+          computerLive={computerLiveStatus.active}
+          fileCount={uploadedFiles.length}
+          goalCount={projectGoalCount}
+          memoryCount={projectMemoryCount}
+          planSteps={workspacePlanSteps}
+          streaming={promptSubmitting || Boolean(streamingAssistantId)}
+          status={streamStatus}
+          threadHasMessages={threadMessages.length > 0}
+          onCaptureScreenshot={IS_DESKTOP ? () => void captureScreenshot() : undefined}
+          onExportChat={() => void exportChatMarkdown()}
+          onOpenWorkbench={(tab) => {
+            setArtifactsInitial(null);
+            setWorkbenchTab(tab);
+            setArtifactsOpen(true);
+          }}
+        />
+        <ChatComputerPanel threadId={thread.threadId} onLiveChange={setComputerLiveStatus} />
+      </div>
 
       <div className="thread-scroll" aria-label={t("chat.activeThread")} ref={conversationRef}>
         <div className="thread-content">
@@ -2097,8 +2106,6 @@ export function ChatView({
         operationalPlanMarkdown={conversationPlan ?? visibleComputerSession.operationalPlanMarkdown}
       />
 
-      <ChatComputerPanel threadId={thread.threadId} />
-
       <Composer
         disabled={promptSubmitting}
         error={promptError}
@@ -2141,6 +2148,8 @@ function loadWorkspaceIslandMode(): WorkspaceIslandMode {
 function WorkspaceIsland({
   activitySteps,
   artifacts,
+  computerActivity,
+  computerLive,
   fileCount,
   goalCount,
   memoryCount,
@@ -2154,6 +2163,8 @@ function WorkspaceIsland({
 }: {
   activitySteps: string[];
   artifacts: ParsedArtifact[];
+  computerActivity: string | null;
+  computerLive: boolean;
   fileCount: number;
   goalCount: number;
   memoryCount: number;
@@ -2178,8 +2189,9 @@ function WorkspaceIsland({
   const latestActivity = activitySteps[activitySteps.length - 1] ?? null;
   const artifactsCount = artifacts.length;
   const hasWorkspaceState =
-    (threadHasMessages || streaming) &&
+    (threadHasMessages || streaming || computerLive) &&
     (streaming ||
+      computerLive ||
       planSteps.length > 0 ||
       activitySteps.length > 0 ||
       artifactsCount > 0 ||
@@ -2191,6 +2203,8 @@ function WorkspaceIsland({
     runningPlan?.title ??
     status?.title ??
     latestActivity ??
+    computerActivity ??
+    (computerLive ? "Computer" : null) ??
     (artifactsCount > 0
       ? `${artifactsCount} artifact`
       : fileCount > 0
@@ -2205,6 +2219,8 @@ function WorkspaceIsland({
       ? `${doneCount}/${planSteps.length}`
       : streaming
         ? status?.phase ?? "live"
+        : computerLive
+          ? "live"
         : artifactsCount > 0
           ? `${artifactsCount}`
           : goalCount > 0
@@ -2250,6 +2266,7 @@ function WorkspaceIsland({
     mode,
     planSteps.length,
     streaming,
+    computerLive,
   ]);
 
   const menuOptions: Array<{ value: WorkspaceIslandMode; label: string }> = [
