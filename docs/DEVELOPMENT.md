@@ -258,14 +258,25 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   `cargo test -p local-first-desktop-gateway
   channel_thread_remembers_reply_recipient_for_app_side_continuity -- --nocapture`
   e `cargo test -p local-first-desktop-gateway app_channel_reply_target -- --nocapture`.
-  **Design Evented Automations approvato/documentato (2026-06-26):** le
-  automazioni non sono piu' concettualmente solo schedule: diventano regole
-  `event source -> filter -> action`. Il tempo resta trigger first-class e
-  fallback di polling per fonti senza push; Channels, Composio, MCP, skills,
-  addon e local computer convergono nello stesso registry/lifecycle visibile.
-  Gli addon come Presentations sono azioni di capability governate da policy e
-  approval, non sottosistemi paralleli. Spec:
+  **Design Evented Automations + Project Access approvato/documentato
+  (2026-06-26):** le automazioni non sono piu' concettualmente solo schedule:
+  diventano regole `event source -> filter -> action`, ma la prima slice non e'
+  il trigger: e' la Project Access Surface. Ogni progetto deve poter dichiarare
+  contatti/canali autorizzati; il runtime compone contact perimeter, accesso
+  progetto, policy regola, capability policy e approval con default fail-closed.
+  Il tempo resta trigger first-class e fallback di polling per fonti senza push;
+  Channels, Composio, MCP, skills, addon e local computer convergono nello
+  stesso registry/lifecycle visibile. Gli addon come Presentations sono azioni di
+  capability governate da project access, policy e approval, non sottosistemi
+  paralleli. Spec:
   [Homun Evented Automations Design](superpowers/specs/2026-06-26-evented-automations-design.md).
+  **Prima slice Project Access locale/verde:** aggiunto store operativo
+  `project-access.json`, API `/api/workspaces/:id/access`, bridge desktop e
+  dialog "Manage access" nel menu progetto. Il resolver compone grant progetto
+  e contact perimeter con default deny/deny-win, senza introdurre memoria
+  parallela. Gate passati:
+  `cargo test -p local-first-desktop-gateway project_ -- --nocapture` e
+  `npm run build` da `apps/desktop`.
   Gate finale continuita' canale: `cargo test -p local-first-desktop-gateway -- --nocapture`
   (312 passati, 1 ignorato), `npm run build` da `apps/desktop`,
   `git diff --check`.

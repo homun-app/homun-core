@@ -1,0 +1,172 @@
+import { Shield, Trash2, UserPlus, X } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import {
+  coreBridge,
+  type CoreContact,
+  type ProjectAccessGrant,
+  type WorkspaceRecord,
+} from "../lib/coreBridge";
+
+type ProjectAccessDialogProps = {
+  workspace: WorkspaceRecord | null;
+  onClose: () => void;
+};
+
+const CHANNELS = ["whatsapp", "telegram", "email"];
+
+export function ProjectAccessDialog({ workspace, onClose }: ProjectAccessDialogProps) {
+  const [contacts, setContacts] = useState<CoreContact[]>([]);
+  const [grants, setGrants] = useState<ProjectAccessGrant[]>([]);
+  const [contactReference, setContactReference] = useState("");
+  const [channel, setChannel] = useState("whatsapp");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!workspace) return;
+    setError(null);
+    void Promise.all([coreBridge.contacts(), coreBridge.projectAccess(workspace.id)])
+      .then(([nextContacts, nextGrants]) => {
+        setContacts(nextContacts);
+        setGrants(nextGrants);
+        setContactReference((current) => current || nextContacts[0]?.reference || "");
+      })
+      .catch((err) => setError((err as Error).message));
+  }, [workspace]);
+
+  const selectedContact = useMemo(
+    () => contacts.find((contact) => contact.reference === contactReference),
+    [contacts, contactReference],
+  );
+
+  if (!workspace) return null;
+
+  async function addGrant() {
+    if (!workspace || !selectedContact) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const next = await coreBridge.upsertProjectAccess(workspace.id, {
+        contact_reference: selectedContact.reference,
+        contact_name: selectedContact.name,
+        channel,
+        can_trigger_automations: true,
+        can_use_project_memory: true,
+        can_receive_replies: true,
+        can_receive_artifacts: false,
+        capability_denies: [],
+      });
+      setGrants(next);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function removeGrant(grant: ProjectAccessGrant) {
+    if (!workspace) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const next = await coreBridge.removeProjectAccess(
+        workspace.id,
+        grant.contact_reference,
+        grant.channel,
+      );
+      setGrants(next);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="project-access-backdrop" role="presentation" onMouseDown={onClose}>
+      <section
+        className="project-access-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Project access for ${workspace.name}`}
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <header className="project-access-header">
+          <div>
+            <p className="eyebrow">Project access</p>
+            <h2>{workspace.name}</h2>
+          </div>
+          <button className="icon-button" type="button" onClick={onClose} aria-label="Close">
+            <X size={16} />
+          </button>
+        </header>
+
+        <div className="project-access-add">
+          <select
+            value={contactReference}
+            onChange={(event) => setContactReference(event.target.value)}
+          >
+            {contacts.length === 0 ? <option value="">No contacts</option> : null}
+            {contacts.map((contact) => (
+              <option key={contact.reference} value={contact.reference}>
+                {contact.name}
+              </option>
+            ))}
+          </select>
+          <select value={channel} onChange={(event) => setChannel(event.target.value)}>
+            {CHANNELS.map((value) => (
+              <option key={value} value={value}>
+                {value}
+              </option>
+            ))}
+          </select>
+          <button
+            className="primary-button"
+            type="button"
+            disabled={!selectedContact || saving}
+            onClick={() => void addGrant()}
+          >
+            <UserPlus size={15} />
+            Authorize
+          </button>
+        </div>
+
+        {error ? <p className="project-access-error">{error}</p> : null}
+
+        <div className="project-access-list">
+          {grants.length === 0 ? (
+            <p className="drawer-empty">No contacts are authorized for this project yet.</p>
+          ) : (
+            grants.map((grant) => (
+              <article
+                className="project-access-row"
+                key={`${grant.contact_reference}:${grant.channel}`}
+              >
+                <Shield size={16} />
+                <div className="project-access-contact">
+                  <strong>{grant.contact_name || grant.contact_reference}</strong>
+                  <span>{grant.channel}</span>
+                </div>
+                <div className="project-access-flags">
+                  {grant.can_trigger_automations ? <span>Automations</span> : null}
+                  {grant.can_use_project_memory ? <span>Project memory</span> : null}
+                  {grant.can_receive_replies ? <span>Replies</span> : null}
+                  {grant.can_receive_artifacts ? <span>Artifacts</span> : null}
+                </div>
+                <button
+                  className="icon-button"
+                  type="button"
+                  disabled={saving}
+                  onClick={() => void removeGrant(grant)}
+                  aria-label="Remove access"
+                >
+                  <Trash2 size={15} />
+                </button>
+              </article>
+            ))
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}

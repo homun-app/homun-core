@@ -362,6 +362,21 @@ export interface WorkspacesSnapshot {
   workspaces: WorkspaceRecord[];
 }
 
+export interface ProjectAccessGrant {
+  workspace_id: string;
+  contact_reference: string;
+  contact_name: string;
+  channel: string;
+  can_trigger_automations: boolean;
+  can_use_project_memory: boolean;
+  can_receive_replies: boolean;
+  can_receive_artifacts: boolean;
+  capability_denies: string[];
+  updated_at: number;
+}
+
+export type ProjectAccessInput = Omit<ProjectAccessGrant, "workspace_id" | "updated_at">;
+
 export interface ComposioConnectResult {
   provider_id: string;
   tools_cached: number;
@@ -1504,6 +1519,33 @@ async function electronDeleteWorkspace(id: string): Promise<WorkspacesSnapshot> 
   );
 }
 
+async function electronProjectAccess(workspaceId: string): Promise<ProjectAccessGrant[]> {
+  return gatewayGetJson<ProjectAccessGrant[]>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/access`,
+  );
+}
+
+async function electronUpsertProjectAccess(
+  workspaceId: string,
+  input: ProjectAccessInput,
+): Promise<ProjectAccessGrant[]> {
+  return gatewayPostJson<ProjectAccessGrant[]>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/access/upsert`,
+    input,
+  );
+}
+
+async function electronRemoveProjectAccess(
+  workspaceId: string,
+  contactReference: string,
+  channel: string,
+): Promise<ProjectAccessGrant[]> {
+  return gatewayPostJson<ProjectAccessGrant[]>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/access/remove`,
+    { contact_reference: contactReference, channel },
+  );
+}
+
 /** A parameter (env var, argument, or HTTP header) a registry server needs. */
 export interface McpRegistryInput {
   key: string;
@@ -2284,6 +2326,11 @@ export const coreBridge = {
   selectWorkspace: (id: string) => electronSelectWorkspace(id),
   renameWorkspace: (id: string, name: string) => electronRenameWorkspace(id, name),
   deleteWorkspace: (id: string) => electronDeleteWorkspace(id),
+  projectAccess: (workspaceId: string) => electronProjectAccess(workspaceId),
+  upsertProjectAccess: (workspaceId: string, input: ProjectAccessInput) =>
+    electronUpsertProjectAccess(workspaceId, input),
+  removeProjectAccess: (workspaceId: string, contactReference: string, channel: string) =>
+    electronRemoveProjectAccess(workspaceId, contactReference, channel),
   mcpConnect: (input: {
     name: string;
     command?: string;

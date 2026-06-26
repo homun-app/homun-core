@@ -959,13 +959,22 @@ ragionato il contratto degli strumenti `make_*` creati dall'harness. ADR 0011
   assistant committate dalla chat desktop vengono reinviate best-effort al
   canale originario. Questo mantiene un unico thread bidirezionale tra app e
   canale; `scheduled` resta escluso dal mirror.
-- ☐ **6.5 / Automation Rules v2 (nuovo, 2026-06-26)** Evented Automations:
-  schedule, canali, Composio, MCP, skills/addon e local computer devono
-  convergere in regole `event source -> filter -> action`. Lo scheduler resta
-  trigger time-based e fallback di polling per fonti senza push; gli addon
-  (es. Presentations) sono azioni capability governate da registry unico,
-  policy/approval, run visibile e memoria/provenance. Spec:
+- ☐ **6.5 / Automation Rules v2 (nuovo, 2026-06-26)** Evented Automations +
+  Project Access: schedule, canali, Composio, MCP, skills/addon e local computer
+  devono convergere in regole `event source -> filter -> action`, ma solo dopo
+  una Project Access Surface esplicita per progetto. Ogni progetto dichiara
+  contatti/canali autorizzati; il runtime compone contact perimeter, accesso
+  progetto, policy regola, capability policy e approval con default fail-closed.
+  Lo scheduler resta trigger time-based e fallback di polling per fonti senza
+  push; gli addon (es. Presentations) sono azioni capability governate da
+  registry unico, project access, policy/approval, run visibile e
+  memoria/provenance. Spec:
   `docs/superpowers/specs/2026-06-26-evented-automations-design.md`.
+  - 🟡 **Prima slice Project Access (2026-06-26, locale/verde):** store
+    operativo `project-access.json`, API workspace access, bridge desktop,
+    dialog "Manage access" nel menu progetto e resolver default-deny che compone
+    grant progetto + contact perimeter. Gate: `cargo test -p
+    local-first-desktop-gateway project_ -- --nocapture`, `npm run build`.
 - ☐ **7.1b (futuro)** Portare ricerca/meeting al livello del deck solo dopo il
   chiarimento sul contratto strumenti: `make_research` e `make_meeting` non sono
   essenziali per la prossima release.

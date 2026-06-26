@@ -16,6 +16,7 @@ import {
   Plus,
   Search,
   Settings,
+  Shield,
   Trash2,
   X,
 } from "lucide-react";
@@ -27,6 +28,7 @@ import type { ChatThread, NavItem, SettingsSectionId, ViewId } from "../types";
 import { useSetting } from "../lib/settingsStore";
 import { coreBridge, type CoreChatThread, type WorkspaceRecord } from "../lib/coreBridge";
 import { useNotificationCount } from "../lib/useNotificationCount";
+import { ProjectAccessDialog } from "./ProjectAccessDialog";
 
 // The base personal workspace ("Predefinito"): always present, never a "project".
 const PERSONAL_WORKSPACE_ID = "local-workspace";
@@ -206,6 +208,7 @@ function ProjectsNav({
   const [expandedGroups, setExpandedGroups] = useState({ personal: true, projects: true });
   const [expandedProjectIds, setExpandedProjectIds] = useState<Set<string>>(new Set());
   const [projectModal, setProjectModal] = useState<ProjectModalState | null>(null);
+  const [accessProject, setAccessProject] = useState<WorkspaceRecord | null>(null);
   const [projectMenu, setProjectMenu] = useState<{
     project: WorkspaceRecord;
     x: number;
@@ -362,6 +365,11 @@ function ProjectsNav({
       name: project.name,
       folder: project.folder ?? null,
     });
+  }
+
+  function openProjectAccess(project: WorkspaceRecord) {
+    setProjectMenu(null);
+    setAccessProject(project);
   }
 
   async function createProjectChat(projectId: string) {
@@ -602,6 +610,10 @@ function ProjectsNav({
             <Pencil size={15} />
             <span>Project settings</span>
           </button>
+          <button type="button" role="menuitem" onClick={() => openProjectAccess(projectMenu.project)}>
+            <Shield size={15} />
+            <span>Manage access</span>
+          </button>
           {projectMenu.project.folder && (
             <button
               type="button"
@@ -623,6 +635,8 @@ function ProjectsNav({
           </button>
         </div>
       )}
+
+      <ProjectAccessDialog workspace={accessProject} onClose={() => setAccessProject(null)} />
 
       {projectModal && (
         <div

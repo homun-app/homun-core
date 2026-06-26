@@ -132,9 +132,12 @@ Tutto è **scoped per `workspace_id` (progetto) + `user_id`**.
    tempo resta un trigger first-class, ma e' anche il fallback tecnico per fonti
    che non possono fare push (polling). Channels, Composio, MCP, skills/addon,
    local computer e scheduler devono convergere nello stesso modello di
-   automazione e nello stesso lifecycle visibile. Gli addon sono capability nel
-   registry unico: una regola puo' invocare Presentations/Documents/PDF/etc. solo
-   attraverso policy, approval, memoria e provenance canoniche. Vedi
+   automazione e nello stesso lifecycle visibile. Prima di ogni evento
+   project-scoped c'e' un perimetro progetto: contatti/canali autorizzati,
+   contact perimeter, policy regola, capability policy e approval compongono una
+   sola decisione fail-closed. Gli addon sono capability nel registry unico: una
+   regola puo' invocare Presentations/Documents/PDF/etc. solo attraverso accesso
+   progetto, policy, approval, memoria e provenance canoniche. Vedi
    [Homun Evented Automations Design](superpowers/specs/2026-06-26-evented-automations-design.md).
 11. **Comprensione senza keyword/regex; verità verificabile.** Il core non capisce le
    richieste con regex/keyword (de-gemma/capable-first); la verifica è deterministica

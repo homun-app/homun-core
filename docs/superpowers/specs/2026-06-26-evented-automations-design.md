@@ -1,11 +1,12 @@
-# Homun Evented Automations Design
+# Homun Evented Automations and Project Access Design
 
 Date: 2026-06-26
-Status: approved direction, implementation plan pending
+Status: approved direction, project-access-first implementation plan pending
 
 ## Purpose
 
-Homun automations must support both scheduled work and reactive workflows:
+Homun automations must support both scheduled work and reactive workflows, but
+reactive work is only safe if it is scoped by project access first:
 
 - "Every weekday at 08:00, send me a briefing."
 - "When Elena messages me on WhatsApp, summarize it and notify me."
@@ -20,20 +21,38 @@ AND these conditions match
 THEN do this
 ```
 
-The internal model must remain Homun-native: visible execution, policy, memory,
-artifact lifecycle, registry-based capability selection, and no parallel store.
+The internal model must remain Homun-native: visible execution, project access,
+contact perimeter, policy, memory, artifact lifecycle, registry-based capability
+selection, and no parallel store.
 
 ## Core Principle
 
-Automations are not just schedules. They are evented rules:
+Projects are the first authorization surface. Automations are not just schedules;
+they are evented rules evaluated inside that surface:
 
 ```text
-Event source -> normalized event -> rule match -> condition/filter -> visible action run
+Project access -> event source -> normalized event -> rule match -> condition/filter -> visible action run
 ```
 
 Time is still first-class. A schedule is one event source, not the whole
 automation system. Polling is also a time-driven source, but it represents an
 event trigger to the user when a provider cannot push real events.
+
+The effective policy for any run is:
+
+```text
+global user defaults
+-> channel/provider settings
+-> contact perimeter
+-> project access
+-> automation rule policy
+-> capability policy
+-> runtime approval
+```
+
+The resolver is fail-closed: denial wins, missing project authorization means no
+project memory/files/artifacts, and external send/publish still needs explicit
+policy or approval.
 
 ## Current State
 
@@ -50,6 +69,43 @@ The existing runtime already has the right seed:
 The missing piece is the runtime bridge that makes event automations actually
 fire through the same queue, stream, policy and memory paths as scheduled
 automations.
+
+The other missing piece is project access. Contacts already have a perimeter
+that controls what a channel-originated reply may know or use. Projects do not
+yet expose an explicit list of contacts/channels that may access the project.
+That list must exist before channel events can safely trigger project-scoped
+work.
+
+## Project Access Surface
+
+Each project owns an access surface:
+
+- authorized contacts and channels;
+- whether the contact may trigger project automations;
+- whether Homun may use project memory for that contact;
+- whether generated artifacts may be sent back to that contact;
+- optional capability restrictions that further narrow the contact perimeter.
+
+Project access does not replace contact perimeter. It composes with it. A
+contact can be globally trusted but still not authorized for a project; a
+project can narrow access but must not silently widen a contact's global
+perimeter.
+
+Resolution rules:
+
+- **No authorized project**: the event is handled as personal/channel scope and
+  cannot read project memory, project files or project artifacts.
+- **One authorized project**: the event can use that project scope if the rule
+  also matches.
+- **Multiple authorized projects**: Homun must ask for disambiguation or route
+  to Personal unless the rule names a project explicitly.
+- **Explicit project on rule**: the contact/channel must be authorized for that
+  project before the rule can fire.
+- **Deny wins** across contact perimeter, project access, capability policy and
+  runtime approval.
+
+Operational project-access tables are allowed for fast lookup and UI state, but
+durable semantic knowledge and provenance still converge to `MemoryFacade`.
 
 ## Architecture
 
@@ -105,7 +161,7 @@ All sources emit a normalized event:
   "provider_id": "whatsapp|composio:gmail|mcp:filesystem|addon:presentations",
   "event_type": "message.received|email.received|file.changed|schedule.due",
   "occurred_at": 1782480000,
-  "workspace_id": "personal",
+  "workspace_id": "personal-or-authorized-project",
   "actor": {
     "contact_ref": "contact_...",
     "display_name": "Elena",
@@ -136,6 +192,11 @@ An automation rule has:
 - `visibility`: where the run appears;
 - `dedup`: avoid firing twice for the same event/item;
 - `state`: provider watermark and polling cursor.
+
+Rules that mention a project are invalid until every selected contact/channel is
+authorized for that project. Rules that do not mention a project must not
+implicitly infer one from vague text; they may use the project only when the
+event resolver finds exactly one authorized project.
 
 Example:
 
@@ -194,6 +255,7 @@ by chat/channel/scheduled work:
 
 ```text
 match rule
+resolve effective project/contact/capability policy
 create or find owner thread
 commit trigger event/user-visible placeholder
 emit thread.turn_started
@@ -220,6 +282,8 @@ Policies should be simple and visible:
 Defaults:
 
 - external send/publish = approval required;
+- project memory/file/artifact access from a contact = denied until the contact
+  is authorized for that project;
 - file writes outside managed artifact store = approval required unless an
   allowed destination exists;
 - destructive actions = approval required;
@@ -276,6 +340,7 @@ before enabling it.
 Evented automation runs must write memory through the canonical facade when they
 produce durable knowledge:
 
+- project access grants/revocations when they matter to future reasoning;
 - automation rule created/updated/deleted;
 - why a rule fired;
 - relevant source event;
@@ -312,37 +377,45 @@ Required behavior:
 
 ### 12. Implementation Slices
 
-**Slice A: Event source contract**
+**Slice A: Project Access Surface**
+
+Add project-contact access as the first policy surface: backend contract, UI
+surface under projects, and effective-policy resolver that composes existing
+contact perimeter with project grants.
+
+**Slice B: Event source contract**
 
 Add a provider-facing trigger descriptor and normalized event envelope. Surface
 available event sources from channels, Composio/MCP/skills/addons and time.
 
-**Slice B: Channel message rules**
+**Slice C: Channel message rules**
 
 Wire `EventTrigger::ChannelMessage` to inbound WhatsApp/Telegram events. Match
 sender/channel filters, create a visible automation run and show it in the
 owning thread.
 
-**Slice C: Polling rules**
+**Slice D: Polling rules**
 
 Implement generic `ConnectorPoll`/MCP polling: run a read-only capability on an
 interval, dedup by `key_field`, emit normalized events for new items.
 
-**Slice D: Capability action policy**
+**Slice E: Capability action policy**
 
 Allow evented rules to route into registry capabilities/addons, including
 Presentations, with explicit policy and approval gates for external send-back.
 
-**Slice E: IFTTT-style UI**
+**Slice F: IFTTT-style UI**
 
 Replace the current event builder with a clearer IF/FILTER/THEN composer, while
 keeping schedule creation and natural-language automation proposal cards.
 
-**Slice F: Eval and safety**
+**Slice G: Eval and safety**
 
 Add tests and evals for:
 
 - scheduled automation still works;
+- project access denies unauthorized contacts by default;
+- project access composes with contact perimeter and deny wins;
 - WhatsApp/Telegram inbound can fire event rules;
 - polling dedup prevents repeated runs;
 - Presentations addon can be selected as an action but cannot auto-send without
@@ -355,14 +428,15 @@ Add tests and evals for:
 - No separate "Automation v2" store.
 - No Zapier-style deterministic node graph as the core execution model.
 - No hidden background actions.
+- No project memory/file/artifact leakage from channel-originated events.
 - No provider-specific hardcoding for every connector.
 - No autonomous send/publish by default.
 
 ## Open Questions
 
-- Which first event source should be the implementation gate: WhatsApp inbound,
-  Gmail polling via Composio, or both?
+- Which first event source should be the implementation gate after project
+  access: WhatsApp inbound, Gmail polling via Composio, or both?
 - How much of model-assisted intent filtering should be enabled in the first
-  slice versus deterministic filters only?
+  event slice versus deterministic filters only?
 - Should notification actions use OS notifications first, channel messages, or
   both depending on user settings?
