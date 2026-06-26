@@ -9431,9 +9431,24 @@ struct AutomationCreateRequest {
     trigger: AutomationTrigger,
     prompt: String,
     #[serde(default)]
+    workspace_id: Option<String>,
+    #[serde(default)]
     approval: Option<ApprovalPolicy>,
     #[serde(default)]
     source: Option<AutomationSource>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct AutomationScopeQuery {
+    #[serde(default)]
+    workspace_id: Option<String>,
+}
+
+fn automation_workspace_scope(raw: Option<&str>) -> WorkspaceId {
+    let Some(value) = raw.map(str::trim).filter(|value| !value.is_empty()) else {
+        return gateway_workspace_id();
+    };
+    WorkspaceId::new(value)
 }
 
 /// Partial update of an existing automation: any field left out is unchanged.
@@ -10537,14 +10552,16 @@ async fn automation_event_sources(State(state): State<AppState>) -> Json<serde_j
 /// GET /api/automations — list the user's automations (rules), newest first.
 async fn automations_list(
     State(state): State<AppState>,
+    Query(scope): Query<AutomationScopeQuery>,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
+    let workspace = automation_workspace_scope(scope.workspace_id.as_deref());
     let store = lock_task_store(&state).map_err(|_| GatewayError {
         status: StatusCode::SERVICE_UNAVAILABLE,
         code: "task_store",
         message: "task store unavailable".into(),
     })?;
     let items = store
-        .list_automations(&gateway_user_id(), &gateway_workspace_id())
+        .list_automations(&gateway_user_id(), &workspace)
         .map_err(|e| GatewayError {
             status: StatusCode::INTERNAL_SERVER_ERROR,
             code: "automations_list",
@@ -10598,10 +10615,11 @@ async fn automation_create(
         }
     }
     let now = OffsetDateTime::now_utc();
+    let workspace = automation_workspace_scope(req.workspace_id.as_deref());
     let mut automation = Automation {
         id: format!("auto_{}", uuid::Uuid::new_v4().simple()),
         user_id: gateway_user_id(),
-        workspace_id: gateway_workspace_id(),
+        workspace_id: workspace,
         title: req.title,
         trigger: req.trigger,
         prompt: req.prompt,
@@ -10643,8 +10661,10 @@ async fn automation_create(
 async fn automation_update(
     State(state): State<AppState>,
     Path(id): Path<String>,
+    Query(scope): Query<AutomationScopeQuery>,
     Json(req): Json<AutomationUpdateRequest>,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
+    let workspace = automation_workspace_scope(scope.workspace_id.as_deref());
     // Validate a new schedule recurrence up front (fail fast, like create).
     if let Some(AutomationTrigger::Schedule { recurrence, tz }) = &req.trigger {
         if local_first_task_runtime::next_occurrence(
@@ -10667,7 +10687,7 @@ async fn automation_update(
         message: "task store unavailable".into(),
     })?;
     let mut automation = store
-        .get_automation(&id, &gateway_user_id(), &gateway_workspace_id())
+        .get_automation(&id, &gateway_user_id(), &workspace)
         .map_err(|e| GatewayError {
             status: StatusCode::INTERNAL_SERVER_ERROR,
             code: "automation_get",
@@ -10713,7 +10733,7 @@ async fn automation_update(
         })?;
     drop(store);
     let memory_user = gateway_memory_user_id();
-    let memory_workspace = gateway_memory_workspace_id();
+    let memory_workspace = MemoryWorkspaceId::new(automation.workspace_id.as_str());
     if let Ok(facade) = lock_memory_facade(&state) {
         let _ = tombstone_automation_memory_records(&facade, &memory_user, &memory_workspace, &id);
     }
@@ -10725,14 +10745,16 @@ async fn automation_update(
 async fn automation_toggle(
     State(state): State<AppState>,
     Path(id): Path<String>,
+    Query(scope): Query<AutomationScopeQuery>,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
+    let workspace = automation_workspace_scope(scope.workspace_id.as_deref());
     let store = lock_task_store(&state).map_err(|_| GatewayError {
         status: StatusCode::SERVICE_UNAVAILABLE,
         code: "task_store",
         message: "task store unavailable".into(),
     })?;
     let mut automation = store
-        .get_automation(&id, &gateway_user_id(), &gateway_workspace_id())
+        .get_automation(&id, &gateway_user_id(), &workspace)
         .map_err(|e| GatewayError {
             status: StatusCode::INTERNAL_SERVER_ERROR,
             code: "automation_get",
@@ -10773,22 +10795,22 @@ async fn automation_toggle(
 async fn automation_delete(
     State(state): State<AppState>,
     Path(id): Path<String>,
+    Query(scope): Query<AutomationScopeQuery>,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
+    let workspace = automation_workspace_scope(scope.workspace_id.as_deref());
     let store = lock_task_store(&state).map_err(|_| GatewayError {
         status: StatusCode::SERVICE_UNAVAILABLE,
         code: "task_store",
         message: "task store unavailable".into(),
     })?;
     // Stop the driving task (if any) before removing the rule.
-    if let Ok(Some(existing)) =
-        store.get_automation(&id, &gateway_user_id(), &gateway_workspace_id())
-    {
+    if let Ok(Some(existing)) = store.get_automation(&id, &gateway_user_id(), &workspace) {
         if let Some(tid) = existing.task_id.as_deref() {
             cancel_automation_task(&store, tid);
         }
     }
     store
-        .delete_automation(&id, &gateway_user_id(), &gateway_workspace_id())
+        .delete_automation(&id, &gateway_user_id(), &workspace)
         .map_err(|e| GatewayError {
             status: StatusCode::INTERNAL_SERVER_ERROR,
             code: "automation_delete",
@@ -10796,7 +10818,7 @@ async fn automation_delete(
         })?;
     drop(store);
     let memory_user = gateway_memory_user_id();
-    let memory_workspace = gateway_memory_workspace_id();
+    let memory_workspace = MemoryWorkspaceId::new(workspace.as_str());
     if let Ok(facade) = lock_memory_facade(&state) {
         let _ = tombstone_automation_memory_records(&facade, &memory_user, &memory_workspace, &id);
     }
@@ -51095,6 +51117,22 @@ data: [DONE]\n";
     }
 
     #[test]
+    fn automation_workspace_scope_defaults_and_trims() {
+        assert_eq!(
+            super::automation_workspace_scope(None).as_str(),
+            super::gateway_workspace_id().as_str()
+        );
+        assert_eq!(
+            super::automation_workspace_scope(Some("  ")).as_str(),
+            super::gateway_workspace_id().as_str()
+        );
+        assert_eq!(
+            super::automation_workspace_scope(Some("project_alpha")).as_str(),
+            "project_alpha"
+        );
+    }
+
+    #[test]
     fn channel_message_event_envelope_is_stable_and_visible() {
         let message = super::ChannelInbound {
             sender: "393331234567@lid".to_string(),
@@ -51180,6 +51218,7 @@ data: [DONE]\n";
     ) -> super::ChatThread {
         super::ChatThread {
             thread_id: thread_id.to_string(),
+            workspace_id: Some("workspace_test".to_string()),
             title: "Thread".to_string(),
             subtitle: String::new(),
             status: "active".to_string(),

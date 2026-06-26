@@ -473,7 +473,10 @@ primo percorso locale verde e WS5 è chiusa localmente/gate:
     user/workspace scope instead of the gateway default scope. Follow-up UI/API:
     event-source groups are now stable data keys (`connected_services`) and the
     Automations builder localizes them while surfacing the Project Access
-    default-deny guard on event rules.
+    default-deny guard on event rules. Follow-up management scope: automation
+    list/create/update/toggle/delete now accept the thread/project
+    `workspace_id`, and chat threads expose `workspace_id` to the desktop
+    client, so rule management no longer falls back to the gateway-global scope.
     Spec: `docs/superpowers/specs/2026-06-26-evented-automations-design.md`.
     Slice consigliata: prima Project Access Surface, poi `ChannelMessage`
     WhatsApp/Telegram, poi `ConnectorPoll` generico per Gmail/Composio/MCP,

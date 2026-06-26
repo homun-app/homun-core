@@ -318,6 +318,15 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   sulle regole evento, cioe' contatti/canali devono essere autorizzati sul
   progetto e il default resta deny. Gate passati: `npm run test:ui-contract`,
   `npm run build`.
+  **Follow-up Automation management workspace scope (2026-06-26):** anche le
+  API e il bridge di gestione automazioni (`list/create/update/toggle/delete`)
+  accettano lo scope workspace/progetto e la UI Automations passa lo
+  `workspace_id` della chat attiva. Il runner era gia' scoped sul task; ora
+  anche creazione e manutenzione delle regole non ricadono nello scope gateway
+  globale. I thread chat espongono `workspace_id` nel contratto API per evitare
+  inferenze client-side. Gate mirati: `cargo test -p
+  local-first-desktop-gateway automation_workspace_scope_defaults_and_trims --
+  --nocapture`, `npm run test:ui-contract`, `npm run build`.
   Gate finale continuita' canale: `cargo test -p local-first-desktop-gateway -- --nocapture`
   (312 passati, 1 ignorato), `npm run build` da `apps/desktop`,
   `git diff --check`.

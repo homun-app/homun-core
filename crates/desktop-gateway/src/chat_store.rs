@@ -372,7 +372,7 @@ impl ChatStore {
         };
         let mut stmt = self.conn.prepare(
             "select thread_id, title, subtitle, status, pinned, computer_session_id, task_id,
-                    updated_at, message_count, source, channel_recipient
+                    updated_at, message_count, source, channel_recipient, workspace_id
                from chat_threads
               where workspace_id = ?1 and thread_id <> 'homun'
               order by pinned desc, cast(updated_at as integer) desc, rowid desc",
@@ -391,6 +391,7 @@ impl ChatStore {
         let thread_id = format!("thread_{}_{}", timestamp, monotonic_suffix());
         let thread = ChatThread {
             thread_id: thread_id.clone(),
+            workspace_id: Some(workspace_id.to_string()),
             title: "New task".to_string(),
             subtitle: "Local chat".to_string(),
             status: "active".to_string(),
@@ -428,6 +429,7 @@ impl ChatStore {
         let timestamp = current_timestamp_seconds();
         let thread = ChatThread {
             thread_id: thread_id.clone(),
+            workspace_id: Some(workspace_id.to_string()),
             title: title.to_string(),
             subtitle: format!("Canale {source}"),
             status: "active".to_string(),
@@ -2653,6 +2655,7 @@ impl ChatStore {
         let timestamp = current_timestamp_seconds();
         let thread = ChatThread {
             thread_id: "thread_active_prompt".to_string(),
+            workspace_id: Some("default".to_string()),
             title: "New task".to_string(),
             subtitle: "Local chat".to_string(),
             status: "active".to_string(),
@@ -2679,6 +2682,7 @@ impl ChatStore {
         let thread_id = format!("thread_{}_{}", timestamp, monotonic_suffix());
         let thread = ChatThread {
             thread_id: thread_id.clone(),
+            workspace_id: Some(workspace_id.to_string()),
             title: "New task".to_string(),
             subtitle: "Local chat".to_string(),
             status: "active".to_string(),
@@ -2904,8 +2908,14 @@ fn active_thread_setting_key(workspace_id: &str) -> String {
 }
 
 fn thread_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChatThread> {
+    let workspace_id = if row.as_ref().column_count() > 11 {
+        row.get::<_, Option<String>>(11)?
+    } else {
+        None
+    };
     Ok(ChatThread {
         thread_id: row.get(0)?,
+        workspace_id,
         title: row.get(1)?,
         subtitle: row.get(2)?,
         status: row.get(3)?,

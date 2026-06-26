@@ -32,6 +32,7 @@ export interface CoreBridgeStatus {
 
 export interface CoreChatThread {
   thread_id: string;
+  workspace_id?: string | null;
   title: string;
   subtitle: string;
   status: string;
@@ -929,14 +930,23 @@ export type AutomationCreateteInput = {
   title: string;
   trigger: AutomationTriggerJson;
   prompt: string;
+  workspace_id?: string | null;
   approval?: "confirm" | "autonomous";
   source?: "chat" | "mining" | "manual";
 };
 
-async function electronAutomations(): Promise<ManagedAutomation[]> {
-  const response = await fetch(`${DESKTOP_GATEWAY_URL}/api/automations`, {
-    headers: gatewayHeaders(),
-  });
+function automationScopeSuffix(workspaceId?: string | null): string {
+  const value = workspaceId?.trim();
+  return value ? `?workspace_id=${encodeURIComponent(value)}` : "";
+}
+
+async function electronAutomations(workspaceId?: string | null): Promise<ManagedAutomation[]> {
+  const response = await fetch(
+    `${DESKTOP_GATEWAY_URL}/api/automations${automationScopeSuffix(workspaceId)}`,
+    {
+      headers: gatewayHeaders(),
+    },
+  );
   if (!response.ok) return [];
   const body = (await response.json()) as { automations: ManagedAutomation[] };
   return body.automations ?? [];
@@ -960,9 +970,12 @@ async function electronCreateteAutomation(
 async function electronUpdateAutomation(
   id: string,
   input: Partial<AutomationCreateteInput>,
+  workspaceId?: string | null,
 ): Promise<ManagedAutomation> {
   const response = await fetch(
-    `${DESKTOP_GATEWAY_URL}/api/automations/${encodeURIComponent(id)}`,
+    `${DESKTOP_GATEWAY_URL}/api/automations/${encodeURIComponent(id)}${automationScopeSuffix(
+      workspaceId,
+    )}`,
     {
       method: "PUT",
       headers: { ...gatewayHeaders(), "Content-Type": "application/json" },
@@ -976,20 +989,33 @@ async function electronUpdateAutomation(
   return (await response.json()) as ManagedAutomation;
 }
 
-async function electronToggleAutomation(id: string): Promise<ManagedAutomation> {
+async function electronToggleAutomation(
+  id: string,
+  workspaceId?: string | null,
+): Promise<ManagedAutomation> {
   const response = await fetch(
-    `${DESKTOP_GATEWAY_URL}/api/automations/${encodeURIComponent(id)}/toggle`,
+    `${DESKTOP_GATEWAY_URL}/api/automations/${encodeURIComponent(
+      id,
+    )}/toggle${automationScopeSuffix(workspaceId)}`,
     { method: "POST", headers: gatewayHeaders() },
   );
   if (!response.ok) throw new Error(`toggle automation HTTP ${response.status}`);
   return (await response.json()) as ManagedAutomation;
 }
 
-async function electronDeleteAutomation(id: string): Promise<void> {
-  await fetch(`${DESKTOP_GATEWAY_URL}/api/automations/${encodeURIComponent(id)}`, {
-    method: "DELETE",
-    headers: gatewayHeaders(),
-  }).catch(() => undefined);
+async function electronDeleteAutomation(
+  id: string,
+  workspaceId?: string | null,
+): Promise<void> {
+  await fetch(
+    `${DESKTOP_GATEWAY_URL}/api/automations/${encodeURIComponent(id)}${automationScopeSuffix(
+      workspaceId,
+    )}`,
+    {
+      method: "DELETE",
+      headers: gatewayHeaders(),
+    },
+  ).catch(() => undefined);
 }
 
 /** One recorded run of an automation — drives the run history + late/failed badge. */
@@ -2440,14 +2466,19 @@ export const coreBridge = {
   createChatThread: (workspace?: string) => chatApi.createChatThread(workspace),
   seedAssistantMessage: (threadId: string, text: string) =>
     chatApi.seedAssistantMessage(threadId, text),
-  automations: () => electronAutomations(),
+  automations: (workspaceId?: string | null) => electronAutomations(workspaceId),
   activeStreams: () => electronActiveStreams(),
   automationEventSources: () => electronAutomationEventSources(),
   createAutomation: (input: AutomationCreateteInput) => electronCreateteAutomation(input),
-  updateAutomation: (id: string, input: Partial<AutomationCreateteInput>) =>
-    electronUpdateAutomation(id, input),
-  toggleAutomation: (id: string) => electronToggleAutomation(id),
-  deleteAutomation: (id: string) => electronDeleteAutomation(id),
+  updateAutomation: (
+    id: string,
+    input: Partial<AutomationCreateteInput>,
+    workspaceId?: string | null,
+  ) => electronUpdateAutomation(id, input, workspaceId),
+  toggleAutomation: (id: string, workspaceId?: string | null) =>
+    electronToggleAutomation(id, workspaceId),
+  deleteAutomation: (id: string, workspaceId?: string | null) =>
+    electronDeleteAutomation(id, workspaceId),
   automationRuns: (id: string) => electronAutomationRuns(id),
   brandKit: () => electronBrandKit(),
   saveBrandKit: (kit: BrandKit) => electronSaveBrandKit(kit),

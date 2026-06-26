@@ -92,6 +92,7 @@ export interface ChatAttachment {
 
 export interface ChatThread {
   threadId: string;
+  workspaceId?: string | null;
   title: string;
   subtitle: string;
   status: "active" | "archived";

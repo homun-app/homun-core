@@ -1008,6 +1008,14 @@ ragionato il contratto degli strumenti `make_*` creati dall'harness. ADR 0011
     `channels`/`connected_services`, elimina literal hardcoded residui e mostra
     nel builder evento il vincolo Project Access (`can_trigger_automations`,
     default deny). Gate: `npm run test:ui-contract`, `npm run build`.
+  - 🟡 **Automation management workspace scope (2026-06-26, locale/verde
+    mirato):** le API `list/create/update/toggle/delete` e il bridge desktop
+    accettano `workspace_id`, mentre la UI Automations usa lo scope della chat
+    attiva. I thread espongono `workspace_id` nel contratto API, quindi le
+    regole create/manutenute da un progetto non finiscono piu' nello scope
+    gateway globale. Gate: `cargo test -p local-first-desktop-gateway
+    automation_workspace_scope_defaults_and_trims -- --nocapture`, `npm run
+    test:ui-contract`, `npm run build`.
 - ☐ **7.1b (futuro)** Portare ricerca/meeting al livello del deck solo dopo il
   chiarimento sul contratto strumenti: `make_research` e `make_meeting` non sono
   essenziali per la prossima release.

@@ -108,6 +108,10 @@ pub struct CancelGenerationRequest {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChatThread {
     pub thread_id: String,
+    /// Workspace/project that owns this thread. Legacy rows may omit it in older
+    /// serialized payloads, so clients treat it as optional.
+    #[serde(default)]
+    pub workspace_id: Option<String>,
     pub title: String,
     pub subtitle: String,
     pub status: String,

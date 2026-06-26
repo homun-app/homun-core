@@ -81,6 +81,7 @@ const defaultChatThread: ChatThread = {
 function mapCoreChatThread(thread: CoreChatThread): ChatThread {
   return {
     threadId: thread.thread_id,
+    workspaceId: thread.workspace_id ?? null,
     title: thread.title,
     subtitle: thread.subtitle,
     status: thread.status === "archived" ? "archived" : "active",
@@ -574,6 +575,7 @@ export default function App() {
       defaultChatThread,
     [activeThreadId, chatThreads],
   );
+  const automationWorkspaceId = activeThread.workspaceId ?? undefined;
   // Threads "busy": a real-time streaming signal (from ChatView, sub-poll) UNION
   // the taskQueue snapshot (running/queued tasks linked to a thread). The union
   // covers both the chat-stream case and the durable-background-task case.
@@ -1108,7 +1110,7 @@ export default function App() {
 
   async function loadAutomations() {
     try {
-      setAutomationItems(await coreBridge.automations());
+      setAutomationItems(await coreBridge.automations(automationWorkspaceId));
     } catch (error) {
       console.warn("automations unavailable", error);
     }
@@ -1116,7 +1118,10 @@ export default function App() {
 
   async function handleCreateteAutomation(input: AutomationCreateteInput) {
     try {
-      await coreBridge.createAutomation(input);
+      await coreBridge.createAutomation({
+        ...input,
+        workspace_id: input.workspace_id ?? automationWorkspaceId,
+      });
       await loadAutomations();
     } catch (error) {
       console.warn("create automation failed", error);
@@ -1125,7 +1130,7 @@ export default function App() {
 
   async function handleUpdateAutomation(id: string, input: Partial<AutomationCreateteInput>) {
     try {
-      await coreBridge.updateAutomation(id, input);
+      await coreBridge.updateAutomation(id, input, automationWorkspaceId);
       await loadAutomations();
     } catch (error) {
       console.warn("update automation failed", error);
@@ -1134,7 +1139,7 @@ export default function App() {
 
   async function handleToggleAutomation(id: string) {
     try {
-      await coreBridge.toggleAutomation(id);
+      await coreBridge.toggleAutomation(id, automationWorkspaceId);
       await loadAutomations();
     } catch (error) {
       console.warn("toggle automation failed", error);
@@ -1143,7 +1148,7 @@ export default function App() {
 
   async function handleDeleteAutomation(id: string) {
     try {
-      await coreBridge.deleteAutomation(id);
+      await coreBridge.deleteAutomation(id, automationWorkspaceId);
       await loadAutomations();
     } catch (error) {
       console.warn("delete automation failed", error);
@@ -1267,7 +1272,7 @@ export default function App() {
   useEffect(() => {
     if (activeView === "automations") void loadAutomations();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeView]);
+  }, [activeView, automationWorkspaceId]);
 
   useEffect(() => {
     let cancelled = false;
