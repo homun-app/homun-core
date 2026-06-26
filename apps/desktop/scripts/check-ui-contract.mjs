@@ -239,10 +239,12 @@ assertContains("src/components/SettingsView.tsx", "https://api.z.ai/api/paas/v4"
 assertContains("src/components/SettingsView.tsx", "https://api.z.ai/api/coding/paas/v4", "Z.ai coding preset must keep the coding GLM endpoint");
 assertContains("src/components/SettingsView.tsx", "v.id === p.id || normUrl(v.base_url) === normUrl(p.baseUrl)", "provider preset cards must match by stable id before URL fallback");
 assertContains("src/components/SettingsView.tsx", "imageRoleMissingHint", "model routing must explain when no image-generation role model is available");
-assertContains("src/components/SettingsView.tsx", "profileImageUpload", "Account profile photo upload must expose a visible upload action");
+assertContains("src/components/SettingsView.tsx", "profileImageUpload", "Account profile photo upload must remain available from the avatar menu");
 assertContains("src/components/SettingsView.tsx", "profileImageDecodeError", "Account profile photo upload must report unsupported/corrupt image files");
 assertContains("src/components/SettingsView.tsx", "profileImageMenuOpen", "Account profile image click must expose upload/remove actions");
 assertContains("src/components/SettingsView.tsx", "profile-image-menu", "Account profile image actions must render as an anchored menu");
+assertNotContains("src/components/SettingsView.tsx", "className=\"set-btn\" onClick={clearProfileImage}", "Account profile image remove action must not be duplicated outside the avatar menu");
+assertNotContains("src/components/SettingsView.tsx", "className=\"set-btn\"\n              onClick={openProfileImagePicker}", "Account profile image upload action must not be duplicated outside the avatar menu");
 assertContains("src/components/Sidebar.tsx", "useSetting(\"profileImage\"", "Settings sidebar profile header must read the saved profile photo");
 assertContains("src/components/Sidebar.tsx", "set-nav-avatar-img", "Settings sidebar profile header must render the saved profile photo");
 assertContains("src/components/BrandKitPanel.tsx", "builtin:template-preview/", "template gallery must render built-in previews when the catalog declares preview_ref");

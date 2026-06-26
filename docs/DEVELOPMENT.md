@@ -266,8 +266,8 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   warning theme-aware se il file non e' leggibile o se Chromium non decodifica
   il formato (es. HEIC), indicando PNG/JPEG/WebP. Follow-up: l'avatar salvato
   viene riusato anche nella sidebar Settings; cliccare sull'immagine apre un
-  menu contestuale per sostituirla o rimuoverla, mantenendo comunque il pulsante
-  esplicito `Upload photo`. Gate:
+  menu contestuale per sostituirla o rimuoverla, senza pulsanti duplicati nella
+  riga profilo. Gate:
   `npm run test:ui-contract`, `npm run build` da `apps/desktop`,
   `git diff --check`.
   **WS7 provider-agnostic template sourcing locale/verde (2026-06-26):**

@@ -699,11 +699,6 @@ function AccountPane({
               }
             }}
           >
-            {profileImage && (
-              <button type="button" className="set-btn" onClick={clearProfileImage}>
-                {t("settings.profileImageRemove")}
-              </button>
-            )}
             <div className="profile-image-menu-anchor">
               <button
                 type="button"
@@ -736,13 +731,6 @@ function AccountPane({
                 </div>
               )}
             </div>
-            <button
-              type="button"
-              className="set-btn"
-              onClick={openProfileImagePicker}
-            >
-              {t("settings.profileImageUpload")}
-            </button>
             <input
               ref={fileInputRef}
               type="file"
