@@ -6520,6 +6520,49 @@ fn parse_plan_marker(text: &str) -> Vec<serde_json::Value> {
     out
 }
 
+/// Anti-churn: the harness appends a fresh ‹‹PLAN›› marker to the running message on
+/// EVERY `update_plan`/`step_advance` call so the plan card animates live. The PERSISTED
+/// message, though, must carry the plan card exactly ONCE — the latest canonical state —
+/// not one block per tool call (a 5-step task that touches the plan 5× otherwise stores
+/// 5 stacked ‹‹PLAN›› blocks = unreadable minestra, the agentic-loop regression).
+///
+/// Keep the LAST block's content (most steps closed = freshest canonical plan) but place
+/// it at the FIRST block's position, so the card stays where the user first saw it instead
+/// of jumping below the prose. All other blocks are removed; surrounding prose is intact.
+/// `parse_plan_marker`'s resume still works: it `rfind`s the single remaining block.
+fn collapse_plan_markers(text: &str) -> String {
+    const OPEN: &str = "‹‹PLAN››";
+    const CLOSE: &str = "‹‹/PLAN››";
+    let mut spans: Vec<(usize, usize)> = Vec::new();
+    let mut search = 0usize;
+    while let Some(rel_o) = text[search..].find(OPEN) {
+        let o = search + rel_o;
+        let Some(rel_c) = text[o..].find(CLOSE) else {
+            break;
+        };
+        let c = o + rel_c + CLOSE.len();
+        spans.push((o, c));
+        search = c;
+    }
+    if spans.len() <= 1 {
+        return text.to_string();
+    }
+    let first_start = spans[0].0;
+    let (ls, le) = spans[spans.len() - 1];
+    let latest = &text[ls..le];
+    let mut out = String::with_capacity(text.len());
+    let mut cursor = 0usize;
+    for &(s, e) in &spans {
+        out.push_str(&text[cursor..s]);
+        if s == first_start {
+            out.push_str(latest);
+        }
+        cursor = e;
+    }
+    out.push_str(&text[cursor..]);
+    out
+}
+
 fn plan_step_status(step: &serde_json::Value) -> &str {
     step.get("status")
         .and_then(|s| s.as_str())
@@ -8463,6 +8506,26 @@ fn thread_has_active_runtime_plan(state: &AppState, thread_id: Option<&str>) -> 
         .unwrap_or_default()
         .iter()
         .any(|memory| runtime_plan_memory_matches(memory, &thread_key))
+}
+
+/// Load the thread's CANONICAL plan steps from the durable runtime-plan store (the same
+/// per-thread memory `thread_has_active_runtime_plan` matches). This is the authoritative
+/// cross-turn state: it's upserted on EVERY `update_plan`/`step_advance` (synchronously,
+/// before a turn ends), so a CONTINUATION turn can inherit `{done,doing,…}` even before the
+/// prior turn's ‹‹PLAN›› message has been persisted/streamed into the next turn's context.
+/// Returns the steps (with verified statuses) or empty if the thread has no open plan.
+fn load_runtime_plan_from_state(state: &AppState, thread_id: Option<&str>) -> Vec<serde_json::Value> {
+    let thread_key = runtime_plan_thread_key(thread_id);
+    let Ok(facade) = lock_memory_facade(state) else {
+        return Vec::new();
+    };
+    facade
+        .list_memories_for_ui(&gateway_memory_user_id(), &gateway_memory_workspace_id())
+        .unwrap_or_default()
+        .iter()
+        .find(|memory| runtime_plan_memory_matches(memory, &thread_key))
+        .and_then(|memory| memory.metadata.get("steps").and_then(|s| s.as_array()).cloned())
+        .unwrap_or_default()
 }
 
 /// A bare continuation/approval message ("1", a step/option number, "ok"/"procedi"/
@@ -13876,7 +13939,11 @@ async fn compact_completed_step(
         if let Some(content) = m.get("content").and_then(|c| c.as_str()) {
             buf.push_str(role);
             buf.push_str(": ");
-            buf.push_str(&content.chars().take(1500).collect::<String>());
+            // Keep enough of each message that a browser snapshot's actual DATA (a full
+            // standings table, a schedule, a price list) reaches the summarizer — 1500
+            // chars truncated mid-table, so the data the deliverable needs was lost and
+            // the final answer evaporated ("verifica interrotta"). 8000 keeps the data.
+            buf.push_str(&content.chars().take(8000).collect::<String>());
             buf.push('\n');
         }
     }
@@ -13887,16 +13954,22 @@ async fn compact_completed_step(
         return;
     };
     let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
-    let system = "Summarize what the agent accomplished in these completed steps and any FACTS, \
-FINDINGS, file paths, or outputs that LATER steps may need. Be concise (<=150 words), preserve \
-concrete values (names, numbers, URLs, artifact filenames). No preamble, no markdown headings.";
+    // Compaction must NOT destroy the task's raw material. A 150-word gist drops the
+    // concrete rows (group standings, match schedule, flight options) the LATER synthesis
+    // step has to report — so preserve DATA verbatim, summarize only the narration.
+    let system = "You compress an agent's completed steps to free context WITHOUT losing the \
+task's raw material. PRESERVE VERBATIM every concrete data point a later step will report: full \
+tables (standings, schedules, results), lists of options (flights/trains/hotels with their \
+times/prices/stops), names, numbers, dates, URLs, artifact filenames. Copy them as a compact \
+markdown list or table — do NOT abbreviate, sample, or say \"etc.\". You may summarize only the \
+NARRATION (what the agent did/tried). No preamble, no headings.";
     let payload = serde_json::json!({
         "model": model,
         "temperature": 0,
-        "max_tokens": 320,
+        "max_tokens": 1600,
         "messages": [
             { "role": "system", "content": system },
-            { "role": "user", "content": buf.chars().take(12000).collect::<String>() },
+            { "role": "user", "content": buf.chars().take(24000).collect::<String>() },
         ],
     });
     let mut builder = http
@@ -14772,6 +14845,32 @@ fn chat_browser_max_rounds() -> usize {
         .and_then(|raw| raw.trim().parse::<usize>().ok())
         .filter(|n| *n > 0)
         .unwrap_or(MAX_TOOL_ROUNDS_BROWSER)
+}
+
+/// Wander-cap: max browser NAVIGATIONS spent on the SAME plan step before we stop
+/// browsing and synthesize from what we already gathered. The per-step round budget
+/// (F1) only resets on step COMPLETION, so a model that never closes a step (it keeps
+/// hopping across cookie-walled / JS-heavy live sources that fail to read — Mondiali:
+/// ~15 pages, 0/4 closed) burns the WHOLE 32-round budget wandering. Counting distinct
+/// navigations per step (via `step_evidence`, cleared on step close) catches the
+/// distinct-URL wander the no-progress guard misses (it only catches IDENTICAL calls).
+/// Env-overridable: `HOMUN_CHAT_BROWSER_NAV_CAP`.
+///
+/// Set GENEROUSLY (20): a legitimate multi-part research reads many DISTINCT productive
+/// pages (e.g. all 12 World-Cup group pages + schedule + knockout ≈ 15-18 navigations),
+/// and counting can't tell that apart from pathological wander. A too-tight cap (10) cut a
+/// real briefing off at 7/12 groups when the turn ran WITHOUT a plan (no step ever closed
+/// → the counter never reset). The real backstops are the per-step round budget AND the
+/// forced final synthesis (which always emits a deliverable from what was gathered), so
+/// this only needs to catch genuinely excessive hopping.
+const MAX_BROWSER_NAVS_PER_STEP: usize = 20;
+
+fn chat_browser_nav_cap() -> usize {
+    env::var("HOMUN_CHAT_BROWSER_NAV_CAP")
+        .ok()
+        .and_then(|raw| raw.trim().parse::<usize>().ok())
+        .filter(|n| *n > 0)
+        .unwrap_or(MAX_BROWSER_NAVS_PER_STEP)
 }
 
 /// How many connected-service tools to pull into the searchable catalog (NOT
@@ -17876,13 +17975,37 @@ STATE them (do not block the user over minor details).\n\
 browser (do not say you have no internet access). Open the source with \
 browser_navigate, read the snapshot and proceed ONE micro-action at a time. Keep \
 2-3 candidate SOURCES in order of preference and try them in turn: if one is \
-blocked/has no data, move to the next. Do not repeat the same search.\n\
+blocked/has no data, move to the next. Do not repeat the same search. For FACTUAL or \
+statistical data (sports standings/results/schedules, reference figures, public \
+timetables) PREFER a login-free, text-rich source (e.g. Wikipedia, an official \
+schedule page) over login-walled, store, or marketing pages that return no data. \
+EXTRACT AS YOU GO: the moment a page shows the data you need, COPY the concrete values \
+(the actual table rows, names, numbers, dates) into your message text — do NOT defer \
+extraction to \"later\" or across another tool call, because the page content is NOT \
+retained once you navigate away or advance the plan. Your browsing budget is LIMITED: \
+do NOT keep hopping across many sites for the same point. If ONE good static source \
+already gives the data, take it and move on; do NOT chase JavaScript-heavy live-score \
+or aggregator SPAs (they frequently fail to read) when an encyclopedic/text source \
+already answers. Aim to settle each sub-question in 1-2 sources, not 5+.\n\
 5. SYNTHESIZE: as soon as you have enough data, STOP using the browser and write the \
 final answer to the user. Report the REAL status of each source: call a source \
 \"blocked/unreachable\" ONLY if it failed to open or shows an explicit CAPTCHA. If \
 you REACHED it but did not complete the search, do NOT say it is blocked or \
 unreachable: say you got there but did not finish, show any partial data collected \
-and offer to retry.\n\
+and offer to retry. REACHING a page and reading its data IS your verification: if you \
+successfully read the data, you MUST report it — NEVER refuse with \"I can't state \
+real-time facts without a verified source\" or \"the check was interrupted\" when you \
+in fact read the page. Refuse ONLY if you never obtained the data at all. Always \
+deliver the concrete data you DID gather rather than a meta-explanation of why you \
+can't. CALIBRATED GROUNDING (critical): report as FACT only what you actually READ from \
+a source. Anything you INFER, project, or that is NOT YET DETERMINED (results of matches \
+not yet played, standings/brackets that depend on pending results) must be clearly \
+LABELLED as projected/uncertain or OMITTED — never presented as established fact. It is \
+contradictory to write \"live results not verifiable\" and then present a full \
+results/bracket table as if confirmed: if you could not verify it, do not assert it. \
+Prefer an accurate partial (\"decided so far: …; still open: …\") over a complete-looking \
+but fabricated picture. Before sending, sanity-check internal consistency (counts match \
+their labels; nothing is both \"already decided\" and \"played later today\").\n\
 \n\
 TOOLS AND ROUTING: when a request can be satisfied by a tool, USE it at once — do \
 NOT reply with empty phrases (\"I'm ready, write to me\", \"what do you want me to \
@@ -18828,16 +18951,27 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
         .rev()
         .find(|m| matches!(m.role, ChatContextRole::Assistant))
         .map(|m| m.text.clone());
-    // F4: resume an interrupted long task on the CANONICAL plan. Rebuild the plan object
-    // from the latest ‹‹PLAN›› marker in the prior conversation, so the turn continues on
-    // the same authoritative state (done steps stay done) instead of restarting.
-    let resume_plan: Vec<serde_json::Value> = request
-        .context
-        .iter()
-        .rev()
-        .find(|m| m.text.contains("‹‹PLAN››"))
-        .map(|m| parse_plan_marker(&m.text))
-        .unwrap_or_default();
+    // F4: resume an interrupted long task on the CANONICAL plan so the turn continues on
+    // the same authoritative state (done steps stay done) instead of RESTARTING. Prefer the
+    // durable per-thread runtime-plan store (upserted on every plan call, survives even when
+    // the prior turn hasn't yet persisted its ‹‹PLAN›› marker into this turn's context) —
+    // reading only the context marker made a continuation turn resume 0 steps and revert
+    // done→doing (the "il piano riparta" symptom). Fall back to the context marker for a
+    // thread-less turn or a store miss.
+    let resume_plan: Vec<serde_json::Value> = {
+        let from_store = load_runtime_plan_from_state(state, thread_id.as_deref());
+        if !from_store.is_empty() {
+            from_store
+        } else {
+            request
+                .context
+                .iter()
+                .rev()
+                .find(|m| m.text.contains("‹‹PLAN››"))
+                .map(|m| parse_plan_marker(&m.text))
+                .unwrap_or_default()
+        }
+    };
     let capability_route_for_runtime = capability_route.clone();
     tokio::spawn(async move {
         let mut accumulated = String::new();
@@ -18880,6 +19014,16 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
         // F2 verification, F5 next-step and the ‹‹PLAN›› marker all read THIS. Seeded from
         // the prior conversation (F4 resume). A step is `done` only after F2 verified it.
         let mut plan: ExecutionPlan = runtime_execution_plan(&resume_plan);
+        if verbose_debug() {
+            let done = resume_plan
+                .iter()
+                .filter(|s| s.get("status").and_then(|v| v.as_str()) == Some("done"))
+                .count();
+            eprintln!(
+                "[plan] turn-start: resumed {} steps ({done} done) from prior ‹‹PLAN›› marker",
+                resume_plan.len()
+            );
+        }
         // F2 verification gate: the running evidence (tool name → result snippet) for the
         // CURRENT plan step, fed to the verifier when the model marks the step done, then
         // cleared. A chat model can claim "done" without doing the work; the gate checks.
@@ -18977,6 +19121,31 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
             if rounds_since_progress >= max_rounds {
                 break;
             }
+            // Wander-cap: the model has navigated to many sources for the CURRENT step
+            // without closing it → it's hopping across walled/SPA pages that won't read.
+            // Stop browsing and synthesize from what we already gathered (the forced-
+            // synthesis below runs because `final_done` is false; #3a compaction kept the
+            // data). `step_evidence` is cleared on every step close, so this counts
+            // navigations for the CURRENT step only. Restores 64f08e4d's budget control
+            // for the distinct-URL case (cold-context consent walls → wander → burn).
+            if browser_used {
+                let step_navs = step_evidence
+                    .iter()
+                    .filter(|e| e.starts_with("browser_navigate"))
+                    .count();
+                if step_navs >= chat_browser_nav_cap() {
+                    let _ = emit_stream_event(
+                        &tx,
+                        GenerateStreamEvent::Delta {
+                            text: "‹‹ACT››⏹️ Enough sources visited — synthesizing from what I \
+gathered‹‹/ACT››"
+                                .to_string(),
+                        },
+                    )
+                    .await;
+                    break;
+                }
+            }
             // Context hygiene: at up to 32 rounds the accumulated snapshots/images
             // would overflow the window and silently truncate the page. Stub all
             // but the latest browser snapshot + the latest screenshot image.
@@ -18997,6 +19166,25 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
             // tools, so the loop never synthesizes and ends with "limite di passi").
             // Omitting the tools field forces a text answer.
             let is_final_round = round + 1 >= max_rounds;
+            // Final round: tools are omitted so the model MUST answer in text. Without an
+            // explicit directive a model that was mid-browse writes a TRANSITION note
+            // ("now I'll compose the briefing", "I'll update the plan") instead of the
+            // deliverable, and that narration becomes the final answer (observed on Mondiali:
+            // ~15 pages browsed, budget spent, ended on "compongo il briefing" with 0/4 steps).
+            // Tell it to OUTPUT the finished deliverable from what it already gathered. The
+            // separate forced-synthesis (`!final_done` path below) covers the case where the
+            // model instead keeps calling tools until the budget breaks the loop.
+            if is_final_round && turn_used_tools {
+                messages.push(serde_json::json!({
+                    "role": "user",
+                    "content": "This is your FINAL step — no more tools or browsing are \
+available. Write the COMPLETE deliverable NOW from everything you already gathered: the full \
+answer with the ACTUAL data (real rows/values/tables, every option), in the user's language. Do \
+NOT narrate what you are about to do (no \"now I'll compose…\", no \"I'll update the plan…\") and \
+do NOT promise further work — output the finished result itself. If some data is genuinely \
+missing, give what you have and note the gap in one short line.",
+                }));
+            }
             // Ollama (local or cloud) must use the NATIVE /api/chat: its OpenAI-compat
             // /v1 layer drops tool calls when streaming (ollama#12557). The payload
             // shape is provider-specific; both stream from upstream so the governor is
@@ -21517,6 +21705,28 @@ an uncertain date.",
                         // until F2 verifies). See `merge_plan` for the anti-reset rule.
                         let claims = merge_execution_plan(&mut plan, &sent);
                         let mut plan_steps = execution_plan_steps(&plan);
+                        // DIAG (HOMUN_DEBUG): the plan lifecycle, to see if the model
+                        // re-proposes the whole plan (churn) or advances one step, and
+                        // whether a re-proposal RESETS statuses (the "il piano riparta"
+                        // symptom). One line per update_plan/step_advance call.
+                        if verbose_debug() {
+                            let sig = |s: &serde_json::Value| {
+                                format!(
+                                    "{}:{}",
+                                    s.get("id").and_then(|v| v.as_str()).unwrap_or("?"),
+                                    s.get("status").and_then(|v| v.as_str()).unwrap_or("?")
+                                )
+                            };
+                            let sent_sig: Vec<String> = sent.iter().map(&sig).collect();
+                            let plan_sig: Vec<String> = plan_steps.iter().map(&sig).collect();
+                            eprintln!(
+                                "[plan] {name}: sent[{}]=[{}] → canonical[{}]=[{}]",
+                                sent.len(),
+                                sent_sig.join(","),
+                                plan_steps.len(),
+                                plan_sig.join(",")
+                            );
+                        }
                         if plan_steps.is_empty() {
                             "Empty plan: provide at least one step with a title.".to_string()
                         } else {
@@ -22435,8 +22645,14 @@ Tell the user clearly; do NOT claim it's done."
                     // answer can carry a deterministic "Fonti" section. The
                     // granular browser_navigate result embeds the visited page URL.
                     if name == "browser_navigate" {
-                        for url in extract_source_urls(&result) {
-                            if !browse_sources.contains(&url) {
+                        // Capture ONLY the VISITED page URL (the first URL in the result,
+                        // from "Page opened (URL). Snapshot: …"), not every link scraped
+                        // from the page body — otherwise the content snapshot's footer
+                        // chrome (Wikipedia donate/edit/history, wikimedia/mediawiki footer
+                        // links) lands in the "Sources" footer. The page visited IS the
+                        // source. `is_low_value_source_url` stays as a defensive net.
+                        if let Some(url) = extract_source_urls(&result).into_iter().next() {
+                            if !is_low_value_source_url(&url) && !browse_sources.contains(&url) {
                                 browse_sources.push(url);
                             }
                         }
@@ -22477,7 +22693,7 @@ Tell the user clearly; do NOT claim it's done."
                     let _ = emit_stream_event(
                         &tx,
                         GenerateStreamEvent::Done {
-                            text: accumulated.clone(),
+                            text: collapse_plan_markers(&accumulated),
                             metrics: TokenMetrics::zero(),
                         },
                     )
@@ -22504,35 +22720,53 @@ Tell the user clearly; do NOT claim it's done."
             if !is_final_round && plan_nudges < MAX_PLAN_NUDGES {
                 let plan_steps = execution_plan_steps(&plan);
                 if let Some(step) = plan_next_open(&plan_steps) {
-                    plan_nudges += 1;
-                    if !content.trim().is_empty() {
-                        messages
-                            .push(serde_json::json!({ "role": "assistant", "content": content }));
-                    }
-                    // DIRECTIVE nudge: name the exact next step and forbid redoing work —
-                    // weak-agentic models otherwise re-run the skill / regenerate images
-                    // on a vague "continue" instead of advancing to the next step.
-                    messages.push(serde_json::json!({
-                        "role": "user",
-                        "content": format!(
-                            "Do NOT stop and do NOT re-run the skill. Your next unfinished plan \
-                             step is: «{step}». Do ONLY that step now, reusing the files you \
-                             already created (do not regenerate existing images). Mark it done \
-                             with update_plan, then continue to the next step until the plan is \
-                             complete. No confirmation, no summary yet."
-                        ),
-                    }));
-                    let _ = emit_stream_event(
-                        &tx,
-                        GenerateStreamEvent::Delta {
-                            text: format!(
-                                "‹‹ACT››▶ Proseguo: {}‹‹/ACT››",
-                                step.chars().take(50).collect::<String>()
+                    // F5 over-running guard: when only the LAST step is still open AND the
+                    // model already wrote a substantial answer, it almost certainly FINISHED
+                    // the work and merely forgot to mark that step done. The "continue, no
+                    // summary yet" nudge then drags it PAST a good answer into a degraded or
+                    // self-contradictory one (the long-horizon regression). Accept the answer
+                    // instead. When SEVERAL steps remain open the model genuinely stopped
+                    // early → keep nudging. Failure-safe: when in doubt (short answer or many
+                    // open steps), we nudge — never a premature stop.
+                    let open_left = plan_steps
+                        .iter()
+                        .filter(|s| plan_step_status(s) != "done")
+                        .count();
+                    let model_delivered = content.trim().chars().count() >= 600;
+                    if !(open_left <= 1 && model_delivered) {
+                        plan_nudges += 1;
+                        if !content.trim().is_empty() {
+                            messages.push(
+                                serde_json::json!({ "role": "assistant", "content": content }),
+                            );
+                        }
+                        // DIRECTIVE nudge: name the exact next step and forbid redoing work —
+                        // weak-agentic models otherwise re-run the skill / regenerate images
+                        // on a vague "continue" instead of advancing to the next step.
+                        messages.push(serde_json::json!({
+                            "role": "user",
+                            "content": format!(
+                                "Do NOT stop and do NOT re-run the skill. Your next unfinished plan \
+                                 step is: «{step}». Do ONLY that step now, reusing the files you \
+                                 already created (do not regenerate existing images). Mark it done \
+                                 with update_plan, then continue to the next step until the plan is \
+                                 complete. No confirmation, no summary yet."
                             ),
-                        },
-                    )
-                    .await;
-                    continue;
+                        }));
+                        let _ = emit_stream_event(
+                            &tx,
+                            GenerateStreamEvent::Delta {
+                                text: format!(
+                                    "‹‹ACT››▶ Proseguo: {}‹‹/ACT››",
+                                    step.chars().take(50).collect::<String>()
+                                ),
+                            },
+                        )
+                        .await;
+                        continue;
+                    }
+                    // else: the answer is substantial and the plan is all-but-closed →
+                    // fall through to finalize with `content` instead of nudging.
                 } else if plan_steps.is_empty()
                     && turn_used_tools
                     && task_appears_incomplete(&state_owned.http, &memory_user_message, &content)
@@ -22575,11 +22809,14 @@ Tell the user clearly; do NOT claim it's done."
                 accumulated.push_str(&fonti);
                 let _ = emit_stream_event(&tx, GenerateStreamEvent::Delta { text: fonti }).await;
             }
-            memory_answer = accumulated.clone();
+            // Anti-churn: the live stream carried one ‹‹PLAN›› block per plan tool call;
+            // the PERSISTED answer keeps the plan card exactly once (latest state).
+            let final_answer = collapse_plan_markers(&accumulated);
+            memory_answer = final_answer.clone();
             let _ = emit_stream_event(
                 &tx,
                 GenerateStreamEvent::Done {
-                    text: accumulated.clone(),
+                    text: final_answer,
                     metrics: TokenMetrics::zero(),
                 },
             )
@@ -22680,6 +22917,9 @@ Tell me if you want me to retry or rephrase."
             if let Some(fonti) = fonti_section(&browse_sources, &final_text) {
                 final_text.push_str(&fonti);
             }
+            // Anti-churn safety net for the `accumulated` fallback (synth_text never
+            // carries plan blocks, so this is a no-op when synthesis succeeded).
+            let final_text = collapse_plan_markers(&final_text);
             memory_answer = final_text.clone();
             let _ = emit_stream_event(
                 &tx,
@@ -24743,19 +24983,30 @@ async fn chat_browser_call(
     }
 }
 
-/// Canonical Snapshot params for the chat-driven browser (mirrors the planner's
-/// `browser_loop.rs` snapshot call). 12000 chars keeps it simple and bounded.
+/// Canonical Snapshot params for the chat-driven browser.
+///
+/// CONTENT-PRESERVING (not `interactive`-only): the old `mode:"efficient" +
+/// interactive:true` snapshot filtered the aria tree down to CLICKABLE roles only
+/// (button/link/textbox…) and dropped every table/row/cell/heading/text line — so a
+/// Wikipedia standings table came back as navbar+cookie-buttons+links and the model
+/// NEVER saw the data it had to report (it then fell back to curl and presented stale/
+/// fabricated figures). Dropping `mode`/`interactive` (keeping `compact:true`) makes the
+/// builder keep CONTENT rows AND still parse interactive refs, so the agent can both READ
+/// the page and CLICK. Larger `max_chars` so a full standings/results table isn't cut
+/// mid-data; a longer snapshot timeout so JS-heavy pages finish their aria tree.
 fn browser_chat_snapshot_params(target_id: &str) -> serde_json::Value {
     serde_json::json!({
         "target_id": target_id,
         "snapshot_format": "ai",
         "refs_mode": "aria",
-        "mode": "efficient",
-        "interactive": true,
         "compact": true,
-        "depth": 10,
-        "max_chars": 12_000,
-        "urls": true,
+        "depth": 12,
+        "max_chars": 20_000,
+        "timeout_ms": 8_000,
+        // No `urls:true`: the content snapshot already carries the page's links inline.
+        // The appended flat url-dump made `extract_source_urls` scrape EVERY link (a
+        // Wikipedia page's donate / edit / history / action= chrome) into `browse_sources`,
+        // which then polluted the "Sources" footer with non-source UI links.
     })
 }
 
@@ -28870,6 +29121,35 @@ fn extract_source_urls(text: &str) -> Vec<String> {
         }
     }
     urls
+}
+
+/// A scraped URL that is page CHROME / tracking, not a real content source — so it never
+/// pollutes the "Sources" footer (a Wikipedia article's donate / edit / history / Special:
+/// links, cookie/consent/login pages, marketing campaign params). Keeps the cited sources
+/// to the actual pages the answer drew from.
+fn is_low_value_source_url(url: &str) -> bool {
+    let u = url.to_lowercase();
+    [
+        "donate.",
+        "/w/index.php",
+        "action=edit",
+        "action=history",
+        "oldid=",
+        "/special:",
+        "uselang=",
+        "/login",
+        "signin",
+        "/cookie",
+        "cookie-policy",
+        "cookie-consent",
+        "/privacy",
+        "/preferences",
+        "intcmp=",
+        "utm_",
+        "wmf_",
+    ]
+    .iter()
+    .any(|needle| u.contains(needle))
 }
 
 /// Builds a "Fonti" markdown footer from collected source URLs, unless the answer
@@ -44206,9 +44486,11 @@ mod tests {
         brain_budgets_for_context_window, browser_error_indicates_dead_sidecar,
         browser_method_for_capability_tool, browser_snapshot_text, browser_targets_for_goal,
         browser_url_for_goal, build_plan_markdown, capability_call_completed_outcome,
-        classify_connector_error, collect_member_counts, composio_tool_is_read,
+        classify_connector_error, collapse_plan_markers, collect_member_counts,
+        composio_tool_is_read,
         connector_error_hint, default_browser_headless_value, evaluate_simple_arithmetic,
         extract_source_urls, fonti_section, format_memory_block, humanize_task_kind,
+        is_low_value_source_url,
         hybrid_memory_score, inbound_action, is_auto_confirmable, is_confirmation_reply,
         is_internal_task_kind, is_salient_exchange, is_semantic_duplicate, jail_in_root,
         legacy_dir_action, llm_concurrency_view, mcp_error_hint, mcp_provider_slug,
@@ -45032,6 +45314,25 @@ prs.save(Path({path:?}))
         let urls = extract_source_urls(text);
         assert!(urls.contains(&"https://example.com/a".to_string()));
         assert!(urls.contains(&"https://kayak.it/flights".to_string()));
+    }
+
+    #[test]
+    fn low_value_source_urls_are_filtered() {
+        // Wikipedia chrome / tracking links must never reach the Sources footer.
+        assert!(is_low_value_source_url(
+            "https://donate.wikimedia.org/?wmf_source=donate"
+        ));
+        assert!(is_low_value_source_url(
+            "https://en.wikipedia.org/w/index.php?title=2026_FIFA_World_Cup&action=history"
+        ));
+        assert!(is_low_value_source_url(
+            "https://www.fifa.com/data-protection-portal/cookie-policy"
+        ));
+        // Real content sources are kept.
+        assert!(!is_low_value_source_url(
+            "https://en.wikipedia.org/wiki/2026_FIFA_World_Cup_knockout_stage"
+        ));
+        assert!(!is_low_value_source_url("https://www.gazzetta.it/calcio/mondiali/"));
     }
 
     #[test]
@@ -47948,6 +48249,46 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             super::route_workflow_or_agent("cos'è Homun e cosa può fare?"),
             super::WorkflowRouteDecision::AgentLoop,
         );
+    }
+
+    #[test]
+    fn collapse_plan_markers_keeps_only_latest() {
+        // Reproduces the real Mondiali churn: the harness stacked several full ‹‹PLAN››
+        // blocks (one per update_plan/step_advance call) ahead of the prose.
+        let churn = "‹‹PLAN››- [-] **A** (`s1`): —‹‹/PLAN››\
+            ‹‹PLAN››- [x] **A** (`s1`): done‹‹/PLAN››\
+            ‹‹PLAN››- [x] **A** (`s1`): done\n- [-] **B** (`s2`): —‹‹/PLAN››\
+            Briefing finale qui.";
+        let out = collapse_plan_markers(churn);
+        // Exactly one plan block survives, and it's the LAST (freshest) one.
+        assert_eq!(out.matches("‹‹PLAN››").count(), 1);
+        assert!(out.contains("**B** (`s2`)"), "kept the latest canonical plan");
+        assert!(out.ends_with("Briefing finale qui."), "prose preserved");
+        // Resume still parses the surviving block.
+        assert_eq!(parse_plan_marker(&out).len(), 2);
+    }
+
+    #[test]
+    fn collapse_plan_markers_noop_for_single_or_none() {
+        let one = "‹‹PLAN››- [ ] **A** (`s1`): —‹‹/PLAN›› done";
+        assert_eq!(collapse_plan_markers(one), one);
+        let none = "just prose, no plan";
+        assert_eq!(collapse_plan_markers(none), none);
+    }
+
+    #[test]
+    fn collapse_plan_markers_keeps_first_position() {
+        // Plan blocks interleaved with prose: the surviving (latest-content) block stays
+        // where the FIRST one was, so the card never jumps below the answer.
+        let text = "intro ‹‹PLAN››- [ ] **A** (`s1`): —‹‹/PLAN›› middle \
+            ‹‹PLAN››- [x] **A** (`s1`): done‹‹/PLAN›› end";
+        let out = collapse_plan_markers(text);
+        assert_eq!(out.matches("‹‹PLAN››").count(), 1);
+        let plan_at = out.find("‹‹PLAN››").unwrap();
+        let middle_at = out.find("middle").unwrap();
+        assert!(plan_at < middle_at, "plan stays before the middle prose");
+        assert!(out.contains("[x] **A**"), "but carries the latest content");
+        assert!(out.contains("end"));
     }
 
     #[test]
