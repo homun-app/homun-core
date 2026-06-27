@@ -14977,6 +14977,23 @@ fn browser_act_tool_schema() -> serde_json::Value {
     })
 }
 
+/// Turn a raw sidecar `browser_act` error into a hint that TEACHES the correct call, so a
+/// model that misused the tool self-corrects instead of looping on the same bad arguments
+/// (the observed action-error loop: no `kind`, an element ref passed as a tab `target`, or a
+/// blocked `evaluate`). Appended to the error the model sees. Empty when nothing to add.
+fn browser_act_error_hint(error: &str) -> &'static str {
+    let e = error.to_lowercase();
+    if e.contains("unknown action kind") || e.contains("invalid_request") && e.contains("kind") {
+        " HINT: browser_act needs a 'kind' (one of click/type/fill/select/press/hover/hold/scroll/wait) AND a 'ref' from the snapshot, e.g. {\"kind\":\"click\",\"ref\":\"e5\"}. Retry with both."
+    } else if e.contains("tab not found") {
+        " HINT: that looks like an element ref, not a tab. Put element refs in 'ref' (e.g. \"ref\":\"e83\"); 'target' is ONLY a tab id from browser_tabs. Retry with kind + ref."
+    } else if e.contains("evaluate") {
+        " HINT: running JavaScript (evaluate) is not available. Read the data straight from the page snapshot text, or click/scroll to reveal it — do not retry evaluate."
+    } else {
+        ""
+    }
+}
+
 /// Granular browser tool: capture a screenshot fed back to the vision model.
 fn browser_screenshot_tool_schema() -> serde_json::Value {
     serde_json::json!({
@@ -19946,14 +19963,35 @@ or tell the user to start the contained computer (Settings → Local computer)."
                                     }
                                 }
                                 "browser_act" => {
-                                    if let Some(t) = args.get("target").and_then(|v| v.as_str()) {
-                                        if !t.trim().is_empty() {
-                                            current_target = t.to_string();
-                                        }
-                                    }
-                                    // Build the action value the safety gate inspects.
+                                    // Build the action the sidecar runs (and the safety gate
+                                    // inspects), coercing a common model mistake that otherwise
+                                    // dead-ends in a retry loop: an element ref (e83) passed as
+                                    // `target` — which is a TAB id, so the sidecar errors "tab
+                                    // not found: e83". Re-route a ref-shaped target into `ref`
+                                    // (when none was given) instead of switching to a missing tab.
                                     let mut action = args.clone();
+                                    let target_arg =
+                                        args.get("target").and_then(|v| v.as_str()).map(str::to_string);
+                                    let has_ref = action
+                                        .get("ref")
+                                        .and_then(|v| v.as_str())
+                                        .is_some_and(|r| !r.trim().is_empty());
+                                    let target_is_ref = target_arg.as_deref().is_some_and(|t| {
+                                        t.len() >= 2
+                                            && t.starts_with('e')
+                                            && t[1..].chars().all(|c| c.is_ascii_digit())
+                                    });
                                     if let Some(obj) = action.as_object_mut() {
+                                        if target_is_ref && !has_ref {
+                                            if let Some(t) = target_arg.clone() {
+                                                obj.insert("ref".to_string(), serde_json::Value::String(t));
+                                            }
+                                            obj.remove("target");
+                                        } else if let Some(t) = target_arg.as_deref() {
+                                            if !t.trim().is_empty() {
+                                                current_target = t.to_string();
+                                            }
+                                        }
                                         obj.insert(
                                             "target_id".to_string(),
                                             serde_json::Value::String(current_target.clone()),
@@ -19993,8 +20031,9 @@ or tell the user to start the contained computer (Settings → Local computer)."
                                             "error",
                                         );
                                         Err(format!(
-                                            "🚫 action blocked, user confirmation needed: {reason}. \
-I did nothing: propose to the user what to do and wait."
+                                            "🚫 action blocked, user confirmation needed: {reason}.{} \
+I did nothing: propose to the user what to do and wait — do NOT retry the same action.",
+                                            browser_act_error_hint(&reason)
                                         ))
                                     } else {
                                         let kind = args
@@ -20076,6 +20115,17 @@ don't repeat the same action; try a different element, scroll, or wait (kind=wai
                                             }
                                             Err(error) => {
                                                 push_browser_step(format!("{kind}"), "error");
+                                                // DIAG (HOMUN_DEBUG): what the model tried + why it
+                                                // failed, to root-cause the repeated browser_act loop.
+                                                if verbose_debug() {
+                                                    eprintln!(
+                                                        "[browser_act] kind={kind} ref={:?} selector={:?} text={:?} → ERROR: {}",
+                                                        args.get("ref").and_then(|v| v.as_str()),
+                                                        args.get("selector").and_then(|v| v.as_str()),
+                                                        args.get("text").and_then(|v| v.as_str()),
+                                                        error.chars().take(220).collect::<String>()
+                                                    );
+                                                }
                                                 // Stale-ref auto-recovery: the page changed under us
                                                 // so the [ref=eN] is gone. Instead of just erroring
                                                 // (forcing the model to spend a round re-snapshotting),
@@ -20103,7 +20153,7 @@ don't repeat the same action; try a different element, scroll, or wait (kind=wai
                                                             .map(browser_snapshot_text)
                                                             .unwrap_or_default();
                                                         if snap.is_empty() {
-                                                            Err(format!("Action failed: {error}"))
+                                                            Err(format!("Action failed: {error}{}", browser_act_error_hint(&error)))
                                                         } else {
                                                             last_snapshot = snap.clone();
                                                             Ok(format!(
@@ -20114,7 +20164,7 @@ changed). I took a fresh snapshot — retry the action with the NEW [ref=...]:\n
                                                     }
                                                     (_, restored) => {
                                                         browser_session = restored;
-                                                        Err(format!("Action failed: {error}"))
+                                                        Err(format!("Action failed: {error}{}", browser_act_error_hint(&error)))
                                                     }
                                                 }
                                             }
