@@ -227,6 +227,11 @@ export class BrowserSessionManager {
     };
   }> {
     const state = await this.resolvePage(params.targetId);
+    // Let late content settle before snapshotting: a static page (Wikipedia) is already
+    // idle so this returns instantly, while a JS-heavy page gets up to 2.5s to finish
+    // hydrating its tables/results (and late consent banners to appear) instead of
+    // snapshotting an empty shell. Bounded so it never hangs on a never-idle SPA.
+    await state.page.waitForLoadState("networkidle", { timeout: 2_500 }).catch(() => {});
     await dismissCommonOverlays(state.page);
     const snapshot = await createSnapshot(state.page, params.targetId, params);
     state.refs = snapshot.refLocators;
