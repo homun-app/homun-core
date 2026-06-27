@@ -5697,10 +5697,23 @@ function parseComposioConfirm(text: string): {
   const ppMatch = text.match(PLAN_PROPOSE_RE);
   if (ppMatch) {
     try {
-      const parsed = JSON.parse(ppMatch[1]) as PlanProposal;
-      const steps = Array.isArray(parsed?.steps)
-        ? parsed.steps.filter((s) => typeof s === "string" && s.trim().length > 0)
-        : [];
+      const parsed = JSON.parse(ppMatch[1]) as { summary?: unknown; steps?: unknown };
+      // Tolerant parsing (caposaldo): the model may emit steps as plain strings OR as
+      // richer objects ({title, detail, …}) — e.g. gemma proposes object-steps. Accept
+      // both, extracting a label from objects, instead of dropping them (which left the
+      // card empty → "the plan doesn't activate").
+      const rawSteps: unknown[] = Array.isArray(parsed?.steps) ? parsed.steps : [];
+      const steps = rawSteps
+        .map((s) => {
+          if (typeof s === "string") return s;
+          if (s && typeof s === "object") {
+            const o = s as Record<string, unknown>;
+            const label = o.title ?? o.step ?? o.name ?? o.detail ?? o.summary ?? "";
+            return typeof label === "string" ? label : "";
+          }
+          return "";
+        })
+        .filter((s) => s.trim().length > 0);
       if (steps.length > 0) {
         planPropose = {
           summary: typeof parsed.summary === "string" ? parsed.summary : "",

@@ -43,6 +43,18 @@ flowchart TD
 - Implementazione: **un solo esecutore** (il task aperto è "un piano con un nodo =
   mini-loop"); un **router** sceglie la modalità.
 
+> **Invariante — il piano ha la precedenza sul workflow-routing (Pavimento).** Il
+> router sceglie la modalità **una volta sola, all'inception**. Se il thread ha un
+> **piano runtime attivo** (un `open_loop`/`runtime_plan` non Stale), oppure il
+> messaggio è una pura **continuazione/approvazione** ("1", "procedi"), il turno
+> **resta sul piano** (agent loop): onorare un route Workflow poterebbe i tool del
+> piano (`update_plan`, `browser_navigate`) e lo manda in dead-end (bug
+> APPROVAL-RESUME / "1 → make_deck"). È **tier- e flag-independent** (vale anche con
+> l'adaptive floor off): `thread_has_active_runtime_plan` /
+> `is_plan_continuation_message` in `stream_chat_via_openai`, prima di
+> `prune_tools_for_workflow_route`. Distinto da `relax_route_for_tier` (Manopola,
+> gated dal flag): questo è Pavimento, sempre attivo.
+
 ## Scaffolding adattivo (per tier di modello) → [ADR 0018](../decisions/0018-adaptive-harness-subagents-triggers.md)
 
 Distinzione di fondo (tre fonti SOTA concordi — Anthropic, Browser Use bitter

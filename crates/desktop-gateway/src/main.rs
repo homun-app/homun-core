@@ -6923,7 +6923,10 @@ fn native_workflow_capabilities() -> &'static [NativeWorkflowCapability] {
             contract: "DeckWorkflow",
             scaffolding_tier: "maximum",
             description: "Create an editable presentation deck, pitch deck, sales deck or slide deck from a brief.",
-            route_text: "make_deck DeckWorkflow presentation presentazione deck slide slides ppt pptx pitch sales deck investor deck proposta commerciale crea creare prepara genera presentare raccontare illustrare PMI clienti investitori",
+            // Keep tokens SPECIFIC to a deck. Generic verbs (crea/genera/prepara/
+            // presentare/illustrare) collided with everything and over-triggered the
+            // one-shot workflow on plain requests — do not re-add them.
+            route_text: "make_deck DeckWorkflow presentation presentazione deck slide slides slideshow ppt pptx keynote pitch investor deck sales deck",
             schema: make_deck_tool_schema,
         },
         NativeWorkflowCapability {
@@ -6932,7 +6935,8 @@ fn native_workflow_capabilities() -> &'static [NativeWorkflowCapability] {
             contract: "DocumentWorkflow",
             scaffolding_tier: "document",
             description: "Create a structured document, report, memo, meeting minutes or relazione from a brief.",
-            route_text: "make_document DocumentWorkflow document documento docx markdown report relazione memo verbale meeting minutes write create make draft prepare scrivi crea genera prepara redigi rapporto documento operativo testo strutturato",
+            // Specific document nouns only — generic verbs removed (see make_deck note).
+            route_text: "make_document DocumentWorkflow document documento docx markdown report relazione memo verbale meeting minutes rapporto whitepaper brief",
             schema: make_document_tool_schema,
         },
     ]
@@ -8438,6 +8442,46 @@ fn runtime_plan_memory_matches(memory: &MemoryRecord, thread_key: &str) -> bool 
         )
         && memory.metadata.get("source").and_then(|v| v.as_str()) == Some("runtime_plan")
         && memory.metadata.get("thread_id").and_then(|v| v.as_str()) == Some(thread_key)
+}
+
+/// True if this thread has an IN-PROGRESS runtime plan. A completed plan is marked
+/// Stale (see `upsert_runtime_plan_memory`) and excluded by `runtime_plan_memory_matches`,
+/// so this only fires while a plan is genuinely open.
+///
+/// The plan is harness-owned control flow (Pavimento — see docs/architecture/agent-loop.md
+/// and ADR 0018): an active plan must take precedence over the workflow-bias *manopola*.
+/// Without this, a continuation turn can be routed into a one-shot workflow (`make_deck`),
+/// which prunes the plan's own tools (`update_plan`, `browser_navigate`) and dead-ends it.
+/// Tier- and flag-independent: it holds even with the adaptive floor off.
+fn thread_has_active_runtime_plan(state: &AppState, thread_id: Option<&str>) -> bool {
+    let thread_key = runtime_plan_thread_key(thread_id);
+    let Ok(facade) = lock_memory_facade(state) else {
+        return false;
+    };
+    facade
+        .list_memories_for_ui(&gateway_memory_user_id(), &gateway_memory_workspace_id())
+        .unwrap_or_default()
+        .iter()
+        .any(|memory| runtime_plan_memory_matches(memory, &thread_key))
+}
+
+/// A bare continuation/approval message ("1", a step/option number, "ok"/"procedi"/
+/// "continua"/"sì") is the user advancing an existing plan or approving a step — never
+/// a fresh task. It must not trigger a one-shot workflow route (that's the APPROVAL-RESUME
+/// dead-end). Kept deliberately tight (short, no task verbs) to avoid false positives.
+fn is_plan_continuation_message(prompt: &str) -> bool {
+    let t = prompt.trim().to_lowercase();
+    if t.is_empty() || t.chars().count() > 16 {
+        return false;
+    }
+    if t.chars().all(|c| c.is_ascii_digit()) {
+        return true;
+    }
+    matches!(
+        t.as_str(),
+        "ok" | "okay" | "procedi" | "continua" | "prosegui" | "avanti" | "vai"
+            | "sì" | "si" | "yes" | "y" | "go" | "next" | "continue"
+    )
 }
 
 fn runtime_plan_step_outcome_matches(
@@ -14018,6 +14062,7 @@ fn model_idle_timeout_secs() -> u64 {
 /// and returns that verbatim — so this is safe for non-streaming providers too.
 fn reassemble_openai_stream(sse: &str) -> serde_json::Value {
     let mut content = String::new();
+    let mut reasoning = String::new();
     let mut finish_reason: Option<String> = None;
     let mut tool_calls: Vec<serde_json::Value> = Vec::new();
     let mut saw_event = false;
@@ -14047,6 +14092,16 @@ fn reassemble_openai_stream(sse: &str) -> serde_json::Value {
         };
         if let Some(chunk) = delta.get("content").and_then(|v| v.as_str()) {
             content.push_str(chunk);
+        }
+        // Reasoning / "thinking" models (GLM, kimi, nemotron, …) may stream the whole
+        // answer as `reasoning_content` and leave `content` empty. Keep it so we can
+        // fall back below instead of committing an empty answer.
+        if let Some(chunk) = delta
+            .get("reasoning_content")
+            .or_else(|| delta.get("reasoning"))
+            .and_then(|v| v.as_str())
+        {
+            reasoning.push_str(chunk);
         }
         if let Some(calls) = delta.get("tool_calls").and_then(|v| v.as_array()) {
             for call in calls {
@@ -14089,6 +14144,15 @@ fn reassemble_openai_stream(sse: &str) -> serde_json::Value {
             return full;
         }
     }
+    // Empty content + non-empty reasoning = a thinking model that put the whole answer
+    // in `reasoning_content` (the GLM/kimi dead-end). Fall back to it so the turn
+    // doesn't commit an empty answer (only the Sources, the reported bug). Model-
+    // independent: supersedes the per-provider thinking-disable hack.
+    let content = if content.trim().is_empty() && !reasoning.trim().is_empty() {
+        reasoning
+    } else {
+        content
+    };
     let mut message = serde_json::json!({ "role": "assistant", "content": content });
     if !tool_calls.is_empty() {
         message["tool_calls"] = serde_json::Value::Array(tool_calls);
@@ -18302,12 +18366,21 @@ in-progress plan (some steps done, others not), CONTINUE it — re-emit the plan
 keeping the completed steps as done, and proceed from the first not-done step; do NOT restart \
 from scratch or re-propose."
     );
+    // LANGUAGE: the whole system prompt is in English, so without an explicit
+    // directive coding-oriented models (e.g. kimi-*-code) reply in English even to an
+    // Italian request — narration AND final answer. Pin it to the user's language.
+    let system = format!(
+        "{system}\n\nLANGUAGE: ALWAYS write in the SAME language as the user's latest \
+message — both your step-by-step narration AND the final answer. If the user writes in \
+Italian, reply entirely in Italian; if in English, in English. Match the user and never \
+switch language on your own. (Tool arguments, code, file paths and URLs stay as-is.)"
+    );
     // Adaptive floor (ADR 0018), Fase 2: for a CAPABLE model, relax a Workflow
     // route to AgentLoop (the workflow tool stays offered; the model just isn't
     // forced into it). Weak/Balanced and flag-off keep the forced behaviour.
     let routed = route_capability(&request.prompt);
     let was_workflow = matches!(routed, CapabilityRouteDecision::Workflow { .. });
-    let capability_route =
+    let mut capability_route =
         relax_route_for_tier(routed, turn_scaffold.workflow_bias, floor_acting);
     if floor_observing
         && was_workflow
@@ -18317,6 +18390,22 @@ from scratch or re-propose."
             "adaptive-floor: capable tier ({}) → workflow route relaxed to agent loop (workflow tool still offered)",
             turn_tier.as_str()
         );
+    }
+    // Plan precedence (Pavimento, tier- and flag-independent): an in-progress runtime
+    // plan — or a bare continuation/approval ("1", "procedi") — owns the control flow.
+    // Honouring a workflow route here would prune the plan's tools (update_plan,
+    // browser_navigate) and dead-end it (the APPROVAL-RESUME / "1 → make_deck" bug).
+    // The continuation check is cheap and short-circuits the memory lookup.
+    if matches!(capability_route, CapabilityRouteDecision::Workflow { .. })
+        && (is_plan_continuation_message(&request.prompt)
+            || thread_has_active_runtime_plan(state, request.thread_id.as_deref()))
+    {
+        eprintln!(
+            "plan-precedence: active plan/continuation → workflow route kept on the agent loop"
+        );
+        capability_route = CapabilityRouteDecision::AgentLoop {
+            reason: "Active runtime plan or continuation message takes precedence over workflow routing (the plan owns control flow).".to_string(),
+        };
     }
     let workflow_route = workflow_route_from_capability(&capability_route);
     let system = match capability_router_instruction_for_decision(&capability_route) {
@@ -47609,6 +47698,27 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         assert!(super::memory_type_participates_in_semantic_dedup(
             "open_loop"
         ));
+    }
+
+    #[test]
+    fn plan_continuation_messages_are_recognized() {
+        for cont in ["1", "42", "ok", "Procedi", "  continua ", "sì", "si", "next", "vai", "YES"] {
+            assert!(
+                super::is_plan_continuation_message(cont),
+                "{cont:?} should be a plan continuation"
+            );
+        }
+        for task in [
+            "crea una presentazione",
+            "1 slide sul fatturato",
+            "spiegami il piano",
+            "",
+        ] {
+            assert!(
+                !super::is_plan_continuation_message(task),
+                "{task:?} should NOT be a continuation"
+            );
+        }
     }
 
     #[test]
