@@ -18975,7 +18975,7 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
     // reading only the context marker made a continuation turn resume 0 steps and revert
     // done→doing (the "il piano riparta" symptom). Fall back to the context marker for a
     // thread-less turn or a store miss.
-    let resume_plan: Vec<serde_json::Value> = {
+    let mut resume_plan: Vec<serde_json::Value> = {
         let from_store = load_runtime_plan_from_state(state, thread_id.as_deref());
         if !from_store.is_empty() {
             from_store
@@ -18989,6 +18989,33 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
                 .unwrap_or_default()
         }
     };
+    // ADR 0020 Phase 1 (flag HOMUN_ORCHESTRATED_CHAT): when there's nothing to resume,
+    // create the plan DETERMINISTICALLY via the OrchestratorBrain planner instead of leaving
+    // it to the model's sampling (the "plan-or-not" variance). Seeds the canonical plan with
+    // stable `step_id`s; the model loop then executes against it. FAILS OPEN to model-driven
+    // planning on any planner error / single-step route. Blocking planner LLM call → off the
+    // async executor via spawn_blocking.
+    if resume_plan.is_empty() && orchestrated_chat_enabled() {
+        let st = state.clone();
+        let goal = request.prompt.clone();
+        let lang = effective_user_language();
+        match tokio::task::spawn_blocking(move || orchestrator_plan_for_chat(&st, &goal, &lang))
+            .await
+        {
+            Ok(Ok(steps)) if !steps.is_empty() => {
+                if verbose_debug() {
+                    eprintln!("[plan] ADR0020-P1 orchestrator-seeded {} steps", steps.len());
+                }
+                resume_plan = steps;
+            }
+            Ok(Err(error)) => {
+                if verbose_debug() {
+                    eprintln!("[plan] ADR0020-P1 planner failed, model-driven fallback: {error}");
+                }
+            }
+            _ => {}
+        }
+    }
     let capability_route_for_runtime = capability_route.clone();
     tokio::spawn(async move {
         let mut accumulated = String::new();
@@ -35550,6 +35577,127 @@ fn brain_materialize_enabled() -> bool {
     }
 }
 
+/// ADR 0020 Phase 1 flag (default OFF): route the chat turn's PLANNING through the
+/// OrchestratorBrain planner so the plan is created DETERMINISTICALLY (stable `step_id`s,
+/// no "plan-or-not" sampling variance) instead of waiting for the model to decide to call
+/// `update_plan`. The execution still runs through the model loop for now; later phases move
+/// step scheduling + done-marking into the driver. OFF → behaviour unchanged.
+fn orchestrated_chat_enabled() -> bool {
+    matches!(
+        env::var("HOMUN_ORCHESTRATED_CHAT")
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase()
+            .as_str(),
+        "1" | "true" | "on"
+    )
+}
+
+/// Convert an OrchestratorBrain [`ExecutionPlan`] into the chat loop's canonical-plan JSON
+/// (`{id,title,status,detail}`) used to seed `stream_chat_via_openai`'s plan. Identity is the
+/// planner's stable `step_id` (ADR 0016 invariant: never title-inferred). Pure + testable.
+fn execution_plan_to_canonical_steps(plan: &ExecutionPlan) -> Vec<serde_json::Value> {
+    plan.steps
+        .iter()
+        .map(|step| {
+            let title = step
+                .goal
+                .as_deref()
+                .map(str::trim)
+                .filter(|g| !g.is_empty())
+                .or(step.tool_name.as_deref())
+                .unwrap_or(step.step_id.as_str())
+                .chars()
+                .take(120)
+                .collect::<String>();
+            let detail = step
+                .contract
+                .as_deref()
+                .or(step.goal.as_deref())
+                .unwrap_or("")
+                .chars()
+                .take(200)
+                .collect::<String>();
+            serde_json::json!({
+                "id": step.step_id,
+                "title": title,
+                "status": "todo",
+                "detail": detail,
+            })
+        })
+        .collect()
+}
+
+/// ADR 0020 Phase 1: produce a DETERMINISTIC canonical plan for a chat turn via the
+/// OrchestratorBrain planner (`plan_only` — no side effects). Returns the canonical steps, or
+/// an empty Vec when the planner routes to a direct answer / single-step (no plan needed), or
+/// `Err` on any infra failure so the caller FAILS OPEN to model-driven planning.
+fn orchestrator_plan_for_chat(
+    state: &AppState,
+    goal: &str,
+    language: &str,
+) -> Result<Vec<serde_json::Value>, String> {
+    let user = gateway_capability_user_id();
+    let workspace = gateway_capability_workspace_id();
+    let (mut policy_context, provider_tools) = {
+        let registry = lock_capability_registry(state).map_err(|e| format!("{e:?}"))?;
+        let policy = registry
+            .policy_context(&user, &workspace)
+            .map_err(|e| format!("policy context: {e}"))?;
+        let mut provider_tools = Vec::new();
+        for provider in &policy.enabled_providers {
+            let tools = registry
+                .cached_tools(provider)
+                .map_err(|e| format!("cached tools: {e}"))?
+                .into_iter()
+                .map(|cached| cached.tool)
+                .collect::<Vec<_>>();
+            provider_tools.push((provider.clone(), tools));
+        }
+        (policy, provider_tools)
+    };
+    // Read/Draft only at planning time — the planner never needs destructive classes.
+    policy_context.allowed_actions = vec![ActionClass::Read, ActionClass::Draft];
+
+    let mut facade =
+        CapabilityFacade::new(CapabilityPolicy::default(), InMemoryCapabilityAudit::default());
+    for (provider_id, tools) in provider_tools {
+        let kind = tools
+            .first()
+            .map(|tool| tool.provider_kind)
+            .unwrap_or(CapabilityProviderKind::Native);
+        facade.register_provider(CachedToolProvider::new(provider_id, kind, tools));
+    }
+
+    let task_store = TaskStore::open(gateway_task_database_path().map_err(|e| e.to_string())?)
+        .map_err(|e| format!("task store: {e}"))?;
+    let router = build_browser_inference_router();
+    let budgets =
+        brain_budgets_for_context_window(router.active_context_window(&Requirements::default()));
+    let mut brain = OrchestratorBrain::new(
+        router,
+        open_brain_memory(),
+        facade,
+        ToolSearchIndexStore::open_in_memory().map_err(|e| format!("tool index: {e}"))?,
+        task_store,
+    );
+    let request = OrchestratorRequest {
+        request_id: format!("chatplan_{}", uuid::Uuid::new_v4().simple()),
+        policy_context,
+        user_message: goal.to_string(),
+        conversation_summary: None,
+        attachments: Vec::new(),
+        budgets,
+        language: language.to_string(),
+    };
+    let plan = brain.plan_only(&request).map_err(|e| format!("plan_only: {e}"))?;
+    // A direct-answer route is a single-step request → no canonical plan to seed.
+    if matches!(plan.route, OrchestratorRoute::DirectAnswer) {
+        return Ok(Vec::new());
+    }
+    Ok(execution_plan_to_canonical_steps(&plan))
+}
+
 /// A1.1: runs the OrchestratorBrain so it MATERIALIZES durable tasks into the
 /// shared TaskStore (the same DB the background worker polls). Durable-only:
 /// the request policy has empty `allowed_actions`, so every tool is
@@ -48339,6 +48487,31 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         assert!(plan_at < middle_at, "plan stays before the middle prose");
         assert!(out.contains("[x] **A**"), "but carries the latest content");
         assert!(out.contains("end"));
+    }
+
+    #[test]
+    fn execution_plan_converts_to_canonical_steps_with_stable_ids() {
+        // ADR 0020 Phase 1: the orchestrator plan's stable `step_id` becomes the canonical
+        // id (never title-inferred), status seeds to todo, title prefers the goal.
+        let plan: crate::ExecutionPlan = serde_json::from_value(serde_json::json!({
+            "route": "capability_call",
+            "steps": [
+                {"step_id":"s1","kind":"capability_call","execution_policy":"immediate",
+                 "risk_level":"low","expected_duration_seconds":10,
+                 "goal":"Find qualified teams","contract":"List the 32 teams"},
+                {"step_id":"s2","kind":"subagent_task","execution_policy":"durable_task",
+                 "risk_level":"low","expected_duration_seconds":10,"goal":"Today's matches"}
+            ]
+        }))
+        .unwrap();
+        let steps = super::execution_plan_to_canonical_steps(&plan);
+        assert_eq!(steps.len(), 2);
+        assert_eq!(steps[0]["id"], "s1");
+        assert_eq!(steps[0]["status"], "todo");
+        assert_eq!(steps[0]["title"], "Find qualified teams");
+        assert_eq!(steps[0]["detail"], "List the 32 teams");
+        assert_eq!(steps[1]["id"], "s2");
+        assert_eq!(steps[1]["title"], "Today's matches");
     }
 
     #[test]
