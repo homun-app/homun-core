@@ -11,6 +11,8 @@ interface LocalFirstDesktopConfig {
   getPathForFile?: (file: File) => string;
   /** Version of this running build (git tag at CI time; dev package.json in dev). */
   appVersion?: () => Promise<string>;
+  /** Machine specs (RAM/cores) for the onboarding system-requirements step. */
+  systemSpecs?: () => Promise<{ totalMemGb: number; cpuCount: number; platform: string }>;
   /** Desktop auto-update (electron-updater). */
   checkForUpdate?: () => Promise<{
     available: boolean;
@@ -156,6 +158,22 @@ export async function getAppVersion(): Promise<string | null> {
   if (!get) return null;
   try {
     return (await get()) || null;
+  } catch {
+    return null;
+  }
+}
+
+/** Machine specs (RAM/cores) for the onboarding system-requirements step. Returns
+ *  null outside Electron. */
+export async function getSystemSpecs(): Promise<{
+  totalMemGb: number;
+  cpuCount: number;
+  platform: string;
+} | null> {
+  const get = desktopConfig?.systemSpecs;
+  if (!get) return null;
+  try {
+    return await get();
   } catch {
     return null;
   }

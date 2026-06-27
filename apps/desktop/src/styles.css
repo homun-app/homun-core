@@ -245,6 +245,19 @@ small {
   pointer-events: auto;
   -webkit-app-region: drag;
 }
+/* Onboarding renders its own drag strip (Shell's chrome is unmounted while the
+   modal is up). Top-center band only: clears the traffic lights (left ~90px),
+   the brand mark and the provider slide-over close button (right). */
+.onb-drag-strip {
+  position: absolute;
+  top: 0;
+  left: 100px;
+  right: 220px;
+  /* Explicit fallback: this lives outside .app-shell, so the var is undefined
+     here and would collapse the strip to 0 height. */
+  height: var(--window-chrome-height, 44px);
+  -webkit-app-region: drag;
+}
 
 .window-drag-strip--center {
   left: 16px;
@@ -13022,111 +13035,6 @@ body.resizing-drawer {
 }
 
 /* ── Onboarding wizard ───────────────────────────────────────────────────── */
-.onboarding-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 9999;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(0, 0, 0, 0.6);
-  backdrop-filter: blur(8px);
-}
-.onboarding-card {
-  background: var(--surface);
-  border: 1px solid var(--surface-border);
-  border-radius: 16px;
-  padding: var(--s6);
-  max-width: 480px;
-  width: 90vw;
-  max-height: 85vh;
-  overflow-y: auto;
-  box-shadow: 0 16px 64px rgba(0, 0, 0, 0.3);
-}
-.onboarding-card .eyebrow {
-  color: var(--muted);
-  font-size: var(--text-xs);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  margin-bottom: var(--s1);
-}
-.onboarding-card h2 {
-  margin-bottom: var(--s4);
-}
-.onboarding-body {
-  display: flex;
-  flex-direction: column;
-  gap: var(--s4);
-}
-.onb-section {
-  display: flex;
-  flex-direction: column;
-  gap: var(--s1);
-}
-.onb-label {
-  display: flex;
-  align-items: center;
-  gap: var(--s1);
-  font-size: var(--text-sm);
-  font-weight: 500;
-  color: var(--text-secondary);
-}
-.onb-hint,
-.onb-ok,
-.onb-waiting,
-.onb-error {
-  font-size: var(--text-sm);
-  display: flex;
-  align-items: center;
-  gap: var(--s1);
-}
-.onb-ok {
-  color: var(--green, #22c55e);
-}
-.onb-waiting {
-  color: var(--muted);
-}
-.onb-error {
-  color: var(--red, #ef4444);
-}
-.onb-lead {
-  color: var(--text-secondary);
-  line-height: 1.6;
-}
-.onb-choices {
-  display: flex;
-  gap: var(--s2);
-}
-.onb-choice {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: var(--s3);
-  border: 1px solid var(--surface-border);
-  border-radius: 10px;
-  background: var(--surface-hover);
-  cursor: pointer;
-  text-align: left;
-  transition: border-color 0.15s;
-}
-.onb-choice:hover {
-  border-color: var(--brand);
-}
-.onb-choice.active {
-  border-color: var(--brand);
-  background: color-mix(in srgb, var(--brand) 8%, var(--surface));
-}
-.onb-choice small {
-  color: var(--muted);
-  font-size: var(--text-xs);
-}
-.onb-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: var(--s2);
-  margin-top: var(--s2);
-}
 .spin {
   animation: spin 1s linear infinite;
 }
@@ -13311,4 +13219,476 @@ body.resizing-drawer {
 .notif-action:disabled {
   opacity: 0.6;
   cursor: default;
+}
+
+/* ── Onboarding (Homun: near-black + teal, always-dark branded first run) ───── */
+.onb-overlay {
+  --o-bg: #0d0e11;
+  --o-card: #16181c;
+  --o-card-hover: #1c1f24;
+  --o-border: #2a2e35;
+  --o-text: #f2f4f7;
+  --o-muted: #aab0bb;
+  --o-faint: #6b7280;
+  --o-accent: var(--brand);
+  --o-accent-bright: #2fb8a0;
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  overflow-y: auto;
+  color: var(--o-text);
+  background-color: var(--o-bg);
+  background-image: radial-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+  background-size: 22px 22px;
+  font-size: var(--text-base);
+  /* Frameless window: the top band is a window-drag region that would swallow
+     clicks on top-placed controls (e.g. the slide-over close). Make the whole
+     onboarding non-draggable so every button/link is clickable. */
+  -webkit-app-region: no-drag;
+}
+.onb-brand {
+  position: absolute;
+  top: 24px;
+  right: 26px;
+  height: 24px;
+  width: auto;
+  user-select: none;
+}
+.onb-stage {
+  width: 100%;
+  max-width: 560px;
+  padding: 84px 24px 32px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.onb-dots {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 48px;
+}
+.onb-dot {
+  width: 26px;
+  height: 4px;
+  border-radius: 2px;
+  background: #2a2e35;
+  transition: background 0.2s;
+}
+.onb-dot.active {
+  background: var(--o-accent-bright);
+}
+.onb-screen {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.onb-screen-center {
+  align-items: center;
+  text-align: center;
+}
+.onb-back {
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: none;
+  border: none;
+  color: var(--o-muted);
+  cursor: pointer;
+  font-size: var(--text-sm);
+  margin-bottom: 16px;
+}
+.onb-back:hover {
+  color: var(--o-text);
+}
+.onb-title {
+  text-align: center;
+  font-size: 25px;
+  font-weight: 600;
+  margin: 0 0 8px;
+  color: var(--o-text);
+}
+.onb-subtitle {
+  text-align: center;
+  color: var(--o-muted);
+  line-height: 1.55;
+  margin: 0 auto 30px;
+  max-width: 440px;
+  font-size: var(--text-base);
+}
+.onb-checks {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 26px;
+}
+.onb-check {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 18px;
+  border: 1px solid var(--o-border);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.012);
+}
+.onb-check.ok {
+  border-color: color-mix(in srgb, var(--o-accent-bright) 40%, var(--o-border));
+}
+.onb-check-logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
+  background: #20242b;
+  color: var(--o-text);
+  flex-shrink: 0;
+}
+.onb-check-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+}
+.onb-check-text strong {
+  font-weight: 600;
+}
+.onb-check-text small {
+  color: var(--o-muted);
+  font-size: var(--text-sm);
+}
+.onb-check-icon {
+  color: var(--o-muted);
+}
+.onb-check-ok {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--text-sm);
+  color: var(--o-accent-bright);
+  font-weight: 500;
+}
+.onb-check-install {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--text-sm);
+  color: var(--o-accent-bright);
+  text-decoration: none;
+  padding: 6px 12px;
+  border: 1px solid color-mix(in srgb, var(--o-accent-bright) 45%, var(--o-border));
+  border-radius: 8px;
+}
+.onb-check-install:hover {
+  background: color-mix(in srgb, var(--o-accent-bright) 12%, transparent);
+}
+.onb-models {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 22px;
+}
+.onb-model {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px 18px;
+  border: 1px solid var(--o-border);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.012);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.15s, background 0.15s;
+}
+.onb-model:hover {
+  background: var(--o-card-hover);
+}
+.onb-model.active {
+  border-color: var(--o-accent-bright);
+  background: color-mix(in srgb, var(--o-accent) 14%, var(--o-bg));
+}
+.onb-model.tight {
+  opacity: 0.6;
+}
+.onb-model-top {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.onb-model-top strong {
+  font-weight: 600;
+  font-size: 15px;
+}
+.onb-model-size {
+  font-size: var(--text-sm);
+  color: var(--o-muted);
+}
+.onb-model-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: var(--text-sm);
+  color: var(--o-muted);
+}
+.onb-rec {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--o-accent-bright);
+  background: color-mix(in srgb, var(--o-accent-bright) 15%, transparent);
+  padding: 2px 7px;
+  border-radius: 5px;
+}
+.onb-cap {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--o-muted);
+  background: color-mix(in srgb, var(--o-text) 8%, transparent);
+  padding: 2px 7px;
+  border-radius: 5px;
+}
+.onb-tight-tag {
+  font-size: var(--text-xs);
+  color: #d8a33a;
+}
+.onb-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 13px;
+  border: none;
+  border-radius: 10px;
+  background: var(--o-accent);
+  color: #ffffff;
+  font-size: var(--text-base);
+  font-weight: 600;
+  cursor: pointer;
+  transition: filter 0.15s;
+}
+.onb-primary:hover:not(:disabled) {
+  filter: brightness(1.12);
+}
+.onb-primary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.onb-progress {
+  margin-top: 2px;
+}
+.onb-progress-bar {
+  height: 8px;
+  border-radius: 4px;
+  background: #20242b;
+  overflow: hidden;
+}
+.onb-progress-fill {
+  height: 100%;
+  background: var(--o-accent-bright);
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+.onb-progress-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--text-sm);
+  color: var(--o-muted);
+  margin: 10px 0 0;
+}
+.onb-error,
+.onb-ok {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--text-sm);
+  margin: 12px 0 0;
+}
+.onb-error {
+  color: #ff7a7a;
+}
+.onb-ok {
+  color: var(--o-accent-bright);
+}
+.onb-or {
+  text-align: center;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--o-faint);
+  margin: 28px 0 16px;
+}
+.onb-provider-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(82px, 1fr));
+  gap: 10px;
+}
+.onb-provider {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 9px;
+  padding: 14px 6px;
+  border: 1px solid var(--o-border);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.012);
+  color: var(--o-muted);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+.onb-provider:hover {
+  border-color: #3a404a;
+  color: var(--o-text);
+  background: var(--o-card-hover);
+}
+.onb-overlay .set-prov-logo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.onb-overlay .set-prov-logo svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.onb-done-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--o-accent-bright) 16%, transparent);
+  color: var(--o-accent-bright);
+  margin-bottom: 20px;
+}
+.onb-done-btn {
+  width: auto;
+  padding: 12px 28px;
+  margin-top: 24px;
+}
+.onb-footer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  margin-top: 40px;
+  width: 100%;
+}
+.onb-footer-links {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: var(--text-sm);
+  color: var(--o-faint);
+}
+.onb-footer-links a {
+  color: var(--o-muted);
+  text-decoration: none;
+}
+.onb-footer-links a:hover {
+  color: var(--o-text);
+}
+.onb-skip {
+  background: none;
+  border: none;
+  color: var(--o-muted);
+  cursor: pointer;
+  font-size: var(--text-sm);
+}
+.onb-skip:hover {
+  color: var(--o-text);
+}
+.onb-slideover-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  justify-content: flex-end;
+  background: rgba(0, 0, 0, 0.5);
+  /* Topmost full-viewport layer: mark it no-drag so it carves the whole modal out
+     of any `-webkit-app-region: drag` region painted beneath (app-region isn't
+     inherited and resolves by paint order, so the scrim is the reliable place to
+     win). Without this the top-right close button sits inside a stray drag zone
+     and the OS swallows the click. */
+  -webkit-app-region: no-drag;
+}
+.onb-slideover {
+  width: 440px;
+  max-width: 92vw;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--o-card);
+  border-left: 1px solid var(--o-border);
+}
+.onb-slideover-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 22px 24px;
+  border-bottom: 1px solid var(--o-border);
+}
+.onb-slideover-head h2 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 17px;
+  font-weight: 600;
+  margin: 0;
+  color: var(--o-text);
+}
+.onb-slideover-close {
+  background: none;
+  border: none;
+  color: var(--o-muted);
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+.onb-slideover-close:hover {
+  color: var(--o-text);
+}
+.onb-slideover-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.onb-field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.onb-field > span {
+  font-size: var(--text-sm);
+  color: var(--o-muted);
+}
+.onb-slideover-hint {
+  font-size: var(--text-sm);
+  color: var(--o-faint);
+  line-height: 1.5;
+  text-align: center;
+}
+.onb-slideover-foot {
+  display: flex;
+  gap: 10px;
+  padding: 18px 24px;
+  border-top: 1px solid var(--o-border);
+}
+.onb-name-input {
+  flex: 1;
+}
+.onb-save-btn {
+  width: auto;
+  padding: 9px 22px;
 }

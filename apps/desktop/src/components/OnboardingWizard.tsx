@@ -1,79 +1,191 @@
-import { useEffect, useState } from "react";
-import { Check, ChevronRight, Loader2, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Check, Loader2, X, ArrowRight, Download, ExternalLink } from "lucide-react";
 import { coreBridge } from "../lib/coreBridge";
-import type { SetupStatus } from "../lib/coreBridge";
+import type { PullProgress, SetupStatus } from "../lib/coreBridge";
+import { getSystemSpecs } from "../lib/gatewayConfig";
+import { ProviderLogo, providerLogoKey } from "./providerLogos";
+import { PROVIDER_PRESETS, type ProviderPreset } from "../lib/providerPresets";
+import homunWordmark from "../assets/homun-wordmark-dark.svg";
+import modelsCatalog from "../assets/models-catalog.json";
 
 interface OnboardingWizardProps {
   onComplete: () => void;
 }
 
-type Step = "prerequisites" | "llm" | "done";
-type LlmChoice = "cloud" | "ollama";
+type Step = "prereq" | "model" | "done";
+
+// Local model recommendations come from a catalog we scrape from ollama.com at
+// BUILD time (scripts/refresh-models-catalog.mjs) — tools-capable models ranked
+// by recency-decayed popularity, factual data only. We surface the top-ranked
+// model per tier and let the detected RAM recommend + gate them. FALLBACK_MODELS
+// covers an empty/unparseable catalog so onboarding never shows zero options.
+type TierKey = "light" | "balanced" | "powerful";
+type CatalogModel = {
+  model: string;
+  name: string;
+  params: number;
+  sizeGb: number;
+  minRamGb: number;
+  tier: TierKey;
+  vision: boolean;
+  thinking: boolean;
+  score?: number;
+};
+type UiModel = {
+  model: string;
+  title: string;
+  size: string;
+  minRamGb: number;
+  tierKey: TierKey;
+  vision: boolean;
+  thinking: boolean;
+};
+
+const TIER_ORDER: readonly TierKey[] = ["light", "balanced", "powerful"];
+
+const FALLBACK_MODELS: UiModel[] = [
+  { model: "qwen3:4b", title: "Qwen3 4B", size: "~2.5 GB", minRamGb: 4, tierKey: "light", vision: false, thinking: true },
+  { model: "qwen3:8b", title: "Qwen3 8B", size: "~5 GB", minRamGb: 10, tierKey: "balanced", vision: false, thinking: true },
+  { model: "gemma4:12b", title: "Gemma 4 12B", size: "~7.4 GB", minRamGb: 12, tierKey: "powerful", vision: true, thinking: true },
+];
+
+const MODELS: UiModel[] = (() => {
+  const catalog = ((modelsCatalog as { models?: CatalogModel[] }).models ?? []);
+  // Within a tier the variants share a score (same model, different sizes), so
+  // break ties by params descending — pick the strongest size that still belongs
+  // to the tier (e.g. light → qwen3.5:4b, not the near-useless :0.8b).
+  const bestInTier = (tier: TierKey) =>
+    catalog
+      .filter((m) => m.tier === tier)
+      .sort((a, b) => (b.score ?? 0) - (a.score ?? 0) || b.params - a.params)[0];
+  const picks = TIER_ORDER.map(bestInTier)
+    .filter((m): m is CatalogModel => !!m)
+    .map<UiModel>((m) => ({
+      model: m.model,
+      title: m.name,
+      size: `~${m.sizeGb} GB`,
+      minRamGb: m.minRamGb,
+      tierKey: m.tier,
+      vision: m.vision,
+      thinking: m.thinking,
+    }));
+  return picks.length === TIER_ORDER.length ? picks : FALLBACK_MODELS;
+})();
+
+// Cloud providers come from the shared catalog (../lib/providerPresets), the same
+// source Settings → Model & Runtime uses, so the two stay aligned. We drop the
+// local Ollama preset (the main onboarding flow already covers local models);
+// "Custom" renders last as the "More" tile.
+const CLOUD_PROVIDERS: ProviderPreset[] = PROVIDER_PRESETS.filter((p) => p.id !== "ollama");
+
+const DOCKER_URL = "https://www.docker.com/products/docker-desktop/";
+const OLLAMA_URL = "https://ollama.com/download";
+
+// Recommend the most capable model whose RAM floor the machine clears (MODELS is
+// ordered light → balanced → powerful), so a roomy machine is steered to the best.
+function recommendIndex(ramGb: number | null): number {
+  if (ramGb == null) return Math.min(1, MODELS.length - 1);
+  for (let i = MODELS.length - 1; i >= 0; i--) {
+    if (ramGb >= MODELS[i].minRamGb) return i;
+  }
+  return 0;
+}
 
 export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
   const { t } = useTranslationSafe();
-  const [step, setStep] = useState<Step>("prerequisites");
-  const [status, setStatus] = useState<SetupStatus | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [dockerStarting, setDockerStarting] = useState(false);
+  const [step, setStep] = useState<Step>("prereq");
 
-  // LLM config
-  const [choice, setChoice] = useState<LlmChoice>("cloud");
-  const [providerKind, setProviderKind] = useState("openai_compat");
-  const [baseUrl, setBaseUrl] = useState("https://api.openai.com/v1");
-  const [apiKey, setApiKey] = useState("");
-  const [validating, setValidating] = useState(false);
-  const [validationError, setValidationError] = useState<string | null>(null);
-  const [validatedModels, setValidatedModels] = useState(0);
+  // Prerequisites (polled so a manual install is auto-detected → marked done).
+  const [setup, setSetup] = useState<SetupStatus | null>(null);
+  const [ollamaUp, setOllamaUp] = useState<boolean | null>(null);
 
-  async function refreshStatus() {
-    setLoading(true);
-    try {
-      const s = await coreBridge.setupStatus();
-      setStatus(s);
-      // If Docker is installed but not running, try to start it.
-      if (s.docker_installed && !s.docker_running && !dockerStarting) {
-        setDockerStarting(true);
-        // Re-check after a delay (Docker Desktop takes ~30-60s to start).
-        setTimeout(() => void refreshStatus(), 10000);
-      } else if (s.docker_running) {
-        setDockerStarting(false);
-      }
-    } catch {
-      /* gateway not ready yet — will retry */
-    } finally {
-      setLoading(false);
-    }
-  }
+  // System specs + model choice
+  const [ramGb, setRamGb] = useState<number | null>(null);
+  const [cpus, setCpus] = useState<number | null>(null);
+  const [modelIdx, setModelIdx] = useState(1);
 
+  // Download
+  const [pulling, setPulling] = useState(false);
+  const [pullPercent, setPullPercent] = useState(0);
+  const [pullStatus, setPullStatus] = useState("");
+  const [pullError, setPullError] = useState<string | null>(null);
+
+  // Provider slide-over
+  const [panel, setPanel] = useState<ProviderPreset | null>(null);
+
+  const dockerOk = !!setup?.docker_running;
+  const ollamaOk = ollamaUp === true;
+  const selected = MODELS[modelIdx];
+  const activeDot = step === "prereq" ? 0 : step === "model" ? (panel ? 2 : 1) : 3;
+
+
+  const pollRef = useRef<number | null>(null);
   useEffect(() => {
-    void refreshStatus();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    let cancelled = false;
+    async function probe() {
+      try {
+        const [s, o] = await Promise.all([
+          coreBridge.setupStatus().catch(() => null),
+          coreBridge.ollamaSetup().catch(() => null),
+        ]);
+        if (cancelled) return;
+        if (s) setSetup(s);
+        if (o) setOllamaUp(o.running);
+      } catch {
+        /* gateway not ready yet */
+      }
+    }
+    void probe();
+    if (step === "prereq") {
+      pollRef.current = window.setInterval(() => void probe(), 4000);
+    }
+    return () => {
+      cancelled = true;
+      if (pollRef.current) window.clearInterval(pollRef.current);
+    };
+  }, [step]);
+
+  // Detect machine specs once and pre-select the recommended model.
+  useEffect(() => {
+    void (async () => {
+      const specs = await getSystemSpecs();
+      if (specs) {
+        setRamGb(specs.totalMemGb);
+        setCpus(specs.cpuCount);
+        setModelIdx(recommendIndex(specs.totalMemGb));
+      }
+    })();
   }, []);
 
-  async function validateAndSave() {
-    setValidating(true);
-    setValidationError(null);
+  async function downloadAndStart() {
+    setPulling(true);
+    setPullError(null);
+    setPullPercent(0);
+    setPullStatus(t("onboarding.preparing"));
     try {
-      const result = await coreBridge.validateLlm(providerKind, baseUrl, apiKey || null);
-      if (!result.valid) {
-        setValidationError("Validation failed.");
-        return;
-      }
-      setValidatedModels(result.models_count);
-      // Save the provider via the existing CRUD endpoint.
-      await coreBridge.upsertProvider({
-        id: crypto.randomUUID(),
-        kind: providerKind,
-        label: choice === "cloud" ? "Cloud" : "Ollama Local",
-        base_url: baseUrl,
-        api_key: apiKey || undefined,
+      await coreBridge.pullModel(selected.model, (p: PullProgress) => {
+        setPullStatus(p.status);
+        if (p.total && p.completed) setPullPercent(Math.min(100, Math.round((p.completed / p.total) * 100)));
       });
+      // Register Ollama with the model we just pulled as its active_model — the
+      // active provider's active_model is what the gateway resolves as the global
+      // default model, so the user lands on Gemma straight away. Then refresh the
+      // provider's model list so Settings shows all local models without a manual
+      // Refresh.
+      const providerId = crypto.randomUUID();
+      await coreBridge.upsertProvider({
+        id: providerId,
+        kind: "ollama",
+        label: "Ollama Local",
+        base_url: "http://127.0.0.1:11434",
+        active_model: selected.model,
+      });
+      await coreBridge.refreshProviderModels(providerId).catch(() => undefined);
       setStep("done");
     } catch (error) {
-      setValidationError((error as Error).message || "Could not validate the provider.");
+      setPullError((error as Error).message || t("onboarding.pullFailed"));
     } finally {
-      setValidating(false);
+      setPulling(false);
     }
   }
 
@@ -81,93 +193,270 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
     await coreBridge.completeSetup();
     onComplete();
   }
-
-  // ── Step 1: Prerequisites ──
-  if (step === "prerequisites") {
-    return (
-      <WizardShell title={t("onboarding.title")} eyebrow={t("onboarding.eyebrow")}>
-        <Section icon={<Check size={18} />} label={t("onboarding.docker")}>
-          {loading ? (
-            <p className="onb-hint">
-              <Loader2 size={14} className="spin" /> {t("common.loading")}
-            </p>
-          ) : status?.docker_installed ? (
-            status.docker_running ? (
-              <p className="onb-ok">
-                <Check size={14} /> {t("onboarding.dockerRunning")}
-              </p>
-            ) : (
-              <p className="onb-waiting">
-                <Loader2 size={14} className="spin" /> {t("onboarding.dockerStarting")}
-              </p>
-            )
-          ) : (
-            <p className="onb-error">
-              <X size={14} /> {t("onboarding.dockerMissing")}{" "}
-              <a href="https://docker.com" target="_blank" rel="noreferrer">
-                docker.com
-              </a>
-            </p>
-          )}
-        </Section>
-
-        <div className="onb-actions">
-          <button
-            type="button"
-            className="primary-button"
-            disabled={!status?.docker_running}
-            onClick={() => setStep("llm")}
-          >
-            {t("onboarding.continue")} <ChevronRight size={16} />
-          </button>
-        </div>
-      </WizardShell>
-    );
+  async function skip() {
+    await coreBridge.completeSetup().catch(() => undefined);
+    onComplete();
   }
 
-  // ── Step 2: LLM Configuration ──
-  if (step === "llm") {
-    return (
-      <WizardShell title={t("onboarding.llmTitle")} eyebrow={t("onboarding.llmEyebrow")}>
-        <div className="onb-choices">
-          <button
-            type="button"
-            className={`onb-choice ${choice === "cloud" ? "active" : ""}`}
-            onClick={() => {
-              setChoice("cloud");
-              setProviderKind("openai_compat");
-              setBaseUrl("https://api.openai.com/v1");
-            }}
-          >
-            <strong>{t("onboarding.cloudOption")}</strong>
-            <small>{t("onboarding.cloudDesc")}</small>
-          </button>
-          <button
-            type="button"
-            className={`onb-choice ${choice === "ollama" ? "active" : ""}`}
-            onClick={() => {
-              setChoice("ollama");
-              setProviderKind("ollama");
-              setBaseUrl("http://localhost:11434");
-            }}
-          >
-            <strong>{t("onboarding.ollamaOption")}</strong>
-            <small>{t("onboarding.ollamaDesc")}</small>
-          </button>
+  return (
+    <div className="onb-overlay">
+      {/* Our own window-drag region (Shell's is hidden during onboarding). Kept
+          to the top-center so it never overlaps the traffic lights (left), the
+          brand mark, or the provider slide-over's close button (right). */}
+      <div className="onb-drag-strip" aria-hidden="true" />
+      <img className="onb-brand" src={homunWordmark} alt="Homun" />
+
+      <div className="onb-stage">
+        <div className="onb-dots" aria-hidden>
+          {[0, 1, 2, 3].map((i) => (
+            <span key={i} className={`onb-dot ${i === activeDot ? "active" : ""}`} />
+          ))}
         </div>
 
-        <Section label={t("onboarding.baseUrl")}>
-          <input
-            className="set-input"
-            type="text"
-            value={baseUrl}
-            onChange={(e) => setBaseUrl(e.target.value)}
-            placeholder="https://api.openai.com/v1"
-          />
-        </Section>
+        {step === "prereq" && (
+          <div className="onb-screen">
+            <h1 className="onb-title">{t("onboarding.prereqTitle")}</h1>
+            <p className="onb-subtitle">{t("onboarding.prereqSubtitle")}</p>
 
-        {choice === "cloud" && (
-          <Section label={t("onboarding.apiKey")}>
+            <div className="onb-checks">
+              <PrereqRow
+                name="Docker"
+                desc={t("onboarding.dockerDesc")}
+                state={setup == null ? "checking" : dockerOk ? "ok" : "missing"}
+                installUrl={DOCKER_URL}
+                t={t}
+              />
+              <PrereqRow
+                name="Ollama"
+                desc={t("onboarding.ollamaDesc")}
+                state={ollamaUp == null ? "checking" : ollamaOk ? "ok" : "missing"}
+                installUrl={OLLAMA_URL}
+                t={t}
+              />
+            </div>
+
+            <button
+              type="button"
+              className="onb-primary"
+              disabled={!dockerOk || !ollamaOk}
+              onClick={() => setStep("model")}
+            >
+              {dockerOk && ollamaOk ? t("onboarding.continue") : t("onboarding.waitingPrereq")}
+              {dockerOk && ollamaOk && <ArrowRight size={16} />}
+            </button>
+          </div>
+        )}
+
+        {step === "model" && (
+          <div className="onb-screen">
+            <button type="button" className="onb-back" onClick={() => setStep("prereq")}>
+              <ArrowRight size={14} style={{ transform: "rotate(180deg)" }} /> {t("common.back")}
+            </button>
+            <h1 className="onb-title">{t("onboarding.modelTitle")}</h1>
+            <p className="onb-subtitle">
+              {ramGb != null
+                ? t("onboarding.specsLine", { ram: ramGb, cpus: cpus ?? "?" })
+                : t("onboarding.modelSubtitle")}
+            </p>
+
+            <div className="onb-models">
+              {MODELS.map((m, i) => {
+                const fits = ramGb == null || ramGb >= m.minRamGb;
+                const recommended = i === recommendIndex(ramGb);
+                return (
+                  <button
+                    key={m.model}
+                    type="button"
+                    className={`onb-model ${i === modelIdx ? "active" : ""} ${fits ? "" : "tight"}`}
+                    onClick={() => setModelIdx(i)}
+                    disabled={pulling}
+                  >
+                    <span className="onb-model-top">
+                      <strong>{m.title}</strong>
+                      <span className="onb-model-size">{m.size}</span>
+                    </span>
+                    <span className="onb-model-meta">
+                      {t(`onboarding.tier.${m.tierKey}`)}
+                      {m.vision && <span className="onb-cap">{t("onboarding.cap.vision")}</span>}
+                      {m.thinking && <span className="onb-cap">{t("onboarding.cap.thinking")}</span>}
+                      {recommended && <span className="onb-rec">{t("onboarding.recommended")}</span>}
+                      {!fits && <span className="onb-tight-tag">{t("onboarding.needsRam", { gb: m.minRamGb })}</span>}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {pulling ? (
+              <div className="onb-progress">
+                <div className="onb-progress-bar">
+                  <div className="onb-progress-fill" style={{ width: `${pullPercent}%` }} />
+                </div>
+                <p className="onb-progress-label">
+                  <Loader2 size={13} className="spin" /> {pullStatus}
+                  {pullPercent > 0 ? ` · ${pullPercent}%` : ""}
+                </p>
+              </div>
+            ) : (
+              <button type="button" className="onb-primary" onClick={() => void downloadAndStart()}>
+                <Download size={15} /> {t("onboarding.downloadStart")}
+              </button>
+            )}
+            {pullError && (
+              <p className="onb-error">
+                <X size={13} /> {pullError}
+              </p>
+            )}
+
+            <div className="onb-or">{t("onboarding.orConnect")}</div>
+            <div className="onb-provider-grid">
+              {CLOUD_PROVIDERS.map((p) => (
+                <button key={p.id} type="button" className="onb-provider" onClick={() => setPanel(p)}>
+                  <ProviderLogo logoKey={providerLogoKey(p.id)} size={22} />
+                  {p.id === "custom" ? t("onboarding.more") : p.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {step === "done" && (
+          <div className="onb-screen onb-screen-center">
+            <div className="onb-done-icon">
+              <Check size={26} />
+            </div>
+            <h1 className="onb-title">{t("onboarding.ready")}</h1>
+            <p className="onb-subtitle">{t("onboarding.readyDesc")}</p>
+            <button type="button" className="onb-primary onb-done-btn" onClick={() => void finish()}>
+              {t("onboarding.start")} <ArrowRight size={16} />
+            </button>
+          </div>
+        )}
+
+        <div className="onb-footer">
+          <div className="onb-footer-links">
+            <a href="https://homun.app" target="_blank" rel="noreferrer">
+              {t("onboarding.site")}
+            </a>
+            <span>·</span>
+            <a href="https://docs.homun.app" target="_blank" rel="noreferrer">
+              {t("onboarding.docs")}
+            </a>
+          </div>
+          {step !== "done" && (
+            <button type="button" className="onb-skip" onClick={() => void skip()}>
+              {t("onboarding.skip")} →
+            </button>
+          )}
+        </div>
+      </div>
+
+      {panel && <ProviderSlideOver preset={panel} onClose={() => setPanel(null)} onSaved={() => setStep("done")} />}
+    </div>
+  );
+}
+
+function PrereqRow({
+  name,
+  desc,
+  state,
+  installUrl,
+  t,
+}: {
+  name: string;
+  desc: string;
+  state: "checking" | "ok" | "missing";
+  installUrl: string;
+  t: (k: string, o?: Record<string, unknown>) => string;
+}) {
+  const logoKey = providerLogoKey(name.toLowerCase());
+  return (
+    <div className={`onb-check ${state}`}>
+      <span className="onb-check-logo">
+        <ProviderLogo logoKey={logoKey} size={22} />
+      </span>
+      <span className="onb-check-text">
+        <strong>{name}</strong>
+        <small>{desc}</small>
+      </span>
+      {state === "checking" && <Loader2 size={16} className="spin onb-check-icon" />}
+      {state === "ok" && (
+        <span className="onb-check-ok">
+          <Check size={15} /> {t("onboarding.detected")}
+        </span>
+      )}
+      {state === "missing" && (
+        <a className="onb-check-install" href={installUrl} target="_blank" rel="noreferrer">
+          {t("onboarding.install")} <ExternalLink size={13} />
+        </a>
+      )}
+    </div>
+  );
+}
+
+function ProviderSlideOver({
+  preset,
+  onClose,
+  onSaved,
+}: {
+  preset: ProviderPreset;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const { t } = useTranslationSafe();
+  const isCustom = preset.id === "custom";
+  const [label, setLabel] = useState<string>(isCustom ? "" : preset.label);
+  const [kind, setKind] = useState<string>(preset.kind);
+  const [baseUrl, setBaseUrl] = useState<string>(preset.baseUrl || "https://api.openai.com/v1");
+  const [apiKey, setApiKey] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [models, setModels] = useState(0);
+
+  async function save() {
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await coreBridge.validateLlm(kind, baseUrl, apiKey || null);
+      if (!result.valid) {
+        setError(t("onboarding.validationFailed"));
+        return;
+      }
+      setModels(result.models_count);
+      await coreBridge.upsertProvider({
+        id: crypto.randomUUID(),
+        kind,
+        label: label || preset.label || "Provider",
+        base_url: baseUrl,
+        api_key: apiKey || undefined,
+      });
+      onSaved();
+    } catch (e) {
+      setError((e as Error).message || t("onboarding.validationFailed"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="onb-slideover-scrim" onClick={onClose}>
+      <aside className="onb-slideover" onClick={(e) => e.stopPropagation()}>
+        <header className="onb-slideover-head">
+          <h2>
+            <ProviderLogo logoKey={providerLogoKey(preset.id)} size={20} />
+            {isCustom ? t("onboarding.newProvider") : preset.label}
+          </h2>
+          <button type="button" className="onb-slideover-close" onClick={onClose} aria-label="Close">
+            <X size={18} />
+          </button>
+        </header>
+        <div className="onb-slideover-body">
+          <label className="onb-field">
+            <span>{t("onboarding.baseUrl")}</span>
+            <input className="set-input" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} />
+          </label>
+          <label className="onb-field">
+            <span>{t("onboarding.apiKey")}</span>
             <input
               className="set-input"
               type="password"
@@ -175,89 +464,41 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
               onChange={(e) => setApiKey(e.target.value)}
               placeholder="sk-..."
             />
-          </Section>
-        )}
-
-        {validationError && <p className="onb-error">{validationError}</p>}
-        {validatedModels > 0 && (
-          <p className="onb-ok">
-            <Check size={14} /> {t("onboarding.modelsFound", { count: validatedModels })}
-          </p>
-        )}
-
-        <div className="onb-actions">
-          <button type="button" className="secondary-button" onClick={() => setStep("prerequisites")}>
-            {t("common.back")}
-          </button>
-          <button
-            type="button"
-            className="primary-button"
-            disabled={validating || !baseUrl}
-            onClick={() => void validateAndSave()}
-          >
-            {validating ? (
-              <>
-                <Loader2 size={16} className="spin" /> {t("onboarding.validating")}
-              </>
-            ) : (
-              t("onboarding.validateAndContinue")
-            )}
-          </button>
+          </label>
+          {isCustom && (
+            <label className="onb-field">
+              <span>{t("onboarding.providerKind")}</span>
+              <select className="set-input" value={kind} onChange={(e) => setKind(e.target.value)}>
+                <option value="openai_compat">OpenAI-compatible</option>
+                <option value="anthropic">Anthropic</option>
+                <option value="ollama">Ollama</option>
+              </select>
+            </label>
+          )}
+          <p className="onb-slideover-hint">{preset.hint ?? t("onboarding.providerHint")}</p>
+          {models > 0 && (
+            <p className="onb-ok">
+              <Check size={13} /> {t("onboarding.modelsFound", { count: models })}
+            </p>
+          )}
+          {error && (
+            <p className="onb-error">
+              <X size={13} /> {error}
+            </p>
+          )}
         </div>
-      </WizardShell>
-    );
-  }
-
-  // ── Step 3: Done ──
-  return (
-    <WizardShell title={t("onboarding.ready")} eyebrow={t("onboarding.readyEyebrow")}>
-      <p className="onb-lead">{t("onboarding.readyDesc")}</p>
-      <div className="onb-actions">
-        <button type="button" className="primary-button" onClick={() => void finish()}>
-          {t("onboarding.start")}
-        </button>
-      </div>
-    </WizardShell>
-  );
-}
-
-// ── Helpers ──────────────────────────────────────────────────────────────────
-
-function WizardShell({
-  title,
-  eyebrow,
-  children,
-}: {
-  title: string;
-  eyebrow: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="onboarding-overlay">
-      <div className="onboarding-card">
-        <p className="eyebrow">{eyebrow}</p>
-        <h2>{title}</h2>
-        <div className="onboarding-body">{children}</div>
-      </div>
-    </div>
-  );
-}
-
-function Section({
-  icon,
-  label,
-  children,
-}: {
-  icon?: React.ReactNode;
-  label: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="onb-section">
-      <label className="onb-label">
-        {icon} {label}
-      </label>
-      {children}
+        <footer className="onb-slideover-foot">
+          <input
+            className="set-input onb-name-input"
+            placeholder={t("onboarding.uniqueName")}
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+          />
+          <button type="button" className="onb-primary onb-save-btn" disabled={busy || !baseUrl} onClick={() => void save()}>
+            {busy ? <Loader2 size={15} className="spin" /> : t("common.save")}
+          </button>
+        </footer>
+      </aside>
     </div>
   );
 }
@@ -270,9 +511,7 @@ function useTranslationSafe() {
   } catch {
     return {
       t: (key: string, opts?: Record<string, unknown>) => {
-        if (opts && typeof opts === "object" && "count" in opts) {
-          return `${key} (${opts.count})`;
-        }
+        if (opts && typeof opts === "object" && "count" in opts) return `${key} (${opts.count})`;
         return key;
       },
       i18n: { language: "en" },

@@ -38,9 +38,12 @@ function darken([r, g, b]: [number, number, number], f: number): string {
   return rgbToHex(r * (1 - f), g * (1 - f), b * (1 - f));
 }
 
-// f in [0,1]: tint toward white (for soft backgrounds).
-function tint([r, g, b]: [number, number, number], f: number): string {
-  return rgbToHex(r + (255 - r) * f, g + (255 - g) * f, b + (255 - b) * f);
+// Translucent brand for soft backgrounds. Using alpha (not a pre-mixed light hex)
+// keeps it theme-correct: over a light surface it reads as a pale tint, over a dark
+// surface as a subtle dark tint — so it works in dark mode too (the old white-tinted
+// hex stayed light on dark, washing out selected rows / chips).
+function soften([r, g, b]: [number, number, number], alpha: number): string {
+  return `rgba(${clamp(r)}, ${clamp(g)}, ${clamp(b)}, ${alpha})`;
 }
 
 export function isValidHex(hex: string): boolean {
@@ -53,7 +56,7 @@ export function applyAccent(hex: string): void {
   const normalized = hex.startsWith("#") ? hex : `#${hex}`;
   const rgb = hexToRgb(normalized);
   const strong = darken(rgb, 0.14);
-  const soft = tint(rgb, 0.88);
+  const soft = soften(rgb, 0.15);
   const root = document.documentElement.style;
   root.setProperty("--brand", normalized);
   root.setProperty("--brand-strong", strong);

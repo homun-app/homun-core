@@ -20,7 +20,7 @@ const LOGOS: Record<string, string> = {
 };
 
 // Aliases: providers that share a brand mark with a catalog entry.
-const ALIASES: Record<string, string> = {"ollama-cloud":"ollama"};
+const ALIASES: Record<string, string> = { "ollama-cloud": "ollama", "zai-coding": "zai" };
 
 /** Resolve a provider/preset id to a baked logo key, or null if we have none. */
 export function providerLogoKey(id: string | null | undefined): string | null {

@@ -743,6 +743,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/setup/status", get(get_setup_status))
         .route("/api/setup/validate-llm", post(validate_llm_config))
         .route("/api/setup/complete", post(complete_setup))
+        .route("/api/setup/ollama", get(get_ollama_setup))
+        .route("/api/setup/pull-model", post(pull_model))
         .route(
             "/api/prefs/approval-routing",
             get(get_approval_routing).post(set_approval_routing),
@@ -18750,6 +18752,10 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
     let capability_route_for_runtime = capability_route.clone();
     tokio::spawn(async move {
         let mut accumulated = String::new();
+        // Last upstream model error this turn (e.g. a 410 "model retired"), already
+        // human-readable. Surfaced as the final answer if the turn produces no text,
+        // so a dead/blocked model is obvious instead of a generic "no answer".
+        let mut last_model_error: Option<String> = None;
         // Final answer text captured for post-turn memory extraction (M2).
         let mut memory_answer = String::new();
         // Consequential actions performed this turn (any domain) → fed to the
@@ -19079,9 +19085,46 @@ check/update the key in Settings → Model & Runtime."
                             } else {
                                 String::new()
                             };
-                            let _ = emit_stream_event(&tx, GenerateStreamEvent::Delta {
-                                text: format!("The model responded with an error ({code}). Try again shortly; if it persists, check the provider in Settings.{hint}"),
-                            })
+                            // Pull the human reason out of the upstream body (e.g.
+                            // "glm-4.6 was retired at 2026-06-16") so the user sees WHY,
+                            // not a silent dead end. Falls back to the raw body, then a
+                            // bare status. Stored AND streamed so the same message is the
+                            // committed final text (the synthesis Done would otherwise
+                            // overwrite this Delta with a generic fallback).
+                            let detail = serde_json::from_str::<serde_json::Value>(&err_body)
+                                .ok()
+                                .and_then(|v| {
+                                    v.get("error")
+                                        .and_then(|e| {
+                                            e.as_str().map(str::to_string).or_else(|| {
+                                                e.get("message")
+                                                    .and_then(|m| m.as_str())
+                                                    .map(str::to_string)
+                                            })
+                                        })
+                                        .or_else(|| {
+                                            v.get("message").and_then(|m| m.as_str()).map(str::to_string)
+                                        })
+                                })
+                                .map(|s| s.trim().to_string())
+                                .filter(|s| !s.is_empty())
+                                .unwrap_or_else(|| err_body.trim().chars().take(240).collect());
+                            let reason = if detail.is_empty() {
+                                format!("The model «{model}» responded with an error ({code}).")
+                            } else {
+                                format!("The model «{model}» is unavailable ({code}): {detail}")
+                            };
+                            let tail = if hint.is_empty() {
+                                " — pick another model in Settings → Model & Runtime.".to_string()
+                            } else {
+                                hint
+                            };
+                            let message = format!("{reason}{tail}");
+                            last_model_error = Some(message.clone());
+                            let _ = emit_stream_event(
+                                &tx,
+                                GenerateStreamEvent::Delta { text: message },
+                            )
                             .await;
                             break None;
                         }
@@ -22536,6 +22579,10 @@ to proceed."
                 synth_text
             } else if !accumulated.trim().is_empty() {
                 accumulated.clone()
+            } else if let Some(err) = last_model_error.clone() {
+                // The model failed every call this turn (e.g. retired / unauthorized).
+                // Surface the real reason instead of a generic "no answer".
+                err
             } else {
                 "I completed the steps but couldn't produce a final answer. \
 Tell me if you want me to retry or rephrase."
@@ -23123,6 +23170,115 @@ async fn complete_setup() -> Result<Json<serde_json::Value>, GatewayError> {
         message,
     })?;
     Ok(Json(serde_json::json!({ "setup_complete": true })))
+}
+
+/// Local Ollama base URL (override via env, else the default loopback port).
+fn ollama_base_url() -> String {
+    std::env::var("HOMUN_OLLAMA_BASE")
+        .or_else(|_| std::env::var("HOMUN_EMBED_BASE"))
+        .unwrap_or_else(|_| "http://127.0.0.1:11434".to_string())
+}
+
+#[derive(Serialize)]
+struct OllamaSetupModel {
+    name: String,
+    size: u64,
+}
+
+#[derive(Serialize)]
+struct OllamaSetupStatus {
+    running: bool,
+    base_url: String,
+    models: Vec<OllamaSetupModel>,
+}
+
+/// GET /api/setup/ollama — is the local Ollama runtime reachable, and which models
+/// are already pulled. Drives the onboarding "Recommended AI" (local) step.
+async fn get_ollama_setup() -> Json<OllamaSetupStatus> {
+    let base = ollama_base_url();
+    let trimmed = base.trim_end_matches('/');
+    let resp = reqwest::Client::new()
+        .get(format!("{trimmed}/api/tags"))
+        .timeout(std::time::Duration::from_secs(3))
+        .send()
+        .await;
+    let models = match resp {
+        Ok(r) if r.status().is_success() => r
+            .json::<serde_json::Value>()
+            .await
+            .ok()
+            .and_then(|body| body.get("models").and_then(|m| m.as_array()).cloned())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|m| {
+                        Some(OllamaSetupModel {
+                            name: m.get("name")?.as_str()?.to_string(),
+                            size: m.get("size").and_then(serde_json::Value::as_u64).unwrap_or(0),
+                        })
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default(),
+        _ => {
+            return Json(OllamaSetupStatus {
+                running: false,
+                base_url: base,
+                models: Vec::new(),
+            });
+        }
+    };
+    Json(OllamaSetupStatus {
+        running: true,
+        base_url: base,
+        models,
+    })
+}
+
+#[derive(Deserialize)]
+struct PullModelRequest {
+    model: String,
+}
+
+/// POST /api/setup/pull-model — proxy Ollama's native `/api/pull` and forward its
+/// NDJSON progress stream verbatim to the client. The onboarding "Download & Get
+/// Started" reads the `{status,total,completed}` lines to drive a progress bar.
+async fn pull_model(Json(req): Json<PullModelRequest>) -> Result<Response, GatewayError> {
+    let model = req.model.trim().to_string();
+    if model.is_empty() {
+        return Err(GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "pull_model_empty",
+            message: "model is required".to_string(),
+        });
+    }
+    let base = ollama_base_url();
+    let trimmed = base.trim_end_matches('/');
+    let resp = reqwest::Client::new()
+        .post(format!("{trimmed}/api/pull"))
+        .json(&serde_json::json!({ "name": model, "model": model, "stream": true }))
+        .send()
+        .await
+        .map_err(|error| GatewayError {
+            status: StatusCode::BAD_GATEWAY,
+            code: "ollama_unreachable",
+            message: format!(
+                "Ollama is not reachable at {base}: {error}. Is Ollama installed and running?"
+            ),
+        })?;
+    if !resp.status().is_success() {
+        return Err(GatewayError {
+            status: StatusCode::BAD_GATEWAY,
+            code: "ollama_pull_failed",
+            message: format!("Ollama pull failed: HTTP {}", resp.status()),
+        });
+    }
+    let body = Body::from_stream(resp.bytes_stream());
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "application/x-ndjson")
+        .header("cache-control", "no-cache")
+        .body(body)
+        .expect("valid streaming response"))
 }
 
 async fn get_approval_routing() -> Json<ApprovalRoutingView> {

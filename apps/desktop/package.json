@@ -18,6 +18,7 @@
     "package:prepare": "node scripts/prepare-package.mjs",
     "package:smoke": "npm run package:prepare -- --skip-build && HOMUN_DESKTOP_RESOURCES_DIR=\"$PWD/.package/resources\" HOMUN_DESKTOP_GATEWAY_PORT=18766 HOMUN_DESKTOP_GATEWAY_URL=http://127.0.0.1:18766 npx electron electron/main.cjs",
     "test:ui-contract": "node scripts/check-ui-contract.mjs",
+    "refresh-models": "node scripts/refresh-models-catalog.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

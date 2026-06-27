@@ -7406,14 +7406,30 @@ function Composer({
   // Refetches the model list + default resolved for THIS thread + per-provider groups.
   // Called on mount and when the menu opens, so a Settings change reflects without an
   // app restart. Does NOT touch the user's selection (Auto stays Auto unless they pick).
-  async function refreshModels() {
+  // Runs at most once per mount: if the runtime list is empty, the provider's
+  // model catalog was never fetched into the registry — populate it so the picker
+  // isn't empty (this is why it only appeared after visiting Settings, which also
+  // refreshes). Returns the model count so the mount effect can retry past the
+  // gateway-startup race. Guarded by a ref so retries don't re-hit the network.
+  const modelsSelfHealedRef = useRef(false);
+  async function refreshModels(): Promise<number> {
     try {
-      const list = await coreBridge.runtimeModels(threadId);
+      let list = await coreBridge.runtimeModels(threadId);
+      if ((list.available ?? []).length === 0 && !modelsSelfHealedRef.current) {
+        modelsSelfHealedRef.current = true;
+        const provs = await coreBridge.providers().catch(() => null);
+        const stale = (provs?.providers ?? []).filter((p) => p.enabled && p.models.length === 0);
+        if (stale.length > 0) {
+          await Promise.all(stale.map((p) => coreBridge.refreshProviderModels(p.id).catch(() => null)));
+          list = await coreBridge.runtimeModels(threadId);
+        }
+      }
       setModels(list.available ?? []);
       setModelGroups(list.groups ?? []);
       setActiveModel(list.active);
+      return (list.available ?? []).length;
     } catch {
-      /* models unavailable → selector hidden */
+      return 0; // gateway not ready yet — the mount effect retries
     }
   }
   const [skills, setSkillss] = useState<SkillsSummary[]>([]);
@@ -7476,6 +7492,24 @@ function Composer({
     }
     wasStreaming.current = streaming;
   }, [streaming]);
+
+  // The runtime model list can be empty for a moment right after launch/onboarding
+  // (gateway still settling, registry just written). Poll until it resolves so the
+  // model picker isn't absent on the first turn — without a manual reload. Stops as
+  // soon as it's populated; capped so an unconfigured app doesn't poll forever.
+  useEffect(() => {
+    if (models.length > 0 || activeModel) return undefined;
+    let attempts = 0;
+    const id = window.setInterval(() => {
+      attempts += 1;
+      if (attempts > 20) {
+        window.clearInterval(id);
+        return;
+      }
+      void refreshModels();
+    }, 1200);
+    return () => window.clearInterval(id);
+  }, [models.length, activeModel, threadId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -8165,7 +8199,7 @@ function Composer({
               )}
             </div>
           )}
-          {models.length > 0 && (
+          {(models.length > 0 || activeModel) && (
             <div className="composer-pop-wrap">
               <button
                 className="composer-model-button"

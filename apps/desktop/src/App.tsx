@@ -1369,9 +1369,6 @@ export default function App() {
 
   return (
     <LoginGate>
-      {showOnboarding && (
-        <OnboardingWizard onComplete={() => setShowOnboarding(false)} />
-      )}
       <Shell
       activeView={activeView}
       activeThreadId={activeThread.threadId}
@@ -1392,6 +1389,7 @@ export default function App() {
       settingsSection={settingsSection}
       settingsSub={settingsSub}
       onSelectSettingsSub={setSettingsSub}
+      hideChrome={showOnboarding}
     >
       <main
         className={`workspace ${isSettings ? "settings-workspace" : ""}`}
@@ -1491,6 +1489,13 @@ export default function App() {
         )}
       </main>
     </Shell>
+      {/* Rendered AFTER Shell so the overlay's `-webkit-app-region: no-drag`
+          regions are processed last and win over the main app's drag zones
+          (e.g. .task-topbar), which otherwise swallow clicks on the onboarding's
+          top-placed controls (provider slide-over close). */}
+      {showOnboarding && (
+        <OnboardingWizard onComplete={() => setShowOnboarding(false)} />
+      )}
     </LoginGate>
   );
 }

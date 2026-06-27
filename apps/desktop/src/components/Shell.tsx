@@ -30,6 +30,12 @@ interface ShellProps {
   onUnarchiveChatThread: (threadId: string) => void;
   settingsSection: SettingsSectionId;
   settingsSub: string;
+  // While a full-window modal (onboarding) is up, drop the window-drag strips:
+  // Electron computes `-webkit-app-region: drag` zones at the OS level and won't
+  // reliably recompute them from a CSS toggle, so the strips would swallow clicks
+  // on modal controls (e.g. the provider slide-over close). DOM removal forces
+  // the recompute; the modal renders its own drag strip in a safe zone.
+  hideChrome?: boolean;
   children: ReactNode;
 }
 
@@ -54,6 +60,7 @@ export function Shell({
   onUnarchiveChatThread,
   settingsSection,
   settingsSub,
+  hideChrome,
 }: ShellProps) {
   const { t } = useTranslation();
   const isSettings = activeView === "settings";
@@ -109,10 +116,12 @@ export function Shell({
         .filter(Boolean)
         .join(" ")}
     >
-      <div className="window-chrome" aria-hidden="true">
-        <div className="window-drag-strip window-drag-strip--center" aria-hidden="true" />
-        <div className="window-drag-strip window-drag-strip--right" aria-hidden="true" />
-      </div>
+      {!hideChrome && (
+        <div className="window-chrome" aria-hidden="true">
+          <div className="window-drag-strip window-drag-strip--center" aria-hidden="true" />
+          <div className="window-drag-strip window-drag-strip--right" aria-hidden="true" />
+        </div>
+      )}
       {!drawerOpen && !isSettings && (
         <button
           className="drawer-bottom-trigger"

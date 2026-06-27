@@ -118,6 +118,7 @@ const THEME_SWATCH: Record<ThemeName, { bg: string; panel: string; line: string 
   dark: { bg: "#111214", panel: "#1a1c20", line: "#343841" },
 };
 import { copyText } from "../lib/clipboard";
+import { PROVIDER_PRESETS, type ProviderPreset } from "../lib/providerPresets";
 import type {
   ConnectionItem,
   SettingsSectionId,
@@ -1255,37 +1256,7 @@ function GeneralPane() {
 
 /* ------------------------------------------------------------------- runtime */
 
-// Provider presets (OpenAI-compatible base URLs). Selecting one fills the base
-// URL; the user adds the key and picks a model. "Custom" leaves it blank.
-const PROVIDER_PRESETS: Array<{
-  id: string;
-  label: string;
-  baseUrl: string;
-  kind: string;
-  hint?: string;
-}> = [
-  { id: "openai", label: "OpenAI", baseUrl: "https://api.openai.com/v1", kind: "openai_compat" },
-  { id: "anthropic", label: "Anthropic", baseUrl: "https://api.anthropic.com", kind: "anthropic" },
-  { id: "zai", label: "Z.ai (GLM)", baseUrl: "https://api.z.ai/api/paas/v4", kind: "openai_compat", hint: "GLM-5 standard" },
-  { id: "zai-coding", label: "Z.ai Coding (GLM)", baseUrl: "https://api.z.ai/api/coding/paas/v4", kind: "openai_compat", hint: "GLM-5 coding" },
-  { id: "openrouter", label: "OpenRouter", baseUrl: "https://openrouter.ai/api/v1", kind: "openai_compat" },
-  { id: "groq", label: "Groq", baseUrl: "https://api.groq.com/openai/v1", kind: "openai_compat" },
-  { id: "deepseek", label: "DeepSeek", baseUrl: "https://api.deepseek.com/v1", kind: "openai_compat" },
-  { id: "together", label: "Together", baseUrl: "https://api.together.xyz/v1", kind: "openai_compat" },
-  { id: "xai", label: "xAI (Grok)", baseUrl: "https://api.x.ai/v1", kind: "openai_compat" },
-  { id: "moonshot", label: "Moonshot (Kimi)", baseUrl: "https://api.moonshot.ai/v1", kind: "openai_compat" },
-  { id: "mistral", label: "Mistral", baseUrl: "https://api.mistral.ai/v1", kind: "openai_compat" },
-  { id: "ollama", label: "Ollama (local)", baseUrl: "http://127.0.0.1:11434/v1", kind: "ollama" },
-  {
-    id: "ollama-cloud",
-    label: "Ollama Cloud",
-    baseUrl: "https://ollama.com/v1",
-    kind: "openai_compat",
-    hint: ":cloud models — key from ollama.com/settings/keys",
-  },
-  { id: "custom", label: "Custom", baseUrl: "", kind: "openai_compat" },
-];
-type ProviderPreset = (typeof PROVIDER_PRESETS)[number];
+// Provider catalog lives in ../lib/providerPresets (shared with onboarding).
 
 /// LLM concurrency control: how many inference requests the ResourceGovernor lets
 /// run in parallel. Auto follows locality (loopback 1, cloud 4); the user can force

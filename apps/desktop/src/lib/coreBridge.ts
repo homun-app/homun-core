@@ -12,6 +12,7 @@ import {
   gatewayPostJson,
   gatewayPutJson,
   gatewayDeleteJson,
+  gatewayErrorDetail,
 } from "./gatewayHttp";
 
 const BROWSER_CHAT_DEFAULT_MAX_TOKENS = 768;
@@ -705,6 +706,66 @@ async function electronValidateLlm(
 
 async function electronCompleteSetup(): Promise<{ setup_complete: boolean }> {
   return gatewayPostJson<{ setup_complete: boolean }>("/api/setup/complete", {});
+}
+
+export interface OllamaSetupModel {
+  name: string;
+  size: number;
+}
+export interface OllamaSetupStatus {
+  running: boolean;
+  base_url: string;
+  models: OllamaSetupModel[];
+}
+
+async function electronOllamaSetup(): Promise<OllamaSetupStatus> {
+  return gatewayGetJson<OllamaSetupStatus>("/api/setup/ollama");
+}
+
+export interface PullProgress {
+  status: string;
+  total?: number;
+  completed?: number;
+}
+
+/** Pull a local Ollama model, forwarding the native NDJSON progress lines to
+ *  `onProgress` (status + total/completed bytes for a progress bar). Resolves when
+ *  the stream ends; rejects on an error line or a non-OK response. */
+async function electronPullModel(
+  model: string,
+  onProgress: (progress: PullProgress) => void,
+): Promise<void> {
+  const response = await fetch(`${DESKTOP_GATEWAY_URL}/api/setup/pull-model`, {
+    method: "POST",
+    headers: { ...gatewayHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ model }),
+  });
+  if (!response.ok || !response.body) {
+    throw new Error(await gatewayErrorDetail(response));
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let nl: number;
+    while ((nl = buffer.indexOf("\n")) >= 0) {
+      const line = buffer.slice(0, nl).trim();
+      buffer = buffer.slice(nl + 1);
+      if (!line) continue;
+      let parsed: (PullProgress & { error?: string }) | null = null;
+      try {
+        parsed = JSON.parse(line);
+      } catch {
+        parsed = null;
+      }
+      if (!parsed) continue;
+      if (parsed.error) throw new Error(parsed.error);
+      onProgress(parsed);
+    }
+  }
 }
 
 export interface ApprovelRouting {
@@ -2335,6 +2396,9 @@ export const coreBridge = {
   validateLlm: (kind: string, baseUrl: string, apiKey: string | null) =>
     electronValidateLlm(kind, baseUrl, apiKey),
   completeSetup: () => electronCompleteSetup(),
+  ollamaSetup: () => electronOllamaSetup(),
+  pullModel: (model: string, onProgress: (progress: PullProgress) => void) =>
+    electronPullModel(model, onProgress),
   approvalRouting: () => electronApprovelRouting(),
   setApprovelRouting: (channel: string, target: string | null) =>
     electronSetApprovelRouting(channel, target),

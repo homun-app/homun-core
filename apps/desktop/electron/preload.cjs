@@ -26,6 +26,8 @@ contextBridge.exposeInMainWorld("localFirstDesktop", {
   // Version of this running build (from the git tag at CI time). Shown in
   // Settings → Account so the user can confirm which build they're on.
   appVersion: () => ipcRenderer.invoke("lfpa:app-version"),
+  // Machine specs (RAM/cores) for the onboarding system-requirements step.
+  systemSpecs: () => ipcRenderer.invoke("lfpa:system-specs"),
   // Auto-update (desktop only). Check returns {available, version, current,
   // releaseNotes}; install downloads the new version and restarts.
   checkForUpdate: () => ipcRenderer.invoke("lfpa:update-check"),

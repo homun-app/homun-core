@@ -530,6 +530,15 @@ autoUpdater.autoInstallOnAppQuit = true;
 // guess. Works in dev too (returns the dev package.json version).
 ipcMain.handle("lfpa:app-version", () => app.getVersion());
 
+// Machine specs for the onboarding "system requirements" step: total RAM and
+// core count drive which local model we recommend. From Node `os` in the main
+// process — accurate and offline (the renderer has no Node access).
+ipcMain.handle("lfpa:system-specs", () => ({
+  totalMemGb: Math.round(os.totalmem() / 1e9),
+  cpuCount: os.cpus().length,
+  platform: process.platform,
+}));
+
 // electron-updater can return releaseNotes as a string or an array of
 // {version, note}; normalise to a single string the renderer can render.
 function flattenReleaseNotes(notes) {
