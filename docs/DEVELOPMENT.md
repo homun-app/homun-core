@@ -2,7 +2,15 @@
 
 > **Punto d'ingresso unico.** Da qui si parte e si torna. Questo file è SEMPRE
 > aggiornato: se cambia una scelta importante, si aggiorna qui (o nel doc linkato).
-> Ultimo aggiornamento: 2026-06-26.
+> Ultimo aggiornamento: 2026-06-27.
+>
+> **SEI QUI (2026-06-27):** linea attiva = **convergenza dalle fondamenta** →
+> [plans/2026-06-27-foundations-up-convergence.md](plans/2026-06-27-foundations-up-convergence.md).
+> Scoperta trasversale: ogni sottosistema ha DUE implementazioni e la canonica è dormiente
+> (caposaldo #5 violato system-wide). Mappe sottosistemi accurate (reverse-engineered) in
+> [architecture/](architecture/). Regola ripristinata: niente codice fuori dalla mappa; ogni
+> modifica aggiorna la pagina architecture + cita il caposaldo. Si parte da L0 (normalizzazione
+> modello). NB: il blocco "Stato esecuzione" sotto è un changelog storico da archiviare.
 
 ## North Star
 
@@ -33,7 +41,8 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
 |---|---|
 | **Principi** (cosa non si viola) | [CAPISALDI.md](CAPISALDI.md) |
 | **Scelte precise** (perché abbiamo deciso X) | [decisions/](decisions/) — ADR 0001-0016 (immutabili) |
-| **Com'è fatto** (architettura + diagrammi) | [architecture/](architecture/) — overview + memory + agent-loop + plugins + system-map |
+| **Com'è fatto** (architettura + diagrammi, reverse-engineered 2026-06-27) | [architecture/](architecture/) — overview · system-map · **agent-loop** · **model-io** · **browser** · **mcp** · **skills** · **connectors-composio** · **contacts-channels** · **capability-registry** · memory · plugins |
+| **Piano corrente** (fondamenta → obiettivo) | [plans/2026-06-27-foundations-up-convergence.md](plans/2026-06-27-foundations-up-convergence.md) |
 | **Dove siamo / cosa manca** (backlog corrente) | [plans/2026-06-22-…](plans/2026-06-22-batch-1042-artifacts-memory.md) |
 | **La memoria** (contratto operativo + visione + struttura) | [MEMORIA.md](MEMORIA.md) · [memory-vision.md](memory-vision.md) · [memory-architecture.md](memory-architecture.md) |
 | **Prodotto / distribuzione / self-host** | [PRODUCT_LOOP.md](PRODUCT_LOOP.md) · [distribution.md](distribution.md) · [self-host.md](self-host.md) · [release-macos.md](release-macos.md) |
