@@ -61,11 +61,12 @@ round attorno a `crates/desktop-gateway/src/main.rs:18948` in poi):
    (`saw_event=false`), lo si usa così com'è.
 
 5. **Tool-call come testo + sanitize** — quando il `message` riassemblato non ha
-   `tool_calls` strutturati, l'agent-loop (`main.rs:~19565`) tenta `parse_text_tool_calls`
-   (`main.rs:24923`): estrae call Hermes/Qwen (`<tool_call>{json}</tool_call>`) e Claude/
-   MiniMax (`<invoke name=…><parameter…>`), filtrate ai soli tool **noti**, e le
-   trasforma in struttura via `synthesize_tool_calls` (`main.rs:24969`). Il `content`
-   committato passa sempre da `sanitize_model_text` (`main.rs:24863`) che spoglia i blocchi
+   `tool_calls` strutturati, l'agent-loop (`main.rs:~19759`) tenta
+   `model_normalize::parse_text_tool_calls`: estrae call Hermes/Qwen
+   (`<tool_call>{json}</tool_call>`) e Claude/MiniMax (`<invoke name=…><parameter…>`),
+   filtrate ai soli tool **noti**, e le trasforma in struttura via
+   `model_normalize::synthesize_tool_calls`. Il `content`
+   committato passa sempre da `sanitize_model_text` (ora in `model_normalize`) che spoglia i blocchi
    `<think>`/`<tool_call>`/`<invoke>`/`<function_calls>` e i token spuri (es. minimax).
 
 6. **Output strutturato (deliverable/judge)** — per il JSON forzato (deck, giudici di
@@ -167,10 +168,11 @@ Invarianti:
 
 ## Divergenze / debolezze
 
-- **Non c'è UN normalizzatore unico**: la normalizzazione è **sparpagliata** in funzioni
-  separate (`reassemble_openai_stream`, `process_ollama_line`, `sanitize_model_text`,
-  `parse_text_tool_calls`, l'hack `thinking:disabled`, `to_ollama_messages`) più regex nel
-  frontend `ChatView.tsx`. È esattamente il difetto che ADR 0019 vuole risolvere.
+- **Normalizzazione della RISPOSTA: convergiuta** in `model_normalize` (F0.1–F0.5: builder
+  canonico + reasoning-fallback, estrazione `<think>`, tool-call Ollama, `sanitize_model_text`,
+  tool-as-text). Restano fuori dal modulo gli stadi di **assemblaggio stream** e **richiesta**
+  (`reassemble_openai_stream`, `process_ollama_line`, `to_ollama_messages`, l'hack
+  `thinking:disabled`) più le regex nel frontend `ChatView.tsx` — bersagli successivi di ADR 0019.
 - **`model_normalize.rs` — cablaggio IN CORSO (F0, [piano](../plans/2026-06-27-foundations-up-convergence.md)):**
   il modulo implementa il pattern canonico SOTA (`Raw* serde-permissivo → Canonical* via
   TryFrom`, "parse don't validate"). Cablato finora:
@@ -214,8 +216,16 @@ Invarianti:
     validato). 2 test (`parse_ollama_capabilities`, `ollama_native_root`).
   - **`sanitize_model_text`** (F0.4): spostato in `model_normalize` (+ `strip_tag_blocks`/
     `strip_fullwidth_bar_tokens`) → tutta la normalizzazione testo nel modulo canonico, 1 test.
-  **L0 CORE = punto fermo.** Coda (increment a sé): `parse_text_tool_calls` (tool-as-text, bloccato
-  dal helper `xml_attr_value` condiviso), schema-downgrade duplicato (gateway vs `openai_compat.rs`),
+  - **`parse_text_tool_calls` + `synthesize_tool_calls`** (F0.5): l'ULTIMO pezzo sparpagliato —
+    il parsing tool-as-text (Hermes/Qwen `<tool_call>{json}</tool_call>`, Claude/MiniMax
+    `<invoke name=…><parameter…>`) — spostato in `model_normalize` con i suoi helper privati
+    (`xml_attr_value`, `parse_xml_parameters`). Il "blocco" annotato (helper condiviso) era
+    illusorio: `xml_attr_value` è condiviso solo *dentro* il cluster, quindi tutto migra insieme.
+    Rimozione che cura anche un doc orfano di `strip_tag_blocks` (riattacca il doc di
+    `prune_browser_history`). 4 test. **Ora la frontiera canonica (ADR 0019) possiede OGNI forma
+    in cui una call può arrivare — strutturata o trapelata-come-testo** (caposaldo #6/#11).
+  **L0 = punto fermo (core + tool-as-text convergiti).** Coda residua (2 increment a sé, NON
+  bloccano F1): schema-downgrade duplicato (gateway `generate_deck_content` vs `openai_compat.rs`),
   `context_length` nel budget prompt.
 - **Doppio path per il deck**: `generate_deck_content` (gateway) duplica il floor
   schema-downgrade già presente in `crates/inference/src/openai_compat.rs`; ADR 0016 prevede
@@ -257,10 +267,10 @@ Invarianti:
     `collect_ollama_native_stream` (`:14517`)
   - `build_chat_payload` (`:14591`)
   - `extract_deck_object` (`:15713`), `generate_deck_content` (`:16217`)
-  - `sanitize_model_text` (`:24863`), `parse_text_tool_calls` (`:24923`),
-    `synthesize_tool_calls` (`:24969`)
   - `build_browser_inference_router` (`:37381`)
-- `crates/desktop-gateway/src/model_normalize.rs` — normalizzatore canonico WIP (ADR 0019, NON cablato)
+- `crates/desktop-gateway/src/model_normalize.rs` — **normalizzatore canonico CABLATO** (ADR 0019):
+  `assistant_response`, `split_reasoning_from_content`, `ollama_tool_call`, `sanitize_model_text`,
+  `parse_text_tool_calls` + `synthesize_tool_calls`, `parse_plan_propose`
 - `crates/desktop-gateway/src/model_registry.rs` — `infer_context_window` (`:288`), shape provider/role
 - `crates/inference/src/openai_compat.rs` — `build_request_body` / schema-downgrade (`:77`, `:106`)
 - `crates/inference/src/router.rs` — `ModelRouter`, `select`, `active_context_window` (`:58`)

@@ -19756,11 +19756,11 @@ check/update the key in Settings → Model & Runtime."
                                 .map(String::from)
                         })
                         .collect();
-                    let parsed = parse_text_tool_calls(&raw_content, &known);
+                    let parsed = model_normalize::parse_text_tool_calls(&raw_content, &known);
                     if parsed.is_empty() {
                         None
                     } else {
-                        Some(synthesize_tool_calls(round, parsed))
+                        Some(model_normalize::synthesize_tool_calls(round, parsed))
                     }
                 });
 
@@ -25003,106 +25003,6 @@ const PRUNED_SNAPSHOT_STUB: &str =
 /// user message carrying an `image_url`, stubbing all older ones. It never touches
 /// the system message, the original first user message, or non-browser tool
 /// results.
-/// Removes every `open..close` block (inclusive). `open` may be a tag prefix
-/// (e.g. "<invoke", to match attributed tags); `close` is the full closing tag.
-/// If a block is unterminated, everything from `open` to end is dropped.
-/// Reads `attr="value"` from a tag/block.
-fn xml_attr_value(block: &str, attr: &str) -> Option<String> {
-    let needle = format!("{attr}=\"");
-    let start = block.find(&needle)? + needle.len();
-    let rest = &block[start..];
-    let end = rest.find('"')?;
-    Some(rest[..end].to_string())
-}
-
-/// Builds a JSON args object from Claude-style
-/// `<parameter name="p">value</parameter>` pairs.
-fn parse_xml_parameters(block: &str) -> String {
-    let mut map = serde_json::Map::new();
-    let mut rest = block;
-    while let Some(pos) = rest.find("<parameter") {
-        let after = &rest[pos..];
-        let Some(name) = xml_attr_value(after, "name") else {
-            break;
-        };
-        let Some(gt) = after.find('>') else { break };
-        let value_region = &after[gt + 1..];
-        let Some(close) = value_region.find("</parameter>") else {
-            break;
-        };
-        let value = value_region[..close].trim().to_string();
-        map.insert(name, serde_json::Value::String(value));
-        rest = &value_region[close + "</parameter>".len()..];
-    }
-    serde_json::Value::Object(map).to_string()
-}
-
-/// Parses tool calls a model emitted as TEXT (when it should have used the
-/// structured `tool_calls` field). Handles the two common leaked formats:
-///   - Hermes/Qwen JSON:   `<tool_call>{"name":"X","arguments":{...}}</tool_call>`
-///   - Claude/MiniMax XML: `<invoke name="X"><parameter name="p">v</parameter></invoke>`
-/// Returns `(name, arguments_json)`, filtered to `known` tool names so prose that
-/// merely mentions a tag is not mistaken for a call.
-fn parse_text_tool_calls(text: &str, known: &[String]) -> Vec<(String, String)> {
-    let cleaned = text.replace("]<]minimax[>[", "");
-    let mut out: Vec<(String, String)> = Vec::new();
-    // 1) Claude/MiniMax XML invokes.
-    let mut rest = cleaned.as_str();
-    while let Some(pos) = rest.find("<invoke") {
-        let after = &rest[pos..];
-        let Some(close) = after.find("</invoke>") else {
-            break;
-        };
-        let block = &after[..close];
-        if let Some(name) = xml_attr_value(block, "name") {
-            if known.iter().any(|k| k == &name) {
-                out.push((name, parse_xml_parameters(block)));
-            }
-        }
-        rest = &after[close + "</invoke>".len()..];
-    }
-    // 2) Hermes/Qwen JSON tool_calls (only if no XML invokes were found).
-    if out.is_empty() {
-        let mut rest = cleaned.as_str();
-        while let Some(pos) = rest.find("<tool_call>") {
-            let after = &rest[pos + "<tool_call>".len()..];
-            let Some(close) = after.find("</tool_call>") else {
-                break;
-            };
-            let inner = after[..close].trim();
-            if let Ok(value) = serde_json::from_str::<serde_json::Value>(inner) {
-                if let Some(name) = value.get("name").and_then(|n| n.as_str()) {
-                    if known.iter().any(|k| k == name) {
-                        let args = value
-                            .get("arguments")
-                            .map(|a| a.to_string())
-                            .unwrap_or_else(|| "{}".to_string());
-                        out.push((name.to_string(), args));
-                    }
-                }
-            }
-            rest = &after[close + "</tool_call>".len()..];
-        }
-    }
-    out
-}
-
-/// Synthesizes an OpenAI-style `tool_calls` array from text-parsed calls so the
-/// existing dispatch path handles them unchanged.
-fn synthesize_tool_calls(round: usize, parsed: Vec<(String, String)>) -> Vec<serde_json::Value> {
-    parsed
-        .into_iter()
-        .enumerate()
-        .map(|(index, (name, arguments))| {
-            serde_json::json!({
-                "id": format!("textcall_{round}_{index}"),
-                "type": "function",
-                "function": { "name": name, "arguments": arguments }
-            })
-        })
-        .collect()
-}
-
 fn prune_browser_history(
     messages: &mut [serde_json::Value],
     browser_tool_call_ids: &std::collections::BTreeSet<String>,

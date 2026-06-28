@@ -112,6 +112,108 @@ pub fn ollama_tool_call(call: &serde_json::Value, index: usize) -> serde_json::V
     })
 }
 
+/// Read `attr="value"` from a tag/block. Shared by the tool-as-text parsers below.
+fn xml_attr_value(block: &str, attr: &str) -> Option<String> {
+    let needle = format!("{attr}=\"");
+    let start = block.find(&needle)? + needle.len();
+    let rest = &block[start..];
+    let end = rest.find('"')?;
+    Some(rest[..end].to_string())
+}
+
+/// Build a JSON args object from Claude/MiniMax-style
+/// `<parameter name="p">value</parameter>` pairs inside an `<invoke>` block.
+fn parse_xml_parameters(block: &str) -> String {
+    let mut map = serde_json::Map::new();
+    let mut rest = block;
+    while let Some(pos) = rest.find("<parameter") {
+        let after = &rest[pos..];
+        let Some(name) = xml_attr_value(after, "name") else {
+            break;
+        };
+        let Some(gt) = after.find('>') else { break };
+        let value_region = &after[gt + 1..];
+        let Some(close) = value_region.find("</parameter>") else {
+            break;
+        };
+        let value = value_region[..close].trim().to_string();
+        map.insert(name, serde_json::Value::String(value));
+        rest = &value_region[close + "</parameter>".len()..];
+    }
+    serde_json::Value::Object(map).to_string()
+}
+
+/// Parse tool calls a model emitted as TEXT instead of the structured `tool_calls`
+/// field. This is the cross-model floor: weak models (minimax, Hermes/Qwen via Ollama)
+/// leak their native chat-template syntax into `content` rather than returning structured
+/// calls, so the loop would otherwise see "no tool call" and stall. Normalizing it HERE —
+/// not in the loop — keeps every way a call can arrive (structured or leaked-as-text) on
+/// the one canonical boundary (ADR 0019). Handles the two common leaked formats:
+///   - Hermes/Qwen JSON:   `<tool_call>{"name":"X","arguments":{...}}</tool_call>`
+///   - Claude/MiniMax XML: `<invoke name="X"><parameter name="p">v</parameter></invoke>`
+/// Returns `(name, arguments_json)`, filtered to `known` tool names so prose that merely
+/// mentions a tag is not mistaken for a call.
+pub fn parse_text_tool_calls(text: &str, known: &[String]) -> Vec<(String, String)> {
+    let cleaned = text.replace("]<]minimax[>[", "");
+    let mut out: Vec<(String, String)> = Vec::new();
+    // 1) Claude/MiniMax XML invokes.
+    let mut rest = cleaned.as_str();
+    while let Some(pos) = rest.find("<invoke") {
+        let after = &rest[pos..];
+        let Some(close) = after.find("</invoke>") else {
+            break;
+        };
+        let block = &after[..close];
+        if let Some(name) = xml_attr_value(block, "name") {
+            if known.iter().any(|k| k == &name) {
+                out.push((name, parse_xml_parameters(block)));
+            }
+        }
+        rest = &after[close + "</invoke>".len()..];
+    }
+    // 2) Hermes/Qwen JSON tool_calls (only if no XML invokes were found).
+    if out.is_empty() {
+        let mut rest = cleaned.as_str();
+        while let Some(pos) = rest.find("<tool_call>") {
+            let after = &rest[pos + "<tool_call>".len()..];
+            let Some(close) = after.find("</tool_call>") else {
+                break;
+            };
+            let inner = after[..close].trim();
+            if let Ok(value) = serde_json::from_str::<serde_json::Value>(inner) {
+                if let Some(name) = value.get("name").and_then(|n| n.as_str()) {
+                    if known.iter().any(|k| k == name) {
+                        let args = value
+                            .get("arguments")
+                            .map(|a| a.to_string())
+                            .unwrap_or_else(|| "{}".to_string());
+                        out.push((name.to_string(), args));
+                    }
+                }
+            }
+            rest = &after[close + "</tool_call>".len()..];
+        }
+    }
+    out
+}
+
+/// Synthesize an OpenAI-style `tool_calls` array from text-parsed calls so the existing
+/// dispatch path handles them unchanged. The synthetic `id` is stable within a round via
+/// `round`+`index` (mirrors `ollama_tool_call`'s id strategy).
+pub fn synthesize_tool_calls(round: usize, parsed: Vec<(String, String)>) -> Vec<serde_json::Value> {
+    parsed
+        .into_iter()
+        .enumerate()
+        .map(|(index, (name, arguments))| {
+            serde_json::json!({
+                "id": format!("textcall_{round}_{index}"),
+                "type": "function",
+                "function": { "name": name, "arguments": arguments }
+            })
+        })
+        .collect()
+}
+
 /// Strip a balanced `<open>…<close>` block (all occurrences) from text. Used by
 /// `sanitize_model_text`. An unclosed `open` drops the rest (a streamed/truncated tag).
 fn strip_tag_blocks(input: &str, open: &str, close: &str) -> String {
@@ -357,6 +459,51 @@ mod tests {
         assert_eq!(ollama_tool_call(&with_str, 2)["id"], "ollama_call_2");
         let missing = serde_json::json!({"function":{"name":"x"}});
         assert_eq!(ollama_tool_call(&missing, 0)["function"]["arguments"], "{}");
+    }
+
+    #[test]
+    fn parse_text_tool_calls_extracts_claude_xml_invoke() {
+        // Claude/MiniMax leaked into content: <invoke name=...><parameter ...>.
+        let known = vec!["browse_web".to_string()];
+        let text = r#"sure ]<]minimax[>[<invoke name="browse_web"><parameter name="query">trains to Rome</parameter></invoke> done"#;
+        let calls = parse_text_tool_calls(text, &known);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, "browse_web");
+        let args: serde_json::Value = serde_json::from_str(&calls[0].1).unwrap();
+        assert_eq!(args["query"], "trains to Rome");
+    }
+
+    #[test]
+    fn parse_text_tool_calls_extracts_hermes_json() {
+        // Hermes/Qwen leaked JSON tool_call.
+        let known = vec!["get_weather".to_string()];
+        let text = r#"<tool_call>{"name":"get_weather","arguments":{"city":"London"}}</tool_call>"#;
+        let calls = parse_text_tool_calls(text, &known);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, "get_weather");
+        assert_eq!(serde_json::from_str::<serde_json::Value>(&calls[0].1).unwrap()["city"], "London");
+    }
+
+    #[test]
+    fn parse_text_tool_calls_ignores_unknown_and_prose() {
+        // A tag for a tool not in `known`, or mere prose mentioning a name, is NOT a call.
+        let known = vec!["browse_web".to_string()];
+        assert!(parse_text_tool_calls(
+            r#"<invoke name="rm_rf"><parameter name="p">x</parameter></invoke>"#,
+            &known,
+        )
+        .is_empty());
+        assert!(parse_text_tool_calls("I could browse_web for you", &known).is_empty());
+    }
+
+    #[test]
+    fn synthesize_tool_calls_builds_openai_shape_with_stable_ids() {
+        let calls = synthesize_tool_calls(3, vec![("a".into(), "{}".into()), ("b".into(), "{\"x\":1}".into())]);
+        assert_eq!(calls[0]["id"], "textcall_3_0");
+        assert_eq!(calls[0]["type"], "function");
+        assert_eq!(calls[0]["function"]["name"], "a");
+        assert_eq!(calls[1]["id"], "textcall_3_1");
+        assert_eq!(calls[1]["function"]["arguments"], "{\"x\":1}");
     }
 
     #[test]
