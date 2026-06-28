@@ -12,10 +12,12 @@
 //! - risk/approval: gated on the ACTION, never on model capability.
 //! - role selection (`model_registry`): which model serves a role.
 //!
-//! Staged rollout (ADR 0018): this slice ships the pure types only. They are
-//! wired into the turn behind a `shadow` flag in the next phase, at which point
-//! the module-level `allow(dead_code)` below is removed.
-#![allow(dead_code)]
+//! Staged rollout (ADR 0018): the profile is now WIRED into the turn —
+//! `scaffold_for(turn_tier)` drives the workflow-bias *manopola* (via
+//! `relax_route_for_tier`) and the verify-depth gate, both under the
+//! `adaptive_floor` setting (`off`|`shadow`|`on`). The `slot` knob is still
+//! observe-only (logged + traced) until its consumption lands; `format` is MOOT
+//! (chat already uses native tool-calling).
 
 use crate::model_registry::ModelTier;
 
@@ -61,8 +63,6 @@ pub enum VerifyDepth {
     Always,
     /// Verify only steps that performed a mutating (non-`Read`) action.
     OnRisk,
-    /// Trust the step without a verification round (reserved; not a default).
-    Off,
 }
 
 /// The "Manopole" of [ADR 0018], derived purely from a model's [`ModelTier`].
@@ -107,9 +107,61 @@ pub fn scaffold_for(tier: ModelTier) -> ScaffoldProfile {
     }
 }
 
+/// One structured telemetry line describing the adaptive-floor decision for a turn: the
+/// model's capability tier, the four resolved knobs, and the active mode. It is pushed into
+/// the turn's `tool_trace` (and so reaches the memory/learning substrate, ADR 0018 Pilastro
+/// 4 + the Fase-1 telemetry the ADR makes the prerequisite for ever switching the floor on)
+/// instead of only hitting stderr. Kept here, beside [`scaffold_for`], so the format and the
+/// policy stay in one tested place; the format is stable (asserted by a test) because a
+/// future learned-router / eval will parse it.
+pub fn floor_trace_line(tier: ModelTier, profile: &ScaffoldProfile, mode: &str) -> String {
+    format!(
+        "adaptive-floor: tier={} mode={mode} workflow_bias={:?} slot={:?} verify={:?} format={:?}",
+        tier.as_str(),
+        profile.workflow_bias,
+        profile.slot,
+        profile.verify_depth,
+        profile.format,
+    )
+}
+
+/// The floor telemetry line to record for a turn, or `None` when the mode is `off`. Centralizes
+/// the "observe in `shadow`|`on`, stay silent in `off`" gate so every sink (the stderr echo and
+/// the persisted `tool_trace`) agrees on WHEN telemetry exists.
+pub fn floor_trace_for_mode(
+    tier: ModelTier,
+    profile: &ScaffoldProfile,
+    mode: &str,
+) -> Option<String> {
+    (mode != "off").then(|| floor_trace_line(tier, profile, mode))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn floor_trace_line_is_stable_and_carries_tier_and_profile() {
+        let line = floor_trace_line(ModelTier::Reasoning, &scaffold_for(ModelTier::Reasoning), "shadow");
+        assert_eq!(
+            line,
+            "adaptive-floor: tier=reasoning mode=shadow workflow_bias=AllowAgentic slot=Free verify=OnRisk format=NativeToolCalling"
+        );
+        // The weak tier reads back its constrained profile under the same format.
+        let fast = floor_trace_line(ModelTier::Fast, &scaffold_for(ModelTier::Fast), "on");
+        assert!(fast.contains("tier=fast"));
+        assert!(fast.contains("workflow_bias=ForceWorkflow"));
+        assert!(fast.contains("verify=Always"));
+        assert!(fast.contains("mode=on"));
+    }
+
+    #[test]
+    fn floor_trace_is_observed_in_shadow_and_on_but_silent_when_off() {
+        let profile = scaffold_for(ModelTier::Balanced);
+        assert!(floor_trace_for_mode(ModelTier::Balanced, &profile, "off").is_none());
+        assert!(floor_trace_for_mode(ModelTier::Balanced, &profile, "shadow").is_some());
+        assert!(floor_trace_for_mode(ModelTier::Balanced, &profile, "on").is_some());
+    }
 
     #[test]
     fn fast_tier_is_maximally_constrained() {

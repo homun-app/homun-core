@@ -97,8 +97,14 @@ Punti caldi (con `file:line` in `main.rs`):
 - **Caposaldo #6** ("stato e control-flow di CODICE; identità non inferita"): **parziale**.
   `merge_plan` inferisce l'identità per **titolo** (`:~6747`) sotto la vernice `ExecutionPlan`.
 - **Caposaldo #5** ("un solo motore"): **violato** — due motori coesistono.
-- **ADR 0018** (inner loop tier-adattivo): **non realizzato** — floor default-off, i
-  modelli capaci ricevono lo stesso scaffolding dei deboli.
+- **ADR 0018** (inner loop tier-adattivo): **parziale, default-off**. Il meccanismo È cablato:
+  `scaffold_for(turn_tier)` (`scaffold.rs`) deriva le manopole e, sotto `adaptive_floor=on`,
+  **workflow_bias** rilassa la rotta (`relax_route_for_tier`) e **verify_depth** modula il gate
+  F2; `format` è MOOT (chat già native tool-calling); `slot` è observe-only. **F2.1 (fatto):** la
+  decisione `{tier, profilo, mode}` è persistita nel `tool_trace` (→ memoria/learning,
+  `scaffold::floor_trace_for_mode`) in `shadow`|`on` — la telemetria Fase-1 prerequisito per
+  accendere il floor. Resta off di default finché la eval bi-popolazione (gemma4 vs capace) non lo
+  valida; e i modelli capaci ricevono ancora lo scaffolding dei deboli **finché il floor è off**.
 
 ### Conseguenze osservate (sintomi)
 - "Il piano a volte parte, a volte no, lo segue e non lo segue" → creazione piano lasciata

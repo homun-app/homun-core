@@ -93,6 +93,23 @@ sulla finestra reale. Testato e verificato sulla fonte. **Coda L0 esaurita.**
   2026-06-28): l'esecutore durable reale pilota il sidecar condiviso direttamente, non serviva il
   provider tipato. Caposaldo #5/#7.
 
+**F2 — loop tier-adattivo / ADR 0018 (IN CORSO).** Stato reale (verificato sul codice, ≠ "non
+implementato"): il meccanismo del floor È già cablato — `scaffold_for(turn_tier)` deriva le manopole,
+**workflow_bias** rilassa la rotta (`relax_route_for_tier`) e **verify_depth** modula il gate F2,
+entrambe sotto `adaptive_floor=on`; `format` MOOT; `slot` observe-only. Default **off**: accenderlo
+richiede eval bi-popolazione (gemma4 vs capace) **non eseguibile in questo ambiente**.
+- ✅ **F2.1 telemetria floor → `tool_trace`** — la decisione `{tier, profilo, mode}` è persistita
+  nel `tool_trace` (→ estrattore memoria/learning) in `shadow`|`on`, non più solo `eprintln`
+  (`scaffold::floor_trace_line`/`floor_trace_for_mode`, formato stabile testato). È il prerequisito
+  ADR Fase-1 per validare il floor prima di accenderlo. Pulizia: tolto l'`#![allow(dead_code)]`
+  stantio in `scaffold.rs`; rimossa la variante `VerifyDepth::Off` mai costruita (l'ADR vieta il
+  "no-verify" per i capaci). +2 test scaffold. Caposaldo #2/#12, ADR 0018.
+- ⏳ **F2.2 il piano traccia il lavoro** — chiudere i canali no-tools che bypassano il piano
+  (`stream_chat_via_openai`, sintesi forzata + final-round) + `done` dopo verify. È il sintomo #1,
+  deterministico/unit-testable. **Prossimo.**
+- ⏳ **F2.3 floor `shadow→on` + manopola `slot`** — richiede la eval bi-popolazione → differito a
+  quando l'ambiente ha Ollama/gemma4.
+
 Mappe: [registry](architecture/capability-registry.md), [skills](architecture/skills.md),
 [connectors](architecture/connectors-composio.md), [browser](architecture/browser.md), [mcp](architecture/mcp.md).
 NB live-validation: setup attuale = deepseek-v4-pro:cloud (Z.ai), non Ollama; Composio non configurato.
@@ -138,6 +155,16 @@ NB live-validation: setup attuale = deepseek-v4-pro:cloud (Z.ai), non Ollama; Co
   `method_for_tool` del provider): il worker path non aveva e non ha bisogno del provider tipato.
   L'enum `CapabilityProviderKind::Browser` resta (lo usano registry/orchestratore/bridge). Stesso
   pattern di ritiro di F1.b/F1.c. Caposaldo #5. `cargo check --workspace` verde.
+
+**Sessione 2026-06-28 (3) — avvio F2 (F2.1 telemetria floor):**
+- Scoperta verificando il codice: ADR 0018 NON è "non implementato" — `scaffold_for` è cablato,
+  workflow_bias + verify_depth modulano sotto `adaptive_floor=on`; manca solo `slot` (observe-only) e
+  l'accensione del floor (gated su eval bi-popolazione non eseguibile qui).
+- **F2.1** la decisione del floor `{tier, profilo, mode}` ora è **persistita nel `tool_trace`**
+  (→ memoria/learning) in `shadow`|`on` via `scaffold::floor_trace_for_mode`, non più solo stderr —
+  telemetria Fase-1 prerequisito per accendere il floor con dati. Tolto `#![allow(dead_code)]`
+  stantio + rimossa `VerifyDepth::Off` mai costruita. +2 test scaffold; gate gateway 359 pass / 1
+  ambientale (soffice). **Prossimo: F2.2 (il piano traccia il lavoro).**
 
 **Sessione 2026-06-27 — diagnosi + fix sintomo + analisi strutturale + metodologia:**
 - **Fix agentic-loop validati e pushati** (default flag-off, migliorano il model-loop):
@@ -194,18 +221,18 @@ canonica e si ritira il parallelo; si rimuove il codice morto toccato; si splitt
 grossi; si commenta il perché; ogni modifica aggiorna la pagina architecture/ + cita il
 caposaldo + porta un test.
 
-PROSSIMO PASSO: F2 — loop tier-adattivo (realizza ADR 0018). Leggi
-docs/decisions/0018-adaptive-harness-subagents-triggers.md + docs/architecture/agent-loop.md, poi:
-- rendere REALE il floor adattivo: modello CAPACE → inner loop libero (fluidità tipo Claude Code,
-  niente F2-gate/nudge-war); modello DEBOLE → slot vincolati. Oggi `relax_route_for_tier` è solo
-  correttivo a valle e `route_capability` non vede il `ModelTier` (vedi Divergenze in
-  capability-registry.md). Direzione: portare il `ModelTier` fino alla decisione di scaffolding.
-- far sì che il PIANO tracci il lavoro: l'esecutore marca `done` dopo verify; il deliverable non
-  deve più uscire da canali no-tools che bypassano il piano (`main.rs:~19210`, `~22924`).
-- `~/.homun/runtime-settings.json` → `adaptive_floor` resta "off" finché F2 non lo realizza.
-Fatto: F0 (L0 completo) + F1 COMPLETO (a search-engine unico, b skill, c Composio, d browser-in-registry).
-Vedi "Dove siamo" in STATO per i dettagli. NB: i file:line di main.rs possono essere sfasati dopo gli
-edit F1 — usa i nomi di funzione.
+PROSSIMO PASSO: F2.2 — il piano traccia il lavoro. Leggi
+docs/decisions/0018-adaptive-harness-subagents-triggers.md + docs/architecture/agent-loop.md, poi
+in `stream_chat_via_openai` (`main.rs`): chiudere i canali no-tools che fanno USCIRE il deliverable
+bypassando il piano (sintesi forzata `!final_done` + final-round che rimuove i tool; cerca
+`is_final_round`, `Sintesi forzata`, `verify_step_complete`) e marcare `done` dopo verify — così
+"il piano a volte parte/segue, a volte no" smette. Deterministico, unit-testable senza modello live.
+NB stato F2 (verificato): il floor È già cablato (scaffold_for + workflow_bias + verify_depth sotto
+`adaptive_floor=on`); F2.1 (telemetria floor → tool_trace) FATTO; F2.3 (floor shadow→on + manopola
+`slot`) DIFFERITO perché serve eval bi-popolazione (gemma4 vs capace) non eseguibile in questo
+ambiente. `adaptive_floor` resta "off" di default.
+Fatto: F0 (L0) + F1 COMPLETO + F2.1. Vedi "Dove siamo" in STATO. NB: i file:line di main.rs sono
+sfasati dopo gli edit F1/F2 — usa i nomi di funzione.
 
 A fine sessione aggiorna docs/STATO.md.
 ```

@@ -18063,15 +18063,12 @@ async fn stream_chat_via_openai(
     let floor_mode = adaptive_floor_mode();
     let floor_acting = floor_mode == "on";
     let floor_observing = floor_mode != "off";
-    if floor_observing {
-        eprintln!(
-            "adaptive-floor: model={model} tier={} verify={:?} workflow_bias={:?} slot={:?} format={:?} acting={floor_acting}",
-            turn_tier.as_str(),
-            turn_scaffold.verify_depth,
-            turn_scaffold.workflow_bias,
-            turn_scaffold.slot,
-            turn_scaffold.format,
-        );
+    // The floor telemetry line for this turn (`None` when `off`). Computed once and used by
+    // both sinks: the dev-time stderr echo here, and the durable `tool_trace` push below
+    // (the Fase-1 telemetry that reaches the memory/learning substrate).
+    let floor_trace = scaffold::floor_trace_for_mode(turn_tier, &turn_scaffold, floor_mode);
+    if let Some(line) = &floor_trace {
+        eprintln!("model={model} {line}");
     }
     // Scope MEMORY to THIS conversation's project (profile injection, recall, per-file
     // recall, extractor). Uses a dedicated memory scope — NOT the global active
@@ -19196,6 +19193,14 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
         // Consequential actions performed this turn (any domain) → fed to the
         // memory extractor so the "why" of each mutation is remembered.
         let mut tool_trace: Vec<String> = Vec::new();
+        // Adaptive-floor telemetry (ADR 0018 Fase 1): persist the tier+profile decision into
+        // the turn trace so it reaches the memory/learning substrate — not just stderr — and
+        // the floor can later be VALIDATED against outcomes before it is switched on. Present
+        // only in the observation modes (`shadow`|`on`); `off` keeps the trace clean. Shared
+        // by chat and channel/automation turns (this is the one shared loop).
+        if let Some(line) = &floor_trace {
+            tool_trace.push(line.clone());
+        }
         if let Some(route_line) = capability_route_trace_line(&capability_route_for_runtime) {
             tool_trace.push(route_line.clone());
             let _ = emit_stream_event(
@@ -21994,7 +21999,6 @@ an uncertain date.",
                                     match turn_scaffold.verify_depth {
                                         scaffold::VerifyDepth::Always => true,
                                         scaffold::VerifyDepth::OnRisk => !step_evidence.is_empty(),
-                                        scaffold::VerifyDepth::Off => false,
                                     }
                                 } else {
                                     true
