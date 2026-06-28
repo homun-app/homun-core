@@ -26,14 +26,15 @@
     (non lo mandiamo) → i reasoning model emettono `<think>` inline che `sanitize` cancellava
     (risposta vuota se tutto nel think). Ora estratti+preservati per il fallback. 2 test.
   - ✅ **inc.3a/3b** Profilo capacità Ollama — `warm_ollama_capabilities` (`/api/show`, cache
-    per-modello) estrae `OllamaCapabilities { thinking, tools, vision, context_length }`. Cablato:
-    `think:true` solo ai thinking. Estratti, da cablare (deliberato): tools/vision/context. 2 test.
-  - **Prossimo (inc.3c)**: CONSUMARE il profilo — gate tools (fail-safe default-true), gate immagini
-    su `vision`, budget su `context_length`. Poi convergere il resto di `sanitize_model_text`,
-    `parse_text_tool_calls` (tool-as-text), schema-downgrade, fixture per-provider. Poi L0 = punto
-    fermo → F1.
-    NB live-validation: setup attuale = deepseek-v4-pro:cloud (OpenAI-compat via Z.ai), non Ollama
-    native → il path capacità si attiva solo con un modello su Ollama locale (per `/api/show`).
+    per-modello) estrae `OllamaCapabilities { thinking, tools, vision, context_length }`. 2 test.
+  - ✅ **inc.3c** CONSUMATO il profilo (tutti fail-safe, None/cloud → invariato): `think:true` solo
+    ai thinking; `tools` (non offre tool a chi non li fa); `vision` (screenshot solo ai vision-model,
+    altrimenti nota testo). `context_length` RIMANDATO (tocca prompt-building → increment validato).
+  - **Prossimo (inc.4)**: `context_length` nel budget; poi convergere il resto di `sanitize_model_text`
+    (tool_call/minimax tokens), `parse_text_tool_calls` (tool-as-text), schema-downgrade, fixture
+    per-provider. Poi L0 = punto fermo → F1.
+    NB live-validation: setup attuale = deepseek-v4-pro:cloud (Z.ai), non Ollama → il path capacità
+    si attiva solo con un modello su Ollama locale (per `/api/show`).
 
 ## Cosa è stato fatto (rolling, conciso)
 

@@ -202,13 +202,14 @@ Invarianti:
     **una volta per turno** (cache per-modello) ed estrae `OllamaCapabilities { thinking, tools,
     vision, context_length }` — `capabilities[]` + `model_info["<arch>.context_length"]`. Così
     l'harness **adatta** invece di indovinare (caposaldo #11). **Cablato:** `think:true` solo ai
-    modelli thinking (clean `message.thinking`, niente 400 sui non-thinking). **Estratti, da
-    cablare (deliberato, fail-safe per-caso):** `tools` (gate offerta tool), `vision` (gate invio
-    immagini), `context_length` (budget sulla finestra reale). 2 test (`parse_ollama_capabilities`,
-    `ollama_native_root`).
-  Da cablare (prossimi increment F0): consumare tools/vision/context dal profilo; convergere il
-  resto di `sanitize_model_text` (tool_call/minimax tokens), `parse_text_tool_calls` (tool-as-
-  text), lo schema-downgrade (duplicato gateway vs `openai_compat.rs`), fixture per-provider.
+    thinking; `tools` (non offre tool a chi non li fa); `vision` (screenshot inviato solo ai
+    vision-model, altrimenti nota testuale → fallback allo snapshot testo). Tutti **fail-safe**:
+    profilo sconosciuto/cloud (None) → comportamento di oggi invariato. **Estratto, rimandato:**
+    `context_length` (budget sulla finestra reale tocca il prompt-building → increment dedicato +
+    validato). 2 test (`parse_ollama_capabilities`, `ollama_native_root`).
+  Da cablare (prossimi increment F0): `context_length` nel budget; convergere il resto di
+  `sanitize_model_text` (tool_call/minimax tokens), `parse_text_tool_calls` (tool-as-text), lo
+  schema-downgrade (duplicato gateway vs `openai_compat.rs`), fixture per-provider.
 - **Doppio path per il deck**: `generate_deck_content` (gateway) duplica il floor
   schema-downgrade già presente in `crates/inference/src/openai_compat.rs`; ADR 0016 prevede
   la convergenza, oggi non avvenuta.

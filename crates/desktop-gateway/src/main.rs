@@ -14390,13 +14390,10 @@ fn ollama_native_root(base_url: &str) -> String {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct OllamaCapabilities {
     thinking: bool,
-    // Extracted now (the profile); CONSUMED by deliberate follow-up increments — `tools` to gate
-    // offering tools, `vision` to gate sending images, `context_length` to budget on the real
-    // window. Marked here so the foundation lands without forcing premature, unvalidated wiring.
-    #[allow(dead_code)]
     tools: bool,
-    #[allow(dead_code)]
     vision: bool,
+    // Extracted now; CONSUMED by a deliberate follow-up — budgeting the prompt on the real
+    // window touches prompt-building, so it's wired in its own validated increment (not here).
     #[allow(dead_code)]
     context_length: Option<u64>,
 }
@@ -14711,7 +14708,12 @@ fn build_chat_payload(
             "keep_alive": "10m",
             "options": { "temperature": temperature, "num_predict": 6000 },
         });
-        if !is_final_round && !tools.is_empty() {
+        // Offer tools only when the model can use them. Strip ONLY when /api/show confidently
+        // reports no `tools` capability; undetected/cloud (profile None) → keep tools, fail-safe.
+        let tool_capable = ollama_capabilities(base_url, model)
+            .map(|c| c.tools)
+            .unwrap_or(true);
+        if !is_final_round && !tools.is_empty() && tool_capable {
             payload["tools"] = serde_json::Value::Array(tools.to_vec());
         }
         // Ask for the reasoning trace as a SEPARATE `message.thinking` field, but ONLY for
@@ -22882,13 +22884,27 @@ Tell the user clearly; do NOT claim it's done."
                 // tool_call to be immediately followed by its tool message; the
                 // image cannot sit between them).
                 if let Some(dataurl) = pending_browser_image.take() {
-                    messages.push(serde_json::json!({
-                        "role": "user",
-                        "content": [
-                            { "type": "text", "text": "Screenshot of the current page:" },
-                            { "type": "image_url", "image_url": { "url": dataurl } }
-                        ],
-                    }));
+                    // Send the image ONLY to a vision-capable model. Skip ONLY when /api/show
+                    // confidently reports no `vision` capability (undetected/cloud → send, as
+                    // today); a non-vision model would otherwise error on the image part — feed
+                    // it a text note so it falls back to the page's text snapshot.
+                    let vision_capable = ollama_capabilities(&base_url, &model)
+                        .map(|c| c.vision)
+                        .unwrap_or(true);
+                    if vision_capable {
+                        messages.push(serde_json::json!({
+                            "role": "user",
+                            "content": [
+                                { "type": "text", "text": "Screenshot of the current page:" },
+                                { "type": "image_url", "image_url": { "url": dataurl } }
+                            ],
+                        }));
+                    } else {
+                        messages.push(serde_json::json!({
+                            "role": "user",
+                            "content": "(A screenshot was captured, but this model cannot see images — rely on the page's TEXT snapshot instead.)",
+                        }));
+                    }
                 }
                 if pending_confirm {
                     // A write is awaiting the user's confirmation card — end the turn
