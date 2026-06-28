@@ -4,12 +4,13 @@ use local_first_capabilities::{
     WorkspaceId,
 };
 use local_first_orchestrator::{
-    ExecutionPlan, MemoryContextSnippet, OrchestratorBrain, OrchestratorBudgets,
+    DriveStepStatus, ExecutionPlan, MemoryContextSnippet, OrchestratorBrain, OrchestratorBudgets,
     OrchestratorRequest, OrchestratorRoute, PlanStep, PlanStepKind, StaticMemoryContextProvider,
     StepExecutionPolicy,
 };
 use local_first_subagents::{
-    GenerateJsonRequest, GenerateJsonResponse, JsonRuntime, RuntimeClientError, TokenMetrics,
+    AgentId, GenerateJsonRequest, GenerateJsonResponse, JsonRuntime, RuntimeClientError,
+    TokenMetrics,
 };
 use local_first_task_runtime::TaskStore;
 
@@ -441,6 +442,134 @@ fn brain_queues_browser_actions_even_when_the_planner_marks_them_immediate() {
     assert!(outcome.immediate_results.is_empty());
     assert_eq!(outcome.enqueued_tasks.len(), 1);
     assert_eq!(outcome.enqueued_tasks[0].tool_name, "browser.act");
+}
+
+#[test]
+fn drive_runs_capability_steps_in_turn_and_marks_done_after_verify() {
+    // The synchronous driver (ADR 0020) executes each step through the real
+    // facade in-turn and marks done only after verify — no planner roundtrip, no
+    // durable task enqueue. Contrast brain_runs_static_execution_plan_*, which
+    // ENQUEUES the same kind of step as a background task.
+    let runtime = StubRuntime::new(vec![]);
+    let mut brain = brain(
+        runtime,
+        vec![tool(
+            "calendar.search",
+            "Search calendar events",
+            ActionClass::Read,
+            CapabilityProviderKind::Native,
+        )],
+    );
+    let plan = ExecutionPlan {
+        route: OrchestratorRoute::CapabilityCall,
+        direct_answer: None,
+        plan_propose: None,
+        steps: vec![drive_step(
+            "find",
+            PlanStepKind::CapabilityCall,
+            &[],
+            Some(("calendar", "calendar.search")),
+        )],
+        needs_more_tools: None,
+    };
+
+    let out = brain.drive(&request("Cerca lo standup"), &plan).unwrap();
+
+    assert!(out.all_done());
+    assert_eq!(out.done_step_ids(), vec!["find"]);
+    // No planner call — the plan was supplied, the driver only executed it.
+    assert!(brain.runtime().requests().is_empty());
+    // The REAL provider ran: the configured calendar.search response flowed out.
+    let result = &out.results[0];
+    assert_eq!(result.status, DriveStepStatus::Done);
+    assert_eq!(
+        result.outcome.as_ref().unwrap().output,
+        serde_json::json!({"events": ["standup"]})
+    );
+    // In-turn driving does NOT enqueue durable tasks (it executed synchronously).
+    assert!(
+        brain
+            .task_store()
+            .list_tasks(&task_user(), &task_workspace())
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn drive_fails_subagent_steps_and_skips_their_dependents() {
+    // The capability-only executor cannot run an agentic step. It must FAIL it
+    // (not silently pass), and the dependent capability step must be skipped —
+    // a plan needing agentic work is never mistaken for complete (caposaldo #2).
+    let runtime = StubRuntime::new(vec![]);
+    let mut brain = brain(
+        runtime,
+        vec![tool(
+            "calendar.search",
+            "Search calendar events",
+            ActionClass::Read,
+            CapabilityProviderKind::Native,
+        )],
+    );
+    let plan = ExecutionPlan {
+        route: OrchestratorRoute::MixedWorkflow,
+        direct_answer: None,
+        plan_propose: None,
+        steps: vec![
+            drive_step("gather", PlanStepKind::SubagentTask, &[], None),
+            drive_step(
+                "use",
+                PlanStepKind::CapabilityCall,
+                &["gather"],
+                Some(("calendar", "calendar.search")),
+            ),
+        ],
+        needs_more_tools: None,
+    };
+
+    let out = brain.drive(&request("Indaga e poi cerca"), &plan).unwrap();
+
+    let gather = out.results.iter().find(|r| r.step_id == "gather").unwrap();
+    let use_step = out.results.iter().find(|r| r.step_id == "use").unwrap();
+    assert_eq!(gather.status, DriveStepStatus::Failed);
+    assert!(
+        gather
+            .error
+            .as_ref()
+            .unwrap()
+            .contains("subagent_step_needs_agentic_executor")
+    );
+    assert_eq!(use_step.status, DriveStepStatus::Skipped);
+}
+
+/// Builds a [`PlanStep`] for the driver tests. For `CapabilityCall` pass the
+/// `(provider, tool)`; for `SubagentTask` the required agent/goal/contract are
+/// filled so `validate_plan` accepts the step.
+fn drive_step(
+    id: &str,
+    kind: PlanStepKind,
+    depends_on: &[&str],
+    capability: Option<(&str, &str)>,
+) -> PlanStep {
+    let is_subagent = kind == PlanStepKind::SubagentTask;
+    PlanStep {
+        step_id: id.to_string(),
+        kind,
+        depends_on: depends_on.iter().map(|d| d.to_string()).collect(),
+        provider_id: capability.map(|(provider, _)| provider.to_string()),
+        tool_name: capability.map(|(_, tool)| tool.to_string()),
+        arguments: serde_json::json!({"query": "standup"}),
+        execution_policy: StepExecutionPolicy::Immediate,
+        risk_level: "low".to_string(),
+        expected_duration_seconds: 2,
+        agent_id: is_subagent.then_some(AgentId::Tool),
+        goal: is_subagent.then(|| "gather context".to_string()),
+        contract: is_subagent.then(|| "return findings".to_string()),
+        allowed_actions: vec![],
+        requires_user_approval: None,
+        timeout_seconds: None,
+        max_tokens: None,
+    }
 }
 
 fn brain(

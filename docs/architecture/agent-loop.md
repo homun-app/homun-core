@@ -68,14 +68,38 @@ Punti caldi (con `file:line` in `main.rs`):
 
 ## I DUE motori (caposaldo #5: convergere, non duplicare → oggi VIOLATO)
 
-| | Motore #1 — produzione | Motore #2 — dormiente |
+| | Motore #1 — produzione | Motore #2 — in convergenza (F3) |
 |---|---|---|
 | Dove | `stream_chat_via_openai` (`main.rs`) | `crates/orchestrator` `OrchestratorBrain` |
 | Guida | **il modello** (prompt-prosa ~2000 righe) | un piano DAG tipizzato |
 | Piano | `Vec<Value>` mergiato — **`merge_plan` per TITOLO** (`:~6747`) | `ExecutionPlan` con `step_id` stabili + `depends_on` |
-| Esecuzione | round loop con tool inline | `execute_plan` itera **lineare, ignora `depends_on`**; solo valida/accoda |
-| Subagenti | n/d (il loop fa tutto) | `generate_json`-only, **senza tool** |
-| Uso live | tutto | solo validazione `make_deck` + materializzazione task durabili |
+| Esecuzione | round loop con tool inline | due path: `execute_plan` (materializza task durabili) **e** `drive` (driver sincrono in-turn, F3) |
+| Subagenti | n/d (il loop fa tutto) | `generate_json`-only, **senza tool** (il driver per ora li fallisce, vedi sotto) |
+| Uso live | tutto | planner `plan_only` semina motore #1 (ADR 0020 P1); `drive` non ancora instradato |
+
+### Precisazione su `execute_plan` e `depends_on` (correzione 2026-06-28)
+
+Una versione precedente di questa pagina diceva che `execute_plan` "itera lineare, **ignora**
+`depends_on`". È **impreciso**: (a) `validate_plan` (`brain.rs`) rifiuta ogni piano in cui una
+dipendenza non **precede** il dipendente → l'array `steps` è già in ordine topologico, quindi
+l'iterazione lineare *è* un ordine valido; (b) `enqueue_step` cabla i `depends_on` come **archi del
+`TaskStore`** durabile. Il gap reale **non è lo scheduler**: è che `execute_plan` **materializza
+task di sfondo e ritorna** (CapabilityCall = una call immediata o enqueue; SubagentTask =
+`generate_json` senza tool). Non esiste(va) un **driver sincrono di turno**.
+
+### Il driver in-turn (F3.1/F3.2a — punto fermo testato)
+
+`crates/orchestrator/src/driver.rs` (`drive_plan`) è il control-flow **posseduto dall'harness**:
+fa un **solo passaggio in avanti** sul piano (ordine topologico garantito da `validate_plan`), e per
+ogni step chiama un `StepExecutor` iniettato; un `done` lo assegna il runtime **solo dopo** lo
+`StepVerifier`, mai l'auto-report del modello. Le **3 invarianti** sono per costruzione: monotonìa
+(un Done non si rivede), limitatezza (un risultato per step, il piano non cresce), identità =
+`step_id` (i titoli non si consultano mai). È puro → unit-testabile con fake, senza modello/SQLite.
+`CapabilityStepExecutor` (`step_executor.rs`) è il primo esecutore reale: instrada i `CapabilityCall`
+sul `CapabilityFacade` canonico (policy + validazione args + dispatch + audit); i `SubagentTask`
+**falliscono** (servono modello + tool-dispatch della chat → esecutore gateway-side, F3.2b). Il Brain
+espone `drive(request, plan) → DriveOutcome`. **Residuo:** l'esecutore agentico (inner-loop modello +
+ponte alla tool-dispatch della chat) e l'instradamento del turno sul `drive` dietro flag (F3.2b/F3.3).
 
 ## Gli strati (su cui ricostruire, bottom-up)
 
@@ -124,4 +148,6 @@ Punti caldi (con `file:line` in `main.rs`):
 - Loop: `crates/desktop-gateway/src/main.rs` → `stream_chat_via_openai`.
 - Piano: `runtime_execution_plan`, `merge_execution_plan`/`merge_plan`, `verify_step_complete`,
   `load_runtime_plan_from_state`, `parse_plan_marker`, `collapse_plan_markers`.
-- Motore #2: `crates/orchestrator` (`brain.rs`, `types.rs`, `planner.rs`).
+- Motore #2: `crates/orchestrator` (`brain.rs` incl. `drive`, `driver.rs` il driver in-turn +
+  seam `StepExecutor`/`StepVerifier`, `step_executor.rs` `CapabilityStepExecutor`, `types.rs`,
+  `planner.rs`).

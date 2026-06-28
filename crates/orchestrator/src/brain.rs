@@ -1,8 +1,9 @@
 use crate::{
-    EnqueuedSubagentTaskSummary, EnqueuedTaskSummary, ExecutionPlan, MemoryContextProvider,
-    OrchestratorAudit, OrchestratorAuditStore, OrchestratorError, OrchestratorOutcome,
-    OrchestratorRequest, OrchestratorResult, OrchestratorRoute, PlanStep, PlanStepKind, ToolCard,
-    ToolCorpus,
+    CapabilityStepExecutor, DriveOutcome, EnqueuedSubagentTaskSummary, EnqueuedTaskSummary,
+    ExecutionPlan, MemoryContextProvider, OrchestratorAudit, OrchestratorAuditStore,
+    OrchestratorError, OrchestratorOutcome, OrchestratorRequest, OrchestratorResult,
+    OrchestratorRoute, PassThroughVerifier, PlanStep, PlanStepKind, ToolCard, ToolCorpus,
+    driver::drive_plan,
     execution::{
         can_execute_immediately, provider_id_for_step, task_id_for_step, task_user_id,
         task_workspace_id, tool_for_step, tool_name_for_step,
@@ -139,6 +140,32 @@ impl<R: JsonRuntime, M: MemoryContextProvider> OrchestratorBrain<R, M> {
             0,
             Vec::new(),
         )
+    }
+
+    /// Drives a validated [`ExecutionPlan`] to completion IN-TURN: every step is
+    /// executed synchronously through the shared capability facade, and the
+    /// runtime marks a step `done` only after the verify gate passes. This is the
+    /// synchronous driver of ADR 0020 — the harness owning the control flow of a
+    /// turn — as opposed to [`Self::execute_plan`], which materializes durable
+    /// background tasks and returns without driving anything.
+    ///
+    /// The plan is validated first (unique ids, every dependency preceding its
+    /// dependent) so the driver's single forward pass is a valid topological
+    /// execution. Uses the capability-only executor: `SubagentTask` steps fail
+    /// here because they need the model + the chat loop's tool dispatch (the
+    /// gateway-side executor, F3.2b). The gateway composes a richer executor over
+    /// the same [`crate::drive_plan`] seam.
+    pub fn drive(
+        &mut self,
+        request: &OrchestratorRequest,
+        plan: &ExecutionPlan,
+    ) -> OrchestratorResult<DriveOutcome> {
+        let access = self.capabilities.list_tools(&request.policy_context)?;
+        self.validate_plan(plan, &access.visible_tools, request.budgets.max_steps)?;
+        let mut executor =
+            CapabilityStepExecutor::new(&mut self.capabilities, &request.policy_context);
+        let mut verifier = PassThroughVerifier;
+        Ok(drive_plan(plan, &mut executor, &mut verifier))
     }
 
     fn run_inner(
