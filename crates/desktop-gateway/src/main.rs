@@ -19290,48 +19290,103 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
             })
             .await;
             match driven {
-                Ok(Ok(Some(answer))) => {
-                    let final_text = collapse_plan_markers(&answer);
-                    let _ = emit_stream_event(
-                        &tx,
-                        GenerateStreamEvent::Done {
-                            text: final_text.clone(),
-                            metrics: TokenMetrics::zero(),
-                        },
-                    )
-                    .await;
-                    // Post-turn memory + resume cleanup (mirror the model loop's tail),
-                    // since this branch returns early and skips the loop.
-                    if !final_text.trim().is_empty() && !read_only {
-                        let learn_state = state_owned.clone();
-                        let learn_user = memory_user_message.clone();
-                        let learn_answer = final_text.clone();
-                        let learn_thread = thread_id.clone();
-                        let learn_prev = memory_prev_assistant.clone();
-                        tokio::spawn(async move {
-                            learn_from_exchange(
-                                &learn_state,
-                                &learn_user,
-                                &learn_answer,
-                                "",
-                                learn_thread.as_deref(),
-                                None,
-                                learn_prev.as_deref(),
-                            )
-                            .await;
-                        });
+                Ok(Ok(Some(gathered))) => {
+                    // Synthesize the final answer with the user's CHAT model (capable at
+                    // prose), streamed LIVE via the same provider-aware path the model
+                    // loop's forced-synthesis uses. The driver gathered the evidence; the
+                    // chat model turns it into the answer.
+                    let synth_messages = vec![serde_json::json!({
+                        "role": "user",
+                        "content": format!(
+                            "You executed a plan to help the user.\nUser request: {}\n\n\
+                             Gathered results from the steps:\n{}\n\n\
+                             Write the FINAL ANSWER now, synthesizing the results above with \
+                             concrete details. If something failed, say so clearly and propose \
+                             next steps.",
+                            memory_user_message, gathered
+                        )
+                    })];
+                    let synth_payload =
+                        build_chat_payload(&model, &base_url, &synth_messages, &[], temperature, true);
+                    let first_token =
+                        std::time::Duration::from_secs(model_first_token_timeout_secs());
+                    let idle = std::time::Duration::from_secs(model_idle_timeout_secs());
+                    let request_timeout =
+                        std::time::Duration::from_secs(model_request_timeout_secs());
+                    let ollama = is_ollama_base(&base_url);
+                    let mut builder = http.post(&endpoint).timeout(request_timeout);
+                    if let Some(key) = api_key.as_ref() {
+                        builder = builder.bearer_auth(key);
                     }
-                    tx.entry
-                        .finished
-                        .store(true, std::sync::atomic::Ordering::Relaxed);
-                    let cleanup_id = resume_id.clone();
-                    tokio::spawn(async move {
-                        tokio::time::sleep(std::time::Duration::from_secs(300)).await;
-                        if let Ok(mut map) = stream_registry().lock() {
-                            map.remove(&cleanup_id);
+                    let body = match builder.json(&synth_payload).send().await {
+                        Ok(resp) if resp.status().is_success() => {
+                            let collected = if ollama {
+                                collect_ollama_native_stream(resp, first_token, idle, &tx).await
+                            } else {
+                                collect_openai_stream(resp, first_token, idle, &tx).await
+                            };
+                            collected.ok()
                         }
-                    });
-                    return;
+                        _ => None,
+                    };
+                    let synth_text = model_normalize::sanitize_model_text(
+                        body.as_ref()
+                            .and_then(|b| b.get("choices"))
+                            .and_then(|c| c.get(0))
+                            .and_then(|c| c.get("message"))
+                            .and_then(|m| m.get("content"))
+                            .and_then(|c| c.as_str())
+                            .unwrap_or(""),
+                    );
+                    if synth_text.trim().is_empty() {
+                        // Synthesis failed → fall through to the model loop (nothing was
+                        // streamed, so no double answer).
+                        if verbose_debug() {
+                            eprintln!("[drive] ADR0020 chat synthesis empty → model-loop fallback");
+                        }
+                    } else {
+                        let final_text = collapse_plan_markers(&synth_text);
+                        let _ = emit_stream_event(
+                            &tx,
+                            GenerateStreamEvent::Done {
+                                text: final_text.clone(),
+                                metrics: TokenMetrics::zero(),
+                            },
+                        )
+                        .await;
+                        // Post-turn memory + resume cleanup (mirror the model loop's tail),
+                        // since this branch returns early and skips the loop.
+                        if !read_only {
+                            let learn_state = state_owned.clone();
+                            let learn_user = memory_user_message.clone();
+                            let learn_answer = final_text.clone();
+                            let learn_thread = thread_id.clone();
+                            let learn_prev = memory_prev_assistant.clone();
+                            tokio::spawn(async move {
+                                learn_from_exchange(
+                                    &learn_state,
+                                    &learn_user,
+                                    &learn_answer,
+                                    "",
+                                    learn_thread.as_deref(),
+                                    None,
+                                    learn_prev.as_deref(),
+                                )
+                                .await;
+                            });
+                        }
+                        tx.entry
+                            .finished
+                            .store(true, std::sync::atomic::Ordering::Relaxed);
+                        let cleanup_id = resume_id.clone();
+                        tokio::spawn(async move {
+                            tokio::time::sleep(std::time::Duration::from_secs(300)).await;
+                            if let Ok(mut map) = stream_registry().lock() {
+                                map.remove(&cleanup_id);
+                            }
+                        });
+                        return;
+                    }
                 }
                 Ok(Ok(None)) => {
                     if verbose_debug() {
@@ -35958,9 +36013,17 @@ impl StepExecutor for ChatDriveStepExecutor<'_> {
             .ok_or_else(|| {
                 OrchestratorError::Planner(format!("drive_tool_not_loaded:{tool_name}"))
             })?;
-        // The model fills the args CONSTRAINED to the browser tool's chat schema
-        // (reuse of the orchestrator's arg-fill — same mechanism as F3.2).
-        let args = fill_arguments(self.router, step, tool, completed)?;
+        // For a SNAPSHOT, use the chat loop's CONTENT-PRESERVING params (F0 fix:
+        // snapshot_format=ai + refs_mode=aria + large max_chars) instead of letting
+        // the model fill them — otherwise the sidecar returns an interactive-only
+        // tree (header/nav, no tables/text) and the synthesis has nothing to read.
+        // Other tools (navigate needs the url, act needs ref/action) keep the
+        // schema-constrained arg-fill.
+        let args = if method == BrowserMethod::Snapshot {
+            browser_chat_snapshot_params(BROWSER_MANAGED_TARGET)
+        } else {
+            fill_arguments(self.router, step, tool, completed)?
+        };
         match call_shared_browser_sidecar(self.state, &self.task, method, args)
             .map_err(|error| OrchestratorError::Capability(error.message))?
         {
@@ -36071,10 +36134,14 @@ fn orchestrator_drive_for_chat(
             } else {
                 text
             };
+            // Pass the WHOLE page snapshot (its own cap is max_chars=20000) so the
+            // CONTENT — an infobox/table that sits AFTER a large nav/menu chrome in
+            // the aria tree (Wikipedia's chrome alone is ~12k chars) — reaches the
+            // synthesis. Truncating shorter left the model reading only the masthead.
             gathered.push_str(&format!(
                 "[{}] {}\n",
                 result.step_id,
-                truncate_chars(&snippet, 3_000)
+                truncate_chars(&snippet, 20_000)
             ));
         }
     }
@@ -36082,61 +36149,19 @@ fn orchestrator_drive_for_chat(
         return Ok(None); // nothing executed → fall back to the model loop
     }
     if verbose_debug() {
+        let preview: String = gathered.chars().take(400).collect();
         eprintln!(
-            "[drive] ADR0020 drove {} steps, {} done",
+            "[drive] ADR0020 drove {} steps, {} done ({} chars). preview: {}",
             outcome.results.len(),
-            outcome.done_step_ids().len()
+            outcome.done_step_ids().len(),
+            gathered.len(),
+            preview.replace('\n', " ")
         );
     }
-
-    // 4. Synthesize the final answer (constrained), then return it.
-    let answer = drive_synthesize_answer(&exec_router, goal, &gathered, language)?;
-    Ok(Some(answer))
-}
-
-/// One constrained model call turning the driver's gathered results into the
-/// user-facing answer. Reuses the chat synthesis intent of the model loop's
-/// forced-synthesis path, but over the driver's structured outputs.
-fn drive_synthesize_answer(
-    router: &ModelRouter,
-    goal: &str,
-    gathered: &str,
-    language: &str,
-) -> Result<String, String> {
-    let prompt = format!(
-        "You executed a plan to help the user. User request: {goal}\n\n\
-         Gathered results from the steps:\n{gathered}\n\n\
-         Write the FINAL ANSWER for the user in language '{language}', synthesizing the results \
-         above with concrete details. If something failed, say so clearly and propose next steps."
-    );
-    let request = GenerateJsonRequest {
-        prompt,
-        max_tokens: 1_024,
-        temperature: 0.0,
-        wait_if_busy: true,
-        request_timeout_seconds: Some(120.0),
-        json_schema: Some(serde_json::json!({
-            "type": "object",
-            "properties": { "answer": { "type": "string" } },
-            "required": ["answer"]
-        })),
-        required_keys: vec!["answer".to_string()],
-        repair: true,
-    };
-    let response = router
-        .generate_json(&request)
-        .map_err(|error| format!("synthesis failed: {error:?}"))?;
-    let answer = response
-        .json
-        .get("answer")
-        .and_then(|value| value.as_str())
-        .unwrap_or("")
-        .trim()
-        .to_string();
-    if answer.is_empty() {
-        return Err("synthesis produced an empty answer".to_string());
-    }
-    Ok(answer)
+    // Return the GATHERED evidence; the caller synthesizes the final answer with the
+    // user's CHAT model (capable at prose). The browser-role router is tuned for
+    // action JSON, not synthesis — it returned an empty answer in the first live run.
+    Ok(Some(gathered))
 }
 
 /// A1.1: runs the OrchestratorBrain so it MATERIALIZES durable tasks into the
