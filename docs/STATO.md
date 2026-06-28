@@ -73,9 +73,15 @@ sulla finestra reale. Testato e verificato sulla fonte. **Coda L0 esaurita.**
   `CapabilityPolicy::tool_access`), 1 unit-test. Commit `4bb88afb`. **Non validato live** (no account Composio).
 - ⏳ **(a) motore di ricerca unico** — convergere `bm25_rank` (chat) vs `ToolSearchIndexStore` FTS5
   (orchestrator). Il più grosso, intrecciato con F3 (quale engine sopravvive). Non ancora iniziato.
-- ⏳ **(d) browser dentro il registry** — oggi i micro-tool browser sono hand-wired in `base_tools`,
-  fuori dal corpus di routing → il planner non li vede (**blocca ADR 0020**). Slice sicuro additivo:
-  aggiungerli al `capability_corpus`/tool-index senza toglierli da `base_tools` (testabile). Non iniziato.
+- ⏳ **(d) browser dentro il registry** — **(a) e (d) sono ACCOPPIATI**, scoperto questa sessione.
+  Il registry GIÀ semina tool browser (`seed_default_capabilities`, `main.rs:43394`) ma come
+  `browser.health/.tabs/.snapshot/.navigate/.act/.screenshot` (dot-named, **schema placeholder**
+  `{"type":"object"}`, `WriteWithConfirmation`), mentre il loop di chat usa `browser_navigate/_act/…`
+  (underscore, **schema reali** via `browser_*_tool_schema`). Il planner quindi vede un **set ombra che
+  non combacia** con i tool eseguibili → torna 0 step. Fix corretto (NON cerotto): riconciliare gli entry
+  registry browser coi nomi/schema reali **e** far costruire il `ToolSearchIndexStore` dell'orchestrator
+  da quegli entry — cioè è la stessa convergenza di (a). **Fare (a) e (d) insieme, in una sessione a
+  contesto fresco**, non uno slice superficiale ora.
 
 Mappe: [registry](architecture/capability-registry.md), [skills](architecture/skills.md),
 [connectors](architecture/connectors-composio.md), [browser](architecture/browser.md), [mcp](architecture/mcp.md).
