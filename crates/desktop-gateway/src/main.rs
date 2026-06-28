@@ -94,7 +94,7 @@ use local_first_secrets::{
     DevelopmentSecretKeyProvider, EncryptedFileSecretStore, SecretMaterial, SecretRef, SecretStore,
 };
 use local_first_subagents::{
-    GenerateJsonRequest, GenerateStreamEvent, JsonRuntime, SubagentTaskExecutor, TokenMetrics,
+    GenerateJsonRequest, GenerateStreamEvent, SubagentTaskExecutor, TokenMetrics,
 };
 use local_first_task_runtime::{
     ApprovalGate, ApprovalPolicy, ApprovalRequest, Automation, AutomationSource, AutomationTrigger,
@@ -19330,8 +19330,19 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
                             memory_user_message, gathered
                         )
                     })];
-                    let synth_payload =
-                        build_chat_payload(&model, &base_url, &synth_messages, &[], temperature, true);
+                    // Streamed synthesis (the provider-aware path the model loop uses):
+                    // robust across OpenAI-compat and Ollama-native. A reasoning chat
+                    // model briefly streams its <think> tokens (a small cosmetic flicker
+                    // that's then sanitized) — acceptable; a non-streaming parse turned
+                    // out to return empty for this provider, so streaming stays.
+                    let synth_payload = build_chat_payload(
+                        &model,
+                        &base_url,
+                        &synth_messages,
+                        &[],
+                        temperature,
+                        true,
+                    );
                     let first_token =
                         std::time::Duration::from_secs(model_first_token_timeout_secs());
                     let idle = std::time::Duration::from_secs(model_idle_timeout_secs());
