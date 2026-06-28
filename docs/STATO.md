@@ -12,7 +12,7 @@
 - **Scoperta che guida tutto:** ogni sottosistema ha **due implementazioni**, la canonica è
   **dormiente** (caposaldo #5 violato system-wide). È la causa dell'instabilità (piano che
   parte o no, stesso prompt esiti diversi). Le mappe accurate sono in [architecture/](architecture/).
-- **F0 in corso (L0 — normalizzazione modello):**
+- **F0 COMPLETO (L0 — normalizzazione modello) — punto fermo, coda esaurita:**
   - ✅ **inc.1** `assistant_response` — builder canonico risposta + reasoning-fallback, cablato
     nei due collector (inline cancellato, `model_normalize` ora WIRED, 3 test).
   - ✅ **inc.1b** Ollama `message.thinking` — `process_ollama_line` accumula il reasoning trace
@@ -47,27 +47,40 @@
     Commit `8d9aad72`. **La frontiera canonica (ADR 0019) possiede ora OGNI forma di tool-call**
     (strutturata o trapelata-come-testo) → caposaldo #6/#11.
 
-**L0 (model-io) — CORE CHIUSO (punto fermo).** La normalizzazione della risposta — builder canonico
-+ reasoning-fallback, estrazione `<think>`, tool-call Ollama, sanitize, profilo capacità — vive ora
-in `model_normalize` ed è **testata e verificata sulla fonte** (Ollama/context7). Contratto: ogni
-risposta modello → `{content, reasoning, tool_calls}` canonico, sanificato.
+  - ✅ **inc.6** schema-downgrade floor (F0.6) — la costruzione del `response_format` (strict
+    `json_schema` → degrade `json_object`) era hand-rolled in 3 punti (`build_request_body`
+    inference, `generate_deck_content` + `orchestration_judge_response_format` gateway). Convergiuta
+    in `local_first_inference::structured_response_format(name, schema)`; i 3 siti la chiamano.
+    Behavior-preserving (test giudice + provider come guardia). Resta per-sito solo il control-flow
+    di trasporto. Commit `b29fa4a3`. Caposaldo #5/ADR 0016.
+  - ✅ **inc.7** `context_length` nel budget prompt (F0.7) — `chat_context_budget_chars` ora budgeta
+    sulla finestra REALE del modello (catalogo `ModelEntry.context_window`, auto-filled F0.3d) via
+    `registry_model_capabilities`, non più un flat 32k. Precedenza env-override > catalogo > 32k;
+    policy pura `resolve_context_budget_chars` (1 test, 6 casi). Commit `7cd44e22`. Caposaldo #6.
 
-**Coda L0 (2 increment a sé, NON bloccano F1):**
-1. schema-downgrade `json_schema→json_object`: duplicato gateway `generate_deck_content` vs
-   `crates/inference/openai_compat.rs` → convergere. NB: il path deck usa Ollama native (`format`
-   non `response_format`) → la convergenza non è un drop-in del helper OpenAI-compat, va valutata.
-2. `context_length` nel budget del prompt (tocca prompt-building → increment validato).
+**L0 (model-io) — PUNTO FERMO COMPLETO.** Normalizzazione risposta (builder canonico +
+reasoning-fallback, `<think>`, tool-call Ollama + tool-as-text, sanitize, profilo capacità) tutta in
+`model_normalize`; floor structured-output in una sola `structured_response_format`; budget prompt
+sulla finestra reale. Testato e verificato sulla fonte. **Coda L0 esaurita.**
 
-**Prossimo:** chiudere la coda L0 sopra **oppure** passare a **F1 (capability unica)** — vedi
-[piano](plans/2026-06-27-foundations-up-convergence.md). NB live-validation capacità: setup attuale =
-deepseek-v4-pro:cloud (Z.ai), non Ollama → il path `/api/show` si attiva con un modello Ollama locale.
+**Prossimo:** **F1 — capability unica** — vedi [piano](plans/2026-06-27-foundations-up-convergence.md):
+(a) un solo motore di capability-search (ritirare `bm25_rank` vs `ToolSearchIndexStore`); (b) skill
+(`SkillCapabilityProvider` cablato o cancellato, decisione esplicita); (c) Composio una sola impl (v3);
+(d) **browser dentro il registry** come capability (oggi inline → il planner non lo vede, blocca ADR
+0020). Mappe: [registry](architecture/capability-registry.md), [skills](architecture/skills.md),
+[connectors](architecture/connectors-composio.md), [browser](architecture/browser.md), [mcp](architecture/mcp.md).
+NB live-validation capacità: setup attuale = deepseek-v4-pro:cloud (Z.ai), non Ollama → il path
+`/api/show` si attiva con un modello Ollama locale.
 
 ## Cosa è stato fatto (rolling, conciso)
 
-**Sessione 2026-06-28 — F0.5 (chiusura normalizzazione):** spostato l'ultimo pezzo sparpagliato
-(tool-as-text + helper) in `model_normalize`; doc orfano curato; 4 test; architecture/model-io.md
-aggiornato. Commit `8d9aad72`. Coda L0 ridotta a 2 increment (schema-downgrade, context_length),
-nessuno bloccante per F1.
+**Sessione 2026-06-28 — chiusura completa di L0 (F0.5 → F0.7):**
+- **F0.5** tool-as-text (`parse_text_tool_calls`/`synthesize_tool_calls` + helper) → `model_normalize`;
+  doc orfano curato; 4 test. Commit `8d9aad72`.
+- **F0.6** floor structured-output convergiuto in `structured_response_format` (1 def, 3 call-site);
+  behavior-preserving. Commit `b29fa4a3`.
+- **F0.7** budget prompt sulla finestra reale del modello (catalogo); policy pura testata. Commit `7cd44e22`.
+- **L0 è ora un punto fermo completo; coda esaurita.** Prossimo strato: F1 (capability unica).
 
 **Sessione 2026-06-27 — diagnosi + fix sintomo + analisi strutturale + metodologia:**
 - **Fix agentic-loop validati e pushati** (default flag-off, migliorano il model-loop):
