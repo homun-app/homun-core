@@ -607,6 +607,24 @@ impl CapabilityRegistryStore {
         Ok(())
     }
 
+    /// Drops every cached tool of a provider WITHOUT touching its config, grants or
+    /// connections (unlike [`Self::remove_provider`], which removes the whole provider).
+    /// Used to re-seed a provider's tool set from scratch so a RENAMED tool can't leave a
+    /// stale row behind: `upsert_cached_tool` keys on `(provider_id, tool_name)`, so when the
+    /// seeded names change (e.g. the browser tools moving from `browser.navigate` to the real
+    /// `browser_navigate`) the old rows would otherwise persist in an existing DB and keep
+    /// shadowing the planner. Returns how many rows were removed.
+    pub fn clear_cached_tools(&self, provider_id: &ProviderId) -> CapabilityResult<usize> {
+        let removed = self
+            .connection
+            .execute(
+                "DELETE FROM capability_tool_cache WHERE provider_id = ?1",
+                params![provider_id.as_str()],
+            )
+            .map_err(to_store_error)?;
+        Ok(removed)
+    }
+
     pub fn cached_tools(
         &self,
         provider_id: &ProviderId,

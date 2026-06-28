@@ -217,6 +217,16 @@ Problemi reali individuati nel codice attuale:
    (`browser_safety.rs:71`), quindi non c'è via di estrazione dati via JS: tutto deve
    passare dal testo dello snapshot o da click/scroll. Limita pagine in cui il dato è
    raggiungibile solo via script.
+6. **Tre sorgenti per "i tool browser" (parzialmente convergente, F1.d).** Esistono: (a)
+   gli **schemi di chat** (`browser_*_tool_schema()` in `main.rs`, la superficie reale che il
+   modello chiama, cablati in `base_tools`); (b) il **seed del registry**
+   (`browser_registry_cached_tools`) che ora deriva gli stessi sei tool dagli schemi (a) — è
+   ciò che il **planner** dell'orchestratore indicizza, quindi il browser è finalmente
+   visibile al piano coi nomi giusti; (c) il provider tipato
+   `BrowserCapabilityProvider` (`crates/capabilities/src/browser_provider.rs`), dot-named a
+   livello di metodo sidecar (`browser.navigate`), **mai istanziato** → codice morto, gemello
+   dormiente da ritirare. F1.d ha reso (a)≡(b); resta da far sorgentare (a) dal registry e
+   cancellare (c) (lavoro di F3).
 
 ---
 

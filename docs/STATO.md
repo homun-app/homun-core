@@ -63,7 +63,8 @@ reasoning-fallback, `<think>`, tool-call Ollama + tool-as-text, sanitize, profil
 `model_normalize`; floor structured-output in una sola `structured_response_format`; budget prompt
 sulla finestra reale. Testato e verificato sulla fonte. **Coda L0 esaurita.**
 
-**F1 — capability unica (IN CORSO).** Vedi [piano](plans/2026-06-27-foundations-up-convergence.md):
+**F1 — capability unica (COMPLETO).** Tutte e quattro le convergenze fatte. Vedi
+[piano](plans/2026-06-27-foundations-up-convergence.md):
 - ✅ **(b) skill** (F1.b) — ritirato il `SkillCapabilityProvider` tipato dormiente (errore di
   categoria: skill = prosa, non tool chiamabile); path filesystem = canonica. Metadati skill/plugin
   tenuti (fondazione WS9). Commit `7b1fcecb`.
@@ -71,17 +72,25 @@ sulla finestra reale. Testato e verificato sulla fonte. **Coda L0 esaurita.**
   (`composio.rs` cancellato). Era anche un **bug latente** (list_tools pre-v3 vs API v3 → run autonome
   rotte). Gate deny-by-default preservato in `authorize_managed_capability_tool` (riusa
   `CapabilityPolicy::tool_access`), 1 unit-test. Commit `4bb88afb`. **Non validato live** (no account Composio).
-- ⏳ **(a) motore di ricerca unico** — convergere `bm25_rank` (chat) vs `ToolSearchIndexStore` FTS5
-  (orchestrator). Il più grosso, intrecciato con F3 (quale engine sopravvive). Non ancora iniziato.
-- ⏳ **(d) browser dentro il registry** — **(a) e (d) sono ACCOPPIATI**, scoperto questa sessione.
-  Il registry GIÀ semina tool browser (`seed_default_capabilities`, `main.rs:43394`) ma come
-  `browser.health/.tabs/.snapshot/.navigate/.act/.screenshot` (dot-named, **schema placeholder**
-  `{"type":"object"}`, `WriteWithConfirmation`), mentre il loop di chat usa `browser_navigate/_act/…`
-  (underscore, **schema reali** via `browser_*_tool_schema`). Il planner quindi vede un **set ombra che
-  non combacia** con i tool eseguibili → torna 0 step. Fix corretto (NON cerotto): riconciliare gli entry
-  registry browser coi nomi/schema reali **e** far costruire il `ToolSearchIndexStore` dell'orchestrator
-  da quegli entry — cioè è la stessa convergenza di (a). **Fare (a) e (d) insieme, in una sessione a
-  contesto fresco**, non uno slice superficiale ora.
+- ✅ **(a) motore di ricerca unico** (F1.a) — convergiuto su **un solo** ranker BM25 condiviso:
+  l'Okapi `bm25_rank` (chat) è stato promosso a `local_first_capabilities::search` (`tokenize` +
+  `bm25_rank_indices` su testo pre-tokenizzato → indici). La chat lo chiama via `bm25_rank`
+  (wrapper, comportamento identico → test esistenti come guardia); l'orchestratore via il nuovo
+  `ToolCorpus` in memoria (`crates/orchestrator/src/tool_corpus.rs`). **Ritirato** l'`FTS5
+  ToolSearchIndexStore` (`tool_index.rs` cancellato): era SEMPRE `open_in_memory` + rebuild ogni
+  turno → macchina FTS5 peso morto, e il `term*`-prefix divergeva dall'Okapi. Stesso algoritmo +
+  stessa tokenizzazione su entrambi i lati → **niente più drift** chat↔planner (divergenza #3 chiusa).
+  Constructor `OrchestratorBrain::new` non prende più l'indice (4 call-site aggiornati). Caposaldo #5.
+- ✅ **(d) browser dentro il registry** (F1.d) — `seed_default_capabilities` ora semina i **veri**
+  sei tool di chat (`browser_navigate`/`_snapshot`/`_act`/`_tabs`/`_screenshot`/`_dialog`, underscore,
+  **schemi reali**) via `browser_registry_cached_tools()`, derivati dalle stesse
+  `browser_*_tool_schema()` (niente terza copia). `clear_cached_tools` (nuovo, in `registry.rs`)
+  rimuove i vecchi `browser.*` placeholder dai DB esistenti. Il planner indicizza i `cached_tools` →
+  ora **vede il browser** coi nomi che il loop esegue (set ombra chiuso → sblocca ADR 0020). Test:
+  i tool seminati combaciano coi tool di chat + sono recuperabili dal `ToolCorpus` (lo stesso ranker
+  del planner). **Residuo F3:** i micro-tool di chat sono ancora cablati in `base_tools` (sorgentarli
+  dal registry è F3); `BrowserCapabilityProvider` (dot-named, mai istanziato) è morto → flaggato per
+  ritiro. Caposaldo #5/#7.
 
 Mappe: [registry](architecture/capability-registry.md), [skills](architecture/skills.md),
 [connectors](architecture/connectors-composio.md), [browser](architecture/browser.md), [mcp](architecture/mcp.md).
@@ -98,7 +107,20 @@ NB live-validation: setup attuale = deepseek-v4-pro:cloud (Z.ai), non Ollama; Co
 - **L0 = punto fermo completo; coda esaurita.**
 - **F1.b** ritirato `SkillCapabilityProvider` dormiente (skill = prosa, non tool). Commit `7b1fcecb`.
 - **F1.c** Composio convergiuto su v3, provider crate pre-v3 cancellato (era anche un bug latente);
-  gate preservato + testato. Commit `4bb88afb`. **Restano F1 (a) search-engine e (d) browser-in-registry.**
+  gate preservato + testato. Commit `4bb88afb`.
+
+**Sessione 2026-06-28 (2) — chiusura F1 (a search-engine + d browser-in-registry, accoppiati):**
+- **F1.a** un solo ranker BM25: Okapi promosso a `local_first_capabilities::search` (shared
+  `tokenize` + `bm25_rank_indices`); chat via wrapper `bm25_rank`, orchestratore via nuovo
+  `ToolCorpus` in-memory. **Ritirato** l'FTS5 `ToolSearchIndexStore`/`tool_index.rs` (sempre
+  in-memory + rebuild-per-turno → peso morto; ranking divergente). `OrchestratorBrain::new` senza
+  più param indice (4 call-site). Niente drift chat↔planner. Caposaldo #5.
+- **F1.d** browser reale nel registry: `browser_registry_cached_tools()` semina i 6 tool di chat
+  (schemi reali, derivati dalle `browser_*_tool_schema()`); `registry.clear_cached_tools` toglie i
+  vecchi `browser.*` placeholder. Planner ora vede il browser (sblocca ADR 0020). `BrowserCapabilityProvider`
+  morto → flaggato. Caposaldo #5/#7.
+- Test: 6 unit shared-ranker + 2 `ToolCorpus` + 2 gateway browser-seed; gate gateway 355 pass / 1
+  fallimento ambientale atteso (soffice). **F1 COMPLETO → prossimo F2 (loop tier-adattivo, ADR 0018).**
 
 **Sessione 2026-06-27 — diagnosi + fix sintomo + analisi strutturale + metodologia:**
 - **Fix agentic-loop validati e pushati** (default flag-off, migliorano il model-loop):
@@ -155,18 +177,18 @@ canonica e si ritira il parallelo; si rimuove il codice morto toccato; si splitt
 grossi; si commenta il perché; ogni modifica aggiorna la pagina architecture/ + cita il
 caposaldo + porta un test.
 
-PROSSIMO PASSO: F1 (a)+(d) INSIEME (sono accoppiati). Leggi le mappe
-docs/architecture/capability-registry.md + browser.md + mcp.md, poi:
-- (a) convergi i due motori di capability-search: bm25_rank (chat, main.rs:17719) e
-  ToolSearchIndexStore FTS5 (orchestrator, crates/orchestrator/src/tool_index.rs) → UN solo
-  componente di ricerca condiviso.
-- (d) nello stesso movimento, riconcilia gli entry browser del registry
-  (seed_default_capabilities main.rs:43394 — oggi dot-named `browser.navigate` con schema
-  placeholder) coi tool REALI del loop (`browser_navigate` ecc., schema veri via
-  browser_*_tool_schema), e fa' costruire il ToolSearchIndexStore dell'orchestrator da quegli
-  entry → il planner vede il browser → sblocca ADR 0020/F3. È coupled con F3: valuta se serve
-  toccare l'orchestrator (load_initial_tools, brain.rs:233).
-Fatto F0 (L0 completo) + F1 (b) skill + (c) Composio. Vedi "Dove siamo" in STATO per i dettagli.
+PROSSIMO PASSO: F2 — loop tier-adattivo (realizza ADR 0018). Leggi
+docs/decisions/0018-adaptive-harness-subagents-triggers.md + docs/architecture/agent-loop.md, poi:
+- rendere REALE il floor adattivo: modello CAPACE → inner loop libero (fluidità tipo Claude Code,
+  niente F2-gate/nudge-war); modello DEBOLE → slot vincolati. Oggi `relax_route_for_tier` è solo
+  correttivo a valle e `route_capability` non vede il `ModelTier` (vedi Divergenze in
+  capability-registry.md). Direzione: portare il `ModelTier` fino alla decisione di scaffolding.
+- far sì che il PIANO tracci il lavoro: l'esecutore marca `done` dopo verify; il deliverable non
+  deve più uscire da canali no-tools che bypassano il piano (`main.rs:~19210`, `~22924`).
+- `~/.homun/runtime-settings.json` → `adaptive_floor` resta "off" finché F2 non lo realizza.
+Fatto: F0 (L0 completo) + F1 COMPLETO (a search-engine unico, b skill, c Composio, d browser-in-registry).
+Vedi "Dove siamo" in STATO per i dettagli. NB: i file:line di main.rs possono essere sfasati dopo gli
+edit F1 — usa i nomi di funzione.
 
 A fine sessione aggiorna docs/STATO.md.
 ```

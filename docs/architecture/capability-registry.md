@@ -1,8 +1,9 @@
 # Registry unico delle capability e routing
 
-**Stato:** 2026-06-27 — documento reverse-engineered dal codice reale, **punto fermo**
-(descrive ciò che esiste e gira oggi, non un piano). Ogni `file:line` è verificato
-sulla codebase corrente in `crates/capabilities` e `crates/desktop-gateway/src/main.rs`.
+**Stato:** 2026-06-28 — reverse-engineered dal codice reale, **punto fermo**. Aggiornato con
+**F1.a** (un solo ranker BM25 condiviso, ritirato l'FTS5 dell'orchestratore) e **F1.d**
+(browser reale nel registry → visibile al planner). I `file:line` numerici di `main.rs`
+possono ora essere leggermente sfasati dopo gli edit; i nomi di funzione restano la chiave.
 
 Serve i **capisaldi #7** (capability activation da registry unico, non keyword sparse)
 e **#11** (comprensione senza keyword/regex; verità verificabile). Vedi
@@ -167,19 +168,25 @@ Quando il modello chiama `find_capability(intent)` (handler `main.rs:21960`):
 ### 5. Percorso orchestratore (planning durevole)
 
 Quando il gateway costruisce un piano canonico via `OrchestratorBrain` (`main.rs:35689`),
-il retrieval usa un **secondo** indice: `ToolSearchIndexStore`
-(`crates/orchestrator/src/tool_index.rs:6`), una FTS5 SQLite con `bm25()` nativo. Il Brain
-chiama `load_initial_tools` (`crates/orchestrator/src/brain.rs:233`): se i tool visibili
-sono ≤ 10 li passa tutti, altrimenti `tool_index.search(user_message,
-max_loaded_tools)` restituisce i `ToolCard` (`crates/orchestrator/src/types.rs:302`) e
-ne carica i dettagli. `max_loaded_tools` è tarato sul context window del modello
-(`brain_budgets_for_context_window`, `main.rs:35762`: 16 per i capaci, 5 di default —
-`types.rs:46`). Round successivi: rotta `NeedsMoreTools` → nuova `search` con la query del
-planner (`brain.rs:299`).
+il retrieval usa lo **stesso** ranker della chat (F1.a): un `ToolCorpus`
+(`crates/orchestrator/src/tool_corpus.rs`) in memoria, ricostruito dai `visible_tools`
+ad ogni ingresso di planning e ordinato dal BM25 **condiviso**
+(`local_first_capabilities::search`). Il Brain chiama `load_initial_tools`
+(`crates/orchestrator/src/brain.rs:233`): se i tool visibili sono ≤ 10 li passa tutti,
+altrimenti `tool_corpus.search(user_message, max_loaded_tools)` restituisce i `ToolCard`
+(`crates/orchestrator/src/types.rs:302`) e ne carica i dettagli. `max_loaded_tools` è tarato
+sul context window del modello (`brain_budgets_for_context_window`, `main.rs:35762`: 16 per i
+capaci, 5 di default — `types.rs:46`). Round successivi: rotta `NeedsMoreTools` → nuova
+`search` con la query del planner (`brain.rs:299`).
 
-> Nota: oggi convivono **due** motori di retrieval BM25 — il `bm25_rank` su `CapabilityEntry`
-> nel loop di chat e l'`FTS5 bm25()` su `ToolCard` nell'orchestratore. Stesso principio,
-> due implementazioni (vedi *Divergenze*).
+> **F1.a — un solo motore di retrieval (caposaldo #5).** Prima convivevano **due** BM25: il
+> `bm25_rank` Okapi del loop di chat e l'`FTS5 bm25()` su `ToolCard` dell'orchestratore (che
+> però era SEMPRE aperto `in_memory` e ricostruito ogni turno → tutta la macchina FTS5 era
+> peso morto, e il ranking `term*`-prefix divergeva dall'Okapi). Ora c'è **un solo** ranker
+> condiviso in `local_first_capabilities::search` (Okapi BM25 puro su testo pre-tokenizzato,
+> ritorna indici): la chat lo chiama via `bm25_rank`, l'orchestratore via `ToolCorpus`. Stesso
+> algoritmo, stessa tokenizzazione → niente più drift tra "cosa trova la chat" e "cosa trova il
+> piano". `ToolSearchIndexStore`/`tool_index.rs` (FTS5) sono **ritirati**.
 
 ### Diagramma del flusso
 
@@ -277,16 +284,18 @@ flowchart TD
   frontier viene comunque profilato sugli slot pensati per i deboli prima del rilascio.
   Direzione ADR 0018: rendere le manopole funzione del `ModelTier` portato fino alla
   decisione di scaffolding.
-- **Il browser è inline, NON nel registry di routing (ADR 0020 P1).** Il provider
-  `browser` esiste nel `CapabilityRegistryStore` (seed `main.rs:43303`), ma i micro-tool
-  che il loop di chat usa davvero (`browser_navigate`, `browser_act`, …) sono schemi
-  cablati a mano in `base_tools` (`main.rs:18640`), fuori dal corpus di routing. Il planner
-  dell'orchestratore quindi **non vede il browser** come capability instradabile: resta un
-  catch-all del loop di chat, non una capability del registry visibile al piano.
-- **Due motori BM25 paralleli.** `bm25_rank` su `CapabilityEntry` (loop di chat,
-  `main.rs:17719`) e `ToolSearchIndexStore` FTS5 (orchestratore,
-  `tool_index.rs:36`) implementano lo stesso retrieval con corpus e codice diversi: rischio
-  di drift nei risultati tra «cosa trova la chat» e «cosa trova il piano».
+- **Il browser è visibile al planner (F1.d) — resta inline nel toolset LIVE della chat.**
+  Il seed (`seed_default_capabilities`, `browser_registry_cached_tools`) ora semina nel
+  provider `browser` i **veri** sei tool di chat (`browser_navigate`/`_snapshot`/`_act`/
+  `_tabs`/`_screenshot`/`_dialog`) coi **loro schemi reali**, derivati dalle stesse
+  `browser_*_tool_schema()`. Poiché il planner indicizza i `cached_tools` del registry, ora
+  **vede il browser** come capability instradabile coi nomi che il loop di chat esegue
+  davvero (chiude il "set ombra", sblocca ADR 0020). Residuo: nel loop di chat i micro-tool
+  sono ancora cablati a mano in `base_tools` (`main.rs:~18829`) invece di essere sorgentati
+  dal registry — convergere quella sorgente è lavoro di F3 (chat→OrchestratorBrain). Nota: il
+  provider tipato `BrowserCapabilityProvider` (`crates/capabilities/src/browser_provider.rs`)
+  è dot-named a livello di metodo sidecar e **mai istanziato** (morto): è il gemello dormiente,
+  granularità sbagliata per il planner.
 - **`PolicyContext` collassa i grant.** L'unione di privacy domain/azioni su tutti i
   provider abilitati (`registry.rs:649`) è permissiva: un'azione concessa per un provider
   entra nell'insieme globale `allowed_actions` valutato per ogni tool. La granularità
@@ -321,7 +330,11 @@ flowchart TD
 - `crates/capabilities/src/types.rs` — `ProviderId` (`:15`), `CapabilityProviderKind`
   (`:67`), `ActionClass` (`:85`), `CapabilityTool` (`:101`).
 - `crates/capabilities/src/provider.rs` — trait `CapabilityProvider` (`:8`).
-- `crates/orchestrator/src/tool_index.rs` — `ToolSearchIndexStore` + FTS5 `search` (`:36`).
+- `crates/capabilities/src/search.rs` — **ranker BM25 condiviso** (F1.a): `tokenize`,
+  `bm25_rank_indices` (Okapi su testo pre-tokenizzato → indici), `bm25_rank_texts`.
+- `crates/orchestrator/src/tool_corpus.rs` — `ToolCorpus` in memoria: `rebuild_from_tools`,
+  `search` (via il ranker condiviso), `tool_detail`. (Sostituisce l'ex `ToolSearchIndexStore`
+  FTS5, ritirato.)
 - `crates/orchestrator/src/types.rs` — `ToolCard` (`:302`), `OrchestratorBudgets`
   (`max_loaded_tools`, `:24`/`:46`).
 - `crates/orchestrator/src/brain.rs` — `load_initial_tools` (`:233`), retry/`NeedsMoreTools`
@@ -330,7 +343,8 @@ flowchart TD
   `relax_route_for_tier` `:8430`, `thread_has_active_runtime_plan` `:8500`,
   `plan-precedence` `:18540`), toolset live (`CORE_TOOL_NAMES` `:17493`,
   split CORE/DEFERRED `:18715`, `MCP_ALWAYS_LOAD_MAX` `:18744`, `auto_retrieve_composio`
-  `:17628`), `bm25_rank` (`:17719`), `find_capability` (`:17520` / handler `:21960`),
-  `lock_capability_registry` (`:43538`), `seed_default_capabilities` (`:43300`).
+  `:17628`), `bm25_rank` (wrapper sul ranker condiviso), `find_capability` (handler
+  `:21960`), `lock_capability_registry`, `seed_default_capabilities` /
+  `browser_registry_cached_tools` (browser reale nel registry, F1.d).
 - `docs/CAPISALDI.md` — caposaldi #7 e #11.
 - `docs/decisions/0013-…`, `0016-…`, `0018-…`, `0020-…` — ADR di riferimento.

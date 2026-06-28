@@ -86,7 +86,7 @@ use local_first_memory::{
 use local_first_orchestrator::{
     ExecutionPlan, MemoryContextProvider, MemoryContextSnippet, OrchestratorBrain,
     OrchestratorBudgets, OrchestratorRequest, OrchestratorResult, OrchestratorRoute, PlanStep,
-    PlanStepKind, StepExecutionPolicy, ToolSearchIndexStore,
+    PlanStepKind, StepExecutionPolicy,
 };
 use local_first_secrets::{
     DevelopmentSecretKeyProvider, EncryptedFileSecretStore, SecretMaterial, SecretRef, SecretStore,
@@ -8207,7 +8207,6 @@ fn run_static_workflow_plan_through_brain(
             CapabilityPolicy::default(),
             InMemoryCapabilityAudit::default(),
         ),
-        ToolSearchIndexStore::open_in_memory().map_err(|error| error.to_string())?,
         TaskStore::open_in_memory().map_err(|error| error.to_string())?,
     );
     let user = gateway_capability_user_id();
@@ -17792,12 +17791,11 @@ fn connector_capability_entry(slug: String, schema: serde_json::Value) -> Option
     Some(entry)
 }
 
+/// Tokenizer for capability search and keyword-overlap prefilters. Delegates to the SHARED
+/// tokenizer (F1.a) so the chat loop and the orchestrator planner split text identically —
+/// the query and the indexed docs MUST tokenize the same way or they'd never match.
 fn cap_tokenize(s: &str) -> Vec<String> {
-    s.to_lowercase()
-        .split(|c: char| !c.is_alphanumeric())
-        .filter(|t| t.chars().count() >= 2)
-        .map(str::to_string)
-        .collect()
+    local_first_capabilities::search::tokenize(s)
 }
 
 /// Best-effort pre-retrieval of connected-service (Composio) tools for the user's
@@ -17894,55 +17892,25 @@ async fn auto_retrieve_composio(
         .collect()
 }
 
-/// Real BM25 ranking — IDF (rare terms weigh more), TF saturation (k1), and length
-/// normalization (b) — over the unified capability corpus. This is the lexical search the
-/// SOTA (Anthropic Tool Search) uses by default; no embeddings needed at this scale. An
-/// empty/no-match query yields a small sample so the model still sees what exists.
+/// BM25 ranking over the unified capability corpus. Thin wrapper over the SHARED ranker
+/// (`local_first_capabilities::search`, F1.a) — Okapi BM25 (IDF + TF saturation + length
+/// normalization), the lexical search the SOTA (Anthropic Tool Search) uses at this scale,
+/// no embeddings needed. This is the EXACT same ranker the orchestrator planner now calls,
+/// so "what chat finds" can't drift from "what the planner finds" (caposaldo #5). Tokenizes
+/// each entry's `text`, ranks, and maps the returned indices back to the entries. An empty
+/// query yields a small sample so the model still sees what exists.
 fn bm25_rank<'a>(
     corpus: &'a [CapabilityEntry],
     query: &str,
     limit: usize,
 ) -> Vec<&'a CapabilityEntry> {
-    let mut q_terms = cap_tokenize(query);
-    q_terms.sort();
-    q_terms.dedup();
-    if q_terms.is_empty() || corpus.is_empty() {
-        return corpus.iter().take(limit).collect();
-    }
-    let docs: Vec<Vec<String>> = corpus.iter().map(|e| cap_tokenize(&e.text)).collect();
-    let n = corpus.len() as f64;
-    let avgdl = (docs.iter().map(|d| d.len()).sum::<usize>() as f64 / n).max(1.0);
-    let (k1, b) = (1.5_f64, 0.75_f64);
-    let df: std::collections::HashMap<&str, f64> = q_terms
+    let docs: Vec<Vec<String>> = corpus
         .iter()
-        .map(|t| {
-            let c = docs.iter().filter(|d| d.iter().any(|w| w == t)).count() as f64;
-            (t.as_str(), c)
-        })
+        .map(|entry| local_first_capabilities::search::tokenize(&entry.text))
         .collect();
-    let mut scored: Vec<(f64, usize)> = docs
-        .iter()
-        .enumerate()
-        .filter_map(|(i, d)| {
-            let dl = d.len() as f64;
-            let mut score = 0.0;
-            for t in &q_terms {
-                let f = d.iter().filter(|w| *w == t).count() as f64;
-                if f == 0.0 {
-                    continue;
-                }
-                let nq = *df.get(t.as_str()).unwrap_or(&0.0);
-                let idf = (((n - nq + 0.5) / (nq + 0.5)) + 1.0).ln();
-                score += idf * (f * (k1 + 1.0)) / (f + k1 * (1.0 - b + b * dl / avgdl));
-            }
-            (score > 0.0).then_some((score, i))
-        })
-        .collect();
-    scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-    scored
+    local_first_capabilities::search::bm25_rank_indices(&docs, query, limit)
         .into_iter()
-        .take(limit)
-        .map(|(_, i)| &corpus[i])
+        .map(|index| &corpus[index])
         .collect()
 }
 
@@ -35745,7 +35713,6 @@ fn orchestrator_plan_for_chat(
         router,
         open_brain_memory(),
         facade,
-        ToolSearchIndexStore::open_in_memory().map_err(|e| format!("tool index: {e}"))?,
         task_store,
     );
     let request = OrchestratorRequest {
@@ -35994,9 +35961,6 @@ fn brain_materialize_tasks(
         router,
         open_brain_memory(),
         facade,
-        ToolSearchIndexStore::open_in_memory().map_err(|error| LocalTaskExecutionError {
-            message: format!("tool index: {error}"),
-        })?,
         task_store,
     );
     let request = OrchestratorRequest {
@@ -43391,35 +43355,51 @@ fn seed_default_capabilities(
         })),
     )?;
 
-    for (name, action, description) in [
-        ("browser.health", ActionClass::Read, "Local browser status"),
-        (
-            "browser.tabs",
-            ActionClass::Read,
-            "List of local browser tabs",
-        ),
-        (
-            "browser.snapshot",
-            ActionClass::Read,
-            "Redacted snapshot of the current page",
-        ),
-        (
-            "browser.navigate",
-            ActionClass::WriteWithConfirmation,
-            "Browser navigation with confirmation",
-        ),
-        (
-            "browser.act",
-            ActionClass::WriteWithConfirmation,
-            "Controlled action on a web page",
-        ),
-        (
-            "browser.screenshot",
-            ActionClass::WriteWithConfirmation,
-            "Redacted local screenshot",
-        ),
-    ] {
-        registry.upsert_cached_tool(&CachedCapabilityTool::new(
+    // (F1.d / ADR 0020) Seed the browser provider with the SAME six tools the chat loop
+    // offers the model — `browser_navigate`/`_snapshot`/`_act`/`_tabs`/`_screenshot`/
+    // `_dialog`, with their REAL schemas — NOT the low-level dot-named sidecar methods with
+    // placeholder `{"type":"object"}` schemas it used to carry. The orchestrator planner
+    // indexes the registry's cached tools (`cached_tools`); seeding the executable model
+    // tools is what makes the planner finally SEE the browser as a routable capability whose
+    // names match what the chat loop actually runs, instead of a shadow set it can't use.
+    // Clear first so an existing DB sheds the renamed `browser.*` rows (caposaldo #5/#7).
+    registry.clear_cached_tools(&browser_provider)?;
+    for tool in browser_registry_cached_tools() {
+        registry.upsert_cached_tool(&tool)?;
+    }
+    Ok(())
+}
+
+/// The browser capability AS THE MODEL SEES IT: the six chat browser tools with their real
+/// names + schemas, built from the SAME `browser_*_tool_schema()` functions the live tool
+/// set uses, so the registry never becomes a second source of truth for the browser surface
+/// (caposaldo #5). Read vs WriteWithConfirmation mirrors the chat safety posture: reading
+/// the page (snapshot/tabs/screenshot) is Read; navigating, acting and answering dialogs can
+/// have side effects → WriteWithConfirmation.
+fn browser_registry_cached_tools() -> Vec<CachedCapabilityTool> {
+    let browser_provider = CapabilityProviderId::new("browser");
+    [
+        (browser_navigate_tool_schema(), ActionClass::WriteWithConfirmation),
+        (browser_snapshot_tool_schema(), ActionClass::Read),
+        (browser_act_tool_schema(), ActionClass::WriteWithConfirmation),
+        (browser_tabs_tool_schema(), ActionClass::Read),
+        (browser_screenshot_tool_schema(), ActionClass::Read),
+        (browser_dialog_tool_schema(), ActionClass::WriteWithConfirmation),
+    ]
+    .into_iter()
+    .filter_map(|(schema, action)| {
+        let function = schema.get("function")?;
+        let name = function.get("name")?.as_str()?.to_string();
+        let description = function
+            .get("description")
+            .and_then(|value| value.as_str())
+            .unwrap_or("")
+            .to_string();
+        let input_schema = function
+            .get("parameters")
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!({"type": "object"}));
+        Some(CachedCapabilityTool::new(
             browser_provider.clone(),
             name,
             CapabilityProviderKind::Browser,
@@ -43427,10 +43407,10 @@ fn seed_default_capabilities(
             description,
             vec!["browser".to_string()],
             "private",
-            serde_json::json!({"type": "object"}),
-        ))?;
-    }
-    Ok(())
+            input_schema,
+        ))
+    })
+    .collect()
 }
 
 fn enum_label(value: &impl Serialize) -> Result<String, GatewayError> {
@@ -46294,6 +46274,69 @@ prs.save(Path({path:?}))
         assert!(entry.schema.is_none());
         assert!(!entry.is_skill);
         assert!(entry.text.contains("template catalog"));
+    }
+
+    /// (F1.d) The browser tools seeded into the registry must BE the chat tools — same
+    /// names, same real schemas — not the old dot-named placeholders. Otherwise the planner
+    /// plans a `browser.navigate` step the chat loop can't run.
+    #[test]
+    fn browser_registry_tools_mirror_the_chat_tools_with_real_schemas() {
+        let tools = super::browser_registry_cached_tools();
+        let names: Vec<&str> = tools.iter().map(|tool| tool.tool.name.as_str()).collect();
+        assert_eq!(
+            names,
+            vec![
+                "browser_navigate",
+                "browser_snapshot",
+                "browser_act",
+                "browser_tabs",
+                "browser_screenshot",
+                "browser_dialog",
+            ]
+        );
+
+        let navigate = tools
+            .iter()
+            .find(|tool| tool.tool.name == "browser_navigate")
+            .expect("browser_navigate seeded");
+        // The real schema, not the `{"type":"object"}` placeholder the seed used to carry.
+        assert!(
+            navigate.tool.input_schema.pointer("/properties/url").is_some(),
+            "browser_navigate must carry its real `url` parameter schema"
+        );
+        assert_ne!(
+            navigate.tool.input_schema,
+            serde_json::json!({"type": "object"})
+        );
+
+        // Read vs WriteWithConfirmation mirrors the chat safety posture.
+        let snapshot = tools
+            .iter()
+            .find(|tool| tool.tool.name == "browser_snapshot")
+            .expect("browser_snapshot seeded");
+        assert_eq!(snapshot.tool.action, super::ActionClass::Read);
+        assert_eq!(navigate.tool.action, super::ActionClass::WriteWithConfirmation);
+    }
+
+    /// (F1.a + F1.d) The end-to-end point of this convergence: feed the SEEDED browser tools
+    /// into the SAME ranker the orchestrator planner uses (`ToolCorpus`, now backed by the
+    /// shared BM25) and confirm a plain browse intent surfaces `browser_navigate`. Before the
+    /// fix the planner indexed dot-named placeholders and saw a shadow set → 0 browse steps.
+    #[test]
+    fn seeded_browser_tools_are_retrievable_by_the_planner_ranker() {
+        use local_first_orchestrator::ToolCorpus;
+        let tools: Vec<_> = super::browser_registry_cached_tools()
+            .into_iter()
+            .map(|cached| cached.tool)
+            .collect();
+        let mut corpus = ToolCorpus::default();
+        corpus.rebuild_from_tools(&tools);
+        let cards = corpus.search("open and read a web page in the browser", 3);
+        assert!(
+            cards.iter().any(|card| card.tool_name == "browser_navigate"),
+            "planner ranker must surface browser_navigate, got {:?}",
+            cards.iter().map(|card| &card.tool_name).collect::<Vec<_>>()
+        );
     }
 
     #[test]

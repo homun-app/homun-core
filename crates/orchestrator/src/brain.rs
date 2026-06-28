@@ -2,7 +2,7 @@ use crate::{
     EnqueuedSubagentTaskSummary, EnqueuedTaskSummary, ExecutionPlan, MemoryContextProvider,
     OrchestratorAudit, OrchestratorAuditStore, OrchestratorError, OrchestratorOutcome,
     OrchestratorRequest, OrchestratorResult, OrchestratorRoute, PlanStep, PlanStepKind, ToolCard,
-    ToolSearchIndexStore,
+    ToolCorpus,
     execution::{
         can_execute_immediately, provider_id_for_step, task_id_for_step, task_user_id,
         task_workspace_id, tool_for_step, tool_name_for_step,
@@ -24,7 +24,7 @@ pub struct OrchestratorBrain<R, M> {
     runtime: R,
     memory: M,
     capabilities: CapabilityFacade,
-    tool_index: ToolSearchIndexStore,
+    tool_corpus: ToolCorpus,
     task_store: TaskStore,
     task_bridge: local_first_capabilities::CapabilityTaskRuntimeBridge,
     subagent_bridge: local_first_subagents::SubagentTaskRuntimeBridge,
@@ -36,14 +36,16 @@ impl<R: JsonRuntime, M: MemoryContextProvider> OrchestratorBrain<R, M> {
         runtime: R,
         memory: M,
         capabilities: CapabilityFacade,
-        tool_index: ToolSearchIndexStore,
         task_store: TaskStore,
     ) -> Self {
         Self {
             runtime,
             memory,
             capabilities,
-            tool_index,
+            // Rebuilt from the policy-visible tools at every planning entry (F1.a): no
+            // index to inject, no persistence — just an in-memory corpus ranked by the
+            // shared BM25.
+            tool_corpus: ToolCorpus::default(),
             task_store,
             task_bridge: local_first_capabilities::CapabilityTaskRuntimeBridge::new(),
             subagent_bridge: local_first_subagents::SubagentTaskRuntimeBridge::new(),
@@ -91,7 +93,7 @@ impl<R: JsonRuntime, M: MemoryContextProvider> OrchestratorBrain<R, M> {
         request: &OrchestratorRequest,
     ) -> OrchestratorResult<ExecutionPlan> {
         let access = self.capabilities.list_tools(&request.policy_context)?;
-        self.tool_index.rebuild_from_tools(&access.visible_tools)?;
+        self.tool_corpus.rebuild_from_tools(&access.visible_tools);
         let memory = self.memory.load_context(request)?;
         let (initial_cards, initial_tools) = self.load_initial_tools(request, &access)?;
         let (plan, _metrics, _rounds, _cards, loaded_tools, _budget) =
@@ -110,7 +112,7 @@ impl<R: JsonRuntime, M: MemoryContextProvider> OrchestratorBrain<R, M> {
         plan: ExecutionPlan,
     ) -> OrchestratorResult<OrchestratorOutcome> {
         let access = self.capabilities.list_tools(&request.policy_context)?;
-        self.tool_index.rebuild_from_tools(&access.visible_tools)?;
+        self.tool_corpus.rebuild_from_tools(&access.visible_tools);
         let memory = self.memory.load_context(&request)?;
         self.validate_plan(&plan, &access.visible_tools, request.budgets.max_steps)?;
         let loaded_cards = access
@@ -144,7 +146,7 @@ impl<R: JsonRuntime, M: MemoryContextProvider> OrchestratorBrain<R, M> {
         request: OrchestratorRequest,
     ) -> OrchestratorResult<OrchestratorOutcome> {
         let access = self.capabilities.list_tools(&request.policy_context)?;
-        self.tool_index.rebuild_from_tools(&access.visible_tools)?;
+        self.tool_corpus.rebuild_from_tools(&access.visible_tools);
         let memory = self.memory.load_context(&request)?;
         let (initial_cards, initial_tools) = self.load_initial_tools(&request, &access)?;
         let (plan, metrics, planner_rounds, loaded_cards, loaded_tools, context_budget) =
@@ -245,14 +247,11 @@ impl<R: JsonRuntime, M: MemoryContextProvider> OrchestratorBrain<R, M> {
         }
 
         let cards = self
-            .tool_index
-            .search(&request.user_message, request.budgets.max_loaded_tools)?;
+            .tool_corpus
+            .search(&request.user_message, request.budgets.max_loaded_tools);
         let mut tools = Vec::new();
         for card in &cards {
-            if let Some(tool) = self
-                .tool_index
-                .tool_detail(&card.provider_id, &card.tool_name)?
-            {
+            if let Some(tool) = self.tool_corpus.tool_detail(&card.provider_id, &card.tool_name) {
                 tools.push(tool);
             }
         }
@@ -303,14 +302,11 @@ impl<R: JsonRuntime, M: MemoryContextProvider> OrchestratorBrain<R, M> {
             .map(|request| request.query.as_str())
             .unwrap_or(&request.user_message);
         let cards = self
-            .tool_index
-            .search(query, request.budgets.max_loaded_tools)?;
+            .tool_corpus
+            .search(query, request.budgets.max_loaded_tools);
         let mut tools = Vec::new();
         for card in &cards {
-            if let Some(tool) = self
-                .tool_index
-                .tool_detail(&card.provider_id, &card.tool_name)?
-            {
+            if let Some(tool) = self.tool_corpus.tool_detail(&card.provider_id, &card.tool_name) {
                 tools.push(tool);
             }
         }

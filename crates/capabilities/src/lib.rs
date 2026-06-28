@@ -8,6 +8,7 @@ mod mcp;
 mod policy;
 mod provider;
 mod registry;
+pub mod search;
 mod skill_plugin;
 mod task_runtime_bridge;
 mod types;

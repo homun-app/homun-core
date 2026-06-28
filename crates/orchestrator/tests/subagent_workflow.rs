@@ -4,7 +4,7 @@ use local_first_capabilities::{
 };
 use local_first_orchestrator::{
     OrchestratorAuditStore, OrchestratorBrain, OrchestratorBudgets, OrchestratorRequest,
-    OrchestratorUiReadModel, StaticMemoryContextProvider, ToolSearchIndexStore,
+    OrchestratorUiReadModel, StaticMemoryContextProvider,
 };
 use local_first_subagents::{
     AgentId, GenerateJsonRequest, GenerateJsonResponse, JsonRuntime, RuntimeClientError,
@@ -56,7 +56,6 @@ fn brain_materializes_subagent_workflow_as_durable_tasks_with_dependencies() {
         runtime,
         StaticMemoryContextProvider::new(vec![]),
         CapabilityFacade::new(CapabilityPolicy::new(), InMemoryCapabilityAudit::new()),
-        ToolSearchIndexStore::open_in_memory().unwrap(),
         task_store,
     )
     .with_audit_store(audit_store);
