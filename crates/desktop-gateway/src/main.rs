@@ -14457,6 +14457,7 @@ fn to_ollama_messages(messages: &[serde_json::Value]) -> Vec<serde_json::Value> 
 async fn process_ollama_line(
     json: &serde_json::Value,
     content: &mut String,
+    reasoning: &mut String,
     tool_calls: &mut Vec<serde_json::Value>,
     sink: &StreamSink,
 ) -> bool {
@@ -14474,6 +14475,16 @@ async fn process_ollama_line(
                 },
             )
             .await;
+        }
+        // Reasoning trace: Ollama native exposes it as `message.thinking` for thinking models
+        // (deepseek-r1, qwen3, …), separate from `content`. Accumulate it so the canonical
+        // reasoning-fallback can recover an answer when a model emits ONLY thinking and leaves
+        // content empty. Not streamed as content (it's the trace, not the answer). Accept
+        // `reasoning`/`reasoning_content` too for compat shims.
+        for key in ["thinking", "reasoning", "reasoning_content"] {
+            if let Some(t) = message.get(key).and_then(|c| c.as_str()).filter(|s| !s.is_empty()) {
+                reasoning.push_str(t);
+            }
         }
         if let Some(calls) = message.get("tool_calls").and_then(|v| v.as_array()) {
             for call in calls {
@@ -14516,6 +14527,7 @@ async fn collect_ollama_native_stream(
     let mut stream = resp.bytes_stream();
     let mut pending = String::new();
     let mut content = String::new();
+    let mut reasoning = String::new();
     let mut tool_calls: Vec<serde_json::Value> = Vec::new();
     let mut got_any = false;
     let mut done = false;
@@ -14550,7 +14562,7 @@ async fn collect_ollama_native_stream(
                         continue;
                     }
                     if let Ok(json) = serde_json::from_str::<serde_json::Value>(&line) {
-                        if process_ollama_line(&json, &mut content, &mut tool_calls, sink).await {
+                        if process_ollama_line(&json, &mut content, &mut reasoning, &mut tool_calls, sink).await {
                             done = true;
                         }
                     }
@@ -14564,15 +14576,15 @@ async fn collect_ollama_native_stream(
     let tail = pending.trim().to_string();
     if !tail.is_empty() {
         if let Ok(json) = serde_json::from_str::<serde_json::Value>(&tail) {
-            process_ollama_line(&json, &mut content, &mut tool_calls, sink).await;
+            process_ollama_line(&json, &mut content, &mut reasoning, &mut tool_calls, sink).await;
         }
     }
-    // Canonical assembly (F0 / ADR 0019), shared with the OpenAI collector. Ollama native
-    // `/api/chat` doesn't surface a separate reasoning field here, so reasoning is empty (the
-    // fallback is a no-op); a later slice can capture `message.thinking` if needed.
+    // Canonical assembly (F0 / ADR 0019), shared with the OpenAI collector. `reasoning` is the
+    // `message.thinking` trace accumulated by `process_ollama_line` (thinking models like
+    // deepseek-r1), so the reasoning-fallback recovers an answer when content is empty.
     Ok(model_normalize::assistant_response(
         content,
-        String::new(),
+        reasoning,
         tool_calls,
         "stop",
     ))

@@ -178,10 +178,14 @@ Invarianti:
   - **`assistant_response`** (F0 increment 1): il **builder canonico** della risposta
     `{choices:[{message,finish_reason}]}` + la regola **reasoning-fallback** ora vivono QUI, e
     sia `reassemble_openai_stream` sia `collect_ollama_native_stream` lo chiamano (la logica
-    inline duplicata è stata **cancellata**). Convergenza a zero cambio comportamento, 3 test.
+    inline duplicata è stata **cancellata**), 3 test.
+  - **Ollama `thinking`** (F0 increment 1b): `process_ollama_line` accumula ora
+    `message.thinking` (e `reasoning`/`reasoning_content` per compat) come traccia di
+    ragionamento — Ollama native LO espone separato dal `content` per i modelli thinking
+    (deepseek-r1, qwen3). Così il reasoning-fallback vale **anche** su Ollama (prima committava
+    vuoto). Non streamato come content (è la traccia, non la risposta).
   Da cablare (prossimi increment F0): `sanitize_model_text`, `parse_text_tool_calls`, lo
-  schema-downgrade (oggi duplicato gateway vs `openai_compat.rs`), la cattura `reasoning`/
-  `thinking` lato Ollama native.
+  schema-downgrade (oggi duplicato gateway vs `openai_compat.rs`), fixture per-provider.
 - **Doppio path per il deck**: `generate_deck_content` (gateway) duplica il floor
   schema-downgrade già presente in `crates/inference/src/openai_compat.rs`; ADR 0016 prevede
   la convergenza, oggi non avvenuta.
