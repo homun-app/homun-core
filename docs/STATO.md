@@ -29,7 +29,13 @@
     per-modello) estrae `OllamaCapabilities { thinking, tools, vision, context_length }`. 2 test.
   - ✅ **inc.3c** CONSUMATO il profilo (tutti fail-safe, None/cloud → invariato): `think:true` solo
     ai thinking; `tools` (non offre tool a chi non li fa); `vision` (screenshot solo ai vision-model,
-    altrimenti nota testo). `context_length` RIMANDATO (tocca prompt-building → increment validato).
+    altrimenti nota testo).
+  - ✅ **inc.3d** CONVERGENZA su `model_registry::ModelEntry` (catalogo utente = fonte unica,
+    caposaldo #5): il profilo si legge dal catalogo (`registry_model_capabilities`); `/api/show`
+    arricchisce E **auto-compila** l'entry (`autofill_model_entry_capabilities` → aggiorna
+    vision/tools/reasoning/context_window + salva). Niente più store parallelo `OllamaCapabilities`
+    (ora è solo cache runtime sorgentata dal registry). Risolve la duplicazione che avevo introdotto.
+    `context_length`: letto per l'auto-fill; usarlo per BUDGET prompt = follow-up validato.
   - **Prossimo (inc.4)**: `context_length` nel budget; poi convergere il resto di `sanitize_model_text`
     (tool_call/minimax tokens), `parse_text_tool_calls` (tool-as-text), schema-downgrade, fixture
     per-provider. Poi L0 = punto fermo → F1.

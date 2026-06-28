@@ -14392,9 +14392,8 @@ struct OllamaCapabilities {
     thinking: bool,
     tools: bool,
     vision: bool,
-    // Extracted now; CONSUMED by a deliberate follow-up — budgeting the prompt on the real
-    // window touches prompt-building, so it's wired in its own validated increment (not here).
-    #[allow(dead_code)]
+    /// Read for catalog auto-fill (`context_window`); using it to BUDGET the prompt is a separate
+    /// validated follow-up.
     context_length: Option<u64>,
 }
 
@@ -14447,8 +14446,67 @@ fn ollama_thinking_supported(base_url: &str, model: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// Detect + cache an Ollama model's full capability profile via `/api/show`. One call per
-/// (base_url, model); any error caches the default (all-false/None) so consumers fail safe.
+/// Read a model's capabilities from the user-managed model catalog (the provider registry's
+/// `ModelEntry`, which already carries vision/tools/reasoning/context_window). The catalog is the
+/// SINGLE source (caposaldo #5) — `/api/show` only enriches + auto-fills it. `None` = the model
+/// isn't in any provider's catalog.
+fn registry_model_capabilities(base_url: &str, model: &str) -> Option<OllamaCapabilities> {
+    let registry = load_provider_registry();
+    let canon = model_registry::canonical_provider_base_url(base_url);
+    registry
+        .providers
+        .iter()
+        .find(|p| model_registry::canonical_provider_base_url(&p.base_url) == canon)
+        .and_then(|p| p.models.iter().find(|m| m.id == model))
+        .map(|e| OllamaCapabilities {
+            thinking: e.reasoning,
+            tools: e.tools,
+            vision: e.vision,
+            context_length: e.context_window.map(u64::from),
+        })
+}
+
+/// AUTO-FILL the catalog's `ModelEntry` with authoritative capabilities from `/api/show`, so the
+/// model management UI reflects what the installed model actually does instead of name-heuristics.
+/// Saves the registry only when a flag actually changed (idempotent; once per model).
+fn autofill_model_entry_capabilities(base_url: &str, model: &str, caps: &OllamaCapabilities) {
+    let mut registry = load_provider_registry();
+    let canon = model_registry::canonical_provider_base_url(base_url);
+    let mut changed = false;
+    for provider in registry.providers.iter_mut() {
+        if model_registry::canonical_provider_base_url(&provider.base_url) != canon {
+            continue;
+        }
+        if let Some(entry) = provider.models.iter_mut().find(|m| m.id == model) {
+            if entry.reasoning != caps.thinking {
+                entry.reasoning = caps.thinking;
+                changed = true;
+            }
+            if entry.tools != caps.tools {
+                entry.tools = caps.tools;
+                changed = true;
+            }
+            if entry.vision != caps.vision {
+                entry.vision = caps.vision;
+                changed = true;
+            }
+            if let Some(ctx) = caps.context_length {
+                let ctx32 = u32::try_from(ctx).unwrap_or(u32::MAX);
+                if entry.context_window != Some(ctx32) {
+                    entry.context_window = Some(ctx32);
+                    changed = true;
+                }
+            }
+        }
+    }
+    if changed {
+        let _ = save_provider_registry(&registry);
+    }
+}
+
+/// Resolve + cache an Ollama model's capability profile. Source order: the user-managed catalog
+/// (`registry_model_capabilities`), then the authoritative `/api/show` for an installed model —
+/// which also AUTO-FILLS the catalog entry. One probe per (base_url, model) per process.
 async fn warm_ollama_capabilities(http: &reqwest::Client, base_url: &str, model: &str) {
     let key = format!("{base_url}|{model}");
     if ollama_capabilities_cache()
@@ -14458,20 +14516,23 @@ async fn warm_ollama_capabilities(http: &reqwest::Client, base_url: &str, model:
     {
         return;
     }
+    // Catalog first (the user's selections / build-time scrape) …
+    let mut caps = registry_model_capabilities(base_url, model).unwrap_or_default();
+    // … then enrich with the authoritative /api/show and auto-fill the catalog entry.
     let endpoint = format!("{}/api/show", ollama_native_root(base_url));
-    let caps = match http
+    if let Ok(resp) = http
         .post(&endpoint)
         .json(&serde_json::json!({ "name": model }))
         .send()
         .await
     {
-        Ok(resp) if resp.status().is_success() => resp
-            .json::<serde_json::Value>()
-            .await
-            .map(|body| parse_ollama_capabilities(&body))
-            .unwrap_or_default(),
-        _ => OllamaCapabilities::default(),
-    };
+        if resp.status().is_success() {
+            if let Ok(body) = resp.json::<serde_json::Value>().await {
+                caps = parse_ollama_capabilities(&body);
+                autofill_model_entry_capabilities(base_url, model, &caps);
+            }
+        }
+    }
     if let Ok(mut cache) = ollama_capabilities_cache().lock() {
         cache.insert(key, caps);
     }

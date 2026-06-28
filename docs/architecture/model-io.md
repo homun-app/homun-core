@@ -198,9 +198,14 @@ Invarianti:
     (→ risposta vuota se l'intera risposta era nel think). Ora estratti+preservati. 2 test.
     Confermato anche: tool_calls Ollama completi per-chunk + accumulo `extend` = il nostro
     pattern; `arguments` oggetto + niente id = la nostra `ollama_tool_call`.
-  - **Profilo capacità Ollama** (F0.3a/3b): `warm_ollama_capabilities` interroga `/api/show`
-    **una volta per turno** (cache per-modello) ed estrae `OllamaCapabilities { thinking, tools,
-    vision, context_length }` — `capabilities[]` + `model_info["<arch>.context_length"]`. Così
+  - **Profilo capacità Ollama** (F0.3a-d): la **fonte unica** è il catalogo modelli gestito
+    dall'utente — `model_registry::ModelEntry` (`vision/tools/reasoning/context_window`) nel
+    `ProviderRegistry` (caposaldo #5, niente store parallelo). `warm_ollama_capabilities` legge
+    dal catalogo (`registry_model_capabilities`), poi interroga `/api/show` **una volta per
+    modello** (`capabilities[]` + `model_info["<arch>.context_length"]`) che **arricchisce** il
+    profilo E **auto-compila** l'entry del catalogo (`autofill_model_entry_capabilities` →
+    aggiorna `ModelEntry` + salva se cambiato), così la UI di gestione modelli mostra le capacità
+    REALI invece delle euristiche da nome. Così
     l'harness **adatta** invece di indovinare (caposaldo #11). **Cablato:** `think:true` solo ai
     thinking; `tools` (non offre tool a chi non li fa); `vision` (screenshot inviato solo ai
     vision-model, altrimenti nota testuale → fallback allo snapshot testo). Tutti **fail-safe**:
