@@ -251,7 +251,8 @@ chat di default = deepseek-v4-pro:cloud (Z.ai, tier **Balanced**); Composio non 
   `~/.homun` reale. Gateway `cargo run` su `:18765` con log **visibili** (l'app pacchettizzata ha
   `stdio:ignore` → niente log). Diagnostica `[plan]`/`[browser_act]` gated su `HOMUN_DEBUG`.
 - Thread/risposte: `~/.homun/desktop-gateway.sqlite` (`chat_threads`, `chat_messages`).
-- `~/.homun/runtime-settings.json` → `adaptive_floor: "off"` (tenere off finché F2 non lo realizza).
+- `~/.homun/runtime-settings.json` → `adaptive_floor: "shadow"` (telemetria F2.1 attiva, NON agisce;
+  tenere lontano da "on" finché la eval bi-popolazione non valida il flip). Ollama+gemma4 disponibili.
 - Build gateway: `cargo build -p local-first-desktop-gateway --bin local-first-desktop-gateway`.
 
 ## Prompt di ripartenza (copia questo per una sessione nuova)
@@ -271,21 +272,47 @@ canonica e si ritira il parallelo; si rimuove il codice morto toccato; si splitt
 grossi; si commenta il perché; ogni modifica aggiorna la pagina architecture/ + cita il
 caposaldo + porta un test.
 
-PROSSIMO PASSO — decisione su due fronti (F2 è "costruito ma gated", il resto serve un ambiente
-live). Lo stato: il MECCANISMO di F2 è in piedi — floor adattivo cablato (scaffold_for + workflow_bias
-+ verify_depth sotto `adaptive_floor=on`), F2.1 telemetria floor→tool_trace FATTO, F2.2 plan-reconcile
-on-delivery FATTO ma gated `HOMUN_PLAN_RECONCILE`. Ciò che MANCA è quasi tutto **validazione su
-ambiente live** (Ollama/gemma4 + `scripts/eval_suite.py`), non codice:
- (a) accendere il floor `shadow→on` + manopola `slot` (F2.3) — richiede eval bi-popolazione;
- (b) validare `HOMUN_PLAN_RECONCILE=1` sul loop reale prima di renderlo default;
- (c) eventuale done-dopo-verify più stretto / caso sintesi forzata.
-Due strade: (1) se hai un ambiente con Ollama+gemma4, VALIDA e accendi F2 (shadow→on, reconcile→default).
-(2) altrimenti avvia **F3 — ADR 0020** (instradare il turno chat su `OrchestratorBrain` come driver DAG
-reale, planner chat-tool-aware ora che il browser è nel registry, ritirare `merge_plan` per-titolo):
-leggi docs/decisions/0020-*.md + agent-loop.md; ha pezzi puri costruibili qui anche se il giro
-end-to-end resta da validare live.
-Fatto: F0 (L0) + F1 COMPLETO + F2.1 + F2.2(gated). NB: i file:line di main.rs sono sfasati dopo gli
-edit F1/F2 — usa i nomi di funzione.
+PROSSIMO PASSO: F3 — UN MOTORE (ADR 0020), la convergenza motore-1 → motore-2. È la fase più
+grossa e rischiosa del piano: rimpiazza il control-flow VIVO. Leggi PRIMA
+docs/decisions/0020-converge-chat-loop-onto-orchestrator.md + docs/decisions/0016-*.md +
+docs/architecture/agent-loop.md (la sezione "I DUE motori") + capability-registry.md §5.
+
+OBIETTIVO: instradare il turno di chat sull'`OrchestratorBrain` reso DRIVER DAG reale (scheduler
+`depends_on` + per-step model-fills-slot + verify/repair), ritirando il loop prompt-prosa di
+motore #1 e `merge_plan` per-TITOLO (identità = `step_id` runtime, mai dedotta dal testo —
+caposaldo #6). Le 3 invarianti del piano: monotonìa (un done verificato non si riapre),
+limitatezza (un avanzamento non gonfia il piano), identità non inferita.
+
+GIÀ FATTO (il planner di F3 è consolidato e VALIDATO su gemma4, non ripartire da lì):
+- F1.d ha messo i tool browser REALI nel registry → il planner li vede (non più "0 step").
+- Risoluzione tollerante del tool_name (`tool_for_step`/`tool_name_resolves`, execution.rs, #11) +
+  enum dei nomi-tool nello schema planner (`planner_schema(loaded_tool_names)`, #6): un modello
+  debole non può più stipare gli argomenti nel nome. Validato live: gemma4 emette `browser_navigate`
+  pulito e il piano valida.
+- Test riproducibile dell'on-ramp: `cargo test -p local-first-desktop-gateway --bin
+  local-first-desktop-gateway orchestrated_planner_sees_browser_on_gemma4 -- --ignored --nocapture`.
+
+I GAP DI MOTORE #2 DA CHIUDERE (verificati in agent-loop.md "I DUE motori"):
+- `orchestrator_plan_for_chat` (main.rs) fa solo `plan_only` → `execution_plan_to_canonical_steps`
+  → SEMINA il piano nel loop esistente. Non guida l'esecuzione.
+- `execute_plan` (orchestrator/brain.rs) itera LINEARE, IGNORA `depends_on`; i subagenti sono
+  `generate_json`-only, SENZA tool. Per essere un driver vero servono: scheduler `depends_on` +
+  esecuzione per-step che CHIAMA i tool (oggi la tool-dispatch vive solo nel loop di chat).
+INCREMENTI bottom-up SUGGERITI (scope tu dopo aver letto, gated dietro `HOMUN_ORCHESTRATED_CHAT`,
+verde a ogni passo, validati su gemma4): (1) valida END-TO-END il seed esistente attraverso il
+gateway con flag ON (il piano-seme aiuta davvero il loop?); (2) `execute_plan` onora `depends_on`
+(scheduler reale); (3) esecuzione per-step con tool (il pezzo difficile: ponte verso la tool-dispatch
+del loop di chat, O dare al Brain l'esecuzione tool reale); (4) instrada il turno sul Brain dietro
+flag, valida flag-ON vs motore #1, zero regressioni; (5) ritira `merge_plan` per-titolo.
+
+AMBIENTE: Ollama gira con gemma4:latest/12b → eval bi-popolazione e validazione live SONO possibili
+qui (`python3 scripts/eval_suite.py gemma4:latest` = gate di regressione caposaldo #2; usa lo schema
+del test ignored sopra per pilotare il Brain su gemma4). Modello chat default = deepseek-v4-pro:cloud
+(Balanced). `adaptive_floor` = "shadow" (telemetria F2.1 attiva). Non accendere il floor a "on" senza
+eval bi-popolazione. NB: i file:line di main.rs sono sfasati dopo F1/F2/F3 — usa i nomi di funzione.
+
+Fatto finora: F0 (L0 completo) + F1 COMPLETO+testato + F2 (meccanismo costruito: telemetria shadow,
+reconcile gated; validato bi-popolazione) + F3-planner (on-ramp + #11 + #6, validati su gemma4).
 
 A fine sessione aggiorna docs/STATO.md.
 ```
