@@ -40,6 +40,8 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
 | Domanda | Dove |
 |---|---|
 | **Principi** (cosa non si viola) | [CAPISALDI.md](CAPISALDI.md) |
+| **Metodo** (come si lavora) | [METHODOLOGY.md](METHODOLOGY.md) |
+| **Stato vivo** (dove siamo / ripartenza) | [STATO.md](STATO.md) |
 | **Scelte precise** (perché abbiamo deciso X) | [decisions/](decisions/) — ADR 0001-0016 (immutabili) |
 | **Com'è fatto** (architettura + diagrammi, reverse-engineered 2026-06-27) | [architecture/](architecture/) — overview · system-map · **agent-loop** · **model-io** · **browser** · **mcp** · **skills** · **connectors-composio** · **contacts-channels** · **capability-registry** · memory · plugins |
 | **Piano corrente** (fondamenta → obiettivo) | [plans/2026-06-27-foundations-up-convergence.md](plans/2026-06-27-foundations-up-convergence.md) |
