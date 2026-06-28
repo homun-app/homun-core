@@ -142,9 +142,24 @@ Commit `b705289a` (driver+executor) + `3ce99c67` (arg-fill). Vedi [agent-loop](a
   scritture fuori). NON è un terzo runner: il `run_generate_json` durabile è la modalità *workflow*.
   **Validato su gemma4** (`orchestrated_subagent_gathers_on_gemma4`): gemma4 sceglie il tool, raccoglie,
   sintetizza (`evidence=[gather:web_search]`). +4 test agentic. Commit `3027abe4`.
-- ⏳ **F3.3** instradare `stream_chat_via_openai` sul `drive` dietro `HOMUN_ORCHESTRATED_CHAT`, validare
-  flag-ON vs motore #1 (**il pezzo rischioso sul path VIVO**, non ancora fatto). ⏳ **F3.4** ritirare
-  `merge_plan` per-titolo + prompt-prosa di control-flow. ⏳ scope agentico oltre read/gather (scritture).
+- ✅ **F3.3 routing live — FATTO e VALIDATO NELL'APP REALE** (dietro nuovo flag `HOMUN_DRIVE_CHAT`,
+  default off; fail-open a motore #1). Il turno di chat ora passa per `orchestrator_drive_for_chat`
+  (main.rs): plan → `drive_plan` con `ChatDriveStepExecutor` (impl del seam `StepExecutor`, tiene
+  `&AppState`) → esegue i browser-step via l'esecutore durabile esistente `call_shared_browser_sidecar`
+  (`TaskRecord` sintetico — riuso, NIENTE terzo dispatch) → sintesi finale col **modello di chat** (non
+  il browser-role) streamata → risposta. Hook in cima al task spawnato di `stream_chat_via_openai`
+  (return early, coda post-turn memoria+cleanup rispecchiata). **Validato dal vivo:** prompt browse
+  Wikipedia → piano 2 step (navigate+snapshot) → contenuto reale → risposta corretta in italiano, con
+  il **pannello "Plan" visibile** (marker ‹‹PLAN›› + status). Commit `d84a1a0b`+`5334d35f`(planner
+  tollerante)+`6d619de4`(snapshot content-preserving+budget 20k)+`8ae9c9ce`(plan-visibility). Fix
+  emersi dal vivo: deser planner tollerante (`lenient_string`/`lenient_opt_string`), snapshot
+  content-preserving (`browser_chat_snapshot_params`, riuso F0), budget gathered 20k.
+- ⏳ **Residuo F3.3:** (a) UX live per-step (ACT deltas durante l'esecuzione) + pannello attività
+  browser; (b) **browse agentico** (form-filling tipo trenitalia): il `ChatDriveStepExecutor` fa solo
+  browser-CapabilityCall, NON instrada i `SubagentTask` (loop F3.2c) al sidecar → task che richiedono
+  compilazione form cadono a motore #1; (c) accendere il drive di default (oggi flag-gated).
+- ⏳ **F3.4** ritirare `merge_plan` per-titolo + prompt-prosa (solo quando il drive è il default).
+  ⏳ scope agentico oltre read/gather (scritture single-threaded+approval).
 
 Mappe: [registry](architecture/capability-registry.md), [skills](architecture/skills.md),
 [connectors](architecture/connectors-composio.md), [browser](architecture/browser.md), [mcp](architecture/mcp.md).
@@ -154,6 +169,16 @@ bi-popolazione (caposaldo #2) È eseguibile qui: `python3 scripts/eval_suite.py 
 chat di default = deepseek-v4-pro:cloud (Z.ai, tier **Balanced**); Composio non configurato.
 
 ## Cosa è stato fatto (rolling, conciso)
+
+**Sessione 2026-06-28 (5b) — F3.3 routing LIVE nell'app reale (motore #2 guida un turno di chat):**
+- Cablato `orchestrator_drive_for_chat` + `ChatDriveStepExecutor` (impl `StepExecutor`, tiene `&AppState`,
+  browser via `call_shared_browser_sidecar`+`TaskRecord` sintetico) + hook in `stream_chat_via_openai`
+  dietro `HOMUN_DRIVE_CHAT` (fail-open). Sintesi col modello di chat (streamata) + marker ‹‹PLAN››.
+- **Validato dal vivo** (electron, browser sidecar reale): browse Wikipedia → drive 2 step → risposta
+  corretta in italiano + pannello Plan visibile. Fix iterati dal vivo: planner deser tollerante,
+  snapshot content-preserving (riuso F0), budget gathered 20k, chat-model synthesis. Commit
+  `d84a1a0b`/`5334d35f`/`6d619de4`/`8ae9c9ce`. Residuo: UX live per-step, browse agentico (form-fill),
+  accensione default.
 
 **Sessione 2026-06-28 (5) — F3 fondazione: driver in-turn + arg-fill + executor agentico, validati su gemma4:**
 - **F3.2c** `agentic.rs` `run_agentic_step` — modalità *agent* (ADR 0016 P2): loop bounded read/gather,
