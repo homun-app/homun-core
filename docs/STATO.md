@@ -188,6 +188,22 @@ chat di default = deepseek-v4-pro:cloud (Z.ai, tier **Balanced**); Composio non 
   fatto:** un turno live attraverso il gateway (telemetria floor che emette in shadow su un turno reale,
   reconcile che scatta) — invasivo sul `~/.homun` reale; il path organico è `adaptive_floor:"shadow"`
   in runtime-settings, che fa fluire la telemetria F2.1 durante l'uso normale.
+- **`adaptive_floor` FLIPPATO a `shadow`** in `~/.homun/runtime-settings.json` (reversibile): la
+  telemetria F2.1 ora fluisce durante l'uso normale.
+
+**Sessione 2026-06-28 (4b) — ON-RAMP F3 validato su gemma4 (ADR 0020):**
+- **Payoff di F1.d CONFERMATO end-to-end:** un test `#[ignore]` (`orchestrated_planner_sees_browser_on_gemma4`,
+  hits Ollama) costruisce la brain come `orchestrator_plan_for_chat` su registry seminato (browser reale)
+  e fa girare il planner su gemma4. Risultato: **piano browser a 5 step** (navigate→act→snapshot→scroll→
+  snapshot) — il vecchio "0 step perché il planner non vede il browser" è MORTO. Il planner vede e pianifica.
+- **Primo blocco F3 trovato E risolto (caposaldo #11):** gemma4 stipa gli argomenti nel campo `tool_name`
+  (`"browser_navigate.url: https://…"`) → `tool_for_step` (exact match) lo rifiutava `tool_not_loaded`.
+  Aggiunta **risoluzione tollerante** (`tool_name_resolves`: il nome caricato è il token iniziale del
+  richiesto, con boundary) → exact-match vince sempre, il fallback recupera i nomi stipati. +1 test;
+  ri-validato live: il piano a 5 step ORA valida. Commit dopo questa nota.
+- **Prossimo strato F3 (non fatto):** gemma4 lascia anche `arguments` VUOTO (l'URL è dentro il nome) →
+  a tempo di ESECUZIONE i browser tool riceverebbero args vuoti. Serve repair degli argomenti / schema
+  planner vincolato (enum nomi tool). È il prossimo increment F3.
 
 **Sessione 2026-06-27 — diagnosi + fix sintomo + analisi strutturale + metodologia:**
 - **Fix agentic-loop validati e pushati** (default flag-off, migliorano il model-loop):

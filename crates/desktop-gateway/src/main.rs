@@ -46521,6 +46521,107 @@ prs.save(Path({path:?}))
         );
     }
 
+    /// F3 on-ramp validation (ADR 0020): the orchestrator planner used to return 0 steps for a
+    /// browse task because it indexed the registry's dot-named placeholder browser tools — a
+    /// shadow set. F1.d seeded the REAL chat browser tools into the registry, so the planner
+    /// should now SEE the browser and be able to plan with it. This drives the SAME brain
+    /// construction `orchestrator_plan_for_chat` uses, but over an in-memory seeded registry and
+    /// against the local gemma4 (the weak tier — caposaldo #2). Ignored by default: it hits the
+    /// live Ollama endpoint. Run with:
+    ///   cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway \
+    ///     orchestrated_planner_sees_browser -- --ignored --nocapture
+    #[test]
+    #[ignore = "hits the live Ollama gemma4 endpoint; run manually"]
+    fn orchestrated_planner_sees_browser_on_gemma4() {
+        use local_first_capabilities::PolicyContext;
+
+        // 1. Seed an in-memory registry exactly as the gateway does (real browser tools, F1.d).
+        let registry = super::CapabilityRegistryStore::open_in_memory().unwrap();
+        super::seed_default_capabilities(&registry).unwrap();
+        let user = super::gateway_capability_user_id();
+        let workspace = super::gateway_capability_workspace_id();
+        let mut policy: PolicyContext = registry.policy_context(&user, &workspace).unwrap();
+
+        // 2. Build the facade the brain plans over (planning is Read/Draft only).
+        let mut provider_tools = Vec::new();
+        for provider in &policy.enabled_providers {
+            let tools: Vec<_> = registry
+                .cached_tools(provider)
+                .unwrap()
+                .into_iter()
+                .map(|cached| cached.tool)
+                .collect();
+            provider_tools.push((provider.clone(), tools));
+        }
+        policy.allowed_actions = vec![super::ActionClass::Read, super::ActionClass::Draft];
+        let mut facade = super::CapabilityFacade::new(
+            super::CapabilityPolicy::default(),
+            super::InMemoryCapabilityAudit::default(),
+        );
+        for (provider_id, tools) in provider_tools {
+            let kind = tools
+                .first()
+                .map(|tool| tool.provider_kind)
+                .unwrap_or(super::CapabilityProviderKind::Native);
+            facade.register_provider(super::CachedToolProvider::new(provider_id, kind, tools));
+        }
+
+        // Deterministic half: the planner's tool view now CONTAINS the real browser tool.
+        let visible = facade.list_tools(&policy).unwrap();
+        assert!(
+            visible
+                .visible_tools
+                .iter()
+                .any(|tool| tool.name == "browser_navigate"),
+            "F1.d regressed: the planner can't see browser_navigate; visible = {:?}",
+            visible.visible_tool_names()
+        );
+
+        // 3. Live half: run the planner on gemma4 for a browse task and print the plan.
+        let router = super::build_router_from(
+            super::ProviderKind::OpenaiCompat,
+            "http://127.0.0.1:11434/v1",
+            "gemma4:latest",
+            None,
+            32_768,
+        );
+        let mut brain = super::OrchestratorBrain::new(
+            router,
+            super::GatewayBrainMemory(None),
+            facade,
+            local_first_task_runtime::TaskStore::open_in_memory().unwrap(),
+        );
+        let request = super::OrchestratorRequest {
+            request_id: "f3_onramp_validation".to_string(),
+            policy_context: policy,
+            user_message: "Cerca sul web i treni da Milano a Roma per domani mattina e \
+                           riportami orari e prezzi."
+                .to_string(),
+            conversation_summary: None,
+            attachments: Vec::new(),
+            budgets: super::brain_budgets_for_context_window(Some(32_768)),
+            language: "it".to_string(),
+        };
+        let plan = brain
+            .plan_only(&request)
+            .expect("plan_only must succeed end-to-end on gemma4 (the on-ramp mechanism)");
+
+        eprintln!("\n=== F3 on-ramp: gemma4 plan ===");
+        eprintln!("route: {:?}", plan.route);
+        for (i, step) in plan.steps.iter().enumerate() {
+            eprintln!(
+                "  step {i}: kind={:?} tool={:?} goal={:?}",
+                step.kind, step.tool_name, step.goal
+            );
+        }
+        let mentions_browser = plan
+            .steps
+            .iter()
+            .any(|step| step.tool_name.as_deref().is_some_and(|t| t.contains("browser")));
+        eprintln!("steps={} mentions_browser={mentions_browser}", plan.steps.len());
+        eprintln!("=== end plan ===\n");
+    }
+
     #[test]
     fn local_template_catalog_provider_exposes_seed_templates() {
         let provider = super::LocalTemplateCatalogProvider;

@@ -21,7 +21,7 @@ Condiviso da chat (`generate_stream`) e canali/automazioni (`run_agent_turn`).
 flowchart TD
     REQ[Messaggio utente] --> SEED{Piano da<br/>riprendere?}
     SEED -- "store durevole / marker" --> PLAN0[Semina piano canonico]
-    SEED -- "no + flag ADR0020" --> ORCH[Planner orchestrator plan_only<br/>oggi torna 0 step per task browser]
+    SEED -- "no + flag ADR0020" --> ORCH[Planner orchestrator plan_only<br/>F1.d+F3: ora vede il browser, pianifica gli step]
     SEED -- no --> PLAN0
     ORCH --> PLAN0
     PLAN0 --> LOOP{{Round loop 0..ceiling}}
