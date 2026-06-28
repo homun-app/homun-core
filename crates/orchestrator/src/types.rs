@@ -209,24 +209,26 @@ enum AgentRef {
 /// whole plan — it maps to the generic worker archetype instead.
 #[derive(Deserialize)]
 struct PlanStepWire {
+    #[serde(deserialize_with = "lenient_string")]
     step_id: String,
     kind: PlanStepKind,
     #[serde(default)]
     depends_on: Vec<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lenient_opt_string")]
     provider_id: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lenient_opt_string")]
     tool_name: Option<String>,
     #[serde(default)]
     arguments: serde_json::Value,
     execution_policy: StepExecutionPolicy,
+    #[serde(deserialize_with = "lenient_string")]
     risk_level: String,
     expected_duration_seconds: u64,
     #[serde(default)]
     agent_id: Option<AgentRef>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lenient_opt_string")]
     goal: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lenient_opt_string")]
     contract: Option<String>,
     #[serde(default, deserialize_with = "lenient_allowed_actions")]
     allowed_actions: Vec<AllowedAction>,
@@ -249,6 +251,35 @@ where
         .into_iter()
         .filter_map(|value| serde_json::from_value::<AllowedAction>(value).ok())
         .collect())
+}
+
+/// Coerces a required string field that a weak planner emitted as a non-string
+/// (an object/number/bool) into a string instead of failing the WHOLE plan
+/// ("invalid type: map, expected a string"). Same robustness intent as
+/// [`lenient_allowed_actions`]: the harness tolerates weak-model output shape
+/// (caposaldo #6 — parsing tollerante ovunque), never crashes on it.
+fn lenient_string<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Ok(match serde_json::Value::deserialize(deserializer)? {
+        serde_json::Value::String(text) => text,
+        serde_json::Value::Null => String::new(),
+        other => other.to_string(),
+    })
+}
+
+/// Optional variant of [`lenient_string`]: `null`/absent → `None`, a non-string
+/// → its JSON text, a string → itself.
+fn lenient_opt_string<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Ok(match serde_json::Value::deserialize(deserializer)? {
+        serde_json::Value::Null => None,
+        serde_json::Value::String(text) => Some(text),
+        other => Some(other.to_string()),
+    })
 }
 
 impl From<PlanStepWire> for PlanStep {

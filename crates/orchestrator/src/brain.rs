@@ -383,7 +383,18 @@ impl<R: JsonRuntime, M: MemoryContextProvider> OrchestratorBrain<R, M> {
         if !response.valid {
             return Err(OrchestratorError::Planner(response.errors.join("; ")));
         }
-        let plan = serde_json::from_value(response.json)?;
+        // Tolerant where it can be (PlanStepWire coerces weak-model field shapes);
+        // when it still can't deserialize (e.g. a required enum emitted as a map),
+        // surface the RAW planner output in the error so the failing field is
+        // diagnosable instead of an opaque "invalid type: map".
+        let plan = serde_json::from_value(response.json.clone()).map_err(|error| {
+            let raw: String = serde_json::to_string(&response.json)
+                .unwrap_or_default()
+                .chars()
+                .take(800)
+                .collect();
+            OrchestratorError::Planner(format!("plan_deserialize: {error}; raw={raw}"))
+        })?;
         Ok((plan, response.metrics, prompt.context_budget))
     }
 
