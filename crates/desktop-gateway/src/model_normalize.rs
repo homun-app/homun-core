@@ -112,6 +112,75 @@ pub fn ollama_tool_call(call: &serde_json::Value, index: usize) -> serde_json::V
     })
 }
 
+/// Strip a balanced `<open>…<close>` block (all occurrences) from text. Used by
+/// `sanitize_model_text`. An unclosed `open` drops the rest (a streamed/truncated tag).
+fn strip_tag_blocks(input: &str, open: &str, close: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut rest = input;
+    while let Some(start) = rest.find(open) {
+        out.push_str(&rest[..start]);
+        let after = &rest[start..];
+        match after.find(close) {
+            Some(end_rel) => rest = &after[end_rel + close.len()..],
+            None => {
+                rest = "";
+                break;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Removes `<…｜…>` / `</…｜…>` tokens (fullwidth bar U+FF5C) that some models (GLM/Zhipu) leak as
+/// text instead of using structured tool calls — e.g. `<｜tool▁calls▁begin｜>`. A leaked end-token
+/// can also replace a marker's proper close, so stripping it keeps the marker parseable.
+fn strip_fullwidth_bar_tokens(s: &str) -> String {
+    let chars: Vec<char> = s.chars().collect();
+    let mut out = String::with_capacity(s.len());
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '<' {
+            if let Some(rel) = chars[i..].iter().position(|&c| c == '>') {
+                if chars[i..=i + rel].iter().any(|&c| c == '｜') {
+                    i += rel + 1;
+                    continue;
+                }
+            }
+        }
+        out.push(chars[i]);
+        i += 1;
+    }
+    out
+}
+
+/// Strip model control-token leakage from text shown to the user: native tool-call / reasoning
+/// template tokens some models (MiniMax via Ollama's shim, GLM, …) leak into `content` instead of
+/// the structured fields. Conservative — only KNOWN control markup is removed. The final
+/// defensive net in L0 (the canonical builder already extracts `<think>` into reasoning upstream).
+pub fn sanitize_model_text(text: &str) -> String {
+    let mut s = strip_fullwidth_bar_tokens(&text.replace("]<]minimax[>[", ""));
+    for (open, close) in [
+        ("<tool_call>", "</tool_call>"),
+        ("<invoke", "</invoke>"),
+        ("<function_calls>", "</function_calls>"),
+        ("<think>", "</think>"),
+        ("<thinking>", "</thinking>"),
+    ] {
+        s = strip_tag_blocks(&s, open, close);
+    }
+    for stray in [
+        "<tool_call>",
+        "</tool_call>",
+        "</invoke>",
+        "<parameter>",
+        "</parameter>",
+    ] {
+        s = s.replace(stray, "");
+    }
+    s.trim().to_string()
+}
+
 pub const PLAN_PROPOSE_OPEN: &str = "‹‹PLAN_PROPOSE››";
 pub const PLAN_PROPOSE_CLOSE: &str = "‹‹/PLAN_PROPOSE››";
 
@@ -211,6 +280,16 @@ pub fn parse_plan_propose(text: &str) -> Result<PlanProposed, NormalizeError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sanitize_strips_known_control_tokens() {
+        assert_eq!(sanitize_model_text("<think>reasoning</think>Answer."), "Answer.");
+        assert_eq!(sanitize_model_text("ok<tool_call>{}</tool_call>"), "ok");
+        assert_eq!(sanitize_model_text("a]<]minimax[>[b"), "ab");
+        assert_eq!(sanitize_model_text("x<｜tool▁calls▁begin｜>y"), "xy");
+        // Plain text is untouched (besides trim).
+        assert_eq!(sanitize_model_text("  hello  "), "hello");
+    }
 
     #[test]
     fn split_reasoning_extracts_think_tags() {

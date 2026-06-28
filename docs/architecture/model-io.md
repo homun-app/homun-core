@@ -212,9 +212,11 @@ Invarianti:
     profilo sconosciuto/cloud (None) → comportamento di oggi invariato. **Estratto, rimandato:**
     `context_length` (budget sulla finestra reale tocca il prompt-building → increment dedicato +
     validato). 2 test (`parse_ollama_capabilities`, `ollama_native_root`).
-  Da cablare (prossimi increment F0): `context_length` nel budget; convergere il resto di
-  `sanitize_model_text` (tool_call/minimax tokens), `parse_text_tool_calls` (tool-as-text), lo
-  schema-downgrade (duplicato gateway vs `openai_compat.rs`), fixture per-provider.
+  - **`sanitize_model_text`** (F0.4): spostato in `model_normalize` (+ `strip_tag_blocks`/
+    `strip_fullwidth_bar_tokens`) → tutta la normalizzazione testo nel modulo canonico, 1 test.
+  **L0 CORE = punto fermo.** Coda (increment a sé): `parse_text_tool_calls` (tool-as-text, bloccato
+  dal helper `xml_attr_value` condiviso), schema-downgrade duplicato (gateway vs `openai_compat.rs`),
+  `context_length` nel budget prompt.
 - **Doppio path per il deck**: `generate_deck_content` (gateway) duplica il floor
   schema-downgrade già presente in `crates/inference/src/openai_compat.rs`; ADR 0016 prevede
   la convergenza, oggi non avvenuta.

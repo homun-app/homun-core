@@ -19804,7 +19804,7 @@ check/update the key in Settings → Model & Runtime."
                 // conversation history.
                 messages.push(serde_json::json!({
                     "role": "assistant",
-                    "content": sanitize_model_text(&raw_content),
+                    "content": model_normalize::sanitize_model_text(&raw_content),
                     "tool_calls": calls,
                 }));
                 // Set when a write tool needs confirmation: we stop the loop and let
@@ -22987,7 +22987,7 @@ Tell the user clearly; do NOT claim it's done."
             // No tool call → normally the final answer. Sanitize any leaked model
             // control tokens (e.g. minimax `]<]minimax[>[` / `<tool_call>` text) so
             // the user never sees raw template markup.
-            let content = sanitize_model_text(
+            let content = model_normalize::sanitize_model_text(
                 message
                     .get("content")
                     .and_then(|c| c.as_str())
@@ -23170,7 +23170,7 @@ to proceed."
                 }
                 _ => None,
             };
-            let synth_text = sanitize_model_text(
+            let synth_text = model_normalize::sanitize_model_text(
                 body.as_ref()
                     .and_then(|b| b.get("choices"))
                     .and_then(|c| c.get(0))
@@ -25006,74 +25006,6 @@ const PRUNED_SNAPSHOT_STUB: &str =
 /// Removes every `open..close` block (inclusive). `open` may be a tag prefix
 /// (e.g. "<invoke", to match attributed tags); `close` is the full closing tag.
 /// If a block is unterminated, everything from `open` to end is dropped.
-fn strip_tag_blocks(input: &str, open: &str, close: &str) -> String {
-    let mut out = String::with_capacity(input.len());
-    let mut rest = input;
-    while let Some(start) = rest.find(open) {
-        out.push_str(&rest[..start]);
-        let after = &rest[start..];
-        match after.find(close) {
-            Some(end_rel) => rest = &after[end_rel + close.len()..],
-            None => {
-                rest = "";
-                break;
-            }
-        }
-    }
-    out.push_str(rest);
-    out
-}
-
-/// Strips model control-token leakage from text shown to the user. Some models
-/// (notably MiniMax via Ollama's OpenAI-compat shim) leak their native tool-call
-/// or reasoning template tokens into the assistant `content` instead of the
-/// structured fields. Conservative: only known control markup is removed.
-/// Removes `<…｜…>` / `</…｜…>` tokens (fullwidth bar U+FF5C) that some models (GLM/Zhipu)
-/// leak as text instead of using structured tool calls — e.g. `<｜tool▁calls▁begin｜>` or
-/// `</｜DSML｜tool_calls>`. A leaked end-token can also replace a marker's proper close, so
-/// stripping it keeps the marker parseable.
-fn strip_fullwidth_bar_tokens(s: &str) -> String {
-    let chars: Vec<char> = s.chars().collect();
-    let mut out = String::with_capacity(s.len());
-    let mut i = 0;
-    while i < chars.len() {
-        if chars[i] == '<' {
-            if let Some(rel) = chars[i..].iter().position(|&c| c == '>') {
-                if chars[i..=i + rel].iter().any(|&c| c == '｜') {
-                    i += rel + 1;
-                    continue;
-                }
-            }
-        }
-        out.push(chars[i]);
-        i += 1;
-    }
-    out
-}
-
-fn sanitize_model_text(text: &str) -> String {
-    let mut s = strip_fullwidth_bar_tokens(&text.replace("]<]minimax[>[", ""));
-    for (open, close) in [
-        ("<tool_call>", "</tool_call>"),
-        ("<invoke", "</invoke>"),
-        ("<function_calls>", "</function_calls>"),
-        ("<think>", "</think>"),
-        ("<thinking>", "</thinking>"),
-    ] {
-        s = strip_tag_blocks(&s, open, close);
-    }
-    for stray in [
-        "<tool_call>",
-        "</tool_call>",
-        "</invoke>",
-        "<parameter>",
-        "</parameter>",
-    ] {
-        s = s.replace(stray, "");
-    }
-    s.trim().to_string()
-}
-
 /// Reads `attr="value"` from a tag/block.
 fn xml_attr_value(block: &str, attr: &str) -> Option<String> {
     let needle = format!("{attr}=\"");

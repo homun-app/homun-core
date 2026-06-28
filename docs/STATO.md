@@ -36,11 +36,25 @@
     vision/tools/reasoning/context_window + salva). Niente più store parallelo `OllamaCapabilities`
     (ora è solo cache runtime sorgentata dal registry). Risolve la duplicazione che avevo introdotto.
     `context_length`: letto per l'auto-fill; usarlo per BUDGET prompt = follow-up validato.
-  - **Prossimo (inc.4)**: `context_length` nel budget; poi convergere il resto di `sanitize_model_text`
-    (tool_call/minimax tokens), `parse_text_tool_calls` (tool-as-text), schema-downgrade, fixture
-    per-provider. Poi L0 = punto fermo → F1.
-    NB live-validation: setup attuale = deepseek-v4-pro:cloud (Z.ai), non Ollama → il path capacità
-    si attiva solo con un modello su Ollama locale (per `/api/show`).
+  - ✅ **inc.4** `sanitize_model_text` (+ `strip_tag_blocks`/`strip_fullwidth_bar_tokens`) spostato
+    in `model_normalize` → **tutta la normalizzazione testo nel modulo canonico**. 1 test. Call site
+    aggiornati a `model_normalize::sanitize_model_text`.
+
+**L0 (model-io) — CORE CHIUSO (punto fermo).** La normalizzazione della risposta — builder canonico
++ reasoning-fallback, estrazione `<think>`, tool-call Ollama, sanitize, profilo capacità — vive ora
+in `model_normalize` ed è **testata e verificata sulla fonte** (Ollama/context7). Contratto: ogni
+risposta modello → `{content, reasoning, tool_calls}` canonico, sanificato.
+
+**Coda L0 (3 increment a sé, NON bloccano F1):**
+1. `parse_text_tool_calls` (tool-as-text Hermes/Qwen/Claude) → spostare in `model_normalize`; **bloccato**
+   da `xml_attr_value` condiviso con un'altra fn (va mosso anche quello + aggiornato l'altro caller).
+2. schema-downgrade `json_schema→json_object`: duplicato gateway `generate_deck_content` vs
+   `crates/inference/openai_compat.rs` → convergere.
+3. `context_length` nel budget del prompt (tocca prompt-building → increment validato).
+
+**Prossimo:** chiudere la coda L0 sopra **oppure** passare a **F1 (capability unica)** — vedi
+[piano](plans/2026-06-27-foundations-up-convergence.md). NB live-validation capacità: setup attuale =
+deepseek-v4-pro:cloud (Z.ai), non Ollama → il path `/api/show` si attiva con un modello Ollama locale.
 
 ## Cosa è stato fatto (rolling, conciso)
 
