@@ -46755,6 +46755,143 @@ prs.save(Path({path:?}))
         );
     }
 
+    /// F3.2c agentic-mode validation on the weak tier (ADR 0016 Pilastro 2 / ADR 0020 Fase 2):
+    /// a `SubagentTask` step is driven by the bounded inner loop where gemma4 STEERS — it chooses
+    /// a read/gather tool from the constrained enum, runs it through the facade, and finishes with
+    /// a summary, all under the harness's round budget. A hand-built single-subagent plan + an
+    /// executable fake `web_search` (Read) tool. Proves a weak model can drive the agentic loop.
+    /// Ignored: hits the live Ollama endpoint. Run with:
+    ///   cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway \
+    ///     orchestrated_subagent_gathers_on_gemma4 -- --ignored --nocapture
+    #[test]
+    #[ignore = "hits the live Ollama gemma4 endpoint; run manually"]
+    fn orchestrated_subagent_gathers_on_gemma4() {
+        use local_first_capabilities::{
+            FakeCapabilityProvider, PolicyContext, ProviderId, UserId, WorkspaceId,
+        };
+        use local_first_orchestrator::{ExecutionPlan, OrchestratorRoute, PlanStep, PlanStepKind};
+        use local_first_subagents::{AgentId, AllowedAction};
+
+        // Executable fake gather provider: one Read tool the sub-agent may use.
+        let search_tool = super::CapabilityTool {
+            name: "web_search".to_string(),
+            provider_id: ProviderId::new("research"),
+            provider_kind: super::CapabilityProviderKind::Native,
+            action: super::ActionClass::Read,
+            description: "Search the web for a query and return result snippets".to_string(),
+            privacy_domains: vec!["web".to_string()],
+            sensitivity: "public".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+                "required": ["query"],
+                "additionalProperties": false
+            }),
+        };
+        let mut provider = FakeCapabilityProvider::new(
+            ProviderId::new("research"),
+            super::CapabilityProviderKind::Native,
+            true,
+            None,
+            vec![search_tool],
+        );
+        provider.set_tool_response(
+            "web_search",
+            serde_json::json!({"results": ["Frecciarossa 08:00 €29", "Italo 09:10 €25"]}),
+        );
+        let mut facade = super::CapabilityFacade::new(
+            super::CapabilityPolicy::default(),
+            super::InMemoryCapabilityAudit::default(),
+        );
+        facade.register_provider(provider);
+
+        let policy = PolicyContext {
+            user_id: UserId::new("u"),
+            workspace_id: WorkspaceId::new("w"),
+            enabled_providers: vec![ProviderId::new("research")],
+            privacy_domains: vec!["web".to_string()],
+            allowed_actions: vec![super::ActionClass::Read, super::ActionClass::Draft],
+            max_autonomy_level: 2,
+            allow_managed_cloud: false,
+        };
+
+        let router = super::build_router_from(
+            super::ProviderKind::OpenaiCompat,
+            "http://127.0.0.1:11434/v1",
+            "gemma4:latest",
+            None,
+            32_768,
+        );
+        let mut brain = super::OrchestratorBrain::new(
+            router,
+            super::GatewayBrainMemory(None),
+            facade,
+            local_first_task_runtime::TaskStore::open_in_memory().unwrap(),
+        );
+
+        // Hand-built plan: one read/gather sub-agent (no planner roundtrip needed).
+        let plan = ExecutionPlan {
+            route: OrchestratorRoute::SubagentWorkflow,
+            direct_answer: None,
+            plan_propose: None,
+            steps: vec![PlanStep {
+                step_id: "gather_trains".to_string(),
+                kind: PlanStepKind::SubagentTask,
+                depends_on: vec![],
+                provider_id: None,
+                tool_name: None,
+                arguments: serde_json::Value::Null,
+                execution_policy: super::StepExecutionPolicy::DurableTask,
+                risk_level: "low".to_string(),
+                expected_duration_seconds: 30,
+                agent_id: Some(AgentId::Tool),
+                goal: Some("Find morning train times from Milan to Rome".to_string()),
+                contract: Some("A short summary listing the train times".to_string()),
+                allowed_actions: vec![AllowedAction::Read],
+                requires_user_approval: None,
+                timeout_seconds: None,
+                max_tokens: None,
+            }],
+            needs_more_tools: None,
+        };
+        let request = super::OrchestratorRequest {
+            request_id: "f3_2c_validation".to_string(),
+            policy_context: policy,
+            user_message: "treni del mattino Milano-Roma".to_string(),
+            conversation_summary: None,
+            attachments: Vec::new(),
+            budgets: super::brain_budgets_for_context_window(Some(32_768)),
+            language: "it".to_string(),
+        };
+
+        let outcome = brain
+            .drive(&request, &plan)
+            .expect("agentic subagent step must drive on gemma4");
+
+        let step = &outcome.results[0];
+        eprintln!("\n=== F3.2c agentic: gemma4 sub-agent ===");
+        eprintln!("status: {:?}", step.status);
+        eprintln!("evidence: {:?}", step.outcome.as_ref().map(|o| &o.evidence));
+        eprintln!("output: {:?}", step.outcome.as_ref().map(|o| &o.output));
+        eprintln!("=== end ===\n");
+
+        // The sub-agent finished within budget → Done with a summary.
+        assert_eq!(
+            step.status,
+            local_first_orchestrator::DriveStepStatus::Done,
+            "gemma4 sub-agent did not reach Done"
+        );
+        assert!(
+            step.outcome
+                .as_ref()
+                .unwrap()
+                .output
+                .get("summary")
+                .is_some(),
+            "agentic step must return a summary"
+        );
+    }
+
     #[test]
     fn local_template_catalog_provider_exposes_seed_templates() {
         let provider = super::LocalTemplateCatalogProvider;

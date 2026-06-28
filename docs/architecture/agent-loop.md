@@ -74,7 +74,7 @@ Punti caldi (con `file:line` in `main.rs`):
 | Guida | **il modello** (prompt-prosa ~2000 righe) | un piano DAG tipizzato |
 | Piano | `Vec<Value>` mergiato — **`merge_plan` per TITOLO** (`:~6747`) | `ExecutionPlan` con `step_id` stabili + `depends_on` |
 | Esecuzione | round loop con tool inline | due path: `execute_plan` (materializza task durabili) **e** `drive` (driver sincrono in-turn + arg-fill model-fills-slot, F3) |
-| Subagenti | n/d (il loop fa tutto) | `generate_json`-only, **senza tool** (il driver fallisce i `SubagentTask`: serve l'inner-loop agentico, vedi sotto) |
+| Subagenti | n/d (il loop fa tutto) | durabile = `generate_json`-only; **nel driver = loop agentico bounded read/gather** (`agentic.rs`, F3.2c, validato su gemma4) |
 | Uso live | tutto | planner `plan_only` semina motore #1 (ADR 0020 P1); `drive` non ancora instradato |
 
 ### Precisazione su `execute_plan` e `depends_on` (correzione 2026-06-28)
@@ -101,21 +101,32 @@ ogni step chiama un `StepExecutor` iniettato; un `done` lo assegna il runtime **
 sono **vuoti** — il planner-seme produce la FORMA del piano, non gli args (ADR 0020 P1) — il **modello
 li riempie vincolato allo schema del tool** (`fill_arguments`, constrained decoding ADR 0016 Pilastro
 3; args concreti → salta la generazione), (3) esegue sul `CapabilityFacade` canonico (policy +
-validazione + dispatch + audit). I `SubagentTask` **falliscono** (servono l'inner-loop agentico
-multi-round → path agentico futuro), mai un silent-pass. Il Brain espone `drive(request, plan) →
-DriveOutcome`.
+validazione + dispatch + audit). Il Brain espone `drive(request, plan) → DriveOutcome`.
+
+**Step agentici (`SubagentTask`, F3.2c — `agentic.rs`, validato su gemma4):** ADR 0016 Pilastro 2
+definisce DUE modalità sullo stesso grafo — *workflow* (slot-fill, il `subagents::run_generate_json`
+durabile single-shot) e *agent* (uno step la cui esecuzione è un mini-loop). `run_agentic_step` è la
+modalità *agent*: loop **bounded** (`MAX_AGENTIC_ROUNDS`, ultimo round forza la sintesi) in cui il
+modello **sterza** (sceglie il prossimo tool read/gather o conclude) mentre l'harness possiede
+l'envelope. **Due fasi per round** (cura il fallimento "invalid arguments" osservato su gemma4):
+(1) scelta del tool vincolata a un **enum** dei tool gather disponibili (#6), (2) `fill_arguments`
+riempie gli args vincolati allo schema di QUEL tool (riuso del meccanismo capability → caposaldo #5).
+Scope **solo read/gather** (Read/Draft; le scritture restano fuori, servono single-threaded+approval).
+Il `done` resta del gate verify del driver, mai dell'auto-report.
 
 **Convergenza chiave (niente terzo dispatch):** il gateway ha **già** un `CapabilityProvider` browser
 reale registrato nella facade (pilota il sidecar condiviso via `call_shared_browser_sidecar`). Quindi
 `drive` → `CapabilityFacade::call_tool` **riusa gli esecutori durabili canonici**; la `chat_browser_call`
 inline del loop di motore #1 è la **parallela da ritirare**, non da replicare.
 
-**Validato su gemma4** (`orchestrated_brain_drives_plan_on_gemma4`, ignored): planner (gemma4) →
-driver → arg-fill (gemma4, vincolato) → execute (fake browser eseguibile) → done. Il verticale di
-motore #2 regge sul tier debole (caposaldo #2). **Residuo F3:** (a) l'esecutore agentico per i
-`SubagentTask` (inner-loop modello + ponte alla tool-dispatch della chat); (b) **instradare il turno**
-di `stream_chat_via_openai` sul `drive` dietro `HOMUN_ORCHESTRATED_CHAT`, validare flag-ON vs motore #1
-(F3.3); (c) ritirare `merge_plan` per-titolo e il prompt-prosa di control-flow (F3.4).
+**Validato su gemma4:** `orchestrated_brain_drives_plan_on_gemma4` (CapabilityCall: planner→driver→
+arg-fill→execute→done) e `orchestrated_subagent_gathers_on_gemma4` (F3.2c: gemma4 sceglie il tool,
+riempie la query vincolata, raccoglie, sintetizza — `evidence=[gather:web_search]`). Il verticale di
+motore #2 regge sul tier debole (caposaldo #2). **Residuo F3:** (a) **instradare il turno** di
+`stream_chat_via_openai` sul `drive` dietro `HOMUN_ORCHESTRATED_CHAT`, validare flag-ON vs motore #1
+(F3.3 — il pezzo rischioso sul path vivo); (b) ritirare `merge_plan` per-titolo e il prompt-prosa di
+control-flow (F3.4); (c) estendere lo scope agentico oltre read/gather (scritture single-threaded +
+approval).
 
 ## Gli strati (su cui ricostruire, bottom-up)
 

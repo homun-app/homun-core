@@ -17,12 +17,13 @@
 //! already supplied concrete arguments (static/declarative plans, or a turn that
 //! pre-filled them), the model call is skipped.
 //!
-//! ## What it does NOT do
+//! ## SubagentTask steps
 //!
-//! Run a bounded inner *agentic* loop for `SubagentTask` steps (multi-round
-//! browse/gather with the model steering). Those need the chat loop's richer
-//! dispatch; such a step FAILS here rather than silently passing — a plan needing
-//! agentic execution must never be mistaken for complete (caposaldo #2).
+//! Dispatched to [`crate::agentic::run_agentic_step`] — a bounded inner loop where
+//! the model steers (chooses the next read/gather tool, or finishes) while the
+//! harness owns the round budget and forced synthesis (ADR 0016 Pilastro 2 *agent*
+//! mode). Read/gather scope only; writes are out of scope (they need the
+//! single-threaded + approval machinery).
 
 use crate::driver::{StepExecutor, StepOutcome, StepVerifier};
 use crate::execution::tool_for_step;
@@ -96,13 +97,17 @@ impl<R: JsonRuntime> StepExecutor for CapabilityStepExecutor<'_, R> {
             PlanStepKind::MemoryLookup | PlanStepKind::DirectAnswer => {
                 Ok(StepOutcome::succeeded(serde_json::Value::Null))
             }
-            // Agentic steps require the model + the chat loop's richer tool
-            // dispatch. Fail loudly so the plan is not reported complete without
-            // doing the work.
-            PlanStepKind::SubagentTask => Err(OrchestratorError::Planner(format!(
-                "subagent_step_needs_agentic_executor:{}",
-                step.step_id
-            ))),
+            // Agentic step: run the bounded inner loop (read/gather scope) where
+            // the model steers and the harness owns the envelope (ADR 0016
+            // Pilastro 2 agent mode). See `agentic::run_agentic_step`.
+            PlanStepKind::SubagentTask => crate::agentic::run_agentic_step(
+                self.runtime,
+                self.facade,
+                self.context,
+                self.loaded_tools,
+                step,
+                completed,
+            ),
         }
     }
 }
@@ -136,10 +141,13 @@ fn call_capability_tool(
     })
 }
 
-/// Resolves the arguments for a capability step. Concrete non-empty object
+/// Resolves the arguments for a capability call. Concrete non-empty object
 /// arguments (static plans / pre-filled turns) are used as-is; otherwise the model
-/// fills them constrained to the tool's input schema (ADR 0016 Pilastro 3).
-fn fill_arguments<R: JsonRuntime>(
+/// fills them constrained to the tool's input schema (ADR 0016 Pilastro 3). Shared
+/// with the agentic loop (`agentic.rs`) so tool-choice and arg-fill use the SAME
+/// schema-constrained mechanism (caposaldo #5) — there the model picks the tool
+/// from an enum, then this fills its args.
+pub(crate) fn fill_arguments<R: JsonRuntime>(
     runtime: &R,
     step: &PlanStep,
     tool: &CapabilityTool,

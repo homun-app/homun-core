@@ -1,5 +1,6 @@
 //! Assistant orchestrator brain contracts and runtime.
 
+mod agentic;
 mod audit;
 mod brain;
 mod driver;

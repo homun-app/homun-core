@@ -497,11 +497,14 @@ fn drive_runs_capability_steps_in_turn_and_marks_done_after_verify() {
 }
 
 #[test]
-fn drive_fails_subagent_steps_and_skips_their_dependents() {
-    // The capability-only executor cannot run an agentic step. It must FAIL it
-    // (not silently pass), and the dependent capability step must be skipped —
-    // a plan needing agentic work is never mistaken for complete (caposaldo #2).
-    let runtime = StubRuntime::new(vec![]);
+fn drive_runs_subagent_step_via_agentic_loop_then_dependent() {
+    // A SubagentTask now runs the bounded agentic loop (read/gather). With a stub
+    // that finishes on the first turn, the subagent reaches Done and its dependent
+    // capability step then runs — the DAG flows through both step kinds.
+    let runtime = StubRuntime::new(vec![
+        // The agentic loop's first (and only) turn: finish with a summary.
+        serde_json::json!({"action": "finish", "summary": "found the standup window"}),
+    ]);
     let mut brain = brain(
         runtime,
         vec![tool(
@@ -529,17 +532,15 @@ fn drive_fails_subagent_steps_and_skips_their_dependents() {
 
     let out = brain.drive(&request("Indaga e poi cerca"), &plan).unwrap();
 
+    assert!(out.all_done());
     let gather = out.results.iter().find(|r| r.step_id == "gather").unwrap();
-    let use_step = out.results.iter().find(|r| r.step_id == "use").unwrap();
-    assert_eq!(gather.status, DriveStepStatus::Failed);
-    assert!(
-        gather
-            .error
-            .as_ref()
-            .unwrap()
-            .contains("subagent_step_needs_agentic_executor")
+    assert_eq!(gather.status, DriveStepStatus::Done);
+    assert_eq!(
+        gather.outcome.as_ref().unwrap().output["summary"],
+        "found the standup window"
     );
-    assert_eq!(use_step.status, DriveStepStatus::Skipped);
+    let use_step = out.results.iter().find(|r| r.step_id == "use").unwrap();
+    assert_eq!(use_step.status, DriveStepStatus::Done);
 }
 
 #[test]
