@@ -898,6 +898,22 @@ mod tests {
     }
 
     #[test]
+    fn adaptive_floor_input_tiers_for_models_in_use() {
+        // The adaptive floor (ADR 0018) keys off these tier classifications. Pin the models
+        // actually in use so a heuristic change can't silently re-tier them and quietly
+        // change how much the floor scaffolds. Validated against the live setup.
+        let tier = |id: &str| ModelEntry::inferred(id).profile.as_ref().unwrap().tier;
+        // Weak LOCAL tier → Fast: the caposaldo #2 case the floor exists to protect.
+        assert_eq!(tier("gemma4:latest"), ModelTier::Fast);
+        assert_eq!(tier("gemma4:12b"), ModelTier::Fast);
+        // Cloud general-purpose model currently configured → Balanced (less scaffolding
+        // than Fast, more than a dedicated reasoner).
+        assert_eq!(tier("deepseek-v4-pro:cloud"), ModelTier::Balanced);
+        // A genuine reasoning model → Reasoning (the floor sheds scaffolding entirely).
+        assert_eq!(tier("deepseek-r1:cloud"), ModelTier::Reasoning);
+    }
+
+    #[test]
     fn ollama_models_endpoint_uses_api_tags() {
         let p = ProviderEntry::new(
             "ollama".into(),

@@ -116,7 +116,10 @@ richiede eval bi-popolazione (gemma4 vs capace) **non eseguibile in questo ambie
 
 Mappe: [registry](architecture/capability-registry.md), [skills](architecture/skills.md),
 [connectors](architecture/connectors-composio.md), [browser](architecture/browser.md), [mcp](architecture/mcp.md).
-NB live-validation: setup attuale = deepseek-v4-pro:cloud (Z.ai), non Ollama; Composio non configurato.
+NB live-validation (CORRETTO 2026-06-28, sessione 4): **Ollama È installato e gira** (`127.0.0.1:11434`)
+con `gemma4:latest` (8B) + `gemma4:12b` — il vecchio "non Ollama" era STANTIO. Quindi la eval
+bi-popolazione (caposaldo #2) È eseguibile qui: `python3 scripts/eval_suite.py gemma4:latest`. Modello
+chat di default = deepseek-v4-pro:cloud (Z.ai, tier **Balanced**); Composio non configurato.
 
 ## Cosa è stato fatto (rolling, conciso)
 
@@ -171,8 +174,20 @@ NB live-validation: setup attuale = deepseek-v4-pro:cloud (Z.ai), non Ollama; Co
 - **F2.2 (parziale, gated)** over-running guard estratto in `answer_concludes_plan` (puro/testato,
   refactor behavior-preserving); quando accetta la risposta con l'ultimo step aperto, riconcilia
   quello step a `done` + persiste → il turno dopo non riprende il piano a vuoto. Gated
-  `HOMUN_PLAN_RECONCILE` (default off, non validabile live qui). La sintesi forzata non riconcilia
-  (lavoro incompiuto). +1 test. Gate gateway **360 pass / 1 ambientale (soffice)**.
+  `HOMUN_PLAN_RECONCILE` (default off). La sintesi forzata non riconcilia (lavoro incompiuto). +1 test.
+
+**Sessione 2026-06-28 (4) — VALIDAZIONE F2 (scoperto: Ollama+gemma4 ci SONO):**
+- **Correzione di realtà:** Ollama gira (`127.0.0.1:11434`) con `gemma4:latest`+`gemma4:12b` → la eval
+  bi-popolazione È eseguibile. STATO "non Ollama" era stantio (fixato).
+- **`scripts/eval_suite.py gemma4:latest` = ALL GREEN** (deck/document/plan/decision+why/open_loop+why,
+  tutti schema-valid sul tier debole, 63–105s/check). È il gate di regressione ADR 0018 / caposaldo #2:
+  l'orchestrazione strutturata regge su gemma4 dopo F0–F2.
+- **Tier reali pinnati (test):** `gemma4:*`→Fast (il caso che il floor protegge), `deepseek-v4-pro:cloud`
+  →Balanced, `deepseek-r1:cloud`→Reasoning — gli input del floor classificano giusto e monotòni.
+- **Coperto:** foundation (eval) + input tier (test) + manopole/telemetria/reconcile (unit). **NON
+  fatto:** un turno live attraverso il gateway (telemetria floor che emette in shadow su un turno reale,
+  reconcile che scatta) — invasivo sul `~/.homun` reale; il path organico è `adaptive_floor:"shadow"`
+  in runtime-settings, che fa fluire la telemetria F2.1 durante l'uso normale.
 
 **Sessione 2026-06-27 — diagnosi + fix sintomo + analisi strutturale + metodologia:**
 - **Fix agentic-loop validati e pushati** (default flag-off, migliorano il model-loop):
