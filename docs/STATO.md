@@ -164,11 +164,15 @@ Commit `b705289a` (driver+executor) + `3ce99c67` (arg-fill). Vedi [agent-loop](a
   planner). **Leva capace:** il drive usa ora il ruolo **"orchestrator" (deepseek)** non "browser"
   (minimax-m3) → args coerenti. Planner nudge: info live→`subagent_task` browse (eval ALL GREEN).
   Commit `7a472488`.
-- ⏳ **Residuo F3.3 (NON malfunzionamenti, sono efficacia/maturità):** (a) estrazione di dati live
-  precisi da siti booking JS-pesanti = compito agentico difficile; motore #1 vince lì per native
-  tool-calling + dispatch browser inline maturo → è la **convergenza F3.3-pre** (ritirare/condividere
-  `chat_browser_call`); (b) il flicker reasoning della sintesi (collector → instradare reasoning alla
-  work-island); (c) accendere il drive di default (oggi `HOMUN_DRIVE_CHAT` off).
+- ⚠️ **REGRESSIONE BROWSE del drive vs motore #1 (sessione 5c, IL bug prioritario):** col flag ON il
+  browse è PEGGIO del motore #1 — browser non visibile (sidecar condiviso headless/conflitto CDP), form
+  non compilati in modo affidabile (loop agentico `generate_json`, schema non imposto → args incoerenti),
+  pannello Computer assente. **Causa unica:** il drive RE-IMPLEMENTA l'esecuzione browser invece di
+  RIUSARE il path maturo del motore #1 (per-thread visibile + native tool-calling + arm inline). **Fix
+  (NON tornare indietro):** il drive possiede il control-flow ma DELEGA l'esecuzione browser al path del
+  motore #1 → è la **convergenza F3.3-pre** ridefinita. Dettagli nel prompt di ripartenza in fondo.
+- ⏳ Altri residui: flicker reasoning della sintesi (collector → reasoning alla work-island); accendere
+  il drive di default solo DOPO la convergenza browser.
 - ⏳ **F3.4** ritirare `merge_plan` per-titolo + prompt-prosa (solo quando il drive è il default).
   ⏳ scope agentico oltre read/gather (scritture single-threaded+approval).
 
@@ -180,6 +184,17 @@ bi-popolazione (caposaldo #2) È eseguibile qui: `python3 scripts/eval_suite.py 
 chat di default = deepseek-v4-pro:cloud (Z.ai, tier **Balanced**); Composio non configurato.
 
 ## Cosa è stato fatto (rolling, conciso)
+
+**Sessione 2026-06-28 (5d) — REGRESSIONE BROWSE individuata (lezione di architettura):**
+- L'utente: col drive il browse è REGREDITO vs motore #1 (che apriva il browser visibile, compilava
+  form, prendeva treni/voli, mostrava il pannello Computer). Il drive: invisibile + form non affidabili
+  + pannello assente.
+- **Lezione:** il drive deve possedere il CONTROL-FLOW (piano/identità — funziona) ma DELEGARE
+  l'esecuzione tool (browser soprattutto) al path MATURO del motore #1 (per-thread visibile + native
+  tool-calling), NON reimplementarlo con loop agentico + sidecar condiviso. Il loop agentico
+  (`agentic.rs`) era la strada sbagliata per l'esecuzione browser. → prossimo passo = convergenza
+  F3.3-pre ridefinita (vedi prompt di ripartenza). NON spegnere il flag (default OFF: l'app normale usa
+  già il motore #1 funzionante); il fix è in avanti.
 
 **Sessione 2026-06-28 (5c) — F3.3 polish: UX live + browse agentico funzionante (curl-driving):**
 - Live per-step UX (‹‹ACT›› via canale sync→async) + pannello Plan (‹‹PLAN›› marker). Commit `8ae9c9ce`.
@@ -373,68 +388,77 @@ canonica e si ritira il parallelo; si rimuove il codice morto toccato; si splitt
 grossi; si commenta il perché; ogni modifica aggiorna la pagina architecture/ + cita il
 caposaldo + porta un test.
 
-PROSSIMO PASSO: F3.3 — INSTRADARE IL TURNO sul driver di motore #2 (il pezzo rischioso, sul path
-VIVO). La FONDAZIONE di F3 è già costruita e validata su gemma4 (driver in-turn + arg-fill, vedi
-sotto): NON ripartire da lì. Leggi PRIMA docs/decisions/0020-*.md + 0016-*.md +
-docs/architecture/agent-loop.md (sezione "Il driver in-turn" + "I DUE motori").
+PROSSIMO PASSO = IL BUG DA RISOLVERE (priorità): il DRIVE (motore #2, dietro `HOMUN_DRIVE_CHAT`) è
+INSTRADATO E FUNZIONA, MA per i task di BROWSE è una REGRESSIONE rispetto al motore #1. Confronto reale
+nell'app (sessione 5c):
+- Motore #1 (default, flag OFF): apre il browser VISIBILE del contained-computer, COMPILA i form,
+  prende treni/voli, e si vede l'avanzamento (pannello "Computer LIVE" in chat).
+- Drive (flag ON): browser NON visibile (headless / conflitto CDP), NON riesce a compilare i form in
+  modo affidabile, il pannello Computer NON compare. → l'utente lo vive come un PEGGIORAMENTO.
 
-OBIETTIVO: instradare `stream_chat_via_openai` sul `OrchestratorBrain::drive` dietro
-`HOMUN_ORCHESTRATED_CHAT`, ritirando il loop prompt-prosa di motore #1 e `merge_plan` per-TITOLO
-(identità = `step_id`, mai dal testo — caposaldo #6). 3 invarianti: monotonìa, limitatezza, identità
-non inferita (tutte già garantite dal driver per costruzione).
+CAUSA RADICE (capirla bene, è UNA sola, tre sintomi): il drive RE-IMPLEMENTA l'esecuzione browser
+(loop agentico in `agentic.rs` + path `call_shared_browser_sidecar`) invece di RIUSARE il path MATURO
+del motore #1 (dispatch browser inline in `stream_chat_via_openai`: `chat_browser_call` + le sue arm +
+**sessione per-thread VISIBILE** + **native tool-calling** del modello). I tre sintomi discendono da qui:
+  1. VISIBILITÀ: il drive usa il **sidecar condiviso** (headless/auto-CDP, in conflitto con la sessione
+     per-thread sullo stesso Chromium `:9222` → `connectOverCDP` va in timeout); il motore #1 usa la
+     sessione per-thread VISIBILE. Restart del container `homun-cc` pulisce uno stato stantio ma il
+     conflitto STRUTTURALE resta.
+  2. FORM-FILLING: il loop agentico usa `generate_json` (schema NON imposto su questo endpoint, gap
+     ADR 0016) → args incoerenti (es. `browser_act` annidato sotto "request", URL nel `tool_name`); il
+     motore #1 usa **native tool-calling** → args imposti dal provider, coerenti.
+  3. PANNELLO COMPUTER: il path chat aggiorna lo stato UI/contained-computer; il drive no.
 
-GIÀ FATTO E VALIDATO SU GEMMA4 (non ripartire da qui):
-- F3-planner: F1.d (browser nel registry), risoluzione tollerante tool_name (#11), enum tool nello
-  schema planner (#6). Test: `orchestrated_planner_sees_browser_on_gemma4` (ignored).
-- **F3.1 driver** (`crates/orchestrator/src/driver.rs` `drive_plan`): control-flow dell'harness, passo
-  avanti su piano topologico (`validate_plan`), `StepExecutor`/`StepVerifier` iniettati, done dopo
-  verify, 3 invarianti per costruzione. 7 unit-test puri. Commit `b705289a`.
-- **F3.2 esecuzione per-step + arg-fill** (`step_executor.rs` `CapabilityStepExecutor<R>`, `Brain::drive`):
-  args vuoti del piano-seme → il modello li riempie vincolato allo schema del tool (ADR 0016 P3) →
-  `CapabilityFacade::call_tool`. Commit `3ce99c67`. Test: `orchestrated_brain_drives_plan_on_gemma4`
-  (plan→driver→arg-fill→execute→done).
-- **F3.2c esecutore agentico** (`agentic.rs` `run_agentic_step`): modalità *agent* ADR 0016 P2, loop
-  bounded read/gather, due fasi/round (scelta tool enum + `fill_arguments`). Commit `3027abe4`. Test:
-  `orchestrated_subagent_gathers_on_gemma4` (gemma4 raccoglie e sintetizza).
+LA DECISIONE GIUSTA (SOTA, NON tamponare, NON tornare indietro): il drive deve POSSEDERE il CONTROL-FLOW
+(piano/identità/tracciamento — quello FUNZIONA e va tenuto) ma DELEGARE l'ESECUZIONE dei tool — il
+BROWSER soprattutto — al path ESISTENTE e MATURO del motore #1, NON reimplementarlo. È la convergenza
+F3.3-pre, ora definita con precisione: un browser-step del drive deve girare attraverso lo STESSO codice
+che usa il motore #1 (sessione per-thread visibile + native tool-calling + le arm inline). Concretamente:
+ESTRARRE l'esecuzione browser del motore #1 in un'unità riusabile che il `ChatDriveStepExecutor` possa
+chiamare — e ritirare il path agentico+sidecar del drive per il browser. Lezione della sessione 5c: il
+mio loop agentico (agentic.rs) era la STRADA SBAGLIATA per l'esecuzione browser; il framework agentico va
+bene come control-flow ma l'esecuzione tool deve riusare il motore #1.
 
-SCOPERTA CHIAVE (de-rischia F3.3): la facade del gateway ha GIÀ un `CapabilityProvider` browser reale
-(main.rs ~`call_shared_browser_sidecar`) → `drive`→`call_tool` riusa gli esecutori durabili canonici.
-NIENTE terzo dispatch: la `chat_browser_call` inline di `stream_chat_via_openai` (un grosso match
-inline, NON un seam estraibile) è la PARALLELA da ritirare, non da replicare.
+NB IMPORTANTE: il flag è default OFF, quindi l'app normale dell'utente USA GIÀ il motore #1 (che
+funziona). Il fix è IN AVANTI (far riusare al drive il path browser del motore #1), NON spegnere il flag.
 
-INCREMENTI RIMASTI (gated dietro flag, verde a ogni passo, validati su gemma4): **F3.3** instrada il
-turno sul `drive` (quando non c'è piano da riprendere E flag ON: pianifica via `orchestrator_plan_for_chat`
-→ `drive` invece di seminare il loop), streama progresso + sintesi finale, valida flag-ON vs motore #1
-zero-regressioni; **F3.4** ritira `merge_plan` per-titolo + prompt-prosa; estendi lo scope agentico
-oltre read/gather (scritture single-threaded+approval).
+GIÀ FATTO (NON ripartire da qui; tutto su `main`):
+- F3.1 driver (`driver.rs` `drive_plan`, seam `StepExecutor`/`StepVerifier`), F3.2 arg-fill
+  (`step_executor.rs`), F3.2c loop agentico (`agentic.rs`) — validati su gemma4. Commit `b705289a`/
+  `3ce99c67`/`3027abe4`.
+- F3.3 routing live: `orchestrator_drive_for_chat` + `ChatDriveStepExecutor` (impl `StepExecutor`, tiene
+  `&AppState`) + hook in cima al task spawnato di `stream_chat_via_openai` dietro `HOMUN_DRIVE_CHAT` +
+  sintesi col modello di chat (streamata) + marker ‹‹PLAN›› + azioni live (‹‹ACT›› via canale
+  `tokio::mpsc` sync→async). Commit `d84a1a0b`...`8dbc0686`.
+- Browse agentico reso funzionante (control-flow): bug radice `action=None` = il prompt agentico non
+  descriveva il FORMATO output → fix: formato+esempi in `build_prompt` (agentic.rs). Leva modello: il
+  drive usa ora `build_drive_inference_router()` = ruolo "orchestrator" (deepseek), NON "browser"
+  (minimax-m3, debole). MA: l'esecuzione browser resta il path sbagliato (vedi sopra).
 
-⚠️ **F3.3 È BLOCCATO SU UN PREREQUISITO: la convergenza dell'esecuzione browser** (verificato a fondo,
-sessione 5). NON è un wire-up. Il driver (`drive_plan`/`Brain::drive`) può iniettare un `StepExecutor`
-custom lato gateway (il seam tiene `&AppState`, NON serve un provider) — fin qui pulito. Il blocco è
-**come eseguire un browser-step**: oggi l'esecuzione browser è **duplicata e non riusabile**:
-- **Loop di chat**: dispatch **inline** (match dentro `stream_chat_via_openai`), tool *underscore*
-  (`browser_navigate {url}`), traduzione args propria, **sessione browser per-thread**. NON è una
-  funzione richiamabile.
-- **Durabile**: `call_shared_browser_sidecar(&AppState, &TaskRecord, BrowserMethod, params)` — tool
-  *dot-named* (`browser.navigate`), `BrowserMethod`, **sidecar condiviso**. Schema/naming/args diversi.
-Il piano del driver ha i tool *underscore* (schemi chat). Mapparli al sidecar = **replicare** la
-traduzione inline (divergenza, viola #5) **o estrarla** (chirurgia sulla funzione da 52k righe).
-**PREREQUISITO REALE (de-risk):** estrarre l'esecuzione browser in **un'unità riusabile** (input: tool
-underscore + args chat; output: risultato) condivisa da chat-loop E driver, ritirando la duplicazione
-(caposaldo #5). Va fatto con l'**app viva** (tocca il browser reale). DOPO, F3.3 = wire-up: gateway
-`StepExecutor` → unità browser condivisa; `orchestrator_drive_for_chat` (plan→`drive_plan`→sintesi);
-hook dietro nuovo flag + fallback a motore #1. `drive` produce esiti per-step → serve sintesi finale
-(riusa il path forced-synthesis ~`stream_chat_via_openai`). Debug: `HOMUN_DEBUG=1 npm run electron:dev`.
+SCOPERTE/STRUMENTI CONCRETI da riusare:
+- Ruoli modello in `~/.homun/providers.json`: `browser`=minimax-m3 (debole), `orchestrator`=deepseek
+  (capace). `chat` default = deepseek-v4-pro:cloud.
+- DEBUG senza GUI: avvia il gateway STANDALONE (`./target/debug/local-first-desktop-gateway`, con
+  `HOMUN_DEBUG=1 HOMUN_DRIVE_CHAT=1`) e pilotalo via `curl -s -X POST :18765/api/chat/generate_stream`
+  (header `Authorization: Bearer $(cat ~/.homun/desktop-gateway-token)`, body
+  `{request_id,prompt,thread_id,max_tokens,temperature,wait_if_busy:true}`). Leggi i log `[agentic]`/
+  `[drive]` (gated HOMUN_DEBUG). ⚠️ electron in dev CRASHA se il `cargo run` del gateway ricompila oltre
+  il timeout health-check → PRE-COMPILA con `cargo build -p local-first-desktop-gateway --bin
+  local-first-desktop-gateway` PRIMA di lanciare `npm run electron:dev`.
+- Browser: `browser_act_tool_schema()` ha parametri PIATTI `{kind, ref, text, ...}` (kind include
+  scroll); `input_schema` cablato = `function.parameters` (piatto). `browser_method_for_chat_tool`
+  mappa i nomi underscore → `BrowserMethod`. `normalize_browser_call` fa il managed-tab. La visibilità
+  dipende da `BROWSER_AUTOMATION_USER_CDP_ENDPOINT` = `contained_computer_cdp_endpoint()` (connessione
+  al Chromium visibile :9222) vs headless. Il chat-loop spawna `spawn_browser_sidecar_for_chat`
+  (per-thread), il drive `call_shared_browser_sidecar`→`spawn_browser_sidecar_for_task` (condiviso).
 
-AMBIENTE: Ollama gira con gemma4:latest/12b → eval bi-popolazione e validazione live SONO possibili
-qui (`python3 scripts/eval_suite.py gemma4:latest` = gate di regressione caposaldo #2). Modello chat
-default = deepseek-v4-pro:cloud (Balanced). `adaptive_floor` = "shadow" (telemetria F2.1 attiva). Non
-accendere il floor a "on" senza eval bi-popolazione. NB: i file:line di main.rs sono sfasati — usa i
-nomi di funzione.
+LEGGI PRIMA: docs/architecture/agent-loop.md (sezioni "Il driver in-turn" + "I DUE motori"), 0020-*.md,
+0016-*.md, e la nota in memoria [[homun-loop-convergence-adr0020]].
 
-Fatto finora: F0 (L0 completo) + F1 COMPLETO+testato + F2 (meccanismo costruito, validato
-bi-popolazione) + F3-planner + **F3.1/F3.2/F3.2c: driver in-turn + arg-fill + executor agentico
-read/gather, tutti validati su gemma4**. Prossimo = F3.3 (instradamento live).
+AMBIENTE: Ollama gira con gemma4 → `python3 scripts/eval_suite.py gemma4:latest` = gate caposaldo #2
+(ALL GREEN dopo tutte le modifiche F3). Container browser `homun-cc` (Docker) up: CDP :9222, noVNC
+:6080. `adaptive_floor`="shadow". I file:line di main.rs (52k righe) sono sfasati → usa i nomi di
+funzione.
 
 A fine sessione aggiorna docs/STATO.md.
 ```
