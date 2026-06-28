@@ -27,12 +27,52 @@ use serde::Deserialize;
 /// F0 / ADR 0019: the convergence point for model-output normalization. Future slices fold
 /// sanitization and tool-call-as-text parsing in here too, so every provider path produces ONE
 /// canonical representation by construction.
+/// Pull `<think>…</think>` / `<thinking>…</thinking>` reasoning blocks OUT of model content,
+/// returning `(content_without_think, reasoning)`. Reasoning models emit their trace inline
+/// like this when not asked with a separate-thinking flag (e.g. Ollama without `think:true`).
+/// Centralizing it here keeps the trace available for the reasoning-fallback, instead of the
+/// loop's text sanitizer deleting it. Only well-formed (closed) blocks are extracted; a stray
+/// unclosed tag is left for the downstream sanitizer.
+pub fn split_reasoning_from_content(content: &str) -> (String, String) {
+    let mut clean = content.to_string();
+    let mut reasoning = String::new();
+    for (open, close) in [("<think>", "</think>"), ("<thinking>", "</thinking>")] {
+        while let Some(o) = clean.find(open) {
+            let after = o + open.len();
+            let Some(close_rel) = clean[after..].find(close) else {
+                break; // unclosed → leave it for the sanitizer
+            };
+            let inner = clean[after..after + close_rel].trim();
+            if !inner.is_empty() {
+                if !reasoning.is_empty() {
+                    reasoning.push('\n');
+                }
+                reasoning.push_str(inner);
+            }
+            clean.replace_range(o..after + close_rel + close.len(), "");
+        }
+    }
+    (clean.trim().to_string(), reasoning)
+}
+
 pub fn assistant_response(
     content: String,
     reasoning: String,
     tool_calls: Vec<serde_json::Value>,
     finish_reason: &str,
 ) -> serde_json::Value {
+    // Pull any inline `<think>…</think>` reasoning OUT of content into the reasoning channel.
+    // A reasoning model that wasn't asked with Ollama's `think:true` (so `message.thinking` is
+    // empty) emits its trace inline as these tags; extracting it here — instead of the loop's
+    // text sanitizer silently DELETING it — lets the fallback below recover an answer when the
+    // model put everything inside the think block (else: empty answer committed). An explicit
+    // `reasoning` (e.g. OpenAI `reasoning_content`, Ollama `message.thinking`) still wins.
+    let (content, inline_reasoning) = split_reasoning_from_content(&content);
+    let reasoning = if reasoning.trim().is_empty() {
+        inline_reasoning
+    } else {
+        reasoning
+    };
     let content = if content.trim().is_empty() && !reasoning.trim().is_empty() {
         reasoning
     } else {
@@ -171,6 +211,26 @@ pub fn parse_plan_propose(text: &str) -> Result<PlanProposed, NormalizeError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn split_reasoning_extracts_think_tags() {
+        let (content, reasoning) =
+            split_reasoning_from_content("<think>step by step</think>The answer is 8.");
+        assert_eq!(content, "The answer is 8.");
+        assert_eq!(reasoning, "step by step");
+        // No tags → content unchanged, reasoning empty.
+        let (c, r) = split_reasoning_from_content("plain answer");
+        assert_eq!(c, "plain answer");
+        assert_eq!(r, "");
+    }
+
+    #[test]
+    fn assistant_response_recovers_answer_buried_in_think_tags() {
+        // Ollama reasoning model without think:true: whole answer inside <think>, content
+        // otherwise empty → sanitizer would delete it → empty. Canonical builder recovers it.
+        let body = assistant_response("<think>the real answer</think>".into(), String::new(), vec![], "stop");
+        assert_eq!(body["choices"][0]["message"]["content"], "the real answer");
+    }
 
     #[test]
     fn assistant_response_keeps_content_when_present() {

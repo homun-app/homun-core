@@ -189,9 +189,19 @@ Invarianti:
     shape OpenAI-compat) è ora in `model_normalize`, **testata** (2 test: oggetto/stringa/
     mancante), e `process_ollama_line` la chiama (inline cancellato). I tool-call OpenAI
     arrivano già-formati (serve solo il reassembly dei frammenti argomenti, resta nel collector).
-  Da cablare (prossimi increment F0): `sanitize_model_text`, `parse_text_tool_calls` (tool-as-
-  text per modelli che li emettono come prosa), lo schema-downgrade (oggi duplicato gateway vs
-  `openai_compat.rs`), fixture end-to-end per-provider.
+  - **`split_reasoning_from_content`** (F0.2): estrae i blocchi `<think>…</think>` /
+    `<thinking>…</thinking>` da `content` → `reasoning`, **in `assistant_response`**, così il
+    reasoning-fallback recupera la risposta quando il modello mette tutto nel think. **Verifica
+    (fonte Ollama + context7):** `message.thinking` si popola SOLO con `think:true` nella
+    richiesta — che NON mandiamo (`build_chat_payload`) → i modelli reasoning (deepseek-r1,
+    qwen3) emettono inline `<think>…</think>`; prima `sanitize_model_text` li **cancellava**
+    (→ risposta vuota se l'intera risposta era nel think). Ora estratti+preservati. 2 test.
+    Confermato anche: tool_calls Ollama completi per-chunk + accumulo `extend` = il nostro
+    pattern; `arguments` oggetto + niente id = la nostra `ollama_tool_call`.
+  Da cablare (prossimi increment F0): `sanitize_model_text` (convergere il resto: tool_call/
+  minimax tokens), `parse_text_tool_calls` (tool-as-text), lo schema-downgrade (duplicato
+  gateway vs `openai_compat.rs`), fixture end-to-end per-provider. (Opzione valutata e scartata:
+  mandare `think:true` — rischioso sui modelli non-thinking; l'estrazione tag è model-agnostic.)
 - **Doppio path per il deck**: `generate_deck_content` (gateway) duplica il floor
   schema-downgrade già presente in `crates/inference/src/openai_compat.rs`; ADR 0016 prevede
   la convergenza, oggi non avvenuta.

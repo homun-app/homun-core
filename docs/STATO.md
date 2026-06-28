@@ -18,9 +18,16 @@
   - ✅ **inc.1b** Ollama `message.thinking` — `process_ollama_line` accumula il reasoning trace
     (Ollama LO espone separato dal content) → fallback uniforme anche su Ollama.
   - ✅ **inc.1c** `ollama_tool_call` — normalizzazione tool-call Ollama (id sintetico + args
-    oggetto→stringa) canonica + **testata** (2 test); inline cancellato.
-  - **Prossimo (inc.2)**: convergere `sanitize_model_text` nel builder; poi `parse_text_tool_calls`
-    (tool-as-text); poi schema-downgrade duplicato; poi fixture per-provider. Poi L0 = punto fermo → F1.
+    oggetto→stringa) canonica + **testata** (2 test); inline cancellato. **Verificato vs fonte
+    Ollama ufficiale + context7**: tool_calls completi per-chunk, accumulo `extend`, args oggetto,
+    niente id — la nostra impl combacia.
+  - ✅ **inc.2** `split_reasoning_from_content` — estrae `<think>…</think>` da content→reasoning
+    nel builder. Verifica ha scoperto: `message.thinking` Ollama si popola solo con `think:true`
+    (non lo mandiamo) → i reasoning model emettono `<think>` inline che `sanitize` cancellava
+    (risposta vuota se tutto nel think). Ora estratti+preservati per il fallback. 2 test.
+  - **Prossimo (inc.3)**: convergere il resto di `sanitize_model_text` (tool_call/minimax tokens)
+    nel normalizzatore; poi `parse_text_tool_calls` (tool-as-text); poi schema-downgrade duplicato;
+    poi fixture per-provider. Poi L0 = punto fermo → F1.
 
 ## Cosa è stato fatto (rolling, conciso)
 
