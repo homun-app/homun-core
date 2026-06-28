@@ -89,8 +89,9 @@ sulla finestra reale. Testato e verificato sulla fonte. **Coda L0 esaurita.**
   ora **vede il browser** coi nomi che il loop esegue (set ombra chiuso → sblocca ADR 0020). Test:
   i tool seminati combaciano coi tool di chat + sono recuperabili dal `ToolCorpus` (lo stesso ranker
   del planner). **Residuo F3:** i micro-tool di chat sono ancora cablati in `base_tools` (sorgentarli
-  dal registry è F3); `BrowserCapabilityProvider` (dot-named, mai istanziato) è morto → flaggato per
-  ritiro. Caposaldo #5/#7.
+  dal registry è F3). `BrowserCapabilityProvider` (dot-named, mai istanziato) **CANCELLATO** (cleanup
+  2026-06-28): l'esecutore durable reale pilota il sidecar condiviso direttamente, non serviva il
+  provider tipato. Caposaldo #5/#7.
 
 Mappe: [registry](architecture/capability-registry.md), [skills](architecture/skills.md),
 [connectors](architecture/connectors-composio.md), [browser](architecture/browser.md), [mcp](architecture/mcp.md).
@@ -121,6 +122,14 @@ NB live-validation: setup attuale = deepseek-v4-pro:cloud (Z.ai), non Ollama; Co
   morto → flaggato. Caposaldo #5/#7.
 - Test: 6 unit shared-ranker + 2 `ToolCorpus` + 2 gateway browser-seed; gate gateway 355 pass / 1
   fallimento ambientale atteso (soffice). **F1 COMPLETO → prossimo F2 (loop tier-adattivo, ADR 0018).**
+- **F1.d cleanup** cancellato il gemello dormiente `BrowserCapabilityProvider` (`browser_provider.rs`
+  + il suo test + l'export in `lib.rs`): mai istanziato, era il terzo sorgente dot-named dei tool
+  browser. Verificato prima che l'esecutore durable reale (`execute_capability_browser_task` →
+  `execute_persistent_browser_capability`) piloti il sidecar condiviso **direttamente** via
+  `BrowserAutomationClient`/`BrowserMethod` + `browser_method_for_capability_tool` (gemello vivo del
+  `method_for_tool` del provider): il worker path non aveva e non ha bisogno del provider tipato.
+  L'enum `CapabilityProviderKind::Browser` resta (lo usano registry/orchestratore/bridge). Stesso
+  pattern di ritiro di F1.b/F1.c. Caposaldo #5. `cargo check --workspace` verde.
 
 **Sessione 2026-06-27 — diagnosi + fix sintomo + analisi strutturale + metodologia:**
 - **Fix agentic-loop validati e pushati** (default flag-off, migliorano il model-loop):

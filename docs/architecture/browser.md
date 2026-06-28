@@ -217,16 +217,23 @@ Problemi reali individuati nel codice attuale:
    (`browser_safety.rs:71`), quindi non c'è via di estrazione dati via JS: tutto deve
    passare dal testo dello snapshot o da click/scroll. Limita pagine in cui il dato è
    raggiungibile solo via script.
-6. **Tre sorgenti per "i tool browser" (parzialmente convergente, F1.d).** Esistono: (a)
+6. **Due sorgenti per "i tool browser" (convergenti, F1.d).** Restano: (a)
    gli **schemi di chat** (`browser_*_tool_schema()` in `main.rs`, la superficie reale che il
    modello chiama, cablati in `base_tools`); (b) il **seed del registry**
-   (`browser_registry_cached_tools`) che ora deriva gli stessi sei tool dagli schemi (a) — è
-   ciò che il **planner** dell'orchestratore indicizza, quindi il browser è finalmente
-   visibile al piano coi nomi giusti; (c) il provider tipato
-   `BrowserCapabilityProvider` (`crates/capabilities/src/browser_provider.rs`), dot-named a
-   livello di metodo sidecar (`browser.navigate`), **mai istanziato** → codice morto, gemello
-   dormiente da ritirare. F1.d ha reso (a)≡(b); resta da far sorgentare (a) dal registry e
-   cancellare (c) (lavoro di F3).
+   (`browser_registry_cached_tools`) che deriva gli stessi sei tool dagli schemi (a) — è
+   ciò che il **planner** dell'orchestratore indicizza, quindi il browser è visibile al piano
+   coi nomi giusti. F1.d ha reso (a)≡(b); resta da far sorgentare (a) dal registry (lavoro di
+   F3). Il **terzo** sorgente storico — il provider tipato `BrowserCapabilityProvider`,
+   dot-named a livello di metodo sidecar (`browser.navigate`), **mai istanziato** — è stato
+   **cancellato** (sessione 2026-06-28, F1.d cleanup): era un gemello dormiente in violazione del
+   caposaldo #5. L'esecutore durable reale (`execute_capability_browser_task` →
+   `execute_persistent_browser_capability`, `main.rs`) pilota il sidecar condiviso
+   **direttamente** via `BrowserAutomationClient`/`BrowserMethod`, mappando il tool con
+   `browser_method_for_capability_tool` (`main.rs:~35473`, gemello vivo di quello che era
+   `method_for_tool` nel provider): non serviva né serve un `CapabilityProvider` tipato per il
+   worker path. NB: l'**enum** `CapabilityProviderKind::Browser` resta (lo usano registry,
+   orchestratore e resource-bridge per la classe risorsa `BrowserSession`); è solo la **struct**
+   provider a essere stata rimossa.
 
 ---
 
@@ -240,6 +247,11 @@ Problemi reali individuati nel codice attuale:
   CODICE (harness), non nel modello: il browsing deve funzionare anche su modelli deboli.
 - **Caposaldo 9 — workspace agentico operativo.** Il loop osserva→agisci con evidenza
   (snapshot, screenshot, browser-step) è una superficie di computer activity verificabile.
+- **Caposaldo 5 — un solo motore / niente duplicati.** Il browser ha UN solo esecutore
+  (l'esecutore durable sul sidecar condiviso) e UNA sola superficie verso il planner (il seed
+  del registry). Il provider tipato dormiente `BrowserCapabilityProvider` è stato cancellato
+  (F1.d cleanup) per non lasciare un secondo path di esecuzione mai cablato — stesso ritiro già
+  fatto per `SkillCapabilityProvider` (F1.b) e `ComposioCapabilityProvider` (F1.c).
 - **ADR 0010 — contained computer**: l'attach via CDP (`connectOverCDP`,
   `BROWSER_AUTOMATION_USER_CDP_ENDPOINT`) è il modo in cui il browser reale del contained
   computer diventa il backend del sidecar. Riferimento esterno: `openclaw` (la snapshot
