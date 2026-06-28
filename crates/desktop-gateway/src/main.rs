@@ -84,7 +84,8 @@ use local_first_memory::{
     WikiPage, WorkspaceId as MemoryWorkspaceId,
 };
 use local_first_orchestrator::{
-    DriveStepStatus, ExecutionPlan, MemoryContextProvider, MemoryContextSnippet, OrchestratorBrain,
+    DriveOutcome, DriveStepStatus, ExecutionPlan, MemoryContextProvider, MemoryContextSnippet,
+    OrchestratorBrain,
     OrchestratorBudgets, OrchestratorError, OrchestratorRequest, OrchestratorResult,
     OrchestratorRoute, PassThroughVerifier, PlanStep, PlanStepKind, StepExecutionPolicy,
     StepExecutor, StepOutcome, drive_plan, fill_arguments,
@@ -19290,7 +19291,7 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
             })
             .await;
             match driven {
-                Ok(Ok(Some(gathered))) => {
+                Ok(Ok(Some((gathered, plan_steps)))) => {
                     // Synthesize the final answer with the user's CHAT model (capable at
                     // prose), streamed LIVE via the same provider-aware path the model
                     // loop's forced-synthesis uses. The driver gathered the evidence; the
@@ -19345,7 +19346,14 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
                             eprintln!("[drive] ADR0020 chat synthesis empty → model-loop fallback");
                         }
                     } else {
-                        let final_text = collapse_plan_markers(&synth_text);
+                        // Prepend the canonical plan marker so the chat UI shows the
+                        // steps and their per-step status (what the driver did) and the
+                        // committed message persists it (collapse keeps one block).
+                        let final_text = collapse_plan_markers(&format!(
+                            "‹‹PLAN››{}‹‹/PLAN››\n{}",
+                            build_plan_markdown(&plan_steps),
+                            synth_text
+                        ));
                         let _ = emit_stream_event(
                             &tx,
                             GenerateStreamEvent::Done {
@@ -36045,15 +36053,41 @@ impl StepExecutor for ChatDriveStepExecutor<'_> {
     }
 }
 
-/// Plans then DRIVES the turn. Returns `Ok(Some(answer))` when the driver produced
-/// a final answer, `Ok(None)` to fall back to the model loop (conversational, empty
-/// plan, or nothing gathered), or `Err` on a hard failure (caller also falls back).
+/// Canonical plan steps ({id,title,status,detail}) with live status overlaid from
+/// the drive outcome, so the chat UI's plan panel can show what the driver did
+/// (reuses `execution_plan_to_canonical_steps`; `None` outcome → all "todo").
+fn drive_canonical_steps(plan: &ExecutionPlan, outcome: Option<&DriveOutcome>) -> Vec<serde_json::Value> {
+    let mut steps = execution_plan_to_canonical_steps(plan);
+    if let Some(outcome) = outcome {
+        for step in &mut steps {
+            let id = step
+                .get("id")
+                .and_then(|value| value.as_str())
+                .unwrap_or("")
+                .to_string();
+            if let Some(result) = outcome.results.iter().find(|r| r.step_id == id) {
+                let status = match result.status {
+                    DriveStepStatus::Done => "done",
+                    DriveStepStatus::Failed | DriveStepStatus::Unverified => "error",
+                    DriveStepStatus::Skipped => "todo",
+                };
+                step["status"] = serde_json::json!(status);
+            }
+        }
+    }
+    steps
+}
+
+/// Plans then DRIVES the turn. Returns `Ok(Some((gathered, plan_steps)))` when the
+/// driver gathered evidence (the caller synthesizes the answer and shows the
+/// plan), `Ok(None)` to fall back to the model loop (conversational, empty plan, or
+/// nothing gathered), or `Err` on a hard failure (caller also falls back).
 /// Synchronous — run via `spawn_blocking` (the sidecar + model calls block).
 fn orchestrator_drive_for_chat(
     state: &AppState,
     goal: &str,
     language: &str,
-) -> Result<Option<String>, String> {
+) -> Result<Option<(String, Vec<serde_json::Value>)>, String> {
     let user = gateway_capability_user_id();
     let workspace = gateway_capability_workspace_id();
     let (mut policy_context, provider_tools) = {
@@ -36158,10 +36192,12 @@ fn orchestrator_drive_for_chat(
             preview.replace('\n', " ")
         );
     }
-    // Return the GATHERED evidence; the caller synthesizes the final answer with the
-    // user's CHAT model (capable at prose). The browser-role router is tuned for
-    // action JSON, not synthesis — it returned an empty answer in the first live run.
-    Ok(Some(gathered))
+    // Return the GATHERED evidence + the plan with per-step status; the caller
+    // synthesizes the final answer with the user's CHAT model (capable at prose)
+    // and surfaces the plan. The browser-role router is tuned for action JSON, not
+    // synthesis — it returned an empty answer in the first live run.
+    let plan_steps = drive_canonical_steps(&plan, Some(&outcome));
+    Ok(Some((gathered, plan_steps)))
 }
 
 /// A1.1: runs the OrchestratorBrain so it MATERIALIZES durable tasks into the
