@@ -63,24 +63,36 @@ reasoning-fallback, `<think>`, tool-call Ollama + tool-as-text, sanitize, profil
 `model_normalize`; floor structured-output in una sola `structured_response_format`; budget prompt
 sulla finestra reale. Testato e verificato sulla fonte. **Coda L0 esaurita.**
 
-**Prossimo:** **F1 — capability unica** — vedi [piano](plans/2026-06-27-foundations-up-convergence.md):
-(a) un solo motore di capability-search (ritirare `bm25_rank` vs `ToolSearchIndexStore`); (b) skill
-(`SkillCapabilityProvider` cablato o cancellato, decisione esplicita); (c) Composio una sola impl (v3);
-(d) **browser dentro il registry** come capability (oggi inline → il planner non lo vede, blocca ADR
-0020). Mappe: [registry](architecture/capability-registry.md), [skills](architecture/skills.md),
+**F1 — capability unica (IN CORSO).** Vedi [piano](plans/2026-06-27-foundations-up-convergence.md):
+- ✅ **(b) skill** (F1.b) — ritirato il `SkillCapabilityProvider` tipato dormiente (errore di
+  categoria: skill = prosa, non tool chiamabile); path filesystem = canonica. Metadati skill/plugin
+  tenuti (fondazione WS9). Commit `7b1fcecb`.
+- ✅ **(c) Composio** (F1.c) — convergiuto sul path **v3** unico; ritirato il provider crate pre-v3
+  (`composio.rs` cancellato). Era anche un **bug latente** (list_tools pre-v3 vs API v3 → run autonome
+  rotte). Gate deny-by-default preservato in `authorize_managed_capability_tool` (riusa
+  `CapabilityPolicy::tool_access`), 1 unit-test. Commit `4bb88afb`. **Non validato live** (no account Composio).
+- ⏳ **(a) motore di ricerca unico** — convergere `bm25_rank` (chat) vs `ToolSearchIndexStore` FTS5
+  (orchestrator). Il più grosso, intrecciato con F3 (quale engine sopravvive). Non ancora iniziato.
+- ⏳ **(d) browser dentro il registry** — oggi i micro-tool browser sono hand-wired in `base_tools`,
+  fuori dal corpus di routing → il planner non li vede (**blocca ADR 0020**). Slice sicuro additivo:
+  aggiungerli al `capability_corpus`/tool-index senza toglierli da `base_tools` (testabile). Non iniziato.
+
+Mappe: [registry](architecture/capability-registry.md), [skills](architecture/skills.md),
 [connectors](architecture/connectors-composio.md), [browser](architecture/browser.md), [mcp](architecture/mcp.md).
-NB live-validation capacità: setup attuale = deepseek-v4-pro:cloud (Z.ai), non Ollama → il path
-`/api/show` si attiva con un modello Ollama locale.
+NB live-validation: setup attuale = deepseek-v4-pro:cloud (Z.ai), non Ollama; Composio non configurato.
 
 ## Cosa è stato fatto (rolling, conciso)
 
-**Sessione 2026-06-28 — chiusura completa di L0 (F0.5 → F0.7):**
+**Sessione 2026-06-28 — chiusura L0 (F0.5–F0.7) + avvio F1 (b, c):**
 - **F0.5** tool-as-text (`parse_text_tool_calls`/`synthesize_tool_calls` + helper) → `model_normalize`;
   doc orfano curato; 4 test. Commit `8d9aad72`.
 - **F0.6** floor structured-output convergiuto in `structured_response_format` (1 def, 3 call-site);
   behavior-preserving. Commit `b29fa4a3`.
 - **F0.7** budget prompt sulla finestra reale del modello (catalogo); policy pura testata. Commit `7cd44e22`.
-- **L0 è ora un punto fermo completo; coda esaurita.** Prossimo strato: F1 (capability unica).
+- **L0 = punto fermo completo; coda esaurita.**
+- **F1.b** ritirato `SkillCapabilityProvider` dormiente (skill = prosa, non tool). Commit `7b1fcecb`.
+- **F1.c** Composio convergiuto su v3, provider crate pre-v3 cancellato (era anche un bug latente);
+  gate preservato + testato. Commit `4bb88afb`. **Restano F1 (a) search-engine e (d) browser-in-registry.**
 
 **Sessione 2026-06-27 — diagnosi + fix sintomo + analisi strutturale + metodologia:**
 - **Fix agentic-loop validati e pushati** (default flag-off, migliorano il model-loop):
