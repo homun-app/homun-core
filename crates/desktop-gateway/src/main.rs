@@ -53,8 +53,8 @@ use local_first_capabilities::{
     ActionClass, CachedCapabilityTool, CachedToolProvider, CapabilityCall,
     CapabilityConnectionConfig, CapabilityError, CapabilityFacade, CapabilityPolicy,
     CapabilityProvider, CapabilityProviderConfig, CapabilityProviderGrant, CapabilityProviderKind,
-    CapabilityRegistryStore, CapabilityResult, CapabilityTaskPayload, ComposioCapabilityProvider,
-    ComposioProviderConfig, ComposioTransport, InMemoryCapabilityAudit, McpCapabilityProvider,
+    CapabilityRegistryStore, CapabilityResult, CapabilityTaskPayload, CapabilityTool,
+    InMemoryCapabilityAudit, McpCapabilityProvider,
     McpStdioConfig, McpStdioTransport, McpToolPolicy, McpTransport, PluginRegistryEntry,
     PluginRegistryIndex, PolicyContext, ProviderId as CapabilityProviderId,
     UserId as CapabilityUserId, WorkspaceId as CapabilityWorkspaceId,
@@ -31612,55 +31612,31 @@ fn execute_capability_generic(
             facade.call_tool(&policy_context, call)
         }
         CapabilityProviderKind::Managed => {
-            let connection = connection.ok_or_else(|| LocalTaskExecutionError {
-                message: format!("no connection for provider {}", provider_id.as_str()),
-            })?;
-            let base_url = connection
-                .metadata
-                .get("base_url")
-                .and_then(Value::as_str)
-                .map(str::to_string)
-                .unwrap_or_else(|| composio_base_url(None));
-            let secret_ref =
-                SecretRef::new(user.as_str(), workspace.as_str(), "composio", "default").map_err(
-                    |error| LocalTaskExecutionError {
-                        message: format!("secret ref: {error}"),
-                    },
-                )?;
-            let api_key = state
-                .secret_store
-                .get(&secret_ref)
-                .map_err(|error| LocalTaskExecutionError {
-                    message: format!("secret get: {error}"),
-                })?
-                .ok_or_else(|| LocalTaskExecutionError {
-                    message: "segreto Composio mancante".to_string(),
-                })?
-                .expose_utf8()
-                .map_err(|error| LocalTaskExecutionError {
-                    message: format!("secret decode: {error}"),
-                })?;
-            let mut facade = CapabilityFacade::new(
-                CapabilityPolicy::default(),
-                InMemoryCapabilityAudit::default(),
-            );
-            facade.register_provider(ComposioCapabilityProvider::new(
-                ComposioProviderConfig {
+            // Composio: converged onto the SINGLE v3 execution path (F1.c, caposaldo #5).
+            // The task-runtime used to wrap the pre-v3 `ComposioCapabilityProvider` in a
+            // throwaway facade, but the facade locates the tool via `provider.list_tools()`,
+            // which does `GET /tools` and parses the pre-v3 `{tools}` shape — that FAILS
+            // against Composio v3 (`{items}`), so the call errored before ever executing
+            // (autonomous Composio runs were broken). We now re-check the SAME deny-by-default
+            // policy (`CapabilityPolicy::tool_access`, no gate duplication) against the
+            // v3-sourced cached tool metadata, then execute through `composio_execute_tool` —
+            // the one v3 path the chat loop already uses. `connection` is unused here now:
+            // the v3 transport is resolved by `composio_transport_for` (single source).
+            if let Err(reason) = authorize_managed_capability_tool(
+                &tool_policies,
+                &policy_context,
+                &provider_id,
+                call.tool_name.as_str(),
+            ) {
+                return Ok(capability_call_failed_outcome(task, &reason));
+            }
+            composio_execute_tool(state, call.tool_name.as_str(), &call.arguments)
+                .map(|output| local_first_capabilities::CapabilityCallResult {
                     provider_id: provider_id.clone(),
-                    // MUST match the Composio entity used at link time
-                    // (`composio_entity_id()` = active workspace), otherwise
-                    // Composio can't resolve the connected account for the tool
-                    // call. `gateway_capability_user_id()` ("local-user") is a
-                    // different namespace and would yield "no connected account".
-                    user_id: CapabilityUserId::new(composio_entity_id()),
-                    workspace_id: gateway_capability_workspace_id(),
-                    enabled: true,
-                    privacy_domains: vec!["managed-cloud".to_string()],
-                    tool_policies: Vec::new(),
-                },
-                GatewayComposioTransport::new(base_url, api_key),
-            ));
-            facade.call_tool(&policy_context, call)
+                    tool_name: call.tool_name.clone(),
+                    output,
+                })
+                .map_err(|error| CapabilityError::ToolExecutionFailed(error.message))
         }
         other => return Ok(capability_kind_not_wired_outcome(task, other)),
     };
@@ -31669,6 +31645,44 @@ fn execute_capability_generic(
         Ok(call_result) => capability_call_completed_outcome(task, &call_result),
         Err(error) => capability_call_failed_outcome(task, &error.to_string()),
     })
+}
+
+/// Re-check the deny-by-default policy for a Managed (Composio) tool before AUTONOMOUS
+/// execution by the task-runtime. Returns `Ok(())` if authorized, else a human-readable
+/// denial reason. Pure (so the security gate is unit-testable without app state), and it
+/// reuses the ONE canonical `CapabilityPolicy::tool_access` — no gate logic is duplicated
+/// here. Fail-closed: a tool absent from the v3 catalog cache (`cached_tools`) cannot be
+/// authorized, so a stale/uncached slug is denied rather than executed blindly. This is the
+/// gate the old facade path enforced; it is preserved here while execution moves to the v3
+/// `composio_execute_tool` (F1.c).
+fn authorize_managed_capability_tool(
+    tool_policies: &[McpToolPolicy],
+    policy_context: &PolicyContext,
+    provider_id: &CapabilityProviderId,
+    tool_name: &str,
+) -> Result<(), String> {
+    let Some(policy) = tool_policies.iter().find(|p| p.tool_name == tool_name) else {
+        return Err(format!(
+            "Composio tool «{tool_name}» is not in the catalog cache — cannot authorize it \
+             for autonomous execution; open the chat once to refresh the connected toolkit."
+        ));
+    };
+    let tool = CapabilityTool {
+        name: policy.tool_name.clone(),
+        provider_id: provider_id.clone(),
+        provider_kind: CapabilityProviderKind::Managed,
+        action: policy.action,
+        description: String::new(),
+        privacy_domains: policy.privacy_domains.clone(),
+        sensitivity: policy.sensitivity.clone(),
+        input_schema: serde_json::json!({ "type": "object" }),
+    };
+    let decision = CapabilityPolicy::default().tool_access(policy_context, &tool);
+    if decision.executable {
+        Ok(())
+    } else {
+        Err(format!("denied: {}", decision.reasons.join("; ")))
+    }
 }
 
 /// Parses an MCP stdio launch config (command/args/env) from a connection's
@@ -32137,10 +32151,9 @@ fn connect_composio_blocking(
 
     // Verify the key against the v3 API FIRST and count available toolkits (apps),
     // before persisting anything. A bad key must not leave a phantom "active"
-    // connection behind. We go transport-direct here: the crate's
-    // ComposioCapabilityProvider targets a pre-v3 shape (expects `{tools}`), but
-    // v3 returns `{items}`. We cache TOOLKITS (apps) for the connectors UI, not
-    // the 1000s of individual tools — those are fetched per toolkit on demand.
+    // connection behind. We go transport-direct here (v3 `{items}` shape). We cache
+    // TOOLKITS (apps) for the connectors UI, not the 1000s of individual tools —
+    // those are fetched per toolkit on demand.
     let transport = GatewayComposioTransport::new(base_url.clone(), api_key.clone());
     let toolkits = transport
         .request("GET", "/toolkits", None)
@@ -35817,10 +35830,10 @@ fn brain_budgets_for_context_window(context_window: Option<u32>) -> Orchestrator
     budgets
 }
 
-/// Real HTTP transport for Composio (the crate ships only an in-memory double).
-/// It is deliberately API-agnostic: it passes the method/path/body the
-/// `ComposioCapabilityProvider` chooses, with `x-api-key` auth, so the protocol
-/// shape stays owned by the crate and the base URL is configurable.
+/// Real HTTP transport for Composio. It is deliberately API-agnostic: callers pass the
+/// method/path/body (the v3 shapes), and it adds `x-api-key` auth over a configurable base
+/// URL. Implements the `ComposioTransport` trait (the only piece kept from the `capabilities`
+/// crate's composio module after the pre-v3 provider was retired, F1.c).
 struct GatewayComposioTransport {
     base_url: String,
     api_key: String,
@@ -35837,7 +35850,9 @@ impl GatewayComposioTransport {
     }
 }
 
-impl ComposioTransport for GatewayComposioTransport {
+impl GatewayComposioTransport {
+    /// Inherent (no longer a trait method): the `capabilities` crate's `ComposioTransport`
+    /// trait was retired with the pre-v3 provider (F1.c). All callers use the concrete type.
     fn request(
         &self,
         method: &str,
@@ -44735,6 +44750,7 @@ mod tests {
         ActiveModelInputs, ChannelSettings, ConnectorErrorKind, InboundAction, LegacyDirAction,
         MemoryCandidate, MemoryDataSensitivity, TASK_EXECUTOR_DEFAULT_WORKER_COUNT,
         active_llm_concurrency, adapt_skill_body, aggregate_session_state_from_counts,
+        authorize_managed_capability_tool,
         brain_budgets_for_context_window, browser_error_indicates_dead_sidecar,
         browser_method_for_capability_tool, browser_snapshot_text, browser_targets_for_goal,
         browser_url_for_goal, build_plan_markdown, capability_call_completed_outcome,
@@ -45895,6 +45911,44 @@ prs.save(Path({path:?}))
         assert_eq!(
             response_format.pointer("/json_schema/schema/additionalProperties"),
             Some(&serde_json::Value::Bool(false))
+        );
+    }
+
+    #[test]
+    fn managed_tool_authorization_is_fail_closed_and_policy_gated() {
+        // F1.c: the deny-by-default gate that the retired facade path enforced must survive
+        // the move to the v3 execution path. This is the security-relevant seam.
+        use local_first_capabilities::{ActionClass, McpToolPolicy, PolicyContext, UserId, WorkspaceId};
+        let provider_id = CapProviderId::new("composio");
+        let policies = vec![McpToolPolicy {
+            tool_name: "GMAIL_FETCH_EMAILS".to_string(),
+            action: ActionClass::Read,
+            privacy_domains: vec!["managed-cloud".to_string()],
+            sensitivity: "private".to_string(),
+        }];
+        let ctx = |allow_cloud: bool| PolicyContext {
+            user_id: UserId::new("u"),
+            workspace_id: WorkspaceId::new("w"),
+            enabled_providers: vec![provider_id.clone()],
+            privacy_domains: vec!["managed-cloud".to_string()],
+            allowed_actions: vec![ActionClass::Read],
+            max_autonomy_level: 4,
+            allow_managed_cloud: allow_cloud,
+        };
+        // Authorized: cached tool, Managed allowed, domain + action granted.
+        assert!(
+            authorize_managed_capability_tool(&policies, &ctx(true), &provider_id, "GMAIL_FETCH_EMAILS")
+                .is_ok()
+        );
+        // Fail-closed: a tool absent from the v3 catalog cache cannot be authorized.
+        assert!(
+            authorize_managed_capability_tool(&policies, &ctx(true), &provider_id, "GMAIL_SEND_EMAIL")
+                .is_err()
+        );
+        // Policy-gated: revoke managed-cloud → denied even for a cached tool.
+        assert!(
+            authorize_managed_capability_tool(&policies, &ctx(false), &provider_id, "GMAIL_FETCH_EMAILS")
+                .is_err()
         );
     }
 

@@ -2,7 +2,6 @@ mod audit;
 mod browser_provider;
 mod cached_provider;
 mod channel;
-mod composio;
 mod error;
 mod facade;
 mod mcp;
@@ -20,10 +19,9 @@ pub use channel::{
     ChannelCapabilities, ChannelMessage, ChannelProvider, FakeChannelProvider,
     OutboundChannelMessage,
 };
-pub use composio::{
-    ComposioCapabilityProvider, ComposioProviderConfig, ComposioRequest, ComposioToolPolicy,
-    ComposioTransport, InMemoryComposioTransport,
-};
+// composio module retired (F1.c): the pre-v3 `ComposioCapabilityProvider` was a dead
+// second execution path; the live v3 path lives entirely in the desktop-gateway. See
+// docs/architecture/connectors-composio.md.
 pub use error::{CapabilityError, CapabilityResult};
 pub use facade::{CapabilityFacade, ToolAccessPlan};
 pub use mcp::{
