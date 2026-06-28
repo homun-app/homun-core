@@ -14372,6 +14372,76 @@ fn chat_endpoint(base_url: &str) -> String {
     }
 }
 
+/// The Ollama native root (strip a trailing `/v1`) for non-chat endpoints like `/api/show`.
+fn ollama_native_root(base_url: &str) -> String {
+    let trimmed = base_url.trim_end_matches('/');
+    trimmed
+        .strip_suffix("/v1")
+        .unwrap_or(trimmed)
+        .trim_end_matches('/')
+        .to_string()
+}
+
+/// True if an Ollama `/api/show` body advertises the `thinking` capability. Pure + testable.
+fn parse_thinking_capability(show_body: &serde_json::Value) -> bool {
+    show_body
+        .get("capabilities")
+        .and_then(|c| c.as_array())
+        .map(|caps| caps.iter().any(|c| c.as_str() == Some("thinking")))
+        .unwrap_or(false)
+}
+
+fn ollama_thinking_cache() -> &'static std::sync::Mutex<std::collections::HashMap<String, bool>> {
+    static CELL: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, bool>>> =
+        std::sync::OnceLock::new();
+    CELL.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
+/// Sync read of the cached "does this Ollama model support thinking" flag. Default FALSE → we do
+/// NOT send `think`, the safe choice: Ollama returns "does not support thinking" (HTTP 400) for
+/// non-thinking models, and every local model routes through the same Ollama branch. Warmed by
+/// `warm_ollama_thinking` once per turn before the round loop.
+fn ollama_thinking_supported(base_url: &str, model: &str) -> bool {
+    ollama_thinking_cache()
+        .lock()
+        .ok()
+        .and_then(|c| c.get(&format!("{base_url}|{model}")).copied())
+        .unwrap_or(false)
+}
+
+/// Detect + cache whether an Ollama model exposes the `thinking` capability (via `/api/show`),
+/// so `build_chat_payload` can send `think:true` ONLY for those — yielding a clean separate
+/// `message.thinking` field (which `process_ollama_line` captures) instead of inline `<think>`
+/// tags, and avoiding the 400 on non-thinking models. Any error → cached false (we fall back to
+/// the model-agnostic `<think>` extraction in `model_normalize`). Cached per (base_url, model).
+async fn warm_ollama_thinking(http: &reqwest::Client, base_url: &str, model: &str) {
+    let key = format!("{base_url}|{model}");
+    if ollama_thinking_cache()
+        .lock()
+        .map(|c| c.contains_key(&key))
+        .unwrap_or(true)
+    {
+        return;
+    }
+    let endpoint = format!("{}/api/show", ollama_native_root(base_url));
+    let supported = match http
+        .post(&endpoint)
+        .json(&serde_json::json!({ "name": model }))
+        .send()
+        .await
+    {
+        Ok(resp) if resp.status().is_success() => resp
+            .json::<serde_json::Value>()
+            .await
+            .map(|body| parse_thinking_capability(&body))
+            .unwrap_or(false),
+        _ => false,
+    };
+    if let Ok(mut cache) = ollama_thinking_cache().lock() {
+        cache.insert(key, supported);
+    }
+}
+
 /// Converts OpenAI-style messages to Ollama native `/api/chat` shape: multimodal
 /// content-parts become `{content, images:[base64]}`; assistant `tool_calls`
 /// arguments are parsed from JSON STRING back to an OBJECT (native expects an object).
@@ -14605,6 +14675,12 @@ fn build_chat_payload(
         });
         if !is_final_round && !tools.is_empty() {
             payload["tools"] = serde_json::Value::Array(tools.to_vec());
+        }
+        // Ask for the reasoning trace as a SEPARATE `message.thinking` field, but ONLY for
+        // models that advertise the capability (cache warmed before the loop) — sending it to a
+        // non-thinking model 400s. Clean separation beats parsing inline `<think>` tags.
+        if ollama_thinking_supported(base_url, model) {
+            payload["think"] = serde_json::Value::Bool(true);
         }
         payload
     } else {
@@ -19150,6 +19226,13 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
 
         // F3: the first plan step's work begins after the initial context is in place.
         step_messages_start = messages.len();
+
+        // F0 / model-io: detect+cache whether this Ollama model supports `thinking`, so
+        // `build_chat_payload` can request a clean separate `message.thinking` field for it (and
+        // never sends `think` to a non-thinking model, which 400s). One /api/show per model.
+        if is_ollama_base(&base_url) {
+            warm_ollama_thinking(&http, &base_url, &model).await;
+        }
 
         // The outer ceiling is the BROWSER budget; the EFFECTIVE budget is dynamic
         // (the normal 5 rounds until a browser tool is actually used, then the
@@ -48516,6 +48599,21 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         assert_eq!(steps[0]["detail"], "List the 32 teams");
         assert_eq!(steps[1]["id"], "s2");
         assert_eq!(steps[1]["title"], "Today's matches");
+    }
+
+    #[test]
+    fn thinking_capability_detected_from_show_body() {
+        let yes = serde_json::json!({"capabilities": ["completion", "tools", "thinking"]});
+        assert!(super::parse_thinking_capability(&yes));
+        let no = serde_json::json!({"capabilities": ["completion", "tools"]});
+        assert!(!super::parse_thinking_capability(&no));
+        assert!(!super::parse_thinking_capability(&serde_json::json!({})));
+    }
+
+    #[test]
+    fn ollama_native_root_strips_v1() {
+        assert_eq!(super::ollama_native_root("http://127.0.0.1:11434/v1"), "http://127.0.0.1:11434");
+        assert_eq!(super::ollama_native_root("http://127.0.0.1:11434/"), "http://127.0.0.1:11434");
     }
 
     #[test]
