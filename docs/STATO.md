@@ -356,9 +356,17 @@ INCREMENTI RIMASTI (gated dietro flag, verde a ogni passo, validati su gemma4): 
 turno sul `drive` (quando non c'è piano da riprendere E flag ON: pianifica via `orchestrator_plan_for_chat`
 → `drive` invece di seminare il loop), streama progresso + sintesi finale, valida flag-ON vs motore #1
 zero-regressioni; **F3.4** ritira `merge_plan` per-titolo + prompt-prosa; estendi lo scope agentico
-oltre read/gather (scritture single-threaded+approval). NB: il `drive` produce esiti per-step, NON la
-risposta NL finale → l'instradamento iniziale serve una sintesi finale (puoi riusare il path
-sintesi del loop) e conviene partire da piani semplici con fallback a motore #1.
+oltre read/gather (scritture single-threaded+approval).
+
+⚠️ **F3.3 RICHIEDE L'APP IN ESECUZIONE** (decisione 2026-06-28 sessione 5): è integrazione sul path
+streaming VIVO, non validabile coi test ignored. Due entanglement da osservare dal vivo: (1) `drive`
+esegue sulla **facade reale** (provider browser→**sidecar condiviso** ~`call_shared_browser_sidecar`),
+mentre il loop di chat usa `chat_browser_call` (**sessione per-thread**) → **rischio collisione** a metà
+turno se entrambi toccano il browser. **De-risk consigliato PRIMA di F3.3:** convergere i due path
+browser su uno solo (caposaldo #5; `chat_browser_call` è la parallela da ritirare). (2) `drive` produce
+esiti per-step, NON la risposta NL finale → serve una sintesi finale (riusa il path sintesi del loop).
+Partire da piani semplici (all-CapabilityCall) con fallback a motore #1. Debug: `HOMUN_DEBUG=1
+HOMUN_ORCHESTRATED_CHAT=1 npm run electron:dev`.
 
 AMBIENTE: Ollama gira con gemma4:latest/12b → eval bi-popolazione e validazione live SONO possibili
 qui (`python3 scripts/eval_suite.py gemma4:latest` = gate di regressione caposaldo #2). Modello chat
