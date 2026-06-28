@@ -201,9 +201,20 @@ chat di default = deepseek-v4-pro:cloud (Z.ai, tier **Balanced**); Composio non 
   Aggiunta **risoluzione tollerante** (`tool_name_resolves`: il nome caricato è il token iniziale del
   richiesto, con boundary) → exact-match vince sempre, il fallback recupera i nomi stipati. +1 test;
   ri-validato live: il piano a 5 step ORA valida. Commit dopo questa nota.
-- **Prossimo strato F3 (non fatto):** gemma4 lascia anche `arguments` VUOTO (l'URL è dentro il nome) →
-  a tempo di ESECUZIONE i browser tool riceverebbero args vuoti. Serve repair degli argomenti / schema
-  planner vincolato (enum nomi tool). È il prossimo increment F3.
+- **Planner vincolato (caposaldo #6) — FATTO:** `planner_schema(loaded_tool_names)` ora inietta un
+  **enum** dei nomi-tool caricati sul campo `tool_name` (era stringa libera → per questo gemma4 ci
+  stipava gli argomenti). `call_planner` passa i nomi da `loaded_tools` + nudge nel prompt ("tool_name
+  = ESATTAMENTE un nome caricato; gli input vanno in arguments"). Ollama applica lo schema (la eval lo
+  prova). **Ri-validato live:** stesso prompt → ora `tool_name="browser_navigate"` PULITO (prima
+  `"browser_navigate.url: https://…"`). +2 test planner. Enum (cura a monte) + risoluzione tollerante
+  (rete di sicurezza) = la coppia canonica #6/#11.
+- **`arguments` vuoto dal planner = BY DESIGN, non un bug:** `execution_plan_to_canonical_steps` usa solo
+  `goal`/`tool_name`/`contract` per i titoli del piano-seed (ADR 0020 P1); gli argomenti reali li riempie
+  il loop di chat all'ESECUZIONE. Quindi il planner produce la FORMA del piano, non gli args. Nessun
+  per-tool argument schema da costruire (evitato over-engineering).
+- **Prossimo F3:** il vero passo grosso resta instradare il turno chat sul Brain come driver (oggi
+  `orchestrator_plan_for_chat` fa solo `plan_only`→seed); + ritirare `merge_plan` per-titolo. Da fare con
+  scoping dedicato.
 
 **Sessione 2026-06-27 — diagnosi + fix sintomo + analisi strutturale + metodologia:**
 - **Fix agentic-loop validati e pushati** (default flag-off, migliorano il model-loop):

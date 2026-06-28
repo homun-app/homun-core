@@ -40,6 +40,7 @@ pub(crate) fn planner_prompt(
         "You are the local-first assistant orchestrator brain.\n\
          Decide whether to answer directly, use memory, call capability tools, create subagent workflow tasks, enqueue durable tasks, or ask for clarification.\n\
          Never invent tools. Use only loaded tool details for executable steps.\n\
+         A capability_call step's \"tool_name\" MUST be EXACTLY one loaded tool name — never put arguments, URLs or values inside it. ALL tool inputs go in the \"arguments\" object.\n\
          \n\
          OUTPUT FORMAT — return ONLY one JSON object with EXACTLY these top-level keys:\n\
          - \"route\": one of [direct_answer, memory_lookup, capability_call, subagent_workflow, mixed_workflow, ask_clarification, refuse, needs_more_tools]\n\
@@ -115,7 +116,22 @@ fn context_budget_usage(label: &str, result: &CompressionResult) -> ContextBudge
     }
 }
 
-pub(crate) fn planner_schema() -> serde_json::Value {
+pub(crate) fn planner_schema(loaded_tool_names: &[&str]) -> serde_json::Value {
+    // Constrain a step's tool_name to the LOADED tool names (caposaldo #6: the model fills a
+    // CONSTRAINED slot, the harness owns the format). A free string let weak models cram the
+    // arguments into the name field (observed on gemma4: `"browser_navigate.url: https://…"`);
+    // an enum forces a real tool id wherever the backend enforces json_schema — and Ollama
+    // does (the eval suite passes strict schemas on gemma4). `null` stays allowed for
+    // non-capability_call steps. When no tools are loaded we keep a free string so the schema
+    // never becomes unsatisfiable.
+    let tool_name_schema = if loaded_tool_names.is_empty() {
+        json!({"type": ["string", "null"]})
+    } else {
+        let mut allowed: Vec<serde_json::Value> =
+            loaded_tool_names.iter().map(|name| json!(name)).collect();
+        allowed.push(serde_json::Value::Null);
+        json!({"type": ["string", "null"], "enum": allowed})
+    };
     json!({
         "type": "object",
         "additionalProperties": false,
@@ -174,7 +190,7 @@ pub(crate) fn planner_schema() -> serde_json::Value {
                             "items": {"type": "string"}
                         },
                         "provider_id": {"type": ["string", "null"]},
-                        "tool_name": {"type": ["string", "null"]},
+                        "tool_name": tool_name_schema,
                         "arguments": {"type": "object"},
                         "execution_policy": {
                             "type": "string",
@@ -230,7 +246,7 @@ pub(crate) fn planner_schema() -> serde_json::Value {
 mod tests {
     #[test]
     fn planner_schema_is_closed_for_constrained_orchestration() {
-        let schema = super::planner_schema();
+        let schema = super::planner_schema(&[]);
         assert_eq!(
             schema.pointer("/additionalProperties"),
             Some(&serde_json::Value::Bool(false))
@@ -247,5 +263,26 @@ mod tests {
             schema.pointer("/properties/steps/items/additionalProperties"),
             Some(&serde_json::Value::Bool(false))
         );
+        // No tools loaded → tool_name stays a free string (schema must not be unsatisfiable).
+        assert!(
+            schema
+                .pointer("/properties/steps/items/properties/tool_name/enum")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn planner_schema_constrains_tool_name_to_loaded_tools() {
+        let schema = super::planner_schema(&["browser_navigate", "browser_act"]);
+        let enum_values = schema
+            .pointer("/properties/steps/items/properties/tool_name/enum")
+            .and_then(|value| value.as_array())
+            .expect("tool_name enum present when tools are loaded");
+        // The real tool names plus null (non-capability_call steps have no tool).
+        assert!(enum_values.contains(&serde_json::json!("browser_navigate")));
+        assert!(enum_values.contains(&serde_json::json!("browser_act")));
+        assert!(enum_values.contains(&serde_json::Value::Null));
+        // A crammed name is NOT in the allowed set → the backend rejects it at the source.
+        assert!(!enum_values.contains(&serde_json::json!("browser_navigate.url: https://x")));
     }
 }

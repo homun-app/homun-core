@@ -46610,8 +46610,8 @@ prs.save(Path({path:?}))
         eprintln!("route: {:?}", plan.route);
         for (i, step) in plan.steps.iter().enumerate() {
             eprintln!(
-                "  step {i}: kind={:?} tool={:?} goal={:?}",
-                step.kind, step.tool_name, step.goal
+                "  step {i}: kind={:?} tool={:?} args={} goal={:?}",
+                step.kind, step.tool_name, step.arguments, step.goal
             );
         }
         let mentions_browser = plan

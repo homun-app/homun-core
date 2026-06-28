@@ -325,13 +325,16 @@ impl<R: JsonRuntime, M: MemoryContextProvider> OrchestratorBrain<R, M> {
         loaded_tools: &[CapabilityTool],
     ) -> OrchestratorResult<(ExecutionPlan, TokenMetrics, Vec<crate::ContextBudgetUsage>)> {
         let prompt = planner_prompt(request, memory, loaded_cards, loaded_tools)?;
+        // Constrain tool_name to the actually-loaded tools (caposaldo #6): the enum stops a
+        // weak model from cramming arguments into the name. Empty → free string (planner.rs).
+        let tool_names: Vec<&str> = loaded_tools.iter().map(|tool| tool.name.as_str()).collect();
         let planner_request = GenerateJsonRequest {
             prompt: prompt.prompt,
             max_tokens: request.budgets.max_planner_tokens,
             temperature: 0.0,
             wait_if_busy: true,
             request_timeout_seconds: Some(request.budgets.planner_timeout_seconds as f64),
-            json_schema: Some(planner_schema()),
+            json_schema: Some(planner_schema(&tool_names)),
             // Only "route" is mandatory. "steps" is optional (ExecutionPlan
             // defaults it to []): a direct_answer/ask_clarification plan
             // legitimately has no steps, and the model (esp. reasoning models)
