@@ -134,10 +134,17 @@ Commit `b705289a` (driver+executor) + `3ce99c67` (arg-fill). Vedi [agent-loop](a
   reale (sidecar condiviso) → `drive`→`call_tool` riusa gli esecutori durabili canonici; la
   `chat_browser_call` inline di motore #1 è la **parallela da ritirare**, non da replicare. NESSUN
   terzo dispatch.
-- ⏳ **F3.2c** esecutore agentico per i `SubagentTask` (inner-loop modello multi-round + ponte alla
-  tool-dispatch della chat). ⏳ **F3.3** instradare `stream_chat_via_openai` sul `drive` dietro
-  `HOMUN_ORCHESTRATED_CHAT`, validare flag-ON vs motore #1 (il pezzo rischioso sul path VIVO, non
-  ancora fatto). ⏳ **F3.4** ritirare `merge_plan` per-titolo + prompt-prosa di control-flow.
+- ✅ **F3.2c esecutore agentico** (`agentic.rs` `run_agentic_step`) — modalità *agent* di ADR 0016
+  Pilastro 2: loop bounded (`MAX_AGENTIC_ROUNDS`, ultimo round forza sintesi) dove il modello sterza
+  (sceglie tool read/gather o conclude) e l'harness possiede l'envelope. **Due fasi per round** (cura
+  il fallimento "invalid arguments" su gemma4): scelta tool vincolata all'enum (#6) + `fill_arguments`
+  riusato per gli args vincolati allo schema del tool (caposaldo #5). Scope solo read/gather (Read/Draft;
+  scritture fuori). NON è un terzo runner: il `run_generate_json` durabile è la modalità *workflow*.
+  **Validato su gemma4** (`orchestrated_subagent_gathers_on_gemma4`): gemma4 sceglie il tool, raccoglie,
+  sintetizza (`evidence=[gather:web_search]`). +4 test agentic. Commit `3027abe4`.
+- ⏳ **F3.3** instradare `stream_chat_via_openai` sul `drive` dietro `HOMUN_ORCHESTRATED_CHAT`, validare
+  flag-ON vs motore #1 (**il pezzo rischioso sul path VIVO**, non ancora fatto). ⏳ **F3.4** ritirare
+  `merge_plan` per-titolo + prompt-prosa di control-flow. ⏳ scope agentico oltre read/gather (scritture).
 
 Mappe: [registry](architecture/capability-registry.md), [skills](architecture/skills.md),
 [connectors](architecture/connectors-composio.md), [browser](architecture/browser.md), [mcp](architecture/mcp.md).
@@ -148,7 +155,11 @@ chat di default = deepseek-v4-pro:cloud (Z.ai, tier **Balanced**); Composio non 
 
 ## Cosa è stato fatto (rolling, conciso)
 
-**Sessione 2026-06-28 (5) — F3 fondazione: driver in-turn + arg-fill, validati su gemma4:**
+**Sessione 2026-06-28 (5) — F3 fondazione: driver in-turn + arg-fill + executor agentico, validati su gemma4:**
+- **F3.2c** `agentic.rs` `run_agentic_step` — modalità *agent* (ADR 0016 P2): loop bounded read/gather,
+  due fasi/round (scelta tool enum #6 + `fill_arguments` vincolato allo schema, riuso). Cura il
+  fallimento gemma4 "invalid arguments". Validato live (`orchestrated_subagent_gathers_on_gemma4`:
+  gemma4 raccoglie e sintetizza). +4 test. Commit `3027abe4`.
 - **F3.1** `driver.rs` `drive_plan` — control-flow posseduto dall'harness: passo avanti su piano
   topologico, `StepExecutor`/`StepVerifier` iniettati, `done` solo dopo verify, 3 invarianti per
   costruzione. 7 unit-test puri. Commit `b705289a`.
@@ -330,9 +341,11 @@ GIÀ FATTO E VALIDATO SU GEMMA4 (non ripartire da qui):
   verify, 3 invarianti per costruzione. 7 unit-test puri. Commit `b705289a`.
 - **F3.2 esecuzione per-step + arg-fill** (`step_executor.rs` `CapabilityStepExecutor<R>`, `Brain::drive`):
   args vuoti del piano-seme → il modello li riempie vincolato allo schema del tool (ADR 0016 P3) →
-  `CapabilityFacade::call_tool`. `SubagentTask` falliscono (F3.2c). Commit `3ce99c67`. Test ripetibile:
-  `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway
-  orchestrated_brain_drives_plan_on_gemma4 -- --ignored --nocapture` (plan→driver→arg-fill→execute→done).
+  `CapabilityFacade::call_tool`. Commit `3ce99c67`. Test: `orchestrated_brain_drives_plan_on_gemma4`
+  (plan→driver→arg-fill→execute→done).
+- **F3.2c esecutore agentico** (`agentic.rs` `run_agentic_step`): modalità *agent* ADR 0016 P2, loop
+  bounded read/gather, due fasi/round (scelta tool enum + `fill_arguments`). Commit `3027abe4`. Test:
+  `orchestrated_subagent_gathers_on_gemma4` (gemma4 raccoglie e sintetizza).
 
 SCOPERTA CHIAVE (de-rischia F3.3): la facade del gateway ha GIÀ un `CapabilityProvider` browser reale
 (main.rs ~`call_shared_browser_sidecar`) → `drive`→`call_tool` riusa gli esecutori durabili canonici.
@@ -342,10 +355,10 @@ inline, NON un seam estraibile) è la PARALLELA da ritirare, non da replicare.
 INCREMENTI RIMASTI (gated dietro flag, verde a ogni passo, validati su gemma4): **F3.3** instrada il
 turno sul `drive` (quando non c'è piano da riprendere E flag ON: pianifica via `orchestrator_plan_for_chat`
 → `drive` invece di seminare il loop), streama progresso + sintesi finale, valida flag-ON vs motore #1
-zero-regressioni; **F3.2c** esecutore agentico per i `SubagentTask` (inner-loop modello multi-round);
-**F3.4** ritira `merge_plan` per-titolo + prompt-prosa. NB: il `drive` produce esiti per-step, NON la
-risposta NL finale né gestisce step agentici → l'instradamento iniziale conviene sui piani all-CapabilityCall
-(es. browse), con fallback a motore #1 per il resto.
+zero-regressioni; **F3.4** ritira `merge_plan` per-titolo + prompt-prosa; estendi lo scope agentico
+oltre read/gather (scritture single-threaded+approval). NB: il `drive` produce esiti per-step, NON la
+risposta NL finale → l'instradamento iniziale serve una sintesi finale (puoi riusare il path
+sintesi del loop) e conviene partire da piani semplici con fallback a motore #1.
 
 AMBIENTE: Ollama gira con gemma4:latest/12b → eval bi-popolazione e validazione live SONO possibili
 qui (`python3 scripts/eval_suite.py gemma4:latest` = gate di regressione caposaldo #2). Modello chat
@@ -354,7 +367,8 @@ accendere il floor a "on" senza eval bi-popolazione. NB: i file:line di main.rs 
 nomi di funzione.
 
 Fatto finora: F0 (L0 completo) + F1 COMPLETO+testato + F2 (meccanismo costruito, validato
-bi-popolazione) + F3-planner + **F3.1/F3.2 driver in-turn + arg-fill, validati su gemma4**.
+bi-popolazione) + F3-planner + **F3.1/F3.2/F3.2c: driver in-turn + arg-fill + executor agentico
+read/gather, tutti validati su gemma4**. Prossimo = F3.3 (instradamento live).
 
 A fine sessione aggiorna docs/STATO.md.
 ```
