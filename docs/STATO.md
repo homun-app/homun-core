@@ -120,8 +120,16 @@ NB live-validation: setup attuale = deepseek-v4-pro:cloud (Z.ai), non Ollama; Co
   (schemi reali, derivati dalle `browser_*_tool_schema()`); `registry.clear_cached_tools` toglie i
   vecchi `browser.*` placeholder. Planner ora vede il browser (sblocca ADR 0020). `BrowserCapabilityProvider`
   morto → flaggato. Caposaldo #5/#7.
-- Test: 6 unit shared-ranker + 2 `ToolCorpus` + 2 gateway browser-seed; gate gateway 355 pass / 1
-  fallimento ambientale atteso (soffice). **F1 COMPLETO → prossimo F2 (loop tier-adattivo, ADR 0018).**
+- Test: 6 unit shared-ranker + 2 `ToolCorpus` + 2 gateway browser-seed.
+- **Giro di chiusura F1 (contract-test, il bar del piano "args → output/errore tipizzato"):** +2
+  test gateway — (1) seed idempotente + migrazione (`clear_cached_tools` droppa i `browser.*`
+  stantii, re-seed non duplica → esattamente 6 underscore); (2) i 6 tool browser passano per il
+  **vero `CapabilityFacade`** (policy → visible/executable, `validate_arguments`): args mancanti →
+  `SchemaValidationFailed` tipizzato, args validi → validazione passa (esecutore planning-only
+  rifiuta con `ProviderUnavailable`). F1.a resta coperto dal ranker condiviso (un'unica funzione,
+  niente test "stesso risultato" fittizio: i due lati indicizzano testo diverso, condividono
+  l'algoritmo). Gate gateway **357 pass / 1 fallimento ambientale atteso (soffice)**.
+  **F1 = PUNTO FERMO TESTATO → prossimo F2 (loop tier-adattivo, ADR 0018).**
 - **F1.d cleanup** cancellato il gemello dormiente `BrowserCapabilityProvider` (`browser_provider.rs`
   + il suo test + l'export in `lib.rs`): mai istanziato, era il terzo sorgente dot-named dei tool
   browser. Verificato prima che l'esecutore durable reale (`execute_capability_browser_task` →

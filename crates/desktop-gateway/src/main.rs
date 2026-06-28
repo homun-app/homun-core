@@ -46339,6 +46339,124 @@ prs.save(Path({path:?}))
         );
     }
 
+    /// (F1.d migration) The seed must be idempotent AND shed the old dot-named placeholders:
+    /// `upsert_cached_tool` keys on `(provider, name)`, so without `clear_cached_tools` a
+    /// renamed tool set would leave `browser.navigate` rows shadowing the planner forever.
+    #[test]
+    fn seed_browser_provider_is_idempotent_and_drops_stale_dot_named_tools() {
+        let registry = super::CapabilityRegistryStore::open_in_memory().unwrap();
+        let browser = super::CapabilityProviderId::new("browser");
+
+        // First seed creates the provider + the six real tools.
+        super::seed_default_capabilities(&registry).unwrap();
+        // Simulate an older build's stale dot-named row left in the cache.
+        registry
+            .upsert_cached_tool(&super::CachedCapabilityTool::new(
+                browser.clone(),
+                "browser.navigate",
+                super::CapabilityProviderKind::Browser,
+                super::ActionClass::WriteWithConfirmation,
+                "old placeholder",
+                vec!["browser".to_string()],
+                "private",
+                serde_json::json!({"type": "object"}),
+            ))
+            .unwrap();
+        // Re-seed: clear_cached_tools must drop the stale row, and re-seeding must not dup.
+        super::seed_default_capabilities(&registry).unwrap();
+
+        let names: Vec<String> = registry
+            .cached_tools(&browser)
+            .unwrap()
+            .into_iter()
+            .map(|cached| cached.tool.name)
+            .collect();
+        assert_eq!(
+            names.len(),
+            6,
+            "exactly the six chat browser tools, no dup, no stale: {names:?}"
+        );
+        assert!(
+            names.iter().all(|name| name.starts_with("browser_")),
+            "no dot-named shadow survives re-seed: {names:?}"
+        );
+        assert!(names.iter().any(|name| name == "browser_navigate"));
+        assert!(!names.iter().any(|name| name == "browser.navigate"));
+    }
+
+    /// (F1.d contract) The seeded browser tools must be real, typed contracts when driven
+    /// through the actual `CapabilityFacade` — the same path the orchestrator uses: policy
+    /// gates visibility/executability, and `validate_arguments` rejects bad args with a
+    /// TYPED error BEFORE any execution. Proves the schemas aren't placeholders.
+    #[test]
+    fn seeded_browser_tools_enforce_their_arg_contracts_through_the_facade() {
+        let registry = super::CapabilityRegistryStore::open_in_memory().unwrap();
+        super::seed_default_capabilities(&registry).unwrap();
+        let user = super::gateway_capability_user_id();
+        let workspace = super::gateway_capability_workspace_id();
+        let policy = registry.policy_context(&user, &workspace).unwrap();
+        let browser = super::CapabilityProviderId::new("browser");
+        let tools: Vec<_> = registry
+            .cached_tools(&browser)
+            .unwrap()
+            .into_iter()
+            .map(|cached| cached.tool)
+            .collect();
+
+        let mut facade = super::CapabilityFacade::new(
+            super::CapabilityPolicy::default(),
+            super::InMemoryCapabilityAudit::default(),
+        );
+        facade.register_provider(super::CachedToolProvider::new(
+            browser.clone(),
+            super::CapabilityProviderKind::Browser,
+            tools,
+        ));
+
+        // The browser grant (Read + WriteWithConfirmation, autonomy 3) makes all six visible
+        // and executable, so calls reach argument validation.
+        let plan = facade.list_tools(&policy).unwrap();
+        assert_eq!(plan.visible_tools.len(), 6, "all six browser tools visible");
+        assert_eq!(plan.executable_tools.len(), 6, "and executable under the grant");
+
+        let call = |tool: &str, args: serde_json::Value| super::CapabilityCall {
+            provider_id: browser.clone(),
+            tool_name: tool.to_string(),
+            arguments: args,
+        };
+
+        // Missing required arg → typed SchemaValidationFailed (navigate needs `url`).
+        let missing_url = facade
+            .call_tool(&policy, call("browser_navigate", serde_json::json!({})))
+            .unwrap_err();
+        assert!(
+            matches!(missing_url, super::CapabilityError::SchemaValidationFailed(_)),
+            "navigate without url must be a typed validation error, got {missing_url:?}"
+        );
+        // browser_act needs `kind`.
+        let missing_kind = facade
+            .call_tool(&policy, call("browser_act", serde_json::json!({})))
+            .unwrap_err();
+        assert!(
+            matches!(missing_kind, super::CapabilityError::SchemaValidationFailed(_)),
+            "act without kind must be a typed validation error, got {missing_kind:?}"
+        );
+
+        // Valid args PASS validation — proven because execution is reached and the
+        // planning-only cached provider refuses with ProviderUnavailable (not a validation
+        // error). I.e. the schema accepted the good call.
+        let valid = facade
+            .call_tool(
+                &policy,
+                call("browser_navigate", serde_json::json!({"url": "https://example.com"})),
+            )
+            .unwrap_err();
+        assert!(
+            matches!(valid, super::CapabilityError::ProviderUnavailable(_)),
+            "a well-formed navigate must clear validation and reach the executor, got {valid:?}"
+        );
+    }
+
     #[test]
     fn local_template_catalog_provider_exposes_seed_templates() {
         let provider = super::LocalTemplateCatalogProvider;
