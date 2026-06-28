@@ -4,6 +4,7 @@ mod attachments;
 mod browser_safety;
 mod chat_store;
 // Multi-provider inference registry (Phase 1 of per-role model routing).
+mod model_normalize;
 mod model_registry;
 mod scaffold;
 // Local scanner for Anthropic "Agent Skills" (SKILL.md folders).
@@ -14217,22 +14218,14 @@ fn reassemble_openai_stream(sse: &str) -> serde_json::Value {
             return full;
         }
     }
-    // Empty content + non-empty reasoning = a thinking model that put the whole answer
-    // in `reasoning_content` (the GLM/kimi dead-end). Fall back to it so the turn
-    // doesn't commit an empty answer (only the Sources, the reported bug). Model-
-    // independent: supersedes the per-provider thinking-disable hack.
-    let content = if content.trim().is_empty() && !reasoning.trim().is_empty() {
-        reasoning
-    } else {
-        content
-    };
-    let mut message = serde_json::json!({ "role": "assistant", "content": content });
-    if !tool_calls.is_empty() {
-        message["tool_calls"] = serde_json::Value::Array(tool_calls);
-    }
-    serde_json::json!({
-        "choices": [ { "message": message, "finish_reason": finish_reason.unwrap_or_default() } ]
-    })
+    // Canonical assembly (F0 / ADR 0019): the reasoning-fallback + message shape live ONCE in
+    // `model_normalize::assistant_response`, shared with the Ollama collector.
+    model_normalize::assistant_response(
+        content,
+        reasoning,
+        tool_calls,
+        &finish_reason.unwrap_or_default(),
+    )
 }
 
 /// Consumes a streamed completion response with a PER-CHUNK idle timeout (reset on
@@ -14574,13 +14567,15 @@ async fn collect_ollama_native_stream(
             process_ollama_line(&json, &mut content, &mut tool_calls, sink).await;
         }
     }
-    let mut message = serde_json::json!({ "role": "assistant", "content": content });
-    if !tool_calls.is_empty() {
-        message["tool_calls"] = serde_json::Value::Array(tool_calls);
-    }
-    Ok(serde_json::json!({
-        "choices": [ { "message": message, "finish_reason": "stop" } ]
-    }))
+    // Canonical assembly (F0 / ADR 0019), shared with the OpenAI collector. Ollama native
+    // `/api/chat` doesn't surface a separate reasoning field here, so reasoning is empty (the
+    // fallback is a no-op); a later slice can capture `message.thinking` if needed.
+    Ok(model_normalize::assistant_response(
+        content,
+        String::new(),
+        tool_calls,
+        "stop",
+    ))
 }
 
 /// Builds the request body for a chat round, in the right shape for the provider:
@@ -19008,12 +19003,23 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
                 }
                 resume_plan = steps;
             }
+            Ok(Ok(_)) => {
+                if verbose_debug() {
+                    eprintln!(
+                        "[plan] ADR0020-P1 planner returned 0 steps (direct-answer/single-step) → model-driven"
+                    );
+                }
+            }
             Ok(Err(error)) => {
                 if verbose_debug() {
                     eprintln!("[plan] ADR0020-P1 planner failed, model-driven fallback: {error}");
                 }
             }
-            _ => {}
+            Err(join) => {
+                if verbose_debug() {
+                    eprintln!("[plan] ADR0020-P1 planner task panicked → model-driven: {join}");
+                }
+            }
         }
     }
     let capability_route_for_runtime = capability_route.clone();

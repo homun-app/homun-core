@@ -171,11 +171,17 @@ Invarianti:
   separate (`reassemble_openai_stream`, `process_ollama_line`, `sanitize_model_text`,
   `parse_text_tool_calls`, l'hack `thinking:disabled`, `to_ollama_messages`) più regex nel
   frontend `ChatView.tsx`. È esattamente il difetto che ADR 0019 vuole risolvere.
-- **`model_normalize.rs` NON è cablato**: il modulo
-  (`crates/desktop-gateway/src/model_normalize.rs`) implementa il pattern canonico SOTA
-  (`Raw* serde-permissivo → Canonical* via TryFrom`, "parse don't validate") ma **solo per
-  `‹‹PLAN_PROPOSE››`** (step stringa-o-oggetto, fix gemma) ed è ancora **isolato dietro
-  test** — non sostituisce ancora i path sopra. È lo step 1 di ADR 0019.
+- **`model_normalize.rs` — cablaggio IN CORSO (F0, [piano](../plans/2026-06-27-foundations-up-convergence.md)):**
+  il modulo implementa il pattern canonico SOTA (`Raw* serde-permissivo → Canonical* via
+  TryFrom`, "parse don't validate"). Cablato finora:
+  - `parse_plan_propose` (`‹‹PLAN_PROPOSE››`, step stringa-o-oggetto, fix gemma) — step 1 ADR 0019.
+  - **`assistant_response`** (F0 increment 1): il **builder canonico** della risposta
+    `{choices:[{message,finish_reason}]}` + la regola **reasoning-fallback** ora vivono QUI, e
+    sia `reassemble_openai_stream` sia `collect_ollama_native_stream` lo chiamano (la logica
+    inline duplicata è stata **cancellata**). Convergenza a zero cambio comportamento, 3 test.
+  Da cablare (prossimi increment F0): `sanitize_model_text`, `parse_text_tool_calls`, lo
+  schema-downgrade (oggi duplicato gateway vs `openai_compat.rs`), la cattura `reasoning`/
+  `thinking` lato Ollama native.
 - **Doppio path per il deck**: `generate_deck_content` (gateway) duplica il floor
   schema-downgrade già presente in `crates/inference/src/openai_compat.rs`; ADR 0016 prevede
   la convergenza, oggi non avvenuta.

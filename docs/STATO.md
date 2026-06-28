@@ -12,10 +12,13 @@
 - **Scoperta che guida tutto:** ogni sottosistema ha **due implementazioni**, la canonica è
   **dormiente** (caposaldo #5 violato system-wide). È la causa dell'instabilità (piano che
   parte o no, stesso prompt esiti diversi). Le mappe accurate sono in [architecture/](architecture/).
-- **Prossimo passo:** **F0 — normalizzazione modello (L0)**: cablare `model_normalize` come
-  unico normalizzatore (`{content, reasoning, tool_calls}`), spostarci sanitize/parse-tool-as-text/
-  reasoning-fallback/schema-downgrade, fixture per-provider. È la chiave di volta; tutto il resto
-  si costruisce sopra. (Attendere conferma utente sul piano prima di iniziare il codice.)
+- **F0 in corso (L0 — normalizzazione modello):**
+  - ✅ **increment 1**: `model_normalize::assistant_response` — builder canonico della risposta
+    + reasoning-fallback, cablato in `reassemble_openai_stream` e `collect_ollama_native_stream`
+    (logica inline cancellata, `model_normalize` ora WIRED, 3 test, zero cambio comportamento).
+  - **Prossimo (increment 2)**: convergere `sanitize_model_text` dentro il builder canonico;
+    poi `parse_text_tool_calls` (tool-as-text), poi lo schema-downgrade duplicato, poi fixture
+    per-provider. La WIP `model_normalize.rs` non è più dead code: è il cuore di F0.
 
 ## Cosa è stato fatto (rolling, conciso)
 
