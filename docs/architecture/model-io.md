@@ -231,8 +231,15 @@ Invarianti:
     e 3 i siti la chiamano. Shape identica (refactor behavior-preserving, garantito dai test giudice
     + provider). Resta per-sito SOLO il control-flow di trasporto (async deck vs blocking provider,
     system+user vs prompt-only). 1 test nuovo. Caposaldo #5 / ADR 0016.
-  **L0 = punto fermo (core + tool-as-text + schema-floor convergiti).** Coda residua (1 increment
-  a sé, NON blocca F1): `context_length` nel budget prompt.
+  - **`context_length` nel budget prompt** (F0.7): `chat_context_budget_chars` budgetava su un
+    flat 32k (solo env `HOMUN_INFERENCE_CONTEXT_WINDOW`), ignorando la finestra reale del modello
+    già auto-compilata nel catalogo (F0.3d). Ora il budget segue la finestra REALE
+    (`registry_model_capabilities` → `ModelEntry.context_window`): precedenza env-override >
+    finestra-catalogo > 32k default; chars = token × 3 (headroom implicito ~25% per system+reply).
+    Policy estratta in `resolve_context_budget_chars` (pura, 1 test su 6 casi). Un modello 128k
+    tiene la sua storia lunga, un modello locale piccolo è clampato a ciò che legge davvero.
+  **L0 = PUNTO FERMO COMPLETO (core + tool-as-text + schema-floor + budget).** Coda L0 esaurita;
+  prossimo strato = **F1 (capability unica)**.
 - **`json_schema` non enforced ≠ rifiutato**: alcuni provider (es. Ollama Cloud) **accettano**
   lo schema ma non lo applicano (wrappano il deck sotto una chiave, aggiungono campi) → il
   vero floor è il **parsing tollerante** a valle, non l'enforcement. Modelli che ignorano

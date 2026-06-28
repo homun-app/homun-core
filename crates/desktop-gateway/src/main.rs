@@ -14941,18 +14941,34 @@ fn extractor_openai_config() -> Option<(String, String, Option<String>)> {
     chat_openai_stream_config()
 }
 
-/// Chat context-char budget for the capable backend, derived from the model's
-/// context window (`HOMUN_INFERENCE_CONTEXT_WINDOW`, default 32k tokens).
-/// ~3 chars/token leaves headroom for the system prompt and the model's reply;
-/// it is vastly larger than the earlier 3.6K small-model default so chat history is not
-/// clamped on a model that can read it.
-fn chat_context_budget_chars() -> usize {
-    let window = env::var("HOMUN_INFERENCE_CONTEXT_WINDOW")
-        .ok()
-        .and_then(|value| value.parse::<usize>().ok())
+/// Resolve the chat context-char budget from the available window signals (pure, so the
+/// precedence is unit-testable without touching the environment). Precedence:
+/// 1. `env_override` — an explicit `HOMUN_INFERENCE_CONTEXT_WINDOW` forces the window
+///    (debugging / capping a model that lies about its size).
+/// 2. `model_window` — the model's REAL context window from the user catalog
+///    (`ModelEntry.context_window`, auto-filled from `/api/show`'s `context_length`, F0.3d).
+///    This is the point: budget against what THIS model can actually read.
+/// 3. `32_768` tokens — a safe default when the model isn't in any catalog (e.g. a raw
+///    cloud endpoint) and no override is set.
+/// Chars = window_tokens × 3: 3 chars/token is conservative vs the real ~4, so the char
+/// budget maps to ~75% of the window in tokens, implicitly reserving headroom for the
+/// system prompt and the model's reply.
+fn resolve_context_budget_chars(env_override: Option<usize>, model_window: Option<usize>) -> usize {
+    let window = env_override
         .filter(|tokens| *tokens > 0)
+        .or(model_window.filter(|tokens| *tokens > 0))
         .unwrap_or(32_768);
     window.saturating_mul(3)
+}
+
+/// Chat context-char budget for the active turn. Reads the explicit env override, then
+/// defers to [`resolve_context_budget_chars`] for the policy. `model_window` is the model's
+/// real catalog window (`None` when the model isn't catalogued → falls back to the default).
+fn chat_context_budget_chars(model_window: Option<usize>) -> usize {
+    let env_override = env::var("HOMUN_INFERENCE_CONTEXT_WINDOW")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok());
+    resolve_context_budget_chars(env_override, model_window)
 }
 
 /// Streams a chat completion from an OpenAI-compatible endpoint, translating its
@@ -18131,10 +18147,16 @@ async fn stream_chat_via_openai(
             note_user_activity();
         }
     }
+    // Budget the prompt against the model's REAL context window (catalog `context_window`,
+    // auto-filled from `/api/show`, F0.3d) instead of a flat 32k default — so a 128k model
+    // keeps its long history and a small local model is clamped to what it can actually read.
+    let model_context_window = registry_model_capabilities(&base_url, &model)
+        .and_then(|caps| caps.context_length)
+        .map(|tokens| usize::try_from(tokens).unwrap_or(usize::MAX));
     let prompt = build_chat_runtime_prompt(&BuildPromptRequest {
         prompt: request.prompt.clone(),
         context: request.context.clone(),
-        max_context_chars: Some(chat_context_budget_chars()),
+        max_context_chars: Some(chat_context_budget_chars(model_context_window)),
     })
     .runtime_prompt;
 
@@ -45874,6 +45896,25 @@ prs.save(Path({path:?}))
             response_format.pointer("/json_schema/schema/additionalProperties"),
             Some(&serde_json::Value::Bool(false))
         );
+    }
+
+    #[test]
+    fn context_budget_follows_real_window_with_env_override() {
+        use super::resolve_context_budget_chars;
+        // The model's REAL catalog window drives the budget (×3 chars/token) when no override.
+        assert_eq!(resolve_context_budget_chars(None, Some(8_192)), 8_192 * 3);
+        // A 128k model keeps a far larger budget than a small one — the whole point of F0.7.
+        assert!(
+            resolve_context_budget_chars(None, Some(131_072))
+                > resolve_context_budget_chars(None, Some(8_192))
+        );
+        // No catalog window (uncatalogued endpoint) → safe 32k default.
+        assert_eq!(resolve_context_budget_chars(None, None), 32_768 * 3);
+        // Explicit env override wins over the model window (debugging / capping a liar).
+        assert_eq!(resolve_context_budget_chars(Some(4_096), Some(131_072)), 4_096 * 3);
+        // A zero/garbage override or window is ignored, not treated as a real size.
+        assert_eq!(resolve_context_budget_chars(Some(0), Some(8_192)), 8_192 * 3);
+        assert_eq!(resolve_context_budget_chars(None, Some(0)), 32_768 * 3);
     }
 
     #[test]
