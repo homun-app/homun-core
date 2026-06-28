@@ -155,7 +155,18 @@ canonica e si ritira il parallelo; si rimuove il codice morto toccato; si splitt
 grossi; si commenta il perché; ogni modifica aggiorna la pagina architecture/ + cita il
 caposaldo + porta un test.
 
-PROSSIMO PASSO: <leggi "Dove siamo / Prossimo passo" in docs/STATO.md>.
+PROSSIMO PASSO: F1 (a)+(d) INSIEME (sono accoppiati). Leggi le mappe
+docs/architecture/capability-registry.md + browser.md + mcp.md, poi:
+- (a) convergi i due motori di capability-search: bm25_rank (chat, main.rs:17719) e
+  ToolSearchIndexStore FTS5 (orchestrator, crates/orchestrator/src/tool_index.rs) → UN solo
+  componente di ricerca condiviso.
+- (d) nello stesso movimento, riconcilia gli entry browser del registry
+  (seed_default_capabilities main.rs:43394 — oggi dot-named `browser.navigate` con schema
+  placeholder) coi tool REALI del loop (`browser_navigate` ecc., schema veri via
+  browser_*_tool_schema), e fa' costruire il ToolSearchIndexStore dell'orchestrator da quegli
+  entry → il planner vede il browser → sblocca ADR 0020/F3. È coupled con F3: valuta se serve
+  toccare l'orchestrator (load_initial_tools, brain.rs:233).
+Fatto F0 (L0 completo) + F1 (b) skill + (c) Composio. Vedi "Dove siamo" in STATO per i dettagli.
 
 A fine sessione aggiorna docs/STATO.md.
 ```
