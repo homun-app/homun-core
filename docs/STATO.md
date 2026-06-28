@@ -3,7 +3,7 @@
 > Aggiornato a OGNI sessione (vedi [METHODOLOGY.md](METHODOLOGY.md) §6). Resta **conciso**: è
 > uno *stato*, non un changelog (lo storico va in `archive/`). Da qui si riparte dopo una
 > compattazione o a inizio sessione.
-> **Ultimo aggiornamento: 2026-06-27.**
+> **Ultimo aggiornamento: 2026-06-28.**
 
 ## Dove siamo
 
@@ -39,24 +39,35 @@
   - ✅ **inc.4** `sanitize_model_text` (+ `strip_tag_blocks`/`strip_fullwidth_bar_tokens`) spostato
     in `model_normalize` → **tutta la normalizzazione testo nel modulo canonico**. 1 test. Call site
     aggiornati a `model_normalize::sanitize_model_text`.
+  - ✅ **inc.5** `parse_text_tool_calls` + `synthesize_tool_calls` (+ helper `xml_attr_value`,
+    `parse_xml_parameters`) spostati in `model_normalize` → **anche il tool-as-text** (Hermes/Qwen
+    `<tool_call>`, Claude/MiniMax `<invoke>`) è ora canonico. Il "blocco" annotato era illusorio:
+    `xml_attr_value` è condiviso solo *dentro* il cluster → tutto migra insieme. La rimozione cura
+    anche un doc orfano lasciato da inc.4 (riattacca il doc di `prune_browser_history`). 4 test.
+    Commit `8d9aad72`. **La frontiera canonica (ADR 0019) possiede ora OGNI forma di tool-call**
+    (strutturata o trapelata-come-testo) → caposaldo #6/#11.
 
 **L0 (model-io) — CORE CHIUSO (punto fermo).** La normalizzazione della risposta — builder canonico
 + reasoning-fallback, estrazione `<think>`, tool-call Ollama, sanitize, profilo capacità — vive ora
 in `model_normalize` ed è **testata e verificata sulla fonte** (Ollama/context7). Contratto: ogni
 risposta modello → `{content, reasoning, tool_calls}` canonico, sanificato.
 
-**Coda L0 (3 increment a sé, NON bloccano F1):**
-1. `parse_text_tool_calls` (tool-as-text Hermes/Qwen/Claude) → spostare in `model_normalize`; **bloccato**
-   da `xml_attr_value` condiviso con un'altra fn (va mosso anche quello + aggiornato l'altro caller).
-2. schema-downgrade `json_schema→json_object`: duplicato gateway `generate_deck_content` vs
-   `crates/inference/openai_compat.rs` → convergere.
-3. `context_length` nel budget del prompt (tocca prompt-building → increment validato).
+**Coda L0 (2 increment a sé, NON bloccano F1):**
+1. schema-downgrade `json_schema→json_object`: duplicato gateway `generate_deck_content` vs
+   `crates/inference/openai_compat.rs` → convergere. NB: il path deck usa Ollama native (`format`
+   non `response_format`) → la convergenza non è un drop-in del helper OpenAI-compat, va valutata.
+2. `context_length` nel budget del prompt (tocca prompt-building → increment validato).
 
 **Prossimo:** chiudere la coda L0 sopra **oppure** passare a **F1 (capability unica)** — vedi
 [piano](plans/2026-06-27-foundations-up-convergence.md). NB live-validation capacità: setup attuale =
 deepseek-v4-pro:cloud (Z.ai), non Ollama → il path `/api/show` si attiva con un modello Ollama locale.
 
 ## Cosa è stato fatto (rolling, conciso)
+
+**Sessione 2026-06-28 — F0.5 (chiusura normalizzazione):** spostato l'ultimo pezzo sparpagliato
+(tool-as-text + helper) in `model_normalize`; doc orfano curato; 4 test; architecture/model-io.md
+aggiornato. Commit `8d9aad72`. Coda L0 ridotta a 2 increment (schema-downgrade, context_length),
+nessuno bloccante per F1.
 
 **Sessione 2026-06-27 — diagnosi + fix sintomo + analisi strutturale + metodologia:**
 - **Fix agentic-loop validati e pushati** (default flag-off, migliorano il model-loop):
@@ -75,17 +86,17 @@ deepseek-v4-pro:cloud (Z.ai), non Ollama → il path `/api/show` si attiva con u
   Commit `941664ac`.
 - **Metodologia + stato** (questo file + METHODOLOGY.md) istituiti per la continuità.
 
-**WIP non committata (intenzionale):** `crates/desktop-gateway/src/model_normalize.rs` +
-`mod model_normalize;` in `main.rs` — fondamento ADR 0019, non cablato. È il punto di partenza di F0.
+**Nota storica:** `crates/desktop-gateway/src/model_normalize.rs` è ora **tracciato e cablato**
+(F0.1–F0.5). Il vecchio workaround sul `mod model_normalize;` untracked non serve più.
 
 ## Vincoli (NON violare)
 
 - Commit diretti su `main`; **no** trailer `Co-Authored-By`. Release = commit + tag `vX.Y.Z` → CI
   builda draft (NON pubblicata). **NON pubblicare** finché l'agentic loop non è a posto.
-- Per modifiche a `main.rs`: c'è la riga `mod model_normalize;` che referenzia un file untracked
-  (WIP ADR 0019). Per committare solo i propri fix senza la WIP: rimuovere temporaneamente la riga
-  `mod`, committare, ripristinarla (pattern già usato).
+- `model_normalize.rs` è tracciato (niente più workaround sul `mod` untracked).
 - `find_italian.py` non è in CI (gate locale); italiano per input-parsing è intenzionale.
+- Gate locale: `cargo test -p local-first-desktop-gateway` ha 1 fallimento ambientale atteso
+  (`import_pptx_template_pack…` richiede `soffice`/LibreOffice assente in dev) — non è una regressione.
 
 ## Ambiente di debug
 
