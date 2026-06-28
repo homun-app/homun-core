@@ -84,15 +84,16 @@ use local_first_memory::{
     WikiPage, WorkspaceId as MemoryWorkspaceId,
 };
 use local_first_orchestrator::{
-    ExecutionPlan, MemoryContextProvider, MemoryContextSnippet, OrchestratorBrain,
-    OrchestratorBudgets, OrchestratorRequest, OrchestratorResult, OrchestratorRoute, PlanStep,
-    PlanStepKind, StepExecutionPolicy,
+    DriveStepStatus, ExecutionPlan, MemoryContextProvider, MemoryContextSnippet, OrchestratorBrain,
+    OrchestratorBudgets, OrchestratorError, OrchestratorRequest, OrchestratorResult,
+    OrchestratorRoute, PassThroughVerifier, PlanStep, PlanStepKind, StepExecutionPolicy,
+    StepExecutor, StepOutcome, drive_plan, fill_arguments,
 };
 use local_first_secrets::{
     DevelopmentSecretKeyProvider, EncryptedFileSecretStore, SecretMaterial, SecretRef, SecretStore,
 };
 use local_first_subagents::{
-    GenerateJsonRequest, GenerateStreamEvent, SubagentTaskExecutor, TokenMetrics,
+    GenerateJsonRequest, GenerateStreamEvent, JsonRuntime, SubagentTaskExecutor, TokenMetrics,
 };
 use local_first_task_runtime::{
     ApprovalGate, ApprovalPolicy, ApprovalRequest, Automation, AutomationSource, AutomationTrigger,
@@ -19268,6 +19269,87 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
                 resume_plan.len()
             );
         }
+
+        // F3.3 (ADR 0020): when there is no plan to resume and the DRIVER flag is on,
+        // PLAN+DRIVE the turn through the OrchestratorBrain (the harness owns the control
+        // flow) instead of the model loop. Fails OPEN to the model loop on any miss, so it
+        // never degrades the live turn. First cut: browser read/gather plans.
+        if resume_plan.is_empty() && drive_orchestrated_chat_enabled() {
+            let _ = emit_stream_event(
+                &tx,
+                GenerateStreamEvent::Delta {
+                    text: "‹‹ACT››🧭 Planning and executing‹‹/ACT››".to_string(),
+                },
+            )
+            .await;
+            let drive_state = state_owned.clone();
+            let drive_goal = memory_user_message.clone();
+            let drive_lang = effective_user_language();
+            let driven = tokio::task::spawn_blocking(move || {
+                orchestrator_drive_for_chat(&drive_state, &drive_goal, &drive_lang)
+            })
+            .await;
+            match driven {
+                Ok(Ok(Some(answer))) => {
+                    let final_text = collapse_plan_markers(&answer);
+                    let _ = emit_stream_event(
+                        &tx,
+                        GenerateStreamEvent::Done {
+                            text: final_text.clone(),
+                            metrics: TokenMetrics::zero(),
+                        },
+                    )
+                    .await;
+                    // Post-turn memory + resume cleanup (mirror the model loop's tail),
+                    // since this branch returns early and skips the loop.
+                    if !final_text.trim().is_empty() && !read_only {
+                        let learn_state = state_owned.clone();
+                        let learn_user = memory_user_message.clone();
+                        let learn_answer = final_text.clone();
+                        let learn_thread = thread_id.clone();
+                        let learn_prev = memory_prev_assistant.clone();
+                        tokio::spawn(async move {
+                            learn_from_exchange(
+                                &learn_state,
+                                &learn_user,
+                                &learn_answer,
+                                "",
+                                learn_thread.as_deref(),
+                                None,
+                                learn_prev.as_deref(),
+                            )
+                            .await;
+                        });
+                    }
+                    tx.entry
+                        .finished
+                        .store(true, std::sync::atomic::Ordering::Relaxed);
+                    let cleanup_id = resume_id.clone();
+                    tokio::spawn(async move {
+                        tokio::time::sleep(std::time::Duration::from_secs(300)).await;
+                        if let Ok(mut map) = stream_registry().lock() {
+                            map.remove(&cleanup_id);
+                        }
+                    });
+                    return;
+                }
+                Ok(Ok(None)) => {
+                    if verbose_debug() {
+                        eprintln!("[drive] ADR0020 no answer → model-loop fallback");
+                    }
+                }
+                Ok(Err(error)) => {
+                    if verbose_debug() {
+                        eprintln!("[drive] ADR0020 failed → model-loop fallback: {error}");
+                    }
+                }
+                Err(join) => {
+                    if verbose_debug() {
+                        eprintln!("[drive] ADR0020 task panicked → model loop: {join}");
+                    }
+                }
+            }
+        }
         // F2 verification gate: the running evidence (tool name → result snippet) for the
         // CURRENT plan step, fed to the verifier when the model marks the step done, then
         // cleared. A chat model can claim "done" without doing the work; the gate checks.
@@ -35782,6 +35864,279 @@ fn orchestrator_plan_for_chat(
         return Ok(Vec::new());
     }
     Ok(execution_plan_to_canonical_steps(&plan))
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// F3.3 — route the chat turn through the OrchestratorBrain DRIVER (ADR 0020).
+//
+// Unlike `orchestrator_plan_for_chat` (which only SEEDS the model loop), this
+// PLANS then DRIVES the plan in-turn: the harness owns the control flow, the model
+// fills the per-step argument slots, and the runtime marks done after verify. It
+// is behind its own flag (`HOMUN_DRIVE_CHAT`) and FAILS OPEN to the model loop on
+// any miss, so it never degrades the live turn.
+//
+// First cut scope: browser read/gather plans. Browser steps execute through the
+// EXISTING durable sidecar executor (`call_shared_browser_sidecar`) — reuse, not a
+// third dispatch. The driver owns the turn, so the shared sidecar is used (no
+// collision with the chat loop's per-thread session, which doesn't run this turn).
+// Non-browser / subagent steps are unsupported here yet → that step fails and, if
+// nothing was gathered, the whole turn falls back to the model loop. The remaining
+// convergence (retiring the chat loop's inline browser dispatch) is F3.3-pre.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Flag gating the DRIVER routing (separate from `HOMUN_ORCHESTRATED_CHAT`, which
+/// only seeds). Default off.
+fn drive_orchestrated_chat_enabled() -> bool {
+    matches!(
+        env::var("HOMUN_DRIVE_CHAT")
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase()
+            .as_str(),
+        "1" | "true" | "on"
+    )
+}
+
+/// Maps a chat browser tool name (underscore, the schema the planner sees, F1.d)
+/// to the sidecar `BrowserMethod`. `normalize_browser_call` (inside
+/// `call_shared_browser_sidecar`) handles the managed-tab labeling, so we pass the
+/// planner-level method + the model-filled args as-is.
+fn browser_method_for_chat_tool(tool_name: &str) -> Option<BrowserMethod> {
+    match tool_name {
+        "browser_navigate" => Some(BrowserMethod::Navigate),
+        "browser_snapshot" => Some(BrowserMethod::Snapshot),
+        "browser_act" => Some(BrowserMethod::Act),
+        "browser_screenshot" => Some(BrowserMethod::Screenshot),
+        "browser_tabs" => Some(BrowserMethod::Tabs),
+        "browser_dialog" => Some(BrowserMethod::RespondDialog),
+        _ => None,
+    }
+}
+
+/// A synthetic `TaskRecord` so `call_shared_browser_sidecar` (built for the durable
+/// runtime) can be reused from a chat turn. The sidecar only reads it for the spawn
+/// env (workspace/profile), so a lightweight record scoped to the owner is enough.
+fn synthetic_drive_task(goal: &str) -> TaskRecord {
+    TaskRecord::new(
+        format!("chatdrive_{}", uuid::Uuid::new_v4().simple()),
+        local_first_task_runtime::UserId::new(gateway_capability_user_id().as_str()),
+        local_first_task_runtime::WorkspaceId::new(gateway_capability_workspace_id().as_str()),
+        "chat_drive_browser",
+        goal,
+        serde_json::json!({}),
+    )
+}
+
+/// The gateway-side [`StepExecutor`] injected into `drive_plan`: it reuses the
+/// orchestrator's schema-constrained arg-fill, then executes browser steps through
+/// the existing shared-sidecar executor. Because the executor is passed to
+/// `drive_plan` BY REFERENCE (not boxed in a facade), it can borrow `&AppState`.
+struct ChatDriveStepExecutor<'a> {
+    state: &'a AppState,
+    router: &'a ModelRouter,
+    loaded_tools: &'a [CapabilityTool],
+    task: TaskRecord,
+}
+
+impl StepExecutor for ChatDriveStepExecutor<'_> {
+    fn execute_step(
+        &mut self,
+        step: &PlanStep,
+        completed: &std::collections::BTreeMap<String, StepOutcome>,
+    ) -> OrchestratorResult<StepOutcome> {
+        let tool_name = step.tool_name.as_deref().unwrap_or("");
+        let Some(method) = browser_method_for_chat_tool(tool_name) else {
+            // First cut: only browser steps. Anything else fails → fallback.
+            return Err(OrchestratorError::Planner(format!(
+                "drive_unsupported_tool:{tool_name}"
+            )));
+        };
+        let tool = self
+            .loaded_tools
+            .iter()
+            .find(|candidate| candidate.name == tool_name)
+            .ok_or_else(|| {
+                OrchestratorError::Planner(format!("drive_tool_not_loaded:{tool_name}"))
+            })?;
+        // The model fills the args CONSTRAINED to the browser tool's chat schema
+        // (reuse of the orchestrator's arg-fill — same mechanism as F3.2).
+        let args = fill_arguments(self.router, step, tool, completed)?;
+        match call_shared_browser_sidecar(self.state, &self.task, method, args)
+            .map_err(|error| OrchestratorError::Capability(error.message))?
+        {
+            SharedSidecarCall::SidecarLost(reason) => Err(OrchestratorError::Capability(reason)),
+            SharedSidecarCall::Response(BrowserResponse::Success {
+                ok: true, result, ..
+            }) => Ok(StepOutcome {
+                succeeded: true,
+                output: result,
+                evidence: vec![format!("browser:{tool_name}")],
+            }),
+            SharedSidecarCall::Response(BrowserResponse::Success { .. }) => Err(
+                OrchestratorError::Capability("browser returned invalid success envelope".into()),
+            ),
+            SharedSidecarCall::Response(BrowserResponse::Error { error, .. }) => Err(
+                OrchestratorError::Capability(format!("{}:{}", error.code, error.message)),
+            ),
+        }
+    }
+}
+
+/// Plans then DRIVES the turn. Returns `Ok(Some(answer))` when the driver produced
+/// a final answer, `Ok(None)` to fall back to the model loop (conversational, empty
+/// plan, or nothing gathered), or `Err` on a hard failure (caller also falls back).
+/// Synchronous — run via `spawn_blocking` (the sidecar + model calls block).
+fn orchestrator_drive_for_chat(
+    state: &AppState,
+    goal: &str,
+    language: &str,
+) -> Result<Option<String>, String> {
+    let user = gateway_capability_user_id();
+    let workspace = gateway_capability_workspace_id();
+    let (mut policy_context, provider_tools) = {
+        let registry = lock_capability_registry(state).map_err(|e| format!("{e:?}"))?;
+        let policy = registry
+            .policy_context(&user, &workspace)
+            .map_err(|e| format!("policy context: {e}"))?;
+        let mut provider_tools = Vec::new();
+        for provider in &policy.enabled_providers {
+            let tools = registry
+                .cached_tools(provider)
+                .map_err(|e| format!("cached tools: {e}"))?
+                .into_iter()
+                .map(|cached| cached.tool)
+                .collect::<Vec<_>>();
+            provider_tools.push((provider.clone(), tools));
+        }
+        (policy, provider_tools)
+    };
+    policy_context.allowed_actions = vec![ActionClass::Read, ActionClass::Draft];
+    // Flattened tool list for the executor's arg-fill (the input schemas).
+    let loaded_tools: Vec<CapabilityTool> = provider_tools
+        .iter()
+        .flat_map(|(_, tools)| tools.clone())
+        .collect();
+
+    // 1. Plan (planning-only facade — the planner never executes).
+    let mut facade =
+        CapabilityFacade::new(CapabilityPolicy::default(), InMemoryCapabilityAudit::default());
+    for (provider_id, tools) in provider_tools {
+        let kind = tools
+            .first()
+            .map(|tool| tool.provider_kind)
+            .unwrap_or(CapabilityProviderKind::Native);
+        facade.register_provider(CachedToolProvider::new(provider_id, kind, tools));
+    }
+    let task_store = TaskStore::open(gateway_task_database_path().map_err(|e| e.to_string())?)
+        .map_err(|e| format!("task store: {e}"))?;
+    let plan_router = build_browser_inference_router();
+    let budgets =
+        brain_budgets_for_context_window(plan_router.active_context_window(&Requirements::default()));
+    let mut brain = OrchestratorBrain::new(plan_router, open_brain_memory(), facade, task_store);
+    let request = OrchestratorRequest {
+        request_id: format!("chatdrive_{}", uuid::Uuid::new_v4().simple()),
+        policy_context,
+        user_message: goal.to_string(),
+        conversation_summary: None,
+        attachments: Vec::new(),
+        budgets,
+        language: language.to_string(),
+    };
+    let plan = brain.plan_only(&request).map_err(|e| format!("plan_only: {e}"))?;
+    if matches!(plan.route, OrchestratorRoute::DirectAnswer) || plan.steps.is_empty() {
+        return Ok(None); // conversational / nothing to drive → model loop
+    }
+
+    // 2. Drive the plan in-turn: model fills args, sidecar executes, runtime verifies.
+    let exec_router = build_browser_inference_router();
+    let mut executor = ChatDriveStepExecutor {
+        state,
+        router: &exec_router,
+        loaded_tools: &loaded_tools,
+        task: synthetic_drive_task(goal),
+    };
+    let mut verifier = PassThroughVerifier;
+    let outcome = drive_plan(&plan, &mut executor, &mut verifier);
+
+    // 3. Gather verified step outputs (snapshots/results) for synthesis.
+    let mut gathered = String::new();
+    for result in &outcome.results {
+        if result.status != DriveStepStatus::Done {
+            continue;
+        }
+        if let Some(step_outcome) = &result.outcome {
+            let text = browser_snapshot_text(&step_outcome.output);
+            let snippet = if text.is_empty() {
+                step_outcome.output.to_string()
+            } else {
+                text
+            };
+            gathered.push_str(&format!(
+                "[{}] {}\n",
+                result.step_id,
+                truncate_chars(&snippet, 3_000)
+            ));
+        }
+    }
+    if gathered.trim().is_empty() {
+        return Ok(None); // nothing executed → fall back to the model loop
+    }
+    if verbose_debug() {
+        eprintln!(
+            "[drive] ADR0020 drove {} steps, {} done",
+            outcome.results.len(),
+            outcome.done_step_ids().len()
+        );
+    }
+
+    // 4. Synthesize the final answer (constrained), then return it.
+    let answer = drive_synthesize_answer(&exec_router, goal, &gathered, language)?;
+    Ok(Some(answer))
+}
+
+/// One constrained model call turning the driver's gathered results into the
+/// user-facing answer. Reuses the chat synthesis intent of the model loop's
+/// forced-synthesis path, but over the driver's structured outputs.
+fn drive_synthesize_answer(
+    router: &ModelRouter,
+    goal: &str,
+    gathered: &str,
+    language: &str,
+) -> Result<String, String> {
+    let prompt = format!(
+        "You executed a plan to help the user. User request: {goal}\n\n\
+         Gathered results from the steps:\n{gathered}\n\n\
+         Write the FINAL ANSWER for the user in language '{language}', synthesizing the results \
+         above with concrete details. If something failed, say so clearly and propose next steps."
+    );
+    let request = GenerateJsonRequest {
+        prompt,
+        max_tokens: 1_024,
+        temperature: 0.0,
+        wait_if_busy: true,
+        request_timeout_seconds: Some(120.0),
+        json_schema: Some(serde_json::json!({
+            "type": "object",
+            "properties": { "answer": { "type": "string" } },
+            "required": ["answer"]
+        })),
+        required_keys: vec!["answer".to_string()],
+        repair: true,
+    };
+    let response = router
+        .generate_json(&request)
+        .map_err(|error| format!("synthesis failed: {error:?}"))?;
+    let answer = response
+        .json
+        .get("answer")
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if answer.is_empty() {
+        return Err("synthesis produced an empty answer".to_string());
+    }
+    Ok(answer)
 }
 
 /// A1.1: runs the OrchestratorBrain so it MATERIALIZES durable tasks into the

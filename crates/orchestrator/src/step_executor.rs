@@ -146,8 +146,10 @@ fn call_capability_tool(
 /// fills them constrained to the tool's input schema (ADR 0016 Pilastro 3). Shared
 /// with the agentic loop (`agentic.rs`) so tool-choice and arg-fill use the SAME
 /// schema-constrained mechanism (caposaldo #5) — there the model picks the tool
-/// from an enum, then this fills its args.
-pub(crate) fn fill_arguments<R: JsonRuntime>(
+/// from an enum, then this fills its args. Public so a host (the desktop gateway's
+/// drive executor, F3.3) that executes tools through its own surface (e.g. the
+/// browser sidecar) can reuse the exact same schema-constrained arg-fill.
+pub fn fill_arguments<R: JsonRuntime>(
     runtime: &R,
     step: &PlanStep,
     tool: &CapabilityTool,
