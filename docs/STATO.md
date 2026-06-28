@@ -114,6 +114,31 @@ richiede eval bi-popolazione (gemma4 vs capace) **non eseguibile in questo ambie
 - ⏳ **F2.3 floor `shadow→on` + manopola `slot`** — richiede la eval bi-popolazione → differito a
   quando l'ambiente ha Ollama/gemma4.
 
+**F3 — un motore / driver in-turn (ADR 0020 — IN CORSO, fondazione costruita+validata su gemma4).**
+Il pezzo mancante "l'harness possiede il control-flow" ora ESISTE come motore #2 sincrono, testato.
+Commit `b705289a` (driver+executor) + `3ce99c67` (arg-fill). Vedi [agent-loop](architecture/agent-loop.md) "Il driver in-turn".
+- ✅ **F3.1 driver deterministico** — `crates/orchestrator/src/driver.rs` `drive_plan(plan, executor,
+  verifier)`: un solo passaggio in avanti su piano già topologico (`validate_plan`), `StepExecutor`
+  iniettato per step, `done` assegnato dal runtime SOLO dopo `StepVerifier`. Le 3 invarianti per
+  costruzione (monotonìa/limitatezza/identità=`step_id`). Puro → 7 unit-test con fake, niente
+  modello/SQLite (caposaldo #2). Seam `StepExecutor`/`StepVerifier` esportati.
+- ✅ **F3.2 esecuzione per-step + arg-fill (model-fills-slot)** — `step_executor.rs`
+  `CapabilityStepExecutor<R: JsonRuntime>` (UN solo executor, args-concreti e arg-fill convergiuti,
+  caposaldo #5): risolve il tool come `validate_plan` (parità #11 validate↔execute); se gli `arguments`
+  sono vuoti (forma piano-seme, il planner possiede la forma non gli args) il **modello li riempie
+  vincolato allo schema del tool** (ADR 0016 Pilastro 3), poi esegue su `CapabilityFacade::call_tool`
+  canonico. `Brain::drive(request, plan)` lo cabla (borrow disgiunti). `SubagentTask` falliscono
+  rumorosamente (path agentico = F3.2c). **Validato end-to-end su gemma4**
+  (`orchestrated_brain_drives_plan_on_gemma4`, ignored): plan→driver→arg-fill→execute→done, 1/1.
+  +7 test orchestrator. **Scoperta:** la facade del gateway ha GIÀ un `CapabilityProvider` browser
+  reale (sidecar condiviso) → `drive`→`call_tool` riusa gli esecutori durabili canonici; la
+  `chat_browser_call` inline di motore #1 è la **parallela da ritirare**, non da replicare. NESSUN
+  terzo dispatch.
+- ⏳ **F3.2c** esecutore agentico per i `SubagentTask` (inner-loop modello multi-round + ponte alla
+  tool-dispatch della chat). ⏳ **F3.3** instradare `stream_chat_via_openai` sul `drive` dietro
+  `HOMUN_ORCHESTRATED_CHAT`, validare flag-ON vs motore #1 (il pezzo rischioso sul path VIVO, non
+  ancora fatto). ⏳ **F3.4** ritirare `merge_plan` per-titolo + prompt-prosa di control-flow.
+
 Mappe: [registry](architecture/capability-registry.md), [skills](architecture/skills.md),
 [connectors](architecture/connectors-composio.md), [browser](architecture/browser.md), [mcp](architecture/mcp.md).
 NB live-validation (CORRETTO 2026-06-28, sessione 4): **Ollama È installato e gira** (`127.0.0.1:11434`)
@@ -122,6 +147,21 @@ bi-popolazione (caposaldo #2) È eseguibile qui: `python3 scripts/eval_suite.py 
 chat di default = deepseek-v4-pro:cloud (Z.ai, tier **Balanced**); Composio non configurato.
 
 ## Cosa è stato fatto (rolling, conciso)
+
+**Sessione 2026-06-28 (5) — F3 fondazione: driver in-turn + arg-fill, validati su gemma4:**
+- **F3.1** `driver.rs` `drive_plan` — control-flow posseduto dall'harness: passo avanti su piano
+  topologico, `StepExecutor`/`StepVerifier` iniettati, `done` solo dopo verify, 3 invarianti per
+  costruzione. 7 unit-test puri. Commit `b705289a`.
+- **F3.2** `step_executor.rs` `CapabilityStepExecutor<R>` — UN executor: args concreti → esegue;
+  args vuoti (piano-seme) → il modello li riempie vincolato allo schema del tool (ADR 0016 P3) →
+  `CapabilityFacade::call_tool`. `Brain::drive` lo cabla. `SubagentTask` falliscono (F3.2c). Commit
+  `3ce99c67`. +7 test orchestrator.
+- **Validazione live gemma4**: `orchestrated_brain_drives_plan_on_gemma4` (ignored) → plan→driver→
+  arg-fill→execute→done, 1/1 step ripetibile. Verticale di motore #2 regge sul tier debole.
+- **Scoperte/correzioni**: la facade gateway ha già un provider browser reale (sidecar) → niente
+  terzo dispatch, la `chat_browser_call` inline è la parallela da ritirare; corretta agent-loop.md
+  ("execute_plan ignora depends_on" era impreciso: validate_plan impone l'ordine topologico,
+  enqueue_step cabla gli archi durabili — il gap era il driver sincrono assente, ora colmato).
 
 **Sessione 2026-06-28 — chiusura L0 (F0.5–F0.7) + avvio F1 (b, c):**
 - **F0.5** tool-as-text (`parse_text_tool_calls`/`synthesize_tool_calls` + helper) → `model_normalize`;
@@ -272,47 +312,49 @@ canonica e si ritira il parallelo; si rimuove il codice morto toccato; si splitt
 grossi; si commenta il perché; ogni modifica aggiorna la pagina architecture/ + cita il
 caposaldo + porta un test.
 
-PROSSIMO PASSO: F3 — UN MOTORE (ADR 0020), la convergenza motore-1 → motore-2. È la fase più
-grossa e rischiosa del piano: rimpiazza il control-flow VIVO. Leggi PRIMA
-docs/decisions/0020-converge-chat-loop-onto-orchestrator.md + docs/decisions/0016-*.md +
-docs/architecture/agent-loop.md (la sezione "I DUE motori") + capability-registry.md §5.
+PROSSIMO PASSO: F3.3 — INSTRADARE IL TURNO sul driver di motore #2 (il pezzo rischioso, sul path
+VIVO). La FONDAZIONE di F3 è già costruita e validata su gemma4 (driver in-turn + arg-fill, vedi
+sotto): NON ripartire da lì. Leggi PRIMA docs/decisions/0020-*.md + 0016-*.md +
+docs/architecture/agent-loop.md (sezione "Il driver in-turn" + "I DUE motori").
 
-OBIETTIVO: instradare il turno di chat sull'`OrchestratorBrain` reso DRIVER DAG reale (scheduler
-`depends_on` + per-step model-fills-slot + verify/repair), ritirando il loop prompt-prosa di
-motore #1 e `merge_plan` per-TITOLO (identità = `step_id` runtime, mai dedotta dal testo —
-caposaldo #6). Le 3 invarianti del piano: monotonìa (un done verificato non si riapre),
-limitatezza (un avanzamento non gonfia il piano), identità non inferita.
+OBIETTIVO: instradare `stream_chat_via_openai` sul `OrchestratorBrain::drive` dietro
+`HOMUN_ORCHESTRATED_CHAT`, ritirando il loop prompt-prosa di motore #1 e `merge_plan` per-TITOLO
+(identità = `step_id`, mai dal testo — caposaldo #6). 3 invarianti: monotonìa, limitatezza, identità
+non inferita (tutte già garantite dal driver per costruzione).
 
-GIÀ FATTO (il planner di F3 è consolidato e VALIDATO su gemma4, non ripartire da lì):
-- F1.d ha messo i tool browser REALI nel registry → il planner li vede (non più "0 step").
-- Risoluzione tollerante del tool_name (`tool_for_step`/`tool_name_resolves`, execution.rs, #11) +
-  enum dei nomi-tool nello schema planner (`planner_schema(loaded_tool_names)`, #6): un modello
-  debole non può più stipare gli argomenti nel nome. Validato live: gemma4 emette `browser_navigate`
-  pulito e il piano valida.
-- Test riproducibile dell'on-ramp: `cargo test -p local-first-desktop-gateway --bin
-  local-first-desktop-gateway orchestrated_planner_sees_browser_on_gemma4 -- --ignored --nocapture`.
+GIÀ FATTO E VALIDATO SU GEMMA4 (non ripartire da qui):
+- F3-planner: F1.d (browser nel registry), risoluzione tollerante tool_name (#11), enum tool nello
+  schema planner (#6). Test: `orchestrated_planner_sees_browser_on_gemma4` (ignored).
+- **F3.1 driver** (`crates/orchestrator/src/driver.rs` `drive_plan`): control-flow dell'harness, passo
+  avanti su piano topologico (`validate_plan`), `StepExecutor`/`StepVerifier` iniettati, done dopo
+  verify, 3 invarianti per costruzione. 7 unit-test puri. Commit `b705289a`.
+- **F3.2 esecuzione per-step + arg-fill** (`step_executor.rs` `CapabilityStepExecutor<R>`, `Brain::drive`):
+  args vuoti del piano-seme → il modello li riempie vincolato allo schema del tool (ADR 0016 P3) →
+  `CapabilityFacade::call_tool`. `SubagentTask` falliscono (F3.2c). Commit `3ce99c67`. Test ripetibile:
+  `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway
+  orchestrated_brain_drives_plan_on_gemma4 -- --ignored --nocapture` (plan→driver→arg-fill→execute→done).
 
-I GAP DI MOTORE #2 DA CHIUDERE (verificati in agent-loop.md "I DUE motori"):
-- `orchestrator_plan_for_chat` (main.rs) fa solo `plan_only` → `execution_plan_to_canonical_steps`
-  → SEMINA il piano nel loop esistente. Non guida l'esecuzione.
-- `execute_plan` (orchestrator/brain.rs) itera LINEARE, IGNORA `depends_on`; i subagenti sono
-  `generate_json`-only, SENZA tool. Per essere un driver vero servono: scheduler `depends_on` +
-  esecuzione per-step che CHIAMA i tool (oggi la tool-dispatch vive solo nel loop di chat).
-INCREMENTI bottom-up SUGGERITI (scope tu dopo aver letto, gated dietro `HOMUN_ORCHESTRATED_CHAT`,
-verde a ogni passo, validati su gemma4): (1) valida END-TO-END il seed esistente attraverso il
-gateway con flag ON (il piano-seme aiuta davvero il loop?); (2) `execute_plan` onora `depends_on`
-(scheduler reale); (3) esecuzione per-step con tool (il pezzo difficile: ponte verso la tool-dispatch
-del loop di chat, O dare al Brain l'esecuzione tool reale); (4) instrada il turno sul Brain dietro
-flag, valida flag-ON vs motore #1, zero regressioni; (5) ritira `merge_plan` per-titolo.
+SCOPERTA CHIAVE (de-rischia F3.3): la facade del gateway ha GIÀ un `CapabilityProvider` browser reale
+(main.rs ~`call_shared_browser_sidecar`) → `drive`→`call_tool` riusa gli esecutori durabili canonici.
+NIENTE terzo dispatch: la `chat_browser_call` inline di `stream_chat_via_openai` (un grosso match
+inline, NON un seam estraibile) è la PARALLELA da ritirare, non da replicare.
+
+INCREMENTI RIMASTI (gated dietro flag, verde a ogni passo, validati su gemma4): **F3.3** instrada il
+turno sul `drive` (quando non c'è piano da riprendere E flag ON: pianifica via `orchestrator_plan_for_chat`
+→ `drive` invece di seminare il loop), streama progresso + sintesi finale, valida flag-ON vs motore #1
+zero-regressioni; **F3.2c** esecutore agentico per i `SubagentTask` (inner-loop modello multi-round);
+**F3.4** ritira `merge_plan` per-titolo + prompt-prosa. NB: il `drive` produce esiti per-step, NON la
+risposta NL finale né gestisce step agentici → l'instradamento iniziale conviene sui piani all-CapabilityCall
+(es. browse), con fallback a motore #1 per il resto.
 
 AMBIENTE: Ollama gira con gemma4:latest/12b → eval bi-popolazione e validazione live SONO possibili
-qui (`python3 scripts/eval_suite.py gemma4:latest` = gate di regressione caposaldo #2; usa lo schema
-del test ignored sopra per pilotare il Brain su gemma4). Modello chat default = deepseek-v4-pro:cloud
-(Balanced). `adaptive_floor` = "shadow" (telemetria F2.1 attiva). Non accendere il floor a "on" senza
-eval bi-popolazione. NB: i file:line di main.rs sono sfasati dopo F1/F2/F3 — usa i nomi di funzione.
+qui (`python3 scripts/eval_suite.py gemma4:latest` = gate di regressione caposaldo #2). Modello chat
+default = deepseek-v4-pro:cloud (Balanced). `adaptive_floor` = "shadow" (telemetria F2.1 attiva). Non
+accendere il floor a "on" senza eval bi-popolazione. NB: i file:line di main.rs sono sfasati — usa i
+nomi di funzione.
 
-Fatto finora: F0 (L0 completo) + F1 COMPLETO+testato + F2 (meccanismo costruito: telemetria shadow,
-reconcile gated; validato bi-popolazione) + F3-planner (on-ramp + #11 + #6, validati su gemma4).
+Fatto finora: F0 (L0 completo) + F1 COMPLETO+testato + F2 (meccanismo costruito, validato
+bi-popolazione) + F3-planner + **F3.1/F3.2 driver in-turn + arg-fill, validati su gemma4**.
 
 A fine sessione aggiorna docs/STATO.md.
 ```
