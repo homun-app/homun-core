@@ -73,8 +73,8 @@ Punti caldi (con `file:line` in `main.rs`):
 | Dove | `stream_chat_via_openai` (`main.rs`) | `crates/orchestrator` `OrchestratorBrain` |
 | Guida | **il modello** (prompt-prosa ~2000 righe) | un piano DAG tipizzato |
 | Piano | `Vec<Value>` mergiato — **`merge_plan` per TITOLO** (`:~6747`) | `ExecutionPlan` con `step_id` stabili + `depends_on` |
-| Esecuzione | round loop con tool inline | due path: `execute_plan` (materializza task durabili) **e** `drive` (driver sincrono in-turn, F3) |
-| Subagenti | n/d (il loop fa tutto) | `generate_json`-only, **senza tool** (il driver per ora li fallisce, vedi sotto) |
+| Esecuzione | round loop con tool inline | due path: `execute_plan` (materializza task durabili) **e** `drive` (driver sincrono in-turn + arg-fill model-fills-slot, F3) |
+| Subagenti | n/d (il loop fa tutto) | `generate_json`-only, **senza tool** (il driver fallisce i `SubagentTask`: serve l'inner-loop agentico, vedi sotto) |
 | Uso live | tutto | planner `plan_only` semina motore #1 (ADR 0020 P1); `drive` non ancora instradato |
 
 ### Precisazione su `execute_plan` e `depends_on` (correzione 2026-06-28)
@@ -87,7 +87,7 @@ l'iterazione lineare *è* un ordine valido; (b) `enqueue_step` cabla i `depends_
 task di sfondo e ritorna** (CapabilityCall = una call immediata o enqueue; SubagentTask =
 `generate_json` senza tool). Non esiste(va) un **driver sincrono di turno**.
 
-### Il driver in-turn (F3.1/F3.2a — punto fermo testato)
+### Il driver in-turn (F3.1/F3.2 — punto fermo testato, validato su gemma4)
 
 `crates/orchestrator/src/driver.rs` (`drive_plan`) è il control-flow **posseduto dall'harness**:
 fa un **solo passaggio in avanti** sul piano (ordine topologico garantito da `validate_plan`), e per
@@ -95,11 +95,27 @@ ogni step chiama un `StepExecutor` iniettato; un `done` lo assegna il runtime **
 `StepVerifier`, mai l'auto-report del modello. Le **3 invarianti** sono per costruzione: monotonìa
 (un Done non si rivede), limitatezza (un risultato per step, il piano non cresce), identità =
 `step_id` (i titoli non si consultano mai). È puro → unit-testabile con fake, senza modello/SQLite.
-`CapabilityStepExecutor` (`step_executor.rs`) è il primo esecutore reale: instrada i `CapabilityCall`
-sul `CapabilityFacade` canonico (policy + validazione args + dispatch + audit); i `SubagentTask`
-**falliscono** (servono modello + tool-dispatch della chat → esecutore gateway-side, F3.2b). Il Brain
-espone `drive(request, plan) → DriveOutcome`. **Residuo:** l'esecutore agentico (inner-loop modello +
-ponte alla tool-dispatch della chat) e l'instradamento del turno sul `drive` dietro flag (F3.2b/F3.3).
+
+`CapabilityStepExecutor` (`step_executor.rs`, generico su `JsonRuntime`) è l'esecutore reale dei
+`CapabilityCall`: (1) risolve il tool come `validate_plan` (tolleranza #11), (2) se gli `arguments`
+sono **vuoti** — il planner-seme produce la FORMA del piano, non gli args (ADR 0020 P1) — il **modello
+li riempie vincolato allo schema del tool** (`fill_arguments`, constrained decoding ADR 0016 Pilastro
+3; args concreti → salta la generazione), (3) esegue sul `CapabilityFacade` canonico (policy +
+validazione + dispatch + audit). I `SubagentTask` **falliscono** (servono l'inner-loop agentico
+multi-round → path agentico futuro), mai un silent-pass. Il Brain espone `drive(request, plan) →
+DriveOutcome`.
+
+**Convergenza chiave (niente terzo dispatch):** il gateway ha **già** un `CapabilityProvider` browser
+reale registrato nella facade (pilota il sidecar condiviso via `call_shared_browser_sidecar`). Quindi
+`drive` → `CapabilityFacade::call_tool` **riusa gli esecutori durabili canonici**; la `chat_browser_call`
+inline del loop di motore #1 è la **parallela da ritirare**, non da replicare.
+
+**Validato su gemma4** (`orchestrated_brain_drives_plan_on_gemma4`, ignored): planner (gemma4) →
+driver → arg-fill (gemma4, vincolato) → execute (fake browser eseguibile) → done. Il verticale di
+motore #2 regge sul tier debole (caposaldo #2). **Residuo F3:** (a) l'esecutore agentico per i
+`SubagentTask` (inner-loop modello + ponte alla tool-dispatch della chat); (b) **instradare il turno**
+di `stream_chat_via_openai` sul `drive` dietro `HOMUN_ORCHESTRATED_CHAT`, validare flag-ON vs motore #1
+(F3.3); (c) ritirare `merge_plan` per-titolo e il prompt-prosa di control-flow (F3.4).
 
 ## Gli strati (su cui ricostruire, bottom-up)
 

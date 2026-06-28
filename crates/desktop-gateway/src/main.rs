@@ -46622,6 +46622,139 @@ prs.save(Path({path:?}))
         eprintln!("=== end plan ===\n");
     }
 
+    /// F3 engine-#2 VERTICAL on the weak tier (ADR 0020 Fase 1 b+d): gemma4 plans, then the
+    /// in-turn `drive` executes that REAL plan to `done` through the canonical CapabilityFacade.
+    /// The browser provider here is an EXECUTABLE fake seeded with the real browser tool schemas
+    /// (visible to the planner AND runnable by the driver) — no live sidecar needed.
+    ///
+    /// Validates the full chain on the weak tier: planner (gemma4) → driver → per-step
+    /// argument-fill (gemma4 again, CONSTRAINED to the tool schema — the planner leaves args empty
+    /// by design, ADR 0020 P1) → execute via the facade → runtime marks `done` only after verify.
+    /// The three invariants hold: boundedness (one result per step), monotonicity (a Done never
+    /// reopens), identity = step_id. Ignored: hits the live Ollama endpoint. Run with:
+    ///   cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway \
+    ///     orchestrated_brain_drives_plan_on_gemma4 -- --ignored --nocapture
+    #[test]
+    #[ignore = "hits the live Ollama gemma4 endpoint; run manually"]
+    fn orchestrated_brain_drives_plan_on_gemma4() {
+        use local_first_capabilities::{FakeCapabilityProvider, PolicyContext, ProviderId};
+
+        // 1. Seed the registry exactly as the gateway does (real browser tools, F1.d).
+        let registry = super::CapabilityRegistryStore::open_in_memory().unwrap();
+        super::seed_default_capabilities(&registry).unwrap();
+        let user = super::gateway_capability_user_id();
+        let workspace = super::gateway_capability_workspace_id();
+        let mut policy: PolicyContext = registry.policy_context(&user, &workspace).unwrap();
+        // Allow confirmation-gated writes so browser_act can execute through the fake provider.
+        policy.allowed_actions = vec![
+            super::ActionClass::Read,
+            super::ActionClass::Draft,
+            super::ActionClass::WriteWithConfirmation,
+        ];
+
+        // 2. Build the facade: the browser provider is an EXECUTABLE fake carrying the real
+        //    browser tool schemas (visible to the planner AND runnable by the driver); every
+        //    other seeded provider stays planning-only (CachedToolProvider).
+        let mut facade = super::CapabilityFacade::new(
+            super::CapabilityPolicy::default(),
+            super::InMemoryCapabilityAudit::default(),
+        );
+        let browser_provider_id = ProviderId::new("browser");
+        for provider in &policy.enabled_providers {
+            let tools: Vec<_> = registry
+                .cached_tools(provider)
+                .unwrap()
+                .into_iter()
+                .map(|cached| cached.tool)
+                .collect();
+            if *provider == browser_provider_id {
+                let mut fake = FakeCapabilityProvider::new(
+                    provider.clone(),
+                    super::CapabilityProviderKind::Browser,
+                    true,
+                    None,
+                    tools.clone(),
+                );
+                // Canned per-tool responses so each browser step succeeds deterministically.
+                for tool in &tools {
+                    fake.set_tool_response(
+                        &tool.name,
+                        serde_json::json!({"ok": true, "tool": tool.name}),
+                    );
+                }
+                facade.register_provider(fake);
+            } else {
+                let kind = tools
+                    .first()
+                    .map(|tool| tool.provider_kind)
+                    .unwrap_or(super::CapabilityProviderKind::Native);
+                facade.register_provider(super::CachedToolProvider::new(
+                    provider.clone(),
+                    kind,
+                    tools,
+                ));
+            }
+        }
+
+        // 3. Plan on gemma4, then DRIVE the plan to completion.
+        let router = super::build_router_from(
+            super::ProviderKind::OpenaiCompat,
+            "http://127.0.0.1:11434/v1",
+            "gemma4:latest",
+            None,
+            32_768,
+        );
+        let mut brain = super::OrchestratorBrain::new(
+            router,
+            super::GatewayBrainMemory(None),
+            facade,
+            local_first_task_runtime::TaskStore::open_in_memory().unwrap(),
+        );
+        let request = super::OrchestratorRequest {
+            request_id: "f3_drive_validation".to_string(),
+            policy_context: policy,
+            user_message: "Cerca sul web i treni da Milano a Roma per domani mattina e \
+                           riportami orari e prezzi."
+                .to_string(),
+            conversation_summary: None,
+            attachments: Vec::new(),
+            budgets: super::brain_budgets_for_context_window(Some(32_768)),
+            language: "it".to_string(),
+        };
+        let plan = brain
+            .plan_only(&request)
+            .expect("plan_only must succeed on gemma4");
+        let outcome = brain
+            .drive(&request, &plan)
+            .expect("drive must execute the gemma4 plan end-to-end");
+
+        eprintln!("\n=== F3 drive: gemma4 plan executed ===");
+        for result in &outcome.results {
+            eprintln!("  {} -> {:?} {:?}", result.step_id, result.status, result.error);
+        }
+        let done = outcome
+            .results
+            .iter()
+            .filter(|r| r.status == local_first_orchestrator::DriveStepStatus::Done)
+            .count();
+        eprintln!("done {}/{} steps", done, outcome.results.len());
+        eprintln!("=== end drive ===\n");
+
+        // Boundedness: exactly one result per planned step — driving never grows the plan.
+        assert_eq!(
+            outcome.results.len(),
+            plan.steps.len(),
+            "driver must return one result per step (boundedness invariant)"
+        );
+        // At least one step reached Done: gemma4 planned, gemma4 filled the args constrained to
+        // the tool schema, the facade executed, and the runtime verified — the engine-#2 vertical
+        // works end-to-end on the weak tier (caposaldo #2).
+        assert!(
+            done >= 1,
+            "no step reached Done; the gemma4 plan did not drive to completion through the facade"
+        );
+    }
+
     #[test]
     fn local_template_catalog_provider_exposes_seed_templates() {
         let provider = super::LocalTemplateCatalogProvider;

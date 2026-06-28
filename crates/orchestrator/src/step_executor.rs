@@ -1,78 +1,104 @@
-//! Concrete [`StepExecutor`]s behind the F3.1 driver seam.
+//! The concrete [`StepExecutor`] behind the F3.1 driver seam.
 //!
 //! [`CapabilityStepExecutor`] runs `CapabilityCall` steps synchronously through
 //! the shared [`CapabilityFacade`] — the *canonical* capability execution path
 //! (policy gate → argument validation → provider dispatch → audit). It is the
-//! first concrete executor behind [`crate::drive_plan`]: it proves the vertical
-//! slice plan → in-turn driver → real tool call → done-after-verify with no model
-//! and no chat loop, so the control flow is testable against an in-memory
-//! provider.
+//! per-step engine of ADR 0020: the model fills the slot, the harness owns the
+//! control flow and the execution.
 //!
-//! What it deliberately does NOT do: run a bounded inner *model* loop for
-//! `SubagentTask` steps. Those need the model plus the chat loop's richer tool
-//! dispatch (the gateway-side executor, F3.2b). Such a step FAILS here rather than
-//! silently passing — a plan that needs agentic execution must never be mistaken
-//! for complete (caposaldo #2: a plan not followed is a design bug, not a silent
-//! success).
+//! ## Model-fills-slot argument filling (ADR 0016 Pilastro 3)
+//!
+//! The planner produces the plan SHAPE — `step_id`, `tool_name`, `goal`,
+//! `depends_on` — but deliberately leaves `arguments` EMPTY (it owns the plan, not
+//! the per-call arguments). So before executing a capability step whose arguments
+//! are missing, the executor asks the model to fill them, **constrained to the
+//! tool's input schema**. Constrained decoding is what makes a weak model emit
+//! schema-valid arguments (the same lever the planner uses). When the caller
+//! already supplied concrete arguments (static/declarative plans, or a turn that
+//! pre-filled them), the model call is skipped.
+//!
+//! ## What it does NOT do
+//!
+//! Run a bounded inner *agentic* loop for `SubagentTask` steps (multi-round
+//! browse/gather with the model steering). Those need the chat loop's richer
+//! dispatch; such a step FAILS here rather than silently passing — a plan needing
+//! agentic execution must never be mistaken for complete (caposaldo #2).
 
 use crate::driver::{StepExecutor, StepOutcome, StepVerifier};
-use crate::execution::{provider_id_for_step, tool_name_for_step};
+use crate::execution::tool_for_step;
 use crate::{OrchestratorError, OrchestratorResult, PlanStep, PlanStepKind};
-use local_first_capabilities::{CapabilityCall, CapabilityFacade, PolicyContext};
+use local_first_capabilities::{CapabilityCall, CapabilityFacade, CapabilityTool, PolicyContext};
+use local_first_subagents::{GenerateJsonRequest, JsonRuntime};
 use std::collections::BTreeMap;
 
-/// Executes `CapabilityCall` steps through the shared capability facade. Borrows
-/// the facade mutably for the duration of a drive (the facade records an audit
-/// event per call, so it needs `&mut`).
-pub struct CapabilityStepExecutor<'a> {
+/// Default token ceiling for an argument-fill model call. Arguments are small;
+/// keep this tight so a step's slot-fill cannot run away.
+const ARG_FILL_MAX_TOKENS: u32 = 512;
+/// Default per-call timeout (seconds) for an argument-fill model call.
+const ARG_FILL_TIMEOUT_SECONDS: u64 = 60;
+/// Cap on how much of an upstream step's output is fed into the arg-fill prompt,
+/// so a large snapshot does not blow the context.
+const UPSTREAM_DIGEST_CHARS: usize = 400;
+
+/// Executes `CapabilityCall` steps through the shared capability facade, filling
+/// missing arguments via the model (constrained to the tool schema). Generic over
+/// the [`JsonRuntime`] so the same executor serves the gateway (Ollama/cloud) and
+/// tests (a stub).
+///
+/// `loaded_tools` are the policy-visible tools the plan was validated against. The
+/// executor resolves each step's tool through `tool_for_step` — the SAME tolerant
+/// resolution `validate_plan` uses — so a weak model that crammed arguments into
+/// the `tool_name` field (caposaldo #11) is resolved identically at execution and
+/// at validation. Without this, a plan could validate yet fail to execute.
+pub struct CapabilityStepExecutor<'a, R> {
+    runtime: &'a R,
     facade: &'a mut CapabilityFacade,
     context: &'a PolicyContext,
+    loaded_tools: &'a [CapabilityTool],
 }
 
-impl<'a> CapabilityStepExecutor<'a> {
-    pub fn new(facade: &'a mut CapabilityFacade, context: &'a PolicyContext) -> Self {
-        Self { facade, context }
+impl<'a, R: JsonRuntime> CapabilityStepExecutor<'a, R> {
+    pub fn new(
+        runtime: &'a R,
+        facade: &'a mut CapabilityFacade,
+        context: &'a PolicyContext,
+        loaded_tools: &'a [CapabilityTool],
+    ) -> Self {
+        Self {
+            runtime,
+            facade,
+            context,
+            loaded_tools,
+        }
     }
 }
 
-impl StepExecutor for CapabilityStepExecutor<'_> {
+impl<R: JsonRuntime> StepExecutor for CapabilityStepExecutor<'_, R> {
     fn execute_step(
         &mut self,
         step: &PlanStep,
-        _completed: &BTreeMap<String, StepOutcome>,
+        completed: &BTreeMap<String, StepOutcome>,
     ) -> OrchestratorResult<StepOutcome> {
         match step.kind {
             PlanStepKind::CapabilityCall => {
-                let provider_id = provider_id_for_step(step)?;
-                let tool_name = tool_name_for_step(step)?.to_string();
-                // The facade is the single canonical execution path: it re-checks
-                // policy (fail-closed — e.g. a write needing confirmation the
-                // context did not grant is denied here, NOT silently performed),
-                // validates arguments against the tool schema, dispatches to the
-                // provider, and audits. A denial / tool error becomes Err → the
-                // driver marks the step Failed with the message.
-                let result = self.facade.call_tool(
-                    self.context,
-                    CapabilityCall {
-                        provider_id,
-                        tool_name: tool_name.clone(),
-                        arguments: step.arguments.clone(),
-                    },
-                )?;
-                Ok(StepOutcome {
-                    succeeded: true,
-                    output: result.output,
-                    evidence: vec![format!("capability:{tool_name}")],
-                })
+                // Resolve the tool the same tolerant way validate_plan does (caposaldo
+                // #11). `tool` borrows loaded_tools (lifetime 'a), not self → no clash
+                // with the mutable facade borrow below.
+                let tool = tool_for_step(step, self.loaded_tools)?;
+                // Model fills the arguments slot, constrained to the tool schema —
+                // unless the caller already provided concrete ones.
+                let arguments = fill_arguments(self.runtime, step, tool, completed)?;
+                call_capability_tool(self.facade, self.context, tool, arguments)
             }
             // No tool to call: a no-op the driver treats as trivially done. The
-            // gateway executor may override these (e.g. surface the direct answer
-            // or perform a real memory recall); here they simply do not block.
+            // gateway executor may override these (surface the direct answer, or
+            // perform a real memory recall); here they simply do not block.
             PlanStepKind::MemoryLookup | PlanStepKind::DirectAnswer => {
                 Ok(StepOutcome::succeeded(serde_json::Value::Null))
             }
-            // Agentic steps require the model + chat-loop tool dispatch. Fail
-            // loudly so the plan is not reported complete without doing the work.
+            // Agentic steps require the model + the chat loop's richer tool
+            // dispatch. Fail loudly so the plan is not reported complete without
+            // doing the work.
             PlanStepKind::SubagentTask => Err(OrchestratorError::Planner(format!(
                 "subagent_step_needs_agentic_executor:{}",
                 step.step_id
@@ -81,13 +107,110 @@ impl StepExecutor for CapabilityStepExecutor<'_> {
     }
 }
 
+/// Executes one capability call through the facade and wraps the result. Shared by
+/// the executor so the canonical "call_tool → StepOutcome" mapping lives once.
+fn call_capability_tool(
+    facade: &mut CapabilityFacade,
+    context: &PolicyContext,
+    tool: &CapabilityTool,
+    arguments: serde_json::Value,
+) -> OrchestratorResult<StepOutcome> {
+    let evidence = format!("capability:{}", tool.name);
+    // The facade is the single canonical execution path: it re-checks policy
+    // (fail-closed — a write needing confirmation the context did not grant is
+    // denied here, NOT silently performed), validates arguments against the tool
+    // schema, dispatches to the provider, and audits. A denial / tool error
+    // becomes Err → the driver marks the step Failed with the message.
+    let result = facade.call_tool(
+        context,
+        CapabilityCall {
+            provider_id: tool.provider_id.clone(),
+            tool_name: tool.name.clone(),
+            arguments,
+        },
+    )?;
+    Ok(StepOutcome {
+        succeeded: true,
+        output: result.output,
+        evidence: vec![evidence],
+    })
+}
+
+/// Resolves the arguments for a capability step. Concrete non-empty object
+/// arguments (static plans / pre-filled turns) are used as-is; otherwise the model
+/// fills them constrained to the tool's input schema (ADR 0016 Pilastro 3).
+fn fill_arguments<R: JsonRuntime>(
+    runtime: &R,
+    step: &PlanStep,
+    tool: &CapabilityTool,
+    completed: &BTreeMap<String, StepOutcome>,
+) -> OrchestratorResult<serde_json::Value> {
+    if let Some(object) = step.arguments.as_object() {
+        if !object.is_empty() {
+            return Ok(step.arguments.clone());
+        }
+    }
+
+    let prompt = format!(
+        "Fill the arguments for a single tool call.\n\
+         Tool: {name}\n\
+         Tool description: {description}\n\
+         Step goal: {goal}\n\
+         {upstream}\
+         Return ONLY a JSON object of arguments valid for the tool's input schema. \
+         Use values that achieve the step goal; do not invent unrelated fields.",
+        name = tool.name,
+        description = tool.description,
+        goal = step
+            .goal
+            .as_deref()
+            .unwrap_or("(use the tool to advance the task)"),
+        upstream = upstream_digest(step, completed),
+    );
+    let request = GenerateJsonRequest {
+        prompt,
+        max_tokens: step.max_tokens.unwrap_or(ARG_FILL_MAX_TOKENS),
+        temperature: 0.0,
+        wait_if_busy: true,
+        request_timeout_seconds: Some(step.timeout_seconds.unwrap_or(ARG_FILL_TIMEOUT_SECONDS) as f64),
+        // Constrained decoding to the tool's own input schema — the lever that
+        // makes even a weak model emit valid arguments.
+        json_schema: Some(tool.input_schema.clone()),
+        required_keys: Vec::new(),
+        repair: true,
+    };
+    let response = runtime
+        .generate_json(&request)
+        .map_err(|error| OrchestratorError::Capability(format!("arg_fill_failed:{error:?}")))?;
+    Ok(response.json)
+}
+
+/// Compact digest of the outputs of this step's (verified) dependencies, so the
+/// arg-fill model can thread data along DAG edges (e.g. a snapshot ref from a
+/// prior step). Bounded per dependency to keep the prompt small.
+fn upstream_digest(step: &PlanStep, completed: &BTreeMap<String, StepOutcome>) -> String {
+    let mut digest = String::new();
+    for dependency in &step.depends_on {
+        if let Some(outcome) = completed.get(dependency) {
+            let compact: String = outcome
+                .output
+                .to_string()
+                .chars()
+                .take(UPSTREAM_DIGEST_CHARS)
+                .collect();
+            digest.push_str(&format!("Upstream {dependency} output: {compact}\n"));
+        }
+    }
+    digest
+}
+
 /// Deterministic verify gate for capability steps: a step is "verified" exactly
 /// when the facade returned success — policy, argument validation and the
 /// provider all passed. For capability tools that IS the real gate; there is no
 /// separate judgment to make, so introducing an LLM here would only add nondeterminism.
 ///
 /// Agentic (`SubagentTask`) steps need a real judgment over their evidence — that
-/// is the gateway's LLM `verify_step_complete` (F3.2b), not this verifier.
+/// is the gateway's LLM `verify_step_complete` (F3.2b agentic path), not this verifier.
 pub struct PassThroughVerifier;
 
 impl StepVerifier for PassThroughVerifier {

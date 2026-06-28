@@ -542,6 +542,124 @@ fn drive_fails_subagent_steps_and_skips_their_dependents() {
     assert_eq!(use_step.status, DriveStepStatus::Skipped);
 }
 
+#[test]
+fn drive_fills_empty_arguments_via_model_then_executes() {
+    // The planner produces the plan SHAPE with EMPTY arguments (ADR 0020 P1: it
+    // owns the plan, not the per-call args). The executor asks the model to fill
+    // them, CONSTRAINED to the tool's input schema, then executes — model fills
+    // the slot, harness owns the call (caposaldo #2/#6, ADR 0016 Pilastro 3).
+    let runtime = StubRuntime::new(vec![serde_json::json!({"query": "standup"})]);
+    let mut brain = brain(
+        runtime,
+        vec![tool(
+            "calendar.search",
+            "Search calendar events",
+            ActionClass::Read,
+            CapabilityProviderKind::Native,
+        )],
+    );
+    let mut empty = drive_step(
+        "find",
+        PlanStepKind::CapabilityCall,
+        &[],
+        Some(("calendar", "calendar.search")),
+    );
+    empty.arguments = serde_json::Value::Null; // planner-seed shape: no args
+    let plan = ExecutionPlan {
+        route: OrchestratorRoute::CapabilityCall,
+        direct_answer: None,
+        plan_propose: None,
+        steps: vec![empty],
+        needs_more_tools: None,
+    };
+
+    let out = brain.drive(&request("Cerca lo standup"), &plan).unwrap();
+
+    assert!(out.all_done());
+    // The model was asked exactly once to fill the args, constrained to the schema.
+    let requests = brain.runtime().requests();
+    assert_eq!(requests.len(), 1);
+    assert!(requests[0].json_schema.is_some());
+    // Execution happened with the filled args (the real provider's response flowed).
+    assert_eq!(
+        out.results[0].outcome.as_ref().unwrap().output,
+        serde_json::json!({"events": ["standup"]})
+    );
+}
+
+#[test]
+fn drive_skips_model_call_when_arguments_already_concrete() {
+    // Concrete args (static/declarative plans) must NOT trigger a model call: the
+    // executor uses them as-is. Proves the arg-fill is only for empty slots.
+    let runtime = StubRuntime::new(vec![]); // empty: any generate_json would panic
+    let mut brain = brain(
+        runtime,
+        vec![tool(
+            "calendar.search",
+            "Search calendar events",
+            ActionClass::Read,
+            CapabilityProviderKind::Native,
+        )],
+    );
+    let plan = ExecutionPlan {
+        route: OrchestratorRoute::CapabilityCall,
+        direct_answer: None,
+        plan_propose: None,
+        steps: vec![drive_step(
+            "find",
+            PlanStepKind::CapabilityCall,
+            &[],
+            Some(("calendar", "calendar.search")),
+        )],
+        needs_more_tools: None,
+    };
+
+    let out = brain.drive(&request("Cerca lo standup"), &plan).unwrap();
+
+    assert!(out.all_done());
+    // No model roundtrip — args were already present.
+    assert!(brain.runtime().requests().is_empty());
+}
+
+#[test]
+fn drive_resolves_crammed_tool_name_at_execution_like_validation() {
+    // A weak model crammed arguments into tool_name (the gemma4 failure mode,
+    // caposaldo #11). validate_plan tolerates it; execution must resolve the SAME
+    // way, not fail — otherwise a plan validates yet cannot run.
+    let runtime = StubRuntime::new(vec![]);
+    let mut brain = brain(
+        runtime,
+        vec![tool(
+            "calendar.search",
+            "Search calendar events",
+            ActionClass::Read,
+            CapabilityProviderKind::Native,
+        )],
+    );
+    let mut crammed = drive_step(
+        "find",
+        PlanStepKind::CapabilityCall,
+        &[],
+        Some(("calendar", "calendar.search")),
+    );
+    crammed.tool_name = Some("calendar.search query=standup".to_string());
+    let plan = ExecutionPlan {
+        route: OrchestratorRoute::CapabilityCall,
+        direct_answer: None,
+        plan_propose: None,
+        steps: vec![crammed],
+        needs_more_tools: None,
+    };
+
+    let out = brain.drive(&request("Cerca lo standup"), &plan).unwrap();
+
+    assert!(out.all_done());
+    assert_eq!(
+        out.results[0].outcome.as_ref().unwrap().output,
+        serde_json::json!({"events": ["standup"]})
+    );
+}
+
 /// Builds a [`PlanStep`] for the driver tests. For `CapabilityCall` pass the
 /// `(provider, tool)`; for `SubagentTask` the required agent/goal/contract are
 /// filled so `validate_plan` accepts the step.

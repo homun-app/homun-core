@@ -162,8 +162,14 @@ impl<R: JsonRuntime, M: MemoryContextProvider> OrchestratorBrain<R, M> {
     ) -> OrchestratorResult<DriveOutcome> {
         let access = self.capabilities.list_tools(&request.policy_context)?;
         self.validate_plan(plan, &access.visible_tools, request.budgets.max_steps)?;
-        let mut executor =
-            CapabilityStepExecutor::new(&mut self.capabilities, &request.policy_context);
+        // Disjoint field borrows: the executor reads the runtime (arg-fill) and
+        // mutates the facade (call_tool) — distinct fields, so both coexist.
+        let mut executor = CapabilityStepExecutor::new(
+            &self.runtime,
+            &mut self.capabilities,
+            &request.policy_context,
+            &access.visible_tools,
+        );
         let mut verifier = PassThroughVerifier;
         Ok(drive_plan(plan, &mut executor, &mut verifier))
     }
