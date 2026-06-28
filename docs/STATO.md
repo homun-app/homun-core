@@ -104,9 +104,13 @@ richiede eval bi-popolazione (gemma4 vs capace) **non eseguibile in questo ambie
   ADR Fase-1 per validare il floor prima di accenderlo. Pulizia: tolto l'`#![allow(dead_code)]`
   stantio in `scaffold.rs`; rimossa la variante `VerifyDepth::Off` mai costruita (l'ADR vieta il
   "no-verify" per i capaci). +2 test scaffold. Caposaldo #2/#12, ADR 0018.
-- ⏳ **F2.2 il piano traccia il lavoro** — chiudere i canali no-tools che bypassano il piano
-  (`stream_chat_via_openai`, sintesi forzata + final-round) + `done` dopo verify. È il sintomo #1,
-  deterministico/unit-testable. **Prossimo.**
+- ◑ **F2.2 il piano traccia il lavoro** (parziale, gated) — l'over-running guard è stato estratto
+  in `answer_concludes_plan` (puro, testato; refactor behavior-preserving) e, quando ACCETTA la
+  risposta con l'ultimo step aperto, ora riconcilia quello step a `done` + persiste (riusa il path
+  canonico mark-done→`runtime_execution_plan`→`upsert_runtime_plan_memory_from_state`), così il
+  turno DOPO non riprende il piano a vuoto. Gated `HOMUN_PLAN_RECONCILE` (default off, hot-path non
+  validabile live qui). La sintesi forzata NON riconcilia (lì il lavoro è incompiuto, il piano DEVE
+  restare aperto). Resta: validare on; eventuale "done dopo verify" più stretto; il caso sintesi.
 - ⏳ **F2.3 floor `shadow→on` + manopola `slot`** — richiede la eval bi-popolazione → differito a
   quando l'ambiente ha Ollama/gemma4.
 
@@ -163,8 +167,12 @@ NB live-validation: setup attuale = deepseek-v4-pro:cloud (Z.ai), non Ollama; Co
 - **F2.1** la decisione del floor `{tier, profilo, mode}` ora è **persistita nel `tool_trace`**
   (→ memoria/learning) in `shadow`|`on` via `scaffold::floor_trace_for_mode`, non più solo stderr —
   telemetria Fase-1 prerequisito per accendere il floor con dati. Tolto `#![allow(dead_code)]`
-  stantio + rimossa `VerifyDepth::Off` mai costruita. +2 test scaffold; gate gateway 359 pass / 1
-  ambientale (soffice). **Prossimo: F2.2 (il piano traccia il lavoro).**
+  stantio + rimossa `VerifyDepth::Off` mai costruita. +2 test scaffold.
+- **F2.2 (parziale, gated)** over-running guard estratto in `answer_concludes_plan` (puro/testato,
+  refactor behavior-preserving); quando accetta la risposta con l'ultimo step aperto, riconcilia
+  quello step a `done` + persiste → il turno dopo non riprende il piano a vuoto. Gated
+  `HOMUN_PLAN_RECONCILE` (default off, non validabile live qui). La sintesi forzata non riconcilia
+  (lavoro incompiuto). +1 test. Gate gateway **360 pass / 1 ambientale (soffice)**.
 
 **Sessione 2026-06-27 — diagnosi + fix sintomo + analisi strutturale + metodologia:**
 - **Fix agentic-loop validati e pushati** (default flag-off, migliorano il model-loop):
@@ -221,18 +229,21 @@ canonica e si ritira il parallelo; si rimuove il codice morto toccato; si splitt
 grossi; si commenta il perché; ogni modifica aggiorna la pagina architecture/ + cita il
 caposaldo + porta un test.
 
-PROSSIMO PASSO: F2.2 — il piano traccia il lavoro. Leggi
-docs/decisions/0018-adaptive-harness-subagents-triggers.md + docs/architecture/agent-loop.md, poi
-in `stream_chat_via_openai` (`main.rs`): chiudere i canali no-tools che fanno USCIRE il deliverable
-bypassando il piano (sintesi forzata `!final_done` + final-round che rimuove i tool; cerca
-`is_final_round`, `Sintesi forzata`, `verify_step_complete`) e marcare `done` dopo verify — così
-"il piano a volte parte/segue, a volte no" smette. Deterministico, unit-testable senza modello live.
-NB stato F2 (verificato): il floor È già cablato (scaffold_for + workflow_bias + verify_depth sotto
-`adaptive_floor=on`); F2.1 (telemetria floor → tool_trace) FATTO; F2.3 (floor shadow→on + manopola
-`slot`) DIFFERITO perché serve eval bi-popolazione (gemma4 vs capace) non eseguibile in questo
-ambiente. `adaptive_floor` resta "off" di default.
-Fatto: F0 (L0) + F1 COMPLETO + F2.1. Vedi "Dove siamo" in STATO. NB: i file:line di main.rs sono
-sfasati dopo gli edit F1/F2 — usa i nomi di funzione.
+PROSSIMO PASSO — decisione su due fronti (F2 è "costruito ma gated", il resto serve un ambiente
+live). Lo stato: il MECCANISMO di F2 è in piedi — floor adattivo cablato (scaffold_for + workflow_bias
++ verify_depth sotto `adaptive_floor=on`), F2.1 telemetria floor→tool_trace FATTO, F2.2 plan-reconcile
+on-delivery FATTO ma gated `HOMUN_PLAN_RECONCILE`. Ciò che MANCA è quasi tutto **validazione su
+ambiente live** (Ollama/gemma4 + `scripts/eval_suite.py`), non codice:
+ (a) accendere il floor `shadow→on` + manopola `slot` (F2.3) — richiede eval bi-popolazione;
+ (b) validare `HOMUN_PLAN_RECONCILE=1` sul loop reale prima di renderlo default;
+ (c) eventuale done-dopo-verify più stretto / caso sintesi forzata.
+Due strade: (1) se hai un ambiente con Ollama+gemma4, VALIDA e accendi F2 (shadow→on, reconcile→default).
+(2) altrimenti avvia **F3 — ADR 0020** (instradare il turno chat su `OrchestratorBrain` come driver DAG
+reale, planner chat-tool-aware ora che il browser è nel registry, ritirare `merge_plan` per-titolo):
+leggi docs/decisions/0020-*.md + agent-loop.md; ha pezzi puri costruibili qui anche se il giro
+end-to-end resta da validare live.
+Fatto: F0 (L0) + F1 COMPLETO + F2.1 + F2.2(gated). NB: i file:line di main.rs sono sfasati dopo gli
+edit F1/F2 — usa i nomi di funzione.
 
 A fine sessione aggiorna docs/STATO.md.
 ```

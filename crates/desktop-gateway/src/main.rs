@@ -6617,6 +6617,33 @@ fn plan_incomplete_reason(plan: &[serde_json::Value]) -> Option<String> {
     ))
 }
 
+/// Minimum answer length (chars) we treat as a real delivered deliverable rather than an
+/// aside, for the over-running guard. Tuned conservatively: when in doubt (short answer) we
+/// keep nudging rather than stop early.
+const MIN_DELIVERED_CHARS_TO_CONCLUDE: usize = 600;
+
+/// F5 over-running guard (ADR 0018): once the model has written a SUBSTANTIAL answer and at
+/// most the LAST plan step is still open, it almost certainly FINISHED the work and merely
+/// forgot to mark that step done — so accept the answer instead of nudging it PAST a good
+/// result into a degraded/self-contradictory one (the long-horizon regression). With several
+/// steps still open it genuinely stopped early → keep nudging. Pure so the threshold lives in
+/// one tested place.
+fn answer_concludes_plan(open_steps: usize, delivered_chars: usize) -> bool {
+    open_steps <= 1 && delivered_chars >= MIN_DELIVERED_CHARS_TO_CONCLUDE
+}
+
+/// F2.2 (ADR 0018, Pavimento): when the over-running guard accepts the answer with the last
+/// step still open, reconcile that step to `done` so the PERSISTED runtime plan reflects the
+/// delivered work. Without it the plan stays "active" and the NEXT turn falsely resumes it
+/// (`thread_has_active_runtime_plan` only goes quiet when the plan is complete→Stale) — the
+/// "lo segue e non lo segue" symptom. Gated until it can be validated against the live loop;
+/// `HOMUN_PLAN_RECONCILE=1`/`on` turns it on. Default off keeps the old behaviour exactly.
+fn plan_reconcile_on_delivery_enabled() -> bool {
+    std::env::var("HOMUN_PLAN_RECONCILE")
+        .map(|value| value == "1" || value.eq_ignore_ascii_case("on"))
+        .unwrap_or(false)
+}
+
 fn runtime_plan_thread_key(thread_id: Option<&str>) -> String {
     thread_id
         .map(str::trim)
@@ -22989,7 +23016,7 @@ Tell the user clearly; do NOT claim it's done."
             // have budget, nudge the model to keep going instead of ending the turn.
             // Bounded by MAX_PLAN_NUDGES (reset on progress) AND the per-step round budget.
             if !is_final_round && plan_nudges < MAX_PLAN_NUDGES {
-                let plan_steps = execution_plan_steps(&plan);
+                let mut plan_steps = execution_plan_steps(&plan);
                 if let Some(step) = plan_next_open(&plan_steps) {
                     // F5 over-running guard: when only the LAST step is still open AND the
                     // model already wrote a substantial answer, it almost certainly FINISHED
@@ -23003,8 +23030,7 @@ Tell the user clearly; do NOT claim it's done."
                         .iter()
                         .filter(|s| plan_step_status(s) != "done")
                         .count();
-                    let model_delivered = content.trim().chars().count() >= 600;
-                    if !(open_left <= 1 && model_delivered) {
+                    if !answer_concludes_plan(open_left, content.trim().chars().count()) {
                         plan_nudges += 1;
                         if !content.trim().is_empty() {
                             messages.push(
@@ -23036,8 +23062,30 @@ Tell the user clearly; do NOT claim it's done."
                         .await;
                         continue;
                     }
-                    // else: the answer is substantial and the plan is all-but-closed →
-                    // fall through to finalize with `content` instead of nudging.
+                    // The answer is substantial and the plan is all-but-closed → finalize with
+                    // `content` instead of nudging. F2.2 (gated): reconcile the one still-open
+                    // step to `done` + persist, so the runtime plan matches the delivered work
+                    // and the NEXT turn doesn't falsely resume it. Reuses the canonical
+                    // mark-done→rebuild→persist path; default-off keeps the old behaviour.
+                    if plan_reconcile_on_delivery_enabled() {
+                        if let Some(open_index) = plan_steps
+                            .iter()
+                            .position(|s| plan_step_status(s) != "done")
+                        {
+                            plan_steps[open_index]["status"] = serde_json::json!("done");
+                            plan = runtime_execution_plan(&plan_steps);
+                            upsert_runtime_plan_memory_from_state(
+                                &state_owned,
+                                thread_id.as_deref(),
+                                &plan_steps,
+                            );
+                            if std::env::var("HOMUN_DEBUG").is_ok() {
+                                eprintln!(
+                                    "[plan] reconciled last open step to done on delivery: «{step}»"
+                                );
+                            }
+                        }
+                    }
                 } else if plan_steps.is_empty()
                     && turn_used_tools
                     && task_appears_incomplete(&state_owned.http, &memory_user_message, &content)
@@ -45605,6 +45653,18 @@ prs.save(Path({path:?}))
     // ── Canonical plan (the loop fix) ───────────────────────────────────────
     fn sent_step(title: &str, status: &str) -> serde_json::Value {
         serde_json::json!({ "title": title, "status": status })
+    }
+
+    #[test]
+    fn answer_concludes_plan_only_when_substantial_and_last_step_open() {
+        // Substantial answer + at most the last step open → stop nudging (the model finished
+        // and forgot to mark done).
+        assert!(super::answer_concludes_plan(1, 600));
+        assert!(super::answer_concludes_plan(0, 1200));
+        // Short answer → keep nudging even with one step open (could be an aside).
+        assert!(!super::answer_concludes_plan(1, 599));
+        // Several steps still open → it genuinely stopped early, keep nudging.
+        assert!(!super::answer_concludes_plan(2, 5000));
     }
 
     #[test]

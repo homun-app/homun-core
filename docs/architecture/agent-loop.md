@@ -109,7 +109,13 @@ Punti caldi (con `file:line` in `main.rs`):
 ### Conseguenze osservate (sintomi)
 - "Il piano a volte parte, a volte no, lo segue e non lo segue" → creazione piano lasciata
   al modello + F2 che tiene `done`→`doing` + il deliverable esce da canali no-tools che
-  **bypassano** il piano (`:~19210`, `:~22924`).
+  **bypassano** il piano. **F2.2 (parziale, gated `HOMUN_PLAN_RECONCILE`):** quando
+  l'over-running guard ACCETTA la risposta con l'ultimo step ancora aperto (`answer_concludes_plan`),
+  l'harness ora riconcilia quello step a `done` + persiste (`upsert_runtime_plan_memory_from_state`),
+  così il piano persistito riflette il deliverable e il turno DOPO non riprende il piano a vuoto
+  (`thread_has_active_runtime_plan`). La sintesi forzata (esaurimento round) NON riconcilia: lì il
+  lavoro è genuinamente incompiuto e il piano DEVE restare aperto per la ripresa. Default-off finché
+  validabile sul loop live.
 - "Stesso prompt, risultato diverso" → temp 0 senza seed (seme piccolo) **amplificato** dal
   control-flow ramificato (pianifica-o-no, profilo browser ephemeral, numero turni variabile).
 
