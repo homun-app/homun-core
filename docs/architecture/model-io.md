@@ -184,8 +184,14 @@ Invarianti:
     ragionamento — Ollama native LO espone separato dal `content` per i modelli thinking
     (deepseek-r1, qwen3). Così il reasoning-fallback vale **anche** su Ollama (prima committava
     vuoto). Non streamato come content (è la traccia, non la risposta).
-  Da cablare (prossimi increment F0): `sanitize_model_text`, `parse_text_tool_calls`, lo
-  schema-downgrade (oggi duplicato gateway vs `openai_compat.rs`), fixture per-provider.
+  - **`ollama_tool_call`** (F0 increment 1c): la normalizzazione tool-call di Ollama native
+    (omette l'`id`, manda `arguments` come **oggetto** → id sintetico + arguments stringa,
+    shape OpenAI-compat) è ora in `model_normalize`, **testata** (2 test: oggetto/stringa/
+    mancante), e `process_ollama_line` la chiama (inline cancellato). I tool-call OpenAI
+    arrivano già-formati (serve solo il reassembly dei frammenti argomenti, resta nel collector).
+  Da cablare (prossimi increment F0): `sanitize_model_text`, `parse_text_tool_calls` (tool-as-
+  text per modelli che li emettono come prosa), lo schema-downgrade (oggi duplicato gateway vs
+  `openai_compat.rs`), fixture end-to-end per-provider.
 - **Doppio path per il deck**: `generate_deck_content` (gateway) duplica il floor
   schema-downgrade già presente in `crates/inference/src/openai_compat.rs`; ADR 0016 prevede
   la convergenza, oggi non avvenuta.

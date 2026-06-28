@@ -14487,25 +14487,11 @@ async fn process_ollama_line(
             }
         }
         if let Some(calls) = message.get("tool_calls").and_then(|v| v.as_array()) {
+            // Canonical tool-call shape (F0 / ADR 0019): Ollama omits the id and sends
+            // object arguments → normalized once in `model_normalize::ollama_tool_call`.
             for call in calls {
-                let name = call
-                    .get("function")
-                    .and_then(|f| f.get("name"))
-                    .and_then(|n| n.as_str())
-                    .unwrap_or("");
-                let args_str = match call.get("function").and_then(|f| f.get("arguments")) {
-                    Some(serde_json::Value::String(s)) => s.clone(),
-                    Some(value) => {
-                        serde_json::to_string(value).unwrap_or_else(|_| "{}".to_string())
-                    }
-                    None => "{}".to_string(),
-                };
-                let id = format!("ollama_call_{}", tool_calls.len());
-                tool_calls.push(serde_json::json!({
-                    "id": id,
-                    "type": "function",
-                    "function": { "name": name, "arguments": args_str }
-                }));
+                let normalized = model_normalize::ollama_tool_call(call, tool_calls.len());
+                tool_calls.push(normalized);
             }
         }
     }

@@ -47,6 +47,31 @@ pub fn assistant_response(
     })
 }
 
+/// Normalize ONE Ollama-native tool call into the OpenAI-compat shape the agent loop expects.
+/// Ollama native `/api/chat` differs from OpenAI in two ways that must be reconciled HERE (not
+/// scattered): it omits the call `id`, and it sends `arguments` as a JSON **object**, not a
+/// string. The loop + OpenAI-compat downstream want `{id, type:"function", function:{name,
+/// arguments:<string>}}`. The synthetic id is stable within a turn via `index` (the number of
+/// calls already collected). Unlike OpenAI (whose tool_calls arrive already-shaped, only their
+/// argument fragments need reassembling), Ollama needs this shape coercion.
+pub fn ollama_tool_call(call: &serde_json::Value, index: usize) -> serde_json::Value {
+    let name = call
+        .get("function")
+        .and_then(|f| f.get("name"))
+        .and_then(|n| n.as_str())
+        .unwrap_or("");
+    let arguments = match call.get("function").and_then(|f| f.get("arguments")) {
+        Some(serde_json::Value::String(s)) => s.clone(),
+        Some(value) => serde_json::to_string(value).unwrap_or_else(|_| "{}".to_string()),
+        None => "{}".to_string(),
+    };
+    serde_json::json!({
+        "id": format!("ollama_call_{index}"),
+        "type": "function",
+        "function": { "name": name, "arguments": arguments }
+    })
+}
+
 pub const PLAN_PROPOSE_OPEN: &str = "‹‹PLAN_PROPOSE››";
 pub const PLAN_PROPOSE_CLOSE: &str = "‹‹/PLAN_PROPOSE››";
 
@@ -169,6 +194,30 @@ mod tests {
         assert_eq!(body["choices"][0]["message"]["tool_calls"][0], call);
         // No reasoning, no content → content stays empty (not replaced by an empty reasoning).
         assert_eq!(body["choices"][0]["message"]["content"], "");
+    }
+
+    #[test]
+    fn ollama_tool_call_stringifies_object_arguments_and_synthesizes_id() {
+        // Ollama native shape: no id, arguments as an OBJECT.
+        let raw = serde_json::json!({
+            "function": { "name": "get_weather", "arguments": {"city": "London"} }
+        });
+        let norm = ollama_tool_call(&raw, 0);
+        assert_eq!(norm["id"], "ollama_call_0");
+        assert_eq!(norm["type"], "function");
+        assert_eq!(norm["function"]["name"], "get_weather");
+        // arguments must be a STRING (OpenAI-compat), the JSON-encoded object.
+        let args = norm["function"]["arguments"].as_str().unwrap();
+        assert_eq!(serde_json::from_str::<serde_json::Value>(args).unwrap()["city"], "London");
+    }
+
+    #[test]
+    fn ollama_tool_call_keeps_string_arguments_and_handles_missing() {
+        let with_str = serde_json::json!({"function":{"name":"x","arguments":"{\"a\":1}"}});
+        assert_eq!(ollama_tool_call(&with_str, 2)["function"]["arguments"], "{\"a\":1}");
+        assert_eq!(ollama_tool_call(&with_str, 2)["id"], "ollama_call_2");
+        let missing = serde_json::json!({"function":{"name":"x"}});
+        assert_eq!(ollama_tool_call(&missing, 0)["function"]["arguments"], "{}");
     }
 
     #[test]

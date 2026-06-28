@@ -13,12 +13,14 @@
   **dormiente** (caposaldo #5 violato system-wide). È la causa dell'instabilità (piano che
   parte o no, stesso prompt esiti diversi). Le mappe accurate sono in [architecture/](architecture/).
 - **F0 in corso (L0 — normalizzazione modello):**
-  - ✅ **increment 1**: `model_normalize::assistant_response` — builder canonico della risposta
-    + reasoning-fallback, cablato in `reassemble_openai_stream` e `collect_ollama_native_stream`
-    (logica inline cancellata, `model_normalize` ora WIRED, 3 test, zero cambio comportamento).
-  - **Prossimo (increment 2)**: convergere `sanitize_model_text` dentro il builder canonico;
-    poi `parse_text_tool_calls` (tool-as-text), poi lo schema-downgrade duplicato, poi fixture
-    per-provider. La WIP `model_normalize.rs` non è più dead code: è il cuore di F0.
+  - ✅ **inc.1** `assistant_response` — builder canonico risposta + reasoning-fallback, cablato
+    nei due collector (inline cancellato, `model_normalize` ora WIRED, 3 test).
+  - ✅ **inc.1b** Ollama `message.thinking` — `process_ollama_line` accumula il reasoning trace
+    (Ollama LO espone separato dal content) → fallback uniforme anche su Ollama.
+  - ✅ **inc.1c** `ollama_tool_call` — normalizzazione tool-call Ollama (id sintetico + args
+    oggetto→stringa) canonica + **testata** (2 test); inline cancellato.
+  - **Prossimo (inc.2)**: convergere `sanitize_model_text` nel builder; poi `parse_text_tool_calls`
+    (tool-as-text); poi schema-downgrade duplicato; poi fixture per-provider. Poi L0 = punto fermo → F1.
 
 ## Cosa è stato fatto (rolling, conciso)
 
