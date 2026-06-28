@@ -198,15 +198,17 @@ Invarianti:
     (→ risposta vuota se l'intera risposta era nel think). Ora estratti+preservati. 2 test.
     Confermato anche: tool_calls Ollama completi per-chunk + accumulo `extend` = il nostro
     pattern; `arguments` oggetto + niente id = la nostra `ollama_tool_call`.
-  - **`think:true` capability-gated** (F0.3a): `warm_ollama_thinking` interroga `/api/show`
-    (cache per-modello, una volta per turno) e legge `capabilities`; `build_chat_payload` manda
-    `think:true` **solo** ai modelli thinking → traccia in `message.thinking` separato (pulito),
-    senza il **400 "does not support thinking"** sui non-thinking (gemma/llama, tutti sullo
-    stesso branch Ollama). Default fail-safe: cache-miss/errore → niente `think` → fallback
-    all'estrazione `<think>` (F0.2). 2 test (`parse_thinking_capability`, `ollama_native_root`).
-  Da cablare (prossimi increment F0): convergere il resto di `sanitize_model_text` (tool_call/
-  minimax tokens), `parse_text_tool_calls` (tool-as-text), lo schema-downgrade (duplicato
-  gateway vs `openai_compat.rs`), fixture end-to-end per-provider.
+  - **Profilo capacità Ollama** (F0.3a/3b): `warm_ollama_capabilities` interroga `/api/show`
+    **una volta per turno** (cache per-modello) ed estrae `OllamaCapabilities { thinking, tools,
+    vision, context_length }` — `capabilities[]` + `model_info["<arch>.context_length"]`. Così
+    l'harness **adatta** invece di indovinare (caposaldo #11). **Cablato:** `think:true` solo ai
+    modelli thinking (clean `message.thinking`, niente 400 sui non-thinking). **Estratti, da
+    cablare (deliberato, fail-safe per-caso):** `tools` (gate offerta tool), `vision` (gate invio
+    immagini), `context_length` (budget sulla finestra reale). 2 test (`parse_ollama_capabilities`,
+    `ollama_native_root`).
+  Da cablare (prossimi increment F0): consumare tools/vision/context dal profilo; convergere il
+  resto di `sanitize_model_text` (tool_call/minimax tokens), `parse_text_tool_calls` (tool-as-
+  text), lo schema-downgrade (duplicato gateway vs `openai_compat.rs`), fixture per-provider.
 - **Doppio path per il deck**: `generate_deck_content` (gateway) duplica il floor
   schema-downgrade già presente in `crates/inference/src/openai_compat.rs`; ADR 0016 prevede
   la convergenza, oggi non avvenuta.

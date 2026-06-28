@@ -25,15 +25,15 @@
     nel builder. Verifica ha scoperto: `message.thinking` Ollama si popola solo con `think:true`
     (non lo mandiamo) → i reasoning model emettono `<think>` inline che `sanitize` cancellava
     (risposta vuota se tutto nel think). Ora estratti+preservati per il fallback. 2 test.
-  - ✅ **inc.3a** `think:true` capability-gated — `warm_ollama_thinking` (`/api/show` capabilities,
-    cache per-modello) → `build_chat_payload` manda `think:true` SOLO ai modelli thinking
-    (clean `message.thinking`, niente 400 sui non-thinking). Default fail-safe → fallback a
-    estrazione `<think>` (inc.2). 2 test. (Realizza l'idea utente in modo sicuro.)
-  - **Prossimo (inc.3b)**: convergere il resto di `sanitize_model_text` (tool_call/minimax tokens)
-    nel normalizzatore; poi `parse_text_tool_calls` (tool-as-text); poi schema-downgrade duplicato;
-    poi fixture per-provider. Poi L0 = punto fermo → F1.
-    NB live-validation: il setup attuale usa deepseek-v4-pro:cloud (OpenAI-compat via Z.ai), non
-    Ollama native → il path think si attiva solo con un modello reasoning su Ollama locale.
+  - ✅ **inc.3a/3b** Profilo capacità Ollama — `warm_ollama_capabilities` (`/api/show`, cache
+    per-modello) estrae `OllamaCapabilities { thinking, tools, vision, context_length }`. Cablato:
+    `think:true` solo ai thinking. Estratti, da cablare (deliberato): tools/vision/context. 2 test.
+  - **Prossimo (inc.3c)**: CONSUMARE il profilo — gate tools (fail-safe default-true), gate immagini
+    su `vision`, budget su `context_length`. Poi convergere il resto di `sanitize_model_text`,
+    `parse_text_tool_calls` (tool-as-text), schema-downgrade, fixture per-provider. Poi L0 = punto
+    fermo → F1.
+    NB live-validation: setup attuale = deepseek-v4-pro:cloud (OpenAI-compat via Z.ai), non Ollama
+    native → il path capacità si attiva solo con un modello su Ollama locale (per `/api/show`).
 
 ## Cosa è stato fatto (rolling, conciso)
 

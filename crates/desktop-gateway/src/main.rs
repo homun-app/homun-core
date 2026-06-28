@@ -14382,41 +14382,79 @@ fn ollama_native_root(base_url: &str) -> String {
         .to_string()
 }
 
-/// True if an Ollama `/api/show` body advertises the `thinking` capability. Pure + testable.
-fn parse_thinking_capability(show_body: &serde_json::Value) -> bool {
-    show_body
-        .get("capabilities")
-        .and_then(|c| c.as_array())
-        .map(|caps| caps.iter().any(|c| c.as_str() == Some("thinking")))
-        .unwrap_or(false)
+/// The capability profile an Ollama model advertises via `/api/show`. Detecting it once lets the
+/// harness ADAPT instead of guessing: send `think` only to thinking models, offer tools only to
+/// tool-capable ones, send images only to vision models, and budget against the REAL context
+/// window. `None` fields mean "unknown" (detection failed) — each consumer picks its own
+/// fail-safe default. Caposaldo #11 (verifiable truth, not keyword guessing).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct OllamaCapabilities {
+    thinking: bool,
+    // Extracted now (the profile); CONSUMED by deliberate follow-up increments — `tools` to gate
+    // offering tools, `vision` to gate sending images, `context_length` to budget on the real
+    // window. Marked here so the foundation lands without forcing premature, unvalidated wiring.
+    #[allow(dead_code)]
+    tools: bool,
+    #[allow(dead_code)]
+    vision: bool,
+    #[allow(dead_code)]
+    context_length: Option<u64>,
 }
 
-fn ollama_thinking_cache() -> &'static std::sync::Mutex<std::collections::HashMap<String, bool>> {
-    static CELL: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, bool>>> =
-        std::sync::OnceLock::new();
+/// Parse an Ollama `/api/show` body into a capability profile. Pure + testable. `capabilities`
+/// is a string array (completion/tools/vision/thinking/insert/embedding); the context window is
+/// `model_info["<arch>.context_length"]` where `<arch> = model_info["general.architecture"]`.
+fn parse_ollama_capabilities(show_body: &serde_json::Value) -> OllamaCapabilities {
+    let has = |name: &str| {
+        show_body
+            .get("capabilities")
+            .and_then(|c| c.as_array())
+            .map(|caps| caps.iter().any(|c| c.as_str() == Some(name)))
+            .unwrap_or(false)
+    };
+    let context_length = show_body.get("model_info").and_then(|mi| {
+        let arch = mi.get("general.architecture").and_then(|a| a.as_str())?;
+        mi.get(format!("{arch}.context_length")).and_then(|v| v.as_u64())
+    });
+    OllamaCapabilities {
+        thinking: has("thinking"),
+        tools: has("tools"),
+        vision: has("vision"),
+        context_length,
+    }
+}
+
+fn ollama_capabilities_cache()
+-> &'static std::sync::Mutex<std::collections::HashMap<String, OllamaCapabilities>> {
+    static CELL: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::HashMap<String, OllamaCapabilities>>,
+    > = std::sync::OnceLock::new();
     CELL.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
 }
 
-/// Sync read of the cached "does this Ollama model support thinking" flag. Default FALSE → we do
-/// NOT send `think`, the safe choice: Ollama returns "does not support thinking" (HTTP 400) for
-/// non-thinking models, and every local model routes through the same Ollama branch. Warmed by
-/// `warm_ollama_thinking` once per turn before the round loop.
-fn ollama_thinking_supported(base_url: &str, model: &str) -> bool {
-    ollama_thinking_cache()
+/// Sync read of the cached capability profile for an Ollama model (`None` = not yet detected).
+/// Warmed by `warm_ollama_capabilities` once per turn before the round loop.
+fn ollama_capabilities(base_url: &str, model: &str) -> Option<OllamaCapabilities> {
+    ollama_capabilities_cache()
         .lock()
         .ok()
-        .and_then(|c| c.get(&format!("{base_url}|{model}")).copied())
+        .and_then(|c| c.get(&format!("{base_url}|{model}")).cloned())
+}
+
+/// Does this Ollama model support thinking? Default FALSE (undetected/non-thinking) → we do NOT
+/// send `think`: Ollama 400s on non-thinking models and every local model routes through the
+/// same branch; the `<think>` extraction (`model_normalize`) is the fallback.
+fn ollama_thinking_supported(base_url: &str, model: &str) -> bool {
+    ollama_capabilities(base_url, model)
+        .map(|c| c.thinking)
         .unwrap_or(false)
 }
 
-/// Detect + cache whether an Ollama model exposes the `thinking` capability (via `/api/show`),
-/// so `build_chat_payload` can send `think:true` ONLY for those — yielding a clean separate
-/// `message.thinking` field (which `process_ollama_line` captures) instead of inline `<think>`
-/// tags, and avoiding the 400 on non-thinking models. Any error → cached false (we fall back to
-/// the model-agnostic `<think>` extraction in `model_normalize`). Cached per (base_url, model).
-async fn warm_ollama_thinking(http: &reqwest::Client, base_url: &str, model: &str) {
+/// Detect + cache an Ollama model's full capability profile via `/api/show`. One call per
+/// (base_url, model); any error caches the default (all-false/None) so consumers fail safe.
+async fn warm_ollama_capabilities(http: &reqwest::Client, base_url: &str, model: &str) {
     let key = format!("{base_url}|{model}");
-    if ollama_thinking_cache()
+    if ollama_capabilities_cache()
         .lock()
         .map(|c| c.contains_key(&key))
         .unwrap_or(true)
@@ -14424,7 +14462,7 @@ async fn warm_ollama_thinking(http: &reqwest::Client, base_url: &str, model: &st
         return;
     }
     let endpoint = format!("{}/api/show", ollama_native_root(base_url));
-    let supported = match http
+    let caps = match http
         .post(&endpoint)
         .json(&serde_json::json!({ "name": model }))
         .send()
@@ -14433,12 +14471,12 @@ async fn warm_ollama_thinking(http: &reqwest::Client, base_url: &str, model: &st
         Ok(resp) if resp.status().is_success() => resp
             .json::<serde_json::Value>()
             .await
-            .map(|body| parse_thinking_capability(&body))
-            .unwrap_or(false),
-        _ => false,
+            .map(|body| parse_ollama_capabilities(&body))
+            .unwrap_or_default(),
+        _ => OllamaCapabilities::default(),
     };
-    if let Ok(mut cache) = ollama_thinking_cache().lock() {
-        cache.insert(key, supported);
+    if let Ok(mut cache) = ollama_capabilities_cache().lock() {
+        cache.insert(key, caps);
     }
 }
 
@@ -19227,11 +19265,12 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
         // F3: the first plan step's work begins after the initial context is in place.
         step_messages_start = messages.len();
 
-        // F0 / model-io: detect+cache whether this Ollama model supports `thinking`, so
-        // `build_chat_payload` can request a clean separate `message.thinking` field for it (and
-        // never sends `think` to a non-thinking model, which 400s). One /api/show per model.
+        // F0 / model-io: detect+cache this Ollama model's capability profile (thinking, tools,
+        // vision, context window) via one /api/show, so the harness can ADAPT — send `think`
+        // only to thinking models, and (future) gate tools/images and budget on the real
+        // context. The thinking gate in `build_chat_payload` reads this cache.
         if is_ollama_base(&base_url) {
-            warm_ollama_thinking(&http, &base_url, &model).await;
+            warm_ollama_capabilities(&http, &base_url, &model).await;
         }
 
         // The outer ceiling is the BROWSER budget; the EFFECTIVE budget is dynamic
@@ -48602,12 +48641,28 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
     }
 
     #[test]
-    fn thinking_capability_detected_from_show_body() {
-        let yes = serde_json::json!({"capabilities": ["completion", "tools", "thinking"]});
-        assert!(super::parse_thinking_capability(&yes));
-        let no = serde_json::json!({"capabilities": ["completion", "tools"]});
-        assert!(!super::parse_thinking_capability(&no));
-        assert!(!super::parse_thinking_capability(&serde_json::json!({})));
+    fn ollama_capabilities_parsed_from_show_body() {
+        // Shape per Ollama /api/show: capabilities array + model_info["<arch>.context_length"].
+        let body = serde_json::json!({
+            "capabilities": ["completion", "tools", "vision", "thinking"],
+            "model_info": { "general.architecture": "qwen3", "qwen3.context_length": 40960 }
+        });
+        let caps = super::parse_ollama_capabilities(&body);
+        assert!(caps.thinking && caps.tools && caps.vision);
+        assert_eq!(caps.context_length, Some(40960));
+
+        // A plain model: no extras, context from its arch key.
+        let plain = serde_json::json!({
+            "capabilities": ["completion"],
+            "model_info": { "general.architecture": "llama", "llama.context_length": 8192 }
+        });
+        let caps = super::parse_ollama_capabilities(&plain);
+        assert!(!caps.thinking && !caps.tools && !caps.vision);
+        assert_eq!(caps.context_length, Some(8192));
+
+        // Missing everything → all false / None, never panics.
+        let empty = super::parse_ollama_capabilities(&serde_json::json!({}));
+        assert_eq!(empty, super::OllamaCapabilities::default());
     }
 
     #[test]
