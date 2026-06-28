@@ -14,6 +14,7 @@ mod tool_corpus;
 mod types;
 mod ui;
 
+pub use agentic::*;
 pub use audit::*;
 pub use brain::*;
 pub use driver::*;

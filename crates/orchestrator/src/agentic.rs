@@ -31,9 +31,7 @@
 
 use crate::driver::StepOutcome;
 use crate::{OrchestratorError, OrchestratorResult, PlanStep};
-use local_first_capabilities::{
-    ActionClass, CapabilityCall, CapabilityFacade, CapabilityTool, PolicyContext,
-};
+use local_first_capabilities::CapabilityTool;
 use local_first_subagents::{GenerateJsonRequest, JsonRuntime};
 use std::collections::BTreeMap;
 
@@ -50,19 +48,24 @@ const UPSTREAM_DIGEST_CHARS: usize = 400;
 /// Runs the bounded agentic loop for a `SubagentTask` step and returns its outcome.
 /// `completed` carries the verified outputs of upstream steps so the sub-agent
 /// starts with the data flowing along the DAG edges.
-pub(crate) fn run_agentic_step<R: JsonRuntime>(
+///
+/// `gather_tools` is the tool set the caller decides to offer (it pre-filters —
+/// the orchestrator passes Read/Draft tools, the gateway passes the browse tools);
+/// `execute` is the injected tool-execution surface: the orchestrator backs it
+/// with the `CapabilityFacade`, the gateway with the browser sidecar. One agentic
+/// loop, two execution surfaces (caposaldo #5) — the harness owns the control flow
+/// regardless of where the tools actually run.
+pub fn run_agentic_step<R, E>(
     runtime: &R,
-    facade: &mut CapabilityFacade,
-    context: &PolicyContext,
-    loaded_tools: &[CapabilityTool],
+    gather_tools: &[CapabilityTool],
     step: &PlanStep,
     completed: &BTreeMap<String, StepOutcome>,
-) -> OrchestratorResult<StepOutcome> {
-    // Read/gather scope: only Read/Draft tools are offered to the sub-agent.
-    let gather_tools: Vec<&CapabilityTool> = loaded_tools
-        .iter()
-        .filter(|tool| matches!(tool.action, ActionClass::Read | ActionClass::Draft))
-        .collect();
+    mut execute: E,
+) -> OrchestratorResult<StepOutcome>
+where
+    R: JsonRuntime,
+    E: FnMut(&CapabilityTool, serde_json::Value) -> OrchestratorResult<serde_json::Value>,
+{
     let gather_names: Vec<&str> = gather_tools.iter().map(|tool| tool.name.as_str()).collect();
 
     let goal = step
@@ -80,7 +83,7 @@ pub(crate) fn run_agentic_step<R: JsonRuntime>(
         // so the step always ends with a summary rather than running out silently.
         let force_finish = round + 1 == MAX_AGENTIC_ROUNDS || gather_names.is_empty();
         let prompt = build_prompt(
-            step, goal, contract, &upstream, &gather_tools, &history, force_finish,
+            step, goal, contract, &upstream, gather_tools, &history, force_finish,
         );
         let request = GenerateJsonRequest {
             prompt,
@@ -128,29 +131,22 @@ pub(crate) fn run_agentic_step<R: JsonRuntime>(
                     // mode observed on gemma4 ("invalid arguments") when args were
                     // free-form in the action.
                     match crate::step_executor::fill_arguments(runtime, step, tool, completed) {
-                        Ok(arguments) => {
-                            let call = CapabilityCall {
-                                provider_id: tool.provider_id.clone(),
-                                tool_name: tool.name.clone(),
-                                arguments,
-                            };
-                            match facade.call_tool(context, call) {
-                                Ok(result) => {
-                                    evidence.push(format!("gather:{}", tool.name));
-                                    history.push_str(&format!(
-                                        "Round {round}: used {} -> {}\n",
-                                        tool.name,
-                                        digest(&result.output, RESULT_DIGEST_CHARS)
-                                    ));
-                                }
-                                // A tool error is fed back so the model can adapt;
-                                // it does not kill the step (rounds remain).
-                                Err(error) => history.push_str(&format!(
-                                    "Round {round}: {} failed: {error}\n",
-                                    tool.name
-                                )),
+                        Ok(arguments) => match execute(tool, arguments) {
+                            Ok(output) => {
+                                evidence.push(format!("gather:{}", tool.name));
+                                history.push_str(&format!(
+                                    "Round {round}: used {} -> {}\n",
+                                    tool.name,
+                                    digest(&output, RESULT_DIGEST_CHARS)
+                                ));
                             }
-                        }
+                            // A tool error is fed back so the model can adapt;
+                            // it does not kill the step (rounds remain).
+                            Err(error) => history.push_str(&format!(
+                                "Round {round}: {} failed: {error}\n",
+                                tool.name
+                            )),
+                        },
                         Err(error) => history.push_str(&format!(
                             "Round {round}: could not prepare {} arguments: {error}\n",
                             tool.name
@@ -212,7 +208,7 @@ fn build_prompt(
     goal: &str,
     contract: &str,
     upstream: &str,
-    gather_tools: &[&CapabilityTool],
+    gather_tools: &[CapabilityTool],
     history: &str,
     force_finish: bool,
 ) -> String {
@@ -265,10 +261,7 @@ mod tests {
     use super::*;
     use crate::PlanStepKind;
     use crate::StepExecutionPolicy;
-    use local_first_capabilities::{
-        CapabilityFacade, CapabilityPolicy, CapabilityProviderKind, FakeCapabilityProvider,
-        InMemoryCapabilityAudit, ProviderId, UserId, WorkspaceId,
-    };
+    use local_first_capabilities::{ActionClass, CapabilityProviderKind, ProviderId};
     use local_first_subagents::{
         AgentId, AllowedAction, GenerateJsonResponse, RuntimeClientError, TokenMetrics,
     };
@@ -319,33 +312,14 @@ mod tests {
         }
     }
 
-    fn facade_with(tools: Vec<CapabilityTool>) -> CapabilityFacade {
-        let mut provider = FakeCapabilityProvider::new(
-            ProviderId::new("research"),
-            CapabilityProviderKind::Native,
-            true,
-            None,
-            tools.clone(),
-        );
-        for t in &tools {
-            provider.set_tool_response(&t.name, serde_json::json!({"hits": [t.name]}));
-        }
-        let mut facade =
-            CapabilityFacade::new(CapabilityPolicy::new(), InMemoryCapabilityAudit::new());
-        facade.register_provider(provider);
-        facade
-    }
-
-    fn context() -> PolicyContext {
-        PolicyContext {
-            user_id: UserId::new("u"),
-            workspace_id: WorkspaceId::new("w"),
-            enabled_providers: vec![ProviderId::new("research")],
-            privacy_domains: vec!["work".to_string()],
-            allowed_actions: vec![ActionClass::Read, ActionClass::Draft],
-            max_autonomy_level: 2,
-            allow_managed_cloud: false,
-        }
+    /// Canned tool executor: every tool returns `{"hits":[name]}`. Replaces the
+    /// facade in tests — the loop no longer talks to a facade, it calls an injected
+    /// closure (the real surfaces are the facade and the browser sidecar).
+    fn canned(
+        tool: &CapabilityTool,
+        _arguments: serde_json::Value,
+    ) -> OrchestratorResult<serde_json::Value> {
+        Ok(serde_json::json!({ "hits": [tool.name] }))
     }
 
     fn subagent_step() -> PlanStep {
@@ -378,16 +352,14 @@ mod tests {
             serde_json::json!({"q": "trains"}), // arg-fill for web_search
             serde_json::json!({"action": "finish", "summary": "Trains at 8:00 and 9:00"}),
         ]);
-        let mut facade = facade_with(vec![tool("web_search", ActionClass::Read)]);
-        let tools = facade.list_tools(&context()).unwrap().visible_tools;
+        let gather = vec![tool("web_search", ActionClass::Read)];
 
         let outcome = run_agentic_step(
             &runtime,
-            &mut facade,
-            &context(),
-            &tools,
+            &gather,
             &subagent_step(),
             &BTreeMap::new(),
+            canned,
         )
         .unwrap();
 
@@ -402,19 +374,17 @@ mod tests {
         let runtime = ScriptRuntime::new(vec![
             serde_json::json!({"action": "finish", "summary": "done"}),
         ]);
-        let mut facade = facade_with(vec![
+        let gather = vec![
             tool("web_search", ActionClass::Read),
             tool("read_page", ActionClass::Read),
-        ]);
-        let tools = facade.list_tools(&context()).unwrap().visible_tools;
+        ];
 
         let _ = run_agentic_step(
             &runtime,
-            &mut facade,
-            &context(),
-            &tools,
+            &gather,
             &subagent_step(),
             &BTreeMap::new(),
+            canned,
         )
         .unwrap();
 
@@ -471,16 +441,14 @@ mod tests {
         let runtime = GreedyRuntime {
             schemas: Arc::new(Mutex::new(Vec::new())),
         };
-        let mut facade = facade_with(vec![tool("web_search", ActionClass::Read)]);
-        let tools = facade.list_tools(&context()).unwrap().visible_tools;
+        let gather = vec![tool("web_search", ActionClass::Read)];
 
         let outcome = run_agentic_step(
             &runtime,
-            &mut facade,
-            &context(),
-            &tools,
+            &gather,
             &subagent_step(),
             &BTreeMap::new(),
+            canned,
         )
         .unwrap();
 
@@ -500,37 +468,9 @@ mod tests {
         assert_eq!(action_enum, &vec![serde_json::json!("finish")]);
     }
 
-    #[test]
-    fn agentic_step_excludes_write_tools_from_the_gather_set() {
-        // A write tool must NOT be offered to the read/gather sub-agent.
-        let runtime = ScriptRuntime::new(vec![
-            serde_json::json!({"action": "finish", "summary": "done"}),
-        ]);
-        let mut facade = facade_with(vec![
-            tool("web_search", ActionClass::Read),
-            tool("send_email", ActionClass::WriteWithConfirmation),
-        ]);
-        let mut ctx = context();
-        ctx.allowed_actions = vec![
-            ActionClass::Read,
-            ActionClass::Draft,
-            ActionClass::WriteWithConfirmation,
-        ];
-        let tools = facade.list_tools(&ctx).unwrap().visible_tools;
-
-        let _ = run_agentic_step(
-            &runtime,
-            &mut facade,
-            &ctx,
-            &tools,
-            &subagent_step(),
-            &BTreeMap::new(),
-        )
-        .unwrap();
-
-        let schema = runtime.schemas.lock().unwrap()[0].clone().unwrap();
-        let names = schema["properties"]["tool_name"]["enum"].as_array().unwrap();
-        let got: Vec<&str> = names.iter().map(|n| n.as_str().unwrap()).collect();
-        assert_eq!(got, vec!["web_search"]); // send_email excluded
-    }
+    // NOTE: the Read/Draft gather filter is now the CALLER's responsibility
+    // (`CapabilityStepExecutor` pre-filters before calling the loop), so the loop
+    // simply offers whatever `gather_tools` it is given. That caller filter is
+    // covered by the brain integration test
+    // `drive_runs_subagent_step_via_agentic_loop_then_dependent`.
 }

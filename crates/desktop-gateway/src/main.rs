@@ -88,7 +88,7 @@ use local_first_orchestrator::{
     OrchestratorBrain,
     OrchestratorBudgets, OrchestratorError, OrchestratorRequest, OrchestratorResult,
     OrchestratorRoute, PassThroughVerifier, PlanStep, PlanStepKind, StepExecutionPolicy,
-    StepExecutor, StepOutcome, drive_plan, fill_arguments,
+    StepExecutor, StepOutcome, drive_plan, fill_arguments, run_agentic_step,
 };
 use local_first_secrets::{
     DevelopmentSecretKeyProvider, EncryptedFileSecretStore, SecretMaterial, SecretRef, SecretStore,
@@ -19283,13 +19283,36 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
                 },
             )
             .await;
+            // Live per-step progress: the sync drive pushes a label per step; this
+            // async task drains them and streams ‹‹ACT›› deltas so the user sees what
+            // the driver is doing (navigate / read / interact), not just a spinner.
+            let (activity_tx, mut activity_rx) =
+                tokio::sync::mpsc::unbounded_channel::<String>();
+            let tx_activity = StreamSink {
+                mpsc: tx.mpsc.clone(),
+                entry: tx.entry.clone(),
+            };
+            let drain = tokio::spawn(async move {
+                while let Some(label) = activity_rx.recv().await {
+                    let _ = emit_stream_event(
+                        &tx_activity,
+                        GenerateStreamEvent::Delta {
+                            text: format!("‹‹ACT››{label}‹‹/ACT››"),
+                        },
+                    )
+                    .await;
+                }
+            });
             let drive_state = state_owned.clone();
             let drive_goal = memory_user_message.clone();
             let drive_lang = effective_user_language();
             let driven = tokio::task::spawn_blocking(move || {
-                orchestrator_drive_for_chat(&drive_state, &drive_goal, &drive_lang)
+                orchestrator_drive_for_chat(&drive_state, &drive_goal, &drive_lang, &activity_tx)
             })
             .await;
+            // The drive dropped its sender(s) → the channel closes → drain finishes,
+            // flushing all activity deltas before the synthesis streams below.
+            let _ = drain.await;
             match driven {
                 Ok(Ok(Some((gathered, plan_steps)))) => {
                     // Synthesize the final answer with the user's CHAT model (capable at
@@ -35999,6 +36022,60 @@ struct ChatDriveStepExecutor<'a> {
     router: &'a ModelRouter,
     loaded_tools: &'a [CapabilityTool],
     task: TaskRecord,
+    /// Live per-step progress sink. The executor is sync (runs in spawn_blocking);
+    /// `UnboundedSender::send` is sync (no await), so it can push a label per step
+    /// that the async closure drains and streams as an ‹‹ACT›› delta.
+    activity: tokio::sync::mpsc::UnboundedSender<String>,
+}
+
+impl ChatDriveStepExecutor<'_> {
+    /// Executes ONE browser tool call through the shared sidecar, emitting a live
+    /// ‹‹ACT›› activity label. Shared by the CapabilityCall path and the agentic
+    /// browse loop. A SNAPSHOT always uses the chat loop's CONTENT-PRESERVING params
+    /// (F0 fix) regardless of the model-filled args, so the sidecar returns the page
+    /// text, not an interactive-only tree.
+    fn run_browser_tool(
+        &self,
+        tool_name: &str,
+        args: serde_json::Value,
+    ) -> OrchestratorResult<serde_json::Value> {
+        let method = browser_method_for_chat_tool(tool_name).ok_or_else(|| {
+            OrchestratorError::Planner(format!("drive_unsupported_tool:{tool_name}"))
+        })?;
+        let call_args = if method == BrowserMethod::Snapshot {
+            browser_chat_snapshot_params(BROWSER_MANAGED_TARGET)
+        } else {
+            args
+        };
+        let label = match method {
+            BrowserMethod::Navigate => format!(
+                "🌐 Apro {}",
+                call_args
+                    .get("url")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("la pagina")
+            ),
+            BrowserMethod::Snapshot => "👁️ Leggo la pagina".to_string(),
+            BrowserMethod::Act => "🖱️ Interagisco con la pagina".to_string(),
+            BrowserMethod::Screenshot => "📸 Catturo uno screenshot".to_string(),
+            _ => format!("🔧 {tool_name}"),
+        };
+        let _ = self.activity.send(label);
+        match call_shared_browser_sidecar(self.state, &self.task, method, call_args)
+            .map_err(|error| OrchestratorError::Capability(error.message))?
+        {
+            SharedSidecarCall::SidecarLost(reason) => Err(OrchestratorError::Capability(reason)),
+            SharedSidecarCall::Response(BrowserResponse::Success {
+                ok: true, result, ..
+            }) => Ok(result),
+            SharedSidecarCall::Response(BrowserResponse::Success { .. }) => Err(
+                OrchestratorError::Capability("browser returned invalid success envelope".into()),
+            ),
+            SharedSidecarCall::Response(BrowserResponse::Error { error, .. }) => Err(
+                OrchestratorError::Capability(format!("{}:{}", error.code, error.message)),
+            ),
+        }
+    }
 }
 
 impl StepExecutor for ChatDriveStepExecutor<'_> {
@@ -36007,48 +36084,54 @@ impl StepExecutor for ChatDriveStepExecutor<'_> {
         step: &PlanStep,
         completed: &std::collections::BTreeMap<String, StepOutcome>,
     ) -> OrchestratorResult<StepOutcome> {
-        let tool_name = step.tool_name.as_deref().unwrap_or("");
-        let Some(method) = browser_method_for_chat_tool(tool_name) else {
-            // First cut: only browser steps. Anything else fails → fallback.
-            return Err(OrchestratorError::Planner(format!(
-                "drive_unsupported_tool:{tool_name}"
-            )));
-        };
-        let tool = self
-            .loaded_tools
-            .iter()
-            .find(|candidate| candidate.name == tool_name)
-            .ok_or_else(|| {
-                OrchestratorError::Planner(format!("drive_tool_not_loaded:{tool_name}"))
-            })?;
-        // For a SNAPSHOT, use the chat loop's CONTENT-PRESERVING params (F0 fix:
-        // snapshot_format=ai + refs_mode=aria + large max_chars) instead of letting
-        // the model fill them — otherwise the sidecar returns an interactive-only
-        // tree (header/nav, no tables/text) and the synthesis has nothing to read.
-        // Other tools (navigate needs the url, act needs ref/action) keep the
-        // schema-constrained arg-fill.
-        let args = if method == BrowserMethod::Snapshot {
-            browser_chat_snapshot_params(BROWSER_MANAGED_TARGET)
-        } else {
-            fill_arguments(self.router, step, tool, completed)?
-        };
-        match call_shared_browser_sidecar(self.state, &self.task, method, args)
-            .map_err(|error| OrchestratorError::Capability(error.message))?
-        {
-            SharedSidecarCall::SidecarLost(reason) => Err(OrchestratorError::Capability(reason)),
-            SharedSidecarCall::Response(BrowserResponse::Success {
-                ok: true, result, ..
-            }) => Ok(StepOutcome {
-                succeeded: true,
-                output: result,
-                evidence: vec![format!("browser:{tool_name}")],
-            }),
-            SharedSidecarCall::Response(BrowserResponse::Success { .. }) => Err(
-                OrchestratorError::Capability("browser returned invalid success envelope".into()),
-            ),
-            SharedSidecarCall::Response(BrowserResponse::Error { error, .. }) => Err(
-                OrchestratorError::Capability(format!("{}:{}", error.code, error.message)),
-            ),
+        match step.kind {
+            // Agentic BROWSE (form-filling): the model steers a bounded loop,
+            // choosing browser tools (navigate / act / snapshot) round by round —
+            // this is what fills a search form (e.g. trains). The SAME agentic loop
+            // as the orchestrator (caposaldo #5), but executing through the browser
+            // sidecar instead of the facade. Offer the browse tools regardless of
+            // their registry action class (navigate/act are WriteWithConfirmation
+            // but are read/gather for browsing).
+            PlanStepKind::SubagentTask => {
+                let browse_tools: Vec<CapabilityTool> = self
+                    .loaded_tools
+                    .iter()
+                    .filter(|tool| browser_method_for_chat_tool(&tool.name).is_some())
+                    .cloned()
+                    .collect();
+                let this = &*self;
+                run_agentic_step(self.router, &browse_tools, step, completed, |tool, args| {
+                    this.run_browser_tool(&tool.name, args)
+                })
+            }
+            // Browser CapabilityCall step: model fills args (except snapshot), the
+            // sidecar executes.
+            _ => {
+                let tool_name = step.tool_name.as_deref().unwrap_or("");
+                let Some(method) = browser_method_for_chat_tool(tool_name) else {
+                    return Err(OrchestratorError::Planner(format!(
+                        "drive_unsupported_tool:{tool_name}"
+                    )));
+                };
+                let args = if method == BrowserMethod::Snapshot {
+                    serde_json::Value::Null // run_browser_tool overrides with content params
+                } else {
+                    let tool = self
+                        .loaded_tools
+                        .iter()
+                        .find(|candidate| candidate.name == tool_name)
+                        .ok_or_else(|| {
+                            OrchestratorError::Planner(format!("drive_tool_not_loaded:{tool_name}"))
+                        })?;
+                    fill_arguments(self.router, step, tool, completed)?
+                };
+                let output = self.run_browser_tool(tool_name, args)?;
+                Ok(StepOutcome {
+                    succeeded: true,
+                    output,
+                    evidence: vec![format!("browser:{tool_name}")],
+                })
+            }
         }
     }
 }
@@ -36087,6 +36170,7 @@ fn orchestrator_drive_for_chat(
     state: &AppState,
     goal: &str,
     language: &str,
+    activity: &tokio::sync::mpsc::UnboundedSender<String>,
 ) -> Result<Option<(String, Vec<serde_json::Value>)>, String> {
     let user = gateway_capability_user_id();
     let workspace = gateway_capability_workspace_id();
@@ -36151,6 +36235,7 @@ fn orchestrator_drive_for_chat(
         router: &exec_router,
         loaded_tools: &loaded_tools,
         task: synthetic_drive_task(goal),
+        activity: activity.clone(),
     };
     let mut verifier = PassThroughVerifier;
     let outcome = drive_plan(&plan, &mut executor, &mut verifier);

@@ -28,7 +28,9 @@
 use crate::driver::{StepExecutor, StepOutcome, StepVerifier};
 use crate::execution::tool_for_step;
 use crate::{OrchestratorError, OrchestratorResult, PlanStep, PlanStepKind};
-use local_first_capabilities::{CapabilityCall, CapabilityFacade, CapabilityTool, PolicyContext};
+use local_first_capabilities::{
+    ActionClass, CapabilityCall, CapabilityFacade, CapabilityTool, PolicyContext,
+};
 use local_first_subagents::{GenerateJsonRequest, JsonRuntime};
 use std::collections::BTreeMap;
 
@@ -99,15 +101,36 @@ impl<R: JsonRuntime> StepExecutor for CapabilityStepExecutor<'_, R> {
             }
             // Agentic step: run the bounded inner loop (read/gather scope) where
             // the model steers and the harness owns the envelope (ADR 0016
-            // Pilastro 2 agent mode). See `agentic::run_agentic_step`.
-            PlanStepKind::SubagentTask => crate::agentic::run_agentic_step(
-                self.runtime,
-                self.facade,
-                self.context,
-                self.loaded_tools,
-                step,
-                completed,
-            ),
+            // Pilastro 2 agent mode). The capability path offers Read/Draft tools
+            // and executes through the facade; the loop itself is shared with the
+            // gateway's browser path (caposaldo #5).
+            PlanStepKind::SubagentTask => {
+                let gather: Vec<CapabilityTool> = self
+                    .loaded_tools
+                    .iter()
+                    .filter(|tool| matches!(tool.action, ActionClass::Read | ActionClass::Draft))
+                    .cloned()
+                    .collect();
+                let facade = &mut *self.facade;
+                let context = self.context;
+                crate::agentic::run_agentic_step(
+                    self.runtime,
+                    &gather,
+                    step,
+                    completed,
+                    |tool, arguments| {
+                        let result = facade.call_tool(
+                            context,
+                            CapabilityCall {
+                                provider_id: tool.provider_id.clone(),
+                                tool_name: tool.name.clone(),
+                                arguments,
+                            },
+                        )?;
+                        Ok(result.output)
+                    },
+                )
+            }
         }
     }
 }
