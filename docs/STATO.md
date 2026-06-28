@@ -154,10 +154,21 @@ Commit `b705289a` (driver+executor) + `3ce99c67` (arg-fill). Vedi [agent-loop](a
   tollerante)+`6d619de4`(snapshot content-preserving+budget 20k)+`8ae9c9ce`(plan-visibility). Fix
   emersi dal vivo: deser planner tollerante (`lenient_string`/`lenient_opt_string`), snapshot
   content-preserving (`browser_chat_snapshot_params`, riuso F0), budget gathered 20k.
-- ⏳ **Residuo F3.3:** (a) UX live per-step (ACT deltas durante l'esecuzione) + pannello attività
-  browser; (b) **browse agentico** (form-filling tipo trenitalia): il `ChatDriveStepExecutor` fa solo
-  browser-CapabilityCall, NON instrada i `SubagentTask` (loop F3.2c) al sidecar → task che richiedono
-  compilazione form cadono a motore #1; (c) accendere il drive di default (oggi flag-gated).
+- ✅ **F3.3 polish — UX live + BROWSE AGENTICO (validati live via curl-driving):** (a) azioni live
+  per-step (canale `tokio::mpsc` sync→async → ‹‹ACT›› deltas: "🌐 Apro…/👁️ Leggo…"); (b) pannello
+  **Plan** visibile (marker ‹‹PLAN›› + status per-step); (c) **browse agentico FUNZIONANTE**: il
+  `SubagentTask` instrada al loop agentico via sidecar (`run_agentic_step` iniettabile, una loop due
+  superfici #5) — naviga, clicca, digita, usa motori di ricerca, sintesi onesta. **Bug radice trovato
+  e risolto** (diagnosi via curl-driving, log `[agentic]` gated HOMUN_DEBUG): il prompt agentico non
+  descriveva il FORMATO output → `action=None` ogni round → vuoto. Aggiunto formato+esempi (come il
+  planner). **Leva capace:** il drive usa ora il ruolo **"orchestrator" (deepseek)** non "browser"
+  (minimax-m3) → args coerenti. Planner nudge: info live→`subagent_task` browse (eval ALL GREEN).
+  Commit `7a472488`.
+- ⏳ **Residuo F3.3 (NON malfunzionamenti, sono efficacia/maturità):** (a) estrazione di dati live
+  precisi da siti booking JS-pesanti = compito agentico difficile; motore #1 vince lì per native
+  tool-calling + dispatch browser inline maturo → è la **convergenza F3.3-pre** (ritirare/condividere
+  `chat_browser_call`); (b) il flicker reasoning della sintesi (collector → instradare reasoning alla
+  work-island); (c) accendere il drive di default (oggi `HOMUN_DRIVE_CHAT` off).
 - ⏳ **F3.4** ritirare `merge_plan` per-titolo + prompt-prosa (solo quando il drive è il default).
   ⏳ scope agentico oltre read/gather (scritture single-threaded+approval).
 
@@ -169,6 +180,20 @@ bi-popolazione (caposaldo #2) È eseguibile qui: `python3 scripts/eval_suite.py 
 chat di default = deepseek-v4-pro:cloud (Z.ai, tier **Balanced**); Composio non configurato.
 
 ## Cosa è stato fatto (rolling, conciso)
+
+**Sessione 2026-06-28 (5c) — F3.3 polish: UX live + browse agentico funzionante (curl-driving):**
+- Live per-step UX (‹‹ACT›› via canale sync→async) + pannello Plan (‹‹PLAN›› marker). Commit `8ae9c9ce`.
+- **Browse agentico**: `run_agentic_step` reso iniettabile (gather tools + execute closure) → gateway
+  via sidecar, orchestrator via facade (una loop, due superfici #5). Planner nudge: info live→browse
+  subagent_task (eval ALL GREEN). Commit `e0eb9f0c`+`7a472488`.
+- **Bug radice del browse agentico TROVATO+RISOLTO** pilotando io il gateway via curl (`/api/chat/
+  generate_stream`) e leggendo i log `[agentic]` (gated HOMUN_DEBUG): prompt senza formato output →
+  `action=None` sempre → vuoto. Fix: formato+esempi nel prompt. **Leva:** drive ora sul ruolo
+  "orchestrator" (deepseek) non "browser" (minimax-m3). Ora naviga/clicca/digita/cerca davvero.
+- Onesto: estrarre dati live precisi da booking JS = difficile (efficacia, non bug); motore #1 vince
+  lì → convergenza F3.3-pre. NB: per debug usato il **gateway standalone** (`./target/debug/...`) per
+  pilotare via curl senza GUI; electron in dev può crashare se il `cargo run` del gateway ricompila
+  oltre il timeout health-check (pre-compilare con `cargo build`).
 
 **Sessione 2026-06-28 (5b) — F3.3 routing LIVE nell'app reale (motore #2 guida un turno di chat):**
 - Cablato `orchestrator_drive_for_chat` + `ChatDriveStepExecutor` (impl `StepExecutor`, tiene `&AppState`,
