@@ -224,12 +224,15 @@ Invarianti:
     Rimozione che cura anche un doc orfano di `strip_tag_blocks` (riattacca il doc di
     `prune_browser_history`). 4 test. **Ora la frontiera canonica (ADR 0019) possiede OGNI forma
     in cui una call può arrivare — strutturata o trapelata-come-testo** (caposaldo #6/#11).
-  **L0 = punto fermo (core + tool-as-text convergiti).** Coda residua (2 increment a sé, NON
-  bloccano F1): schema-downgrade duplicato (gateway `generate_deck_content` vs `openai_compat.rs`),
-  `context_length` nel budget prompt.
-- **Doppio path per il deck**: `generate_deck_content` (gateway) duplica il floor
-  schema-downgrade già presente in `crates/inference/src/openai_compat.rs`; ADR 0016 prevede
-  la convergenza, oggi non avvenuta.
+  - **schema-downgrade floor** (F0.6): la costruzione del `response_format` (strict `json_schema`
+    → degrade `json_object`) era hand-rolled in **3 punti** (`build_request_body` nell'inference
+    crate, `generate_deck_content` e `orchestration_judge_response_format` nel gateway). Convergiuta
+    in **una** funzione pura `local_first_inference::structured_response_format(name, schema)`; tutti
+    e 3 i siti la chiamano. Shape identica (refactor behavior-preserving, garantito dai test giudice
+    + provider). Resta per-sito SOLO il control-flow di trasporto (async deck vs blocking provider,
+    system+user vs prompt-only). 1 test nuovo. Caposaldo #5 / ADR 0016.
+  **L0 = punto fermo (core + tool-as-text + schema-floor convergiti).** Coda residua (1 increment
+  a sé, NON blocca F1): `context_length` nel budget prompt.
 - **`json_schema` non enforced ≠ rifiutato**: alcuni provider (es. Ollama Cloud) **accettano**
   lo schema ma non lo applicano (wrappano il deck sotto una chiave, aggiungono campi) → il
   vero floor è il **parsing tollerante** a valle, non l'enforcement. Modelli che ignorano

@@ -68,7 +68,7 @@ use local_first_desktop_gateway::{
 };
 use local_first_inference::{
     AnthropicProvider, CapabilityDescriptor, Locality, ModelRouter, OpenAiCompatProvider,
-    PrivacyPolicy, Requirements,
+    PrivacyPolicy, Requirements, structured_response_format,
 };
 use local_first_local_computer_session::{
     ApprovalState, ArtifactRecord, ComputerEventRecord, ComputerSessionRecord,
@@ -13765,14 +13765,8 @@ fn orchestration_completion_judge_schema() -> serde_json::Value {
 }
 
 fn orchestration_judge_response_format(name: &str) -> serde_json::Value {
-    serde_json::json!({
-        "type": "json_schema",
-        "json_schema": {
-            "name": name,
-            "strict": true,
-            "schema": orchestration_completion_judge_schema()
-        }
-    })
+    // Strict-schema floor from the single inference-crate definition (caposaldo #5).
+    structured_response_format(name, Some(&orchestration_completion_judge_schema()))
 }
 
 /// F2 verification gate: an independent LLM-judge deciding whether a plan step is
@@ -16382,7 +16376,10 @@ fn merge_object_metadata(target: &mut serde_json::Value, extra: Option<&serde_js
 /// Produce the deck CONTENT as schema-enforced JSON. Uses the orchestrator-role
 /// endpoint with `response_format: json_schema` (constrained decoding — the
 /// cross-model floor), degrading ONCE to `json_object` on a 400 (e.g.
-/// ollama.com/v1). Mirrors the inference-crate floor; converge later (ADR 0016).
+/// ollama.com/v1). The floor shapes come from the single inference-crate
+/// definition (`structured_response_format`, caposaldo #5 / ADR 0016); only the
+/// async transport + degrade control-flow live here (they differ from the
+/// blocking provider: system+user messages, richer empty/reasoning-only handling).
 async fn generate_deck_content(
     http: &reqwest::Client,
     base_url: &str,
@@ -16450,8 +16447,8 @@ any other key such as \"presentation\" or \"deck\", and add no extra top-level k
         { "role": "user", "content": brief },
     ]);
     let attempts = [
-        serde_json::json!({ "type": "json_schema", "json_schema": { "name": "deck", "strict": true, "schema": deck_content_schema() } }),
-        serde_json::json!({ "type": "json_object" }),
+        structured_response_format("deck", Some(&deck_content_schema())),
+        structured_response_format("deck", None),
     ];
     let mut content = String::new();
     let mut last_err = "deck content request failed".to_string();

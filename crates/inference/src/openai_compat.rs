@@ -67,25 +67,47 @@ impl OpenAiCompatProvider {
     }
 }
 
+/// The ONE definition of the cross-model structured-output "floor" `response_format`.
+///
+/// `Some(schema)` → strict `json_schema`: constrained decoding, where a supporting
+/// backend (OpenAI, OpenRouter, recent Ollama) literally cannot emit out-of-schema
+/// tokens — the floor that lets a weak/local model still produce valid structured
+/// output. `None` → the universally-supported `json_object` hint, which is ALSO the
+/// degrade target after a backend rejects `json_schema` with a 400 (e.g. ollama.com/v1).
+/// `name` only labels the schema for the API; its value is cosmetic.
+///
+/// Single-source so every structured-output path — the inference provider, the gateway's
+/// deck-content generation, the orchestration judges — degrades identically. Convergence
+/// per caposaldo #5 / ADR 0016: changing the floor (e.g. adding a degrade level) happens
+/// here, once. Pure + `pub` so cross-crate callers reuse it instead of re-hand-rolling.
+pub fn structured_response_format(name: &str, schema: Option<&Value>) -> Value {
+    match schema {
+        Some(schema) => json!({
+            "type": "json_schema",
+            "json_schema": { "name": name, "strict": true, "schema": schema },
+        }),
+        None => json!({ "type": "json_object" }),
+    }
+}
+
 /// Build the chat-completions request body. When `enforce_schema` is true AND a
-/// `json_schema` is present, emit the strict `response_format: json_schema`
-/// (constrained decoding — the model literally cannot produce out-of-schema
-/// tokens on backends that support it: OpenAI, OpenRouter, recent Ollama). This
-/// is the cross-model "floor" that lets a weak/local model still emit valid
-/// structured output. Otherwise fall back to the universally-supported
-/// `json_object` hint. Free function so it is unit-testable without a provider.
+/// `json_schema` is present, emit the strict `response_format: json_schema` (constrained
+/// decoding — the cross-model floor); otherwise the loose `json_object` hint. The floor
+/// itself is defined once in [`structured_response_format`]. Free function so it is
+/// unit-testable without a provider.
 pub(crate) fn build_request_body(
     model: &str,
     request: &GenerateJsonRequest,
     enforce_schema: bool,
 ) -> Value {
-    let response_format = match (enforce_schema, request.json_schema.as_ref()) {
-        (true, Some(schema)) => json!({
-            "type": "json_schema",
-            "json_schema": { "name": "result", "strict": true, "schema": schema },
-        }),
-        _ => json!({ "type": "json_object" }),
-    };
+    let response_format = structured_response_format(
+        "result",
+        if enforce_schema {
+            request.json_schema.as_ref()
+        } else {
+            None
+        },
+    );
     let mut body = json!({
         "model": model,
         "messages": [{ "role": "user", "content": request.prompt }],
@@ -277,5 +299,20 @@ mod tests {
     fn uses_json_object_when_no_schema_supplied() {
         let body = build_request_body("m", &request(&[]), true);
         assert_eq!(body["response_format"]["type"], "json_object");
+    }
+
+    #[test]
+    fn structured_response_format_is_the_single_floor_definition() {
+        // Schema present → strict json_schema with the given name (constrained decoding).
+        let schema = json!({ "type": "object", "required": ["a"] });
+        let strict = structured_response_format("deck", Some(&schema));
+        assert_eq!(strict["type"], "json_schema");
+        assert_eq!(strict["json_schema"]["name"], "deck");
+        assert_eq!(strict["json_schema"]["strict"], true);
+        assert_eq!(strict["json_schema"]["schema"]["required"][0], "a");
+        // No schema → the universal json_object degrade target (no schema leaks through).
+        let loose = structured_response_format("deck", None);
+        assert_eq!(loose, json!({ "type": "json_object" }));
+        assert!(loose.get("json_schema").is_none());
     }
 }
