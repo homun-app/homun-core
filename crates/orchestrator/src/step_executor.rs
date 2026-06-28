@@ -90,7 +90,7 @@ impl<R: JsonRuntime> StepExecutor for CapabilityStepExecutor<'_, R> {
                 let tool = tool_for_step(step, self.loaded_tools)?;
                 // Model fills the arguments slot, constrained to the tool schema —
                 // unless the caller already provided concrete ones.
-                let arguments = fill_arguments(self.runtime, step, tool, completed)?;
+                let arguments = fill_arguments(self.runtime, step, tool, completed, "")?;
                 call_capability_tool(self.facade, self.context, tool, arguments)
             }
             // No tool to call: a no-op the driver treats as trivially done. The
@@ -177,6 +177,7 @@ pub fn fill_arguments<R: JsonRuntime>(
     step: &PlanStep,
     tool: &CapabilityTool,
     completed: &BTreeMap<String, StepOutcome>,
+    extra_context: &str,
 ) -> OrchestratorResult<serde_json::Value> {
     if let Some(object) = step.arguments.as_object() {
         if !object.is_empty() {
@@ -184,12 +185,20 @@ pub fn fill_arguments<R: JsonRuntime>(
         }
     }
 
+    // `extra_context` carries live state the schema alone can't: e.g. the agentic
+    // browse loop passes the latest page snapshot, so filling a `browser_act`
+    // call can pick the right element "ref" (which only exists in that snapshot).
+    let context_block = if extra_context.trim().is_empty() {
+        String::new()
+    } else {
+        format!("Current context (use it to choose values like element refs):\n{extra_context}\n")
+    };
     let prompt = format!(
         "Fill the arguments for a single tool call.\n\
          Tool: {name}\n\
          Tool description: {description}\n\
          Step goal: {goal}\n\
-         {upstream}\
+         {upstream}{context_block}\
          Return ONLY a JSON object of arguments valid for the tool's input schema. \
          Use values that achieve the step goal; do not invent unrelated fields.",
         name = tool.name,

@@ -502,7 +502,9 @@ fn drive_runs_subagent_step_via_agentic_loop_then_dependent() {
     // that finishes on the first turn, the subagent reaches Done and its dependent
     // capability step then runs — the DAG flows through both step kinds.
     let runtime = StubRuntime::new(vec![
-        // The agentic loop's first (and only) turn: finish with a summary.
+        // The harness forbids finishing empty-handed: gather once, then finish.
+        serde_json::json!({"action": "use_tool", "tool_name": "calendar.search"}),
+        serde_json::json!({"query": "standup"}), // arg-fill for calendar.search
         serde_json::json!({"action": "finish", "summary": "found the standup window"}),
     ]);
     let mut brain = brain(

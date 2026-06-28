@@ -39,6 +39,7 @@ pub(crate) fn planner_prompt(
     let prompt = format!(
         "You are the local-first assistant orchestrator brain.\n\
          Decide whether to answer directly, use memory, call capability tools, create subagent workflow tasks, enqueue durable tasks, or ask for clarification.\n\
+         ROUTING: When the user needs LIVE or EXTERNAL information you cannot answer reliably from memory — current prices, schedules/timetables, availability, news, sports results, or the content of a specific website — DO NOT route to direct_answer. Plan a WEB BROWSE: a single subagent_task step (kind=subagent_task, agent_id=ToolAgent, depends_on=[], execution_policy=durable_task, risk_level=low, expected_duration_seconds=60, allowed_actions=[\"read\"], requires_user_approval=false) whose \"goal\" states what to find on the web and \"contract\" states what to return; the sub-agent will navigate, search and read with the browser tools. Use direct_answer ONLY for things answerable from your own knowledge or the provided memory.\n\
          Never invent tools. Use only loaded tool details for executable steps.\n\
          A capability_call step's \"tool_name\" MUST be EXACTLY one loaded tool name — never put arguments, URLs or values inside it. ALL tool inputs go in the \"arguments\" object.\n\
          \n\

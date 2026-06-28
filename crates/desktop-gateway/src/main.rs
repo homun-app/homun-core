@@ -36104,10 +36104,17 @@ impl StepExecutor for ChatDriveStepExecutor<'_> {
             // their registry action class (navigate/act are WriteWithConfirmation
             // but are read/gather for browsing).
             PlanStepKind::SubagentTask => {
+                // Offer the INTERACTIVE browse tools. Exclude screenshot (a text
+                // model can't use an image, and it errors without a file_name) and
+                // tabs (single managed tab) — they only waste agentic rounds.
                 let browse_tools: Vec<CapabilityTool> = self
                     .loaded_tools
                     .iter()
-                    .filter(|tool| browser_method_for_chat_tool(&tool.name).is_some())
+                    .filter(|tool| {
+                        browser_method_for_chat_tool(&tool.name).is_some()
+                            && tool.name != "browser_screenshot"
+                            && tool.name != "browser_tabs"
+                    })
                     .cloned()
                     .collect();
                 let this = &*self;
@@ -36134,7 +36141,7 @@ impl StepExecutor for ChatDriveStepExecutor<'_> {
                         .ok_or_else(|| {
                             OrchestratorError::Planner(format!("drive_tool_not_loaded:{tool_name}"))
                         })?;
-                    fill_arguments(self.router, step, tool, completed)?
+                    fill_arguments(self.router, step, tool, completed, "")?
                 };
                 let output = self.run_browser_tool(tool_name, args)?;
                 Ok(StepOutcome {
@@ -36221,7 +36228,7 @@ fn orchestrator_drive_for_chat(
     }
     let task_store = TaskStore::open(gateway_task_database_path().map_err(|e| e.to_string())?)
         .map_err(|e| format!("task store: {e}"))?;
-    let plan_router = build_browser_inference_router();
+    let plan_router = build_drive_inference_router();
     let budgets =
         brain_budgets_for_context_window(plan_router.active_context_window(&Requirements::default()));
     let mut brain = OrchestratorBrain::new(plan_router, open_brain_memory(), facade, task_store);
@@ -36240,7 +36247,7 @@ fn orchestrator_drive_for_chat(
     }
 
     // 2. Drive the plan in-turn: model fills args, sidecar executes, runtime verifies.
-    let exec_router = build_browser_inference_router();
+    let exec_router = build_drive_inference_router();
     let mut executor = ChatDriveStepExecutor {
         state,
         router: &exec_router,
@@ -37965,6 +37972,15 @@ fn resolve_role_for_task(goal: &str, role: &str) -> Option<ResolvedRole> {
 /// Browser-loop router (Phase 2): the "browser" role.
 fn build_browser_inference_router() -> ModelRouter {
     router_for_role("browser")
+}
+
+/// Router for the DRIVER (ADR 0020): planning, per-step argument-fill and the
+/// agentic browse loop. Uses the "orchestrator" role — a capable model — because
+/// these steer multi-step browsing and must emit consistent, schema-valid tool
+/// arguments (the "browser" role is a cheaper model tuned for single actions and,
+/// observed live, produced inconsistent args in the agentic loop).
+fn build_drive_inference_router() -> ModelRouter {
+    router_for_role("orchestrator")
 }
 
 /// Legacy env-only router, used when the registry has no providers yet.

@@ -35,13 +35,16 @@ use local_first_capabilities::CapabilityTool;
 use local_first_subagents::{GenerateJsonRequest, JsonRuntime};
 use std::collections::BTreeMap;
 
-/// Hard ceiling on model turns inside one agentic step. Small: a read/gather step
-/// is a few lookups, and the bound is what keeps a weak model from looping.
-const MAX_AGENTIC_ROUNDS: usize = 6;
+/// Hard ceiling on model turns inside one agentic step. Enough for a real browse
+/// (navigate → read → dismiss a cookie banner → fill several fields → search →
+/// read results), while still bounding a looping model.
+const MAX_AGENTIC_ROUNDS: usize = 16;
 /// Per-turn token ceiling for the action/synthesis emission.
 const AGENTIC_MAX_TOKENS: u32 = 768;
-/// Truncation of a tool result fed back into the loop history, to bound context.
-const RESULT_DIGEST_CHARS: usize = 600;
+/// Truncation of a tool result fed back into the loop history. Generous: a page
+/// snapshot carries the element "refs" the model needs to act (fill a field, click
+/// a button), and those sit deep in the tree — too small a digest hides the form.
+const RESULT_DIGEST_CHARS: usize = 4_000;
 /// Truncation of an upstream dependency output in the opening context.
 const UPSTREAM_DIGEST_CHARS: usize = 400;
 
@@ -67,6 +70,17 @@ where
     E: FnMut(&CapabilityTool, serde_json::Value) -> OrchestratorResult<serde_json::Value>,
 {
     let gather_names: Vec<&str> = gather_tools.iter().map(|tool| tool.name.as_str()).collect();
+    // Diagnostic (HOMUN_DEBUG): the agentic loop is opaque from outside (only its
+    // final summary shows in the drive trace). Log each round's decision + outcome
+    // so an empty/poor browse can be diagnosed (model finishing early, tool errors).
+    let dbg = std::env::var("HOMUN_DEBUG").is_ok();
+    if dbg {
+        eprintln!(
+            "[agentic] start step={} tools=[{}]",
+            step.step_id,
+            gather_names.join(",")
+        );
+    }
 
     let goal = step
         .goal
@@ -100,19 +114,43 @@ where
             .map_err(|error| OrchestratorError::Capability(format!("agentic_step_failed:{error:?}")))?;
         let action = response.json;
         let action_kind = action.get("action").and_then(|value| value.as_str());
+        if dbg {
+            eprintln!(
+                "[agentic] round {round} force_finish={force_finish} action={action_kind:?} tool={:?}",
+                action.get("tool_name").and_then(|v| v.as_str())
+            );
+        }
 
         // Finish (or a forced final round): synthesize and return. The runtime,
         // not the model, owns whether the STEP is done (the driver's verify gate);
         // here we only end the inner loop with the model's summary.
         if action_kind == Some("finish") || force_finish {
+            // The harness owns control flow: do NOT let the sub-agent finish
+            // EMPTY-HANDED on a non-forced round (a weak/lazy model otherwise
+            // returns an empty summary without ever browsing). Require at least one
+            // successful gather first — nudge and continue.
+            if !force_finish && evidence.is_empty() {
+                history.push_str(&format!(
+                    "Round {round}: you have not gathered anything yet — you MUST use a \
+                     tool (start by navigating to a relevant website or search engine, \
+                     then read it) before you can finish. Do not finish empty-handed.\n"
+                ));
+                continue;
+            }
             let summary = action
                 .get("summary")
                 .and_then(|value| value.as_str())
                 .unwrap_or("")
                 .to_string();
+            // Return the GATHERED history alongside the model's summary. On a forced
+            // round the model sometimes asks for another tool instead of writing a
+            // summary (empty summary) — but the history holds what it actually read,
+            // so the driver's final synthesis (a capable model) can still answer from
+            // it. Never lose the gathered evidence to an empty summary field.
+            let gathered: String = history.chars().take(16_000).collect();
             return Ok(StepOutcome {
                 succeeded: true,
-                output: serde_json::json!({ "summary": summary }),
+                output: serde_json::json!({ "summary": summary, "gathered": gathered }),
                 evidence,
             });
         }
@@ -130,27 +168,57 @@ where
                     // model cannot emit args that violate the schema — the failure
                     // mode observed on gemma4 ("invalid arguments") when args were
                     // free-form in the action.
-                    match crate::step_executor::fill_arguments(runtime, step, tool, completed) {
-                        Ok(arguments) => match execute(tool, arguments) {
-                            Ok(output) => {
-                                evidence.push(format!("gather:{}", tool.name));
-                                history.push_str(&format!(
-                                    "Round {round}: used {} -> {}\n",
+                    // Pass the loop history (with the latest snapshot's element refs)
+                    // so arg-fill can choose the right ref for a browser_act.
+                    match crate::step_executor::fill_arguments(
+                        runtime, step, tool, completed, &history,
+                    ) {
+                        Ok(arguments) => {
+                            if dbg {
+                                eprintln!(
+                                    "[agentic]   exec {} args={}",
                                     tool.name,
-                                    digest(&output, RESULT_DIGEST_CHARS)
-                                ));
+                                    digest(&arguments, 200)
+                                );
                             }
-                            // A tool error is fed back so the model can adapt;
-                            // it does not kill the step (rounds remain).
-                            Err(error) => history.push_str(&format!(
-                                "Round {round}: {} failed: {error}\n",
+                            match execute(tool, arguments) {
+                                Ok(output) => {
+                                    if dbg {
+                                        eprintln!(
+                                            "[agentic]   ok {} -> {}",
+                                            tool.name,
+                                            digest(&output, 160)
+                                        );
+                                    }
+                                    evidence.push(format!("gather:{}", tool.name));
+                                    history.push_str(&format!(
+                                        "Round {round}: used {} -> {}\n",
+                                        tool.name,
+                                        digest(&output, RESULT_DIGEST_CHARS)
+                                    ));
+                                }
+                                // A tool error is fed back so the model can adapt;
+                                // it does not kill the step (rounds remain).
+                                Err(error) => {
+                                    if dbg {
+                                        eprintln!("[agentic]   ERR {} failed: {error}", tool.name);
+                                    }
+                                    history.push_str(&format!(
+                                        "Round {round}: {} failed: {error}\n",
+                                        tool.name
+                                    ));
+                                }
+                            }
+                        }
+                        Err(error) => {
+                            if dbg {
+                                eprintln!("[agentic]   argfill ERR {}: {error}", tool.name);
+                            }
+                            history.push_str(&format!(
+                                "Round {round}: could not prepare {} arguments: {error}\n",
                                 tool.name
-                            )),
-                        },
-                        Err(error) => history.push_str(&format!(
-                            "Round {round}: could not prepare {} arguments: {error}\n",
-                            tool.name
-                        )),
+                            ));
+                        }
                     }
                 }
                 None => history.push_str(&format!(
@@ -223,17 +291,37 @@ fn build_prompt(
     }
     let closing = if force_finish {
         "This is your final step. Finish now: return a summary that satisfies the contract."
+    } else if history.is_empty() {
+        "Start by USING A TOOL: navigate to a relevant website or a search engine to find what \
+         the goal needs (do not finish yet — you have gathered nothing)."
     } else {
-        "Choose the next action: use a tool to gather more, or finish with a summary that \
-         satisfies the contract."
+        "Choose the next action: use a tool to gather more, or — once you have enough — finish \
+         with a summary that satisfies the contract."
     };
+    // CRITICAL: describe the OUTPUT FORMAT explicitly (like the planner prompt).
+    // Without it the model returns free-form JSON with no "action" field — the
+    // json_schema is not strictly enforced on every endpoint (ADR 0016), so the
+    // prompt must carry the contract. This is what makes the sub-agent actually act.
     format!(
-        "You are a {agent} sub-agent gathering information for one step.\n\
+        "You are a {agent} sub-agent. Achieve the goal by browsing the web, ONE tool call at a time.\n\
          Goal: {goal}\n\
-         Contract (what to return): {contract}\n\
+         Contract (what to return when you finish): {contract}\n\
          {upstream}\
-         Tools you may use (read/gather only):\n{tools}\
+         Available tools — use EXACTLY one of these names:\n{tools}\
+         \n\
+         How to browse: browser_navigate(url) opens a page; browser_snapshot reads it and returns \
+         elements each with a \"ref\" id; browser_act interacts with a ref (click a button/link, or \
+         type text into a field) — pass the ref and what to do. browser_act ALREADY returns the \
+         updated snapshot, so do NOT call browser_snapshot right after acting. For quick facts like \
+         schedules, prices or results, a SEARCH ENGINE (navigate to \
+         https://www.google.com/search?q=...) is usually faster and more reliable than filling a \
+         booking site's form. Typical flow: navigate → snapshot → act on the right refs → read the \
+         returned snapshot → finish. Never take screenshots (you cannot see images).\n\
          History so far:\n{history}\n\
+         \n\
+         Reply with ONLY ONE JSON object (no prose, no markdown, no code fence):\n\
+         - to use a tool:  {{\"action\":\"use_tool\",\"tool_name\":\"<one tool name from the list above>\"}}\n\
+         - to finish:      {{\"action\":\"finish\",\"summary\":\"<your findings that satisfy the contract>\"}}\n\
          {closing}"
     )
 }
@@ -371,7 +459,10 @@ mod tests {
 
     #[test]
     fn agentic_step_constrains_tool_name_to_an_enum_of_gather_tools() {
+        // Gather once (the harness now forbids finishing empty-handed), then finish.
         let runtime = ScriptRuntime::new(vec![
+            serde_json::json!({"action": "use_tool", "tool_name": "web_search"}),
+            serde_json::json!({"q": "x"}), // arg-fill
             serde_json::json!({"action": "finish", "summary": "done"}),
         ]);
         let gather = vec![
