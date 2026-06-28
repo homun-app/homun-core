@@ -358,15 +358,23 @@ turno sul `drive` (quando non c'è piano da riprendere E flag ON: pianifica via 
 zero-regressioni; **F3.4** ritira `merge_plan` per-titolo + prompt-prosa; estendi lo scope agentico
 oltre read/gather (scritture single-threaded+approval).
 
-⚠️ **F3.3 RICHIEDE L'APP IN ESECUZIONE** (decisione 2026-06-28 sessione 5): è integrazione sul path
-streaming VIVO, non validabile coi test ignored. Due entanglement da osservare dal vivo: (1) `drive`
-esegue sulla **facade reale** (provider browser→**sidecar condiviso** ~`call_shared_browser_sidecar`),
-mentre il loop di chat usa `chat_browser_call` (**sessione per-thread**) → **rischio collisione** a metà
-turno se entrambi toccano il browser. **De-risk consigliato PRIMA di F3.3:** convergere i due path
-browser su uno solo (caposaldo #5; `chat_browser_call` è la parallela da ritirare). (2) `drive` produce
-esiti per-step, NON la risposta NL finale → serve una sintesi finale (riusa il path sintesi del loop).
-Partire da piani semplici (all-CapabilityCall) con fallback a motore #1. Debug: `HOMUN_DEBUG=1
-HOMUN_ORCHESTRATED_CHAT=1 npm run electron:dev`.
+⚠️ **F3.3 È BLOCCATO SU UN PREREQUISITO: la convergenza dell'esecuzione browser** (verificato a fondo,
+sessione 5). NON è un wire-up. Il driver (`drive_plan`/`Brain::drive`) può iniettare un `StepExecutor`
+custom lato gateway (il seam tiene `&AppState`, NON serve un provider) — fin qui pulito. Il blocco è
+**come eseguire un browser-step**: oggi l'esecuzione browser è **duplicata e non riusabile**:
+- **Loop di chat**: dispatch **inline** (match dentro `stream_chat_via_openai`), tool *underscore*
+  (`browser_navigate {url}`), traduzione args propria, **sessione browser per-thread**. NON è una
+  funzione richiamabile.
+- **Durabile**: `call_shared_browser_sidecar(&AppState, &TaskRecord, BrowserMethod, params)` — tool
+  *dot-named* (`browser.navigate`), `BrowserMethod`, **sidecar condiviso**. Schema/naming/args diversi.
+Il piano del driver ha i tool *underscore* (schemi chat). Mapparli al sidecar = **replicare** la
+traduzione inline (divergenza, viola #5) **o estrarla** (chirurgia sulla funzione da 52k righe).
+**PREREQUISITO REALE (de-risk):** estrarre l'esecuzione browser in **un'unità riusabile** (input: tool
+underscore + args chat; output: risultato) condivisa da chat-loop E driver, ritirando la duplicazione
+(caposaldo #5). Va fatto con l'**app viva** (tocca il browser reale). DOPO, F3.3 = wire-up: gateway
+`StepExecutor` → unità browser condivisa; `orchestrator_drive_for_chat` (plan→`drive_plan`→sintesi);
+hook dietro nuovo flag + fallback a motore #1. `drive` produce esiti per-step → serve sintesi finale
+(riusa il path forced-synthesis ~`stream_chat_via_openai`). Debug: `HOMUN_DEBUG=1 npm run electron:dev`.
 
 AMBIENTE: Ollama gira con gemma4:latest/12b → eval bi-popolazione e validazione live SONO possibili
 qui (`python3 scripts/eval_suite.py gemma4:latest` = gate di regressione caposaldo #2). Modello chat
