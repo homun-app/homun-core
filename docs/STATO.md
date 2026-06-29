@@ -7,7 +7,16 @@
 
 ## Dove siamo
 
-- **Linea attiva:** *convergenza dalle fondamenta* →
+- **DECISIONE D'ARCHITETTURA (ADR 0021, 2026-06-29):** convergere su **UN loop guardato** (motore #1,
+  ReAct + native tool-calling), piano come *tool*, NON un secondo motore plan-execute. Supersede la
+  direzione 0020, emenda 0016. Browse instradato a motore #1 (`plan_is_browse_only`). Basata su 3 cluster
+  di ricerca + prova empirica. Vedi [decisions/0021](decisions/0021-single-guarded-loop-planning-as-tool.md)
+  e [[homun-single-loop-evidence-verdict]].
+- **Linea pratica corrente (sessione 5g):** batch di fix chat-UX/funzionali nell'app reale (vedi rolling in
+  fondo) — risolti "bloccato" (self-heal CDP del path motore #1), "continua"/autonomia (final-round per
+  progresso), reasoning collassato, isola live+persistente, F1/F2/planner. **In coda:** F4 (ripresa-piano),
+  form-fill, #3/#5 UI.
+- **Linea attiva (fondamenta):** *convergenza dalle fondamenta* →
   [plans/2026-06-27-foundations-up-convergence.md](plans/2026-06-27-foundations-up-convergence.md).
 - **Scoperta che guida tutto:** ogni sottosistema ha **due implementazioni**, la canonica è
   **dormiente** (caposaldo #5 violato system-wide). È la causa dell'instabilità (piano che
@@ -215,6 +224,38 @@ bi-popolazione (caposaldo #2) È eseguibile qui: `python3 scripts/eval_suite.py 
 chat di default = deepseek-v4-pro:cloud (Z.ai, tier **Balanced**); Composio non configurato.
 
 ## Cosa è stato fatto (rolling, conciso)
+
+**Sessione 2026-06-29 (5g) — ADR 0021 (single-loop) + batch fix chat-UX/funzionali (validati live nell'app):**
+La sessione è passata dalla diagnosi browse all'azione: scritto l'**ADR 0021** (un loop guardato + piano
+come tool; supersede direzione 0020, emenda 0016 — [[homun-single-loop-evidence-verdict]]) e poi una serie
+di fix concreti, ciascuno committato + buildato + (dove possibile) validato live via curl/app Electron:
+- **F1 — typo tool browser → no Composio 404** (`f34a399e`): `resolve_browser_chat_tool_name` canonicalizza
+  `browser_tavigate`→`browser_navigate` (edit-distance ≤2) prima del dispatch; mai più su Composio. +1 test.
+- **#1 — titolo isola live** (`f34a399e`): l'headline preferisce i segnali reali (plan/‹‹ACT››) al label di
+  fase, così il titolo compare subito durante il turno.
+- **Reasoning collassato** (`85e19dc3`+`bf85c2ed`): builder emette `‹‹REASONING››…‹‹/REASONING››` (non più
+  fold-into-content che lo spacciava per risposta; preserva il fallback weak-model `<think>`-empty-content);
+  frontend lo rende **collassato** e gestisce anche `<think>` inline **dal vivo** (deepseek lo strema in
+  chiaro); label "Reasoning"; canali ripuliti dai marker (`strip_chat_markers`). +test.
+- **#2 — isola persistente** (`bf85c2ed`): latch per-thread, resta (collassata) dopo il turno.
+- **Planner deser tollerante** (`ea5d169e`): `confidence:"high"` (o assente) non fa più fallire il piano
+  (`lenient_confidence`); era una causa del "non segue il piano". +test.
+- **F2 — pivot su ricerca dopo navigate falliti** (`7bd46495`): hint di recovery (STOP+cerca su Google al 2°
+  fallimento dello stesso URL). +test. *(NB: contatore per-turno → non frena il loop di ripresa-piano F4.)*
+- **Self-heal CDP-wedge nel path di motore #1** (`6609441c`): ERA il "bloccato". `connectOverCDP timeout`
+  (container stantio, HTTP ok ma ws hung) — il self-heal stava SOLO nel path drive; ora anche la navigate di
+  motore #1 lo rileva (`cdp_wedge_signature`) e ricicla (`force_recycle_contained_computer`, throttlato).
+  Validato: navigate→done + risposta vera su container fresco.
+- **Liveness pannello Computer** (`b5745b2c`): "· Xs" dall'ultima attività + avviso ambra "may be stuck" a
+  45s → si capisce se avanza o è fermo.
+- **Autonomia / fine del "continua"** (`86c0e435`): BUG — `is_final_round` usava il round TOTALE invece di
+  `rounds_since_progress`, così un piano lungo ma in avanzamento veniva forzato a sintetizzare a metà (round
+  32) → turno incompleto → l'utente doveva digitare "continua". Ora misurato dall'ultimo progresso → il
+  task multi-step va fino in fondo da solo (tetto duro 600 round).
+- **In coda (prossimi):** **F4** (ripresa-piano cross-turno che cicla — il contatore F2/budget è per-turno),
+  **form-fill** (`browser_act kind=fill → ERROR` visto nei log), **#3** (espansione pannello computer),
+  **#5** (formattazione progressiva — sembra già live ma da verificare), **F3-deep** (modello che a volte
+  non produce risposta per cutoff). NB: doc stantii da sistemare (ADR 0006 ha già il banner stale).
 
 **Sessione 2026-06-29 (5e) — REGRESSIONE BROWSE: diagnosi corretta dall'evidenza + 2/3 cause risolte:**
 - **Investigazione (3 deep-dive paralleli + verifica in codice/dal vivo):** la diagnosi 5c era
@@ -433,54 +474,41 @@ PRIMA leggi, in ordine: docs/CAPISALDI.md (principi), docs/METHODOLOGY.md (come 
 docs/STATO.md (dove siamo), docs/plans/2026-06-27-foundations-up-convergence.md (il piano),
 e le mappe in docs/architecture/ del sottosistema su cui lavoriamo.
 
-CONTESTO: il sistema ha due implementazioni per ogni sottosistema, la canonica dormiente
-(caposaldo #5 violato) → instabilità. Stiamo CONVERGENDO dalle fondamenta (bottom-up):
-F0 normalizzazione modello → F1 capability unica → F2 loop tier-adattivo (ADR 0018) →
-F3 un motore (ADR 0016/0020). Niente cerotti, niente terza implementazione: si cabla la
-canonica e si ritira il parallelo; si rimuove il codice morto toccato; si splittano i file
-grossi; si commenta il perché; ogni modifica aggiorna la pagina architecture/ + cita il
-caposaldo + porta un test.
+CONTESTO + DECISIONE (ADR 0021, 2026-06-29): il sistema aveva DUE motori (chat-loop "motore #1" +
+drive/orchestrator "motore #2"). Decisione, basata su 3 cluster di ricerca su sistemi reali + prova
+empirica: convergere su UN loop guardato (motore #1: ReAct + native tool-calling + osserva→agisci, il
+port fedele di OpenClaw), col PIANO COME *TOOL* — NON estendere il drive plan-execute (è l'anti-pattern;
+il suo unico vantaggio, esecutore più economico, non esiste per un target locale). ADR 0021 supersede la
+DIREZIONE della 0020 ed emenda la 0016 (obiettivo ok, meccanismo no: niente slot-filling JSON sull'intero
+turno — danneggia il ragionamento dei modelli deboli). Il browse è GIÀ instradato a motore #1
+(`plan_is_browse_only`). **NON investire più nel drive come motore di esecuzione.** Metodo invariato:
+niente terza impl, rimuovi il morto toccato, commenta il perché, ogni fix porta un test + aggiorna
+architecture/. Leggi [[homun-single-loop-evidence-verdict]] + decisions/0021.
 
-PROSSIMO PASSO = INCREMENT B (la convergenza vera). DIAGNOSI GIÀ CORRETTA dall'evidenza nella sessione 5e
-(la vecchia "causa unica, conflitto CDP" era PARZIALMENTE SBAGLIATA sul meccanismo). Verificato in codice +
-dal vivo: la regressione BROWSE del drive sono TRE cause INDIPENDENTI, due già RISOLTE:
-  1. ✅ PANNELLO Computer assente — il drive non cablava `begin/push/end_browser_activity` (chat-loop only).
-     NON era "headless/conflitto CDP": drive e motore #1 usano lo STESSO `browser_sidecar_env_with_headless`
-     che setta `USER_CDP_ENDPOINT` identico → stesso :9222 visibile. RISOLTO + validato
-     (`/api/local-computer/live` → active:true + steps + novnc).
-  2. ✅ `connectOverCDP` TIMEOUT (il "browser non funziona") — wedge del container: `/json/version` (HTTP)
-     risponde ma il ws handshake si impianta su targets stantii. `browser_cdp_ok` (solo HTTP) NON lo vede →
-     gap di ENTRAMBI i motori; il drive in più fa blind-retry. RISOLTO: self-heal nel surface condiviso
-     `call_shared_browser_sidecar` (`browser_response_indicates_cdp_wedge` + recycle throttlato once/90s →
-     respawn). Su container fresco il drive funziona davvero (navigate→snapshot→act sul browser user visibile).
-  3. ⏳ FORM-FILL / wandering — NON "schema non imposto" (lo È: `fill_arguments`+`json_schema`). È il loop
-     agentico `run_agentic_step`: digest 4k tronca i `ref` dei campi profondi + `generate_json` non-enforced
-     su Ollama, contro il NATIVE TOOL-CALLING di motore #1. QUESTO è Increment B.
+PROSSIMO PASSO (in coda, scegli con l'utente — l'utente lavora a fix concreti chat-UX/funzionali nell'app):
+- **F4 — ripresa-piano cross-turno che cicla:** i contatori di recovery (F2 navigate-fail, budget round)
+  sono PER-TURNO; un piano RIPRESO (channel/resume) può riavviare lo stesso step fallito all'infinito.
+  Serve memoria cross-turno dei fallimenti per-step + stop/abort. Lega a [[homun-longhorizon-engine]].
+- **form-fill:** `browser_act kind=fill → ERROR` visto nei log; affidabilità riempimento campi (tecniche
+  del lineage che funziona: ref/index-by-element, batch-fill-then-verify, dropdown/autocomplete handler).
+- **#3** espansione pannello computer; **#5** formattazione progressiva (sembra già live — verificare);
+  **F3-deep** (modello che a volte non produce la risposta per cutoff/budget — diverso dal display).
 
-INCREMENT B (SOTA, NON tornare indietro): ritirare `run_agentic_step` PER IL BROWSER e far DELEGARE i
-browse-step del drive al loop NATIVE-TOOL-CALLING di motore #1. Il drive POSSIEDE piano/envelope (3
-invarianti, quando-done, verify — funziona, NON toccare); DELEGA l'ESECUZIONE browser. Caposaldo #5: NON
-scrivere una terza impl — ESTRARRE la browser-arm-executor di motore #1 in un'unità condivisa che sia il
-`ChatDriveStepExecutor` sia il loop di motore #1 chiamano. ⚠️ Le arm inline (`stream_chat_via_openai`,
-~20075–20836) sono intrecciate con ~10 local del loop di streaming (browser_session, opened_targets,
-current_target, role-switch, tx…) → estrazione INCREMENTALE e gated, non big-bang. OpenClaw: motore #1 È il
-port fedele (native tool-calling osserva→agisci); il drive rianima il `generate_json` loop già RITIRATO.
-
-NB IMPORTANTE: il flag è default OFF, quindi l'app normale dell'utente USA GIÀ il motore #1 (che
-funziona). Il fix è IN AVANTI, NON spegnere il flag.
-
-GIÀ FATTO (NON ripartire da qui; tutto su `main`):
-- F3.1 driver (`driver.rs` `drive_plan`, seam `StepExecutor`/`StepVerifier`), F3.2 arg-fill
-  (`step_executor.rs`), F3.2c loop agentico (`agentic.rs`) — validati su gemma4. Commit `b705289a`/
-  `3ce99c67`/`3027abe4`.
-- F3.3 routing live: `orchestrator_drive_for_chat` + `ChatDriveStepExecutor` (impl `StepExecutor`, tiene
-  `&AppState`) + hook in cima al task spawnato di `stream_chat_via_openai` dietro `HOMUN_DRIVE_CHAT` +
-  sintesi col modello di chat (streamata) + marker ‹‹PLAN›› + azioni live (‹‹ACT›› via canale
-  `tokio::mpsc` sync→async). Commit `d84a1a0b`...`8dbc0686`.
-- Browse agentico reso funzionante (control-flow): bug radice `action=None` = il prompt agentico non
-  descriveva il FORMATO output → fix: formato+esempi in `build_prompt` (agentic.rs). Leva modello: il
-  drive usa ora `build_drive_inference_router()` = ruolo "orchestrator" (deepseek), NON "browser"
-  (minimax-m3, debole). MA: l'esecuzione browser resta il path sbagliato (vedi sopra).
+GIÀ FATTO sessione 5g (NON ripartire; tutto su `main`, validato live nell'app Electron):
+- ADR 0021 (decisione single-loop) + banner stale su 0020/0016.
+- F1 typo tool browser → no Composio/404 (`f34a399e`); #1 titolo isola live (`f34a399e`).
+- reasoning collassato live (anche `<think>` inline) + label EN + strip marker canali (`85e19dc3`+`bf85c2ed`).
+- #2 isola persistente (`bf85c2ed`); planner `confidence` tollerante (`ea5d169e`); F2 pivot-su-ricerca (`7bd46495`).
+- **SELF-HEAL CDP-wedge nel path di MOTORE #1** — era il "bloccato": `connectOverCDP timeout` su container
+  stantio (HTTP ok, ws hung), `browser_cdp_ok` non lo vede; ora la navigate di motore #1 lo rileva
+  (`cdp_wedge_signature`) e ricicla (`force_recycle_contained_computer`, throttlato) (`6609441c`).
+- liveness pannello Computer "· Xs" + stall ambra (`b5745b2c`).
+- **AUTONOMIA / fine "continua"** (`86c0e435`): `is_final_round` ora da `rounds_since_progress` (non dal
+  round TOTALE) → un piano lungo ma in avanzamento NON viene più forzato a sintetizzare a metà; va fino in
+  fondo (tetto duro 600 round).
+GIÀ FATTO prima (5b–5f): F3.1/3.2/3.2c driver+arg-fill+agentic (gemma4); F3.3 routing drive dietro
+`HOMUN_DRIVE_CHAT` (default OFF, con ADR 0021 NON è più il target); Increment A pannello drive; B.1 prune
+snapshot agentico. Il drive resta default-OFF e NON va esteso.
 
 SCOPERTE/STRUMENTI CONCRETI da riusare:
 - Ruoli modello in `~/.homun/providers.json`: `browser`=minimax-m3 (debole), `orchestrator`=deepseek
@@ -499,8 +527,9 @@ SCOPERTE/STRUMENTI CONCRETI da riusare:
   al Chromium visibile :9222) vs headless. Il chat-loop spawna `spawn_browser_sidecar_for_chat`
   (per-thread), il drive `call_shared_browser_sidecar`→`spawn_browser_sidecar_for_task` (condiviso).
 
-LEGGI PRIMA: docs/architecture/agent-loop.md (sezioni "Il driver in-turn" + "I DUE motori"), 0020-*.md,
-0016-*.md, e la nota in memoria [[homun-loop-convergence-adr0020]].
+LEGGI PRIMA: docs/decisions/0021-single-guarded-loop-planning-as-tool.md (la decisione corrente),
+docs/architecture/agent-loop.md, e le note in memoria [[homun-single-loop-evidence-verdict]] +
+[[homun-browser-drive-regression-diagnosis]] + [[homun-longhorizon-engine]].
 
 AMBIENTE: Ollama gira con gemma4 → `python3 scripts/eval_suite.py gemma4:latest` = gate caposaldo #2
 (ALL GREEN dopo tutte le modifiche F3). Container browser `homun-cc` (Docker) up: CDP :9222, noVNC
