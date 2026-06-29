@@ -6764,6 +6764,15 @@ news discovery page), scan multiple recent candidates, then choose the best sour
 Do not jump directly to one outlet unless the user explicitly named it."
 }
 
+fn booking_assumption_choice_instruction() -> &'static str {
+    "For bookings, purchases, or other real-world transactions, do NOT silently proceed \
+with an assumed critical parameter (departure city/station, destination, date/time, quantity, \
+budget, passenger count, etc.). If you have a likely default from context, STOP and emit a \
+CHOICES marker with one option that confirms the default and one option for free-text correction \
+(for example: Confirm Milan departure / Choose another departure). Continue only after the user \
+chooses or writes the missing value."
+}
+
 fn runtime_plan_thread_key(thread_id: Option<&str>) -> String {
     thread_id
         .map(str::trim)
@@ -18399,6 +18408,7 @@ async fn stream_chat_via_openai(
     })
     .runtime_prompt;
     let browser_discovery = browser_open_research_discovery_instruction();
+    let booking_choices = booking_assumption_choice_instruction();
 
     let system = format!(
         "You are the local assistant acting as ORCHESTRATOR. Right now {now}: ALWAYS \
@@ -18768,6 +18778,7 @@ automatically become artifacts downloadable by the user.{methodology}\n{lines}"
 (valid JSON; \"multi\":true if more than one can be chosen). The user will see clickable buttons and their \
 choice will come back as a message. Use it ONLY for closed choices, not for open questions."
     );
+    let system = format!("{system}\n{booking_choices}");
     // Authorized write destinations: when present, the model can deliver
     // generated files to user-granted folders via `save_artifact`.
     let artifact_destinations = load_artifact_destinations();
@@ -46878,6 +46889,15 @@ prs.save(Path({path:?}))
         assert!(guidance.contains("open-ended current news"));
         assert!(guidance.contains("start with search/discovery"));
         assert!(guidance.contains("Do not jump directly to one outlet"));
+    }
+
+    #[test]
+    fn booking_assumption_instruction_requires_choice_card_before_proceeding() {
+        let guidance = super::booking_assumption_choice_instruction();
+        assert!(guidance.contains("do NOT silently proceed"));
+        assert!(guidance.contains("assumed critical parameter"));
+        assert!(guidance.contains("CHOICES marker"));
+        assert!(guidance.contains("Continue only after the user"));
     }
 
     #[test]

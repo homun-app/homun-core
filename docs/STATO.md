@@ -595,6 +595,12 @@ GIÀ FATTO sessione 5g (NON ripartire; tutto su `main`):
   e il dock era dentro `.chat-status-stack { pointer-events:none }` senza riabilitare gli eventi → click
   non affidabile/non funzionante. Fix: icona compatta `Maximize2`, click `bar→full`, `.cc-dock/.cc-scrim`
   `pointer-events:auto`; contract UI + build desktop verdi.
+- **Follow-up Computer full + prenotazioni:** il `full` era `position: fixed` sull'intera viewport, quindi
+  poteva espandersi sotto la sidebar e restare visivamente stretto; ora resta dentro `.chat-status-stack`
+  con larghezza `min(980px, calc(100vw - 390px))`, quindi si apre nella posizione operativa del dock ed è
+  molto più grande. Per prenotazioni/acquisti, se manca un parametro critico e il modello ha solo un default
+  probabile dal contesto, il system prompt ora impone stop + `CHOICES` (conferma default / scelta libera)
+  prima di procedere. Contract UI, test backend mirato, build desktop e build gateway verdi.
 - **bug "Continue" (validato live nell'app — puzzle Einstein ora 1 risposta pulita):** 2 cause distinte —
   (1) backend `df65d0b0`: il trace `‹‹REASONING››` rientrava nel contesto modello via
   `build_chat_runtime_prompt` → `strip_display_markers` canonico in lib.rs usato in `normalize_context_text`,

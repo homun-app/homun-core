@@ -2000,6 +2000,10 @@ body.resizing-drawer {
 .chat-status-stack:has(.cc-dock.expanded) {
   max-width: min(620px, calc(100vw - 390px));
 }
+.chat-status-stack:has(.cc-dock.full) {
+  width: min(980px, calc(100vw - 390px));
+  max-width: min(980px, calc(100vw - 390px));
+}
 
 /* Workspace Island — compact operational state, inspired by Zed/Zcode status
    panels: the pill expands in place into a lightweight thread card. */
@@ -7277,8 +7281,9 @@ body.resizing-drawer {
 }
 
 .cc-dock.full {
-  position: fixed;
-  inset: 4vh 4vw;
+  position: relative;
+  width: min(980px, calc(100vw - 390px));
+  height: min(760px, calc(100vh - 128px));
   margin: 0;
   z-index: 60;
   display: flex;
