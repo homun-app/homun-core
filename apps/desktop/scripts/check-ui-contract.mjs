@@ -298,6 +298,10 @@ assertContains("src/lib/coreBridge.ts", "/api/local-computer/sessions/", "Electr
 assertContains("src/lib/coreBridge.ts", "/artifacts/", "Electron local computer artifact previews must load from the local gateway");
 assertContains("src/lib/coreBridge.ts", "/api/memory/dashboard", "Electron memory dashboard must load from the local gateway");
 assertContains("src/lib/coreBridge.ts", "/api/capabilities/snapshot", "Electron capability registry must load from the local gateway");
+assertContains("src/lib/coreBridge.ts", "/api/vault/proposals/accept", "Vault proposal cards must persist through the local gateway");
+assertContains("src/lib/coreBridge.ts", "/api/vault/proposals/dismiss", "Vault proposal cards must dismiss through the local gateway");
+assertContains("src/components/ChatView.tsx", "coreBridge.vaultProposalAccept", "Vault proposal card must expose an accept action");
+assertContains("src/components/ChatView.tsx", "Salva nel Vault", "Vault proposal card must offer an explicit save action");
 assertContains("src/App.tsx", "mapCoreMemoryDashboard", "desktop memory page must map the gateway memory dashboard read model");
 assertContains("src/App.tsx", "mapCoreCapabilitySnapshot", "desktop connections page must map the gateway capability read model");
 assertContains("src/lib/chatApi.ts", "/api/chat/threads", "chat threads must load from the local Rust gateway first");

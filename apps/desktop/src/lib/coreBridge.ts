@@ -1821,6 +1821,34 @@ async function electronFsAuthorize(
   });
 }
 
+export interface VaultProposalActionInput {
+  category: string;
+  label: string;
+  redacted_preview: string;
+  thread_id?: string;
+  message_id?: string;
+}
+
+export interface VaultProposalAcceptResult {
+  ok: boolean;
+  record_id: string;
+  category: string;
+  label: string;
+  redacted_preview: string;
+}
+
+async function electronVaultProposalAccept(
+  input: VaultProposalActionInput,
+): Promise<VaultProposalAcceptResult> {
+  return gatewayPostJson<VaultProposalAcceptResult>("/api/vault/proposals/accept", input);
+}
+
+async function electronVaultProposalDismiss(
+  input: VaultProposalActionInput,
+): Promise<{ ok: boolean }> {
+  return gatewayPostJson<{ ok: boolean }>("/api/vault/proposals/dismiss", input);
+}
+
 /** Persists that the user connected one suggestion from an in-chat connect-card,
  *  so the item shows "Collegato" on reload instead of re-offering the action. */
 async function electronConnectMark(input: {
@@ -2502,6 +2530,10 @@ export const coreBridge = {
     op: string,
     ctx?: { threadId?: string; messageId?: string },
   ) => electronFsAuthorize(path, op, ctx),
+  vaultProposalAccept: (input: VaultProposalActionInput) =>
+    electronVaultProposalAccept(input),
+  vaultProposalDismiss: (input: VaultProposalActionInput) =>
+    electronVaultProposalDismiss(input),
   connectMark: (input: {
     kind: string;
     ref: string;

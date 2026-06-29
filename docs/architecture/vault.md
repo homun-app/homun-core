@@ -1,7 +1,7 @@
 # Sottosistema Vault
 
-> Stato: 2026-06-29. MVP foundation implementata a livello Rust e documentata prima
-> dell'integrazione completa UI/checkout. Spec di riferimento:
+> Stato: 2026-06-29. MVP foundation implementata a livello Rust/frontend con
+> persistenza metadata-only delle proposte Vault. Spec di riferimento:
 > `docs/superpowers/specs/2026-06-29-vault-purchase-approval-design.md`.
 
 ## Cosa fa
@@ -15,14 +15,17 @@ Non e' memoria: la memoria puo' contenere solo testo redatto o riferimenti
 
 - `crates/vault`: crate `local-first-vault`.
 - `sensitive.rs`: classifier/redactor deterministico MVP.
-- `types.rs` + `store.rs`: skeleton record/metadati separati da `SecretRef`.
+- `types.rs` + `store.rs`: record/metadati separati da `SecretRef`, store in-memory
+  e SQLite metadata-only.
 - `payment.rs`: policy di confronto per `PaymentApprovalSnapshot`.
 - `crates/memory/src/redaction.rs`: usa il classifier Vault prima di salvare/esporre
   memoria normale.
 - `crates/desktop-gateway/src/browser_safety.rs`: variante approval-aware per il
   click finale di pagamento.
 - `apps/desktop/src/components/ChatView.tsx`: parsing/rendering del marker
-  `VAULT_PROPOSE`.
+  `VAULT_PROPOSE`, con azioni salva/scarta.
+- `crates/desktop-gateway/src/main.rs`: endpoint
+  `/api/vault/proposals/accept` e `/api/vault/proposals/dismiss`.
 
 ## Modello dati
 
@@ -61,8 +64,11 @@ Il backend espone un formatter per:
 ‹‹VAULT_PROPOSE››{"category":"payments","label":"Carta personale","redacted_preview":"[VAULT:payments:card:last4=1111]"}‹‹/VAULT_PROPOSE››
 ```
 
-Il frontend lo nasconde dalla prosa e mostra una card. Nell'MVP corrente la card e'
-informativa/stub: il salvataggio strutturato richiede il prossimo endpoint Vault.
+Il frontend lo nasconde dalla prosa e mostra una card. `Salva nel Vault` chiama
+`/api/vault/proposals/accept` e persiste un `VaultRecord` in `~/.homun/vault.sqlite`
+con label, categoria, preview redatta, `thread_id`/`message_id` opzionali e un
+`SecretRef` opaco. `Non salvare` chiama `/api/vault/proposals/dismiss`; oggi e'
+solo ack locale, senza audit persistente.
 
 ## Pagamenti
 
@@ -81,8 +87,7 @@ Login, script arbitrari e azioni high-risk non-payment restano bloccati.
 
 ## Non implementato ancora
 
-- Persistenza SQLite/Keychain completa del Vault.
-- Endpoint accept/dismiss per `VAULT_PROPOSE`.
+- Keychain/secret-store completo del valore sensibile associato al `SecretRef`.
 - Sezione UI Vault completa.
 - Dialog locale PIN + CVV one-shot.
 - Payment Approval Card completa con screenshot/fingerprint.

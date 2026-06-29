@@ -5896,7 +5896,13 @@ function AssistantMessageBody({
           threadId={threadId}
         />
       )}
-      {vaultPropose && !streaming && <VaultProposeCard proposal={vaultPropose} />}
+      {vaultPropose && !streaming && (
+        <VaultProposeCard
+          proposal={vaultPropose}
+          messageId={messageId}
+          threadId={threadId}
+        />
+      )}
       {choices && !streaming && onChoose && (
         <ChoicesCard prompt={choices} onChoose={onChoose} />
       )}
@@ -5910,7 +5916,56 @@ function AssistantMessageBody({
   );
 }
 
-function VaultProposeCard({ proposal }: { proposal: VaultProposal }) {
+function VaultProposeCard({
+  proposal,
+  messageId,
+  threadId,
+}: {
+  proposal: VaultProposal;
+  messageId?: string;
+  threadId?: string;
+}) {
+  const [status, setStatus] = useState<"idle" | "saving" | "saved" | "dismissed" | "error">(
+    "idle",
+  );
+  const [note, setNote] = useState<string | null>(null);
+
+  const payload = {
+    category: proposal.category,
+    label: proposal.label,
+    redacted_preview: proposal.redacted_preview,
+    ...(threadId ? { thread_id: threadId } : {}),
+    ...(messageId ? { message_id: messageId } : {}),
+  };
+
+  const save = async () => {
+    setStatus("saving");
+    setNote(null);
+    try {
+      const result = await coreBridge.vaultProposalAccept(payload);
+      setStatus("saved");
+      setNote(`Salvato nel Vault (${result.record_id}).`);
+    } catch (error) {
+      setStatus("error");
+      setNote((error as Error).message);
+    }
+  };
+
+  const dismiss = async () => {
+    setStatus("saving");
+    setNote(null);
+    try {
+      await coreBridge.vaultProposalDismiss(payload);
+      setStatus("dismissed");
+      setNote("Proposta scartata.");
+    } catch (error) {
+      setStatus("error");
+      setNote((error as Error).message);
+    }
+  };
+
+  const busy = status === "saving";
+
   return (
     <div className="cmp-confirm">
       <div className="cmp-confirm-head">
@@ -5925,9 +5980,28 @@ function VaultProposeCard({ proposal }: { proposal: VaultProposal }) {
         <input readOnly value={proposal.redacted_preview} />
       </div>
       <p className="cmp-confirm-note">
-        Il dato non entra nella memoria normale in chiaro. Il salvataggio strutturato nel Vault sarà
-        abilitato dal prossimo step.
+        Il dato non entra nella memoria normale in chiaro. La card salva solo metadati redatti nel
+        Vault; il valore segreto verrà richiesto separatamente.
       </p>
+      {status === "error" && <p className="cmp-confirm-err">Errore: {note}</p>}
+      {(status === "saved" || status === "dismissed") && note && (
+        <p className="cmp-confirm-note">{note}</p>
+      )}
+      {status !== "saved" && status !== "dismissed" && (
+        <div className="cmp-confirm-actions">
+          <button
+            className="set-btn primary"
+            type="button"
+            disabled={busy}
+            onClick={() => void save()}
+          >
+            Salva nel Vault
+          </button>
+          <button className="set-btn" type="button" disabled={busy} onClick={() => void dismiss()}>
+            Non salvare
+          </button>
+        </div>
+      )}
     </div>
   );
 }

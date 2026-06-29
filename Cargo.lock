@@ -3280,6 +3280,7 @@ dependencies = [
  "local-first-secrets",
  "local-first-subagents",
  "local-first-task-runtime",
+ "local-first-vault",
  "pdfium-render",
  "printpdf",
  "pulldown-cmark",

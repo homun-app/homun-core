@@ -102,6 +102,7 @@ use local_first_task_runtime::{
     TaskScheduler, TaskStatus, TaskStore, TaskUiDetail, TaskUiItem, TaskUiReadModel, UserId,
     WorkspaceId,
 };
+use local_first_vault::{SQLiteVaultStore, VaultCategory, VaultRecord, VaultRecordId, VaultStore};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -140,6 +141,7 @@ pub(crate) struct AppState {
     computer_store: Arc<Mutex<LocalComputerSessionStore>>,
     browser_url_policies: Arc<Mutex<BrowserUrlPolicyStore>>,
     memory_facade: Arc<Mutex<MemoryFacade>>,
+    vault_store: Arc<Mutex<SQLiteVaultStore>>,
     capability_registry: Arc<Mutex<CapabilityRegistryStore>>,
     task_executor_status: Arc<Mutex<TaskExecutorStatus>>,
     task_executor_registry: TaskExecutorRegistry,
@@ -569,6 +571,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             SQLiteMemoryStore::open(gateway_memory_database_path()?)
                 .map_err(std::io::Error::other)?,
         ))),
+        vault_store: Arc::new(Mutex::new(
+            SQLiteVaultStore::open(gateway_vault_database_path()?)
+                .map_err(std::io::Error::other)?,
+        )),
         capability_registry: Arc::new(Mutex::new(open_seeded_capability_registry()?)),
         task_executor_status: Arc::new(Mutex::new(TaskExecutorStatus::new(
             task_executor_worker_enabled(),
@@ -892,6 +898,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/memory/wiki", get(memory_wiki).put(memory_wiki_save))
         .route("/api/memory/consolidate", post(memory_consolidate))
         .route("/api/memory/decide", post(memory_decide))
+        .route("/api/vault/proposals/accept", post(vault_proposal_accept))
+        .route("/api/vault/proposals/dismiss", post(vault_proposal_dismiss))
         .route("/api/memory/contacts", get(contacts_list))
         .route("/api/memory/contacts/memories", post(contact_memories))
         .route("/api/memory/contacts/profile", post(contact_profile))
@@ -34910,6 +34918,106 @@ fn vault_propose_marker(category: &str, label: &str, redacted_preview: &str) -> 
     format!("{VAULT_PROPOSE_OPEN}{marker}{VAULT_PROPOSE_CLOSE}")
 }
 
+#[derive(Debug, Deserialize)]
+struct VaultProposalActionRequest {
+    category: String,
+    label: String,
+    redacted_preview: String,
+    #[serde(default)]
+    thread_id: Option<String>,
+    #[serde(default)]
+    message_id: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct VaultProposalAcceptResponse {
+    ok: bool,
+    record_id: String,
+    category: String,
+    label: String,
+    redacted_preview: String,
+}
+
+#[derive(Debug, Serialize)]
+struct VaultProposalDismissResponse {
+    ok: bool,
+}
+
+async fn vault_proposal_accept(
+    State(state): State<AppState>,
+    Json(request): Json<VaultProposalActionRequest>,
+) -> Result<Json<VaultProposalAcceptResponse>, GatewayError> {
+    let record = vault_record_from_proposal(&request).map_err(invalid_vault_proposal)?;
+    let response = VaultProposalAcceptResponse {
+        ok: true,
+        record_id: record.id.to_string(),
+        category: request.category,
+        label: request.label,
+        redacted_preview: request.redacted_preview,
+    };
+    lock_vault_store(&state)?
+        .put(record)
+        .map_err(|error| GatewayError {
+            status: StatusCode::BAD_GATEWAY,
+            code: "vault_store_error",
+            message: error.to_string(),
+        })?;
+    Ok(Json(response))
+}
+
+async fn vault_proposal_dismiss(
+    Json(_request): Json<VaultProposalActionRequest>,
+) -> Result<Json<VaultProposalDismissResponse>, GatewayError> {
+    Ok(Json(VaultProposalDismissResponse { ok: true }))
+}
+
+fn vault_record_from_proposal(request: &VaultProposalActionRequest) -> Result<VaultRecord, String> {
+    let category = vault_category_from_marker(&request.category)?;
+    let record_id = VaultRecordId::new(format!("vault_{}", uuid::Uuid::new_v4().simple()))?;
+    let user = gateway_user_id();
+    let workspace = active_workspace_id();
+    let secret_ref = SecretRef::new(
+        user.as_str(),
+        workspace.as_str(),
+        "vault",
+        record_id.as_str(),
+    )
+    .map_err(|error| error.to_string())?;
+    let metadata = serde_json::json!({
+        "redacted_preview": request.redacted_preview,
+        "source": "vault_propose",
+        "thread_id": request.thread_id,
+        "message_id": request.message_id,
+    });
+    VaultRecord::new(
+        record_id,
+        category,
+        request.label.trim(),
+        secret_ref,
+        metadata,
+    )
+}
+
+fn vault_category_from_marker(category: &str) -> Result<VaultCategory, String> {
+    match category.trim().to_ascii_lowercase().as_str() {
+        "payments" | "payment" => Ok(VaultCategory::Payments),
+        "identity" => Ok(VaultCategory::Identity),
+        "health" => Ok(VaultCategory::Health),
+        "vehicles" | "vehicle" => Ok(VaultCategory::Vehicles),
+        "credentials" | "credential" => Ok(VaultCategory::Credentials),
+        "private_notes" | "private-notes" | "private notes" => Ok(VaultCategory::PrivateNotes),
+        other => Err(format!("unknown vault category: {other}")),
+    }
+}
+
+fn invalid_vault_proposal(message: String) -> GatewayError {
+    GatewayError {
+        status: StatusCode::BAD_REQUEST,
+        code: "invalid_vault_proposal",
+        message,
+    }
+}
+
 fn confirm_marker_value(text: &str, open_tag: &str, close_tag: &str) -> Option<serde_json::Value> {
     let open = text.find(open_tag)?;
     let start = open + open_tag.len();
@@ -44837,6 +44945,14 @@ fn lock_memory_facade(state: &AppState) -> Result<MutexGuard<'_, MemoryFacade>, 
     })
 }
 
+fn lock_vault_store(state: &AppState) -> Result<MutexGuard<'_, SQLiteVaultStore>, GatewayError> {
+    state.vault_store.lock().map_err(|error| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "vault_store_lock_error",
+        message: error.to_string(),
+    })
+}
+
 fn lock_capability_registry(
     state: &AppState,
 ) -> Result<MutexGuard<'_, CapabilityRegistryStore>, GatewayError> {
@@ -44926,6 +45042,19 @@ fn gateway_memory_database_path() -> Result<PathBuf, std::io::Error> {
 
     let base = gateway_data_dir()?;
     Ok(base.join("memory.sqlite"))
+}
+
+fn gateway_vault_database_path() -> Result<PathBuf, std::io::Error> {
+    if let Ok(path) = env::var("HOMUN_VAULT_DB") {
+        let path = PathBuf::from(path);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        return Ok(path);
+    }
+
+    let base = gateway_data_dir()?;
+    Ok(base.join("vault.sqlite"))
 }
 
 /// Directory for human-readable/editable memory wiki markdown pages.
@@ -47018,6 +47147,35 @@ prs.save(Path({path:?}))
             parsed["redacted_preview"],
             "[VAULT:payments:card:last4=1111]"
         );
+    }
+
+    #[test]
+    fn vault_record_from_proposal_creates_metadata_only_record() {
+        let request = super::VaultProposalActionRequest {
+            category: "payments".to_string(),
+            label: "Carta personale".to_string(),
+            redacted_preview: "[VAULT:payments:card:last4=1111]".to_string(),
+            thread_id: Some("thread_1".to_string()),
+            message_id: Some("msg_1".to_string()),
+        };
+        let record = super::vault_record_from_proposal(&request).expect("record");
+        assert_eq!(record.category, local_first_vault::VaultCategory::Payments);
+        assert_eq!(record.label, "Carta personale");
+        assert_eq!(
+            record.metadata["redacted_preview"],
+            "[VAULT:payments:card:last4=1111]"
+        );
+        assert_eq!(record.metadata["source"], "vault_propose");
+        assert_eq!(record.metadata["thread_id"], "thread_1");
+        assert_eq!(record.metadata["message_id"], "msg_1");
+        assert_eq!(record.secret_ref.provider_id(), "vault");
+        assert_eq!(record.secret_ref.connection_id(), record.id.as_str());
+    }
+
+    #[test]
+    fn vault_category_from_marker_rejects_unknown_category() {
+        let error = super::vault_category_from_marker("banking").expect_err("unknown category");
+        assert!(error.contains("unknown vault category"));
     }
 
     #[test]

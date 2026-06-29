@@ -23,6 +23,7 @@ local-first-process-skill = { path = "../process-skill" }
 local-first-secrets = { path = "../secrets" }
 local-first-subagents = { path = "../subagents" }
 local-first-task-runtime = { path = "../task-runtime" }
+local-first-vault = { path = "../vault" }
 # PDF ingestion for chat attachments: pdfium-render binds (at runtime, via
 # libloading) to the pdfium native lib for BOTH text-layer extraction (born-digital
 # PDFs) and page rasterization (scanned PDFs → images for the vision model). image

@@ -615,6 +615,10 @@ GIÀ FATTO sessione 5g (NON ripartire; tutto su `main`):
   `PaymentApprovalSnapshot` con invalidazione su checkout mutato, variante browser safety
   `high_risk_reason_with_payment_approval` che sblocca solo final payment click con
   `payment_approval_id` combaciante; mappa `docs/architecture/vault.md` creata e linkata da memoria/browser.
+- **Vault proposal accept/dismiss**: `local-first-vault` ora ha store SQLite metadata-only,
+  il gateway apre `~/.homun/vault.sqlite` e espone `/api/vault/proposals/accept|dismiss`;
+  la card `VAULT_PROPOSE` in chat salva o scarta esplicitamente. Il record conserva solo
+  categoria/label/preview redatta + `SecretRef`, non il valore sensibile ne' CVV/CV2.
 - **bug "Continue" (validato live nell'app — puzzle Einstein ora 1 risposta pulita):** 2 cause distinte —
   (1) backend `df65d0b0`: il trace `‹‹REASONING››` rientrava nel contesto modello via
   `build_chat_runtime_prompt` → `strip_display_markers` canonico in lib.rs usato in `normalize_context_text`,
