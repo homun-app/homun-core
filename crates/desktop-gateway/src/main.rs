@@ -6652,6 +6652,69 @@ fn plan_incomplete_reason(plan: &[serde_json::Value]) -> Option<String> {
     ))
 }
 
+// --- F4: cross-turn plan-stall guard -------------------------------------------------
+//
+// The per-turn recovery counters (nav-fail `nav_failures`, round budget
+// `rounds_since_progress`) are reset every turn. A plan RESUMED across turns
+// (`load_runtime_plan_from_state`, channel/resume) therefore restarts its current step with
+// the counters at zero — so a step that fails deterministically (dead URL, unfillable form)
+// retries forever, once per resume. The fix is a CROSS-turn signal: count consecutive resumes
+// that close NO new step; after the cap the harness blocks the stuck step (caposaldo #2 — the
+// harness owns recovery, the model won't pivot on its own). The pure pieces live here, tested.
+
+/// Max consecutive resumes of a plan with no new completed step before the harness blocks the
+/// stuck step. Generous on purpose: a plan legitimately advancing even one step per turn never
+/// trips (any `done`-count increase resets the counter); only genuine no-progress loops do.
+const MAX_PLAN_STALL_RESUMES: u32 = 3;
+
+/// New stall count from the prior count and the done-counts at the previous vs the current
+/// resume. ANY progress (more done steps than last resume) resets to 0; otherwise +1. Pure.
+fn next_plan_stall(prior_stall: u32, last_resume_done: usize, current_done: usize) -> u32 {
+    if current_done > last_resume_done {
+        0
+    } else {
+        prior_stall.saturating_add(1)
+    }
+}
+
+fn plan_stall_exhausted(stall: u32) -> bool {
+    stall >= MAX_PLAN_STALL_RESUMES
+}
+
+/// A plan is SETTLED when every step is terminal (`done` or `blocked`) — nothing runnable
+/// remains. Distinct from `plan_is_complete` (all `done`): a plan with a permanently-blocked
+/// step is finished, not in-progress, so it must STOP auto-resuming. This is what lets a
+/// blocked step actually terminate the plan instead of keeping it forever "active".
+fn plan_is_settled(plan: &[serde_json::Value]) -> bool {
+    !plan.is_empty() && plan.iter().all(|s| matches!(plan_step_status(s), "done" | "blocked"))
+}
+
+/// Block the first runnable (`todo`/`doing`) step — the F4 abort action once a plan has
+/// stalled across resumes. Records WHY in the step's `detail` (surfaced in the Plan panel).
+/// Returns the blocked step's title, or None if nothing was runnable. Pure (mutates `plan`).
+fn block_stalled_step(plan: &mut [serde_json::Value]) -> Option<String> {
+    for step in plan.iter_mut() {
+        if matches!(plan_step_status(step), "todo" | "doing") {
+            let title = plan_step_title(step).to_string();
+            step["status"] = serde_json::json!("blocked");
+            step["detail"] = serde_json::json!(format!(
+                "paused by the harness: no progress after {MAX_PLAN_STALL_RESUMES} resumed turns"
+            ));
+            return Some(title).filter(|t| !t.is_empty());
+        }
+    }
+    None
+}
+
+/// F4 abort is hot-path control-flow that can't be validated live in this environment, so it
+/// ships gated (same discipline as `HOMUN_PLAN_RECONCILE`). Flip on to validate. The pure
+/// stall math and the `settled`-termination it relies on are always active and tested.
+fn plan_stall_abort_enabled() -> bool {
+    std::env::var("HOMUN_PLAN_STALL_ABORT")
+        .map(|value| value == "1" || value.eq_ignore_ascii_case("on"))
+        .unwrap_or(false)
+}
+
 /// Minimum answer length (chars) we treat as a real delivered deliverable rather than an
 /// aside, for the over-running guard. Tuned conservatively: when in doubt (short answer) we
 /// keep nudging rather than stop early.
@@ -8590,6 +8653,72 @@ fn load_runtime_plan_from_state(state: &AppState, thread_id: Option<&str>) -> Ve
         .unwrap_or_default()
 }
 
+/// F4 turn-start: update the cross-turn stall bookkeeping on the RESUMED plan's memory and
+/// report whether it has stalled past the cap. Reads `{stall_turns, last_resume_done}` from
+/// the plan-memory metadata, recomputes them against the current done-count, writes them back
+/// (so a mid-turn plan upsert preserves them — `upsert_runtime_plan_memory` carries these
+/// fields forward), and returns true when the harness should block the stuck step. A no-op
+/// returning false on any store miss (fail-open: never wedge a turn over bookkeeping).
+fn plan_stall_check_and_bump(
+    state: &AppState,
+    thread_id: Option<&str>,
+    resume_plan: &[serde_json::Value],
+) -> bool {
+    let thread_key = runtime_plan_thread_key(thread_id);
+    let Ok(facade) = lock_memory_facade(state) else {
+        return false;
+    };
+    let user = gateway_memory_user_id();
+    let workspace = gateway_memory_workspace_id();
+    let Some(memory) = facade
+        .list_memories_for_ui(&user, &workspace)
+        .unwrap_or_default()
+        .into_iter()
+        .find(|memory| runtime_plan_memory_matches(memory, &thread_key))
+    else {
+        return false;
+    };
+    let prior_stall = memory
+        .metadata
+        .get("stall_turns")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as u32;
+    let last_resume_done = memory
+        .metadata
+        .get("last_resume_done")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as usize;
+    let current_done = plan_done_count(resume_plan);
+    let new_stall = next_plan_stall(prior_stall, last_resume_done, current_done);
+
+    let mut metadata = memory.metadata.clone();
+    if let Some(obj) = metadata.as_object_mut() {
+        obj.insert("stall_turns".to_string(), serde_json::json!(new_stall));
+        obj.insert("last_resume_done".to_string(), serde_json::json!(current_done));
+    }
+    let lifecycle = MemoryLifecycleRequest {
+        actor_id: "runtime-plan".to_string(),
+        user_id: user.clone(),
+        workspace_id: workspace.clone(),
+        purpose: "sync_runtime_plan".to_string(),
+    };
+    let _ = facade.update_memory(
+        &lifecycle,
+        &memory.reference,
+        MemoryUpdatePatch {
+            text: None,
+            aliases: None,
+            language_hints: None,
+            confidence: None,
+            privacy_domain: None,
+            sensitivity: None,
+            metadata: Some(metadata),
+            last_seen_at: None,
+        },
+    );
+    plan_stall_exhausted(new_stall)
+}
+
 /// A bare continuation/approval message ("1", a step/option number, "ok"/"procedi"/
 /// "continua"/"sì") is the user advancing an existing plan or approving a step — never
 /// a fresh task. It must not trigger a one-shot workflow route (that's the APPROVAL-RESUME
@@ -9005,8 +9134,12 @@ fn upsert_runtime_plan_memory(
         return Ok(None);
     };
     let thread_key = runtime_plan_thread_key(thread_id);
-    let complete = plan_is_complete(plan);
-    let metadata = runtime_plan_memory_metadata(thread_id, plan);
+    // Terminate (stop auto-resuming) when the plan is SETTLED — every step done OR blocked —
+    // not only when fully complete. A blocked step is terminal: keeping such a plan "active"
+    // is exactly the F4 infinite-resume loop. settled == complete when no step is blocked, so
+    // this is behaviour-preserving for ordinary plans.
+    let settled = plan_is_settled(plan);
+    let mut metadata = runtime_plan_memory_metadata(thread_id, plan);
     let existing = facade
         .list_memories_for_ui(user, workspace)
         .unwrap_or_default()
@@ -9015,6 +9148,16 @@ fn upsert_runtime_plan_memory(
 
     match existing {
         Some(existing) => {
+            // Carry the F4 cross-turn stall bookkeeping forward: it lives on the plan memory
+            // but `runtime_plan_memory_metadata` rebuilds metadata from the steps alone, so a
+            // mid-turn upsert would otherwise wipe the counter the turn-start guard wrote.
+            if let Some(obj) = metadata.as_object_mut() {
+                for key in ["stall_turns", "last_resume_done"] {
+                    if let Some(value) = existing.metadata.get(key) {
+                        obj.insert(key.to_string(), value.clone());
+                    }
+                }
+            }
             let record = facade
                 .update_memory(
                     lifecycle,
@@ -9031,9 +9174,9 @@ fn upsert_runtime_plan_memory(
                     },
                 )
                 .map_err(|error| error.to_string())?;
-            if complete {
+            if settled {
                 facade
-                    .mark_memory_stale(lifecycle, &record.reference, "runtime plan completed")
+                    .mark_memory_stale(lifecycle, &record.reference, "runtime plan settled")
                     .map_err(|error| error.to_string())?;
             } else {
                 facade
@@ -9051,7 +9194,7 @@ fn upsert_runtime_plan_memory(
             )?;
             Ok(Some(record.reference))
         }
-        None if complete => Ok(None),
+        None if settled => Ok(None),
         None => {
             let record = facade
                 .create_memory_candidate(MemoryCreateRequest {
@@ -9144,8 +9287,10 @@ fn merge_plan(plan: &mut Vec<serde_json::Value>, sent: &[serde_json::Value]) -> 
             });
         match pos {
             Some(i) => {
-                if plan_step_status(&plan[i]) == "done" {
-                    // sticky: ignore any attempt to re-open a done step
+                if matches!(plan_step_status(&plan[i]), "done" | "blocked") {
+                    // sticky: a `done` step never re-opens (stops the regenerate loop), and a
+                    // `blocked` step stays blocked — the harness blocks a stalled step (F4) and
+                    // the model must not re-open it, which would re-arm the cross-turn loop.
                 } else if new_status == "done" {
                     plan[i]["status"] = serde_json::json!("doing");
                     claims.push(i);
@@ -19260,6 +19405,24 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
             Err(join) => {
                 if verbose_debug() {
                     eprintln!("[plan] ADR0020-P1 planner task panicked → model-driven: {join}");
+                }
+            }
+        }
+    }
+    // F4: a RESUMED plan that closes no new step across turns is stuck (the per-turn recovery
+    // counters reset each turn, so the same failing step retries forever). After the cap the
+    // harness BLOCKS the stuck step (caposaldo #2) — `block_stalled_step` makes the plan
+    // `settled`, so `upsert_runtime_plan_memory` stops it auto-resuming. Gated until validated
+    // live; the bookkeeping is a no-op when off.
+    if !resume_plan.is_empty() && plan_stall_abort_enabled() {
+        let stalled = plan_stall_check_and_bump(state, thread_id.as_deref(), &resume_plan);
+        if stalled {
+            if let Some(title) = block_stalled_step(&mut resume_plan) {
+                upsert_runtime_plan_memory_from_state(state, thread_id.as_deref(), &resume_plan);
+                if verbose_debug() {
+                    eprintln!(
+                        "[plan] F4: blocked stalled step after {MAX_PLAN_STALL_RESUMES} no-progress resumes: «{title}»"
+                    );
                 }
             }
         }
@@ -45659,7 +45822,8 @@ mod tests {
         legacy_dir_action, llm_concurrency_view, mcp_error_hint, mcp_provider_slug,
         mcp_stdio_config_from_metadata, mcp_stdio_config_to_metadata, memory_age_days, merge_plan,
         message_has_image_url, normalize_for_dedup, parse_plan_marker, parse_review_suggestion,
-        plan_done_count, plan_incomplete_reason, plan_is_complete, plan_next_open,
+        MAX_PLAN_STALL_RESUMES, block_stalled_step, next_plan_stall, plan_stall_exhausted,
+        plan_is_settled, plan_done_count, plan_incomplete_reason, plan_is_complete, plan_next_open,
         plan_step_status, proactive_memory_request_for_suggestion_action,
         project_filesystem_mcp_instruction, prune_browser_history, redact_sensitive_text,
         requeue_waiting_resource_tasks, resolve_active_model, resolve_contained_computer_cdp,
@@ -50259,6 +50423,74 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         ];
         assert!(plan_is_complete(&complete));
         assert!(plan_incomplete_reason(&complete).is_none());
+    }
+
+    #[test]
+    fn plan_stall_counts_no_progress_resumes_and_resets_on_progress() {
+        // No progress (done-count unchanged across resumes) accumulates; the cap trips.
+        let mut stall = 0;
+        for _ in 0..MAX_PLAN_STALL_RESUMES {
+            assert!(!plan_stall_exhausted(stall));
+            stall = next_plan_stall(stall, 1, 1); // last_resume_done == current_done → no progress
+        }
+        assert!(plan_stall_exhausted(stall), "stall should trip at the cap");
+        // Any progress (current_done > last_resume_done) resets the counter to 0.
+        let reset = next_plan_stall(stall, 1, 2);
+        assert_eq!(reset, 0);
+        assert!(!plan_stall_exhausted(reset));
+    }
+
+    #[test]
+    fn plan_is_settled_when_every_step_done_or_blocked() {
+        let running = vec![
+            serde_json::json!({"id":"s1","title":"A","status":"done"}),
+            serde_json::json!({"id":"s2","title":"B","status":"doing"}),
+        ];
+        assert!(!plan_is_settled(&running), "a runnable step keeps the plan unsettled");
+
+        let settled = vec![
+            serde_json::json!({"id":"s1","title":"A","status":"done"}),
+            serde_json::json!({"id":"s2","title":"B","status":"blocked"}),
+        ];
+        assert!(plan_is_settled(&settled), "done+blocked is terminal → settled");
+        // Distinct from complete: a settled-with-blocked plan is NOT complete.
+        assert!(!plan_is_complete(&settled));
+
+        assert!(!plan_is_settled(&[]), "an empty plan is not settled");
+    }
+
+    #[test]
+    fn block_stalled_step_blocks_the_first_runnable_and_records_why() {
+        let mut plan = vec![
+            serde_json::json!({"id":"s1","title":"Done","status":"done"}),
+            serde_json::json!({"id":"s2","title":"Stuck","status":"doing"}),
+            serde_json::json!({"id":"s3","title":"Later","status":"todo"}),
+        ];
+        let title = block_stalled_step(&mut plan).expect("a runnable step exists");
+        assert_eq!(title, "Stuck");
+        assert_eq!(plan_step_status(&plan[1]), "blocked");
+        assert!(plan[1]["detail"].as_str().unwrap_or("").contains("no progress"));
+        // The done step and the later todo step are untouched (only the FIRST runnable blocks).
+        assert_eq!(plan_step_status(&plan[0]), "done");
+        assert_eq!(plan_step_status(&plan[2]), "todo");
+
+        // Nothing runnable → None (already settled, nothing to block).
+        let mut settled = vec![serde_json::json!({"id":"s1","title":"A","status":"done"})];
+        assert!(block_stalled_step(&mut settled).is_none());
+    }
+
+    #[test]
+    fn merge_plan_keeps_blocked_steps_sticky() {
+        // The harness blocked a stalled step (F4); the model must not re-open it by re-sending
+        // it as todo/doing — that would re-arm the cross-turn loop.
+        let mut plan = vec![
+            serde_json::json!({"id":"s1","title":"Stuck","status":"blocked","detail":"paused"}),
+        ];
+        let claims = merge_plan(&mut plan, &[
+            serde_json::json!({"id":"s1","title":"Stuck","status":"doing"}),
+        ]);
+        assert!(claims.is_empty());
+        assert_eq!(plan_step_status(&plan[0]), "blocked", "blocked stays blocked");
     }
 
     #[test]

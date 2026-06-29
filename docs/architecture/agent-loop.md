@@ -177,6 +177,19 @@ approval).
   validabile sul loop live.
 - "Stesso prompt, risultato diverso" → temp 0 senza seed (seme piccolo) **amplificato** dal
   control-flow ramificato (pianifica-o-no, profilo browser ephemeral, numero turni variabile).
+- **Ripresa-piano che cicla all'infinito (F4 — gated `HOMUN_PLAN_STALL_ABORT`).** I contatori
+  di recovery sono **per-turno** (`nav_failures`, `rounds_since_progress` sono `let mut` dentro il
+  turno → resettati a ogni ripresa). Un piano RIPRESO dallo store (`load_runtime_plan_from_state`,
+  channel/resume) riavvia il suo step corrente coi contatori a zero, quindi uno step che fallisce in
+  modo deterministico (URL morto, form non riempibile) **si ritenta a ogni ripresa, per sempre**.
+  Fix: un **segnale cross-turno** persistito sulla memoria del piano (`stall_turns`/`last_resume_done`,
+  preservati attraverso gli upsert di mid-turno) conta le riprese che NON chiudono nessun nuovo step;
+  dopo `MAX_PLAN_STALL_RESUMES` (3) l'harness **blocca** lo step stallato (`block_stalled_step`).
+  Perché funzioni la terminazione: il piano si stala (stop auto-resume) quando è **`settled`** (ogni
+  step `done` **o** `blocked`), non solo quando è `complete` (tutti `done`) — altrimenti uno step
+  `blocked` lo terrebbe "attivo" in eterno. E `blocked` è reso **sticky** in `merge_plan` (il modello
+  non può riaprirlo e ri-armare il loop). Puro+testato (`next_plan_stall`, `plan_is_settled`,
+  `block_stalled_step`); il wiring del turno è gated finché non validabile sul loop live.
 
 ## File chiave
 
