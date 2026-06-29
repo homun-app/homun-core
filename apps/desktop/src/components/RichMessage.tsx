@@ -12,6 +12,7 @@ const RichMessageRenderer = lazy(() => import("./RichMessageRenderer"));
 // rendered COLLAPSED ("Ragionamento", expandable) and kept OUT of the answer body — the
 // model's thinking is never shown as the answer itself.
 const REASONING_MARKER_RE = /‹‹REASONING››([\s\S]*?)‹‹\/REASONING››/g;
+const STRAY_REASONING_MARKER_RE = /‹{1,2}\/?REASONING››/g;
 const REASONING_OPEN = "‹‹REASONING››";
 // Reasoning models (e.g. deepseek) emit their trace inline as <think>…</think> in the
 // CONTENT, which streams live — so the trace must be collapsed DURING streaming, not only
@@ -35,6 +36,10 @@ function extractReasoning(text: string): { reasoning: string; body: string } {
     if (trace) traces.push(trace);
   }
   body = body.replace(REASONING_MARKER_RE, "");
+  // Streaming/provider leakage can leave empty or malformed fragments such as
+  // `‹/REASONING››` after the valid block pass. They are display control tokens,
+  // never answer content.
+  body = body.replace(STRAY_REASONING_MARKER_RE, "");
   for (const match of body.matchAll(THINK_RE)) {
     const trace = match[1].trim();
     if (trace) traces.push(trace);

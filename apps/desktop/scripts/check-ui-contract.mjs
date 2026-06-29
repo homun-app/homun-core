@@ -424,6 +424,7 @@ assertContains("src/components/ChatView.tsx", "autoSubmit?: ChatAutoSubmit | nul
 assertContains("src/components/ChatView.tsx", "submitPrompt(\n      autoSubmit.prompt", "external chat-start triggers must reuse the normal visible submit pipeline");
 assertNotContains("src/App.tsx", "template_workflow_", "template workflows must not start a parallel invisible stream from App");
 assertContains("src/components/ChatComputerPanel.tsx", "view === \"bar\" ? \"full\" : \"bar\"", "Computer dock chevron must open the live browser to a useful expanded view from the compact card");
+assertContains("src/components/RichMessage.tsx", "STRAY_REASONING_MARKER_RE", "streaming renderer must strip stray or malformed reasoning markers from the visible answer body");
 
 assertContains("src/types.ts", "\"learning\"", "auto-learning must be a first-class view");
 assertContains("src/components/LearningView.tsx", "learning-view", "auto-learning must have a dedicated page");

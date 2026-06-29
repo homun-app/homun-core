@@ -584,6 +584,13 @@ GIÀ FATTO sessione 5g (NON ripartire; tutto su `main`):
   `HOMUN_PLAN_RECONCILE=0/off`; aggiunto test sul flag. Il system prompt browser ora dice che per news/
   ricerche aperte senza sito nominato deve partire da search/discovery e poi scegliere fonti, invece di
   saltare direttamente a una testata. La freccia del Computer dock da `bar` apre `full`; contract UI verde.
+- **Follow-up screenshot 16:39 — streaming/browser recovery:** la query news ora parte correttamente da
+  Google News in italiano (`hl=it&gl=IT`), ma sono emersi 3 bug: (1) il renderer mostrava marker
+  `‹‹/REASONING››` stray/malformati durante lo streaming → `RichMessage` ora rimuove
+  `STRAY_REASONING_MARKER_RE` (+ contract UI); (2) su `BROWSER_STALE_REF` il modello ripeteva lo stesso
+  ref → il recovery message ora dice esplicitamente `Do NOT retry e...` e impone un nuovo ref dallo snapshot
+  (+ test); (3) F2.2 aggiornava lo store runtime ma lasciava il `‹‹PLAN››` della risposta finale con ultimo
+  step `[ ]` → `replace_latest_plan_marker` riscrive il marker consegnato dopo il reconcile (+ test).
 - **bug "Continue" (validato live nell'app — puzzle Einstein ora 1 risposta pulita):** 2 cause distinte —
   (1) backend `df65d0b0`: il trace `‹‹REASONING››` rientrava nel contesto modello via
   `build_chat_runtime_prompt` → `strip_display_markers` canonico in lib.rs usato in `normalize_context_text`,

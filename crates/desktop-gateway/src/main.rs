@@ -6590,6 +6590,24 @@ fn collapse_plan_markers(text: &str) -> String {
     out
 }
 
+fn replace_latest_plan_marker(text: &str, steps: &[serde_json::Value]) -> String {
+    const OPEN: &str = "‹‹PLAN››";
+    const CLOSE: &str = "‹‹/PLAN››";
+    let (Some(start), Some(close_start)) = (text.rfind(OPEN), text.rfind(CLOSE)) else {
+        return text.to_string();
+    };
+    if close_start <= start {
+        return text.to_string();
+    }
+    let close_end = close_start + CLOSE.len();
+    let marker = format!("‹‹PLAN››{}‹‹/PLAN››", build_plan_markdown(steps));
+    let mut out = String::with_capacity(text.len() + marker.len());
+    out.push_str(&text[..start]);
+    out.push_str(&marker);
+    out.push_str(&text[close_end..]);
+    out
+}
+
 fn plan_step_status(step: &serde_json::Value) -> &str {
     step.get("status")
         .and_then(|s| s.as_str())
@@ -15420,6 +15438,15 @@ fn browser_act_error_hint(error: &str) -> &'static str {
     }
 }
 
+fn stale_ref_recovery_message(old_ref: Option<&str>, snapshot: &str) -> String {
+    let old = old_ref.map(str::trim).filter(|r| !r.is_empty()).unwrap_or("the old ref");
+    format!(
+        "⚠ The reference had expired (the page changed). I took a fresh snapshot. \
+Do NOT retry {old}; choose a NEW [ref=...] from this snapshot, or use browser_snapshot if the \
+data is already visible:\n{snapshot}"
+    )
+}
+
 /// Granular browser tool: capture a screenshot fed back to the vision model.
 fn browser_screenshot_tool_schema() -> serde_json::Value {
     serde_json::json!({
@@ -20879,9 +20906,9 @@ don't repeat the same action; try a different element, scroll, or wait (kind=wai
                                                             Err(format!("Action failed: {error}{}", browser_act_error_hint(&error)))
                                                         } else {
                                                             last_snapshot = snap.clone();
-                                                            Ok(format!(
-                                                                "⚠ The reference had expired (the page \
-changed). I took a fresh snapshot — retry the action with the NEW [ref=...]:\n{snap}"
+                                                            Ok(stale_ref_recovery_message(
+                                                                args.get("ref").and_then(|v| v.as_str()),
+                                                                &snap,
                                                             ))
                                                         }
                                                     }
@@ -23493,7 +23520,7 @@ Tell the user clearly; do NOT claim it's done."
             // No tool call → normally the final answer. Sanitize any leaked model
             // control tokens (e.g. minimax `]<]minimax[>[` / `<tool_call>` text) so
             // the user never sees raw template markup.
-            let content = model_normalize::sanitize_model_text(
+            let mut content = model_normalize::sanitize_model_text(
                 message
                     .get("content")
                     .and_then(|c| c.as_str())
@@ -23561,6 +23588,7 @@ Tell the user clearly; do NOT claim it's done."
                             .position(|s| plan_step_status(s) != "done")
                         {
                             plan_steps[open_index]["status"] = serde_json::json!("done");
+                            content = replace_latest_plan_marker(&content, &plan_steps);
                             upsert_runtime_plan_memory_from_state(
                                 &state_owned,
                                 thread_id.as_deref(),
@@ -46850,6 +46878,28 @@ prs.save(Path({path:?}))
         assert!(guidance.contains("open-ended current news"));
         assert!(guidance.contains("start with search/discovery"));
         assert!(guidance.contains("Do not jump directly to one outlet"));
+    }
+
+    #[test]
+    fn stale_ref_recovery_message_forbids_reusing_the_old_ref() {
+        let msg = super::stale_ref_recovery_message(Some("e145"), "[ref=e200] Article");
+        assert!(msg.contains("Do NOT retry e145"));
+        assert!(msg.contains("NEW [ref=...]"));
+        assert!(msg.contains("[ref=e200] Article"));
+    }
+
+    #[test]
+    fn replace_latest_plan_marker_updates_delivered_plan_status() {
+        let steps = vec![
+            serde_json::json!({"id":"s1","title":"Open page","status":"done","detail":"ok"}),
+            serde_json::json!({"id":"s2","title":"Deliver answer","status":"done","detail":"sent"}),
+        ];
+        let answer = "‹‹PLAN››- [x] **Open page** (`s1`): ok\n\
+- [ ] **Deliver answer** (`s2`): pending‹‹/PLAN››\nDone.";
+        let updated = super::replace_latest_plan_marker(answer, &steps);
+        assert!(updated.contains("- [x] **Deliver answer** (`s2`): sent"));
+        assert!(!updated.contains("- [ ] **Deliver answer**"));
+        assert!(updated.ends_with("\nDone."));
     }
 
     #[test]
