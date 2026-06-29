@@ -4,7 +4,14 @@ Date: 2026-06-27
 
 ## Status
 
-Proposed. Esegue il **passo 5 ("Convergenza con OrchestratorBrain")** rimasto aperto dalla
+> **SUPERSEDED dalla [0021](0021-single-guarded-loop-planning-as-tool.md) (2026-06-29).** La diagnosi
+> qui sotto (due motori; il control flow è del modello) resta valida, ma la **direzione di convergenza
+> era invertita.** Provata sul campo, instradare il turno sull'OrchestratorBrain (motore #2) **regredisce**
+> (browse lento, vaga, risposta vuota), e l'evidenza SOTA (ReAct, Anthropic, Claude Code, browser-use,
+> Manus) dice di convergere sul **loop di chat unico** (motore #1) con il piano come *tool*, non su un
+> secondo motore plan-execute. Vedi la 0021.
+
+Proposed (originale, 2026-06-27). Esegue il **passo 5 ("Convergenza con OrchestratorBrain")** rimasto aperto dalla
 [0016](0016-harness-owned-task-engine-cross-model.md), alla luce di un'analisi strutturale
 del loop di produzione (2026-06-27). Si appoggia alla [0018](0018-adaptive-harness-subagents-triggers.md)
 (Pavimento/Manopole, inner loop libero per i capaci) e abilita il fan-out di sub-agent con tool.
