@@ -288,6 +288,12 @@ di fix concreti, ciascuno committato + buildato + (dove possibile) validato live
   modello rileggeva il proprio trace come testo incollato. Fix: `strip_display_markers` canonico in lib
   (gestisce trace non chiuso da cutoff), usato in `normalize_context_text`; `strip_chat_markers` del
   gateway converge (#5/#13). +3 test. Resume non toccato (legge `request.context`, non il prompt).
+- **Auto-continue su risposta completa** (`f31e3f48`, frontend): la prova live ha mostrato che il
+  marker-leak era risolto MA restava un residuo: `isLikelyIncompleteMessage` (ChatView) ritornava
+  `true` appena `generationTokens ≥ 96% maxTokens` → su un reasoning model che brucia il budget a
+  *pensare* (trace all'inizio, risposta alla fine) falso-positivo → auto-continue ×2 → rifeed di una
+  risposta completa → "il testo è già completo". Fix: near-max conta come incompleto SOLO se il testo
+  finisce anche a metà (niente punteggiatura/fence/riga-tabella di chiusura). HMR-live.
 - **In coda (prossimi):** coda fix-sessione **esaurita**. Da fare: **validare live** F4
   (`HOMUN_PLAN_STALL_ABORT=1`), form-fill e F3-deep (l'utente testa). Poi eventualmente: scope agentico
   oltre read/gather, accensione drive solo dopo convergenza. NB: doc stantii (ADR 0006 ha già il banner).
