@@ -183,11 +183,19 @@ Commit `b705289a` (driver+executor) + `3ce99c67` (arg-fill). Vedi [agent-loop](a
   3. ⏳ **Form-fill / wandering** = NON "schema non imposto" (lo è, `fill_arguments`+`json_schema`): è il
      loop agentico (`run_agentic_step`) — digest 4k tronca i `ref` dei campi profondi + `generate_json`
      non-enforced su Ollama, contro il **native tool-calling** di motore #1. **= Increment B** (sotto).
-- ⏳ **Increment B (la convergenza vera, prossimo passo):** ritirare `run_agentic_step` per il browser e
-  far **delegare** i browse-step del drive al loop **native-tool-calling** di motore #1 (estrarre la
-  browser-arm-executor condivisa, caposaldo #5). Le arm inline sono intrecciate con ~10 local del loop di
-  streaming → estrazione incrementale, non big-bang. **OpenClaw:** motore #1 È il port fedele; il drive
-  rianima il `generate_json` loop già ritirato. Vedi [[homun-browser-drive-regression-diagnosis]].
+- ◑ **Increment B.1 (FATTO, +test):** tolto il troncamento 4k del loop agentico — `render_history` tiene
+  l'ULTIMO snapshot pieno (16k) e stubba i vecchi (mirror di `prune_browser_history`), così il modello
+  VEDE i campi del form. Commit `3c70dbc8`. Validato live: il prune compare nel gathered; il self-heal CDP
+  ha anche recuperato dal vivo (round 0 wedge→recycle→round 1 ok).
+- 🛑 **DECISIONE DI ARCHITETTURA (Phase 4.5 systematic-debugging):** ogni fix al loop agentico scopre un
+  ALTRO gap che motore #1 ha già (troncamento [fatto] → **wandering** [16 round di scroll, no wander-cap/
+  no-progress-detection] → **sintesi vuota**). Continuare a patchare `agentic.rs` = **duplicare motore #1**
+  (anti caposaldo #5). Le opzioni: (1) estrarre il loop browser di motore #1 in un'unità condivisa e farci
+  delegare il drive (vera convergenza, ma estrazione grossa sul hot-path di `stream_chat_via_openai`);
+  (2) instradare i piani **solo-browse** a motore #1 quando il drive è on (basso rischio, il drive resta
+  per l'orchestrazione multi-capability); (3) continuare a indurire il loop agentico (sconsigliato:
+  duplicazione). **Raccomandazione: (2) ora + (1) come end-state.** Da decidere con l'utente prima di
+  procedere. Vedi [[homun-browser-drive-regression-diagnosis]].
 - ⏳ Altri residui: flicker reasoning della sintesi (collector → reasoning alla work-island); accendere
   il drive di default solo DOPO la convergenza browser.
 - ⏳ **F3.4** ritirare `merge_plan` per-titolo + prompt-prosa (solo quando il drive è il default).
