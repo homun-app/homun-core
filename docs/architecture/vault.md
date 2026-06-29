@@ -123,6 +123,12 @@ chiama `browser_act` con `payment_approval_id` e `vault_secret:"cvv_one_shot"`.
 Il gateway sostituisce localmente il secret nel payload browser e lo consuma:
 un secondo uso dello stesso CVV fallisce e richiede una nuova approval.
 
+Il flusso e' coperto da un checkout controllato di gateway: messaggio assistant
+con `PAYMENT_APPROVAL`, store chat in-memory, PIN configurato, approval, rewrite
+transcript, blocco/sblocco del final-click e consumo one-shot del CVV. Questo
+test resta sotto `local-first-desktop-gateway` perche' il confine critico e'
+gateway/safety/store; il sidecar browser esegue solo azioni atomiche.
+
 Il browser safety gate resta conservativo:
 
 - `high_risk_reason` blocca acquisti/login/prenotazioni come prima.
@@ -138,7 +144,7 @@ Login, script arbitrari e azioni high-risk non-payment restano bloccati.
 - Sezione UI Vault completa.
 - Payment Approval Card completa con screenshot/fingerprint.
 - Telegram routing per riepilogo pagamento.
-- E2E su checkout controllato.
+- Smoke live Electron su checkout fixture/browser reale.
 
 ## Regola di confine
 

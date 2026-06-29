@@ -727,7 +727,7 @@ impl ChatStore {
         self.conn
             .query_row(
                 "select id, role, text, timestamp, metadata, metrics_json, feedback,
-                        saved_memory_ref, linked_task_id, linked_automation_ref
+                        saved_memory_ref, linked_task_id, linked_automation_ref, attachments_json
                    from chat_messages
                   where thread_id = ?1 and id = ?2",
                 params![thread_id, message_id],
@@ -3439,6 +3439,24 @@ mod tests {
             linked_automation_ref: None,
             attachments: Vec::new(),
         }
+    }
+
+    #[test]
+    fn message_lookup_reads_attachment_column() {
+        let store = ChatStore::in_memory().unwrap();
+        let thread = store.create_thread("default").unwrap();
+        let message = mk_message("assistant_lookup", "assistant");
+        store
+            .append_assistant_message(&thread.thread_id, &message)
+            .unwrap();
+
+        let loaded = store
+            .message(&thread.thread_id, "assistant_lookup")
+            .unwrap()
+            .expect("message");
+
+        assert_eq!(loaded.id, "assistant_lookup");
+        assert!(loaded.attachments.is_empty());
     }
 
     #[test]

@@ -631,6 +631,11 @@ GIÀ FATTO sessione 5g (NON ripartire; tutto su `main`):
   `vault_secret:"cvv_one_shot"` con `payment_approval_id`: il gateway inserisce localmente
   il CVV nel browser e lo consuma una sola volta. Il click finale resta dietro
   `high_risk_reason_with_payment_approval`.
+- **Checkout controllato Vault**: aggiunto test end-to-end di gateway per il flusso payment approval
+  (messaggio con `PAYMENT_APPROVAL` → PIN/CVV → grant volatile → rewrite transcript → final-click
+  bloccato/sbloccato → CVV one-shot consumato). Nel farlo emerso e corretto un bug di
+  `ChatStore::message`: il select non includeva `attachments_json`, quindi ogni lookup singolo via
+  `message_from_row` falliva con `InvalidColumnIndex(10)` e poteva impedire i rewrite delle card.
 - **bug "Continue" (validato live nell'app — puzzle Einstein ora 1 risposta pulita):** 2 cause distinte —
   (1) backend `df65d0b0`: il trace `‹‹REASONING››` rientrava nel contesto modello via
   `build_chat_runtime_prompt` → `strip_display_markers` canonico in lib.rs usato in `normalize_context_text`,

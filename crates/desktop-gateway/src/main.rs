@@ -35110,32 +35110,10 @@ async fn vault_payment_approval_approve(
     State(state): State<AppState>,
     Json(request): Json<VaultPaymentApprovalRequest>,
 ) -> Result<Json<VaultPaymentApprovalResponse>, GatewayError> {
-    let verifier = lock_vault_store(&state)?
-        .local_pin_verifier()
-        .map_err(vault_store_error)?
-        .ok_or_else(|| invalid_vault_pin("Vault PIN is not configured".to_string()))?;
-    let grant = payment_approval_grant_from_request(&request, &verifier)?;
-    let approval_id = grant.snapshot.approval_id.clone();
-    lock_payment_approvals(&state)?.insert(approval_id.clone(), grant);
-    if let (Some(thread_id), Some(message_id)) = (&request.thread_id, &request.message_id) {
-        if let Ok(store) = lock_store(&state) {
-            if let Ok(Some(message)) = store.message(thread_id, message_id) {
-                if payment_approval_marker_matches(&message.text, &request.snapshot) {
-                    let rewritten = rewrite_payment_approval_to_done(
-                        &message.text,
-                        &approval_id,
-                        PAYMENT_APPROVAL_TTL_SECONDS,
-                    );
-                    let _ = store.set_message_text(thread_id, message_id, &rewritten);
-                }
-            }
-        }
-    }
-    Ok(Json(VaultPaymentApprovalResponse {
-        ok: true,
-        payment_approval_id: approval_id,
-        expires_in_seconds: PAYMENT_APPROVAL_TTL_SECONDS,
-    }))
+    let vault_store = lock_vault_store(&state)?;
+    let chat_store = lock_store(&state)?;
+    let mut approvals = lock_payment_approvals(&state)?;
+    approve_payment_checkout_request(&vault_store, &chat_store, &mut approvals, request).map(Json)
 }
 
 fn vault_record_from_proposal(request: &VaultProposalActionRequest) -> Result<VaultRecord, String> {
@@ -35188,6 +35166,38 @@ fn payment_approval_grant_from_request(
         cvv_one_shot: Some(request.cvv.trim().to_string()),
         expires_at: std::time::Instant::now()
             + std::time::Duration::from_secs(PAYMENT_APPROVAL_TTL_SECONDS),
+    })
+}
+
+fn approve_payment_checkout_request(
+    vault_store: &SQLiteVaultStore,
+    chat_store: &ChatStore,
+    approvals: &mut std::collections::HashMap<String, PaymentApprovalGrant>,
+    request: VaultPaymentApprovalRequest,
+) -> Result<VaultPaymentApprovalResponse, GatewayError> {
+    let verifier = vault_store
+        .local_pin_verifier()
+        .map_err(vault_store_error)?
+        .ok_or_else(|| invalid_vault_pin("Vault PIN is not configured".to_string()))?;
+    let grant = payment_approval_grant_from_request(&request, &verifier)?;
+    let approval_id = grant.snapshot.approval_id.clone();
+    approvals.insert(approval_id.clone(), grant);
+    if let (Some(thread_id), Some(message_id)) = (&request.thread_id, &request.message_id) {
+        if let Ok(Some(message)) = chat_store.message(thread_id, message_id) {
+            if payment_approval_marker_matches(&message.text, &request.snapshot) {
+                let rewritten = rewrite_payment_approval_to_done(
+                    &message.text,
+                    &approval_id,
+                    PAYMENT_APPROVAL_TTL_SECONDS,
+                );
+                let _ = chat_store.set_message_text(thread_id, message_id, &rewritten);
+            }
+        }
+    }
+    Ok(VaultPaymentApprovalResponse {
+        ok: true,
+        payment_approval_id: approval_id,
+        expires_in_seconds: PAYMENT_APPROVAL_TTL_SECONDS,
     })
 }
 
@@ -47660,8 +47670,90 @@ prs.save(Path({path:?}))
             "payment_approval_id": "pay_test",
             "vault_secret": "cvv_one_shot"
         });
+        assert!(super::apply_payment_approval_secret_from_map(&mut approvals, &mut click).is_err());
+    }
+
+    #[test]
+    fn controlled_checkout_approval_flow_rewrites_transcript_and_consumes_cvv() {
+        let chat = ChatStore::in_memory().expect("chat store");
+        let thread = chat.create_thread("default").expect("thread");
+        let snapshot = payment_snapshot();
+        let marker = super::payment_approval_marker(&snapshot);
+        let assistant = super::channel_chat_message_with_id(
+            "assistant",
+            &format!("Riepilogo checkout.\n\n{marker}\n\nAttendo approvazione."),
+            "assistant_checkout",
+        );
+        chat.append_assistant_message(&thread.thread_id, &assistant)
+            .expect("assistant message");
+
+        let vault = local_first_vault::SQLiteVaultStore::open_in_memory().expect("vault");
+        vault
+            .set_local_pin_verifier(local_first_vault::LocalPinVerifier::create("123456").unwrap())
+            .expect("pin verifier");
+        let mut approvals = std::collections::HashMap::new();
+        let request = super::VaultPaymentApprovalRequest {
+            snapshot,
+            pin: "123456".to_string(),
+            cvv: "123".to_string(),
+            thread_id: Some(thread.thread_id.clone()),
+            message_id: Some("assistant_checkout".to_string()),
+        };
+
+        let response =
+            super::approve_payment_checkout_request(&vault, &chat, &mut approvals, request)
+                .expect("approval response");
+
+        assert_eq!(response.payment_approval_id, "pay_test");
+        assert_eq!(
+            response.expires_in_seconds,
+            super::PAYMENT_APPROVAL_TTL_SECONDS
+        );
+        let rewritten = chat
+            .message(&thread.thread_id, "assistant_checkout")
+            .expect("message query")
+            .expect("message")
+            .text;
+        assert!(rewritten.contains("payment_approval_id: pay_test"));
+        assert!(!rewritten.contains(super::PAYMENT_APPROVAL_OPEN));
+        assert!(!rewritten.contains("123456"));
+        assert!(!rewritten.contains("CVV: 123"));
+
+        let page_snapshot = "- textbox \"CVV\" [ref=e12]\n- button \"Paga ora\" [ref=e20]";
+        let blocked_click = serde_json::json!({"kind":"click","ref":"e20"});
+        assert!(browser_safety::high_risk_reason(&blocked_click, page_snapshot).is_some());
+        let approved_click =
+            serde_json::json!({"kind":"click","ref":"e20","payment_approval_id":"pay_test"});
         assert!(
-            super::apply_payment_approval_secret_from_map(&mut approvals, &mut click).is_err()
+            browser_safety::high_risk_reason_with_payment_approval(
+                &approved_click,
+                page_snapshot,
+                Some("pay_test")
+            )
+            .is_none()
+        );
+
+        let mut fill_cvv = serde_json::json!({
+            "kind": "fill",
+            "ref": "e12",
+            "payment_approval_id": "pay_test",
+            "vault_secret": "cvv_one_shot"
+        });
+        assert!(
+            super::apply_payment_approval_secret_from_map(&mut approvals, &mut fill_cvv).unwrap()
+        );
+        assert_eq!(fill_cvv["text"], "123");
+        assert!(fill_cvv.get("vault_secret").is_none());
+
+        let mut second_fill = serde_json::json!({
+            "kind": "fill",
+            "ref": "e12",
+            "payment_approval_id": "pay_test",
+            "vault_secret": "cvv_one_shot"
+        });
+        assert!(
+            super::apply_payment_approval_secret_from_map(&mut approvals, &mut second_fill)
+                .is_err()
         );
     }
 
