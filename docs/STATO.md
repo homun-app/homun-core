@@ -280,6 +280,14 @@ di fix concreti, ciascuno committato + buildato + (dove possibile) validato live
   (`strip_chat_markers` non lascia prosa) e niente accumulato, `break` SENZA `final_done` → scatta la
   sintesi forzata esistente (`!final_done`: no-tools, budget fresco, "scrivi la risposta ORA" + fallback).
   `break` esce dal loop → sintesi una volta sola, niente spin. Riuso (#5), non terzo path. +1 test.
+- **Marker display-only nel contesto modello** (`df65d0b0`, backend): scoperto dal test live dell'utente
+  (puzzle Einstein → modello confuso "il testo che hai incollato è già completo"). Root-cause: il binario
+  in esecuzione era **vecchio** (processo avviato prima dei commit; un processo non ricarica il binario
+  ricompilato) → comportamento pre-fix. Ma ha rivelato un bug reale separato: `build_chat_runtime_prompt`
+  (lib.rs) rendeva la history dell'assistant **coi marker `‹‹REASONING››`** → su follow-up/Continue il
+  modello rileggeva il proprio trace come testo incollato. Fix: `strip_display_markers` canonico in lib
+  (gestisce trace non chiuso da cutoff), usato in `normalize_context_text`; `strip_chat_markers` del
+  gateway converge (#5/#13). +3 test. Resume non toccato (legge `request.context`, non il prompt).
 - **In coda (prossimi):** coda fix-sessione **esaurita**. Da fare: **validare live** F4
   (`HOMUN_PLAN_STALL_ABORT=1`), form-fill e F3-deep (l'utente testa). Poi eventualmente: scope agentico
   oltre read/gather, accensione drive solo dopo convergenza. NB: doc stantii (ADR 0006 ha già il banner).

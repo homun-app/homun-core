@@ -201,6 +201,15 @@ approval).
   "scrivi la risposta finale ORA", con la catena di fallback (`accumulated`/`last_model_error`/canned).
   `break` esce dal round-loop → la sintesi gira **una volta sola**, niente spin né contatore. Riuso del
   meccanismo esistente (caposaldo #5), non un terzo path. Puro+testato (`answer_body_is_empty`).
+- **Marker display-only che rientrano nel contesto del modello (fix).** `build_chat_runtime_prompt`
+  (`lib.rs`) rendeva la history dell'assistant nel prompt **verbatim**, marker `‹‹REASONING››`/`‹‹PLAN››`/…
+  inclusi. Su un follow-up (peggio sul "Continue") un modello di ragionamento **rileggeva il proprio
+  trace** e lo scambiava per testo incollato dall'utente ("il testo che hai incollato è già completo").
+  I marker sono display-only (la UI li rende, i canali già li strippano via `strip_chat_markers`): non
+  devono mai raggiungere il modello come contenuto. Fix: `strip_display_markers` canonico in `lib.rs`
+  (gestisce anche un trace **non chiuso** da `finish_reason:length` → drop fino a fine stringa), usato in
+  `normalize_context_text`; `strip_chat_markers` del gateway converge su di esso (caposaldo #5/#13). La
+  ripresa-piano NON è toccata: legge `request.context` direttamente, non il prompt renderizzato.
 
 ## File chiave
 
