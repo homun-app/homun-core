@@ -7253,6 +7253,11 @@ body.resizing-drawer {
 
 /* Computer Island — live, thread-owned browser/terminal preview. It sits under
    Workspace Island and disappears when the contained computer is idle. */
+.cc-dock,
+.cc-scrim {
+  pointer-events: auto;
+}
+
 .cc-dock {
   position: relative;
   z-index: 31;

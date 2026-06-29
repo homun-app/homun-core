@@ -591,6 +591,10 @@ GIÀ FATTO sessione 5g (NON ripartire; tutto su `main`):
   ref → il recovery message ora dice esplicitamente `Do NOT retry e...` e impone un nuovo ref dallo snapshot
   (+ test); (3) F2.2 aggiornava lo store runtime ma lasciava il `‹‹PLAN››` della risposta finale con ultimo
   step `[ ]` → `replace_latest_plan_marker` riscrive il marker consegnato dopo il reconcile (+ test).
+- **Follow-up Computer dock:** il bottone compatto usava una chevron su (simbolo sbagliato per "espandi")
+  e il dock era dentro `.chat-status-stack { pointer-events:none }` senza riabilitare gli eventi → click
+  non affidabile/non funzionante. Fix: icona compatta `Maximize2`, click `bar→full`, `.cc-dock/.cc-scrim`
+  `pointer-events:auto`; contract UI + build desktop verdi.
 - **bug "Continue" (validato live nell'app — puzzle Einstein ora 1 risposta pulita):** 2 cause distinte —
   (1) backend `df65d0b0`: il trace `‹‹REASONING››` rientrava nel contesto modello via
   `build_chat_runtime_prompt` → `strip_display_markers` canonico in lib.rs usato in `normalize_context_text`,

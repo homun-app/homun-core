@@ -174,10 +174,10 @@ export function ChatComputerPanel({
             className="cc-icon-btn"
             type="button"
             onClick={() => setView(view === "bar" ? "full" : "bar")}
-            title={view === "bar" ? t("chat.showBrowser") : t("chat.collapse")}
-            aria-label={view === "bar" ? t("chat.showBrowser") : t("chat.collapse")}
+            title={view === "bar" ? t("chat.fullscreen") : t("chat.collapse")}
+            aria-label={view === "bar" ? t("chat.fullscreen") : t("chat.collapse")}
           >
-            {view === "bar" ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+            {view === "bar" ? <Maximize2 size={15} /> : <ChevronDown size={15} />}
           </button>
         </header>
 
