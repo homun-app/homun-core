@@ -14945,6 +14945,10 @@ fn build_chat_payload(
     temperature: f64,
     is_final_round: bool,
 ) -> serde_json::Value {
+    let max_tokens = chat_payload_max_tokens(
+        is_final_round,
+        env::var("HOMUN_DEBUG_MAIN_LOOP_MAX_TOKENS").ok().as_deref(),
+    );
     if is_ollama_base(base_url) {
         // Native /api/chat streams content + tool_calls together fine on current
         // Ollama (verified on 0.30.6: `/v1` AND native both return tool_calls while
@@ -14958,7 +14962,7 @@ fn build_chat_payload(
             "messages": to_ollama_messages(messages),
             "stream": true,
             "keep_alive": "10m",
-            "options": { "temperature": temperature, "num_predict": 6000 },
+            "options": { "temperature": temperature, "num_predict": max_tokens },
         });
         // Offer tools only when the model can use them. Strip ONLY when /api/show confidently
         // reports no `tools` capability; undetected/cloud (profile None) → keep tools, fail-safe.
@@ -14980,7 +14984,7 @@ fn build_chat_payload(
             "model": model,
             "messages": messages,
             "temperature": temperature,
-            "max_tokens": 6000,
+            "max_tokens": max_tokens,
             "stream": true,
         });
         // z.ai GLM defaults to "thinking" mode, which streams the answer as
@@ -14998,6 +15002,17 @@ fn build_chat_payload(
         }
         payload
     }
+}
+
+fn chat_payload_max_tokens(is_final_round: bool, debug_override: Option<&str>) -> u32 {
+    const DEFAULT_CHAT_MAX_TOKENS: u32 = 6000;
+    if is_final_round {
+        return DEFAULT_CHAT_MAX_TOKENS;
+    }
+    debug_override
+        .and_then(|raw| raw.trim().parse::<u32>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(DEFAULT_CHAT_MAX_TOKENS)
 }
 
 fn auth_fallback_config(failing_model: &str) -> Option<(String, String, Option<String>)> {
@@ -47026,6 +47041,22 @@ prs.save(Path({path:?}))
                 .and_then(|value| value.as_str()),
             Some("Provider unavailable")
         );
+    }
+
+    #[test]
+    fn chat_payload_max_tokens_override_skips_forced_synthesis() {
+        assert_eq!(
+            super::chat_payload_max_tokens(false, Some("24")),
+            24,
+            "debug cutoff should apply to the main loop"
+        );
+        assert_eq!(
+            super::chat_payload_max_tokens(true, Some("24")),
+            6000,
+            "forced synthesis must keep the normal fresh budget"
+        );
+        assert_eq!(super::chat_payload_max_tokens(false, Some("0")), 6000);
+        assert_eq!(super::chat_payload_max_tokens(false, Some("nope")), 6000);
     }
 
     #[test]

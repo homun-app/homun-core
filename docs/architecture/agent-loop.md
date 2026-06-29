@@ -189,7 +189,11 @@ approval).
   step `done` **o** `blocked`), non solo quando è `complete` (tutti `done`) — altrimenti uno step
   `blocked` lo terrebbe "attivo" in eterno. E `blocked` è reso **sticky** in `merge_plan` (il modello
   non può riaprirlo e ri-armare il loop). Puro+testato (`next_plan_stall`, `plan_is_settled`,
-  `block_stalled_step`); il wiring del turno è gated finché non validabile sul loop live.
+  `block_stalled_step`). **Validazione live 2026-06-29:** non promuovere ancora default-ON. Il
+  tentativo con URL `.invalid` ha mostrato che il piano può essere sostituito/contaminato da un
+  runtime-plan non correlato recuperato dalla memoria/recall, prima che il contatore F4 arrivi al
+  log atteso. Quindi il wiring resta gated: prima va chiusa l'identità/perimetro del runtime-plan
+  ripreso, poi si riprova il cap `3`.
 - **"Il modello a volte non produce la risposta" (F3-deep — cutoff/budget).** Un modello di
   ragionamento può spendere l'intero budget token a *pensare* (`finish_reason:length`, `content`
   vuoto): la frontiera canonica (`model_normalize::assistant_response`) produce allora
@@ -201,6 +205,10 @@ approval).
   "scrivi la risposta finale ORA", con la catena di fallback (`accumulated`/`last_model_error`/canned).
   `break` esce dal round-loop → la sintesi gira **una volta sola**, niente spin né contatore. Riuso del
   meccanismo esistente (caposaldo #5), non un terzo path. Puro+testato (`answer_body_is_empty`).
+  Per validarlo senza introdurre un secondo path, esiste solo in debug
+  `HOMUN_DEBUG_MAIN_LOOP_MAX_TOKENS`: abbassa il budget del loop principale ma NON quello della
+  sintesi forzata, così il log `[answer] empty answer body (...) → forced synthesis` è esercitabile
+  live in modo deterministico.
 - **Marker display-only che rientrano nel contesto del modello (fix).** `build_chat_runtime_prompt`
   (`lib.rs`) rendeva la history dell'assistant nel prompt **verbatim**, marker `‹‹REASONING››`/`‹‹PLAN››`/…
   inclusi. Su un follow-up (peggio sul "Continue") un modello di ragionamento **rileggeva il proprio

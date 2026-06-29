@@ -21,8 +21,13 @@
   2 cause): backend = trace `‹‹REASONING››` rientrava nel contesto modello (`strip_display_markers`,
   `df65d0b0`) + frontend = auto-continue su risposta completa (`isLikelyIncompleteMessage`, `f31e3f48`).
   **Validazione live (gateway dev riavviato col codice nuovo):** puzzle Einstein ora 1 sola risposta pulita
-  (1 blocco reasoning, 0 frasi "il testo è già completo"). **Da validare ancora (utente):** F4, form-fill,
-  F3-deep (recovery body-vuoto non ancora esercitata — serve variante `max_tokens` forzata).
+  (1 blocco reasoning, 0 frasi "il testo è già completo"). **Validazioni 2026-06-29:** form-fill OK su
+  form pubblico Selenium (`browser-step[done]: fill`, valore `Fabio Test` nello snapshot); F3-deep OK con
+  override debug `HOMUN_DEBUG_MAIN_LOOP_MAX_TOKENS=1` → log `[answer] empty answer body (finish_reason=stop)
+  → forced synthesis` e risposta finale prodotta dalla sintesi. **F4 NON promosso:** il tentativo live con
+  URL `.invalid` non ha raggiunto il log F4; ha invece esposto contaminazione/sostituzione del runtime-plan
+  ripreso con un piano non correlato da memoria/recall. Tenere `HOMUN_PLAN_STALL_ABORT` gated finché
+  l'identità/perimetro del piano ripreso non è chiusa.
 - **Linea attiva (fondamenta):** *convergenza dalle fondamenta* →
   [plans/2026-06-27-foundations-up-convergence.md](plans/2026-06-27-foundations-up-convergence.md).
 - **Scoperta che guida tutto:** ogni sottosistema ha **due implementazioni**, la canonica è
@@ -297,9 +302,10 @@ di fix concreti, ciascuno committato + buildato + (dove possibile) validato live
   *pensare* (trace all'inizio, risposta alla fine) falso-positivo → auto-continue ×2 → rifeed di una
   risposta completa → "il testo è già completo". Fix: near-max conta come incompleto SOLO se il testo
   finisce anche a metà (niente punteggiatura/fence/riga-tabella di chiusura). HMR-live.
-- **In coda (prossimi):** coda fix-sessione **esaurita**. Da fare: **validare live** F4
-  (`HOMUN_PLAN_STALL_ABORT=1`), form-fill e F3-deep (l'utente testa). Poi eventualmente: scope agentico
-  oltre read/gather, accensione drive solo dopo convergenza. NB: doc stantii (ADR 0006 ha già il banner).
+- **In coda (prossimi):** coda fix-sessione **esaurita**. Form-fill e F3-deep sono validati live; F4 resta
+  gated e va ripreso dal nuovo finding su identità/perimetro del runtime-plan ripreso (piano `.invalid`
+  sostituito da piano FIFA non correlato). Poi eventualmente: scope agentico oltre read/gather, accensione
+  drive solo dopo convergenza. NB: doc stantii (ADR 0006 ha già il banner).
 
 **Sessione 2026-06-29 (5e) — REGRESSIONE BROWSE: diagnosi corretta dall'evidenza + 2/3 cause risolte:**
 - **Investigazione (3 deep-dive paralleli + verifica in codice/dal vivo):** la diagnosi 5c era
@@ -529,16 +535,17 @@ turno — danneggia il ragionamento dei modelli deboli). Il browse è GIÀ instr
 niente terza impl, rimuovi il morto toccato, commenta il perché, ogni fix porta un test + aggiorna
 architecture/. Leggi [[homun-single-loop-evidence-verdict]] + decisions/0021.
 
-PROSSIMO PASSO (scegli con l'utente — la coda di fix chat-UX/funzionali di sessione è ESAURITA, restano
-validazioni + backlog più profondo):
-- **VALIDARE LIVE (l'utente testa nell'app)** i fix di sessione non ancora esercitati dal vivo:
-  (a) **F4** ripresa-piano — `HOMUN_PLAN_STALL_ABORT=1`, prompt con URL morti + `continua` ×3-4 →
-  atteso log `[plan] F4: blocked stalled step after 3 …`; se regge → portarlo default-ON (togliere il gate).
-  (b) **form-fill** — prompt che compila un form reale (es. httpbin) → atteso NESSUN `kind=fill → ERROR`.
-  (c) **F3-deep** recovery body-vuoto NON ancora esercitata (i prompt davano risposta *presente*); per
-  validarla serve forzare il cutoff: aggiungere una variante deterministica (`max_tokens` basso SOLO sul
-  loop principale, con la sintesi forzata esente) e verificare il log `[answer] empty answer body → forced
-  synthesis`. Offerta all'utente, non ancora fatta.
+PROSSIMO PASSO (scegli con l'utente — la coda di fix chat-UX/funzionali di sessione è ESAURITA; restano
+F4 + backlog più profondo):
+- **F4 resta gated / NON default-ON.** Validazione live con URL `.invalid` + `continua` non ha prodotto il
+  log atteso `[plan] F4: blocked stalled step after 3 …`; ha invece esposto un problema più profondo:
+  il runtime-plan ripreso può essere sostituito/contaminato da un piano non correlato recuperato da
+  memoria/recall (nel test: piano `.invalid` → piano FIFA). Prima chiudere identità/perimetro del
+  runtime-plan ripreso, poi riprovare `HOMUN_PLAN_STALL_ABORT=1`.
+- **Già validati live:** form-fill `kind=fill` su `https://www.selenium.dev/selenium/web/web-form.html`
+  (`browser-step[done]: fill`, valore `Fabio Test` nello snapshot); F3-deep con
+  `HOMUN_DEBUG_MAIN_LOOP_MAX_TOKENS=1` sul solo loop principale → log `[answer] empty answer body
+  (finish_reason=stop) → forced synthesis` e risposta finale prodotta dalla sintesi.
 - **Backlog più profondo (con scoping dedicato):** scope agentico oltre read/gather (scritture single-
   threaded+approval); ritirare `merge_plan` per-titolo + prompt-prosa di control-flow (solo se/quando il
   piano-come-tool della 0021 prende forma); doc stantii (ADR 0006 / i due `2026-05-28-openclaw-*` hanno già
@@ -559,8 +566,10 @@ GIÀ FATTO sessione 5g (NON ripartire; tutto su `main`):
   per-turno → segnale cross-turno (`stall_turns`/`last_resume_done` sulla memoria del piano, preservati
   negli upsert mid-turno); dopo cap=3 `block_stalled_step`; terminazione su **`settled`** (done|blocked)
   non solo `complete`; `blocked` sticky in `merge_plan`. Puri testati, +5 test, 33/33 piano verdi.
-- **F3-deep risposta vuota** (`7fddd545`, backend): body-vuoto/solo-reasoning (`finish_reason:length`) non
-  più committato → `break` senza `final_done` → sintesi forzata esistente recupera (riuso, no terzo path).
+- **F3-deep risposta vuota** (`7fddd545`, backend; validato live in questa sessione): body-vuoto/
+  solo-reasoning non più committato → `break` senza `final_done` → sintesi forzata esistente recupera
+  (riuso, no terzo path). La variante debug `HOMUN_DEBUG_MAIN_LOOP_MAX_TOKENS` abbassa solo il budget
+  del loop principale e lascia la sintesi forzata col budget normale.
 - **bug "Continue" (validato live nell'app — puzzle Einstein ora 1 risposta pulita):** 2 cause distinte —
   (1) backend `df65d0b0`: il trace `‹‹REASONING››` rientrava nel contesto modello via
   `build_chat_runtime_prompt` → `strip_display_markers` canonico in lib.rs usato in `normalize_context_text`,
@@ -590,6 +599,7 @@ SCOPERTE/STRUMENTI CONCRETI da riusare:
   $(cat ~/.homun/desktop-gateway-token)`, body `{request_id,prompt,thread_id,max_tokens,temperature,wait_if_busy:true}`).
   ⚠️ electron in dev CRASHA se il `cargo run` del gateway ricompila oltre il timeout health-check →
   PRE-COMPILA con `cargo build -p local-first-desktop-gateway --bin local-first-desktop-gateway` PRIMA.
+  Per forzare F3-deep: aggiungi `HOMUN_DEBUG_MAIN_LOOP_MAX_TOKENS=1` al gateway; non usarlo per lavoro reale.
 - Browser: `browser_act_tool_schema()` ha parametri PIATTI `{kind, ref, text, ...}` (kind include
   scroll); `input_schema` cablato = `function.parameters` (piatto). `browser_method_for_chat_tool`
   mappa i nomi underscore → `BrowserMethod`. `normalize_browser_call` fa il managed-tab. La visibilità
