@@ -12,14 +12,17 @@
   direzione 0020, emenda 0016. Browse instradato a motore #1 (`plan_is_browse_only`). Basata su 3 cluster
   di ricerca + prova empirica. Vedi [decisions/0021](decisions/0021-single-guarded-loop-planning-as-tool.md)
   e [[homun-single-loop-evidence-verdict]].
-- **Linea pratica corrente (sessione 5g):** batch di fix chat-UX/funzionali nell'app reale (vedi rolling in
-  fondo) — risolti "bloccato" (self-heal CDP del path motore #1), "continua"/autonomia (final-round per
-  progresso), reasoning collassato, isola live+persistente, F1/F2/planner; **form-fill `kind=fill`**
-  (contratto schema-piatto↔sidecar, `a62cfba9`); **#5/#3 UI verificati GIÀ FATTI** (formattazione
-  progressiva streaming-aware + pannello computer bar/expanded/full); **F4 loop ripresa-piano**
-  (guard cross-turno + settled-termination + blocked-sticky, gated `HOMUN_PLAN_STALL_ABORT`, `cfd270c9`).
-  **F3-deep risposta vuota** (cutoff/budget: body-vuoto/solo-reasoning → recupero via sintesi forzata,
-  `7fddd545`). **In coda esaurita** per i fix di sessione; resta da **validare live** (l'utente).
+- **Linea pratica corrente (sessione 5g):** batch di fix chat-UX/funzionali nell'app reale (dettagli nel
+  rolling in fondo) — risolti "bloccato" (self-heal CDP motore #1), "continua"/autonomia, reasoning
+  collassato, isola live+persistente, F1/F2/planner; **form-fill `kind=fill`** (contratto schema-piatto↔
+  sidecar, `a62cfba9`); **#5/#3 UI** verificati GIÀ FATTI; **F4 loop ripresa-piano** (guard cross-turno +
+  settled-termination + blocked-sticky, gated `HOMUN_PLAN_STALL_ABORT`, `cfd270c9`); **F3-deep risposta
+  vuota** (body-vuoto/solo-reasoning → sintesi forzata, `7fddd545`); **bug "Continue"** (validato live,
+  2 cause): backend = trace `‹‹REASONING››` rientrava nel contesto modello (`strip_display_markers`,
+  `df65d0b0`) + frontend = auto-continue su risposta completa (`isLikelyIncompleteMessage`, `f31e3f48`).
+  **Validazione live (gateway dev riavviato col codice nuovo):** puzzle Einstein ora 1 sola risposta pulita
+  (1 blocco reasoning, 0 frasi "il testo è già completo"). **Da validare ancora (utente):** F4, form-fill,
+  F3-deep (recovery body-vuoto non ancora esercitata — serve variante `max_tokens` forzata).
 - **Linea attiva (fondamenta):** *convergenza dalle fondamenta* →
   [plans/2026-06-27-foundations-up-convergence.md](plans/2026-06-27-foundations-up-convergence.md).
 - **Scoperta che guida tutto:** ogni sottosistema ha **due implementazioni**, la canonica è
@@ -526,41 +529,67 @@ turno — danneggia il ragionamento dei modelli deboli). Il browse è GIÀ instr
 niente terza impl, rimuovi il morto toccato, commenta il perché, ogni fix porta un test + aggiorna
 architecture/. Leggi [[homun-single-loop-evidence-verdict]] + decisions/0021.
 
-PROSSIMO PASSO (in coda, scegli con l'utente — l'utente lavora a fix concreti chat-UX/funzionali nell'app):
-- **F4 — ripresa-piano cross-turno che cicla:** i contatori di recovery (F2 navigate-fail, budget round)
-  sono PER-TURNO; un piano RIPRESO (channel/resume) può riavviare lo stesso step fallito all'infinito.
-  Serve memoria cross-turno dei fallimenti per-step + stop/abort. Lega a [[homun-longhorizon-engine]].
-- **form-fill:** `browser_act kind=fill → ERROR` visto nei log; affidabilità riempimento campi (tecniche
-  del lineage che funziona: ref/index-by-element, batch-fill-then-verify, dropdown/autocomplete handler).
-- **#3** espansione pannello computer; **#5** formattazione progressiva (sembra già live — verificare);
-  **F3-deep** (modello che a volte non produce la risposta per cutoff/budget — diverso dal display).
+PROSSIMO PASSO (scegli con l'utente — la coda di fix chat-UX/funzionali di sessione è ESAURITA, restano
+validazioni + backlog più profondo):
+- **VALIDARE LIVE (l'utente testa nell'app)** i fix di sessione non ancora esercitati dal vivo:
+  (a) **F4** ripresa-piano — `HOMUN_PLAN_STALL_ABORT=1`, prompt con URL morti + `continua` ×3-4 →
+  atteso log `[plan] F4: blocked stalled step after 3 …`; se regge → portarlo default-ON (togliere il gate).
+  (b) **form-fill** — prompt che compila un form reale (es. httpbin) → atteso NESSUN `kind=fill → ERROR`.
+  (c) **F3-deep** recovery body-vuoto NON ancora esercitata (i prompt davano risposta *presente*); per
+  validarla serve forzare il cutoff: aggiungere una variante deterministica (`max_tokens` basso SOLO sul
+  loop principale, con la sintesi forzata esente) e verificare il log `[answer] empty answer body → forced
+  synthesis`. Offerta all'utente, non ancora fatta.
+- **Backlog più profondo (con scoping dedicato):** scope agentico oltre read/gather (scritture single-
+  threaded+approval); ritirare `merge_plan` per-titolo + prompt-prosa di control-flow (solo se/quando il
+  piano-come-tool della 0021 prende forma); doc stantii (ADR 0006 / i due `2026-05-28-openclaw-*` hanno già
+  il banner stale, ma andrebbero allineati).
 
-GIÀ FATTO sessione 5g (NON ripartire; tutto su `main`, validato live nell'app Electron):
+GIÀ FATTO sessione 5g (NON ripartire; tutto su `main`):
 - ADR 0021 (decisione single-loop) + banner stale su 0020/0016.
-- F1 typo tool browser → no Composio/404 (`f34a399e`); #1 titolo isola live (`f34a399e`).
-- reasoning collassato live (anche `<think>` inline) + label EN + strip marker canali (`85e19dc3`+`bf85c2ed`).
-- #2 isola persistente (`bf85c2ed`); planner `confidence` tollerante (`ea5d169e`); F2 pivot-su-ricerca (`7bd46495`).
-- **SELF-HEAL CDP-wedge nel path di MOTORE #1** — era il "bloccato": `connectOverCDP timeout` su container
-  stantio (HTTP ok, ws hung), `browser_cdp_ok` non lo vede; ora la navigate di motore #1 lo rileva
-  (`cdp_wedge_signature`) e ricicla (`force_recycle_contained_computer`, throttlato) (`6609441c`).
-- liveness pannello Computer "· Xs" + stall ambra (`b5745b2c`).
-- **AUTONOMIA / fine "continua"** (`86c0e435`): `is_final_round` ora da `rounds_since_progress` (non dal
-  round TOTALE) → un piano lungo ma in avanzamento NON viene più forzato a sintetizzare a metà; va fino in
-  fondo (tetto duro 600 round).
+- F1 typo tool browser → no Composio/404 (`f34a399e`); #1 titolo isola live; reasoning collassato live
+  (anche `<think>` inline, `85e19dc3`+`bf85c2ed`); #2 isola persistente; planner `confidence` tollerante
+  (`ea5d169e`); F2 pivot-su-ricerca (`7bd46495`); SELF-HEAL CDP-wedge nel path motore #1 (era il
+  "bloccato", `6609441c`); liveness pannello Computer (`b5745b2c`); autonomia/fine "continua"
+  (`is_final_round` da `rounds_since_progress`, `86c0e435`).
+- **form-fill `kind=fill`** (`a62cfba9`, sidecar TS): contratto schema-piatto chat `{kind,ref,text}` vs
+  `case "fill"` che iterava `action.fields` → `resolveFillFields` accetta entrambe (#5). +1 test.
+- **#5 / #3 UI verificati GIÀ FATTI** (no codice): #5 formattazione progressiva è streaming-aware; #3 il
+  pannello computer ha già bar/expanded/full. Erano chiusi da sessioni precedenti.
+- **F4 loop ripresa-piano** (`cfd270c9`, backend, GATED `HOMUN_PLAN_STALL_ABORT`): contatori recovery
+  per-turno → segnale cross-turno (`stall_turns`/`last_resume_done` sulla memoria del piano, preservati
+  negli upsert mid-turno); dopo cap=3 `block_stalled_step`; terminazione su **`settled`** (done|blocked)
+  non solo `complete`; `blocked` sticky in `merge_plan`. Puri testati, +5 test, 33/33 piano verdi.
+- **F3-deep risposta vuota** (`7fddd545`, backend): body-vuoto/solo-reasoning (`finish_reason:length`) non
+  più committato → `break` senza `final_done` → sintesi forzata esistente recupera (riuso, no terzo path).
+- **bug "Continue" (validato live nell'app — puzzle Einstein ora 1 risposta pulita):** 2 cause distinte —
+  (1) backend `df65d0b0`: il trace `‹‹REASONING››` rientrava nel contesto modello via
+  `build_chat_runtime_prompt` → `strip_display_markers` canonico in lib.rs usato in `normalize_context_text`,
+  `strip_chat_markers` del gateway converge (#5/#13); (2) frontend `f31e3f48`: `isLikelyIncompleteMessage`
+  marcava incompleto su `gen≥96% maxTokens` (falso positivo su reasoning model) → ora near-max conta solo
+  se il testo finisce anche a metà.
 GIÀ FATTO prima (5b–5f): F3.1/3.2/3.2c driver+arg-fill+agentic (gemma4); F3.3 routing drive dietro
-`HOMUN_DRIVE_CHAT` (default OFF, con ADR 0021 NON è più il target); Increment A pannello drive; B.1 prune
-snapshot agentico. Il drive resta default-OFF e NON va esteso.
+`HOMUN_DRIVE_CHAT` (default OFF, con ADR 0021 NON è più il target). Il drive resta default-OFF e NON va esteso.
 
 SCOPERTE/STRUMENTI CONCRETI da riusare:
 - Ruoli modello in `~/.homun/providers.json`: `browser`=minimax-m3 (debole), `orchestrator`=deepseek
   (capace). `chat` default = deepseek-v4-pro:cloud.
-- DEBUG senza GUI: avvia il gateway STANDALONE (`./target/debug/local-first-desktop-gateway`, con
-  `HOMUN_DEBUG=1 HOMUN_DRIVE_CHAT=1`) e pilotalo via `curl -s -X POST :18765/api/chat/generate_stream`
-  (header `Authorization: Bearer $(cat ~/.homun/desktop-gateway-token)`, body
-  `{request_id,prompt,thread_id,max_tokens,temperature,wait_if_busy:true}`). Leggi i log `[agentic]`/
-  `[drive]` (gated HOMUN_DEBUG). ⚠️ electron in dev CRASHA se il `cargo run` del gateway ricompila oltre
-  il timeout health-check → PRE-COMPILA con `cargo build -p local-first-desktop-gateway --bin
-  local-first-desktop-gateway` PRIMA di lanciare `npm run electron:dev`.
+- ⚠️ **GOTCHA-CHIAVE (sessione 5g): un PROCESSO IN ESECUZIONE non ricarica un binario ricompilato.** Se
+  l'`electron:dev` gira da prima di un commit Rust, sta eseguendo il vecchio codice in memoria anche dopo
+  `cargo build` — i fix NON sono attivi finché non si RIAVVIA. Sintomo: il test mostra comportamento pre-fix.
+  Verifica: `ps -o lstart` del PID gateway vs orario commit; `pgrep -f target/debug/local-first-desktop-gateway`.
+  Per testare i fix Rust: chiudi l'albero (`pkill -f scripts/electron-dev.mjs; pkill -f electron/dist/Electron;
+  pkill -f target/debug/local-first-desktop-gateway`), `cargo build`, poi rilancia. I fix FRONTEND invece
+  arrivano via **Vite HMR** senza riavviare (cerca `[vite] (client) hmr update` nel log).
+- **LOG SU FILE (per leggerli senza GUI/terminale dell'utente):** lancia `npm run electron:dev` in background
+  redirezionando: `HOMUN_DEBUG=1 HOMUN_PLAN_STALL_ABORT=1 npm run electron:dev > <logfile> 2>&1`. Il gateway
+  in dev ha `stdio:inherit` → i suoi log `[plan]`/`[answer]`/`[browser]` finiscono nel file. Diagnosi senza
+  GUI = leggere ANCHE il DB `~/.homun/desktop-gateway.sqlite` (`chat_messages.text` GREZZO coi marker:
+  conta i blocchi `‹‹REASONING››`, cerca frasi-sintomo). Questa coppia (log-file + DB) ha chiuso il bug Continue.
+- DEBUG via curl (gateway standalone): `./target/debug/local-first-desktop-gateway` con `HOMUN_DEBUG=1` +
+  `curl -s -X POST :18765/api/chat/generate_stream` (header `Authorization: Bearer
+  $(cat ~/.homun/desktop-gateway-token)`, body `{request_id,prompt,thread_id,max_tokens,temperature,wait_if_busy:true}`).
+  ⚠️ electron in dev CRASHA se il `cargo run` del gateway ricompila oltre il timeout health-check →
+  PRE-COMPILA con `cargo build -p local-first-desktop-gateway --bin local-first-desktop-gateway` PRIMA.
 - Browser: `browser_act_tool_schema()` ha parametri PIATTI `{kind, ref, text, ...}` (kind include
   scroll); `input_schema` cablato = `function.parameters` (piatto). `browser_method_for_chat_tool`
   mappa i nomi underscore → `BrowserMethod`. `normalize_browser_call` fa il managed-tab. La visibilità
