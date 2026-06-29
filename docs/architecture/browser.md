@@ -54,6 +54,11 @@ Flusso di un turno con browsing (lato gateway, `main.rs`):
    restituisce lo snapshot aggiornato. C'è anche no-progress detection (snapshot identico
    → nudge, `main.rs:20105`) e `browser_act_error_hint` (`main.rs:14985`) che insegna la
    chiamata corretta.
+   Dal 2026-06-29 il gate ha anche una variante approval-aware per il futuro flusso
+   pagamenti: `high_risk_reason_with_payment_approval` sblocca solo controlli finali di
+   pagamento con `payment_approval_id` combaciante. Il path chat corrente continua a
+   chiamare il gate conservativo senza approval, quindi acquisti/login/pagamenti restano
+   bloccati finché non esiste la Payment Approval Card completa. Vedi [vault.md](vault.md).
 
 Lato sidecar (`session_manager.ts`), una `snapshot` (`:216`) fa:
 `waitForLoadState("networkidle", 2500ms)` → `dismissCommonOverlays` → `createSnapshot`,

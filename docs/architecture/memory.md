@@ -145,6 +145,13 @@ parallelo che diventi una seconda verità semantica. Ogni output/cache esterna (
 wiki markdown, read-model operativi) resta **derivata** e deve **convergere** sullo store
 canonico (`entities` / `relations` / `memories`).
 
+**Confine Vault (2026-06-29).** Il Vault è separato dalla memoria: dati critici come
+carte, CVV/CV2, codice fiscale, targhe, salute e credenziali non devono entrare in
+memoria in chiaro. `crates/memory/src/redaction.rs` chiama il classifier di
+`local-first-vault` prima di persistere/esporre testo, sostituendo i valori con
+placeholder `VAULT:*`. Il valore reale vive dietro `SecretRef`/Vault e deve essere
+richiesto con tool minimizzati e auditati. Vedi [vault.md](vault.md).
+
 ## Divergenze / debolezze
 
 - **`contact_relationships` / `contacts` / `contact_identities`** vivono nel DB della chat

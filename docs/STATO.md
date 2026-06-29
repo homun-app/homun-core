@@ -611,6 +611,10 @@ GIÀ FATTO sessione 5g (NON ripartire; tutto su `main`):
   codice fiscale, targhe, salute e credenziali; `local-first-memory` ora redige questi valori prima
   della persistenza normale; aggiunto skeleton `VaultRecord`/`InMemoryVaultStore` con metadati separati
   da `SecretRef` e rifiuto esplicito di CVV/CV2 nei metadati.
+- **Vault MVP foundation completata**: aggiunti `VAULT_PROPOSE` backend/frontend, policy
+  `PaymentApprovalSnapshot` con invalidazione su checkout mutato, variante browser safety
+  `high_risk_reason_with_payment_approval` che sblocca solo final payment click con
+  `payment_approval_id` combaciante; mappa `docs/architecture/vault.md` creata e linkata da memoria/browser.
 - **bug "Continue" (validato live nell'app — puzzle Einstein ora 1 risposta pulita):** 2 cause distinte —
   (1) backend `df65d0b0`: il trace `‹‹REASONING››` rientrava nel contesto modello via
   `build_chat_runtime_prompt` → `strip_display_markers` canonico in lib.rs usato in `normalize_context_text`,
