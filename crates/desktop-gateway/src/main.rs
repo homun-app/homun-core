@@ -54,10 +54,10 @@ use local_first_capabilities::{
     CapabilityConnectionConfig, CapabilityError, CapabilityFacade, CapabilityPolicy,
     CapabilityProvider, CapabilityProviderConfig, CapabilityProviderGrant, CapabilityProviderKind,
     CapabilityRegistryStore, CapabilityResult, CapabilityTaskPayload, CapabilityTool,
-    InMemoryCapabilityAudit, McpCapabilityProvider,
-    McpStdioConfig, McpStdioTransport, McpToolPolicy, McpTransport, PluginRegistryEntry,
-    PluginRegistryIndex, PolicyContext, ProviderId as CapabilityProviderId,
-    UserId as CapabilityUserId, WorkspaceId as CapabilityWorkspaceId,
+    InMemoryCapabilityAudit, McpCapabilityProvider, McpStdioConfig, McpStdioTransport,
+    McpToolPolicy, McpTransport, PluginRegistryEntry, PluginRegistryIndex, PolicyContext,
+    ProviderId as CapabilityProviderId, UserId as CapabilityUserId,
+    WorkspaceId as CapabilityWorkspaceId,
 };
 use local_first_desktop_gateway::{
     BuildPromptRequest, BuildPromptResponse, ChatContextMessage, ChatContextRole,
@@ -85,10 +85,9 @@ use local_first_memory::{
 };
 use local_first_orchestrator::{
     DriveOutcome, DriveStepStatus, ExecutionPlan, MemoryContextProvider, MemoryContextSnippet,
-    OrchestratorBrain,
-    OrchestratorBudgets, OrchestratorError, OrchestratorRequest, OrchestratorResult,
-    OrchestratorRoute, PassThroughVerifier, PlanStep, PlanStepKind, StepExecutionPolicy,
-    StepExecutor, StepOutcome, drive_plan, fill_arguments, run_agentic_step,
+    OrchestratorBrain, OrchestratorBudgets, OrchestratorError, OrchestratorRequest,
+    OrchestratorResult, OrchestratorRoute, PassThroughVerifier, PlanStep, PlanStepKind,
+    StepExecutionPolicy, StepExecutor, StepOutcome, drive_plan, fill_arguments, run_agentic_step,
 };
 use local_first_secrets::{
     DevelopmentSecretKeyProvider, EncryptedFileSecretStore, SecretMaterial, SecretRef, SecretStore,
@@ -6695,7 +6694,10 @@ fn plan_stall_exhausted(stall: u32) -> bool {
 /// step is finished, not in-progress, so it must STOP auto-resuming. This is what lets a
 /// blocked step actually terminate the plan instead of keeping it forever "active".
 fn plan_is_settled(plan: &[serde_json::Value]) -> bool {
-    !plan.is_empty() && plan.iter().all(|s| matches!(plan_step_status(s), "done" | "blocked"))
+    !plan.is_empty()
+        && plan
+            .iter()
+            .all(|s| matches!(plan_step_status(s), "done" | "blocked"))
 }
 
 /// Block the first runnable (`todo`/`doing`) step — the F4 abort action once a plan has
@@ -7579,7 +7581,10 @@ fn percent_encode_query(value: &str) -> String {
 fn template_catalog_preview_response_ref(preview_ref: Option<String>) -> Option<String> {
     preview_ref.map(|preview| {
         if preview.starts_with("template-pack://") {
-            format!("/api/templates/preview?ref={}", percent_encode_query(&preview))
+            format!(
+                "/api/templates/preview?ref={}",
+                percent_encode_query(&preview)
+            )
         } else {
             preview
         }
@@ -7597,11 +7602,8 @@ fn parse_imported_template_pack(pack_root: &std::path::Path) -> Option<TemplateC
         .get("source_provider")
         .and_then(|value| value.as_str())
         .and_then(clean_template_catalog_id);
-    entry.source_ref = clean_template_catalog_ref(
-        value
-            .get("source_url")
-            .or_else(|| value.get("source_ref")),
-    );
+    entry.source_ref =
+        clean_template_catalog_ref(value.get("source_url").or_else(|| value.get("source_ref")));
     entry.license = clean_template_catalog_text(value.get("license"), 120);
     entry.attribution_required = value
         .get("attribution_required")
@@ -7815,7 +7817,11 @@ fn imported_template_pack_root() -> Option<PathBuf> {
     std::env::var("HOMUN_TEMPLATE_PACK_ROOT")
         .ok()
         .map(PathBuf::from)
-        .or_else(|| gateway_data_dir().ok().map(|dir| dir.join("template-packs")))
+        .or_else(|| {
+            gateway_data_dir()
+                .ok()
+                .map(|dir| dir.join("template-packs"))
+        })
 }
 
 fn delete_imported_template_pack(root: &std::path::Path, template_id: &str) -> Result<(), String> {
@@ -7861,23 +7867,13 @@ fn slugify_template_pack_name(name: &str) -> Option<String> {
         .trim()
         .to_ascii_lowercase()
         .chars()
-        .map(|ch| {
-            if ch.is_ascii_alphanumeric() {
-                ch
-            } else {
-                '-'
-            }
-        })
+        .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '-' })
         .collect::<String>()
         .split('-')
         .filter(|part| !part.is_empty())
         .collect::<Vec<_>>()
         .join("-");
-    if slug.is_empty() {
-        None
-    } else {
-        Some(slug)
-    }
+    if slug.is_empty() { None } else { Some(slug) }
 }
 
 fn next_template_pack_slug(root: &std::path::Path, base_slug: &str) -> Result<String, String> {
@@ -7945,10 +7941,11 @@ fn render_imported_template_thumbnails(
     .into_iter()
     .flatten()
     .collect::<Vec<_>>();
-    let soffice = find_executable(&soffice_candidates)
-    .ok_or_else(|| "PowerPoint thumbnail generation requires LibreOffice/soffice".to_string())?;
+    let soffice = find_executable(&soffice_candidates).ok_or_else(|| {
+        "PowerPoint thumbnail generation requires LibreOffice/soffice".to_string()
+    })?;
     let pdftoppm = find_executable(&pdftoppm_candidates)
-    .ok_or_else(|| "PowerPoint thumbnail generation requires pdftoppm".to_string())?;
+        .ok_or_else(|| "PowerPoint thumbnail generation requires pdftoppm".to_string())?;
 
     let temp_root = env::temp_dir().join(format!(
         "homun-template-preview-{}-{}",
@@ -8008,7 +8005,9 @@ fn render_imported_template_thumbnails(
     if !pdf_output.status.success() {
         let stderr = String::from_utf8_lossy(&pdf_output.stderr);
         cleanup(&temp_root);
-        return Err(format!("pdftoppm failed while rendering template preview: {stderr}"));
+        return Err(format!(
+            "pdftoppm failed while rendering template preview: {stderr}"
+        ));
     }
 
     let thumbnails_dir = pack_root.join("thumbnails");
@@ -8120,8 +8119,7 @@ fn import_pptx_template_pack(
         "tags": tags,
         "route_text": route_text,
     });
-    let manifest_bytes =
-        serde_json::to_vec_pretty(&manifest).map_err(|error| error.to_string())?;
+    let manifest_bytes = serde_json::to_vec_pretty(&manifest).map_err(|error| error.to_string())?;
     fs::write(pack_root.join("manifest.json"), manifest_bytes)
         .map_err(|error| format!("could not write template manifest: {error}"))?;
 
@@ -8670,7 +8668,10 @@ fn thread_has_active_runtime_plan(state: &AppState, thread_id: Option<&str>) -> 
 /// before a turn ends), so a CONTINUATION turn can inherit `{done,doing,…}` even before the
 /// prior turn's ‹‹PLAN›› message has been persisted/streamed into the next turn's context.
 /// Returns the steps (with verified statuses) or empty if the thread has no open plan.
-fn load_runtime_plan_from_state(state: &AppState, thread_id: Option<&str>) -> Vec<serde_json::Value> {
+fn load_runtime_plan_from_state(
+    state: &AppState,
+    thread_id: Option<&str>,
+) -> Vec<serde_json::Value> {
     let thread_key = runtime_plan_thread_key(thread_id);
     let Ok(facade) = lock_memory_facade(state) else {
         return Vec::new();
@@ -8680,7 +8681,13 @@ fn load_runtime_plan_from_state(state: &AppState, thread_id: Option<&str>) -> Ve
         .unwrap_or_default()
         .iter()
         .find(|memory| runtime_plan_memory_matches(memory, &thread_key))
-        .and_then(|memory| memory.metadata.get("steps").and_then(|s| s.as_array()).cloned())
+        .and_then(|memory| {
+            memory
+                .metadata
+                .get("steps")
+                .and_then(|s| s.as_array())
+                .cloned()
+        })
         .unwrap_or_default()
 }
 
@@ -8725,7 +8732,10 @@ fn plan_stall_check_and_bump(
     let mut metadata = memory.metadata.clone();
     if let Some(obj) = metadata.as_object_mut() {
         obj.insert("stall_turns".to_string(), serde_json::json!(new_stall));
-        obj.insert("last_resume_done".to_string(), serde_json::json!(current_done));
+        obj.insert(
+            "last_resume_done".to_string(),
+            serde_json::json!(current_done),
+        );
     }
     let lifecycle = MemoryLifecycleRequest {
         actor_id: "runtime-plan".to_string(),
@@ -8764,8 +8774,19 @@ fn is_plan_continuation_message(prompt: &str) -> bool {
     }
     matches!(
         t.as_str(),
-        "ok" | "okay" | "procedi" | "continua" | "prosegui" | "avanti" | "vai"
-            | "sì" | "si" | "yes" | "y" | "go" | "next" | "continue"
+        "ok" | "okay"
+            | "procedi"
+            | "continua"
+            | "prosegui"
+            | "avanti"
+            | "vai"
+            | "sì"
+            | "si"
+            | "yes"
+            | "y"
+            | "go"
+            | "next"
+            | "continue"
     )
 }
 
@@ -10459,7 +10480,12 @@ async fn connector_poll_tick(state: &AppState) {
 fn connector_poll_event_key(tool: &str, key_field: &str, item: &serde_json::Value) -> String {
     let key_value = item
         .get(key_field)
-        .and_then(|value| value.as_str().map(str::to_string).or_else(|| Some(value.to_string())))
+        .and_then(|value| {
+            value
+                .as_str()
+                .map(str::to_string)
+                .or_else(|| Some(value.to_string()))
+        })
         .unwrap_or_default();
     format!("connector:{tool}:{key_field}:{key_value}")
 }
@@ -10473,7 +10499,12 @@ fn connector_poll_event_envelope(
 ) -> serde_json::Value {
     let key_value = item
         .get(key_field)
-        .and_then(|value| value.as_str().map(str::to_string).or_else(|| Some(value.to_string())))
+        .and_then(|value| {
+            value
+                .as_str()
+                .map(str::to_string)
+                .or_else(|| Some(value.to_string()))
+        })
         .unwrap_or_default();
     let dedup_key = connector_poll_event_key(tool, key_field, item);
     serde_json::json!({
@@ -10520,10 +10551,9 @@ fn connector_fire_run(
         .collect();
     let (tool, key_field) = match &automation.trigger {
         AutomationTrigger::Event {
-            event:
-                EventTrigger::ConnectorPoll {
-                    tool, key_field, ..
-                },
+            event: EventTrigger::ConnectorPoll {
+                tool, key_field, ..
+            },
         } => (tool.as_str(), key_field.as_str()),
         _ => ("connector", "id"),
     };
@@ -10662,9 +10692,11 @@ fn channel_project_contact_policy(
 /// ONE-SHOT run (proactive_prompt) carrying the automation's prompt + the message as context.
 /// Independent of the auto-reply/draft policy — these are explicit user rules. Best-effort.
 fn fire_channel_event_automations(state: &AppState, channel: &str, message: &ChannelInbound) {
-    let automations = match lock_task_store(state)
-        .and_then(|store| store.list_enabled_event_automations(&gateway_user_id()).map_err(GatewayError::task))
-    {
+    let automations = match lock_task_store(state).and_then(|store| {
+        store
+            .list_enabled_event_automations(&gateway_user_id())
+            .map_err(GatewayError::task)
+    }) {
         Ok(list) => list,
         Err(_) => return,
     };
@@ -10697,7 +10729,12 @@ fn fire_channel_event_automations(state: &AppState, channel: &str, message: &Cha
                 continue;
             }
         }
-        let policy = channel_project_contact_policy(state, automation.workspace_id.as_str(), channel, message);
+        let policy = channel_project_contact_policy(
+            state,
+            automation.workspace_id.as_str(),
+            channel,
+            message,
+        );
         if !policy.authorized || !policy.can_trigger_automations {
             if let Ok(store) = lock_task_store(state) {
                 let detail = if policy.denied_reason.is_empty() {
@@ -10705,7 +10742,8 @@ fn fire_channel_event_automations(state: &AppState, channel: &str, message: &Cha
                 } else {
                     policy.denied_reason.as_str()
                 };
-                let _ = store.record_automation_run(&automation.id, now, false, false, Some(detail));
+                let _ =
+                    store.record_automation_run(&automation.id, now, false, false, Some(detail));
             }
             eprintln!(
                 "automation/{}: denied on {channel} message from {speaker}: {}",
@@ -14641,7 +14679,8 @@ fn parse_ollama_capabilities(show_body: &serde_json::Value) -> OllamaCapabilitie
     };
     let context_length = show_body.get("model_info").and_then(|mi| {
         let arch = mi.get("general.architecture").and_then(|a| a.as_str())?;
-        mi.get(format!("{arch}.context_length")).and_then(|v| v.as_u64())
+        mi.get(format!("{arch}.context_length"))
+            .and_then(|v| v.as_u64())
     });
     OllamaCapabilities {
         thinking: has("thinking"),
@@ -14879,7 +14918,11 @@ async fn process_ollama_line(
         // content empty. Not streamed as content (it's the trace, not the answer). Accept
         // `reasoning`/`reasoning_content` too for compat shims.
         for key in ["thinking", "reasoning", "reasoning_content"] {
-            if let Some(t) = message.get(key).and_then(|c| c.as_str()).filter(|s| !s.is_empty()) {
+            if let Some(t) = message
+                .get(key)
+                .and_then(|c| c.as_str())
+                .filter(|s| !s.is_empty())
+            {
                 reasoning.push_str(t);
             }
         }
@@ -14945,7 +14988,15 @@ async fn collect_ollama_native_stream(
                         continue;
                     }
                     if let Ok(json) = serde_json::from_str::<serde_json::Value>(&line) {
-                        if process_ollama_line(&json, &mut content, &mut reasoning, &mut tool_calls, sink).await {
+                        if process_ollama_line(
+                            &json,
+                            &mut content,
+                            &mut reasoning,
+                            &mut tool_calls,
+                            sink,
+                        )
+                        .await
+                        {
                             done = true;
                         }
                     }
@@ -14966,10 +15017,7 @@ async fn collect_ollama_native_stream(
     // `message.thinking` trace accumulated by `process_ollama_line` (thinking models like
     // deepseek-r1), so the reasoning-fallback recovers an answer when content is empty.
     Ok(model_normalize::assistant_response(
-        content,
-        reasoning,
-        tool_calls,
-        "stop",
+        content, reasoning, tool_calls, "stop",
     ))
 }
 
@@ -15448,7 +15496,10 @@ fn browser_act_error_hint(error: &str) -> &'static str {
 }
 
 fn stale_ref_recovery_message(old_ref: Option<&str>, snapshot: &str) -> String {
-    let old = old_ref.map(str::trim).filter(|r| !r.is_empty()).unwrap_or("the old ref");
+    let old = old_ref
+        .map(str::trim)
+        .filter(|r| !r.is_empty())
+        .unwrap_or("the old ref");
     format!(
         "⚠ The reference had expired (the page changed). I took a fresh snapshot. \
 Do NOT retry {old}; choose a NEW [ref=...] from this snapshot, or use browser_snapshot if the \
@@ -19445,7 +19496,10 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
         {
             Ok(Ok(steps)) if !steps.is_empty() => {
                 if verbose_debug() {
-                    eprintln!("[plan] ADR0020-P1 orchestrator-seeded {} steps", steps.len());
+                    eprintln!(
+                        "[plan] ADR0020-P1 orchestrator-seeded {} steps",
+                        steps.len()
+                    );
                 }
                 resume_plan = steps;
             }
@@ -19562,8 +19616,7 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
             // Live per-step progress: the sync drive pushes a label per step; this
             // async task drains them and streams ‹‹ACT›› deltas so the user sees what
             // the driver is doing (navigate / read / interact), not just a spinner.
-            let (activity_tx, mut activity_rx) =
-                tokio::sync::mpsc::unbounded_channel::<String>();
+            let (activity_tx, mut activity_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
             let tx_activity = StreamSink {
                 mpsc: tx.mpsc.clone(),
                 entry: tx.entry.clone(),
@@ -19806,7 +19859,8 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
         // the same dead URL (the observed "navigate FIFA page 7× then loop" case), the
         // harness nudges it to STOP retrying and pivot to a web search (caposaldo #2 —
         // the harness owns recovery, the weak model won't pivot on its own).
-        let mut nav_failures: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
+        let mut nav_failures: std::collections::HashMap<String, u32> =
+            std::collections::HashMap::new();
         // Fresh terminal buffer for this request; the computer panel shows the
         // CLI commands + output run during THIS response.
         sandbox_clear(thread_id.clone());
@@ -20106,7 +20160,9 @@ check/update the key in Settings → Model & Runtime."
                                             })
                                         })
                                         .or_else(|| {
-                                            v.get("message").and_then(|m| m.as_str()).map(str::to_string)
+                                            v.get("message")
+                                                .and_then(|m| m.as_str())
+                                                .map(str::to_string)
                                         })
                                 })
                                 .map(|s| s.trim().to_string())
@@ -20731,8 +20787,10 @@ or tell the user to start the contained computer (Settings → Local computer)."
                                     // not found: e83". Re-route a ref-shaped target into `ref`
                                     // (when none was given) instead of switching to a missing tab.
                                     let mut action = args.clone();
-                                    let target_arg =
-                                        args.get("target").and_then(|v| v.as_str()).map(str::to_string);
+                                    let target_arg = args
+                                        .get("target")
+                                        .and_then(|v| v.as_str())
+                                        .map(str::to_string);
                                     let has_ref = action
                                         .get("ref")
                                         .and_then(|v| v.as_str())
@@ -20745,7 +20803,10 @@ or tell the user to start the contained computer (Settings → Local computer)."
                                     if let Some(obj) = action.as_object_mut() {
                                         if target_is_ref && !has_ref {
                                             if let Some(t) = target_arg.clone() {
-                                                obj.insert("ref".to_string(), serde_json::Value::String(t));
+                                                obj.insert(
+                                                    "ref".to_string(),
+                                                    serde_json::Value::String(t),
+                                                );
                                             }
                                             obj.remove("target");
                                         } else if let Some(t) = target_arg.as_deref() {
@@ -20882,7 +20943,8 @@ don't repeat the same action; try a different element, scroll, or wait (kind=wai
                                                     eprintln!(
                                                         "[browser_act] kind={kind} ref={:?} selector={:?} text={:?} → ERROR: {}",
                                                         args.get("ref").and_then(|v| v.as_str()),
-                                                        args.get("selector").and_then(|v| v.as_str()),
+                                                        args.get("selector")
+                                                            .and_then(|v| v.as_str()),
                                                         args.get("text").and_then(|v| v.as_str()),
                                                         error.chars().take(220).collect::<String>()
                                                     );
@@ -20914,18 +20976,25 @@ don't repeat the same action; try a different element, scroll, or wait (kind=wai
                                                             .map(browser_snapshot_text)
                                                             .unwrap_or_default();
                                                         if snap.is_empty() {
-                                                            Err(format!("Action failed: {error}{}", browser_act_error_hint(&error)))
+                                                            Err(format!(
+                                                                "Action failed: {error}{}",
+                                                                browser_act_error_hint(&error)
+                                                            ))
                                                         } else {
                                                             last_snapshot = snap.clone();
                                                             Ok(stale_ref_recovery_message(
-                                                                args.get("ref").and_then(|v| v.as_str()),
+                                                                args.get("ref")
+                                                                    .and_then(|v| v.as_str()),
                                                                 &snap,
                                                             ))
                                                         }
                                                     }
                                                     (_, restored) => {
                                                         browser_session = restored;
-                                                        Err(format!("Action failed: {error}{}", browser_act_error_hint(&error)))
+                                                        Err(format!(
+                                                            "Action failed: {error}{}",
+                                                            browser_act_error_hint(&error)
+                                                        ))
                                                     }
                                                 }
                                             }
@@ -24412,7 +24481,10 @@ async fn get_ollama_setup() -> Json<OllamaSetupStatus> {
                     .filter_map(|m| {
                         Some(OllamaSetupModel {
                             name: m.get("name")?.as_str()?.to_string(),
-                            size: m.get("size").and_then(serde_json::Value::as_u64).unwrap_or(0),
+                            size: m
+                                .get("size")
+                                .and_then(serde_json::Value::as_u64)
+                                .unwrap_or(0),
                         })
                     })
                     .collect::<Vec<_>>()
@@ -27580,8 +27652,8 @@ async fn handle_channel_inbound(
                         &format!("{label} · {name}"),
                     ) {
                         Ok(thread) => {
-                            let _ = store
-                                .set_channel_thread_recipient(&thread.thread_id, &reply_to);
+                            let _ =
+                                store.set_channel_thread_recipient(&thread.thread_id, &reply_to);
                             Some(thread.thread_id)
                         }
                         Err(_) => None,
@@ -28933,7 +29005,12 @@ fn artifact_thread_metadata(
 }
 
 fn artifact_bundle_title(dir: &std::path::Path) -> Option<String> {
-    for name in ["deck.json", "document.json", "manifest.json", "artifact.json"] {
+    for name in [
+        "deck.json",
+        "document.json",
+        "manifest.json",
+        "artifact.json",
+    ] {
         let path = dir.join(name);
         let Ok(raw) = fs::read_to_string(path) else {
             continue;
@@ -34821,6 +34898,17 @@ struct ComposioExecuteRequest {
 
 const COMPOSIO_CONFIRM_OPEN: &str = "‹‹COMPOSIO_CONFIRM››";
 const COMPOSIO_CONFIRM_CLOSE: &str = "‹‹/COMPOSIO_CONFIRM››";
+const VAULT_PROPOSE_OPEN: &str = "‹‹VAULT_PROPOSE››";
+const VAULT_PROPOSE_CLOSE: &str = "‹‹/VAULT_PROPOSE››";
+
+fn vault_propose_marker(category: &str, label: &str, redacted_preview: &str) -> String {
+    let marker = serde_json::json!({
+        "category": category,
+        "label": label,
+        "redacted_preview": redacted_preview,
+    });
+    format!("{VAULT_PROPOSE_OPEN}{marker}{VAULT_PROPOSE_CLOSE}")
+}
 
 fn confirm_marker_value(text: &str, open_tag: &str, close_tag: &str) -> Option<serde_json::Value> {
     let open = text.find(open_tag)?;
@@ -36355,8 +36443,10 @@ fn orchestrator_plan_for_chat(
     // Read/Draft only at planning time — the planner never needs destructive classes.
     policy_context.allowed_actions = vec![ActionClass::Read, ActionClass::Draft];
 
-    let mut facade =
-        CapabilityFacade::new(CapabilityPolicy::default(), InMemoryCapabilityAudit::default());
+    let mut facade = CapabilityFacade::new(
+        CapabilityPolicy::default(),
+        InMemoryCapabilityAudit::default(),
+    );
     for (provider_id, tools) in provider_tools {
         let kind = tools
             .first()
@@ -36370,12 +36460,7 @@ fn orchestrator_plan_for_chat(
     let router = build_browser_inference_router();
     let budgets =
         brain_budgets_for_context_window(router.active_context_window(&Requirements::default()));
-    let mut brain = OrchestratorBrain::new(
-        router,
-        open_brain_memory(),
-        facade,
-        task_store,
-    );
+    let mut brain = OrchestratorBrain::new(router, open_brain_memory(), facade, task_store);
     let request = OrchestratorRequest {
         request_id: format!("chatplan_{}", uuid::Uuid::new_v4().simple()),
         policy_context,
@@ -36385,7 +36470,9 @@ fn orchestrator_plan_for_chat(
         budgets,
         language: language.to_string(),
     };
-    let plan = brain.plan_only(&request).map_err(|e| format!("plan_only: {e}"))?;
+    let plan = brain
+        .plan_only(&request)
+        .map_err(|e| format!("plan_only: {e}"))?;
     // A direct-answer route is a single-step request → no canonical plan to seed.
     if matches!(plan.route, OrchestratorRoute::DirectAnswer) {
         return Ok(Vec::new());
@@ -36586,7 +36673,9 @@ impl ChatDriveStepExecutor<'_> {
             .map_err(|error| OrchestratorError::Capability(error.message))
         {
             Err(error) => Err(error),
-            Ok(SharedSidecarCall::SidecarLost(reason)) => Err(OrchestratorError::Capability(reason)),
+            Ok(SharedSidecarCall::SidecarLost(reason)) => {
+                Err(OrchestratorError::Capability(reason))
+            }
             Ok(SharedSidecarCall::Response(BrowserResponse::Success {
                 ok: true, result, ..
             })) => Ok(result),
@@ -36672,7 +36761,10 @@ impl StepExecutor for ChatDriveStepExecutor<'_> {
 /// Canonical plan steps ({id,title,status,detail}) with live status overlaid from
 /// the drive outcome, so the chat UI's plan panel can show what the driver did
 /// (reuses `execution_plan_to_canonical_steps`; `None` outcome → all "todo").
-fn drive_canonical_steps(plan: &ExecutionPlan, outcome: Option<&DriveOutcome>) -> Vec<serde_json::Value> {
+fn drive_canonical_steps(
+    plan: &ExecutionPlan,
+    outcome: Option<&DriveOutcome>,
+) -> Vec<serde_json::Value> {
     let mut steps = execution_plan_to_canonical_steps(plan);
     if let Some(outcome) = outcome {
         for step in &mut steps {
@@ -36753,8 +36845,10 @@ fn orchestrator_drive_for_chat(
         .collect();
 
     // 1. Plan (planning-only facade — the planner never executes).
-    let mut facade =
-        CapabilityFacade::new(CapabilityPolicy::default(), InMemoryCapabilityAudit::default());
+    let mut facade = CapabilityFacade::new(
+        CapabilityPolicy::default(),
+        InMemoryCapabilityAudit::default(),
+    );
     for (provider_id, tools) in provider_tools {
         let kind = tools
             .first()
@@ -36765,8 +36859,9 @@ fn orchestrator_drive_for_chat(
     let task_store = TaskStore::open(gateway_task_database_path().map_err(|e| e.to_string())?)
         .map_err(|e| format!("task store: {e}"))?;
     let plan_router = build_drive_inference_router();
-    let budgets =
-        brain_budgets_for_context_window(plan_router.active_context_window(&Requirements::default()));
+    let budgets = brain_budgets_for_context_window(
+        plan_router.active_context_window(&Requirements::default()),
+    );
     let mut brain = OrchestratorBrain::new(plan_router, open_brain_memory(), facade, task_store);
     let request = OrchestratorRequest {
         request_id: format!("chatdrive_{}", uuid::Uuid::new_v4().simple()),
@@ -36777,7 +36872,9 @@ fn orchestrator_drive_for_chat(
         budgets,
         language: language.to_string(),
     };
-    let plan = brain.plan_only(&request).map_err(|e| format!("plan_only: {e}"))?;
+    let plan = brain
+        .plan_only(&request)
+        .map_err(|e| format!("plan_only: {e}"))?;
     if matches!(plan.route, OrchestratorRoute::DirectAnswer) || plan.steps.is_empty() {
         return Ok(None); // conversational / nothing to drive → model loop
     }
@@ -36792,7 +36889,9 @@ fn orchestrator_drive_for_chat(
     // verdict + STATO.
     if plan_is_browse_only(&plan) {
         if verbose_debug() {
-            eprintln!("[drive] browse-only plan → motore #1 (the drive's agentic browse regresses)");
+            eprintln!(
+                "[drive] browse-only plan → motore #1 (the drive's agentic browse regresses)"
+            );
         }
         return Ok(None);
     }
@@ -37087,12 +37186,7 @@ fn brain_materialize_tasks(
     let router = build_browser_inference_router();
     let budgets =
         brain_budgets_for_context_window(router.active_context_window(&Requirements::default()));
-    let mut brain = OrchestratorBrain::new(
-        router,
-        open_brain_memory(),
-        facade,
-        task_store,
-    );
+    let mut brain = OrchestratorBrain::new(router, open_brain_memory(), facade, task_store);
     let request = OrchestratorRequest {
         request_id: format!("brain_{}", uuid::Uuid::new_v4().simple()),
         policy_context,
@@ -44541,12 +44635,21 @@ fn seed_default_capabilities(
 fn browser_registry_cached_tools() -> Vec<CachedCapabilityTool> {
     let browser_provider = CapabilityProviderId::new("browser");
     [
-        (browser_navigate_tool_schema(), ActionClass::WriteWithConfirmation),
+        (
+            browser_navigate_tool_schema(),
+            ActionClass::WriteWithConfirmation,
+        ),
         (browser_snapshot_tool_schema(), ActionClass::Read),
-        (browser_act_tool_schema(), ActionClass::WriteWithConfirmation),
+        (
+            browser_act_tool_schema(),
+            ActionClass::WriteWithConfirmation,
+        ),
         (browser_tabs_tool_schema(), ActionClass::Read),
         (browser_screenshot_tool_schema(), ActionClass::Read),
-        (browser_dialog_tool_schema(), ActionClass::WriteWithConfirmation),
+        (
+            browser_dialog_tool_schema(),
+            ActionClass::WriteWithConfirmation,
+        ),
     ]
     .into_iter()
     .filter_map(|(schema, action)| {
@@ -45205,8 +45308,7 @@ fn load_project_access_file() -> ProjectAccessFile {
 
 fn save_project_access_file(file: &ProjectAccessFile) -> Result<(), std::io::Error> {
     let path = gateway_project_access_path()?;
-    let body =
-        serde_json::to_string_pretty(file).unwrap_or_else(|_| "{\"grants\":[]}".to_string());
+    let body = serde_json::to_string_pretty(file).unwrap_or_else(|_| "{\"grants\":[]}".to_string());
     fs::write(path, body)
 }
 
@@ -45276,9 +45378,9 @@ fn resolve_project_contact_policy(
 
     let contact_reference = contact_reference.trim();
     let channel = channel.trim().to_ascii_lowercase();
-    let grant = list_project_access(workspace_id).into_iter().find(|grant| {
-        grant.contact_reference == contact_reference && grant.channel == channel
-    });
+    let grant = list_project_access(workspace_id)
+        .into_iter()
+        .find(|grant| grant.contact_reference == contact_reference && grant.channel == channel);
     let Some(grant) = grant else {
         return EffectiveProjectContactPolicy {
             authorized: false,
@@ -45890,35 +45992,33 @@ impl IntoResponse for GatewayError {
 mod tests {
     use super::{
         ActiveModelInputs, ChannelSettings, ConnectorErrorKind, InboundAction, LegacyDirAction,
-        MemoryCandidate, MemoryDataSensitivity, TASK_EXECUTOR_DEFAULT_WORKER_COUNT,
-        active_llm_concurrency, adapt_skill_body, aggregate_session_state_from_counts,
-        authorize_managed_capability_tool,
-        brain_budgets_for_context_window, browser_error_indicates_dead_sidecar,
-        browser_method_for_capability_tool, browser_snapshot_text, browser_targets_for_goal,
-        browser_url_for_goal, build_plan_markdown, capability_call_completed_outcome,
-        classify_connector_error, collapse_plan_markers, collect_member_counts,
-        composio_tool_is_read,
-        connector_error_hint, default_browser_headless_value, evaluate_simple_arithmetic,
-        extract_source_urls, fonti_section, format_memory_block, humanize_task_kind,
-        is_low_value_source_url,
-        hybrid_memory_score, inbound_action, is_auto_confirmable, is_confirmation_reply,
-        is_internal_task_kind, is_salient_exchange, is_semantic_duplicate, jail_in_root,
+        MAX_PLAN_STALL_RESUMES, MemoryCandidate, MemoryDataSensitivity,
+        TASK_EXECUTOR_DEFAULT_WORKER_COUNT, active_llm_concurrency, adapt_skill_body,
+        aggregate_session_state_from_counts, answer_body_is_empty,
+        authorize_managed_capability_tool, block_stalled_step, brain_budgets_for_context_window,
+        browser_error_indicates_dead_sidecar, browser_method_for_capability_tool,
+        browser_snapshot_text, browser_targets_for_goal, browser_url_for_goal, build_plan_markdown,
+        capability_call_completed_outcome, classify_connector_error, collapse_plan_markers,
+        collect_member_counts, composio_tool_is_read, connector_error_hint,
+        default_browser_headless_value, evaluate_simple_arithmetic, extract_source_urls,
+        fonti_section, format_memory_block, humanize_task_kind, hybrid_memory_score,
+        inbound_action, is_auto_confirmable, is_confirmation_reply, is_internal_task_kind,
+        is_low_value_source_url, is_salient_exchange, is_semantic_duplicate, jail_in_root,
         legacy_dir_action, llm_concurrency_view, mcp_error_hint, mcp_provider_slug,
         mcp_stdio_config_from_metadata, mcp_stdio_config_to_metadata, memory_age_days, merge_plan,
-        message_has_image_url, normalize_for_dedup, parse_plan_marker, parse_review_suggestion,
-        MAX_PLAN_STALL_RESUMES, answer_body_is_empty, block_stalled_step, next_plan_stall,
-        plan_stall_exhausted,
-        plan_is_settled, plan_done_count, plan_incomplete_reason, plan_is_complete, plan_next_open,
-        plan_step_status, proactive_memory_request_for_suggestion_action,
-        project_filesystem_mcp_instruction, prune_browser_history, redact_sensitive_text,
-        requeue_waiting_resource_tasks, resolve_active_model, resolve_contained_computer_cdp,
-        resolve_contained_computer_novnc, rewrite_confirm_to_done, sanitize_dedup_key,
+        message_has_image_url, next_plan_stall, normalize_for_dedup, parse_plan_marker,
+        parse_review_suggestion, plan_done_count, plan_incomplete_reason, plan_is_complete,
+        plan_is_settled, plan_next_open, plan_stall_exhausted, plan_step_status,
+        proactive_memory_request_for_suggestion_action, project_filesystem_mcp_instruction,
+        prune_browser_history, redact_sensitive_text, requeue_waiting_resource_tasks,
+        resolve_active_model, resolve_contained_computer_cdp, resolve_contained_computer_novnc,
+        response_language_instruction, rewrite_confirm_to_done, sanitize_dedup_key,
         sanitize_wiki_filename, scheduled_thread_sender_for_task_id, scheduled_thread_title,
         search_composio_catalog, should_try_tool_compatibility_fallback, skill_id_from_command,
         strip_json_fences, suggestion_choices_json, task_effective_goal,
         task_execution_outcome_from_executor_result, task_executor_worker_count,
         task_executor_worker_id, task_goal_summary, task_queue_response, tool_touches_calendar,
-        tool_touches_contacts, response_language_instruction, wiki_title_from_text,
+        tool_touches_contacts, wiki_title_from_text,
     };
     use crate::browser_safety;
     use crate::chat_store::{self, ChatStore};
@@ -45944,7 +46044,9 @@ mod tests {
 
     impl TestGatewayDataDir {
         fn new(path: &std::path::Path) -> Self {
-            let lock = GATEWAY_DATA_DIR_TEST_LOCK.lock().expect("gateway data dir test lock");
+            let lock = GATEWAY_DATA_DIR_TEST_LOCK
+                .lock()
+                .expect("gateway data dir test lock");
             let restore = std::env::var("HOMUN_DATA_DIR").ok();
             // SAFETY: gateway tests already mutate process env for focused
             // configuration checks. This guard restores the previous value.
@@ -45971,10 +46073,7 @@ mod tests {
     }
 
     fn isolated_gateway_test_dir(prefix: &str) -> std::path::PathBuf {
-        std::env::temp_dir().join(format!(
-            "homun-{prefix}-{}",
-            uuid::Uuid::new_v4().simple()
-        ))
+        std::env::temp_dir().join(format!("homun-{prefix}-{}", uuid::Uuid::new_v4().simple()))
     }
 
     #[test]
@@ -46216,8 +46315,7 @@ mod tests {
     }
 
     fn bundled_python_with_pptx() -> Option<&'static str> {
-        let python =
-            "/Users/fabio/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3";
+        let python = "/Users/fabio/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3";
         if !std::path::Path::new(python).is_file() {
             eprintln!("skipping PPTX import test: bundled python unavailable");
             return None;
@@ -46243,10 +46341,7 @@ mod tests {
             "{instruction}"
         );
         assert!(instruction.contains("Italiano"), "{instruction}");
-        assert!(
-            !instruction.contains("Reply in Italiano"),
-            "{instruction}"
-        );
+        assert!(!instruction.contains("Reply in Italiano"), "{instruction}");
     }
 
     fn write_test_pptx(path: &std::path::Path, title: &str) -> bool {
@@ -46839,7 +46934,9 @@ prs.save(Path({path:?}))
         assert!(!is_low_value_source_url(
             "https://en.wikipedia.org/wiki/2026_FIFA_World_Cup_knockout_stage"
         ));
-        assert!(!is_low_value_source_url("https://www.gazzetta.it/calcio/mondiali/"));
+        assert!(!is_low_value_source_url(
+            "https://www.gazzetta.it/calcio/mondiali/"
+        ));
     }
 
     #[test]
@@ -46898,6 +46995,29 @@ prs.save(Path({path:?}))
         assert!(guidance.contains("assumed critical parameter"));
         assert!(guidance.contains("CHOICES marker"));
         assert!(guidance.contains("Continue only after the user"));
+    }
+
+    #[test]
+    fn vault_propose_marker_wraps_valid_json_payload() {
+        let marker = super::vault_propose_marker(
+            "payments",
+            "Carta personale",
+            "[VAULT:payments:card:last4=1111]",
+        );
+        assert!(marker.starts_with(super::VAULT_PROPOSE_OPEN));
+        assert!(marker.ends_with(super::VAULT_PROPOSE_CLOSE));
+        let parsed = super::confirm_marker_value(
+            &marker,
+            super::VAULT_PROPOSE_OPEN,
+            super::VAULT_PROPOSE_CLOSE,
+        )
+        .expect("valid vault marker");
+        assert_eq!(parsed["category"], "payments");
+        assert_eq!(parsed["label"], "Carta personale");
+        assert_eq!(
+            parsed["redacted_preview"],
+            "[VAULT:payments:card:last4=1111]"
+        );
     }
 
     #[test]
@@ -47233,7 +47353,9 @@ prs.save(Path({path:?}))
     fn managed_tool_authorization_is_fail_closed_and_policy_gated() {
         // F1.c: the deny-by-default gate that the retired facade path enforced must survive
         // the move to the v3 execution path. This is the security-relevant seam.
-        use local_first_capabilities::{ActionClass, McpToolPolicy, PolicyContext, UserId, WorkspaceId};
+        use local_first_capabilities::{
+            ActionClass, McpToolPolicy, PolicyContext, UserId, WorkspaceId,
+        };
         let provider_id = CapProviderId::new("composio");
         let policies = vec![McpToolPolicy {
             tool_name: "GMAIL_FETCH_EMAILS".to_string(),
@@ -47252,18 +47374,33 @@ prs.save(Path({path:?}))
         };
         // Authorized: cached tool, Managed allowed, domain + action granted.
         assert!(
-            authorize_managed_capability_tool(&policies, &ctx(true), &provider_id, "GMAIL_FETCH_EMAILS")
-                .is_ok()
+            authorize_managed_capability_tool(
+                &policies,
+                &ctx(true),
+                &provider_id,
+                "GMAIL_FETCH_EMAILS"
+            )
+            .is_ok()
         );
         // Fail-closed: a tool absent from the v3 catalog cache cannot be authorized.
         assert!(
-            authorize_managed_capability_tool(&policies, &ctx(true), &provider_id, "GMAIL_SEND_EMAIL")
-                .is_err()
+            authorize_managed_capability_tool(
+                &policies,
+                &ctx(true),
+                &provider_id,
+                "GMAIL_SEND_EMAIL"
+            )
+            .is_err()
         );
         // Policy-gated: revoke managed-cloud → denied even for a cached tool.
         assert!(
-            authorize_managed_capability_tool(&policies, &ctx(false), &provider_id, "GMAIL_FETCH_EMAILS")
-                .is_err()
+            authorize_managed_capability_tool(
+                &policies,
+                &ctx(false),
+                &provider_id,
+                "GMAIL_FETCH_EMAILS"
+            )
+            .is_err()
         );
     }
 
@@ -47280,9 +47417,15 @@ prs.save(Path({path:?}))
         // No catalog window (uncatalogued endpoint) → safe 32k default.
         assert_eq!(resolve_context_budget_chars(None, None), 32_768 * 3);
         // Explicit env override wins over the model window (debugging / capping a liar).
-        assert_eq!(resolve_context_budget_chars(Some(4_096), Some(131_072)), 4_096 * 3);
+        assert_eq!(
+            resolve_context_budget_chars(Some(4_096), Some(131_072)),
+            4_096 * 3
+        );
         // A zero/garbage override or window is ignored, not treated as a real size.
-        assert_eq!(resolve_context_budget_chars(Some(0), Some(8_192)), 8_192 * 3);
+        assert_eq!(
+            resolve_context_budget_chars(Some(0), Some(8_192)),
+            8_192 * 3
+        );
         assert_eq!(resolve_context_budget_chars(None, Some(0)), 32_768 * 3);
     }
 
@@ -47636,7 +47779,11 @@ prs.save(Path({path:?}))
             .expect("browser_navigate seeded");
         // The real schema, not the `{"type":"object"}` placeholder the seed used to carry.
         assert!(
-            navigate.tool.input_schema.pointer("/properties/url").is_some(),
+            navigate
+                .tool
+                .input_schema
+                .pointer("/properties/url")
+                .is_some(),
             "browser_navigate must carry its real `url` parameter schema"
         );
         assert_ne!(
@@ -47650,7 +47797,10 @@ prs.save(Path({path:?}))
             .find(|tool| tool.tool.name == "browser_snapshot")
             .expect("browser_snapshot seeded");
         assert_eq!(snapshot.tool.action, super::ActionClass::Read);
-        assert_eq!(navigate.tool.action, super::ActionClass::WriteWithConfirmation);
+        assert_eq!(
+            navigate.tool.action,
+            super::ActionClass::WriteWithConfirmation
+        );
     }
 
     /// (F1.a + F1.d) The end-to-end point of this convergence: feed the SEEDED browser tools
@@ -47668,7 +47818,9 @@ prs.save(Path({path:?}))
         corpus.rebuild_from_tools(&tools);
         let cards = corpus.search("open and read a web page in the browser", 3);
         assert!(
-            cards.iter().any(|card| card.tool_name == "browser_navigate"),
+            cards
+                .iter()
+                .any(|card| card.tool_name == "browser_navigate"),
             "planner ranker must surface browser_navigate, got {:?}",
             cards.iter().map(|card| &card.tool_name).collect::<Vec<_>>()
         );
@@ -47752,7 +47904,11 @@ prs.save(Path({path:?}))
         // and executable, so calls reach argument validation.
         let plan = facade.list_tools(&policy).unwrap();
         assert_eq!(plan.visible_tools.len(), 6, "all six browser tools visible");
-        assert_eq!(plan.executable_tools.len(), 6, "and executable under the grant");
+        assert_eq!(
+            plan.executable_tools.len(),
+            6,
+            "and executable under the grant"
+        );
 
         let call = |tool: &str, args: serde_json::Value| super::CapabilityCall {
             provider_id: browser.clone(),
@@ -47765,7 +47921,10 @@ prs.save(Path({path:?}))
             .call_tool(&policy, call("browser_navigate", serde_json::json!({})))
             .unwrap_err();
         assert!(
-            matches!(missing_url, super::CapabilityError::SchemaValidationFailed(_)),
+            matches!(
+                missing_url,
+                super::CapabilityError::SchemaValidationFailed(_)
+            ),
             "navigate without url must be a typed validation error, got {missing_url:?}"
         );
         // browser_act needs `kind`.
@@ -47773,7 +47932,10 @@ prs.save(Path({path:?}))
             .call_tool(&policy, call("browser_act", serde_json::json!({})))
             .unwrap_err();
         assert!(
-            matches!(missing_kind, super::CapabilityError::SchemaValidationFailed(_)),
+            matches!(
+                missing_kind,
+                super::CapabilityError::SchemaValidationFailed(_)
+            ),
             "act without kind must be a typed validation error, got {missing_kind:?}"
         );
 
@@ -47783,7 +47945,10 @@ prs.save(Path({path:?}))
         let valid = facade
             .call_tool(
                 &policy,
-                call("browser_navigate", serde_json::json!({"url": "https://example.com"})),
+                call(
+                    "browser_navigate",
+                    serde_json::json!({"url": "https://example.com"}),
+                ),
             )
             .unwrap_err();
         assert!(
@@ -47885,11 +48050,15 @@ prs.save(Path({path:?}))
                 step.kind, step.tool_name, step.arguments, step.goal
             );
         }
-        let mentions_browser = plan
-            .steps
-            .iter()
-            .any(|step| step.tool_name.as_deref().is_some_and(|t| t.contains("browser")));
-        eprintln!("steps={} mentions_browser={mentions_browser}", plan.steps.len());
+        let mentions_browser = plan.steps.iter().any(|step| {
+            step.tool_name
+                .as_deref()
+                .is_some_and(|t| t.contains("browser"))
+        });
+        eprintln!(
+            "steps={} mentions_browser={mentions_browser}",
+            plan.steps.len()
+        );
         eprintln!("=== end plan ===\n");
     }
 
@@ -48001,7 +48170,10 @@ prs.save(Path({path:?}))
 
         eprintln!("\n=== F3 drive: gemma4 plan executed ===");
         for result in &outcome.results {
-            eprintln!("  {} -> {:?} {:?}", result.step_id, result.status, result.error);
+            eprintln!(
+                "  {} -> {:?} {:?}",
+                result.step_id, result.status, result.error
+            );
         }
         let done = outcome
             .results
@@ -48269,10 +48441,9 @@ prs.save(Path({path:?}))
         );
         assert!(entry.attribution_required);
         assert!(
-            entry
-                .preview_ref
-                .as_deref()
-                .is_some_and(|value| value.starts_with("template-pack://slidescarnival/pitch-clean/"))
+            entry.preview_ref.as_deref().is_some_and(
+                |value| value.starts_with("template-pack://slidescarnival/pitch-clean/")
+            )
         );
 
         let _ = std::fs::remove_dir_all(root);
@@ -48423,10 +48594,7 @@ prs.save(Path({path:?}))
                 attribution_required: Some(true),
                 attribution_text: Some("Template by SlidesCarnival".to_string()),
                 redistribution_policy: Some("generated_decks_only".to_string()),
-                tags: Some(vec![
-                    "pitch".to_string(),
-                    "slidescarnival".to_string(),
-                ]),
+                tags: Some(vec!["pitch".to_string(), "slidescarnival".to_string()]),
             },
         )
         .expect("imported");
@@ -48554,7 +48722,9 @@ prs.save(Path({path:?}))
             .expect("delete imported pack");
 
         assert!(!pack.exists(), "pack directory should be removed");
-        assert!(super::delete_imported_template_pack(&root, "monet/startup-pitch-clean-01").is_err());
+        assert!(
+            super::delete_imported_template_pack(&root, "monet/startup-pitch-clean-01").is_err()
+        );
 
         let _ = std::fs::remove_dir_all(root);
     }
@@ -48607,8 +48777,12 @@ prs.save(Path({path:?}))
 
         assert_eq!(filename, ".internal/template-source.pptx");
         assert_eq!(
-            std::fs::read(super::sandbox::artifacts_dir().join(&thread_slug).join(&filename))
-                .expect("copied"),
+            std::fs::read(
+                super::sandbox::artifacts_dir()
+                    .join(&thread_slug)
+                    .join(&filename)
+            )
+            .expect("copied"),
             b"real pptx bytes"
         );
 
@@ -50195,7 +50369,18 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
 
     #[test]
     fn plan_continuation_messages_are_recognized() {
-        for cont in ["1", "42", "ok", "Procedi", "  continua ", "sì", "si", "next", "vai", "YES"] {
+        for cont in [
+            "1",
+            "42",
+            "ok",
+            "Procedi",
+            "  continua ",
+            "sì",
+            "si",
+            "next",
+            "vai",
+            "YES",
+        ] {
             assert!(
                 super::is_plan_continuation_message(cont),
                 "{cont:?} should be a plan continuation"
@@ -50247,8 +50432,7 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         );
 
         // Capable + floor ON → relaxed to the agent loop.
-        let relaxed =
-            super::relax_route_for_tier(deck.clone(), WorkflowBias::AllowAgentic, true);
+        let relaxed = super::relax_route_for_tier(deck.clone(), WorkflowBias::AllowAgentic, true);
         assert!(matches!(
             relaxed,
             super::CapabilityRouteDecision::AgentLoop { .. }
@@ -50454,7 +50638,10 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         let out = collapse_plan_markers(churn);
         // Exactly one plan block survives, and it's the LAST (freshest) one.
         assert_eq!(out.matches("‹‹PLAN››").count(), 1);
-        assert!(out.contains("**B** (`s2`)"), "kept the latest canonical plan");
+        assert!(
+            out.contains("**B** (`s2`)"),
+            "kept the latest canonical plan"
+        );
         assert!(out.ends_with("Briefing finale qui."), "prose preserved");
         // Resume still parses the surviving block.
         assert_eq!(parse_plan_marker(&out).len(), 2);
@@ -50535,8 +50722,14 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
 
     #[test]
     fn ollama_native_root_strips_v1() {
-        assert_eq!(super::ollama_native_root("http://127.0.0.1:11434/v1"), "http://127.0.0.1:11434");
-        assert_eq!(super::ollama_native_root("http://127.0.0.1:11434/"), "http://127.0.0.1:11434");
+        assert_eq!(
+            super::ollama_native_root("http://127.0.0.1:11434/v1"),
+            "http://127.0.0.1:11434"
+        );
+        assert_eq!(
+            super::ollama_native_root("http://127.0.0.1:11434/"),
+            "http://127.0.0.1:11434"
+        );
     }
 
     #[test]
@@ -50595,13 +50788,19 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             serde_json::json!({"id":"s1","title":"A","status":"done"}),
             serde_json::json!({"id":"s2","title":"B","status":"doing"}),
         ];
-        assert!(!plan_is_settled(&running), "a runnable step keeps the plan unsettled");
+        assert!(
+            !plan_is_settled(&running),
+            "a runnable step keeps the plan unsettled"
+        );
 
         let settled = vec![
             serde_json::json!({"id":"s1","title":"A","status":"done"}),
             serde_json::json!({"id":"s2","title":"B","status":"blocked"}),
         ];
-        assert!(plan_is_settled(&settled), "done+blocked is terminal → settled");
+        assert!(
+            plan_is_settled(&settled),
+            "done+blocked is terminal → settled"
+        );
         // Distinct from complete: a settled-with-blocked plan is NOT complete.
         assert!(!plan_is_complete(&settled));
 
@@ -50618,7 +50817,12 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         let title = block_stalled_step(&mut plan).expect("a runnable step exists");
         assert_eq!(title, "Stuck");
         assert_eq!(plan_step_status(&plan[1]), "blocked");
-        assert!(plan[1]["detail"].as_str().unwrap_or("").contains("no progress"));
+        assert!(
+            plan[1]["detail"]
+                .as_str()
+                .unwrap_or("")
+                .contains("no progress")
+        );
         // The done step and the later todo step are untouched (only the FIRST runnable blocks).
         assert_eq!(plan_step_status(&plan[0]), "done");
         assert_eq!(plan_step_status(&plan[2]), "todo");
@@ -50634,7 +50838,9 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         // budget thinking, leaving only a ‹‹REASONING›› trace and no prose.
         assert!(answer_body_is_empty(""));
         assert!(answer_body_is_empty("   \n  "));
-        assert!(answer_body_is_empty("‹‹REASONING››long chain of thought‹‹/REASONING››"));
+        assert!(answer_body_is_empty(
+            "‹‹REASONING››long chain of thought‹‹/REASONING››"
+        ));
         assert!(answer_body_is_empty("‹‹PLAN››- [x] step‹‹/PLAN››"));
         // A real answer — with or without a reasoning trace above it — is NOT empty.
         assert!(!answer_body_is_empty("Here is the answer."));
@@ -50650,11 +50856,16 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         let mut plan = vec![
             serde_json::json!({"id":"s1","title":"Stuck","status":"blocked","detail":"paused"}),
         ];
-        let claims = merge_plan(&mut plan, &[
-            serde_json::json!({"id":"s1","title":"Stuck","status":"doing"}),
-        ]);
+        let claims = merge_plan(
+            &mut plan,
+            &[serde_json::json!({"id":"s1","title":"Stuck","status":"doing"})],
+        );
         assert!(claims.is_empty());
-        assert_eq!(plan_step_status(&plan[0]), "blocked", "blocked stays blocked");
+        assert_eq!(
+            plan_step_status(&plan[0]),
+            "blocked",
+            "blocked stays blocked"
+        );
     }
 
     #[test]
@@ -54367,7 +54578,8 @@ data: [DONE]\n";
         assert!(project_automation.last_fired_at.is_some());
         assert!(gateway_automation.last_fired_at.is_none());
         assert_eq!(
-            store.recent_automation_runs("auto_channel", 10)
+            store
+                .recent_automation_runs("auto_channel", 10)
                 .unwrap()
                 .len(),
             1
@@ -54459,7 +54671,10 @@ data: [DONE]\n";
         assert_eq!(envelope["workspace_id"], "workspace_project");
         assert_eq!(envelope["actor"]["display_name"], "Elena");
         assert_eq!(envelope["actor"]["identifier"], "393331234567@lid");
-        assert_eq!(envelope["visibility"]["thread_id"], "channel_whatsapp_elena");
+        assert_eq!(
+            envelope["visibility"]["thread_id"],
+            "channel_whatsapp_elena"
+        );
         assert_eq!(envelope["visibility"]["title"], "WhatsApp · Elena");
         assert_eq!(envelope["payload"]["message_id"], "wamid.42");
         assert_eq!(envelope["payload"]["has_content"], true);
@@ -54503,8 +54718,14 @@ data: [DONE]\n";
             &item,
         );
 
-        assert_eq!(envelope["event_id"], "connector:GMAIL_FETCH_EMAILS:messageId:msg_42");
-        assert_eq!(envelope["dedup_key"], "connector:GMAIL_FETCH_EMAILS:messageId:msg_42");
+        assert_eq!(
+            envelope["event_id"],
+            "connector:GMAIL_FETCH_EMAILS:messageId:msg_42"
+        );
+        assert_eq!(
+            envelope["dedup_key"],
+            "connector:GMAIL_FETCH_EMAILS:messageId:msg_42"
+        );
         assert_eq!(envelope["source_kind"], "connector");
         assert_eq!(envelope["provider_id"], "GMAIL_FETCH_EMAILS");
         assert_eq!(envelope["event_type"], "item.detected");

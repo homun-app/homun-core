@@ -3210,6 +3210,7 @@ const FS_AUTHORIZE_RE = /‹‹FS_AUTHORIZE››([\s\S]*?)‹‹\/FS_AUTHORIZE�
 const CONNECT_SUGGEST_RE = /‹‹CONNECT_SUGGEST››([\s\S]*?)‹‹\/CONNECT_SUGGEST››/;
 const COMPOSIO_DONE_RE = /‹‹COMPOSIO_DONE››([\s\S]*?)‹‹\/COMPOSIO_DONE››/;
 const COMPOSIO_RECONNECT_RE = /‹‹COMPOSIO_RECONNECT››([\s\S]*?)‹‹\/COMPOSIO_RECONNECT››/;
+const VAULT_PROPOSE_RE = /‹‹VAULT_PROPOSE››([\s\S]*?)‹‹\/VAULT_PROPOSE››/;
 // Single/multi-choice question card (Claude-Code style): the model emits the choices
 // instead of listing them in prose, and the click sends the answer back.
 const CHOICES_RE = /‹‹CHOICES››([\s\S]*?)‹‹\/CHOICES››/;
@@ -3223,7 +3224,7 @@ const GOAL_PROPOSE_RE = /‹‹GOAL_PROPOSE››([\s\S]*?)‹‹\/GOAL_PROPOSE�
 // Strips an UNCLOSED plan/goal marker (open present, no close) from the visible prose.
 const UNCLOSED_PROPOSE_RE = /‹‹(?:PLAN_PROPOSE|GOAL_PROPOSE)››[\s\S]*$/;
 const COMPOSIO_MARKERS_RE =
-  /‹‹(?:COMPOSIO_(?:CONFIRM|DONE|RECONNECT)|MCP_CONFIRM|FS_AUTHORIZE|CONNECT_SUGGEST|CHOICES|PLAN_PROPOSE|GOAL_PROPOSE|PLAN)››[\s\S]*?‹‹\/(?:COMPOSIO_(?:CONFIRM|DONE|RECONNECT)|MCP_CONFIRM|FS_AUTHORIZE|CONNECT_SUGGEST|CHOICES|PLAN_PROPOSE|GOAL_PROPOSE|PLAN)››/g;
+  /‹‹(?:COMPOSIO_(?:CONFIRM|DONE|RECONNECT)|MCP_CONFIRM|FS_AUTHORIZE|CONNECT_SUGGEST|VAULT_PROPOSE|CHOICES|PLAN_PROPOSE|GOAL_PROPOSE|PLAN)››[\s\S]*?‹‹\/(?:COMPOSIO_(?:CONFIRM|DONE|RECONNECT)|MCP_CONFIRM|FS_AUTHORIZE|CONNECT_SUGGEST|VAULT_PROPOSE|CHOICES|PLAN_PROPOSE|GOAL_PROPOSE|PLAN)››/g;
 const PROPOSE_MARKERS_VISIBLE_RE =
   /‹‹(?:PLAN_PROPOSE|GOAL_PROPOSE)››[\s\S]*?‹‹\/(?:PLAN_PROPOSE|GOAL_PROPOSE)››/g;
 
@@ -3244,6 +3245,12 @@ interface ConnectSuggestItem {
 interface ConnectSuggest {
   need: string;
   items: ConnectSuggestItem[];
+}
+
+interface VaultProposal {
+  category: string;
+  label: string;
+  redacted_preview: string;
 }
 
 /** Composer interaction modes (Cursor-style, adapted for a general assistant).
@@ -5644,6 +5651,7 @@ function parseComposioConfirm(text: string): {
   reconnectSlug: string | null;
   fsAuthorize: { path: string; op: string } | null;
   connectSuggest: ConnectSuggest | null;
+  vaultPropose: VaultProposal | null;
   choices: ChoicePrompt | null;
   planPropose: PlanProposal | null;
   goalPropose: string[] | null;
@@ -5696,6 +5704,27 @@ function parseComposioConfirm(text: string): {
       const parsed = JSON.parse(csMatch[1]) as ConnectSuggest;
       if (parsed && Array.isArray(parsed.items) && parsed.items.length > 0) {
         connectSuggest = parsed;
+      }
+    } catch {
+      /* malformed → just hide it */
+    }
+  }
+  let vaultPropose: VaultProposal | null = null;
+  const vaultMatch = text.match(VAULT_PROPOSE_RE);
+  if (vaultMatch) {
+    try {
+      const parsed = JSON.parse(vaultMatch[1]) as Partial<VaultProposal>;
+      if (
+        parsed &&
+        typeof parsed.category === "string" &&
+        typeof parsed.label === "string" &&
+        typeof parsed.redacted_preview === "string"
+      ) {
+        vaultPropose = {
+          category: parsed.category,
+          label: parsed.label,
+          redacted_preview: parsed.redacted_preview,
+        };
       }
     } catch {
       /* malformed → just hide it */
@@ -5792,6 +5821,7 @@ function parseComposioConfirm(text: string): {
     reconnectSlug,
     fsAuthorize,
     connectSuggest,
+    vaultPropose,
     choices,
     planPropose,
     goalPropose,
@@ -5831,6 +5861,7 @@ function AssistantMessageBody({
     reconnectSlug,
     fsAuthorize,
     connectSuggest,
+    vaultPropose,
     choices,
     planPropose,
     goalPropose,
@@ -5865,6 +5896,7 @@ function AssistantMessageBody({
           threadId={threadId}
         />
       )}
+      {vaultPropose && !streaming && <VaultProposeCard proposal={vaultPropose} />}
       {choices && !streaming && onChoose && (
         <ChoicesCard prompt={choices} onChoose={onChoose} />
       )}
@@ -5875,6 +5907,28 @@ function AssistantMessageBody({
         <GoalProposeCard objectives={goalPropose} threadId={threadId} />
       )}
     </>
+  );
+}
+
+function VaultProposeCard({ proposal }: { proposal: VaultProposal }) {
+  return (
+    <div className="cmp-confirm">
+      <div className="cmp-confirm-head">
+        <ShieldCheck size={15} />
+        <strong>Dato sensibile rilevato</strong>
+        <span className="cmp-confirm-name">{proposal.category}</span>
+      </div>
+      <div className="cmp-confirm-fields">
+        <label>Record</label>
+        <input readOnly value={proposal.label} />
+        <label>Preview redatta</label>
+        <input readOnly value={proposal.redacted_preview} />
+      </div>
+      <p className="cmp-confirm-note">
+        Il dato non entra nella memoria normale in chiaro. Il salvataggio strutturato nel Vault sarà
+        abilitato dal prossimo step.
+      </p>
+    </div>
   );
 }
 

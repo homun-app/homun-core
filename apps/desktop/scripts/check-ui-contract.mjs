@@ -430,6 +430,9 @@ assertContains("src/styles.css", ".chat-status-stack:has(.cc-dock.full)", "Compu
 assertContains("src/styles.css", "width: min(980px, calc(100vw - 390px));", "Computer fullscreen must be large but bounded by the chat area");
 assertNotContains("src/styles.css", ".cc-dock.full {\n  position: fixed;", "Computer fullscreen dock must not be fixed to the whole viewport/sidebar");
 assertContains("src/components/RichMessage.tsx", "STRAY_REASONING_MARKER_RE", "streaming renderer must strip stray or malformed reasoning markers from the visible answer body");
+assertContains("src/components/ChatView.tsx", "VAULT_PROPOSE_RE", "chat renderer must parse vault proposal markers");
+assertContains("src/components/ChatView.tsx", "VaultProposeCard", "chat renderer must render sensitive-data vault proposal cards");
+assertContains("src/components/ChatView.tsx", "VAULT_PROPOSE|", "vault proposal markers must be stripped from visible prose");
 
 assertContains("src/types.ts", "\"learning\"", "auto-learning must be a first-class view");
 assertContains("src/components/LearningView.tsx", "learning-view", "auto-learning must have a dedicated page");
