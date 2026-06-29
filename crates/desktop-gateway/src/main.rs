@@ -64,7 +64,7 @@ use local_first_desktop_gateway::{
     ChatGenerateStreamRequest, ChatMessage, ChatMessagesSnapshot, ChatThread, ChatThreadSnapshot,
     CommitContinuationResultRequest, CommitPromptResultRequest, CommitRegeneratedResultRequest,
     SetActiveLeafRequest, SetBranchLabelRequest, SetThreadPinnedRequest, build_chat_runtime_prompt,
-    compact_thread_title,
+    compact_thread_title, strip_display_markers,
 };
 use local_first_inference::{
     AnthropicProvider, CapabilityDescriptor, Locality, ModelRouter, OpenAiCompatProvider,
@@ -6542,28 +6542,9 @@ fn parse_plan_marker(text: &str) -> Vec<serde_json::Value> {
 /// These markers (‹‹PLAN››, ‹‹ACT››, ‹‹ARTIFACT››, ‹‹REASONING››, ‹‹COMPOSIO_*››) are
 /// rendered by the app UI; a channel must never receive them raw.
 fn strip_chat_markers(text: &str) -> String {
-    const TAGS: [&str; 7] = [
-        "PLAN",
-        "ACT",
-        "ARTIFACT",
-        "REASONING",
-        "COMPOSIO_CONFIRM",
-        "COMPOSIO_DONE",
-        "COMPOSIO_RECONNECT",
-    ];
-    let mut out = text.to_string();
-    for tag in TAGS {
-        let open = format!("‹‹{tag}››");
-        let close = format!("‹‹/{tag}››");
-        while let Some(o) = out.find(&open) {
-            let Some(rel_c) = out[o..].find(&close) else {
-                break;
-            };
-            let c = o + rel_c + close.len();
-            out.replace_range(o..c, "");
-        }
-    }
-    out.trim().to_string()
+    // Canonical stripper lives in the lib (shared with the in-app context renderer, caposaldo
+    // #5). The channel mirror just wants the trimmed prose.
+    strip_display_markers(text).trim().to_string()
 }
 
 /// F3-deep: true when an assembled answer carries NO answer body — only control markers

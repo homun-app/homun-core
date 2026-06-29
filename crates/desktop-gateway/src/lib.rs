@@ -342,8 +342,48 @@ fn render_runtime_prompt(prompt: &str, compressed_context: &str) -> String {
     .join("\n")
 }
 
+/// App-only control markers carried inside message text and rendered by the UI:
+/// ‹‹PLAN›› (workbench plan card), ‹‹ACT›› (live activity), ‹‹ARTIFACT›› (artifact chip),
+/// ‹‹REASONING›› (collapsed thinking trace), ‹‹COMPOSIO_*›› (confirm/done/reconnect cards).
+const DISPLAY_MARKER_TAGS: [&str; 7] = [
+    "PLAN",
+    "ACT",
+    "ARTIFACT",
+    "REASONING",
+    "COMPOSIO_CONFIRM",
+    "COMPOSIO_DONE",
+    "COMPOSIO_RECONNECT",
+];
+
+/// Remove the app-only control-marker BLOCKS (marker + content) from message text. These
+/// markers are display-only: the UI renders them (collapsed reasoning, plan card, …) and they
+/// must never reach the model as conversational content — otherwise a reasoning model re-reads
+/// its own ‹‹REASONING›› trace from the history and treats it as pasted text (the "il testo che
+/// hai incollato è già completo" confusion on a follow-up / Continue turn). The single canonical
+/// stripper, shared by the in-app context renderer here and the channel mirror in the gateway
+/// (caposaldo #5). An UNCLOSED marker (e.g. a reasoning trace truncated by `finish_reason:length`)
+/// is dropped to end-of-string — there is no real answer body after an unterminated trace.
+pub fn strip_display_markers(text: &str) -> String {
+    let mut out = text.to_string();
+    for tag in DISPLAY_MARKER_TAGS {
+        let open = format!("‹‹{tag}››");
+        let close = format!("‹‹/{tag}››");
+        while let Some(start) = out.find(&open) {
+            let end = match out[start..].find(&close) {
+                Some(rel) => start + rel + close.len(),
+                None => out.len(),
+            };
+            out.replace_range(start..end, "");
+        }
+    }
+    out
+}
+
 fn normalize_context_text(text: &str, max_message_chars: usize) -> String {
-    let normalized = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    // Strip display-only markers BEFORE compressing: the model must see the prior answer's
+    // prose, never the UI's collapsed reasoning/plan markers (which it would misread as content).
+    let stripped = strip_display_markers(text);
+    let normalized = stripped.split_whitespace().collect::<Vec<_>>().join(" ");
     clamp_end(&normalized, max_message_chars)
 }
 
@@ -400,6 +440,37 @@ impl PromptCompressionSummary {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn strip_display_markers_removes_blocks_including_unclosed() {
+        // A closed reasoning trace + plan card are removed; the answer prose stays.
+        let s = strip_display_markers(
+            "‹‹REASONING››long chain of thought‹‹/REASONING››\nThe answer is 42.‹‹PLAN››- [x] step‹‹/PLAN››",
+        );
+        assert!(!s.contains("‹‹"), "no marker left: {s:?}");
+        assert!(!s.contains("chain of thought"));
+        assert!(s.contains("The answer is 42."));
+        // An UNCLOSED marker (reasoning truncated by finish_reason:length) drops to end.
+        let trunc = strip_display_markers("Visible.‹‹REASONING››thinking that got cut off");
+        assert_eq!(trunc.trim(), "Visible.");
+    }
+
+    #[test]
+    fn followup_context_excludes_the_assistant_reasoning_trace() {
+        // Regression: a reasoning model's prior ‹‹REASONING›› trace must NOT re-enter the model
+        // context — else it reads its own markers as pasted text ("il testo è già completo").
+        let response = build_chat_runtime_prompt(&BuildPromptRequest {
+            prompt: "continue".to_string(),
+            context: vec![ChatContextMessage {
+                role: ChatContextRole::Assistant,
+                text: "‹‹REASONING››I should explain X then Y‹‹/REASONING››\nHere is X.".to_string(),
+            }],
+            max_context_chars: Some(1_000),
+        });
+        assert!(response.runtime_prompt.contains("Assistant: Here is X."));
+        assert!(!response.runtime_prompt.contains("REASONING"));
+        assert!(!response.runtime_prompt.contains("I should explain X"));
+    }
 
     #[test]
     fn prompt_builder_keeps_recent_context_for_followups() {
