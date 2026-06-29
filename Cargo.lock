@@ -3431,9 +3431,11 @@ name = "local-first-vault"
 version = "0.1.0"
 dependencies = [
  "local-first-secrets",
+ "rand 0.8.6",
  "rusqlite",
  "serde",
  "serde_json",
+ "sha2",
 ]
 
 [[package]]

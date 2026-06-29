@@ -102,7 +102,9 @@ use local_first_task_runtime::{
     TaskScheduler, TaskStatus, TaskStore, TaskUiDetail, TaskUiItem, TaskUiReadModel, UserId,
     WorkspaceId,
 };
-use local_first_vault::{SQLiteVaultStore, VaultCategory, VaultRecord, VaultRecordId, VaultStore};
+use local_first_vault::{
+    LocalPinVerifier, SQLiteVaultStore, VaultCategory, VaultRecord, VaultRecordId, VaultStore,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -900,6 +902,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/memory/decide", post(memory_decide))
         .route("/api/vault/proposals/accept", post(vault_proposal_accept))
         .route("/api/vault/proposals/dismiss", post(vault_proposal_dismiss))
+        .route("/api/vault/pin/status", get(vault_pin_status))
+        .route("/api/vault/pin/setup", post(vault_pin_setup))
+        .route("/api/vault/pin/verify", post(vault_pin_verify))
         .route("/api/memory/contacts", get(contacts_list))
         .route("/api/memory/contacts/memories", post(contact_memories))
         .route("/api/memory/contacts/profile", post(contact_profile))
@@ -34943,6 +34948,31 @@ struct VaultProposalDismissResponse {
     ok: bool,
 }
 
+#[derive(Debug, Serialize)]
+struct VaultPinStatusResponse {
+    configured: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct VaultPinSetupRequest {
+    pin: String,
+}
+
+#[derive(Debug, Serialize)]
+struct VaultPinSetupResponse {
+    configured: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct VaultPinVerifyRequest {
+    pin: String,
+}
+
+#[derive(Debug, Serialize)]
+struct VaultPinVerifyResponse {
+    ok: bool,
+}
+
 async fn vault_proposal_accept(
     State(state): State<AppState>,
     Json(request): Json<VaultProposalActionRequest>,
@@ -34957,11 +34987,7 @@ async fn vault_proposal_accept(
     };
     lock_vault_store(&state)?
         .put(record)
-        .map_err(|error| GatewayError {
-            status: StatusCode::BAD_GATEWAY,
-            code: "vault_store_error",
-            message: error.to_string(),
-        })?;
+        .map_err(vault_store_error)?;
     Ok(Json(response))
 }
 
@@ -34969,6 +34995,39 @@ async fn vault_proposal_dismiss(
     Json(_request): Json<VaultProposalActionRequest>,
 ) -> Result<Json<VaultProposalDismissResponse>, GatewayError> {
     Ok(Json(VaultProposalDismissResponse { ok: true }))
+}
+
+async fn vault_pin_status(
+    State(state): State<AppState>,
+) -> Result<Json<VaultPinStatusResponse>, GatewayError> {
+    let configured = lock_vault_store(&state)?
+        .local_pin_verifier()
+        .map_err(vault_store_error)?
+        .is_some();
+    Ok(Json(VaultPinStatusResponse { configured }))
+}
+
+async fn vault_pin_setup(
+    State(state): State<AppState>,
+    Json(request): Json<VaultPinSetupRequest>,
+) -> Result<Json<VaultPinSetupResponse>, GatewayError> {
+    let verifier = local_pin_verifier_from_request(&request).map_err(invalid_vault_pin)?;
+    lock_vault_store(&state)?
+        .set_local_pin_verifier(verifier)
+        .map_err(vault_store_error)?;
+    Ok(Json(VaultPinSetupResponse { configured: true }))
+}
+
+async fn vault_pin_verify(
+    State(state): State<AppState>,
+    Json(request): Json<VaultPinVerifyRequest>,
+) -> Result<Json<VaultPinVerifyResponse>, GatewayError> {
+    let verifier = lock_vault_store(&state)?
+        .local_pin_verifier()
+        .map_err(vault_store_error)?;
+    Ok(Json(VaultPinVerifyResponse {
+        ok: local_pin_verify_result(verifier.as_ref(), &request.pin),
+    }))
 }
 
 fn vault_record_from_proposal(request: &VaultProposalActionRequest) -> Result<VaultRecord, String> {
@@ -34998,6 +35057,16 @@ fn vault_record_from_proposal(request: &VaultProposalActionRequest) -> Result<Va
     )
 }
 
+fn local_pin_verifier_from_request(
+    request: &VaultPinSetupRequest,
+) -> Result<LocalPinVerifier, String> {
+    LocalPinVerifier::create(&request.pin)
+}
+
+fn local_pin_verify_result(verifier: Option<&LocalPinVerifier>, pin: &str) -> bool {
+    verifier.is_some_and(|verifier| verifier.verify(pin))
+}
+
 fn vault_category_from_marker(category: &str) -> Result<VaultCategory, String> {
     match category.trim().to_ascii_lowercase().as_str() {
         "payments" | "payment" => Ok(VaultCategory::Payments),
@@ -35014,6 +35083,22 @@ fn invalid_vault_proposal(message: String) -> GatewayError {
     GatewayError {
         status: StatusCode::BAD_REQUEST,
         code: "invalid_vault_proposal",
+        message,
+    }
+}
+
+fn invalid_vault_pin(message: String) -> GatewayError {
+    GatewayError {
+        status: StatusCode::BAD_REQUEST,
+        code: "invalid_vault_pin",
+        message,
+    }
+}
+
+fn vault_store_error(message: String) -> GatewayError {
+    GatewayError {
+        status: StatusCode::BAD_GATEWAY,
+        code: "vault_store_error",
         message,
     }
 }
@@ -47176,6 +47261,28 @@ prs.save(Path({path:?}))
     fn vault_category_from_marker_rejects_unknown_category() {
         let error = super::vault_category_from_marker("banking").expect_err("unknown category");
         assert!(error.contains("unknown vault category"));
+    }
+
+    #[test]
+    fn vault_pin_setup_rejects_invalid_pin_values() {
+        let request = super::VaultPinSetupRequest {
+            pin: "12345".to_string(),
+        };
+
+        let error = super::local_pin_verifier_from_request(&request).expect_err("short pin");
+        assert!(error.contains("PIN"));
+    }
+
+    #[test]
+    fn vault_pin_verify_requires_configured_matching_pin() {
+        let request = super::VaultPinSetupRequest {
+            pin: "123456".to_string(),
+        };
+        let verifier = super::local_pin_verifier_from_request(&request).expect("verifier");
+
+        assert!(super::local_pin_verify_result(Some(&verifier), "123456"));
+        assert!(!super::local_pin_verify_result(Some(&verifier), "654321"));
+        assert!(!super::local_pin_verify_result(None, "123456"));
     }
 
     #[test]

@@ -300,6 +300,9 @@ assertContains("src/lib/coreBridge.ts", "/api/memory/dashboard", "Electron memor
 assertContains("src/lib/coreBridge.ts", "/api/capabilities/snapshot", "Electron capability registry must load from the local gateway");
 assertContains("src/lib/coreBridge.ts", "/api/vault/proposals/accept", "Vault proposal cards must persist through the local gateway");
 assertContains("src/lib/coreBridge.ts", "/api/vault/proposals/dismiss", "Vault proposal cards must dismiss through the local gateway");
+assertContains("src/lib/coreBridge.ts", "/api/vault/pin/status", "Vault PIN status must load through the local gateway");
+assertContains("src/lib/coreBridge.ts", "/api/vault/pin/setup", "Vault PIN setup must persist through the local gateway");
+assertContains("src/lib/coreBridge.ts", "/api/vault/pin/verify", "Vault PIN verification must run through the local gateway");
 assertContains("src/components/ChatView.tsx", "coreBridge.vaultProposalAccept", "Vault proposal card must expose an accept action");
 assertContains("src/components/ChatView.tsx", "Salva nel Vault", "Vault proposal card must offer an explicit save action");
 assertContains("src/App.tsx", "mapCoreMemoryDashboard", "desktop memory page must map the gateway memory dashboard read model");

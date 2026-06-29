@@ -619,6 +619,10 @@ GIÀ FATTO sessione 5g (NON ripartire; tutto su `main`):
   il gateway apre `~/.homun/vault.sqlite` e espone `/api/vault/proposals/accept|dismiss`;
   la card `VAULT_PROPOSE` in chat salva o scarta esplicitamente. Il record conserva solo
   categoria/label/preview redatta + `SecretRef`, non il valore sensibile ne' CVV/CV2.
+- **Vault PIN locale**: aggiunto `LocalPinVerifier` con salt/hash iterato, persistenza
+  metadata-only in `vault_local_pin`, endpoint gateway `/api/vault/pin/status|setup|verify`
+  e bridge frontend. Il PIN e' pronto come gate locale per CVV one-shot/payment approval,
+  ma manca ancora il dialog UI e il flusso checkout completo.
 - **bug "Continue" (validato live nell'app — puzzle Einstein ora 1 risposta pulita):** 2 cause distinte —
   (1) backend `df65d0b0`: il trace `‹‹REASONING››` rientrava nel contesto modello via
   `build_chat_runtime_prompt` → `strip_display_markers` canonico in lib.rs usato in `normalize_context_text`,

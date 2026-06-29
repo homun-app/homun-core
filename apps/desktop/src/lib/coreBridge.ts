@@ -1837,6 +1837,14 @@ export interface VaultProposalAcceptResult {
   redacted_preview: string;
 }
 
+export interface VaultPinStatus {
+  configured: boolean;
+}
+
+export interface VaultPinVerifyResult {
+  ok: boolean;
+}
+
 async function electronVaultProposalAccept(
   input: VaultProposalActionInput,
 ): Promise<VaultProposalAcceptResult> {
@@ -1847,6 +1855,18 @@ async function electronVaultProposalDismiss(
   input: VaultProposalActionInput,
 ): Promise<{ ok: boolean }> {
   return gatewayPostJson<{ ok: boolean }>("/api/vault/proposals/dismiss", input);
+}
+
+async function electronVaultPinStatus(): Promise<VaultPinStatus> {
+  return gatewayGetJson<VaultPinStatus>("/api/vault/pin/status");
+}
+
+async function electronVaultPinSetup(pin: string): Promise<VaultPinStatus> {
+  return gatewayPostJson<VaultPinStatus>("/api/vault/pin/setup", { pin });
+}
+
+async function electronVaultPinVerify(pin: string): Promise<VaultPinVerifyResult> {
+  return gatewayPostJson<VaultPinVerifyResult>("/api/vault/pin/verify", { pin });
 }
 
 /** Persists that the user connected one suggestion from an in-chat connect-card,
@@ -2534,6 +2554,9 @@ export const coreBridge = {
     electronVaultProposalAccept(input),
   vaultProposalDismiss: (input: VaultProposalActionInput) =>
     electronVaultProposalDismiss(input),
+  vaultPinStatus: () => electronVaultPinStatus(),
+  vaultPinSetup: (pin: string) => electronVaultPinSetup(pin),
+  vaultPinVerify: (pin: string) => electronVaultPinVerify(pin),
   connectMark: (input: {
     kind: string;
     ref: string;

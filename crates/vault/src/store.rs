@@ -1,4 +1,4 @@
-use crate::{VaultRecord, VaultRecordId};
+use crate::{LocalPinVerifier, VaultRecord, VaultRecordId};
 use local_first_secrets::SecretRef;
 use rusqlite::{Connection, params};
 use std::collections::BTreeMap;
@@ -55,8 +55,57 @@ impl SQLiteVaultStore {
                     metadata_json text not null,
                     created_at text not null default CURRENT_TIMESTAMP,
                     updated_at text not null default CURRENT_TIMESTAMP
+                );
+                create table if not exists vault_local_pin (
+                    id integer primary key check (id = 1),
+                    verifier_json text not null,
+                    updated_at text not null default CURRENT_TIMESTAMP
                 );",
             )
+            .map_err(|error| error.to_string())?;
+        Ok(())
+    }
+
+    pub fn set_local_pin_verifier(&self, verifier: LocalPinVerifier) -> Result<(), String> {
+        let verifier_json = serde_json::to_string(&verifier).map_err(|error| error.to_string())?;
+        self.conn
+            .lock()
+            .map_err(|_| "vault sqlite lock poisoned".to_string())?
+            .execute(
+                "insert into vault_local_pin (id, verifier_json)
+                 values (1, ?1)
+                 on conflict(id) do update set
+                    verifier_json=excluded.verifier_json,
+                    updated_at=CURRENT_TIMESTAMP",
+                params![verifier_json],
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(())
+    }
+
+    pub fn local_pin_verifier(&self) -> Result<Option<LocalPinVerifier>, String> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| "vault sqlite lock poisoned".to_string())?;
+        let mut stmt = conn
+            .prepare("select verifier_json from vault_local_pin where id = 1")
+            .map_err(|error| error.to_string())?;
+        let mut rows = stmt.query([]).map_err(|error| error.to_string())?;
+        let Some(row) = rows.next().map_err(|error| error.to_string())? else {
+            return Ok(None);
+        };
+        let verifier_json = row.get::<_, String>(0).map_err(|error| error.to_string())?;
+        serde_json::from_str(&verifier_json)
+            .map(Some)
+            .map_err(|error| error.to_string())
+    }
+
+    pub fn clear_local_pin_verifier(&self) -> Result<(), String> {
+        self.conn
+            .lock()
+            .map_err(|_| "vault sqlite lock poisoned".to_string())?
+            .execute("delete from vault_local_pin where id = 1", [])
             .map_err(|error| error.to_string())?;
         Ok(())
     }
@@ -283,5 +332,18 @@ mod tests {
                 .to_ascii_lowercase()
                 .contains("cvv")
         );
+    }
+
+    #[test]
+    fn sqlite_vault_store_persists_local_pin_verifier_without_plaintext() {
+        let store = SQLiteVaultStore::open_in_memory().unwrap();
+        let verifier = LocalPinVerifier::create("123456").unwrap();
+
+        store.set_local_pin_verifier(verifier).unwrap();
+        let saved = store.local_pin_verifier().unwrap().unwrap();
+
+        assert!(saved.verify("123456"));
+        assert!(!saved.verify("654321"));
+        assert!(!serde_json::to_string(&saved).unwrap().contains("123456"));
     }
 }

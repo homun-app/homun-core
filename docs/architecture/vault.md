@@ -16,7 +16,9 @@ Non e' memoria: la memoria puo' contenere solo testo redatto o riferimenti
 - `crates/vault`: crate `local-first-vault`.
 - `sensitive.rs`: classifier/redactor deterministico MVP.
 - `types.rs` + `store.rs`: record/metadati separati da `SecretRef`, store in-memory
-  e SQLite metadata-only.
+  e SQLite metadata-only; lo stesso DB conserva il verifier del PIN locale.
+- `pin.rs`: verifier PIN locale con salt e hash iterato, serializzabile senza PIN
+  in chiaro.
 - `payment.rs`: policy di confronto per `PaymentApprovalSnapshot`.
 - `crates/memory/src/redaction.rs`: usa il classifier Vault prima di salvare/esporre
   memoria normale.
@@ -41,6 +43,10 @@ Categorie:
 `VaultRecord` conserva metadati non sensibili e un `SecretRef`. Il materiale segreto
 resta nello store segreti esistente (`local-first-secrets`) o nel backend sicuro
 futuro. `VaultRecord::new` rifiuta CVV/CV2 nei metadati.
+
+`vault_local_pin` conserva solo `LocalPinVerifier` (`algorithm`, `iterations`,
+`salt_hex`, `digest_hex`). Il PIN non e' reversibile e non viene mai serializzato in
+chiaro; il gateway espone solo status/setup/verify dietro il bearer locale.
 
 ## Classificazione e redaction
 
@@ -70,6 +76,17 @@ con label, categoria, preview redatta, `thread_id`/`message_id` opzionali e un
 `SecretRef` opaco. `Non salvare` chiama `/api/vault/proposals/dismiss`; oggi e'
 solo ack locale, senza audit persistente.
 
+## PIN locale
+
+Endpoint gateway:
+
+- `GET /api/vault/pin/status` -> `{ configured }`;
+- `POST /api/vault/pin/setup` con `{ pin }` -> crea/sostituisce il verifier;
+- `POST /api/vault/pin/verify` con `{ pin }` -> `{ ok }`.
+
+Il PIN e' pensato come gate locale per CVV one-shot e approvazioni pagamento. Non
+sostituisce il TOTP futuro dell'app.
+
 ## Pagamenti
 
 `PaymentApprovalSnapshot` cattura merchant, dominio, importo, valuta, prodotto,
@@ -89,7 +106,7 @@ Login, script arbitrari e azioni high-risk non-payment restano bloccati.
 
 - Keychain/secret-store completo del valore sensibile associato al `SecretRef`.
 - Sezione UI Vault completa.
-- Dialog locale PIN + CVV one-shot.
+- Dialog UI locale PIN + CVV one-shot.
 - Payment Approval Card completa con screenshot/fingerprint.
 - Telegram routing per riepilogo pagamento.
 - E2E su checkout controllato.
