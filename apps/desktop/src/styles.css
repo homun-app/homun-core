@@ -13734,3 +13734,16 @@ body.resizing-drawer {
   font-size: var(--text-xs);
   line-height: 1.55;
 }
+
+/* Computer panel liveness: time-since-last-activity + a soft stall warning, so the
+   spinner isn't ambiguous between "advancing" and "frozen". */
+.cc-step-elapsed {
+  opacity: 0.55;
+  font-variant-numeric: tabular-nums;
+}
+.cc-step.stalled {
+  color: var(--amber);
+}
+.cc-step-stalled {
+  color: var(--amber);
+}
