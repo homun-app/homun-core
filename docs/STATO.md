@@ -601,6 +601,11 @@ GIÀ FATTO sessione 5g (NON ripartire; tutto su `main`):
   molto più grande. Per prenotazioni/acquisti, se manca un parametro critico e il modello ha solo un default
   probabile dal contesto, il system prompt ora impone stop + `CHOICES` (conferma default / scelta libera)
   prima di procedere. Contract UI, test backend mirato, build desktop e build gateway verdi.
+- **Spec Vault + acquisti approvati** (`docs/superpowers/specs/2026-06-29-vault-purchase-approval-design.md`):
+  direzione MVP approvata con Vault separato dalla memoria, classificatore sensibile + redaction,
+  categorie interne (`payments`, `identity`, `health`, `vehicles`, `credentials`, `private_notes`),
+  carta salvabile senza CVV, PIN locale + CVV one-shot per autorizzare il pagamento, click finale solo
+  dopo `Payment Approval Card` e invalidazione se merchant/importo/prodotto/metodo cambiano.
 - **bug "Continue" (validato live nell'app — puzzle Einstein ora 1 risposta pulita):** 2 cause distinte —
   (1) backend `df65d0b0`: il trace `‹‹REASONING››` rientrava nel contesto modello via
   `build_chat_runtime_prompt` → `strip_display_markers` canonico in lib.rs usato in `normalize_context_text`,
