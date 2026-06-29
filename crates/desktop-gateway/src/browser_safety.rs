@@ -43,6 +43,23 @@ const HIGH_RISK_LABEL_PATTERNS: &[&str] = &[
     "entra con",
 ];
 
+const FINAL_PAYMENT_LABEL_PATTERNS: &[&str] = &[
+    "buy",
+    "pay",
+    "payment",
+    "checkout",
+    "purchase",
+    "place order",
+    "order now",
+    "acquista",
+    "paga",
+    "pagamento",
+    "compra",
+    "acquisto",
+    "ordina",
+    "procedi all'acquisto",
+];
+
 /// True if the action commits something potentially irreversible: a click, a
 /// `type` with `submit`, or an Enter/Return key press. Used both by the
 /// high-risk check and (in read-only/channel turns) to block ALL commits.
@@ -67,6 +84,17 @@ pub fn is_committing_action(action: &Value) -> bool {
 /// pattern. `None` means the action is safe to run. `snapshot` is the latest
 /// page snapshot text, used to resolve the control label from `ref`.
 pub fn high_risk_reason(action: &Value, snapshot: &str) -> Option<String> {
+    high_risk_reason_with_payment_approval(action, snapshot, None)
+}
+
+/// Approval-aware variant for the future payment flow. A matching
+/// `payment_approval_id` can unlock final purchase/payment controls only; login,
+/// arbitrary script, booking, and unrelated high-risk labels remain blocked.
+pub fn high_risk_reason_with_payment_approval(
+    action: &Value,
+    snapshot: &str,
+    approved_payment_id: Option<&str>,
+) -> Option<String> {
     let kind = action.get("kind").and_then(Value::as_str).unwrap_or("");
     if kind == "evaluate" {
         return Some(
@@ -89,6 +117,22 @@ pub fn high_risk_reason(action: &Value, snapshot: &str) -> Option<String> {
         .to_ascii_lowercase();
     if label.is_empty() {
         return None;
+    }
+    let payment_match = FINAL_PAYMENT_LABEL_PATTERNS
+        .iter()
+        .find(|pattern| label.contains(*pattern));
+    if let Some(pattern) = payment_match {
+        let action_approval_id = action
+            .get("payment_approval_id")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        if approved_payment_id.is_some_and(|approved| approved == action_approval_id) {
+            return None;
+        }
+        return Some(format!(
+            "blocked before final payment action: control \"{label}\" matches \"{pattern}\" \
+             and requires a matching Payment Approval Card"
+        ));
     }
     HIGH_RISK_LABEL_PATTERNS
         .iter()
@@ -164,5 +208,20 @@ mod tests {
     #[test]
     fn blocks_hold_on_purchase_label() {
         assert!(high_risk_reason(&json!({"kind":"hold","ref":"e9"}), SNAP).is_some());
+    }
+
+    #[test]
+    fn final_payment_click_requires_matching_payment_approval() {
+        let snapshot = "- button \"Paga ora\" [ref=e10]";
+        let action = json!({"kind":"click","ref":"e10"});
+
+        let blocked = high_risk_reason_with_payment_approval(&action, snapshot, Some("pay_123"));
+        assert!(blocked.is_some());
+        assert!(blocked.unwrap().contains("Payment Approval Card"));
+
+        let approved = json!({"kind":"click","ref":"e10","payment_approval_id":"pay_123"});
+        assert!(
+            high_risk_reason_with_payment_approval(&approved, snapshot, Some("pay_123")).is_none()
+        );
     }
 }
