@@ -20378,21 +20378,54 @@ or tell the user to start the contained computer (Settings → Local computer)."
                                         }
                                         match (nav_err, snap_result) {
                                             (Some(error), _) => {
+                                                if verbose_debug() {
+                                                    eprintln!(
+                                                        "[browser] navigate {url} FAILED: {error}"
+                                                    );
+                                                }
                                                 push_browser_step(
                                                     format!("navigate {url}"),
                                                     "error",
                                                 );
-                                                let fails = {
-                                                    let entry = nav_failures
-                                                        .entry(url.to_string())
-                                                        .or_insert(0);
-                                                    *entry += 1;
-                                                    *entry
-                                                };
-                                                Err(format!(
-                                                    "Navigation failed: {error}{}",
-                                                    browser_navigate_failure_hint(&url, fails)
-                                                ))
+                                                // CDP wedge (connectOverCDP timeout despite an
+                                                // HTTP-OK /json/version): recycle the contained
+                                                // computer once per window and DROP the session so
+                                                // the next call respawns against fresh CDP. motore
+                                                // #1's pre-spawn `browser_cdp_ok` can't see this
+                                                // ws-level wedge, so heal it on the failure (same
+                                                // self-heal the drive's shared path already has).
+                                                if cdp_wedge_signature(&error) {
+                                                    let _ = emit_stream_event(
+                                                        &tx,
+                                                        GenerateStreamEvent::Delta {
+                                                            text: "‹‹ACT››🔧 Browser bloccato: riavvio il computer…‹‹/ACT››".to_string(),
+                                                        },
+                                                    )
+                                                    .await;
+                                                    let healed = force_recycle_contained_computer(
+                                                        &state_owned,
+                                                    )
+                                                    .await;
+                                                    browser_session = None;
+                                                    opened_targets.clear();
+                                                    if healed {
+                                                        Err("The browser was wedged; I recycled the contained computer. Retry the SAME navigation now.".to_string())
+                                                    } else {
+                                                        Err("The browser is unavailable (the contained computer did not recover). Tell the user to check Settings → Local computer.".to_string())
+                                                    }
+                                                } else {
+                                                    let fails = {
+                                                        let entry = nav_failures
+                                                            .entry(url.to_string())
+                                                            .or_insert(0);
+                                                        *entry += 1;
+                                                        *entry
+                                                    };
+                                                    Err(format!(
+                                                        "Navigation failed: {error}{}",
+                                                        browser_navigate_failure_hint(&url, fails)
+                                                    ))
+                                                }
                                             }
                                             (None, Ok(value)) => {
                                                 let snap = browser_snapshot_text(&value);
@@ -31675,12 +31708,15 @@ enum SharedSidecarCall {
 /// is the gap that turned a transient wedge into the drive's hard browse failure:
 /// motore #1's HTTP-only self-heal misses it too, but its warm per-thread session
 /// usually predates the wedge — the drive spawns cold into it.
+/// The textual signature of a CDP wedge in an error string: a `connectOverCDP` timeout.
+fn cdp_wedge_signature(message: &str) -> bool {
+    let message = message.to_ascii_lowercase();
+    message.contains("connectovercdp") && message.contains("timeout")
+}
+
 fn browser_response_indicates_cdp_wedge(response: &BrowserResponse) -> bool {
     match response {
-        BrowserResponse::Error { error, .. } => {
-            let message = error.message.to_ascii_lowercase();
-            message.contains("connectovercdp") && message.contains("timeout")
-        }
+        BrowserResponse::Error { error, .. } => cdp_wedge_signature(&error.message),
         BrowserResponse::Success { .. } => false,
     }
 }
@@ -43643,6 +43679,29 @@ async fn ensure_browser_cdp_healthy(state: &AppState) -> bool {
     })
     .await;
     // Poll for Chrome to relaunch + bind CDP (cold container start).
+    for _ in 0..40 {
+        tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+        if browser_cdp_ok(state).await {
+            return true;
+        }
+    }
+    false
+}
+
+/// UNCONDITIONAL recycle of the contained computer, for the CDP WEDGE: Chrome's HTTP
+/// `/json/version` still answers (so `browser_cdp_ok` returns true and
+/// `ensure_browser_cdp_healthy` is a no-op) yet `connectOverCDP` hangs on stale targets.
+/// Throttled (once per window) so a retry loop can't thrash `docker rm -f`. Returns true
+/// if CDP came back. Mirrors the drive's shared-path self-heal for motore #1's chat path.
+async fn force_recycle_contained_computer(state: &AppState) -> bool {
+    if !browser_recycle_throttle_ok() {
+        return false;
+    }
+    let _ = tokio::task::spawn_blocking(|| {
+        crate::sandbox::recycle_container();
+        let _ = crate::sandbox::ensure_contained_computer();
+    })
+    .await;
     for _ in 0..40 {
         tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
         if browser_cdp_ok(state).await {
