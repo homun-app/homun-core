@@ -8,6 +8,7 @@ members = [
     "crates/process-manager",
     "crates/local-computer-session",
     "crates/secrets",
+    "crates/vault",
     "crates/skill-runtime",
     "crates/orchestrator",
     "crates/context-compression",
