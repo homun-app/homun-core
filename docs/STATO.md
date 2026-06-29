@@ -15,7 +15,10 @@
 - **Linea pratica corrente (sessione 5g):** batch di fix chat-UX/funzionali nell'app reale (vedi rolling in
   fondo) — risolti "bloccato" (self-heal CDP del path motore #1), "continua"/autonomia (final-round per
   progresso), reasoning collassato, isola live+persistente, F1/F2/planner; **form-fill `kind=fill`**
-  (contratto schema-piatto↔sidecar, `a62cfba9`). **In coda:** F4 (ripresa-piano), #3/#5 UI, F3-deep.
+  (contratto schema-piatto↔sidecar, `a62cfba9`); **#5/#3 UI verificati GIÀ FATTI** (formattazione
+  progressiva streaming-aware + pannello computer bar/expanded/full); **F4 loop ripresa-piano**
+  (guard cross-turno + settled-termination + blocked-sticky, gated `HOMUN_PLAN_STALL_ABORT`, `cfd270c9`).
+  **In coda:** F3-deep (risposta vuota per cutoff/budget).
 - **Linea attiva (fondamenta):** *convergenza dalle fondamenta* →
   [plans/2026-06-27-foundations-up-convergence.md](plans/2026-06-27-foundations-up-convergence.md).
 - **Scoperta che guida tutto:** ogni sottosistema ha **due implementazioni**, la canonica è
@@ -258,10 +261,20 @@ di fix concreti, ciascuno committato + buildato + (dove possibile) validato live
   undefined` → `BROWSER_ACTION_FAILED` silenzioso. Quindi `kind=fill` non ha MAI funzionato dalla chat,
   `kind=type` sì. Fix: `resolveFillFields` (`actions.ts`) accetta entrambe le forme convergendole (#5);
   `ref` senza valore → `BROWSER_INVALID_REQUEST` esplicito. +1 test fixture (flat fill), 24/24 verdi.
-- **In coda (prossimi):** **F4** (ripresa-piano cross-turno che cicla — il contatore F2/budget è per-turno),
-  **form-fill** (`browser_act kind=fill → ERROR` visto nei log), **#3** (espansione pannello computer),
-  **#5** (formattazione progressiva — sembra già live ma da verificare), **F3-deep** (modello che a volte
-  non produce risposta per cutoff). NB: doc stantii da sistemare (ADR 0006 ha già il banner stale).
+- **#5 / #3 (UI) verificati GIÀ FATTI** (no codice): #5 formattazione progressiva è live — il messaggio
+  in streaming rende `RichMessage streaming` → `RichMessageRenderer` streaming-aware (code-fence aperti,
+  mermaid differito); #3 il pannello computer ha già i tre stati `bar`(320px)→`expanded`(620px)→`full`
+  (overlay `4vh/4vw`, ESC+scrim). Probabilmente chiusi in sessioni precedenti senza spuntare STATO.
+- **F4 — loop ripresa-piano** (`cfd270c9`, backend): root-cause = contatori recovery PER-TURNO
+  (`nav_failures`/`rounds_since_progress` `let mut` nel turno) → piano ripreso riavvia lo step fallito a
+  ogni resume. Fix: segnale cross-turno persistito sul piano (`stall_turns`/`last_resume_done`, preservati
+  negli upsert mid-turno) conta i resume senza nuovi `done`; dopo cap=3 l'harness `block_stalled_step`.
+  Terminazione su **`settled`** (done|blocked), non solo `complete`, + `blocked` sticky in `merge_plan`
+  (evita il re-arm). Puri testati (`next_plan_stall`/`plan_is_settled`/`block_stalled_step`), wiring gated
+  `HOMUN_PLAN_STALL_ABORT` (non validabile live qui, come `HOMUN_PLAN_RECONCILE`). +5 test, 33/33 piano verdi.
+- **In coda (prossimi):** **F3-deep** (modello che a volte non produce la risposta per cutoff/budget —
+  diverso dal display); validare live F4 (`HOMUN_PLAN_STALL_ABORT=1`) e form-fill (l'utente li testa).
+  NB: doc stantii da sistemare (ADR 0006 ha già il banner stale).
 
 **Sessione 2026-06-29 (5e) — REGRESSIONE BROWSE: diagnosi corretta dall'evidenza + 2/3 cause risolte:**
 - **Investigazione (3 deep-dive paralleli + verifica in codice/dal vivo):** la diagnosi 5c era
