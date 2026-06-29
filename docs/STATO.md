@@ -187,15 +187,19 @@ Commit `b705289a` (driver+executor) + `3ce99c67` (arg-fill). Vedi [agent-loop](a
   l'ULTIMO snapshot pieno (16k) e stubba i vecchi (mirror di `prune_browser_history`), così il modello
   VEDE i campi del form. Commit `3c70dbc8`. Validato live: il prune compare nel gathered; il self-heal CDP
   ha anche recuperato dal vivo (round 0 wedge→recycle→round 1 ok).
-- 🛑 **DECISIONE DI ARCHITETTURA (Phase 4.5 systematic-debugging):** ogni fix al loop agentico scopre un
-  ALTRO gap che motore #1 ha già (troncamento [fatto] → **wandering** [16 round di scroll, no wander-cap/
-  no-progress-detection] → **sintesi vuota**). Continuare a patchare `agentic.rs` = **duplicare motore #1**
-  (anti caposaldo #5). Le opzioni: (1) estrarre il loop browser di motore #1 in un'unità condivisa e farci
-  delegare il drive (vera convergenza, ma estrazione grossa sul hot-path di `stream_chat_via_openai`);
-  (2) instradare i piani **solo-browse** a motore #1 quando il drive è on (basso rischio, il drive resta
-  per l'orchestrazione multi-capability); (3) continuare a indurire il loop agentico (sconsigliato:
-  duplicazione). **Raccomandazione: (2) ora + (1) come end-state.** Da decidere con l'utente prima di
-  procedere. Vedi [[homun-browser-drive-regression-diagnosis]].
+- ✅ **RISOLTO — browse instradato a motore #1 (commit `8c427e18`).** Prova empirica decisiva (drive ON):
+  il loop agentico del drive è PEGGIORE di motore #1 — 16 round × 2 chiamate cloud (~5 min), vaga
+  (scroll/scroll, `action=None`), **risposta VUOTA**; riproducibile (Tokyo, notizie tech). Causa
+  ARCHITETTURALE, non un patch mancante: un motore plan-execute separato con loop `generate_json` è il
+  design sbagliato per uno strumento osserva→agisci. Fix: `plan_is_browse_only` → `Ok(None)` → fallback a
+  motore #1 (path fail-open esistente). **Validato live:** stessa query notizie tech → instradata a motore
+  #1 (0 righe `[agentic]`) → risposta vera, formattata, con fonte. Il drive resta per piani multi-capability.
+- 🧭 **EVIDENZA SOTA (3 ricerche citate, [[homun-single-loop-evidence-verdict]]):** il campo (2025) usa UN
+  loop ReAct guardato col piano come *tool* (Claude Code TodoWrite, Manus todo.md), NON un planner+executor
+  separato. browser-use ha RIMOSSO il suo planner. Forzare JSON sui modelli deboli DANNEGGIA il ragionamento
+  ("Format Tax": il degrado entra dal prompt, non dal decoder). → motore #1 è il design corretto; il drive
+  (due motori) è l'errore architetturale. ADR 0016 (slot-filling) emendato, ADR 0020 (convergere
+  nell'orchestrator) **invertito** → convergere nel loop di chat unico. **Da fissare in un ADR.**
 - ⏳ Altri residui: flicker reasoning della sintesi (collector → reasoning alla work-island); accendere
   il drive di default solo DOPO la convergenza browser.
 - ⏳ **F3.4** ritirare `merge_plan` per-titolo + prompt-prosa (solo quando il drive è il default).
