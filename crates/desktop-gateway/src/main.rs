@@ -6566,6 +6566,16 @@ fn strip_chat_markers(text: &str) -> String {
     out.trim().to_string()
 }
 
+/// F3-deep: true when an assembled answer carries NO answer body — only control markers
+/// (chiefly a ‹‹REASONING›› trace) or nothing. This is the "non produce la risposta" failure:
+/// a reasoning model that spent its whole token budget thinking (`finish_reason:length` with
+/// empty content) leaves `‹‹REASONING››…‹‹/REASONING››` and no prose, so committing it would
+/// Done an empty / reasoning-only bubble. `strip_chat_markers` removes every marker block, so
+/// an empty remainder means there is no real answer to show.
+fn answer_body_is_empty(content: &str) -> bool {
+    strip_chat_markers(content).trim().is_empty()
+}
+
 fn collapse_plan_markers(text: &str) -> String {
     const OPEN: &str = "‹‹PLAN››";
     const CLOSE: &str = "‹‹/PLAN››";
@@ -23585,6 +23595,31 @@ Tell the user clearly; do NOT claim it's done."
                     .await;
                     continue;
                 }
+            }
+            // F3-deep: the model is about to finalize but produced NO answer body this round
+            // — typically a reasoning model that burned its whole token budget thinking
+            // (`finish_reason:length`, empty content) so only a ‹‹REASONING›› trace remains.
+            // Committing it would Done an empty / reasoning-only bubble (the "non produce la
+            // risposta" report). Recover by breaking WITHOUT `final_done`: the guaranteed
+            // forced-synthesis (`!final_done` below) then writes a real answer with a FRESH
+            // token budget and an explicit "write the FINAL ANSWER now" directive. `break`
+            // leaves the round loop, so the synthesis runs exactly once — no spin, no counter;
+            // if it too comes back empty, its own fallback chain ends the turn cleanly.
+            if answer_body_is_empty(&content) && accumulated.trim().is_empty() {
+                if verbose_debug() {
+                    let fr = body
+                        .get("choices")
+                        .and_then(|c| c.get(0))
+                        .and_then(|c| c.get("finish_reason"))
+                        .and_then(|f| f.as_str())
+                        .unwrap_or("");
+                    eprintln!("[answer] empty answer body (finish_reason={fr}) → forced synthesis");
+                }
+                // Keep the reasoning trace in context so the synthesis builds on it.
+                if !content.trim().is_empty() {
+                    messages.push(serde_json::json!({ "role": "assistant", "content": content }));
+                }
+                break;
             }
             // The content already streamed LIVE (raw) via collect_openai_stream; here we
             // only accumulate the SANITIZED version, which becomes the authoritative
@@ -45822,7 +45857,8 @@ mod tests {
         legacy_dir_action, llm_concurrency_view, mcp_error_hint, mcp_provider_slug,
         mcp_stdio_config_from_metadata, mcp_stdio_config_to_metadata, memory_age_days, merge_plan,
         message_has_image_url, normalize_for_dedup, parse_plan_marker, parse_review_suggestion,
-        MAX_PLAN_STALL_RESUMES, block_stalled_step, next_plan_stall, plan_stall_exhausted,
+        MAX_PLAN_STALL_RESUMES, answer_body_is_empty, block_stalled_step, next_plan_stall,
+        plan_stall_exhausted,
         plan_is_settled, plan_done_count, plan_incomplete_reason, plan_is_complete, plan_next_open,
         plan_step_status, proactive_memory_request_for_suggestion_action,
         project_filesystem_mcp_instruction, prune_browser_history, redact_sensitive_text,
@@ -50477,6 +50513,21 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         // Nothing runnable → None (already settled, nothing to block).
         let mut settled = vec![serde_json::json!({"id":"s1","title":"A","status":"done"})];
         assert!(block_stalled_step(&mut settled).is_none());
+    }
+
+    #[test]
+    fn answer_body_is_empty_detects_reasoning_only_completions() {
+        // The "non produce la risposta" failure: a reasoning model spends its whole token
+        // budget thinking, leaving only a ‹‹REASONING›› trace and no prose.
+        assert!(answer_body_is_empty(""));
+        assert!(answer_body_is_empty("   \n  "));
+        assert!(answer_body_is_empty("‹‹REASONING››long chain of thought‹‹/REASONING››"));
+        assert!(answer_body_is_empty("‹‹PLAN››- [x] step‹‹/PLAN››"));
+        // A real answer — with or without a reasoning trace above it — is NOT empty.
+        assert!(!answer_body_is_empty("Here is the answer."));
+        assert!(!answer_body_is_empty(
+            "‹‹REASONING››thought‹‹/REASONING››\nHere is the answer."
+        ));
     }
 
     #[test]
