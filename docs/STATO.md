@@ -14,8 +14,8 @@
   e [[homun-single-loop-evidence-verdict]].
 - **Linea pratica corrente (sessione 5g):** batch di fix chat-UX/funzionali nell'app reale (vedi rolling in
   fondo) — risolti "bloccato" (self-heal CDP del path motore #1), "continua"/autonomia (final-round per
-  progresso), reasoning collassato, isola live+persistente, F1/F2/planner. **In coda:** F4 (ripresa-piano),
-  form-fill, #3/#5 UI.
+  progresso), reasoning collassato, isola live+persistente, F1/F2/planner; **form-fill `kind=fill`**
+  (contratto schema-piatto↔sidecar, `a62cfba9`). **In coda:** F4 (ripresa-piano), #3/#5 UI, F3-deep.
 - **Linea attiva (fondamenta):** *convergenza dalle fondamenta* →
   [plans/2026-06-27-foundations-up-convergence.md](plans/2026-06-27-foundations-up-convergence.md).
 - **Scoperta che guida tutto:** ogni sottosistema ha **due implementazioni**, la canonica è
@@ -252,6 +252,12 @@ di fix concreti, ciascuno committato + buildato + (dove possibile) validato live
   `rounds_since_progress`, così un piano lungo ma in avanzamento veniva forzato a sintetizzare a metà (round
   32) → turno incompleto → l'utente doveva digitare "continua". Ora misurato dall'ultimo progresso → il
   task multi-step va fino in fondo da solo (tetto duro 600 round).
+- **form-fill `kind=fill`** (`a62cfba9`): root-cause = mismatch di CONTRATTO (backend, non UI). Lo schema
+  chat `browser_act` è PIATTO (`{kind,ref,text}`, una micro-azione), ma il `case "fill"` del sidecar TS
+  iterava `action.fields` (forma array di `fill_form`); la forma piatta non porta `fields` → `for…of
+  undefined` → `BROWSER_ACTION_FAILED` silenzioso. Quindi `kind=fill` non ha MAI funzionato dalla chat,
+  `kind=type` sì. Fix: `resolveFillFields` (`actions.ts`) accetta entrambe le forme convergendole (#5);
+  `ref` senza valore → `BROWSER_INVALID_REQUEST` esplicito. +1 test fixture (flat fill), 24/24 verdi.
 - **In coda (prossimi):** **F4** (ripresa-piano cross-turno che cicla — il contatore F2/budget è per-turno),
   **form-fill** (`browser_act kind=fill → ERROR` visto nei log), **#3** (espansione pannello computer),
   **#5** (formattazione progressiva — sembra già live ma da verificare), **F3-deep** (modello che a volte
