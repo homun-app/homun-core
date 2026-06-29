@@ -3430,6 +3430,7 @@ name = "local-first-vault"
 version = "0.1.0"
 dependencies = [
  "local-first-secrets",
+ "rusqlite",
  "serde",
  "serde_json",
 ]
