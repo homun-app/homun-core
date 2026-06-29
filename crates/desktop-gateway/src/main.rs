@@ -19662,7 +19662,14 @@ gathered‹‹/ACT››"
             // tool_choice:"none" — minimax-via-Ollama ignores it and keeps calling
             // tools, so the loop never synthesizes and ends with "limite di passi").
             // Omitting the tools field forces a text answer.
-            let is_final_round = round + 1 >= max_rounds;
+            // Measure the "final round" from the LAST PROGRESS (per-step budget), NOT the
+            // total round count — same basis as the `break` above. Using total `round` here
+            // was a bug: a long but STEADILY PROGRESSING plan (e.g. a 5-step browse) hit
+            // is_final_round at round 32 and got force-synthesized MID-PLAN, ending the turn
+            // incomplete so the user had to keep typing "continua". Now the turn only forces a
+            // final answer when a SINGLE step stalls for the whole budget (or the 600-round
+            // hard ceiling) — so the harness drives the task end-to-end on its own.
+            let is_final_round = rounds_since_progress + 1 >= max_rounds;
             // Final round: tools are omitted so the model MUST answer in text. Without an
             // explicit directive a model that was mid-browse writes a TRANSITION note
             // ("now I'll compose the briefing", "I'll update the plan") instead of the
