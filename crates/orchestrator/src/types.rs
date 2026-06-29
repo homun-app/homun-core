@@ -145,6 +145,9 @@ pub enum OrchestratorRoute {
 pub struct DirectAnswer {
     pub answer: String,
     pub reason: String,
+    // Weak models emit `confidence` as a WORD ("high") or omit it; coerce/​default it
+    // instead of failing the whole plan ("invalid type: string \"high\", expected f64").
+    #[serde(default = "default_confidence", deserialize_with = "lenient_confidence")]
     pub confidence: f64,
 }
 
@@ -280,6 +283,31 @@ where
         serde_json::Value::String(text) => Some(text),
         other => Some(other.to_string()),
     })
+}
+
+/// Coerces the planner's `confidence` into f64 without failing the whole plan when a
+/// weak model emits it as a WORD ("high"/"medium"/"low") or a numeric string instead of a
+/// number — the observed `invalid type: string "high", expected f64` dead-end that dropped
+/// the drive to the model-loop fallback. Same tolerance intent as [`lenient_string`]
+/// (caposaldo #6 — parsing tollerante ovunque).
+fn lenient_confidence<'de, D>(deserializer: D) -> Result<f64, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Ok(match serde_json::Value::deserialize(deserializer)? {
+        serde_json::Value::Number(number) => number.as_f64().unwrap_or(0.5),
+        serde_json::Value::String(text) => match text.trim().to_ascii_lowercase().as_str() {
+            "high" | "alta" | "very_high" | "certain" | "sure" => 0.9,
+            "medium" | "media" | "moderate" | "mid" => 0.6,
+            "low" | "bassa" | "uncertain" | "unsure" => 0.3,
+            other => other.parse::<f64>().unwrap_or(0.5),
+        },
+        _ => 0.5,
+    })
+}
+
+fn default_confidence() -> f64 {
+    0.5
 }
 
 impl From<PlanStepWire> for PlanStep {
@@ -440,5 +468,35 @@ mod plan_step_tests {
         let proposal = plan.plan_propose.expect("proposal");
         assert_eq!(proposal.summary, "Build the report");
         assert_eq!(proposal.steps, vec!["Gather sources", "Write report"]);
+    }
+
+    #[test]
+    fn direct_answer_tolerates_word_or_missing_confidence() {
+        // The observed dead-end: confidence emitted as the WORD "high" → must not fail the
+        // whole plan deserialize (it dropped the drive to the model-loop fallback).
+        let worded: ExecutionPlan = serde_json::from_value(serde_json::json!({
+            "route": "direct_answer",
+            "direct_answer": { "answer": "42", "reason": "math", "confidence": "high" },
+            "steps": []
+        }))
+        .unwrap();
+        assert!((worded.direct_answer.unwrap().confidence - 0.9).abs() < 1e-9);
+
+        // A numeric value is preserved; a missing one defaults instead of failing.
+        let numeric: ExecutionPlan = serde_json::from_value(serde_json::json!({
+            "route": "direct_answer",
+            "direct_answer": { "answer": "x", "reason": "y", "confidence": 0.72 },
+            "steps": []
+        }))
+        .unwrap();
+        assert!((numeric.direct_answer.unwrap().confidence - 0.72).abs() < 1e-9);
+
+        let missing: ExecutionPlan = serde_json::from_value(serde_json::json!({
+            "route": "direct_answer",
+            "direct_answer": { "answer": "x", "reason": "y" },
+            "steps": []
+        }))
+        .unwrap();
+        assert!((missing.direct_answer.unwrap().confidence - 0.5).abs() < 1e-9);
     }
 }
