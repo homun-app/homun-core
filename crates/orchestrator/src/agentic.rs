@@ -41,10 +41,18 @@ use std::collections::BTreeMap;
 const MAX_AGENTIC_ROUNDS: usize = 16;
 /// Per-turn token ceiling for the action/synthesis emission.
 const AGENTIC_MAX_TOKENS: u32 = 768;
-/// Truncation of a tool result fed back into the loop history. Generous: a page
-/// snapshot carries the element "refs" the model needs to act (fill a field, click
-/// a button), and those sit deep in the tree — too small a digest hides the form.
-const RESULT_DIGEST_CHARS: usize = 4_000;
+/// Full size of the MOST RECENT tool result fed back to the model. A page snapshot
+/// carries the element "refs" the model needs to act (fill a field, click a button),
+/// and those sit deep in the tree — the old flat 4k digest hid the form, which is why
+/// the drive couldn't fill search forms (treni/voli). Mirrors motore #1's snapshot
+/// budget (`browser_chat_snapshot_params` max_chars=20k); the loop's prune
+/// (`render_history`) keeps only THIS latest one full so context stays bounded.
+const LATEST_RESULT_CHARS: usize = 16_000;
+/// Older tool results collapse to this stub: their element refs are stale (superseded
+/// by the latest snapshot), so only a breadcrumb of what was read is kept. This is the
+/// agentic-loop twin of motore #1's `prune_browser_history` (keep last snapshot, stub
+/// the rest) — without it, full snapshots every round would explode the context.
+const STALE_RESULT_CHARS: usize = 200;
 /// Truncation of an upstream dependency output in the opening context.
 const UPSTREAM_DIGEST_CHARS: usize = 400;
 
@@ -89,15 +97,17 @@ where
     let contract = step.contract.as_deref().unwrap_or("(return your findings)");
     let upstream = upstream_context(step, completed);
 
-    let mut history = String::new();
+    let mut history: Vec<HistoryEntry> = Vec::new();
     let mut evidence: Vec<String> = Vec::new();
 
     for round in 0..MAX_AGENTIC_ROUNDS {
         // The last available round (or no gather tools at all) forces a synthesis,
         // so the step always ends with a summary rather than running out silently.
         let force_finish = round + 1 == MAX_AGENTIC_ROUNDS || gather_names.is_empty();
+        // Render once per round with the latest snapshot full, older ones stubbed.
+        let history_text = render_history(&history);
         let prompt = build_prompt(
-            step, goal, contract, &upstream, gather_tools, &history, force_finish,
+            step, goal, contract, &upstream, gather_tools, &history_text, force_finish,
         );
         let request = GenerateJsonRequest {
             prompt,
@@ -130,11 +140,11 @@ where
             // returns an empty summary without ever browsing). Require at least one
             // successful gather first — nudge and continue.
             if !force_finish && evidence.is_empty() {
-                history.push_str(&format!(
+                history.push(HistoryEntry::Note(format!(
                     "Round {round}: you have not gathered anything yet — you MUST use a \
                      tool (start by navigating to a relevant website or search engine, \
                      then read it) before you can finish. Do not finish empty-handed.\n"
-                ));
+                )));
                 continue;
             }
             let summary = action
@@ -146,8 +156,9 @@ where
             // round the model sometimes asks for another tool instead of writing a
             // summary (empty summary) — but the history holds what it actually read,
             // so the driver's final synthesis (a capable model) can still answer from
-            // it. Never lose the gathered evidence to an empty summary field.
-            let gathered: String = history.chars().take(16_000).collect();
+            // it. Never lose the gathered evidence to an empty summary field. The
+            // render keeps the latest page full (the results the synthesis needs).
+            let gathered: String = render_history(&history).chars().take(20_000).collect();
             return Ok(StepOutcome {
                 succeeded: true,
                 output: serde_json::json!({ "summary": summary, "gathered": gathered }),
@@ -171,7 +182,7 @@ where
                     // Pass the loop history (with the latest snapshot's element refs)
                     // so arg-fill can choose the right ref for a browser_act.
                     match crate::step_executor::fill_arguments(
-                        runtime, step, tool, completed, &history,
+                        runtime, step, tool, completed, &history_text,
                     ) {
                         Ok(arguments) => {
                             if dbg {
@@ -191,11 +202,13 @@ where
                                         );
                                     }
                                     evidence.push(format!("gather:{}", tool.name));
-                                    history.push_str(&format!(
-                                        "Round {round}: used {} -> {}\n",
-                                        tool.name,
-                                        digest(&output, RESULT_DIGEST_CHARS)
-                                    ));
+                                    // Keep the FULL result; the renderer prunes older
+                                    // ones so only this latest snapshot stays full.
+                                    history.push(HistoryEntry::ToolResult {
+                                        round,
+                                        tool: tool.name.clone(),
+                                        output,
+                                    });
                                 }
                                 // A tool error is fed back so the model can adapt;
                                 // it does not kill the step (rounds remain).
@@ -203,10 +216,10 @@ where
                                     if dbg {
                                         eprintln!("[agentic]   ERR {} failed: {error}", tool.name);
                                     }
-                                    history.push_str(&format!(
+                                    history.push(HistoryEntry::Note(format!(
                                         "Round {round}: {} failed: {error}\n",
                                         tool.name
-                                    ));
+                                    )));
                                 }
                             }
                         }
@@ -214,23 +227,23 @@ where
                             if dbg {
                                 eprintln!("[agentic]   argfill ERR {}: {error}", tool.name);
                             }
-                            history.push_str(&format!(
+                            history.push(HistoryEntry::Note(format!(
                                 "Round {round}: could not prepare {} arguments: {error}\n",
                                 tool.name
-                            ));
+                            )));
                         }
                     }
                 }
-                None => history.push_str(&format!(
+                None => history.push(HistoryEntry::Note(format!(
                     "Round {round}: requested tool {tool_name:?} is not available; \
                      choose one of the listed tools or finish.\n"
-                )),
+                ))),
             }
         } else {
             // Unrecognized action on a non-forced round: nudge and continue.
-            history.push_str(&format!(
+            history.push(HistoryEntry::Note(format!(
                 "Round {round}: no valid action; use a listed tool or finish.\n"
-            ));
+            )));
         }
     }
 
@@ -342,6 +355,53 @@ fn upstream_context(step: &PlanStep, completed: &BTreeMap<String, StepOutcome>) 
 
 fn digest(value: &serde_json::Value, limit: usize) -> String {
     value.to_string().chars().take(limit).collect()
+}
+
+/// One entry in the agentic loop's working memory. The split exists so the renderer
+/// can PRUNE: browser tool results carry a large page snapshot, but only the LATEST
+/// one is actionable (older refs are stale) — so it alone is rendered full, mirroring
+/// motore #1's `prune_browser_history`. Notes (errors, nudges) are always small.
+enum HistoryEntry {
+    ToolResult {
+        round: usize,
+        tool: String,
+        output: serde_json::Value,
+    },
+    Note(String),
+}
+
+/// Renders the loop history for the prompt / arg-fill, keeping ONLY the most recent
+/// tool result at full size (`LATEST_RESULT_CHARS`) and stubbing older ones
+/// (`STALE_RESULT_CHARS`). This is what lets the model see the current page's form
+/// fields without the context growing unbounded over 16 rounds.
+fn render_history(entries: &[HistoryEntry]) -> String {
+    let last_result = entries
+        .iter()
+        .rposition(|entry| matches!(entry, HistoryEntry::ToolResult { .. }));
+    let mut out = String::new();
+    for (index, entry) in entries.iter().enumerate() {
+        match entry {
+            HistoryEntry::ToolResult {
+                round,
+                tool,
+                output,
+            } => {
+                if Some(index) == last_result {
+                    out.push_str(&format!(
+                        "Round {round}: used {tool} -> {}\n",
+                        digest(output, LATEST_RESULT_CHARS)
+                    ));
+                } else {
+                    out.push_str(&format!(
+                        "Round {round}: used {tool} -> {} …(older snapshot pruned)\n",
+                        digest(output, STALE_RESULT_CHARS)
+                    ));
+                }
+            }
+            HistoryEntry::Note(text) => out.push_str(text),
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -557,6 +617,35 @@ mod tests {
             .as_array()
             .unwrap();
         assert_eq!(action_enum, &vec![serde_json::json!("finish")]);
+    }
+
+    #[test]
+    fn render_history_keeps_latest_snapshot_full_and_stubs_older() {
+        // A snapshot bigger than the full budget — the model must see the LATEST one
+        // in full to find a form's element ref (the form-fill regression root cause).
+        let big = "X".repeat(LATEST_RESULT_CHARS + 5_000);
+        let entries = vec![
+            HistoryEntry::ToolResult {
+                round: 0,
+                tool: "browser_navigate".to_string(),
+                output: serde_json::json!({ "snapshot": big }),
+            },
+            HistoryEntry::Note("Round 1: cookie banner dismissed\n".to_string()),
+            HistoryEntry::ToolResult {
+                round: 2,
+                tool: "browser_snapshot".to_string(),
+                output: serde_json::json!({ "snapshot": big }),
+            },
+        ];
+        let rendered = render_history(&entries);
+        // Notes are always kept verbatim.
+        assert!(rendered.contains("cookie banner dismissed"));
+        // The OLDER snapshot is stubbed; the LATEST is full.
+        assert!(rendered.contains("older snapshot pruned"));
+        // Latest carried full (>budget); but NOT both full (would be ~2x budget) —
+        // proving the older one was pruned to a stub, keeping context bounded.
+        assert!(rendered.len() > LATEST_RESULT_CHARS);
+        assert!(rendered.len() < LATEST_RESULT_CHARS + STALE_RESULT_CHARS + 1_000);
     }
 
     // NOTE: the Read/Draft gather filter is now the CALLER's responsibility
