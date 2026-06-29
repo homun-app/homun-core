@@ -36258,6 +36258,26 @@ fn drive_canonical_steps(plan: &ExecutionPlan, outcome: Option<&DriveOutcome>) -
     steps
 }
 
+/// True when EVERY step of the plan is browser work — a browse `SubagentTask` (in the
+/// drive a SubagentTask is always the browse agent) or a `browser_*` CapabilityCall.
+/// Such plans are DELEGATED to motore #1's inline loop (caller returns `Ok(None)`,
+/// reusing the existing fail-open path). Empirically motore #1's single native-tool-
+/// calling loop browses far better than the drive's agentic `generate_json` loop
+/// (which wanders and returns empty), and the field consensus (single guarded loop +
+/// planning-as-a-tool, not a separate plan-execute engine) backs that. The drive still
+/// owns genuine multi-capability plans.
+fn plan_is_browse_only(plan: &ExecutionPlan) -> bool {
+    !plan.steps.is_empty()
+        && plan.steps.iter().all(|step| {
+            matches!(step.kind, PlanStepKind::SubagentTask)
+                || step
+                    .tool_name
+                    .as_deref()
+                    .map(|name| browser_method_for_chat_tool(name).is_some())
+                    .unwrap_or(false)
+        })
+}
+
 /// Plans then DRIVES the turn. Returns `Ok(Some((gathered, plan_steps)))` when the
 /// driver gathered evidence (the caller synthesizes the answer and shows the
 /// plan), `Ok(None)` to fall back to the model loop (conversational, empty plan, or
@@ -36324,6 +36344,21 @@ fn orchestrator_drive_for_chat(
     let plan = brain.plan_only(&request).map_err(|e| format!("plan_only: {e}"))?;
     if matches!(plan.route, OrchestratorRoute::DirectAnswer) || plan.steps.is_empty() {
         return Ok(None); // conversational / nothing to drive → model loop
+    }
+    // BROWSE → motore #1 (evidence-based, 2026-06-29). Empirically the drive's agentic
+    // browse loop is WORSE than motore #1's inline loop: slow (16 rounds × 2 model calls),
+    // it wanders (scroll/scroll, action=None) and often returns an EMPTY answer. Motore #1
+    // is the mature, OpenClaw-faithful single ReAct loop (native tool-calling, visible
+    // session, no-progress detection, wander-cap, Computer panel) — and the field's
+    // consensus (single guarded loop, not a separate plan-execute engine) backs it. So a
+    // browse-only plan falls back to motore #1 via the existing fail-open path. The drive
+    // still EXECUTES genuine multi-capability plans. See docs/decisions on the single-loop
+    // verdict + STATO.
+    if plan_is_browse_only(&plan) {
+        if verbose_debug() {
+            eprintln!("[drive] browse-only plan → motore #1 (the drive's agentic browse regresses)");
+        }
+        return Ok(None);
     }
 
     // 2. Drive the plan in-turn: model fills args, sidecar executes, runtime verifies.
