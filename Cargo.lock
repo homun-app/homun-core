@@ -3429,6 +3429,7 @@ dependencies = [
 name = "local-first-vault"
 version = "0.1.0"
 dependencies = [
+ "local-first-secrets",
  "serde",
  "serde_json",
 ]
