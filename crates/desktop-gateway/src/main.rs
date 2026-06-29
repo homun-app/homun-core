@@ -6725,12 +6725,25 @@ fn answer_concludes_plan(open_steps: usize, delivered_chars: usize) -> bool {
 /// step still open, reconcile that step to `done` so the PERSISTED runtime plan reflects the
 /// delivered work. Without it the plan stays "active" and the NEXT turn falsely resumes it
 /// (`thread_has_active_runtime_plan` only goes quiet when the plan is complete→Stale) — the
-/// "lo segue e non lo segue" symptom. Gated until it can be validated against the live loop;
-/// `HOMUN_PLAN_RECONCILE=1`/`on` turns it on. Default off keeps the old behaviour exactly.
+/// "lo segue e non lo segue" symptom. Default-on after live evidence showed the Plan panel
+/// stuck at 1/2 while the delivered answer had already registered the last-step failure.
+/// `HOMUN_PLAN_RECONCILE=0`/`off` remains as a diagnostic opt-out.
+fn plan_reconcile_on_delivery_flag(value: Option<&str>) -> bool {
+    match value.map(str::trim).filter(|value| !value.is_empty()) {
+        Some(value) if value == "0" || value.eq_ignore_ascii_case("off") => false,
+        _ => true,
+    }
+}
+
 fn plan_reconcile_on_delivery_enabled() -> bool {
-    std::env::var("HOMUN_PLAN_RECONCILE")
-        .map(|value| value == "1" || value.eq_ignore_ascii_case("on"))
-        .unwrap_or(false)
+    plan_reconcile_on_delivery_flag(std::env::var("HOMUN_PLAN_RECONCILE").ok().as_deref())
+}
+
+fn browser_open_research_discovery_instruction() -> &'static str {
+    "For open-ended current news or broad web research where the user did NOT name \
+a specific site/URL, start with search/discovery (for example a search results or \
+news discovery page), scan multiple recent candidates, then choose the best sources. \
+Do not jump directly to one outlet unless the user explicitly named it."
 }
 
 fn runtime_plan_thread_key(thread_id: Option<&str>) -> String {
@@ -18358,6 +18371,7 @@ async fn stream_chat_via_openai(
         max_context_chars: Some(chat_context_budget_chars(model_context_window)),
     })
     .runtime_prompt;
+    let browser_discovery = browser_open_research_discovery_instruction();
 
     let system = format!(
         "You are the local assistant acting as ORCHESTRATOR. Right now {now}: ALWAYS \
@@ -18384,6 +18398,7 @@ blocked/has no data, move to the next. Do not repeat the same search. For FACTUA
 statistical data (sports standings/results/schedules, reference figures, public \
 timetables) PREFER a login-free, text-rich source (e.g. Wikipedia, an official \
 schedule page) over login-walled, store, or marketing pages that return no data. \
+{browser_discovery} \
 EXTRACT AS YOU GO: the moment a page shows the data you need, COPY the concrete values \
 (the actual table rows, names, numbers, dates) into your message text — do NOT defer \
 extraction to \"later\" or across another tool call, because the page content is NOT \
@@ -23536,17 +23551,16 @@ Tell the user clearly; do NOT claim it's done."
                         continue;
                     }
                     // The answer is substantial and the plan is all-but-closed → finalize with
-                    // `content` instead of nudging. F2.2 (gated): reconcile the one still-open
+                    // `content` instead of nudging. F2.2 (default-on): reconcile the one still-open
                     // step to `done` + persist, so the runtime plan matches the delivered work
                     // and the NEXT turn doesn't falsely resume it. Reuses the canonical
-                    // mark-done→rebuild→persist path; default-off keeps the old behaviour.
+                    // mark-done→persist path.
                     if plan_reconcile_on_delivery_enabled() {
                         if let Some(open_index) = plan_steps
                             .iter()
                             .position(|s| plan_step_status(s) != "done")
                         {
                             plan_steps[open_index]["status"] = serde_json::json!("done");
-                            plan = runtime_execution_plan(&plan_steps);
                             upsert_runtime_plan_memory_from_state(
                                 &state_owned,
                                 thread_id.as_deref(),
@@ -46819,6 +46833,23 @@ prs.save(Path({path:?}))
         assert!(!super::answer_concludes_plan(1, 599));
         // Several steps still open → it genuinely stopped early, keep nudging.
         assert!(!super::answer_concludes_plan(2, 5000));
+    }
+
+    #[test]
+    fn plan_reconcile_on_delivery_is_default_on_with_explicit_opt_out() {
+        assert!(super::plan_reconcile_on_delivery_flag(None));
+        assert!(super::plan_reconcile_on_delivery_flag(Some("1")));
+        assert!(super::plan_reconcile_on_delivery_flag(Some("on")));
+        assert!(!super::plan_reconcile_on_delivery_flag(Some("0")));
+        assert!(!super::plan_reconcile_on_delivery_flag(Some("off")));
+    }
+
+    #[test]
+    fn browser_method_guides_open_ended_news_through_discovery_first() {
+        let guidance = super::browser_open_research_discovery_instruction();
+        assert!(guidance.contains("open-ended current news"));
+        assert!(guidance.contains("start with search/discovery"));
+        assert!(guidance.contains("Do not jump directly to one outlet"));
     }
 
     #[test]

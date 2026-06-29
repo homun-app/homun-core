@@ -27,7 +27,12 @@
   → forced synthesis` e risposta finale prodotta dalla sintesi. **F4 NON promosso:** il tentativo live con
   URL `.invalid` non ha raggiunto il log F4; ha invece esposto contaminazione/sostituzione del runtime-plan
   ripreso con un piano non correlato da memoria/recall. Tenere `HOMUN_PLAN_STALL_ABORT` gated finché
-  l'identità/perimetro del piano ripreso non è chiusa.
+  l'identità/perimetro del piano ripreso non è chiusa. **Follow-up live 16:20:** piano `.invalid` consegnato
+  ma UI rimasta 1/2 perché lo step finale era ancora `doing` nello store; F2.2 promosso default-on
+  (`HOMUN_PLAN_RECONCILE=0/off` resta opt-out). Browser research: per news/ricerche aperte il prompt ora
+  impone discovery-first (search/news discovery) prima di scegliere le fonti, evitando il salto diretto a
+  una singola testata tipo ANSA se non nominata dall'utente. Computer dock: la freccia su nel card compatto
+  apre direttamente la vista fullscreen live.
 - **Linea attiva (fondamenta):** *convergenza dalle fondamenta* →
   [plans/2026-06-27-foundations-up-convergence.md](plans/2026-06-27-foundations-up-convergence.md).
 - **Scoperta che guida tutto:** ogni sottosistema ha **due implementazioni**, la canonica è
@@ -125,13 +130,14 @@ richiede eval bi-popolazione (gemma4 vs capace) **non eseguibile in questo ambie
   ADR Fase-1 per validare il floor prima di accenderlo. Pulizia: tolto l'`#![allow(dead_code)]`
   stantio in `scaffold.rs`; rimossa la variante `VerifyDepth::Off` mai costruita (l'ADR vieta il
   "no-verify" per i capaci). +2 test scaffold. Caposaldo #2/#12, ADR 0018.
-- ◑ **F2.2 il piano traccia il lavoro** (parziale, gated) — l'over-running guard è stato estratto
+- ✅ **F2.2 il piano traccia il lavoro** (default-on, opt-out) — l'over-running guard è stato estratto
   in `answer_concludes_plan` (puro, testato; refactor behavior-preserving) e, quando ACCETTA la
-  risposta con l'ultimo step aperto, ora riconcilia quello step a `done` + persiste (riusa il path
-  canonico mark-done→`runtime_execution_plan`→`upsert_runtime_plan_memory_from_state`), così il
-  turno DOPO non riprende il piano a vuoto. Gated `HOMUN_PLAN_RECONCILE` (default off, hot-path non
-  validabile live qui). La sintesi forzata NON riconcilia (lì il lavoro è incompiuto, il piano DEVE
-  restare aperto). Resta: validare on; eventuale "done dopo verify" più stretto; il caso sintesi.
+  risposta con l'ultimo step aperto, riconcilia quello step a `done` + persiste (riusa il path
+  canonico mark-done→`upsert_runtime_plan_memory_from_state`), così il turno DOPO non riprende il
+  piano a vuoto. Promosso dopo evidenza live: risposta `.invalid` corretta ma Plan panel 1/2 perché
+  lo step "registrare il fallimento" era rimasto `doing`. `HOMUN_PLAN_RECONCILE=0/off` resta opt-out
+  diagnostico. La sintesi forzata NON riconcilia (lì il lavoro è incompiuto, il piano DEVE restare aperto).
+  Resta: eventuale "done dopo verify" più stretto; il caso sintesi.
 - ⏳ **F2.3 floor `shadow→on` + manopola `slot`** — richiede la eval bi-popolazione → differito a
   quando l'ambiente ha Ollama/gemma4.
 
@@ -270,10 +276,12 @@ di fix concreti, ciascuno committato + buildato + (dove possibile) validato live
   undefined` → `BROWSER_ACTION_FAILED` silenzioso. Quindi `kind=fill` non ha MAI funzionato dalla chat,
   `kind=type` sì. Fix: `resolveFillFields` (`actions.ts`) accetta entrambe le forme convergendole (#5);
   `ref` senza valore → `BROWSER_INVALID_REQUEST` esplicito. +1 test fixture (flat fill), 24/24 verdi.
-- **#5 / #3 (UI) verificati GIÀ FATTI** (no codice): #5 formattazione progressiva è live — il messaggio
+- **#5 / #3 (UI)**: #5 formattazione progressiva è live — il messaggio
   in streaming rende `RichMessage streaming` → `RichMessageRenderer` streaming-aware (code-fence aperti,
-  mermaid differito); #3 il pannello computer ha già i tre stati `bar`(320px)→`expanded`(620px)→`full`
-  (overlay `4vh/4vw`, ESC+scrim). Probabilmente chiusi in sessioni precedenti senza spuntare STATO.
+  mermaid differito); #3 il pannello computer ha i tre stati `bar`(320px)→`expanded`(620px)→`full`
+  (overlay `4vh/4vw`, ESC+scrim). Dopo screenshot live 16:19 la freccia su del card compatto è stata
+  promossa ad apertura `full`; il thumbnail resta il gesto per l'`expanded` inline. Contract UI copre
+  questa regressione.
 - **F4 — loop ripresa-piano** (`cfd270c9`, backend): root-cause = contatori recovery PER-TURNO
   (`nav_failures`/`rounds_since_progress` `let mut` nel turno) → piano ripreso riavvia lo step fallito a
   ogni resume. Fix: segnale cross-turno persistito sul piano (`stall_turns`/`last_resume_done`, preservati
@@ -431,10 +439,10 @@ di fix concreti, ciascuno committato + buildato + (dove possibile) validato live
   (→ memoria/learning) in `shadow`|`on` via `scaffold::floor_trace_for_mode`, non più solo stderr —
   telemetria Fase-1 prerequisito per accendere il floor con dati. Tolto `#![allow(dead_code)]`
   stantio + rimossa `VerifyDepth::Off` mai costruita. +2 test scaffold.
-- **F2.2 (parziale, gated)** over-running guard estratto in `answer_concludes_plan` (puro/testato,
+- **F2.2 (promosso default-on)** over-running guard estratto in `answer_concludes_plan` (puro/testato,
   refactor behavior-preserving); quando accetta la risposta con l'ultimo step aperto, riconcilia
-  quello step a `done` + persiste → il turno dopo non riprende il piano a vuoto. Gated
-  `HOMUN_PLAN_RECONCILE` (default off). La sintesi forzata non riconcilia (lavoro incompiuto). +1 test.
+  quello step a `done` + persiste → il turno dopo non riprende il piano a vuoto. Opt-out diagnostico
+  `HOMUN_PLAN_RECONCILE=0/off`. La sintesi forzata non riconcilia (lavoro incompiuto). +2 test.
 
 **Sessione 2026-06-28 (4) — VALIDAZIONE F2 (scoperto: Ollama+gemma4 ci SONO):**
 - **Correzione di realtà:** Ollama gira (`127.0.0.1:11434`) con `gemma4:latest`+`gemma4:12b` → la eval
@@ -560,8 +568,8 @@ GIÀ FATTO sessione 5g (NON ripartire; tutto su `main`):
   (`is_final_round` da `rounds_since_progress`, `86c0e435`).
 - **form-fill `kind=fill`** (`a62cfba9`, sidecar TS): contratto schema-piatto chat `{kind,ref,text}` vs
   `case "fill"` che iterava `action.fields` → `resolveFillFields` accetta entrambe (#5). +1 test.
-- **#5 / #3 UI verificati GIÀ FATTI** (no codice): #5 formattazione progressiva è streaming-aware; #3 il
-  pannello computer ha già bar/expanded/full. Erano chiusi da sessioni precedenti.
+- **#5 / #3 UI**: #5 formattazione progressiva è streaming-aware; #3 il pannello computer ha bar/
+  expanded/full e la freccia su del compatto apre `full` (il thumbnail apre `expanded`).
 - **F4 loop ripresa-piano** (`cfd270c9`, backend, GATED `HOMUN_PLAN_STALL_ABORT`): contatori recovery
   per-turno → segnale cross-turno (`stall_turns`/`last_resume_done` sulla memoria del piano, preservati
   negli upsert mid-turno); dopo cap=3 `block_stalled_step`; terminazione su **`settled`** (done|blocked)
@@ -570,6 +578,12 @@ GIÀ FATTO sessione 5g (NON ripartire; tutto su `main`):
   solo-reasoning non più committato → `break` senza `final_done` → sintesi forzata esistente recupera
   (riuso, no terzo path). La variante debug `HOMUN_DEBUG_MAIN_LOOP_MAX_TOKENS` abbassa solo il budget
   del loop principale e lascia la sintesi forzata col budget normale.
+- **F2.2 promosso + search discovery + Computer fullscreen** (2026-06-29, follow-up live): il DB della
+  chat mostrava runtime-plan `.invalid` con `done_count=1/2`, `s2=doing`, mentre la risposta aveva già
+  registrato onestamente il fallimento. `plan_reconcile_on_delivery_enabled` è ora default-on con opt-out
+  `HOMUN_PLAN_RECONCILE=0/off`; aggiunto test sul flag. Il system prompt browser ora dice che per news/
+  ricerche aperte senza sito nominato deve partire da search/discovery e poi scegliere fonti, invece di
+  saltare direttamente a una testata. La freccia del Computer dock da `bar` apre `full`; contract UI verde.
 - **bug "Continue" (validato live nell'app — puzzle Einstein ora 1 risposta pulita):** 2 cause distinte —
   (1) backend `df65d0b0`: il trace `‹‹REASONING››` rientrava nel contesto modello via
   `build_chat_runtime_prompt` → `strip_display_markers` canonico in lib.rs usato in `normalize_context_text`,

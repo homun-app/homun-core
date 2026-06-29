@@ -112,6 +112,11 @@ flowchart TD
 - **Lock globale = un solo browser** (`browse_web_lock`, `main.rs:24797`): c'è una sola
   istanza Chromium condivisa (warm context con cookie/consenso), quindi va serializzato
   l'accesso per non avere due turni che si pestano i tab/lo stato.
+- **Discovery-first per ricerche aperte** (`browser_open_research_discovery_instruction`):
+  quando l'utente chiede news o ricerca web corrente senza nominare un sito/URL, il loop
+  deve partire da una pagina di search/discovery (risultati o news discovery), leggere più
+  candidati recenti e solo dopo scegliere le fonti. Saltare direttamente a una singola
+  testata è ammesso solo se l'utente l'ha nominata o se il contesto la impone.
 
 ---
 

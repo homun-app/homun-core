@@ -235,8 +235,8 @@ assertNotMatches(
   "completed computer timeline/artifacts must not reopen the inline Computer card",
 );
 assertContains("src/components/ChatView.tsx", "approval-scope-options", "approval UI must make temporary vs fixed scope explicit");
-assertContains("src/components/SettingsView.tsx", "https://api.z.ai/api/paas/v4", "Z.ai standard preset must keep the standard GLM endpoint");
-assertContains("src/components/SettingsView.tsx", "https://api.z.ai/api/coding/paas/v4", "Z.ai coding preset must keep the coding GLM endpoint");
+assertContains("src/lib/providerPresets.ts", "https://api.z.ai/api/paas/v4", "Z.ai standard preset must keep the standard GLM endpoint");
+assertContains("src/lib/providerPresets.ts", "https://api.z.ai/api/coding/paas/v4", "Z.ai coding preset must keep the coding GLM endpoint");
 assertContains("src/components/SettingsView.tsx", "v.id === p.id || normUrl(v.base_url) === normUrl(p.baseUrl)", "provider preset cards must match by stable id before URL fallback");
 assertContains("src/components/SettingsView.tsx", "imageRoleMissingHint", "model routing must explain when no image-generation role model is available");
 assertContains("src/components/SettingsView.tsx", "profileImageUpload", "Account profile photo upload must remain available from the avatar menu");
@@ -344,7 +344,7 @@ assertContains("src/components/ChatView.tsx", "<WorkspaceIsland", "closed operat
 assertContains("src/components/ChatView.tsx", "workspacePlanSteps", "workspace island must derive progress from closed operational plan markers");
 assertContains("src/components/ChatView.tsx", "Workspace island options", "workspace island must expose its expand/collapse preference menu");
 assertContains("src/components/ChatView.tsx", "wi-progress", "workspace island must render collapsible progress inside the island");
-assertContains("src/components/ChatView.tsx", "if (!hasWorkspaceState) return null", "workspace island must stay hidden when a thread has no real workspace state");
+assertContains("src/components/ChatView.tsx", "if (!hasWorkspaceState && !hadWorkspaceState) return null", "workspace island must stay hidden when a thread has no real workspace state, while preserving completed state after a run");
 assertContains("src/components/ChatView.tsx", "threadHasMessages={threadMessages.length > 0}", "workspace island must not treat project memory artifacts as state for an empty new chat");
 assertContains("src/components/ChatView.tsx", "(threadHasMessages || streaming || computerLive) &&", "workspace island must appear for thread-owned content, stream, or owned live computer work");
 assertContains("src/components/ChatView.tsx", "onOpenWorkbench={(tab) =>", "workspace island must be the single launcher for workbench tabs");
@@ -423,6 +423,7 @@ assertContains("src/App.tsx", "onAutoSubmitConsumed", "template auto-submit trig
 assertContains("src/components/ChatView.tsx", "autoSubmit?: ChatAutoSubmit | null", "ChatView must accept external chat-start triggers without bypassing streaming UI");
 assertContains("src/components/ChatView.tsx", "submitPrompt(\n      autoSubmit.prompt", "external chat-start triggers must reuse the normal visible submit pipeline");
 assertNotContains("src/App.tsx", "template_workflow_", "template workflows must not start a parallel invisible stream from App");
+assertContains("src/components/ChatComputerPanel.tsx", "view === \"bar\" ? \"full\" : \"bar\"", "Computer dock chevron must open the live browser to a useful expanded view from the compact card");
 
 assertContains("src/types.ts", "\"learning\"", "auto-learning must be a first-class view");
 assertContains("src/components/LearningView.tsx", "learning-view", "auto-learning must have a dedicated page");

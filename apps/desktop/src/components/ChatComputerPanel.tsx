@@ -173,7 +173,7 @@ export function ChatComputerPanel({
           <button
             className="cc-icon-btn"
             type="button"
-            onClick={() => setView(view === "bar" ? "expanded" : "bar")}
+            onClick={() => setView(view === "bar" ? "full" : "bar")}
             title={view === "bar" ? t("chat.showBrowser") : t("chat.collapse")}
             aria-label={view === "bar" ? t("chat.showBrowser") : t("chat.collapse")}
           >
