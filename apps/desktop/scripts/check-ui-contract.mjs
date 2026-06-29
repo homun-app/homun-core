@@ -303,6 +303,8 @@ assertContains("src/lib/coreBridge.ts", "/api/vault/proposals/dismiss", "Vault p
 assertContains("src/lib/coreBridge.ts", "/api/vault/pin/status", "Vault PIN status must load through the local gateway");
 assertContains("src/lib/coreBridge.ts", "/api/vault/pin/setup", "Vault PIN setup must persist through the local gateway");
 assertContains("src/lib/coreBridge.ts", "/api/vault/pin/verify", "Vault PIN verification must run through the local gateway");
+assertContains("src/data/mockData.ts", "id: \"vault\"", "Vault must be a separate Settings section");
+assertContains("src/components/SettingsView.tsx", "coreBridge.vaultPinSetup", "Vault Settings must configure the local PIN through the bridge");
 assertContains("src/components/ChatView.tsx", "coreBridge.vaultProposalAccept", "Vault proposal card must expose an accept action");
 assertContains("src/components/ChatView.tsx", "Salva nel Vault", "Vault proposal card must offer an explicit save action");
 assertContains("src/App.tsx", "mapCoreMemoryDashboard", "desktop memory page must map the gateway memory dashboard read model");

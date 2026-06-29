@@ -621,8 +621,8 @@ GIÀ FATTO sessione 5g (NON ripartire; tutto su `main`):
   categoria/label/preview redatta + `SecretRef`, non il valore sensibile ne' CVV/CV2.
 - **Vault PIN locale**: aggiunto `LocalPinVerifier` con salt/hash iterato, persistenza
   metadata-only in `vault_local_pin`, endpoint gateway `/api/vault/pin/status|setup|verify`
-  e bridge frontend. Il PIN e' pronto come gate locale per CVV one-shot/payment approval,
-  ma manca ancora il dialog UI e il flusso checkout completo.
+  e bridge frontend. Aggiunta sezione Settings separata `Vault` per configurare/verificare
+  il PIN, fuori da Memory. Manca ancora il dialog runtime CVV/PIN nel checkout completo.
 - **bug "Continue" (validato live nell'app — puzzle Einstein ora 1 risposta pulita):** 2 cause distinte —
   (1) backend `df65d0b0`: il trace `‹‹REASONING››` rientrava nel contesto modello via
   `build_chat_runtime_prompt` → `strip_display_markers` canonico in lib.rs usato in `normalize_context_text`,

@@ -19,6 +19,7 @@ export type SettingsSectionId =
   | "appearance"
   | "runtime"
   | "privacy"
+  | "vault"
   | "memory"
   | "artifacts"
   | "contacts"

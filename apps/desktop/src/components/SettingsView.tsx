@@ -141,6 +141,7 @@ const SECTION_TITLES: Record<SettingsSectionId, string> = {
   appearance: "settings.appearance",
   runtime: "settings.runtime",
   privacy: "settings.privacy",
+  vault: "Vault",
   memory: "nav.memory",
   artifacts: "settings.artifacts",
   contacts: "nav.contacts",
@@ -215,6 +216,7 @@ export function SettingsView({ section, sub, onPluginsChanged }: SettingsViewPro
           />
         )}
         {section === "privacy" && <PrivacyPane />}
+        {section === "vault" && <VaultPane />}
         {section === "memory" && <MemoryView embedded />}
         {section === "artifacts" && <ArtifactsPane />}
         {section === "contacts" && <ContactsView />}
@@ -2226,6 +2228,146 @@ function PrivacyPane() {
         <ShieldCheck size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />
         The browser still stops before logins, personal data, payments or purchases.
       </p>
+    </>
+  );
+}
+
+/* --------------------------------------------------------------------- vault */
+
+function VaultPane() {
+  const [configured, setConfigured] = useState<boolean | null>(null);
+  const [pin, setPin] = useState("");
+  const [pinConfirm, setPinConfirm] = useState("");
+  const [verifyPin, setVerifyPin] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function refresh() {
+    try {
+      const status = await coreBridge.vaultPinStatus();
+      setConfigured(status.configured);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  useEffect(() => {
+    void refresh();
+  }, []);
+
+  async function setupPin() {
+    setError(null);
+    setNote(null);
+    if (pin !== pinConfirm) {
+      setError("I PIN non coincidono.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const status = await coreBridge.vaultPinSetup(pin);
+      setConfigured(status.configured);
+      setPin("");
+      setPinConfirm("");
+      setNote("PIN locale configurato.");
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function verify() {
+    setError(null);
+    setNote(null);
+    setBusy(true);
+    try {
+      const result = await coreBridge.vaultPinVerify(verifyPin);
+      setNote(result.ok ? "PIN verificato." : "PIN non valido.");
+      setVerifyPin("");
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <>
+      <div className="set-section-label">Vault</div>
+      <div className="set-card">
+        <div className="set-card-top">
+          <span className="set-card-name">PIN locale</span>
+          <span className={`set-badge ${configured ? "green" : "muted"}`}>
+            {configured == null ? "Checking" : configured ? "Configured" : "Not configured"}
+          </span>
+        </div>
+        <p className="set-hint">
+          Il PIN resta locale e protegge CVV one-shot e future autorizzazioni di pagamento.
+          Il Vault non salva il PIN in chiaro.
+        </p>
+        <div className="set-card-divider" />
+        <div className="set-rows">
+          <div className="set-row">
+            <div>
+              <div className="rk">Nuovo PIN</div>
+              <div className="rv">6-12 cifre. Sostituisce il PIN locale esistente.</div>
+            </div>
+            <div style={{ display: "grid", gap: 8, minWidth: 220 }}>
+              <input
+                className="set-input"
+                inputMode="numeric"
+                type="password"
+                value={pin}
+                placeholder="PIN"
+                onChange={(event) => setPin(event.target.value)}
+              />
+              <input
+                className="set-input"
+                inputMode="numeric"
+                type="password"
+                value={pinConfirm}
+                placeholder="Conferma PIN"
+                onChange={(event) => setPinConfirm(event.target.value)}
+              />
+              <button
+                className="set-btn primary"
+                type="button"
+                disabled={busy || pin.length === 0 || pinConfirm.length === 0}
+                onClick={() => void setupPin()}
+              >
+                Salva PIN
+              </button>
+            </div>
+          </div>
+          <div className="set-row">
+            <div>
+              <div className="rk">Verifica PIN</div>
+              <div className="rv">Controllo locale per debug del gate Vault.</div>
+            </div>
+            <div style={{ display: "flex", gap: 8, minWidth: 260 }}>
+              <input
+                className="set-input"
+                inputMode="numeric"
+                type="password"
+                value={verifyPin}
+                placeholder="PIN"
+                onChange={(event) => setVerifyPin(event.target.value)}
+              />
+              <button
+                className="set-btn"
+                type="button"
+                disabled={busy || verifyPin.length === 0}
+                onClick={() => void verify()}
+              >
+                Verifica
+              </button>
+            </div>
+          </div>
+        </div>
+        {note && <p className="set-hint">{note}</p>}
+        {error && <p className="cmp-confirm-err">{error}</p>}
+      </div>
     </>
   );
 }

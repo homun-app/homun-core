@@ -26,6 +26,8 @@ Non e' memoria: la memoria puo' contenere solo testo redatto o riferimenti
   click finale di pagamento.
 - `apps/desktop/src/components/ChatView.tsx`: parsing/rendering del marker
   `VAULT_PROPOSE`, con azioni salva/scarta.
+- `apps/desktop/src/components/SettingsView.tsx`: sezione Settings separata `Vault`
+  per status/setup/verifica del PIN locale.
 - `crates/desktop-gateway/src/main.rs`: endpoint
   `/api/vault/proposals/accept` e `/api/vault/proposals/dismiss`.
 
@@ -87,6 +89,8 @@ Endpoint gateway:
 Il PIN e' pensato come gate locale per CVV one-shot e approvazioni pagamento. Non
 sostituisce il TOTP futuro dell'app.
 
+La UI espone il setup nella sezione Settings `Vault`, separata da `Memory`.
+
 ## Pagamenti
 
 `PaymentApprovalSnapshot` cattura merchant, dominio, importo, valuta, prodotto,
@@ -106,7 +110,7 @@ Login, script arbitrari e azioni high-risk non-payment restano bloccati.
 
 - Keychain/secret-store completo del valore sensibile associato al `SecretRef`.
 - Sezione UI Vault completa.
-- Dialog UI locale PIN + CVV one-shot.
+- Dialog runtime PIN + CVV one-shot dentro il flusso checkout.
 - Payment Approval Card completa con screenshot/fingerprint.
 - Telegram routing per riepilogo pagamento.
 - E2E su checkout controllato.
