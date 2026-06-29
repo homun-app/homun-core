@@ -3326,6 +3326,7 @@ version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "chacha20poly1305",
+ "local-first-vault",
  "rand 0.8.6",
  "rusqlite",
  "serde",

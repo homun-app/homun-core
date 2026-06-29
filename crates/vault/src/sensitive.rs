@@ -151,29 +151,21 @@ fn detect_italian_plate(text: &str, detections: &mut Vec<SensitiveDetection>) {
 
 fn detect_health_notes(text: &str, detections: &mut Vec<SensitiveDetection>) {
     let lower = text.to_ascii_lowercase();
-    let has_health = [
+    for needle in [
         "allerg", "diagnos", "farmac", "patolog", "terapia", "sanitari",
-    ]
-    .iter()
-    .any(|needle| lower.contains(needle));
-    if !has_health {
-        return;
-    }
-    for (start, sentence) in sentence_spans(text) {
-        let lower_sentence = sentence.to_ascii_lowercase();
-        if [
-            "allerg", "diagnos", "farmac", "patolog", "terapia", "sanitari",
-        ]
-        .iter()
-        .any(|needle| lower_sentence.contains(needle))
-        {
+    ] {
+        let mut offset = 0;
+        while let Some(relative) = lower[offset..].find(needle) {
+            let idx = offset + relative;
+            let (start, end) = containing_clause(text, idx);
             detections.push(SensitiveDetection {
                 category: VaultCategory::Health,
                 kind: "health_note".to_string(),
                 placeholder: "[VAULT:health:health_note]".to_string(),
                 start,
-                end: start + sentence.trim_end_matches('.').len(),
+                end,
             });
+            offset = end;
         }
     }
 }
@@ -242,29 +234,22 @@ fn word_spans(text: &str) -> Vec<(usize, &str)> {
     spans
 }
 
-fn sentence_spans(text: &str) -> Vec<(usize, &str)> {
-    let mut spans = Vec::new();
-    let mut start = 0;
-    for (idx, ch) in text.char_indices() {
-        if matches!(ch, '.' | '!' | '?' | '\n') {
-            let sentence = text[start..idx].trim();
-            if !sentence.is_empty() {
-                let leading = text[start..idx]
-                    .len()
-                    .saturating_sub(text[start..idx].trim_start().len());
-                spans.push((start + leading, sentence));
-            }
-            start = idx + ch.len_utf8();
-        }
-    }
-    let sentence = text[start..].trim();
-    if !sentence.is_empty() {
-        let leading = text[start..]
-            .len()
-            .saturating_sub(text[start..].trim_start().len());
-        spans.push((start + leading, sentence));
-    }
-    spans
+fn containing_clause(text: &str, idx: usize) -> (usize, usize) {
+    let start = text[..idx]
+        .rfind([',', '.', '!', '?', '\n'])
+        .map(|pos| pos + 1)
+        .unwrap_or(0);
+    let end = text[idx..]
+        .find([',', '.', '!', '?', '\n'])
+        .map(|pos| idx + pos)
+        .unwrap_or(text.len());
+    let leading = text[start..end]
+        .len()
+        .saturating_sub(text[start..end].trim_start().len());
+    let trailing = text[start..end]
+        .len()
+        .saturating_sub(text[start..end].trim_end().len());
+    (start + leading, end - trailing)
 }
 
 fn first_digit_run(
