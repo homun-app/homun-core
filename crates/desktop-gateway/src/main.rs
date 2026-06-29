@@ -19306,8 +19306,15 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
             let drive_state = state_owned.clone();
             let drive_goal = memory_user_message.clone();
             let drive_lang = effective_user_language();
+            let drive_thread = thread_id.clone();
             let driven = tokio::task::spawn_blocking(move || {
-                orchestrator_drive_for_chat(&drive_state, &drive_goal, &drive_lang, &activity_tx)
+                orchestrator_drive_for_chat(
+                    &drive_state,
+                    &drive_goal,
+                    &drive_lang,
+                    drive_thread,
+                    &activity_tx,
+                )
             })
             .await;
             // The drive dropped its sender(s) → the channel closes → drain finishes,
@@ -31582,6 +31589,44 @@ enum SharedSidecarCall {
     SidecarLost(String),
 }
 
+/// A CDP "wedge": the sidecar IPC is healthy but its inner `connectOverCDP` to the
+/// contained-computer Chromium times out. Happens when a long-lived container
+/// accumulates stale CDP targets — `/json/version` still answers (so `browser_cdp_ok`
+/// can't see it), yet the ws handshake hangs. The cure is recycling the container.
+/// Matched conservatively on Playwright's English message (its only producer). This
+/// is the gap that turned a transient wedge into the drive's hard browse failure:
+/// motore #1's HTTP-only self-heal misses it too, but its warm per-thread session
+/// usually predates the wedge — the drive spawns cold into it.
+fn browser_response_indicates_cdp_wedge(response: &BrowserResponse) -> bool {
+    match response {
+        BrowserResponse::Error { error, .. } => {
+            let message = error.message.to_ascii_lowercase();
+            message.contains("connectovercdp") && message.contains("timeout")
+        }
+        BrowserResponse::Success { .. } => false,
+    }
+}
+
+/// Throttle container recycles so a burst of wedge responses (an agentic loop
+/// retrying every round) recycles AT MOST once per window — never thrashing
+/// `docker rm -f`. Returns true and arms the window when a recycle is allowed.
+fn browser_recycle_throttle_ok() -> bool {
+    static LAST: std::sync::OnceLock<std::sync::Mutex<Option<std::time::Instant>>> =
+        std::sync::OnceLock::new();
+    let cell = LAST.get_or_init(|| std::sync::Mutex::new(None));
+    let Ok(mut guard) = cell.lock() else {
+        return false;
+    };
+    let now = std::time::Instant::now();
+    let allowed = guard
+        .map(|last| now.duration_since(last) >= std::time::Duration::from_secs(90))
+        .unwrap_or(true);
+    if allowed {
+        *guard = Some(now);
+    }
+    allowed
+}
+
 /// THE single browser execution surface (A1.3). All durable browser capability
 /// execution flows through here so there is exactly one owner of the persistent
 /// sidecar: this function holds `state.browser_capability_client`, lazily spawns
@@ -31619,6 +31664,23 @@ fn call_shared_browser_sidecar(
         client.call_response(method, params)
     };
     match call_result {
+        // Self-heal a CDP wedge (connectOverCDP timeout despite a live sidecar):
+        // recycle the contained computer once per window, drop the sidecar so the next
+        // call respawns against the fresh CDP, and report SidecarLost so the caller
+        // retries (the drive's agentic loop retries next round; the durable runtime
+        // re-enqueues). Closes the gap `browser_cdp_ok`'s HTTP probe can't catch.
+        Ok(response)
+            if browser_response_indicates_cdp_wedge(&response) && browser_recycle_throttle_ok() =>
+        {
+            crate::sandbox::recycle_container();
+            let _ = crate::sandbox::ensure_contained_computer();
+            *client_guard = None;
+            Ok(SharedSidecarCall::SidecarLost(
+                "browser CDP wedged (connectOverCDP timeout); recycled contained computer, \
+                 respawning on retry"
+                    .to_string(),
+            ))
+        }
         Ok(response) => Ok(SharedSidecarCall::Response(response)),
         // Self-heal: a broken IPC pipe (Sidecar) or a garbled/empty reply
         // (InvalidResponse, e.g. the child closed stdout) means the single
@@ -36071,21 +36133,38 @@ impl ChatDriveStepExecutor<'_> {
             BrowserMethod::Screenshot => "📸 Catturo uno screenshot".to_string(),
             _ => format!("🔧 {tool_name}"),
         };
+        // Concise panel step label (mirrors motore #1's `push_browser_step` style),
+        // computed before `call_args` is moved into the sidecar call.
+        let step_label = match method {
+            BrowserMethod::Navigate => format!(
+                "navigate {}",
+                call_args.get("url").and_then(|v| v.as_str()).unwrap_or("")
+            ),
+            BrowserMethod::Snapshot => "snapshot".to_string(),
+            BrowserMethod::Act => "interact".to_string(),
+            BrowserMethod::Screenshot => "screenshot".to_string(),
+            _ => tool_name.to_string(),
+        };
         let _ = self.activity.send(label);
-        match call_shared_browser_sidecar(self.state, &self.task, method, call_args)
-            .map_err(|error| OrchestratorError::Capability(error.message))?
+        let result = match call_shared_browser_sidecar(self.state, &self.task, method, call_args)
+            .map_err(|error| OrchestratorError::Capability(error.message))
         {
-            SharedSidecarCall::SidecarLost(reason) => Err(OrchestratorError::Capability(reason)),
-            SharedSidecarCall::Response(BrowserResponse::Success {
+            Err(error) => Err(error),
+            Ok(SharedSidecarCall::SidecarLost(reason)) => Err(OrchestratorError::Capability(reason)),
+            Ok(SharedSidecarCall::Response(BrowserResponse::Success {
                 ok: true, result, ..
-            }) => Ok(result),
-            SharedSidecarCall::Response(BrowserResponse::Success { .. }) => Err(
+            })) => Ok(result),
+            Ok(SharedSidecarCall::Response(BrowserResponse::Success { .. })) => Err(
                 OrchestratorError::Capability("browser returned invalid success envelope".into()),
             ),
-            SharedSidecarCall::Response(BrowserResponse::Error { error, .. }) => Err(
+            Ok(SharedSidecarCall::Response(BrowserResponse::Error { error, .. })) => Err(
                 OrchestratorError::Capability(format!("{}:{}", error.code, error.message)),
             ),
-        }
+        };
+        // Feed the panel's step checklist (the polled `contained_computer_live` read-model),
+        // so the drive shows progress like the chat loop — not just inline ‹‹ACT›› text.
+        push_browser_step(step_label, if result.is_ok() { "done" } else { "error" });
+        result
     }
 }
 
@@ -36188,6 +36267,7 @@ fn orchestrator_drive_for_chat(
     state: &AppState,
     goal: &str,
     language: &str,
+    thread_id: Option<String>,
     activity: &tokio::sync::mpsc::UnboundedSender<String>,
 ) -> Result<Option<(String, Vec<serde_json::Value>)>, String> {
     let user = gateway_capability_user_id();
@@ -36247,6 +36327,13 @@ fn orchestrator_drive_for_chat(
     }
 
     // 2. Drive the plan in-turn: model fills args, sidecar executes, runtime verifies.
+    // Surface the SAME "Computer LIVE" panel as motore #1 (the chat loop): the panel is
+    // a polled read-model (`contained_computer_live`) keyed off this in-process activity
+    // cell — without `begin_browser_activity` the contained browser drives :9222 but the
+    // user never sees the live noVNC frame or the step checklist (the regression).
+    // `thread_id` binds the panel to the owning chat thread. `push_browser_step` per tool
+    // is emitted inside `ChatDriveStepExecutor::run_browser_tool`.
+    begin_browser_activity(goal.to_string(), thread_id);
     let exec_router = build_drive_inference_router();
     let mut executor = ChatDriveStepExecutor {
         state,
@@ -36257,6 +36344,7 @@ fn orchestrator_drive_for_chat(
     };
     let mut verifier = PassThroughVerifier;
     let outcome = drive_plan(&plan, &mut executor, &mut verifier);
+    end_browser_activity();
 
     // 3. Gather verified step outputs (snapshots/results) for synthesis.
     let mut gathered = String::new();
@@ -45391,6 +45479,44 @@ mod tests {
             "homun-{prefix}-{}",
             uuid::Uuid::new_v4().simple()
         ))
+    }
+
+    #[test]
+    fn cdp_wedge_matched_only_for_connect_over_cdp_timeout() {
+        use local_first_browser_automation::{BrowserResponse, BrowserSidecarError};
+        let err = |code: &str, message: &str| BrowserResponse::Error {
+            id: "1".to_string(),
+            ok: false,
+            error: BrowserSidecarError {
+                code: code.to_string(),
+                message: message.to_string(),
+                retryable: false,
+                manual_action_required: false,
+            },
+        };
+        // The wedge signature (Playwright English) → recover by recycling.
+        assert!(super::browser_response_indicates_cdp_wedge(&err(
+            "BROWSER_INTERNAL_ERROR",
+            "browserType.connectOverCDP: Timeout 30000ms exceeded.",
+        )));
+        // An ordinary browser error (stale ref, action timeout) must NOT recycle the
+        // whole container — only the connectOverCDP handshake wedge does.
+        assert!(!super::browser_response_indicates_cdp_wedge(&err(
+            "BROWSER_ACTION_TIMEOUT",
+            "click timed out after 5000ms",
+        )));
+        assert!(!super::browser_response_indicates_cdp_wedge(&err(
+            "BROWSER_STALE_REF",
+            "stale ref e5; take a fresh snapshot",
+        )));
+        // Success is never a wedge.
+        assert!(!super::browser_response_indicates_cdp_wedge(
+            &BrowserResponse::Success {
+                id: "2".to_string(),
+                ok: true,
+                result: serde_json::json!({}),
+            }
+        ));
     }
 
     #[test]

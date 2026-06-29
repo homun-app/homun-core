@@ -234,6 +234,15 @@ Problemi reali individuati nel codice attuale:
    worker path. NB: l'**enum** `CapabilityProviderKind::Browser` resta (lo usano registry,
    orchestratore e resource-bridge per la classe risorsa `BrowserSession`); è solo la **struct**
    provider a essere stata rimossa.
+7. **CDP-wedge invisibile a `browser_cdp_ok` (2026-06-29).** Un container `homun-cc` long-lived può
+   andare in *wedge*: `/json/version` (HTTP) risponde ancora, ma `connectOverCDP` (ws handshake) si
+   impianta su targets stantii → ogni sidecar nuovo va in `Timeout 30000ms exceeded`. `browser_cdp_ok`
+   (`main.rs:43383`) sonda SOLO l'HTTP, quindi `ensure_browser_cdp_healthy` lo manca → **gap di entrambi i
+   motori**. Mitigazione (path condiviso `call_shared_browser_sidecar`): `browser_response_indicates_cdp_wedge`
+   riconosce la firma e `recycle_container()` una volta per finestra (`browser_recycle_throttle_ok`, 90s) →
+   `SidecarLost` → respawn fresco. Resta debole: la firma è testuale (EN Playwright) e il recycle è un
+   `docker rm -f` (disruptivo se un altro turno sta usando il browser). Fix migliore a regime: un probe
+   ws-level (non solo HTTP) in `browser_cdp_ok`.
 
 ---
 

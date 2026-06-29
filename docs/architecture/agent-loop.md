@@ -114,10 +114,18 @@ riempie gli args vincolati allo schema di QUEL tool (riuso del meccanismo capabi
 Scope **solo read/gather** (Read/Draft; le scritture restano fuori, servono single-threaded+approval).
 Il `done` resta del gate verify del driver, mai dell'auto-report.
 
-**Convergenza chiave (niente terzo dispatch):** il gateway ha **già** un `CapabilityProvider` browser
-reale registrato nella facade (pilota il sidecar condiviso via `call_shared_browser_sidecar`). Quindi
-`drive` → `CapabilityFacade::call_tool` **riusa gli esecutori durabili canonici**; la `chat_browser_call`
-inline del loop di motore #1 è la **parallela da ritirare**, non da replicare.
+**Convergenza chiave (CORREZIONE 2026-06-28 — la direzione era invertita):** una versione precedente
+diceva che il path "canonico" per il browser è il `CapabilityProvider` sul sidecar condiviso
+(`call_shared_browser_sidecar`) e che la `chat_browser_call` inline di motore #1 era "la parallela da
+ritirare". È **SBAGLIATO**, verificato dal vivo (vedi [browser.md](browser.md) §Divergenze e
+[STATO.md](../STATO.md) sessione 5e). Il path **maturo e fedele a OpenClaw** è quello di **motore #1**:
+loop osserva→agisci con **native tool-calling** (gli args li impone il provider, contro l'intero
+snapshot in contesto) + le arm inline + il pannello "Computer LIVE". Il path del **drive** —
+`run_agentic_step` (loop `generate_json` su un digest da 4k) — è la **REGRESSIONE**: rianima esattamente
+il `RuntimeBrowserLoopPlanner`/`BrowserLoopRunner` che il codebase aveva già **ritirato** convergendo su
+OpenClaw. La convergenza giusta: il drive **possiede il piano/envelope** (le 3 invarianti, quando-done,
+verify) e **DELEGA l'esecuzione browser** al loop native di motore #1 — non la reimplementa. È
+l'estrazione & delega (Increment B, in corso).
 
 **Validato su gemma4:** `orchestrated_brain_drives_plan_on_gemma4` (CapabilityCall: planner→driver→
 arg-fill→execute→done) e `orchestrated_subagent_gathers_on_gemma4` (F3.2c: gemma4 sceglie il tool,

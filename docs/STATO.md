@@ -3,7 +3,7 @@
 > Aggiornato a OGNI sessione (vedi [METHODOLOGY.md](METHODOLOGY.md) §6). Resta **conciso**: è
 > uno *stato*, non un changelog (lo storico va in `archive/`). Da qui si riparte dopo una
 > compattazione o a inizio sessione.
-> **Ultimo aggiornamento: 2026-06-28.**
+> **Ultimo aggiornamento: 2026-06-29.**
 
 ## Dove siamo
 
@@ -164,13 +164,30 @@ Commit `b705289a` (driver+executor) + `3ce99c67` (arg-fill). Vedi [agent-loop](a
   planner). **Leva capace:** il drive usa ora il ruolo **"orchestrator" (deepseek)** non "browser"
   (minimax-m3) → args coerenti. Planner nudge: info live→`subagent_task` browse (eval ALL GREEN).
   Commit `7a472488`.
-- ⚠️ **REGRESSIONE BROWSE del drive vs motore #1 (sessione 5c, IL bug prioritario):** col flag ON il
-  browse è PEGGIO del motore #1 — browser non visibile (sidecar condiviso headless/conflitto CDP), form
-  non compilati in modo affidabile (loop agentico `generate_json`, schema non imposto → args incoerenti),
-  pannello Computer assente. **Causa unica:** il drive RE-IMPLEMENTA l'esecuzione browser invece di
-  RIUSARE il path maturo del motore #1 (per-thread visibile + native tool-calling + arm inline). **Fix
-  (NON tornare indietro):** il drive possiede il control-flow ma DELEGA l'esecuzione browser al path del
-  motore #1 → è la **convergenza F3.3-pre** ridefinita. Dettagli nel prompt di ripartenza in fondo.
+- ◑ **REGRESSIONE BROWSE del drive vs motore #1 — DIAGNOSI CORRETTA + 2 cause su 3 risolte (sess. 5e):**
+  La diagnosi 5c era **parzialmente sbagliata sul meccanismo** (giusta sulla direzione). Verificato in
+  codice + dal vivo (curl-driving, container `homun-cc`), sono **TRE cause indipendenti**, non una:
+  1. ✅ **Pannello Computer assente** = il drive non cablava `begin_browser_activity`/`push_browser_step`/
+     `end_browser_activity` (chat-loop only). NON era "headless/conflitto CDP": entrambi i path passano per
+     lo **stesso** `browser_sidecar_env_with_headless` che setta `USER_CDP_ENDPOINT` identico → si
+     attaccano allo **stesso** Chromium :9222 visibile. **FATTO** (`orchestrator_drive_for_chat` ora chiama
+     begin/end + `thread_id` per bindare il pannello; `run_browser_tool` chiama push_browser_step).
+     **Validato dal vivo**: `/api/local-computer/live` → `active:true`, steps, novnc_url.
+  2. ✅ **connectOverCDP timeout (il "browser non funziona")** = wedge del container (CDP HTTP `/json/version`
+     risponde MA il ws handshake si impianta su targets stantii dopo ore di uptime). `browser_cdp_ok`
+     (solo HTTP) **non lo vede** → gap di **entrambi** i motori; il drive in più fa blind-retry. **FATTO**:
+     self-heal nel surface condiviso `call_shared_browser_sidecar` — `browser_response_indicates_cdp_wedge`
+     + recycle container throttlato (once/90s, no `docker rm -f` thrash) → SidecarLost → respawn fresh.
+     +1 unit-test (matcher conservativo). Su container fresco il drive **funziona**: navigate→snapshot→act
+     sul browser **user visibile**, 6–20k char raccolti.
+  3. ⏳ **Form-fill / wandering** = NON "schema non imposto" (lo è, `fill_arguments`+`json_schema`): è il
+     loop agentico (`run_agentic_step`) — digest 4k tronca i `ref` dei campi profondi + `generate_json`
+     non-enforced su Ollama, contro il **native tool-calling** di motore #1. **= Increment B** (sotto).
+- ⏳ **Increment B (la convergenza vera, prossimo passo):** ritirare `run_agentic_step` per il browser e
+  far **delegare** i browse-step del drive al loop **native-tool-calling** di motore #1 (estrarre la
+  browser-arm-executor condivisa, caposaldo #5). Le arm inline sono intrecciate con ~10 local del loop di
+  streaming → estrazione incrementale, non big-bang. **OpenClaw:** motore #1 È il port fedele; il drive
+  rianima il `generate_json` loop già ritirato. Vedi [[homun-browser-drive-regression-diagnosis]].
 - ⏳ Altri residui: flicker reasoning della sintesi (collector → reasoning alla work-island); accendere
   il drive di default solo DOPO la convergenza browser.
 - ⏳ **F3.4** ritirare `merge_plan` per-titolo + prompt-prosa (solo quando il drive è il default).
@@ -184,6 +201,28 @@ bi-popolazione (caposaldo #2) È eseguibile qui: `python3 scripts/eval_suite.py 
 chat di default = deepseek-v4-pro:cloud (Z.ai, tier **Balanced**); Composio non configurato.
 
 ## Cosa è stato fatto (rolling, conciso)
+
+**Sessione 2026-06-29 (5e) — REGRESSIONE BROWSE: diagnosi corretta dall'evidenza + 2/3 cause risolte:**
+- **Investigazione (3 deep-dive paralleli + verifica in codice/dal vivo):** la diagnosi 5c era
+  parzialmente errata sul MECCANISMO. Le tre cause sono INDIPENDENTI (non "una sola"): (1) pannello assente
+  = drive non cabla `begin/push/end_browser_activity` (NON "headless/conflitto CDP": stesso env builder,
+  stesso `USER_CDP_ENDPOINT`, stesso :9222 visibile); (2) `connectOverCDP` timeout = wedge del container
+  (HTTP ok, ws hung), `browser_cdp_ok` non lo vede → gap di ENTRAMBI i motori; (3) form-fill = digest 4k +
+  `generate_json` del loop agentico, NON "schema non imposto".
+- **OpenClaw:** NON abbiamo perso fedeltà. Motore #1 (granular tools + native tool-calling + osserva→agisci)
+  È il port fedele; il drive ha **rianimato** il `generate_json` loop (`RuntimeBrowserLoopPlanner`) che il
+  codebase aveva già RITIRATO. ADR 0006 + i due `2026-05-28-openclaw-*` descrivono ancora quel loop ritirato
+  → **stale**.
+- **Increment A (FATTO, validato live):** pannello Computer per il drive — `orchestrator_drive_for_chat`
+  chiama begin/end activity (+ `thread_id`), `run_browser_tool` chiama `push_browser_step`.
+  `/api/local-computer/live` → `active:true` + steps + novnc.
+- **Self-heal CDP-wedge (FATTO, +1 test):** nel surface condiviso `call_shared_browser_sidecar`,
+  `browser_response_indicates_cdp_wedge` + recycle throttlato (once/90s) → respawn fresh. Beneficia drive
+  E task durabili. Su container fresco il drive naviga/snapshot/agisce sul browser **user visibile**
+  (navigate→done, 6–20k char). Healthy-path ri-validato: nessun recycle spurio.
+- **Engine (dubbio dell'utente):** parzialmente validato, NON marcio. Errore di categoria in F3: "harness
+  possiede il control-flow" letto come "harness ri-esegue il tool via JSON loop" → sbagliato per uno
+  strumento osserva→agisci. Vedi [[homun-browser-drive-regression-diagnosis]]. **Prossimo = Increment B.**
 
 **Sessione 2026-06-28 (5d) — REGRESSIONE BROWSE individuata (lezione di architettura):**
 - L'utente: col drive il browse è REGREDITO vs motore #1 (che apriva il browser visibile, compilava
@@ -388,39 +427,33 @@ canonica e si ritira il parallelo; si rimuove il codice morto toccato; si splitt
 grossi; si commenta il perché; ogni modifica aggiorna la pagina architecture/ + cita il
 caposaldo + porta un test.
 
-PROSSIMO PASSO = IL BUG DA RISOLVERE (priorità): il DRIVE (motore #2, dietro `HOMUN_DRIVE_CHAT`) è
-INSTRADATO E FUNZIONA, MA per i task di BROWSE è una REGRESSIONE rispetto al motore #1. Confronto reale
-nell'app (sessione 5c):
-- Motore #1 (default, flag OFF): apre il browser VISIBILE del contained-computer, COMPILA i form,
-  prende treni/voli, e si vede l'avanzamento (pannello "Computer LIVE" in chat).
-- Drive (flag ON): browser NON visibile (headless / conflitto CDP), NON riesce a compilare i form in
-  modo affidabile, il pannello Computer NON compare. → l'utente lo vive come un PEGGIORAMENTO.
+PROSSIMO PASSO = INCREMENT B (la convergenza vera). DIAGNOSI GIÀ CORRETTA dall'evidenza nella sessione 5e
+(la vecchia "causa unica, conflitto CDP" era PARZIALMENTE SBAGLIATA sul meccanismo). Verificato in codice +
+dal vivo: la regressione BROWSE del drive sono TRE cause INDIPENDENTI, due già RISOLTE:
+  1. ✅ PANNELLO Computer assente — il drive non cablava `begin/push/end_browser_activity` (chat-loop only).
+     NON era "headless/conflitto CDP": drive e motore #1 usano lo STESSO `browser_sidecar_env_with_headless`
+     che setta `USER_CDP_ENDPOINT` identico → stesso :9222 visibile. RISOLTO + validato
+     (`/api/local-computer/live` → active:true + steps + novnc).
+  2. ✅ `connectOverCDP` TIMEOUT (il "browser non funziona") — wedge del container: `/json/version` (HTTP)
+     risponde ma il ws handshake si impianta su targets stantii. `browser_cdp_ok` (solo HTTP) NON lo vede →
+     gap di ENTRAMBI i motori; il drive in più fa blind-retry. RISOLTO: self-heal nel surface condiviso
+     `call_shared_browser_sidecar` (`browser_response_indicates_cdp_wedge` + recycle throttlato once/90s →
+     respawn). Su container fresco il drive funziona davvero (navigate→snapshot→act sul browser user visibile).
+  3. ⏳ FORM-FILL / wandering — NON "schema non imposto" (lo È: `fill_arguments`+`json_schema`). È il loop
+     agentico `run_agentic_step`: digest 4k tronca i `ref` dei campi profondi + `generate_json` non-enforced
+     su Ollama, contro il NATIVE TOOL-CALLING di motore #1. QUESTO è Increment B.
 
-CAUSA RADICE (capirla bene, è UNA sola, tre sintomi): il drive RE-IMPLEMENTA l'esecuzione browser
-(loop agentico in `agentic.rs` + path `call_shared_browser_sidecar`) invece di RIUSARE il path MATURO
-del motore #1 (dispatch browser inline in `stream_chat_via_openai`: `chat_browser_call` + le sue arm +
-**sessione per-thread VISIBILE** + **native tool-calling** del modello). I tre sintomi discendono da qui:
-  1. VISIBILITÀ: il drive usa il **sidecar condiviso** (headless/auto-CDP, in conflitto con la sessione
-     per-thread sullo stesso Chromium `:9222` → `connectOverCDP` va in timeout); il motore #1 usa la
-     sessione per-thread VISIBILE. Restart del container `homun-cc` pulisce uno stato stantio ma il
-     conflitto STRUTTURALE resta.
-  2. FORM-FILLING: il loop agentico usa `generate_json` (schema NON imposto su questo endpoint, gap
-     ADR 0016) → args incoerenti (es. `browser_act` annidato sotto "request", URL nel `tool_name`); il
-     motore #1 usa **native tool-calling** → args imposti dal provider, coerenti.
-  3. PANNELLO COMPUTER: il path chat aggiorna lo stato UI/contained-computer; il drive no.
-
-LA DECISIONE GIUSTA (SOTA, NON tamponare, NON tornare indietro): il drive deve POSSEDERE il CONTROL-FLOW
-(piano/identità/tracciamento — quello FUNZIONA e va tenuto) ma DELEGARE l'ESECUZIONE dei tool — il
-BROWSER soprattutto — al path ESISTENTE e MATURO del motore #1, NON reimplementarlo. È la convergenza
-F3.3-pre, ora definita con precisione: un browser-step del drive deve girare attraverso lo STESSO codice
-che usa il motore #1 (sessione per-thread visibile + native tool-calling + le arm inline). Concretamente:
-ESTRARRE l'esecuzione browser del motore #1 in un'unità riusabile che il `ChatDriveStepExecutor` possa
-chiamare — e ritirare il path agentico+sidecar del drive per il browser. Lezione della sessione 5c: il
-mio loop agentico (agentic.rs) era la STRADA SBAGLIATA per l'esecuzione browser; il framework agentico va
-bene come control-flow ma l'esecuzione tool deve riusare il motore #1.
+INCREMENT B (SOTA, NON tornare indietro): ritirare `run_agentic_step` PER IL BROWSER e far DELEGARE i
+browse-step del drive al loop NATIVE-TOOL-CALLING di motore #1. Il drive POSSIEDE piano/envelope (3
+invarianti, quando-done, verify — funziona, NON toccare); DELEGA l'ESECUZIONE browser. Caposaldo #5: NON
+scrivere una terza impl — ESTRARRE la browser-arm-executor di motore #1 in un'unità condivisa che sia il
+`ChatDriveStepExecutor` sia il loop di motore #1 chiamano. ⚠️ Le arm inline (`stream_chat_via_openai`,
+~20075–20836) sono intrecciate con ~10 local del loop di streaming (browser_session, opened_targets,
+current_target, role-switch, tx…) → estrazione INCREMENTALE e gated, non big-bang. OpenClaw: motore #1 È il
+port fedele (native tool-calling osserva→agisci); il drive rianima il `generate_json` loop già RITIRATO.
 
 NB IMPORTANTE: il flag è default OFF, quindi l'app normale dell'utente USA GIÀ il motore #1 (che
-funziona). Il fix è IN AVANTI (far riusare al drive il path browser del motore #1), NON spegnere il flag.
+funziona). Il fix è IN AVANTI, NON spegnere il flag.
 
 GIÀ FATTO (NON ripartire da qui; tutto su `main`):
 - F3.1 driver (`driver.rs` `drive_plan`, seam `StepExecutor`/`StepVerifier`), F3.2 arg-fill
