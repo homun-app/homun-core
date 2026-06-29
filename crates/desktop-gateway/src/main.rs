@@ -15222,6 +15222,27 @@ fn browser_act_tool_schema() -> serde_json::Value {
 /// model that misused the tool self-corrects instead of looping on the same bad arguments
 /// (the observed action-error loop: no `kind`, an element ref passed as a tab `target`, or a
 /// blocked `evaluate`). Appended to the error the model sees. Empty when nothing to add.
+/// Recovery hint appended to a `browser_navigate` error. A weak model tends to retry the
+/// SAME dead URL forever (the observed "navigate the FIFA page 7× then loop" case). On the
+/// FIRST failure suggest a search; on a REPEAT failure of the same URL, firmly tell it to
+/// STOP and pivot to a web search — the harness owns recovery (caposaldo #2), since the
+/// model won't pivot on its own.
+fn browser_navigate_failure_hint(url: &str, fails: u32) -> String {
+    if fails >= 2 {
+        format!(
+            "\n\nSTOP — you have tried to open {url} {fails} times and it keeps failing. Do NOT \
+             request that URL again. Instead SEARCH the web: call browser_navigate with \
+             url=\"https://www.google.com/search?q=<your query>\" (or https://duckduckgo.com/?q=...), \
+             read the results snapshot, then open a working result link."
+        )
+    } else {
+        "\n\nIf that URL is wrong or unreachable, do NOT keep retrying it — SEARCH the web instead \
+         (browser_navigate to https://www.google.com/search?q=<your query>), then open a working \
+         result link."
+            .to_string()
+    }
+}
+
 fn browser_act_error_hint(error: &str) -> &'static str {
     let e = error.to_lowercase();
     if e.contains("unknown action kind") || e.contains("invalid_request") && e.contains("kind") {
@@ -19559,6 +19580,11 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
         // first navigate on a not-yet-opened id Opens it, later ones Navigate.
         let mut current_target: String = "chat_0".to_string();
         let mut opened_targets: Vec<String> = Vec::new();
+        // Per-URL navigation failure counter for THIS turn: when the model keeps hitting
+        // the same dead URL (the observed "navigate FIFA page 7× then loop" case), the
+        // harness nudges it to STOP retrying and pivot to a web search (caposaldo #2 —
+        // the harness owns recovery, the weak model won't pivot on its own).
+        let mut nav_failures: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
         // Fresh terminal buffer for this request; the computer panel shows the
         // CLI commands + output run during THIS response.
         sandbox_clear(thread_id.clone());
@@ -20356,7 +20382,17 @@ or tell the user to start the contained computer (Settings → Local computer)."
                                                     format!("navigate {url}"),
                                                     "error",
                                                 );
-                                                Err(format!("Navigation failed: {error}"))
+                                                let fails = {
+                                                    let entry = nav_failures
+                                                        .entry(url.to_string())
+                                                        .or_insert(0);
+                                                    *entry += 1;
+                                                    *entry
+                                                };
+                                                Err(format!(
+                                                    "Navigation failed: {error}{}",
+                                                    browser_navigate_failure_hint(&url, fails)
+                                                ))
                                             }
                                             (None, Ok(value)) => {
                                                 let snap = browser_snapshot_text(&value);
@@ -45624,6 +45660,19 @@ mod tests {
             "homun-{prefix}-{}",
             uuid::Uuid::new_v4().simple()
         ))
+    }
+
+    #[test]
+    fn navigate_failure_hint_escalates_to_search_pivot_on_repeat() {
+        // First failure: a gentle suggestion to search.
+        let first = super::browser_navigate_failure_hint("https://x.test/page", 1);
+        assert!(first.to_lowercase().contains("search"));
+        assert!(!first.contains("STOP"));
+        // Repeat failure of the SAME url: a firm STOP + pivot to a search engine.
+        let repeat = super::browser_navigate_failure_hint("https://x.test/page", 3);
+        assert!(repeat.contains("STOP"));
+        assert!(repeat.contains("google.com/search") || repeat.contains("duckduckgo"));
+        assert!(repeat.contains("3 times"));
     }
 
     #[test]
