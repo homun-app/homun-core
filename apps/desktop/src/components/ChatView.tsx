@@ -1749,6 +1749,7 @@ export function ChatView({
 
       <div className="chat-status-stack" aria-label="Live workspace status">
         <WorkspaceIsland
+          threadId={thread.threadId}
           activitySteps={conversationActivity}
           artifacts={workbenchArtifacts}
           computerActivity={computerLiveStatus.activity}
@@ -2146,6 +2147,7 @@ function loadWorkspaceIslandMode(): WorkspaceIslandMode {
 }
 
 function WorkspaceIsland({
+  threadId,
   activitySteps,
   artifacts,
   computerActivity,
@@ -2161,6 +2163,7 @@ function WorkspaceIsland({
   onExportChat,
   onOpenWorkbench,
 }: {
+  threadId: string;
   activitySteps: string[];
   artifacts: ParsedArtifact[];
   computerActivity: string | null;
@@ -2181,6 +2184,10 @@ function WorkspaceIsland({
   const [expanded, setExpanded] = useState(() => loadWorkspaceIslandMode() === "expanded");
   const [menuOpen, setMenuOpen] = useState(false);
   const [completedExpanded, setCompletedExpanded] = useState(false);
+  // Latch: once the island has shown work this thread, keep it AROUND (collapsed) after
+  // the run instead of unmounting the moment the live state empties — so the user can
+  // review what the agent did ("it disappears and doesn't stay"). Reset per thread.
+  const [hadWorkspaceState, setHadWorkspaceState] = useState(false);
   const doneCount = planSteps.filter((step) => step.status === "done").length;
   const completedSteps = planSteps.filter((step) => step.status === "done");
   const openSteps = planSteps.filter((step) => step.status !== "done");
@@ -2198,6 +2205,10 @@ function WorkspaceIsland({
       fileCount > 0 ||
       goalCount > 0 ||
       memoryCount > 0);
+  useEffect(() => setHadWorkspaceState(false), [threadId]);
+  useEffect(() => {
+    if (hasWorkspaceState) setHadWorkspaceState(true);
+  }, [hasWorkspaceState]);
   // Headline precedence: REAL work signals first (the running/blocked plan step,
   // the live ‹‹ACT›› activity, the computer activity) so the task's title shows up
   // IMMEDIATELY as the agent works — the generic phase label ("thinking"/"writing")
@@ -2281,7 +2292,7 @@ function WorkspaceIsland({
     { value: "collapsed", label: "Always collapsed" },
   ];
 
-  if (!hasWorkspaceState) return null;
+  if (!hasWorkspaceState && !hadWorkspaceState) return null;
 
   return (
     <div className={`workspace-island${expanded ? " expanded" : ""}${streaming ? " live" : ""}`}>
