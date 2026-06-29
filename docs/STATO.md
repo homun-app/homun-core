@@ -194,6 +194,8 @@ Commit `b705289a` (driver+executor) + `3ce99c67` (arg-fill). Vedi [agent-loop](a
   design sbagliato per uno strumento osserva→agisci. Fix: `plan_is_browse_only` → `Ok(None)` → fallback a
   motore #1 (path fail-open esistente). **Validato live:** stessa query notizie tech → instradata a motore
   #1 (0 righe `[agentic]`) → risposta vera, formattata, con fonte. Il drive resta per piani multi-capability.
+  **Validato nell'app Electron reale (drive flag ON):** sia la ricerca/browse sia una chiamata MCP
+  funzionano → il browse va a motore #1, la capability MCP la esegue il drive. Comportamento corretto.
 - 🧭 **EVIDENZA SOTA (3 ricerche citate, [[homun-single-loop-evidence-verdict]]):** il campo (2025) usa UN
   loop ReAct guardato col piano come *tool* (Claude Code TodoWrite, Manus todo.md), NON un planner+executor
   separato. browser-use ha RIMOSSO il suo planner. Forzare JSON sui modelli deboli DANNEGGIA il ragionamento
