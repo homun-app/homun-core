@@ -92,6 +92,28 @@ describe("browser sidecar engine", () => {
     expect(secondSnapshot.snapshot).toContain("Submitted Ada to Milano Centrale in standard");
   });
 
+  it("fills a single field from the FLAT chat shape (kind=fill, ref, text)", async () => {
+    // The chat browser_act schema is flat ({kind, ref, text}) — one micro-action.
+    // The sidecar fill contract is an array of fields. A flat fill must still work
+    // (it was silently erroring before: action.fields was undefined). Value may
+    // arrive in `text` (chat schema) or `value`; both coerce to one field.
+    await manager.start();
+    await manager.open({ url: baseUrl, label: "booking" });
+    const snapshot = await manager.snapshot({ targetId: "booking" });
+    const name = snapshot.refs.find((ref) => ref.name === "Name");
+    expect(name?.ref).toMatch(/^e/);
+
+    const fillResult = await manager.act({
+      targetId: "booking",
+      kind: "fill",
+      ref: name!.ref,
+      text: "Ada",
+    } as never);
+
+    expect(fillResult.filledRefs).toEqual([name!.ref]);
+    expect(fillResult.failedRefs).toEqual([]);
+  });
+
   it("auto-confirms an autocomplete combobox by keyboard when typing (no clickable suggestion)", async () => {
     await manager.start();
     await manager.open({ url: `${baseUrl}/combobox`, label: "combobox" });

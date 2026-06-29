@@ -182,6 +182,14 @@ response `{id, ok:true, result}` o `{id, ok:false, error:{code, message, retryab
   suggerimento (combobox, typeahead, keyboard-only) — il modello non deve saperlo
   (`actions.ts:806`, `confirmAutocomplete`). `hold` per le challenge "tieni premuto"
   (`actions.ts:336`).
+- **`kind:"fill"` accetta DUE forme** (`resolveFillFields`, `actions.ts`): la canonica
+  `fields:[{ref,value}]` (multi-campo, usata da `fill_form`/batch) **e** la forma PIATTA
+  del micro-tool chat `{ref, text|value}`. Lo schema `browser_act` esposto al modello è
+  piatto (una micro-azione per volta), quindi `kind:"fill"` dal chat-loop arriva senza
+  `fields`: prima della coercizione il `for…of action.fields` falliva silenziosamente
+  (`action.fields` undefined → `BROWSER_ACTION_FAILED`), così **fill non funzionava** dalla
+  chat mentre `type` sì. Ora le due forme convergono in un solo path (caposaldo #5); manca
+  ancora `ref`+nessun valore → `BROWSER_INVALID_REQUEST` esplicito (non più TypeError opaco).
 - **Resilienza tab**: `resolvePage` (`session_manager.ts:537`) ri-materializza un tab
   morto al suo ultimo URL invece di fallire a metà loop; fallback headless→visibile su
   errori di rete tipici (`gotoWithHeadlessFallback`, `:496`; `isHeadlessNavigationFailure`,
