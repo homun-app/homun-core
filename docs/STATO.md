@@ -606,6 +606,11 @@ GIÀ FATTO sessione 5g (NON ripartire; tutto su `main`):
   categorie interne (`payments`, `identity`, `health`, `vehicles`, `credentials`, `private_notes`),
   carta salvabile senza CVV, PIN locale + CVV one-shot per autorizzare il pagamento, click finale solo
   dopo `Payment Approval Card` e invalidazione se merchant/importo/prodotto/metodo cambiano.
+- **Piano + primi slice Vault** (`docs/superpowers/plans/2026-06-29-vault-purchase-approval-implementation.md`):
+  creata crate `local-first-vault` con classifier/redactor deterministico per carte, CVV one-shot,
+  codice fiscale, targhe, salute e credenziali; `local-first-memory` ora redige questi valori prima
+  della persistenza normale; aggiunto skeleton `VaultRecord`/`InMemoryVaultStore` con metadati separati
+  da `SecretRef` e rifiuto esplicito di CVV/CV2 nei metadati.
 - **bug "Continue" (validato live nell'app — puzzle Einstein ora 1 risposta pulita):** 2 cause distinte —
   (1) backend `df65d0b0`: il trace `‹‹REASONING››` rientrava nel contesto modello via
   `build_chat_runtime_prompt` → `strip_display_markers` canonico in lib.rs usato in `normalize_context_text`,
