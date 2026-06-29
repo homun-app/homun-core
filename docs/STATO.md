@@ -18,7 +18,8 @@
   (contratto schema-piatto↔sidecar, `a62cfba9`); **#5/#3 UI verificati GIÀ FATTI** (formattazione
   progressiva streaming-aware + pannello computer bar/expanded/full); **F4 loop ripresa-piano**
   (guard cross-turno + settled-termination + blocked-sticky, gated `HOMUN_PLAN_STALL_ABORT`, `cfd270c9`).
-  **In coda:** F3-deep (risposta vuota per cutoff/budget).
+  **F3-deep risposta vuota** (cutoff/budget: body-vuoto/solo-reasoning → recupero via sintesi forzata,
+  `7fddd545`). **In coda esaurita** per i fix di sessione; resta da **validare live** (l'utente).
 - **Linea attiva (fondamenta):** *convergenza dalle fondamenta* →
   [plans/2026-06-27-foundations-up-convergence.md](plans/2026-06-27-foundations-up-convergence.md).
 - **Scoperta che guida tutto:** ogni sottosistema ha **due implementazioni**, la canonica è
@@ -272,9 +273,16 @@ di fix concreti, ciascuno committato + buildato + (dove possibile) validato live
   Terminazione su **`settled`** (done|blocked), non solo `complete`, + `blocked` sticky in `merge_plan`
   (evita il re-arm). Puri testati (`next_plan_stall`/`plan_is_settled`/`block_stalled_step`), wiring gated
   `HOMUN_PLAN_STALL_ABORT` (non validabile live qui, come `HOMUN_PLAN_RECONCILE`). +5 test, 33/33 piano verdi.
-- **In coda (prossimi):** **F3-deep** (modello che a volte non produce la risposta per cutoff/budget —
-  diverso dal display); validare live F4 (`HOMUN_PLAN_STALL_ABORT=1`) e form-fill (l'utente li testa).
-  NB: doc stantii da sistemare (ADR 0006 ha già il banner stale).
+- **F3-deep — risposta vuota per cutoff/budget** (`7fddd545`, backend): root-cause = un modello di
+  ragionamento spende tutto il budget token a pensare (`finish_reason:length`, content vuoto) →
+  `assistant_response` emette `‹‹REASONING››…‹‹/REASONING››` con body VUOTO e il loop lo committava come
+  risposta finale → bolla vuota/solo-reasoning. Fix: prima del commit, se `answer_body_is_empty(&content)`
+  (`strip_chat_markers` non lascia prosa) e niente accumulato, `break` SENZA `final_done` → scatta la
+  sintesi forzata esistente (`!final_done`: no-tools, budget fresco, "scrivi la risposta ORA" + fallback).
+  `break` esce dal loop → sintesi una volta sola, niente spin. Riuso (#5), non terzo path. +1 test.
+- **In coda (prossimi):** coda fix-sessione **esaurita**. Da fare: **validare live** F4
+  (`HOMUN_PLAN_STALL_ABORT=1`), form-fill e F3-deep (l'utente testa). Poi eventualmente: scope agentico
+  oltre read/gather, accensione drive solo dopo convergenza. NB: doc stantii (ADR 0006 ha già il banner).
 
 **Sessione 2026-06-29 (5e) — REGRESSIONE BROWSE: diagnosi corretta dall'evidenza + 2/3 cause risolte:**
 - **Investigazione (3 deep-dive paralleli + verifica in codice/dal vivo):** la diagnosi 5c era
