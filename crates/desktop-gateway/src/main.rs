@@ -1955,7 +1955,11 @@ async fn mirror_app_reply_to_channel_thread(
     if assistant_message.role != "assistant" {
         return;
     }
-    let text = assistant_message.text.trim();
+    // Channels render PLAIN text: strip app-only control markers (‹‹PLAN››, ‹‹ACT››,
+    // ‹‹REASONING››, …) so Telegram/WhatsApp never see raw markers. A reasoning-only turn
+    // becomes empty here → skipped below (the trace is not the answer).
+    let stripped = strip_chat_markers(&assistant_message.text);
+    let text = stripped.trim();
     if text.is_empty() || text == "…" {
         return;
     }
@@ -6533,6 +6537,35 @@ fn parse_plan_marker(text: &str) -> Vec<serde_json::Value> {
 /// it at the FIRST block's position, so the card stays where the user first saw it instead
 /// of jumping below the prose. All other blocks are removed; surrounding prose is intact.
 /// `parse_plan_marker`'s resume still works: it `rfind`s the single remaining block.
+/// Remove the app-only control markers (and their content) from a message before it
+/// leaves the app to a plain-text surface — chiefly a channel mirror (Telegram/WhatsApp).
+/// These markers (‹‹PLAN››, ‹‹ACT››, ‹‹ARTIFACT››, ‹‹REASONING››, ‹‹COMPOSIO_*››) are
+/// rendered by the app UI; a channel must never receive them raw.
+fn strip_chat_markers(text: &str) -> String {
+    const TAGS: [&str; 7] = [
+        "PLAN",
+        "ACT",
+        "ARTIFACT",
+        "REASONING",
+        "COMPOSIO_CONFIRM",
+        "COMPOSIO_DONE",
+        "COMPOSIO_RECONNECT",
+    ];
+    let mut out = text.to_string();
+    for tag in TAGS {
+        let open = format!("‹‹{tag}››");
+        let close = format!("‹‹/{tag}››");
+        while let Some(o) = out.find(&open) {
+            let Some(rel_c) = out[o..].find(&close) else {
+                break;
+            };
+            let c = o + rel_c + close.len();
+            out.replace_range(o..c, "");
+        }
+    }
+    out.trim().to_string()
+}
+
 fn collapse_plan_markers(text: &str) -> String {
     const OPEN: &str = "‹‹PLAN››";
     const CLOSE: &str = "‹‹/PLAN››";
@@ -45591,6 +45624,21 @@ mod tests {
             "homun-{prefix}-{}",
             uuid::Uuid::new_v4().simple()
         ))
+    }
+
+    #[test]
+    fn strip_chat_markers_removes_app_only_markers_for_channels() {
+        // Reasoning + plan markers are app-only; a channel (Telegram/WhatsApp) must get
+        // clean text. The answer survives; the markers and their content are removed.
+        let text = "‹‹REASONING››thinking hard‹‹/REASONING››\n‹‹PLAN››1/3‹‹/PLAN››\nThe answer.";
+        assert_eq!(super::strip_chat_markers(text), "The answer.");
+        // A reasoning-only message becomes empty (→ the channel mirror skips it).
+        assert_eq!(
+            super::strip_chat_markers("‹‹REASONING››only thinking‹‹/REASONING››"),
+            ""
+        );
+        // Plain text is untouched.
+        assert_eq!(super::strip_chat_markers("just text"), "just text");
     }
 
     #[test]

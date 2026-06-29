@@ -13692,3 +13692,45 @@ body.resizing-drawer {
   width: auto;
   padding: 9px 22px;
 }
+
+/* Collapsed reasoning trace (‹‹REASONING›› marker → details). The model's thinking is
+   shown as an expandable "Ragionamento", muted and out of the answer body. */
+.reasoning-block {
+  margin: 0 0 8px;
+}
+.reasoning-summary {
+  cursor: pointer;
+  color: var(--muted);
+  list-style: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  user-select: none;
+  font-size: var(--text-sm);
+}
+.reasoning-summary::-webkit-details-marker {
+  display: none;
+}
+.reasoning-summary::before {
+  content: "\25B8";
+  font-size: 10px;
+  transition: transform 0.15s ease;
+  opacity: 0.7;
+}
+.reasoning-block[open] .reasoning-summary::before {
+  transform: rotate(90deg);
+}
+.reasoning-dot {
+  font-size: 12px;
+}
+.reasoning-trace {
+  margin-top: 6px;
+  padding: 8px 12px;
+  border-left: 2px solid var(--border);
+  background: var(--surface-muted);
+  border-radius: 4px;
+  color: var(--muted);
+  white-space: pre-wrap;
+  font-size: var(--text-xs);
+  line-height: 1.55;
+}

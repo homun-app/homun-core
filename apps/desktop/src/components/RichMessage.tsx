@@ -1,4 +1,5 @@
 import { lazy, memo, Suspense } from "react";
+import { useTranslation } from "react-i18next";
 
 interface RichMessageProps {
   text: string;
@@ -6,6 +7,79 @@ interface RichMessageProps {
 }
 
 const RichMessageRenderer = lazy(() => import("./RichMessageRenderer"));
+
+// The reasoning trace travels in a ‹‹REASONING››…‹‹/REASONING›› marker (gateway). It is
+// rendered COLLAPSED ("Ragionamento", expandable) and kept OUT of the answer body — the
+// model's thinking is never shown as the answer itself.
+const REASONING_MARKER_RE = /‹‹REASONING››([\s\S]*?)‹‹\/REASONING››/g;
+const REASONING_OPEN = "‹‹REASONING››";
+
+/// Split a message into its (collapsed) reasoning trace and the answer body. Handles the
+/// streaming case where the ‹‹REASONING›› block is still OPEN (no close yet): everything
+/// after the open tag is the in-progress trace, kept out of the answer.
+function extractReasoning(text: string): { reasoning: string; body: string } {
+  if (!text.includes(REASONING_OPEN)) return { reasoning: "", body: text };
+  const completed = [...text.matchAll(REASONING_MARKER_RE)]
+    .map((match) => match[1].trim())
+    .filter(Boolean);
+  let reasoning = completed.join("\n\n");
+  let body = text.replace(REASONING_MARKER_RE, "");
+  const openIdx = body.indexOf(REASONING_OPEN);
+  if (openIdx !== -1) {
+    const tail = body.slice(openIdx + REASONING_OPEN.length).trim();
+    if (tail) reasoning = reasoning ? `${reasoning}\n\n${tail}` : tail;
+    body = body.slice(0, openIdx);
+  }
+  return { reasoning: reasoning.trim(), body: body.trim() };
+}
+
+function ReasoningBlock({ text }: { text: string }) {
+  const { t } = useTranslation();
+  return (
+    <details className="reasoning-block">
+      <summary className="reasoning-summary">
+        <span className="reasoning-dot" aria-hidden="true">
+          💭
+        </span>
+        {t("chat.reasoning", { defaultValue: "Ragionamento" })}
+      </summary>
+      <div className="reasoning-trace">{text}</div>
+    </details>
+  );
+}
+
+function renderAnswer(text: string, streaming: boolean) {
+  const withoutMarkers =
+    text.includes("‹‹COMPOSIO_") ||
+    text.includes("‹‹ACT››") ||
+    text.includes("‹‹ARTIFACT››") ||
+    text.includes("‹‹PLAN››")
+      ? text
+          .replace(CONTROL_MARKER_RE, "")
+          .replace(ACTIVITY_MARKER_RE, "")
+          .replace(ARTIFACT_MARKER_RE, "")
+          .replace(PLAN_MARKER_RE, "")
+          .replace(ARTIFACT_NOTE_RE, "")
+          .trim()
+      : text;
+  let clean = withoutMarkers.includes("![")
+    ? withoutMarkers.replace(BROKEN_IMAGE_RE, "").trim()
+    : withoutMarkers;
+  if (clean.includes("<tool_call")) {
+    clean = clean.replace(LEAKED_TOOLCALL_RE, "").trim();
+  }
+  // Render markdown LIVE while streaming (like Claude Code): the renderer is
+  // streaming-aware (tolerates an unclosed code fence, defers mermaid until complete),
+  // so we no longer fall back to plain text until the end.
+  if (!needsRichRendering(clean)) {
+    return <PlainTextMessage text={clean} />;
+  }
+  return (
+    <Suspense fallback={<PlainTextMessage text={clean} />}>
+      <RichMessageRenderer text={clean} streaming={streaming} />
+    </Suspense>
+  );
+}
 
 // Internal control markers the gateway uses to carry a pending write-confirmation
 // action (or its executed state), and the tool-activity trace; both are rendered
@@ -32,37 +106,14 @@ const BROKEN_IMAGE_RE = /!\[[^\]]*\]\(\s*(?!https?:\/\/|data:|blob:)[^)]*\)/g;
 const LEAKED_TOOLCALL_RE = /<tool_call\b[\s\S]*?(?:<\/tool_call>|$)/gi;
 
 export const RichMessage = memo(function RichMessage({ text, streaming = false }: RichMessageProps) {
-  const withoutMarkers =
-    text.includes("‹‹COMPOSIO_") ||
-    text.includes("‹‹ACT››") ||
-    text.includes("‹‹ARTIFACT››") ||
-    text.includes("‹‹PLAN››")
-      ? text
-          .replace(CONTROL_MARKER_RE, "")
-          .replace(ACTIVITY_MARKER_RE, "")
-          .replace(ARTIFACT_MARKER_RE, "")
-          .replace(PLAN_MARKER_RE, "")
-          .replace(ARTIFACT_NOTE_RE, "")
-          .trim()
-      : text;
-  let clean = withoutMarkers.includes("![")
-    ? withoutMarkers.replace(BROKEN_IMAGE_RE, "").trim()
-    : withoutMarkers;
-  if (clean.includes("<tool_call")) {
-    clean = clean.replace(LEAKED_TOOLCALL_RE, "").trim();
-  }
-
-  // Render markdown LIVE while streaming (like Claude Code): the renderer is
-  // streaming-aware (tolerates an unclosed code fence, defers mermaid until complete),
-  // so we no longer fall back to plain text until the end.
-  if (!needsRichRendering(clean)) {
-    return <PlainTextMessage text={clean} />;
-  }
-
+  const { reasoning, body } = extractReasoning(text);
+  const answer = renderAnswer(body, streaming);
+  if (!reasoning) return answer;
   return (
-    <Suspense fallback={<PlainTextMessage text={clean} />}>
-      <RichMessageRenderer text={clean} streaming={streaming} />
-    </Suspense>
+    <>
+      <ReasoningBlock text={reasoning} />
+      {answer}
+    </>
   );
 });
 

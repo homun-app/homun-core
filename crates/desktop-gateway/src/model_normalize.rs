@@ -68,15 +68,39 @@ pub fn assistant_response(
     // model put everything inside the think block (else: empty answer committed). An explicit
     // `reasoning` (e.g. OpenAI `reasoning_content`, Ollama `message.thinking`) still wins.
     let (content, inline_reasoning) = split_reasoning_from_content(&content);
-    let reasoning = if reasoning.trim().is_empty() {
-        inline_reasoning
+    let content = content.trim();
+    let explicit_reasoning = reasoning.trim();
+    let inline_reasoning = inline_reasoning.trim();
+
+    // Decide the answer BODY and the (collapsed) reasoning TRACE, distinguishing by source:
+    //   - An EXPLICIT reasoning channel (`reasoning_content` / Ollama `message.thinking`)
+    //     is always genuine reasoning → it becomes the collapsed trace; `content` is the
+    //     answer (possibly empty — an honest "reasoned, produced no answer").
+    //   - With NO explicit channel and EMPTY content, an inline `<think>` block is most
+    //     likely a WEAK model dumping the whole ANSWER inside think → recover it as the
+    //     BODY (preserves the F0 fallback), NOT collapsed (else the user sees no answer).
+    //   - Otherwise the inline `<think>` (alongside real content) is reasoning → collapse it.
+    // The trace travels in a ‹‹REASONING››…‹‹/REASONING›› marker (like ‹‹PLAN››): the app
+    // renders it COLLAPSED and channels strip it. This stops a thinking model's trace from
+    // masquerading as the answer (the "it says it'll write in Italian but doesn't" case).
+    let (body, trace): (String, String) = if !explicit_reasoning.is_empty() {
+        let trace = if inline_reasoning.is_empty() {
+            explicit_reasoning.to_string()
+        } else {
+            format!("{explicit_reasoning}\n{inline_reasoning}")
+        };
+        (content.to_string(), trace)
+    } else if content.is_empty() {
+        (inline_reasoning.to_string(), String::new())
     } else {
-        reasoning
+        (content.to_string(), inline_reasoning.to_string())
     };
-    let content = if content.trim().is_empty() && !reasoning.trim().is_empty() {
-        reasoning
+    let content = if trace.is_empty() {
+        body
+    } else if body.is_empty() {
+        format!("‹‹REASONING››{trace}‹‹/REASONING››")
     } else {
-        content
+        format!("‹‹REASONING››{trace}‹‹/REASONING››\n{body}")
     };
     let mut message = serde_json::json!({ "role": "assistant", "content": content });
     if !tool_calls.is_empty() {
@@ -414,18 +438,28 @@ mod tests {
     }
 
     #[test]
-    fn assistant_response_keeps_content_when_present() {
+    fn assistant_response_collapses_reasoning_above_the_answer() {
+        // Explicit reasoning + a real answer: the trace is wrapped in a ‹‹REASONING›› marker
+        // (rendered COLLAPSED by the app, stripped for channels) and the answer body follows.
         let body = assistant_response("hello".into(), "thoughts".into(), vec![], "stop");
-        assert_eq!(body["choices"][0]["message"]["content"], "hello");
+        assert_eq!(
+            body["choices"][0]["message"]["content"],
+            "‹‹REASONING››thoughts‹‹/REASONING››\nhello"
+        );
         assert_eq!(body["choices"][0]["finish_reason"], "stop");
         assert!(body["choices"][0]["message"].get("tool_calls").is_none());
     }
 
     #[test]
-    fn assistant_response_falls_back_to_reasoning_when_content_empty() {
-        // The GLM/kimi dead-end: whole answer in reasoning, content blank.
+    fn assistant_response_collapses_explicit_reasoning_when_content_empty() {
+        // A thinking model that emitted reasoning but NO answer: the trace is collapsed in a
+        // ‹‹REASONING›› marker with an EMPTY body — an honest "reasoned, produced no answer",
+        // NOT the old behavior that showed the trace masquerading AS the answer.
         let body = assistant_response("   ".into(), "the real answer".into(), vec![], "stop");
-        assert_eq!(body["choices"][0]["message"]["content"], "the real answer");
+        assert_eq!(
+            body["choices"][0]["message"]["content"],
+            "‹‹REASONING››the real answer‹‹/REASONING››"
+        );
     }
 
     #[test]
