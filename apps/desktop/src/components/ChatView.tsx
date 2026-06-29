@@ -2601,20 +2601,29 @@ function hasCodeContent(text: string) {
 }
 
 function isLikelyIncompleteMessage(message: ChatMessage) {
-  const metrics = message.metrics;
-  if (
-    metrics &&
-    metrics.maxTokens > 0 &&
-    metrics.generationTokens >= Math.floor(metrics.maxTokens * 0.96)
-  ) {
-    return true;
-  }
   const trimmed = message.text.trim();
   if (!trimmed) return false;
+  // Structural truncation signals: an unclosed code fence, a dangling open bracket, or a
+  // numbered-list item with a bold lead-in but no body — these mean the text was genuinely cut.
   const fenceCount = (trimmed.match(/```/g) ?? []).length;
   if (fenceCount % 2 !== 0) return true;
   if (/[({[]$/.test(trimmed)) return true;
   if (/(^|\n)\s*\d+\.\s+\*\*[^*\n]*$/.test(trimmed)) return true;
+  // Near the token budget is NOT truncation on its own: a reasoning model can spend its whole
+  // budget THINKING (the ‹‹REASONING›› trace lives at the START, the answer at the END) and
+  // still finish a clean answer. Auto-continuing it then re-feeds a COMPLETE answer and the
+  // model rambles "il testo è già completo". So only treat near-max as incomplete when the text
+  // ALSO ends mid-thought — no sentence-terminating punctuation, closing fence, or table row.
+  const metrics = message.metrics;
+  const nearMax = Boolean(
+    metrics &&
+      metrics.maxTokens > 0 &&
+      metrics.generationTokens >= Math.floor(metrics.maxTokens * 0.96),
+  );
+  if (nearMax) {
+    const endsCleanly = /[.!?…»"'”’)\]`|]\s*$/u.test(trimmed);
+    return !endsCleanly;
+  }
   return false;
 }
 
