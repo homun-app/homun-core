@@ -2198,12 +2198,18 @@ function WorkspaceIsland({
       fileCount > 0 ||
       goalCount > 0 ||
       memoryCount > 0);
+  // Headline precedence: REAL work signals first (the running/blocked plan step,
+  // the live ‹‹ACT›› activity, the computer activity) so the task's title shows up
+  // IMMEDIATELY as the agent works — the generic phase label ("thinking"/"writing")
+  // is only a fallback for the brief moment before any concrete activity exists.
+  // Previously `status?.title` sat above the activity signals, so the island showed
+  // "thinking"/"writing" for the whole turn and the real title appeared only at the end.
   const headline =
     blockedPlan?.title ??
     runningPlan?.title ??
-    status?.title ??
     latestActivity ??
     computerActivity ??
+    status?.title ??
     (computerLive ? "Computer" : null) ??
     (artifactsCount > 0
       ? `${artifactsCount} artifact`

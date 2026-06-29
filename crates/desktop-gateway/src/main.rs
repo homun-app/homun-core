@@ -20031,6 +20031,15 @@ check/update the key in Settings → Model & Runtime."
                         .and_then(|i| i.as_str())
                         .unwrap_or("")
                         .to_string();
+                    // Recover a typo'd native browser tool name (e.g. "browser_tavigate")
+                    // BEFORE dispatch, so it matches the native browser arm instead of
+                    // falling through to the Composio catch-all (404 → model loops). The
+                    // `browser_` namespace is reserved for native tools. No-op for any
+                    // non-browser tool name.
+                    let name = match resolve_browser_chat_tool_name(name) {
+                        Some(canonical) => canonical,
+                        None => name,
+                    };
 
                     if let Some(blocked) =
                         workflow_route_blocked_tool_message(&capability_route_for_runtime, name)
@@ -36072,6 +36081,74 @@ fn browser_method_for_chat_tool(tool_name: &str) -> Option<BrowserMethod> {
     }
 }
 
+/// The six native browser tools the chat loop dispatches inline.
+const NATIVE_BROWSER_TOOLS: [&str; 6] = [
+    "browser_navigate",
+    "browser_snapshot",
+    "browser_act",
+    "browser_screenshot",
+    "browser_tabs",
+    "browser_dialog",
+];
+
+/// Plain Levenshtein edit distance (small inputs: tool names). Used only to recover a
+/// near-miss browser tool name; no external crate needed.
+fn levenshtein(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    let mut cur = vec![0usize; b.len() + 1];
+    for (i, ca) in a.iter().enumerate() {
+        cur[0] = i + 1;
+        for (j, cb) in b.iter().enumerate() {
+            let cost = if ca == cb { 0 } else { 1 };
+            cur[j + 1] = (prev[j + 1] + 1).min(cur[j] + 1).min(prev[j] + cost);
+        }
+        std::mem::swap(&mut prev, &mut cur);
+    }
+    prev[b.len()]
+}
+
+/// Canonicalize a possibly-typo'd native browser tool name. The model occasionally
+/// hallucinates a near-miss (observed: `browser_tavigate` for `browser_navigate`);
+/// the arguments are usually right, so recovering the NAME lets the call dispatch
+/// natively. WHY this matters: `browser_` is a RESERVED native namespace, but the chat
+/// dispatch ends in a Composio catch-all — a misspelled `browser_*` name matches no
+/// native arm and falls through to Composio, which 404s, and the model then loops on
+/// it. Conservative: exact match first; otherwise the UNIQUE closest of the six native
+/// names within edit distance ≤ 2. Returns `None` for anything not clearly a browser
+/// tool, so non-browser tool names are left untouched.
+fn resolve_browser_chat_tool_name(name: &str) -> Option<&'static str> {
+    if let Some(exact) = NATIVE_BROWSER_TOOLS
+        .iter()
+        .copied()
+        .find(|candidate| *candidate == name)
+    {
+        return Some(exact);
+    }
+    if !name.starts_with("browser_") {
+        return None;
+    }
+    let mut best: Option<(&'static str, usize)> = None;
+    let mut tied = false;
+    for candidate in NATIVE_BROWSER_TOOLS {
+        let distance = levenshtein(name, candidate);
+        match best {
+            None => best = Some((candidate, distance)),
+            Some((_, current)) if distance < current => {
+                best = Some((candidate, distance));
+                tied = false;
+            }
+            Some((_, current)) if distance == current => tied = true,
+            _ => {}
+        }
+    }
+    match best {
+        Some((candidate, distance)) if distance <= 2 && !tied => Some(candidate),
+        _ => None,
+    }
+}
+
 /// A synthetic `TaskRecord` so `call_shared_browser_sidecar` (built for the durable
 /// runtime) can be reused from a chat turn. The sidecar only reads it for the spawn
 /// env (workspace/profile), so a lightweight record scoped to the owner is enough.
@@ -45514,6 +45591,35 @@ mod tests {
             "homun-{prefix}-{}",
             uuid::Uuid::new_v4().simple()
         ))
+    }
+
+    #[test]
+    fn browser_tool_name_recovers_typos_and_leaves_others_untouched() {
+        // Exact native names pass through.
+        assert_eq!(
+            super::resolve_browser_chat_tool_name("browser_navigate"),
+            Some("browser_navigate")
+        );
+        // The observed hallucination recovers to the right native tool.
+        assert_eq!(
+            super::resolve_browser_chat_tool_name("browser_tavigate"),
+            Some("browser_navigate")
+        );
+        assert_eq!(
+            super::resolve_browser_chat_tool_name("browser_snapshot"),
+            Some("browser_snapshot")
+        );
+        // Non-browser tool names are left untouched (NOT pulled into the browser namespace).
+        assert_eq!(super::resolve_browser_chat_tool_name("web_search"), None);
+        assert_eq!(
+            super::resolve_browser_chat_tool_name("GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID"),
+            None
+        );
+        // A `browser_`-prefixed name too far from any native tool does NOT mis-map.
+        assert_eq!(
+            super::resolve_browser_chat_tool_name("browser_make_me_a_sandwich"),
+            None
+        );
     }
 
     #[test]
