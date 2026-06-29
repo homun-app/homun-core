@@ -622,7 +622,15 @@ GIÀ FATTO sessione 5g (NON ripartire; tutto su `main`):
 - **Vault PIN locale**: aggiunto `LocalPinVerifier` con salt/hash iterato, persistenza
   metadata-only in `vault_local_pin`, endpoint gateway `/api/vault/pin/status|setup|verify`
   e bridge frontend. Aggiunta sezione Settings separata `Vault` per configurare/verificare
-  il PIN, fuori da Memory. Manca ancora il dialog runtime CVV/PIN nel checkout completo.
+  il PIN, fuori da Memory.
+- **Payment Approval runtime MVP**: aggiunto marker `PAYMENT_APPROVAL`, card chat con
+  riepilogo merchant/dominio/importo/prodotto/metodo, endpoint
+  `/api/vault/payment-approvals/approve` con PIN locale + CVV/CV2 one-shot, grant volatile
+  TTL 300s e rewrite del messaggio sorgente per lasciare nel transcript solo
+  `payment_approval_id` (mai PIN/CVV). `browser_act` ora accetta
+  `vault_secret:"cvv_one_shot"` con `payment_approval_id`: il gateway inserisce localmente
+  il CVV nel browser e lo consuma una sola volta. Il click finale resta dietro
+  `high_risk_reason_with_payment_approval`.
 - **bug "Continue" (validato live nell'app — puzzle Einstein ora 1 risposta pulita):** 2 cause distinte —
   (1) backend `df65d0b0`: il trace `‹‹REASONING››` rientrava nel contesto modello via
   `build_chat_runtime_prompt` → `strip_display_markers` canonico in lib.rs usato in `normalize_context_text`,

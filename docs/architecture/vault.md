@@ -1,7 +1,8 @@
 # Sottosistema Vault
 
 > Stato: 2026-06-29. MVP foundation implementata a livello Rust/frontend con
-> persistenza metadata-only delle proposte Vault. Spec di riferimento:
+> persistenza metadata-only delle proposte Vault e runtime locale di approval
+> pagamento PIN+CVV one-shot. Spec di riferimento:
 > `docs/superpowers/specs/2026-06-29-vault-purchase-approval-design.md`.
 
 ## Cosa fa
@@ -25,11 +26,13 @@ Non e' memoria: la memoria puo' contenere solo testo redatto o riferimenti
 - `crates/desktop-gateway/src/browser_safety.rs`: variante approval-aware per il
   click finale di pagamento.
 - `apps/desktop/src/components/ChatView.tsx`: parsing/rendering del marker
-  `VAULT_PROPOSE`, con azioni salva/scarta.
+  `VAULT_PROPOSE`, con azioni salva/scarta, e del marker `PAYMENT_APPROVAL`.
 - `apps/desktop/src/components/SettingsView.tsx`: sezione Settings separata `Vault`
   per status/setup/verifica del PIN locale.
 - `crates/desktop-gateway/src/main.rs`: endpoint
-  `/api/vault/proposals/accept` e `/api/vault/proposals/dismiss`.
+  `/api/vault/proposals/accept`, `/api/vault/proposals/dismiss`,
+  `/api/vault/pin/status|setup|verify` e
+  `/api/vault/payment-approvals/approve`.
 
 ## Modello dati
 
@@ -97,6 +100,29 @@ La UI espone il setup nella sezione Settings `Vault`, separata da `Memory`.
 metodo di pagamento e fingerprint checkout. `validate_payment_approval` invalida
 l'approval se uno di questi campi cambia.
 
+Il loop non puo' cliccare il pagamento finale in autonomia. Quando arriva al
+checkout emette:
+
+```text
+‹‹PAYMENT_APPROVAL››{"snapshot":{"approval_id":"pay_...","merchant":"...","domain":"...","amount_minor":5900,"currency":"EUR","product_summary":"...","payment_method_label":"Visa 1111","checkout_fingerprint":"..."}}‹‹/PAYMENT_APPROVAL››
+```
+
+La UI nasconde il marker e mostra una Payment Approval Card con riepilogo
+merchant/importo/prodotto/metodo. L'utente inserisce PIN locale e CVV/CV2
+one-shot; il bridge chiama `/api/vault/payment-approvals/approve` passando
+`thread_id`/`message_id` quando disponibili. Il gateway:
+
+- verifica il PIN locale;
+- valida il CVV/CV2 come 3-4 cifre;
+- registra in memoria volatile un grant con TTL 300s;
+- riscrive il messaggio sorgente rimuovendo la card e lasciando solo
+  `payment_approval_id` nel transcript, senza PIN o CVV.
+
+Per riempire un campo CVV dopo l'approval, il modello non riceve il valore:
+chiama `browser_act` con `payment_approval_id` e `vault_secret:"cvv_one_shot"`.
+Il gateway sostituisce localmente il secret nel payload browser e lo consuma:
+un secondo uso dello stesso CVV fallisce e richiede una nuova approval.
+
 Il browser safety gate resta conservativo:
 
 - `high_risk_reason` blocca acquisti/login/prenotazioni come prima.
@@ -110,7 +136,6 @@ Login, script arbitrari e azioni high-risk non-payment restano bloccati.
 
 - Keychain/secret-store completo del valore sensibile associato al `SecretRef`.
 - Sezione UI Vault completa.
-- Dialog runtime PIN + CVV one-shot dentro il flusso checkout.
 - Payment Approval Card completa con screenshot/fingerprint.
 - Telegram routing per riepilogo pagamento.
 - E2E su checkout controllato.

@@ -103,7 +103,8 @@ use local_first_task_runtime::{
     WorkspaceId,
 };
 use local_first_vault::{
-    LocalPinVerifier, SQLiteVaultStore, VaultCategory, VaultRecord, VaultRecordId, VaultStore,
+    LocalPinVerifier, PaymentApprovalSnapshot, SQLiteVaultStore, VaultCategory, VaultRecord,
+    VaultRecordId, VaultStore,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -153,6 +154,7 @@ pub(crate) struct AppState {
     /// tab) instead of spawning a fresh sidecar each time. Reaped on idle and on
     /// thread archive/close/delete.
     browser_thread_sessions: Arc<Mutex<std::collections::HashMap<String, ThreadBrowserSession>>>,
+    payment_approvals: Arc<Mutex<std::collections::HashMap<String, PaymentApprovalGrant>>>,
     secret_store: Arc<EncryptedFileSecretStore<DevelopmentSecretKeyProvider>>,
     auth_token: Arc<str>,
     /// Short-lived tickets authorizing the noVNC live-view proxy. The iframe and
@@ -162,6 +164,13 @@ pub(crate) struct AppState {
     /// The current STABLE live-view ticket, reused across status polls so the embed
     /// URL (and thus the iframe) doesn't change every poll. Re-minted when expired.
     pub(crate) novnc_view_ticket: Arc<Mutex<Option<String>>>,
+}
+
+#[derive(Debug, Clone)]
+struct PaymentApprovalGrant {
+    snapshot: PaymentApprovalSnapshot,
+    cvv_one_shot: Option<String>,
+    expires_at: std::time::Instant,
 }
 
 /// A live, reusable browser session bound to a chat thread.
@@ -584,6 +593,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         task_executor_registry: TaskExecutorRegistry::with_defaults(),
         browser_capability_client: Arc::new(Mutex::new(None)),
         browser_thread_sessions: Arc::new(Mutex::new(std::collections::HashMap::new())),
+        payment_approvals: Arc::new(Mutex::new(std::collections::HashMap::new())),
         secret_store: Arc::new(open_gateway_secret_store()?),
         auth_token: resolve_gateway_auth_token()?.into(),
         novnc_tickets: Arc::new(Mutex::new(std::collections::HashMap::new())),
@@ -905,6 +915,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/vault/pin/status", get(vault_pin_status))
         .route("/api/vault/pin/setup", post(vault_pin_setup))
         .route("/api/vault/pin/verify", post(vault_pin_verify))
+        .route(
+            "/api/vault/payment-approvals/approve",
+            post(vault_payment_approval_approve),
+        )
         .route("/api/memory/contacts", get(contacts_list))
         .route("/api/memory/contacts/memories", post(contact_memories))
         .route("/api/memory/contacts/profile", post(contact_profile))
@@ -15443,7 +15457,7 @@ fn browser_act_tool_schema() -> serde_json::Value {
         "type": "function",
         "function": {
             "name": "browser_act",
-            "description": "Perform ONE single micro-action on the current page (a click, writing in a field, selecting, pressing a key, etc.) and return the UPDATED snapshot. One action at a time: after each action re-read the snapshot before the next. For fields with autocomplete use kind='type' (the suggestion selection is automatic). For a 'press and hold' / 'tieni premuto' human-verification challenge use kind='hold' on the button (it keeps the pointer pressed for a few seconds). Do not use for purchases, logins or payments: stop and propose to the user.",
+            "description": "Perform ONE single micro-action on the current page (a click, writing in a field, selecting, pressing a key, etc.) and return the UPDATED snapshot. One action at a time: after each action re-read the snapshot before the next. For fields with autocomplete use kind='type' (the suggestion selection is automatic). For a 'press and hold' / 'tieni premuto' human-verification challenge use kind='hold' on the button (it keeps the pointer pressed for a few seconds). Do not use for purchases, logins or payments unless the user approved a Payment Approval Card and you have its exact payment_approval_id.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -15462,6 +15476,8 @@ fn browser_act_tool_schema() -> serde_json::Value {
                     "submit": { "type": "boolean", "description": "If true, submit the form after writing (equivalent to pressing Enter)." },
                     "key": { "type": "string", "description": "Key to press (kind='press'/'press_key'), e.g. 'Enter', 'ArrowDown'." },
                     "durationMs": { "type": "number", "description": "How long to keep the pointer pressed for kind='hold' (ms). Default ~3000; raise if the challenge needs a longer hold." },
+                    "payment_approval_id": { "type": "string", "description": "Exact id returned by an approved Payment Approval Card. Use only for approved checkout actions and the final payment click; never invent it." },
+                    "vault_secret": { "type": "string", "enum": ["cvv_one_shot"], "description": "Use with payment_approval_id to fill the CVV/CV2 field without exposing the CVV to the model. Do not include a text value when using this." },
                     "target": { "type": "string", "description": "id of the tab to operate on; default: the current tab." }
                 },
                 "required": ["kind"]
@@ -19093,8 +19109,10 @@ through the results; don't discard the range.\n\
 duration, changes, price). Do NOT say \"no results\" if there are visible rows.\n\
 - SCREENSHOT: use browser_screenshot ONLY if the snapshot text isn't enough (layout/map/\
 image).\n\
-- SECURITY: NEVER purchases, logins, bookings or payments. If they're needed, STOP and propose \
-to the user what to do (don't click \"Buy\"/\"Sign in\"/\"Book\").\n\
+- SECURITY: NEVER logins/bookings/payments unattended. At final checkout, STOP and show \
+a Payment Approval Card with marker `‹‹PAYMENT_APPROVAL››{{\"snapshot\":{{\"approval_id\":\"pay_<uuid>\",\"merchant\":\"...\",\"domain\":\"...\",\"amount_minor\":5900,\"currency\":\"EUR\",\"product_summary\":\"...\",\"payment_method_label\":\"Visa 1111\",\"checkout_fingerprint\":\"stable hash or screenshot id\"}}}}‹‹/PAYMENT_APPROVAL››`. \
+After local approval, if a CVV/CV2 field must be filled, call browser_act with `payment_approval_id` and `vault_secret:\"cvv_one_shot\"` instead of writing the CVV yourself. \
+Do not click the final payment button until the user approves the card locally and gives you the exact returned `payment_approval_id`; never invent that id.\n\
 - STOP: as soon as you have enough data, STOP using the browser and write the final reply \
 to the user (one table per row + an optional Sources footer)."
     );
@@ -20832,6 +20850,24 @@ or tell the user to start the contained computer (Settings → Local computer)."
                                             serde_json::Value::String(current_target.clone()),
                                         );
                                     }
+                                    let mut preflight_error = None;
+                                    let vault_secret_used =
+                                        match apply_payment_approval_secret_for_action(
+                                            &state_owned,
+                                            &mut action,
+                                        ) {
+                                            Ok(used) => used,
+                                            Err(error) => {
+                                                push_browser_step(
+                                                    "payment vault secret blocked".to_string(),
+                                                    "error",
+                                                );
+                                                preflight_error = Some(format!(
+                                                    "Payment vault secret unavailable: {error}. Ask the user to approve the Payment Approval Card again."
+                                                ));
+                                                false
+                                            }
+                                        };
                                     // SAFETY GATE: high-risk (buy/login/booking, or
                                     // evaluate) is refused for EVERYONE. In read-only
                                     // (channel) turns any committing action is also
@@ -20839,7 +20875,13 @@ or tell the user to start the contained computer (Settings → Local computer)."
                                     // (is_self card): that block protects the user from
                                     // other people, not from their own requests (e.g.
                                     // clicking "Cerca" on a train search they asked for).
-                                    let blocked = browser_safety::high_risk_reason(&action, &last_snapshot)
+                                    let approved_payment_id =
+                                        approved_payment_id_for_action(&state_owned, &action);
+                                    let blocked = browser_safety::high_risk_reason_with_payment_approval(
+                                        &action,
+                                        &last_snapshot,
+                                        approved_payment_id.as_deref(),
+                                    )
                                     .or_else(|| {
                                         if read_only
                                             && !channel_owner
@@ -20853,7 +20895,10 @@ or tell the user to start the contained computer (Settings → Local computer)."
                                             None
                                         }
                                     });
-                                    if let Some(reason) = blocked {
+                                    if let Some(error) = preflight_error {
+                                        browser_session = Some(client);
+                                        Err(error)
+                                    } else if let Some(reason) = blocked {
                                         eprintln!("browser-gate: BLOCKED ({reason})");
                                         browser_session = Some(client);
                                         push_browser_step(
@@ -20958,7 +21003,12 @@ don't repeat the same action; try a different element, scroll, or wait (kind=wai
                                                         args.get("ref").and_then(|v| v.as_str()),
                                                         args.get("selector")
                                                             .and_then(|v| v.as_str()),
-                                                        args.get("text").and_then(|v| v.as_str()),
+                                                        if vault_secret_used {
+                                                            Some("[vault-secret]")
+                                                        } else {
+                                                            args.get("text")
+                                                                .and_then(|v| v.as_str())
+                                                        },
                                                         error.chars().take(220).collect::<String>()
                                                     );
                                                 }
@@ -34913,6 +34963,9 @@ const COMPOSIO_CONFIRM_OPEN: &str = "‹‹COMPOSIO_CONFIRM››";
 const COMPOSIO_CONFIRM_CLOSE: &str = "‹‹/COMPOSIO_CONFIRM››";
 const VAULT_PROPOSE_OPEN: &str = "‹‹VAULT_PROPOSE››";
 const VAULT_PROPOSE_CLOSE: &str = "‹‹/VAULT_PROPOSE››";
+const PAYMENT_APPROVAL_OPEN: &str = "‹‹PAYMENT_APPROVAL››";
+const PAYMENT_APPROVAL_CLOSE: &str = "‹‹/PAYMENT_APPROVAL››";
+const PAYMENT_APPROVAL_TTL_SECONDS: u64 = 300;
 
 fn vault_propose_marker(category: &str, label: &str, redacted_preview: &str) -> String {
     let marker = serde_json::json!({
@@ -34921,6 +34974,11 @@ fn vault_propose_marker(category: &str, label: &str, redacted_preview: &str) -> 
         "redacted_preview": redacted_preview,
     });
     format!("{VAULT_PROPOSE_OPEN}{marker}{VAULT_PROPOSE_CLOSE}")
+}
+
+fn payment_approval_marker(snapshot: &PaymentApprovalSnapshot) -> String {
+    let marker = serde_json::json!({ "snapshot": snapshot });
+    format!("{PAYMENT_APPROVAL_OPEN}{marker}{PAYMENT_APPROVAL_CLOSE}")
 }
 
 #[derive(Debug, Deserialize)]
@@ -34971,6 +35029,24 @@ struct VaultPinVerifyRequest {
 #[derive(Debug, Serialize)]
 struct VaultPinVerifyResponse {
     ok: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct VaultPaymentApprovalRequest {
+    snapshot: PaymentApprovalSnapshot,
+    pin: String,
+    cvv: String,
+    #[serde(default)]
+    thread_id: Option<String>,
+    #[serde(default)]
+    message_id: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct VaultPaymentApprovalResponse {
+    ok: bool,
+    payment_approval_id: String,
+    expires_in_seconds: u64,
 }
 
 async fn vault_proposal_accept(
@@ -35030,6 +35106,38 @@ async fn vault_pin_verify(
     }))
 }
 
+async fn vault_payment_approval_approve(
+    State(state): State<AppState>,
+    Json(request): Json<VaultPaymentApprovalRequest>,
+) -> Result<Json<VaultPaymentApprovalResponse>, GatewayError> {
+    let verifier = lock_vault_store(&state)?
+        .local_pin_verifier()
+        .map_err(vault_store_error)?
+        .ok_or_else(|| invalid_vault_pin("Vault PIN is not configured".to_string()))?;
+    let grant = payment_approval_grant_from_request(&request, &verifier)?;
+    let approval_id = grant.snapshot.approval_id.clone();
+    lock_payment_approvals(&state)?.insert(approval_id.clone(), grant);
+    if let (Some(thread_id), Some(message_id)) = (&request.thread_id, &request.message_id) {
+        if let Ok(store) = lock_store(&state) {
+            if let Ok(Some(message)) = store.message(thread_id, message_id) {
+                if payment_approval_marker_matches(&message.text, &request.snapshot) {
+                    let rewritten = rewrite_payment_approval_to_done(
+                        &message.text,
+                        &approval_id,
+                        PAYMENT_APPROVAL_TTL_SECONDS,
+                    );
+                    let _ = store.set_message_text(thread_id, message_id, &rewritten);
+                }
+            }
+        }
+    }
+    Ok(Json(VaultPaymentApprovalResponse {
+        ok: true,
+        payment_approval_id: approval_id,
+        expires_in_seconds: PAYMENT_APPROVAL_TTL_SECONDS,
+    }))
+}
+
 fn vault_record_from_proposal(request: &VaultProposalActionRequest) -> Result<VaultRecord, String> {
     let category = vault_category_from_marker(&request.category)?;
     let record_id = VaultRecordId::new(format!("vault_{}", uuid::Uuid::new_v4().simple()))?;
@@ -35065,6 +35173,145 @@ fn local_pin_verifier_from_request(
 
 fn local_pin_verify_result(verifier: Option<&LocalPinVerifier>, pin: &str) -> bool {
     verifier.is_some_and(|verifier| verifier.verify(pin))
+}
+
+fn payment_approval_grant_from_request(
+    request: &VaultPaymentApprovalRequest,
+    verifier: &LocalPinVerifier,
+) -> Result<PaymentApprovalGrant, GatewayError> {
+    if !verifier.verify(&request.pin) {
+        return Err(invalid_vault_pin("Invalid Vault PIN".to_string()));
+    }
+    validate_one_shot_cvv(&request.cvv).map_err(invalid_vault_pin)?;
+    Ok(PaymentApprovalGrant {
+        snapshot: request.snapshot.clone(),
+        cvv_one_shot: Some(request.cvv.trim().to_string()),
+        expires_at: std::time::Instant::now()
+            + std::time::Duration::from_secs(PAYMENT_APPROVAL_TTL_SECONDS),
+    })
+}
+
+fn validate_one_shot_cvv(cvv: &str) -> Result<(), String> {
+    let cvv = cvv.trim();
+    if (3..=4).contains(&cvv.len()) && cvv.chars().all(|char| char.is_ascii_digit()) {
+        Ok(())
+    } else {
+        Err("CVV/CV2 must be 3-4 digits and is one-shot only".to_string())
+    }
+}
+
+fn payment_approval_marker_matches(text: &str, snapshot: &PaymentApprovalSnapshot) -> bool {
+    let Some(marker) = confirm_marker_value(text, PAYMENT_APPROVAL_OPEN, PAYMENT_APPROVAL_CLOSE)
+    else {
+        return false;
+    };
+    marker
+        .get("snapshot")
+        .and_then(|value| serde_json::from_value::<PaymentApprovalSnapshot>(value.clone()).ok())
+        .is_some_and(|stored| stored == *snapshot)
+}
+
+fn apply_payment_approval_secret_for_action(
+    state: &AppState,
+    action: &mut serde_json::Value,
+) -> Result<bool, String> {
+    let secret = action
+        .get("vault_secret")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("");
+    if secret.is_empty() {
+        return Ok(false);
+    }
+    if secret != "cvv_one_shot" {
+        return Err(format!("unsupported vault_secret: {secret}"));
+    }
+    let mut approvals = lock_payment_approvals(state).map_err(|error| error.message)?;
+    apply_payment_approval_secret_from_map(&mut approvals, action)
+}
+
+fn apply_payment_approval_secret_from_map(
+    approvals: &mut std::collections::HashMap<String, PaymentApprovalGrant>,
+    action: &mut serde_json::Value,
+) -> Result<bool, String> {
+    let kind = action
+        .get("kind")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("");
+    if !matches!(kind, "type" | "fill") {
+        return Err("vault_secret can only be used with type/fill actions".to_string());
+    }
+    let approval_id = action
+        .get("payment_approval_id")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .ok_or_else(|| "vault_secret requires a payment_approval_id".to_string())?
+        .to_string();
+    prune_expired_payment_approvals(approvals);
+    let grant = approvals
+        .get_mut(&approval_id)
+        .ok_or_else(|| "payment approval is missing or expired".to_string())?;
+    let cvv = grant
+        .cvv_one_shot
+        .take()
+        .ok_or_else(|| "CVV/CV2 one-shot was already used".to_string())?;
+    let Some(obj) = action.as_object_mut() else {
+        return Err("browser action must be an object".to_string());
+    };
+    obj.insert("text".to_string(), serde_json::Value::String(cvv));
+    obj.remove("vault_secret");
+    Ok(true)
+}
+
+fn rewrite_payment_approval_to_done(
+    text: &str,
+    payment_approval_id: &str,
+    ttl_seconds: u64,
+) -> String {
+    let Some(open) = text.find(PAYMENT_APPROVAL_OPEN) else {
+        return text.to_string();
+    };
+    let Some(close_rel) = text[open..].find(PAYMENT_APPROVAL_CLOSE) else {
+        return text.to_string();
+    };
+    let close = open + close_rel + PAYMENT_APPROVAL_CLOSE.len();
+    let mut out = text[..open].trim_end().to_string();
+    let tail = text[close..].trim();
+    if !tail.is_empty() {
+        if !out.is_empty() {
+            out.push_str("\n\n");
+        }
+        out.push_str(tail);
+    }
+    if !out.is_empty() {
+        out.push_str("\n\n");
+    }
+    out.push_str(&format!(
+        "Pagamento autorizzato localmente. Per il click finale di pagamento usa payment_approval_id: {payment_approval_id}. L'autorizzazione scade tra {ttl_seconds}s. Il CVV e' one-shot e non e' stato salvato nel transcript."
+    ));
+    out
+}
+
+fn approved_payment_id_for_action(state: &AppState, action: &serde_json::Value) -> Option<String> {
+    let approval_id = action.get("payment_approval_id")?.as_str()?.to_string();
+    let mut approvals = lock_payment_approvals(state).ok()?;
+    prune_expired_payment_approvals(&mut approvals);
+    approvals
+        .get(&approval_id)
+        .map(|grant| grant.snapshot.approval_id.clone())
+}
+
+fn prune_expired_payment_approvals(
+    approvals: &mut std::collections::HashMap<String, PaymentApprovalGrant>,
+) {
+    let expired: Vec<String> = approvals
+        .iter()
+        .filter(|(_, grant)| std::time::Instant::now() > grant.expires_at)
+        .map(|(id, _)| id.clone())
+        .collect();
+    for id in expired {
+        approvals.remove(&id);
+    }
 }
 
 fn vault_category_from_marker(category: &str) -> Result<VaultCategory, String> {
@@ -45038,6 +45285,19 @@ fn lock_vault_store(state: &AppState) -> Result<MutexGuard<'_, SQLiteVaultStore>
     })
 }
 
+fn lock_payment_approvals(
+    state: &AppState,
+) -> Result<MutexGuard<'_, std::collections::HashMap<String, PaymentApprovalGrant>>, GatewayError> {
+    state
+        .payment_approvals
+        .lock()
+        .map_err(|error| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "payment_approval_lock_error",
+            message: error.to_string(),
+        })
+}
+
 fn lock_capability_registry(
     state: &AppState,
 ) -> Result<MutexGuard<'_, CapabilityRegistryStore>, GatewayError> {
@@ -47283,6 +47543,126 @@ prs.save(Path({path:?}))
         assert!(super::local_pin_verify_result(Some(&verifier), "123456"));
         assert!(!super::local_pin_verify_result(Some(&verifier), "654321"));
         assert!(!super::local_pin_verify_result(None, "123456"));
+    }
+
+    fn payment_snapshot() -> local_first_vault::PaymentApprovalSnapshot {
+        local_first_vault::PaymentApprovalSnapshot {
+            approval_id: "pay_test".to_string(),
+            merchant: "Trainline".to_string(),
+            domain: "www.thetrainline.com".to_string(),
+            amount_minor: 5900,
+            currency: "EUR".to_string(),
+            product_summary: "Napoli -> Roma 2026-07-10 09:50".to_string(),
+            payment_method_label: "Visa 1111".to_string(),
+            checkout_fingerprint: "checkout_hash_a".to_string(),
+        }
+    }
+
+    #[test]
+    fn payment_approval_marker_wraps_snapshot_payload() {
+        let marker = super::payment_approval_marker(&payment_snapshot());
+
+        assert!(marker.starts_with(super::PAYMENT_APPROVAL_OPEN));
+        assert!(marker.ends_with(super::PAYMENT_APPROVAL_CLOSE));
+        let parsed = super::confirm_marker_value(
+            &marker,
+            super::PAYMENT_APPROVAL_OPEN,
+            super::PAYMENT_APPROVAL_CLOSE,
+        )
+        .expect("valid payment marker");
+        assert_eq!(parsed["snapshot"]["approval_id"], "pay_test");
+        assert_eq!(parsed["snapshot"]["amount_minor"], 5900);
+        assert_eq!(parsed["snapshot"]["payment_method_label"], "Visa 1111");
+    }
+
+    #[test]
+    fn payment_approval_grant_requires_pin_and_one_shot_cvv() {
+        let verifier = local_first_vault::LocalPinVerifier::create("123456").unwrap();
+        let request = super::VaultPaymentApprovalRequest {
+            snapshot: payment_snapshot(),
+            pin: "123456".to_string(),
+            cvv: "123".to_string(),
+            thread_id: None,
+            message_id: None,
+        };
+
+        let grant =
+            super::payment_approval_grant_from_request(&request, &verifier).expect("payment grant");
+        assert_eq!(grant.snapshot.approval_id, "pay_test");
+        assert_eq!(grant.cvv_one_shot.as_deref(), Some("123"));
+
+        let bad_pin = super::VaultPaymentApprovalRequest {
+            pin: "654321".to_string(),
+            ..request
+        };
+        assert!(super::payment_approval_grant_from_request(&bad_pin, &verifier).is_err());
+
+        let bad_cvv = super::VaultPaymentApprovalRequest {
+            snapshot: payment_snapshot(),
+            pin: "123456".to_string(),
+            cvv: "12x".to_string(),
+            thread_id: None,
+            message_id: None,
+        };
+        assert!(super::payment_approval_grant_from_request(&bad_cvv, &verifier).is_err());
+    }
+
+    #[test]
+    fn rewrite_payment_approval_removes_card_and_leaves_approved_id() {
+        let marker = super::payment_approval_marker(&payment_snapshot());
+        let text = format!("Riepilogo checkout.\n\n{marker}\n\nNon procedo senza conferma.");
+
+        let rewritten = super::rewrite_payment_approval_to_done(&text, "pay_test", 300);
+
+        assert!(rewritten.contains("Riepilogo checkout."));
+        assert!(rewritten.contains("Pagamento autorizzato localmente"));
+        assert!(rewritten.contains("payment_approval_id: pay_test"));
+        assert!(!rewritten.contains(super::PAYMENT_APPROVAL_OPEN));
+        assert!(!rewritten.contains("123"));
+    }
+
+    #[test]
+    fn payment_approval_secret_injects_cvv_once() {
+        let mut approvals = std::collections::HashMap::from([(
+            "pay_test".to_string(),
+            super::PaymentApprovalGrant {
+                snapshot: payment_snapshot(),
+                cvv_one_shot: Some("123".to_string()),
+                expires_at: std::time::Instant::now() + std::time::Duration::from_secs(300),
+            },
+        )]);
+        let mut action = serde_json::json!({
+            "kind": "fill",
+            "ref": "e12",
+            "payment_approval_id": "pay_test",
+            "vault_secret": "cvv_one_shot"
+        });
+
+        assert!(
+            super::apply_payment_approval_secret_from_map(&mut approvals, &mut action).unwrap()
+        );
+        assert_eq!(action["text"], "123");
+        assert!(action.get("vault_secret").is_none());
+
+        let mut second = serde_json::json!({
+            "kind": "fill",
+            "ref": "e12",
+            "payment_approval_id": "pay_test",
+            "vault_secret": "cvv_one_shot"
+        });
+        assert!(
+            super::apply_payment_approval_secret_from_map(&mut approvals, &mut second).is_err()
+        );
+
+        let mut click = serde_json::json!({
+            "kind": "click",
+            "ref": "e20",
+            "payment_approval_id": "pay_test",
+            "vault_secret": "cvv_one_shot"
+        });
+        assert!(
+            super::apply_payment_approval_secret_from_map(&mut approvals, &mut click).is_err()
+        );
     }
 
     #[test]

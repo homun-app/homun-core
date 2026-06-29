@@ -93,6 +93,7 @@ import {
   type MemoryGraphNode,
   type MemoryHygieneSuggestion,
   type MemoryWikiPage,
+  type PaymentApprovalSnapshot,
   type ProjectSubdir,
   modelIsCloud,
   type ProviderModelsGroup,
@@ -3211,6 +3212,7 @@ const CONNECT_SUGGEST_RE = /‹‹CONNECT_SUGGEST››([\s\S]*?)‹‹\/CONNECT
 const COMPOSIO_DONE_RE = /‹‹COMPOSIO_DONE››([\s\S]*?)‹‹\/COMPOSIO_DONE››/;
 const COMPOSIO_RECONNECT_RE = /‹‹COMPOSIO_RECONNECT››([\s\S]*?)‹‹\/COMPOSIO_RECONNECT››/;
 const VAULT_PROPOSE_RE = /‹‹VAULT_PROPOSE››([\s\S]*?)‹‹\/VAULT_PROPOSE››/;
+const PAYMENT_APPROVAL_RE = /‹‹PAYMENT_APPROVAL››([\s\S]*?)‹‹\/PAYMENT_APPROVAL››/;
 // Single/multi-choice question card (Claude-Code style): the model emits the choices
 // instead of listing them in prose, and the click sends the answer back.
 const CHOICES_RE = /‹‹CHOICES››([\s\S]*?)‹‹\/CHOICES››/;
@@ -3224,7 +3226,7 @@ const GOAL_PROPOSE_RE = /‹‹GOAL_PROPOSE››([\s\S]*?)‹‹\/GOAL_PROPOSE�
 // Strips an UNCLOSED plan/goal marker (open present, no close) from the visible prose.
 const UNCLOSED_PROPOSE_RE = /‹‹(?:PLAN_PROPOSE|GOAL_PROPOSE)››[\s\S]*$/;
 const COMPOSIO_MARKERS_RE =
-  /‹‹(?:COMPOSIO_(?:CONFIRM|DONE|RECONNECT)|MCP_CONFIRM|FS_AUTHORIZE|CONNECT_SUGGEST|VAULT_PROPOSE|CHOICES|PLAN_PROPOSE|GOAL_PROPOSE|PLAN)››[\s\S]*?‹‹\/(?:COMPOSIO_(?:CONFIRM|DONE|RECONNECT)|MCP_CONFIRM|FS_AUTHORIZE|CONNECT_SUGGEST|VAULT_PROPOSE|CHOICES|PLAN_PROPOSE|GOAL_PROPOSE|PLAN)››/g;
+  /‹‹(?:COMPOSIO_(?:CONFIRM|DONE|RECONNECT)|MCP_CONFIRM|FS_AUTHORIZE|CONNECT_SUGGEST|VAULT_PROPOSE|PAYMENT_APPROVAL|CHOICES|PLAN_PROPOSE|GOAL_PROPOSE|PLAN)››[\s\S]*?‹‹\/(?:COMPOSIO_(?:CONFIRM|DONE|RECONNECT)|MCP_CONFIRM|FS_AUTHORIZE|CONNECT_SUGGEST|VAULT_PROPOSE|PAYMENT_APPROVAL|CHOICES|PLAN_PROPOSE|GOAL_PROPOSE|PLAN)››/g;
 const PROPOSE_MARKERS_VISIBLE_RE =
   /‹‹(?:PLAN_PROPOSE|GOAL_PROPOSE)››[\s\S]*?‹‹\/(?:PLAN_PROPOSE|GOAL_PROPOSE)››/g;
 
@@ -3251,6 +3253,10 @@ interface VaultProposal {
   category: string;
   label: string;
   redacted_preview: string;
+}
+
+interface PaymentApprovalProposal {
+  snapshot: PaymentApprovalSnapshot;
 }
 
 /** Composer interaction modes (Cursor-style, adapted for a general assistant).
@@ -5652,6 +5658,7 @@ function parseComposioConfirm(text: string): {
   fsAuthorize: { path: string; op: string } | null;
   connectSuggest: ConnectSuggest | null;
   vaultPropose: VaultProposal | null;
+  paymentApproval: PaymentApprovalProposal | null;
   choices: ChoicePrompt | null;
   planPropose: PlanProposal | null;
   goalPropose: string[] | null;
@@ -5725,6 +5732,29 @@ function parseComposioConfirm(text: string): {
           label: parsed.label,
           redacted_preview: parsed.redacted_preview,
         };
+      }
+    } catch {
+      /* malformed → just hide it */
+    }
+  }
+  let paymentApproval: PaymentApprovalProposal | null = null;
+  const paymentMatch = text.match(PAYMENT_APPROVAL_RE);
+  if (paymentMatch) {
+    try {
+      const parsed = JSON.parse(paymentMatch[1]) as { snapshot?: Partial<PaymentApprovalSnapshot> };
+      const snapshot = parsed?.snapshot;
+      if (
+        snapshot &&
+        typeof snapshot.approval_id === "string" &&
+        typeof snapshot.merchant === "string" &&
+        typeof snapshot.domain === "string" &&
+        typeof snapshot.amount_minor === "number" &&
+        typeof snapshot.currency === "string" &&
+        typeof snapshot.product_summary === "string" &&
+        typeof snapshot.payment_method_label === "string" &&
+        typeof snapshot.checkout_fingerprint === "string"
+      ) {
+        paymentApproval = { snapshot: snapshot as PaymentApprovalSnapshot };
       }
     } catch {
       /* malformed → just hide it */
@@ -5822,6 +5852,7 @@ function parseComposioConfirm(text: string): {
     fsAuthorize,
     connectSuggest,
     vaultPropose,
+    paymentApproval,
     choices,
     planPropose,
     goalPropose,
@@ -5862,6 +5893,7 @@ function AssistantMessageBody({
     fsAuthorize,
     connectSuggest,
     vaultPropose,
+    paymentApproval,
     choices,
     planPropose,
     goalPropose,
@@ -5899,6 +5931,13 @@ function AssistantMessageBody({
       {vaultPropose && !streaming && (
         <VaultProposeCard
           proposal={vaultPropose}
+          messageId={messageId}
+          threadId={threadId}
+        />
+      )}
+      {paymentApproval && !streaming && (
+        <PaymentApprovalCard
+          proposal={paymentApproval}
           messageId={messageId}
           threadId={threadId}
         />
@@ -6004,6 +6043,116 @@ function VaultProposeCard({
       )}
     </div>
   );
+}
+
+function PaymentApprovalCard({
+  proposal,
+  messageId,
+  threadId,
+}: {
+  proposal: PaymentApprovalProposal;
+  messageId?: string;
+  threadId?: string;
+}) {
+  const snapshot = proposal.snapshot;
+  const [pin, setPin] = useState("");
+  const [cvv, setCvv] = useState("");
+  const [status, setStatus] = useState<"idle" | "running" | "approved" | "error">("idle");
+  const [note, setNote] = useState<string | null>(null);
+
+  const approve = async () => {
+    setStatus("running");
+    setNote(null);
+    try {
+      const result = await coreBridge.vaultPaymentApprovalApprove(snapshot, pin, cvv, {
+        threadId,
+        messageId,
+      });
+      setPin("");
+      setCvv("");
+      setStatus("approved");
+      setNote(
+        `Pagamento autorizzato: ${result.payment_approval_id}. L'autorizzazione scade tra ${result.expires_in_seconds}s.`,
+      );
+    } catch (error) {
+      setStatus("error");
+      setNote((error as Error).message);
+    }
+  };
+
+  const amount = formatPaymentAmount(snapshot.amount_minor, snapshot.currency);
+  const busy = status === "running";
+
+  return (
+    <div className="cmp-confirm destructive">
+      <div className="cmp-confirm-head">
+        <ShieldCheck size={15} />
+        <strong>Conferma pagamento</strong>
+        <span className="cmp-confirm-name">{amount}</span>
+      </div>
+      <div className="cmp-confirm-fields">
+        <label>Merchant</label>
+        <input readOnly value={snapshot.merchant} />
+        <label>Dominio</label>
+        <input readOnly value={snapshot.domain} />
+        <label>Prodotto</label>
+        <textarea className="set-input" readOnly rows={2} value={snapshot.product_summary} />
+        <label>Metodo</label>
+        <input readOnly value={snapshot.payment_method_label} />
+      </div>
+      <p className="cmp-confirm-note">
+        Il click finale resta bloccato finché PIN e CVV one-shot non sono verificati localmente.
+        Il CVV non viene salvato.
+      </p>
+      {status !== "approved" && (
+        <div className="cmp-confirm-fields">
+          <label>PIN locale</label>
+          <input
+            className="set-input"
+            inputMode="numeric"
+            type="password"
+            value={pin}
+            disabled={busy}
+            onChange={(event) => setPin(event.target.value)}
+          />
+          <label>CVV/CV2 one-shot</label>
+          <input
+            className="set-input"
+            inputMode="numeric"
+            type="password"
+            value={cvv}
+            disabled={busy}
+            onChange={(event) => setCvv(event.target.value)}
+          />
+        </div>
+      )}
+      {status === "error" && <p className="cmp-confirm-err">Errore: {note}</p>}
+      {status === "approved" && note && <p className="cmp-confirm-note">{note}</p>}
+      {status !== "approved" && (
+        <div className="cmp-confirm-actions">
+          <button
+            className="set-btn primary"
+            type="button"
+            disabled={busy || pin.length === 0 || cvv.length === 0}
+            onClick={() => void approve()}
+          >
+            {busy ? "Verifico..." : "Autorizza pagamento"}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function formatPaymentAmount(amountMinor: number, currency: string): string {
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency,
+    }).format(amountMinor / 100);
+  } catch {
+    return `${(amountMinor / 100).toFixed(2)} ${currency}`;
+  }
 }
 
 /** Plan-mode card: the model proposed a plan and stopped. Accetta sends the approval

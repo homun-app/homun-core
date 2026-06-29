@@ -1845,6 +1845,23 @@ export interface VaultPinVerifyResult {
   ok: boolean;
 }
 
+export interface PaymentApprovalSnapshot {
+  approval_id: string;
+  merchant: string;
+  domain: string;
+  amount_minor: number;
+  currency: string;
+  product_summary: string;
+  payment_method_label: string;
+  checkout_fingerprint: string;
+}
+
+export interface PaymentApprovalResult {
+  ok: boolean;
+  payment_approval_id: string;
+  expires_in_seconds: number;
+}
+
 async function electronVaultProposalAccept(
   input: VaultProposalActionInput,
 ): Promise<VaultProposalAcceptResult> {
@@ -1867,6 +1884,21 @@ async function electronVaultPinSetup(pin: string): Promise<VaultPinStatus> {
 
 async function electronVaultPinVerify(pin: string): Promise<VaultPinVerifyResult> {
   return gatewayPostJson<VaultPinVerifyResult>("/api/vault/pin/verify", { pin });
+}
+
+async function electronVaultPaymentApprovalApprove(
+  snapshot: PaymentApprovalSnapshot,
+  pin: string,
+  cvv: string,
+  ctx?: { threadId?: string; messageId?: string },
+): Promise<PaymentApprovalResult> {
+  return gatewayPostJson<PaymentApprovalResult>("/api/vault/payment-approvals/approve", {
+    snapshot,
+    pin,
+    cvv,
+    ...(ctx?.threadId ? { thread_id: ctx.threadId } : {}),
+    ...(ctx?.messageId ? { message_id: ctx.messageId } : {}),
+  });
 }
 
 /** Persists that the user connected one suggestion from an in-chat connect-card,
@@ -2557,6 +2589,12 @@ export const coreBridge = {
   vaultPinStatus: () => electronVaultPinStatus(),
   vaultPinSetup: (pin: string) => electronVaultPinSetup(pin),
   vaultPinVerify: (pin: string) => electronVaultPinVerify(pin),
+  vaultPaymentApprovalApprove: (
+    snapshot: PaymentApprovalSnapshot,
+    pin: string,
+    cvv: string,
+    ctx?: { threadId?: string; messageId?: string },
+  ) => electronVaultPaymentApprovalApprove(snapshot, pin, cvv, ctx),
   connectMark: (input: {
     kind: string;
     ref: string;
