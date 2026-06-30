@@ -474,9 +474,9 @@ assertNotContains("src/App.tsx", "template_workflow_", "template workflows must 
 assertContains("src/components/ChatComputerPanel.tsx", "view === \"bar\" ? \"full\" : \"bar\"", "Computer dock chevron must open the live browser to a useful expanded view from the compact card");
 assertContains("src/components/ChatComputerPanel.tsx", "view === \"bar\" ? <Maximize2 size={15} /> : <ChevronDown size={15} />", "Computer dock compact expand control must use a fullscreen/expand icon, not an upward chevron");
 assertContains("src/styles.css", ".cc-dock,\n.cc-scrim {\n  pointer-events: auto;", "Computer dock controls must be clickable inside the non-interactive status stack");
-assertContains("src/styles.css", ".chat-status-stack:has(.cc-dock.full)", "Computer fullscreen must expand inside the chat status stack instead of under the sidebar");
-assertContains("src/styles.css", "width: min(980px, calc(100vw - 390px));", "Computer fullscreen must be large but bounded by the chat area");
-assertNotContains("src/styles.css", ".cc-dock.full {\n  position: fixed;", "Computer fullscreen dock must not be fixed to the whole viewport/sidebar");
+assertContains("src/styles.css", ".cc-dock.full {\n  position: fixed;", "Computer fullscreen dock must escape the status stack and anchor inside the chat viewport");
+assertContains("src/styles.css", "left: calc(var(--drawer-island-gap) + var(--drawer-width, 292px) + 24px);", "Computer fullscreen dock must start to the right of the sidebar island");
+assertContains("src/styles.css", "width: min(1040px, calc(100vw - var(--drawer-width, 292px) - 72px));", "Computer fullscreen must be large but bounded by the chat area");
 assertContains("src/components/RichMessage.tsx", "STRAY_REASONING_MARKER_RE", "streaming renderer must strip stray or malformed reasoning markers from the visible answer body");
 assertContains("src/components/ChatView.tsx", "VAULT_PROPOSE_RE", "chat renderer must parse vault proposal markers");
 assertContains("src/components/ChatView.tsx", "VaultProposeCard", "chat renderer must render sensitive-data vault proposal cards");

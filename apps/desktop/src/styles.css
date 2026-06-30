@@ -2001,8 +2001,7 @@ body.resizing-drawer {
   max-width: min(620px, calc(100vw - 390px));
 }
 .chat-status-stack:has(.cc-dock.full) {
-  width: min(980px, calc(100vw - 390px));
-  max-width: min(980px, calc(100vw - 390px));
+  max-width: min(360px, calc(100vw - 390px));
 }
 
 /* Workspace Island — compact operational state, inspired by Zed/Zcode status
@@ -7281,14 +7280,21 @@ body.resizing-drawer {
 }
 
 .cc-dock.full {
-  position: relative;
-  width: min(980px, calc(100vw - 390px));
-  height: min(760px, calc(100vh - 128px));
+  position: fixed;
+  top: 72px;
+  left: calc(var(--drawer-island-gap) + var(--drawer-width, 292px) + 24px);
+  width: min(1040px, calc(100vw - var(--drawer-width, 292px) - 72px));
+  height: min(760px, calc(100vh - 144px));
   margin: 0;
   z-index: 60;
   display: flex;
   flex-direction: column;
   box-shadow: 0 24px 80px rgba(0, 0, 0, 0.4);
+}
+
+.app-shell.drawer-closed .cc-dock.full {
+  left: 24px;
+  width: min(1040px, calc(100vw - 48px));
 }
 
 .cc-dock-bar {

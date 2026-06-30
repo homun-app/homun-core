@@ -1,6 +1,6 @@
 # Sottosistema Browser
 
-> Stato: **2026-06-27 — reverse-engineered dal codice, punto fermo.** Documenta il
+> Stato: **2026-06-30 — reverse-engineered dal codice, punto fermo.** Documenta il
 > comportamento reale OGGI, non il design desiderato. Ogni riferimento è `file:line`
 > verificato sul sorgente del repo `app`. Quando il codice e questa nota divergono,
 > vince il codice (e questa nota va corretta).
@@ -25,6 +25,11 @@ Due metà:
   granulari `browser_navigate` / `browser_snapshot` / `browser_act` / `browser_tabs` /
   `browser_screenshot` / `browser_dialog`, gestisce il loop a round, l'igiene di
   contesto, il **gate di sicurezza** e il **lock globale** sul singolo browser.
+- **Renderer live panel** (`apps/desktop/src/components/ChatComputerPanel.tsx` +
+  `apps/desktop/src/styles.css`): mostra la sessione noVNC del thread mentre il browser
+  lavora. Il compact card usa icona di espansione (`Maximize2`) e la modalità full è
+  `position: fixed` ancorata dentro l'area chat, a destra della sidebar, così non cresce
+  sotto il drawer e lascia una preview browser ampia.
 
 ---
 

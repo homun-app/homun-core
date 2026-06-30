@@ -749,6 +749,11 @@ GIÀ FATTO sessione 5g (NON ripartire; tutto su `main`):
   converte distance in score e resta fuori dal runtime default. Test verde:
   `cargo test -p local-first-memory --features usearch-index usearch_index_returns_hits_ranked_by_cosine_similarity`.
   Prossimo passo prima del wiring: benchmark su dataset reale + verifica peso bundle/notarization.
+- **Browser live panel / espansione**: il dock `ChatComputerPanel` in modalità full ora esce dallo
+  status stack e si ancora `fixed` dentro l'area chat, a destra della sidebar; il compact expand usa
+  `Maximize2` e il pannello full è più largo (`min(1040px, ...)`) senza scivolare sotto il drawer.
+  Aggiornato `test:ui-contract` per bloccare la regressione. Verifiche verdi:
+  `npm --prefix apps/desktop run test:ui-contract`, `npm --prefix apps/desktop run build`.
 - **bug "Continue" (validato live nell'app — puzzle Einstein ora 1 risposta pulita):** 2 cause distinte —
   (1) backend `df65d0b0`: il trace `‹‹REASONING››` rientrava nel contesto modello via
   `build_chat_runtime_prompt` → `strip_display_markers` canonico in lib.rs usato in `normalize_context_text`,
