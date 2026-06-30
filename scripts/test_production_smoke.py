@@ -19,11 +19,14 @@ class ProductionSmokeTests(unittest.TestCase):
                 "S6",
                 "S7",
                 "S8",
+                "S9",
             ],
         )
         self.assertIn("Vault", scenarios[2].name)
         self.assertTrue(scenarios[2].expect_marker)
         self.assertTrue(scenarios[2].forbid_plaintext)
+        self.assertIn("Italian locale", scenarios[8].name)
+        self.assertIn("Italia", scenarios[8].prompt)
 
     def test_select_scenarios_filters_by_id(self):
         selected = smoke.select_scenarios(smoke.build_scenarios(), ["S1", "S3"])

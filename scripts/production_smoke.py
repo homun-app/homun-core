@@ -69,6 +69,11 @@ def build_scenarios() -> list[Scenario]:
             "Simula un checkout di test e chiedimi approvazione pagamento senza completarlo.",
             expect_marker="PAYMENT_APPROVAL",
         ),
+        Scenario(
+            "S9",
+            "Italian locale web discovery",
+            "Cerca sul web le ultime 3 notizie tech di oggi in Italia: parti da una pagina di discovery/search, non da una singola testata, e dammi titolo, fonte e una riga.",
+        ),
     ]
 
 

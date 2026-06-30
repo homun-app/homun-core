@@ -759,6 +759,10 @@ GIÀ FATTO sessione 5g (NON ripartire; tutto su `main`):
   da una singola fonte, e deve allineare lingua del prompt + locale browser (`hl=`/`gl=` quando
   usa URL di ricerca/news). Test verde:
   `cargo test -p local-first-desktop-gateway browser_method_guides_open_ended_news_through_discovery_first`.
+- **Production smoke S9**: aggiunto scenario dichiarativo `Italian locale web discovery` a
+  `scripts/production_smoke.py` per rendere esplicita la regressione vista live (news tech IT deve
+  partire da discovery/search e non da una singola testata). Test verdi:
+  `python3 -m unittest scripts.test_production_smoke`, `python3 scripts/production_smoke.py --list`.
 - **bug "Continue" (validato live nell'app — puzzle Einstein ora 1 risposta pulita):** 2 cause distinte —
   (1) backend `df65d0b0`: il trace `‹‹REASONING››` rientrava nel contesto modello via
   `build_chat_runtime_prompt` → `strip_display_markers` canonico in lib.rs usato in `normalize_context_text`,
