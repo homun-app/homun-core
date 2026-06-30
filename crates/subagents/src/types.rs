@@ -316,9 +316,19 @@ pub struct RuntimeWarmupResponse {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum GenerateStreamEvent {
-    Delta { text: String },
-    Done { text: String, metrics: TokenMetrics },
-    Error { code: String, message: String },
+    Delta {
+        text: String,
+    },
+    Done {
+        text: String,
+        metrics: TokenMetrics,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        redacted_user_text: Option<String>,
+    },
+    Error {
+        code: String,
+        message: String,
+    },
 }
 
 impl TokenMetrics {

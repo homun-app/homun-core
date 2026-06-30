@@ -22,6 +22,7 @@ mod process_skills;
 mod novnc_proxy;
 mod pdf_render;
 mod plugin_packages;
+mod privacy_guard;
 mod sandbox;
 mod task_registry;
 mod temporal;
@@ -145,6 +146,7 @@ pub(crate) struct AppState {
     browser_url_policies: Arc<Mutex<BrowserUrlPolicyStore>>,
     memory_facade: Arc<Mutex<MemoryFacade>>,
     vault_store: Arc<Mutex<SQLiteVaultStore>>,
+    pending_vault_proposals: Arc<privacy_guard::PendingVaultProposalStore>,
     capability_registry: Arc<Mutex<CapabilityRegistryStore>>,
     task_executor_status: Arc<Mutex<TaskExecutorStatus>>,
     task_executor_registry: TaskExecutorRegistry,
@@ -586,6 +588,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             SQLiteVaultStore::open(gateway_vault_database_path()?)
                 .map_err(std::io::Error::other)?,
         )),
+        pending_vault_proposals: Arc::new(privacy_guard::PendingVaultProposalStore::default()),
         capability_registry: Arc::new(Mutex::new(open_seeded_capability_registry()?)),
         task_executor_status: Arc::new(Mutex::new(TaskExecutorStatus::new(
             task_executor_worker_enabled(),
@@ -13865,7 +13868,7 @@ fn set_persisted_inference_api_key(key: &str) -> Result<(), String> {
 // ── Provider registry (Phase 1: multi-provider inference) ──────────────────
 
 use model_registry::{
-    ProviderEntry, ProviderKind, ProviderRegistry, ResolvedRole, RoleBinding,
+    ModelTier, ProviderEntry, ProviderKind, ProviderRegistry, ResolvedRole, RoleBinding,
     canonical_provider_base_url,
 };
 
@@ -14030,6 +14033,97 @@ fn role_openai_config(role: &str) -> Option<(String, String, Option<String>)> {
         return Some((resolved.base_url, resolved.model, api_key));
     }
     chat_openai_stream_config()
+}
+
+fn privacy_guard_openai_config() -> Option<(String, String, Option<String>)> {
+    let registry = load_provider_registry();
+    if let Some(resolved) = registry.resolve_role("privacy_guard")
+        && provider_endpoint_is_local(&resolved.base_url)
+        && !model_id_is_cloud(&resolved.model)
+    {
+        let api_key = provider_api_key(&resolved.provider_id).or_else(env_inference_api_key);
+        return Some((resolved.base_url, resolved.model, api_key));
+    }
+
+    let mut candidates = registry
+        .providers
+        .iter()
+        .filter(|provider| provider.enabled && provider_endpoint_is_local(&provider.base_url))
+        .flat_map(|provider| {
+            provider
+                .models
+                .iter()
+                .filter(|model| model.modality == "text" && !model_id_is_cloud(&model.id))
+                .map(move |model| (provider, model))
+        })
+        .collect::<Vec<_>>();
+    candidates.sort_by(|(provider_a, model_a), (provider_b, model_b)| {
+        let tier_rank = |tier: ModelTier| match tier {
+            ModelTier::Fast => 0,
+            ModelTier::Balanced => 1,
+            ModelTier::Reasoning => 2,
+        };
+        let rank_a = model_a
+            .profile
+            .as_ref()
+            .map(|profile| tier_rank(profile.tier))
+            .unwrap_or(1);
+        let rank_b = model_b
+            .profile
+            .as_ref()
+            .map(|profile| tier_rank(profile.tier))
+            .unwrap_or(1);
+        rank_a
+            .cmp(&rank_b)
+            .then(model_a.reasoning.cmp(&model_b.reasoning))
+            .then(provider_a.id.cmp(&provider_b.id))
+            .then(model_a.id.cmp(&model_b.id))
+    });
+    let (provider, model) = candidates.first()?;
+    let api_key = provider_api_key(&provider.id).or_else(env_inference_api_key);
+    Some((provider.base_url.clone(), model.id.clone(), api_key))
+}
+
+fn provider_endpoint_is_local(base_url: &str) -> bool {
+    base_url.contains("127.0.0.1") || base_url.contains("localhost") || base_url.contains("[::1]")
+}
+
+fn model_id_is_cloud(model: &str) -> bool {
+    model.to_ascii_lowercase().contains(":cloud")
+}
+
+async fn classify_sensitive_input_with_privacy_guard_model(
+    http: &reqwest::Client,
+    text: &str,
+) -> Option<privacy_guard::PrivacyGuardDecision> {
+    let (base_url, model, api_key) = privacy_guard_openai_config()?;
+    let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
+    let system = "You are Homun Privacy Guard. Classify the user's message BEFORE the main assistant sees it. Detect sensitive personal data in any language, including payment cards, CVV, identity documents, tax IDs, license plates, health data, credentials, API keys, private addresses, and other secrets. Return STRICT JSON only: {\"has_sensitive_data\": boolean, \"items\": [{\"category\": \"payments|identity|health|vehicles|credentials|private_notes\", \"kind\": \"short_snake_case\", \"label\": \"short user-visible label\", \"secret_value\": \"exact substring from the user message\", \"confidence\": 0.0-1.0}]}. Use exact substrings only; do not infer or invent values.";
+    let payload = serde_json::json!({
+        "model": model,
+        "temperature": 0,
+        "max_tokens": 700,
+        "messages": [
+            { "role": "system", "content": system },
+            { "role": "user", "content": text },
+        ],
+    });
+    let mut builder = http
+        .post(&endpoint)
+        .timeout(std::time::Duration::from_secs(20));
+    if let Some(key) = api_key.as_ref() {
+        builder = builder.bearer_auth(key);
+    }
+    let resp = builder.json(&payload).send().await.ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let body = resp.json::<serde_json::Value>().await.ok()?;
+    let content = body
+        .pointer("/choices/0/message/content")
+        .and_then(|c| c.as_str())
+        .unwrap_or("");
+    privacy_guard::decision_from_model_output(text, content)
 }
 
 /// F2 step-verification gate toggle (default ON). `HOMUN_VERIFY_STEPS=0` disables it,
@@ -19466,6 +19560,40 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
         mpsc: mpsc_tx,
         entry: stream_entry,
     };
+    let privacy_decision =
+        classify_sensitive_input_with_privacy_guard_model(&state.http, &request.prompt)
+            .await
+            .unwrap_or_else(|| {
+                privacy_guard::classify_sensitive_input_deterministic(&request.prompt)
+            });
+    if let Some(intercept) = privacy_guard::build_privacy_guard_intercept(
+        &state.pending_vault_proposals,
+        &request.request_id,
+        &privacy_decision,
+    ) {
+        // Privacy Guard runs before the agent loop: the raw secret must not reach
+        // the main chat model or the committed user transcript. The actual value
+        // lives only in the pending sidecar until the user accepts with the PIN.
+        let _ = emit_stream_event(
+            &tx,
+            GenerateStreamEvent::Done {
+                text: intercept.assistant_text,
+                metrics: TokenMetrics::zero(),
+                redacted_user_text: Some(intercept.user_text),
+            },
+        )
+        .await;
+        schedule_stream_registry_cleanup(resume_id.clone());
+        let body = Body::from_stream(futures_util::stream::unfold(rx, |mut rx| async move {
+            rx.recv().await.map(|item| (item, rx))
+        }));
+        return Ok(Response::builder()
+            .status(StatusCode::OK)
+            .header("content-type", "application/x-ndjson")
+            .header("x-effective-model", "privacy_guard")
+            .body(body)
+            .expect("valid streaming response"));
+    }
     // Dedicated STREAMING client: HTTP/1.1 (avoids HTTP/2 RST_STREAM that CDNs in
     // front of cloud model hosts can throw on long streams) + no idle connection
     // reuse (a stale pooled keep-alive connection is a classic cause of the
@@ -19770,6 +19898,7 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
                             GenerateStreamEvent::Done {
                                 text: final_text.clone(),
                                 metrics: TokenMetrics::zero(),
+                                redacted_user_text: None,
                             },
                         )
                         .await;
@@ -19797,13 +19926,7 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
                         tx.entry
                             .finished
                             .store(true, std::sync::atomic::Ordering::Relaxed);
-                        let cleanup_id = resume_id.clone();
-                        tokio::spawn(async move {
-                            tokio::time::sleep(std::time::Duration::from_secs(300)).await;
-                            if let Ok(mut map) = stream_registry().lock() {
-                                map.remove(&cleanup_id);
-                            }
-                        });
+                        schedule_stream_registry_cleanup(resume_id.clone());
                         return;
                     }
                 }
@@ -23661,6 +23784,7 @@ Tell the user clearly; do NOT claim it's done."
                         GenerateStreamEvent::Done {
                             text: collapse_plan_markers(&accumulated),
                             metrics: TokenMetrics::zero(),
+                            redacted_user_text: None,
                         },
                     )
                     .await;
@@ -23830,6 +23954,7 @@ Tell the user clearly; do NOT claim it's done."
                 GenerateStreamEvent::Done {
                     text: final_answer,
                     metrics: TokenMetrics::zero(),
+                    redacted_user_text: None,
                 },
             )
             .await;
@@ -23938,6 +24063,7 @@ Tell me if you want me to retry or rephrase."
                 GenerateStreamEvent::Done {
                     text: final_text,
                     metrics: TokenMetrics::zero(),
+                    redacted_user_text: None,
                 },
             )
             .await;
@@ -23991,13 +24117,7 @@ Tell me if you want me to retry or rephrase."
         tx.entry
             .finished
             .store(true, std::sync::atomic::Ordering::Relaxed);
-        let cleanup_id = resume_id.clone();
-        tokio::spawn(async move {
-            tokio::time::sleep(std::time::Duration::from_secs(300)).await;
-            if let Ok(mut map) = stream_registry().lock() {
-                map.remove(&cleanup_id);
-            }
-        });
+        schedule_stream_registry_cleanup(resume_id.clone());
     });
 
     let body = Body::from_stream(futures_util::stream::unfold(rx, |mut rx| async move {
@@ -30069,6 +30189,15 @@ fn stream_entry_has_terminal_event(entry: &StreamEntry) -> bool {
         .unwrap_or(false)
 }
 
+fn schedule_stream_registry_cleanup(resume_id: String) {
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(300)).await;
+        if let Ok(mut map) = stream_registry().lock() {
+            map.remove(&resume_id);
+        }
+    });
+}
+
 const STREAM_ACTIVITY_IDLE_STALE_SECS: u64 = 180;
 
 fn stream_entry_is_activity_stale(entry: &StreamEntry, now: u64) -> bool {
@@ -34971,20 +35100,9 @@ struct ComposioExecuteRequest {
 
 const COMPOSIO_CONFIRM_OPEN: &str = "‹‹COMPOSIO_CONFIRM››";
 const COMPOSIO_CONFIRM_CLOSE: &str = "‹‹/COMPOSIO_CONFIRM››";
-const VAULT_PROPOSE_OPEN: &str = "‹‹VAULT_PROPOSE››";
-const VAULT_PROPOSE_CLOSE: &str = "‹‹/VAULT_PROPOSE››";
 const PAYMENT_APPROVAL_OPEN: &str = "‹‹PAYMENT_APPROVAL››";
 const PAYMENT_APPROVAL_CLOSE: &str = "‹‹/PAYMENT_APPROVAL››";
 const PAYMENT_APPROVAL_TTL_SECONDS: u64 = 300;
-
-fn vault_propose_marker(category: &str, label: &str, redacted_preview: &str) -> String {
-    let marker = serde_json::json!({
-        "category": category,
-        "label": label,
-        "redacted_preview": redacted_preview,
-    });
-    format!("{VAULT_PROPOSE_OPEN}{marker}{VAULT_PROPOSE_CLOSE}")
-}
 
 fn payment_approval_marker(snapshot: &PaymentApprovalSnapshot) -> String {
     let marker = serde_json::json!({ "snapshot": snapshot });
@@ -34998,6 +35116,8 @@ struct VaultProposalActionRequest {
     redacted_preview: String,
     #[serde(default)]
     secret_value: Option<String>,
+    #[serde(default)]
+    pending_id: Option<String>,
     #[serde(default)]
     pin: Option<String>,
     #[serde(default)]
@@ -35116,7 +35236,8 @@ async fn vault_proposal_accept(
     Json(request): Json<VaultProposalActionRequest>,
 ) -> Result<Json<VaultProposalAcceptResponse>, GatewayError> {
     let vault_store = lock_vault_store(&state)?;
-    accept_vault_proposal(&vault_store, &request).map(Json)
+    accept_vault_proposal_with_pending(&vault_store, Some(&state.pending_vault_proposals), &request)
+        .map(Json)
 }
 
 async fn vault_proposal_dismiss(
@@ -35432,6 +35553,41 @@ fn accept_vault_proposal(
     };
     vault_store.put(record).map_err(vault_store_error)?;
     Ok(response)
+}
+
+fn accept_vault_proposal_with_pending(
+    vault_store: &SQLiteVaultStore,
+    pending_store: Option<&privacy_guard::PendingVaultProposalStore>,
+    request: &VaultProposalActionRequest,
+) -> Result<VaultProposalAcceptResponse, GatewayError> {
+    let Some(pending_id) = request.pending_id.as_deref().filter(|id| !id.is_empty()) else {
+        return accept_vault_proposal(vault_store, request);
+    };
+    let pending_store = pending_store.ok_or_else(|| {
+        invalid_vault_proposal("Pending Vault proposal store is unavailable".to_string())
+    })?;
+    let pending = pending_store.take(pending_id).ok_or_else(|| {
+        invalid_vault_proposal("Pending Vault proposal expired or was already used".to_string())
+    })?;
+    if pending.category != request.category
+        || pending.label != request.label
+        || pending.redacted_preview != request.redacted_preview
+    {
+        return Err(invalid_vault_proposal(
+            "Pending Vault proposal does not match this card".to_string(),
+        ));
+    }
+    let resolved = VaultProposalActionRequest {
+        category: request.category.clone(),
+        label: request.label.clone(),
+        redacted_preview: request.redacted_preview.clone(),
+        secret_value: Some(pending.secret_value),
+        pending_id: None,
+        pin: request.pin.clone(),
+        thread_id: request.thread_id.clone(),
+        message_id: request.message_id.clone(),
+    };
+    accept_vault_proposal(vault_store, &resolved)
 }
 
 fn local_pin_verifier_from_request(
@@ -47806,35 +47962,13 @@ prs.save(Path({path:?}))
     }
 
     #[test]
-    fn vault_propose_marker_wraps_valid_json_payload() {
-        let marker = super::vault_propose_marker(
-            "payments",
-            "Carta personale",
-            "[VAULT:payments:card:last4=1111]",
-        );
-        assert!(marker.starts_with(super::VAULT_PROPOSE_OPEN));
-        assert!(marker.ends_with(super::VAULT_PROPOSE_CLOSE));
-        let parsed = super::confirm_marker_value(
-            &marker,
-            super::VAULT_PROPOSE_OPEN,
-            super::VAULT_PROPOSE_CLOSE,
-        )
-        .expect("valid vault marker");
-        assert_eq!(parsed["category"], "payments");
-        assert_eq!(parsed["label"], "Carta personale");
-        assert_eq!(
-            parsed["redacted_preview"],
-            "[VAULT:payments:card:last4=1111]"
-        );
-    }
-
-    #[test]
     fn vault_record_from_proposal_creates_metadata_only_record() {
         let request = super::VaultProposalActionRequest {
             category: "payments".to_string(),
             label: "Carta personale".to_string(),
             redacted_preview: "[VAULT:payments:card:last4=1111]".to_string(),
             secret_value: None,
+            pending_id: None,
             pin: None,
             thread_id: Some("thread_1".to_string()),
             message_id: Some("msg_1".to_string()),
@@ -47866,6 +48000,7 @@ prs.save(Path({path:?}))
             label: "Carta personale".to_string(),
             redacted_preview: "[VAULT:payments:card:last4=1111]".to_string(),
             secret_value: Some("4111111111111111".to_string()),
+            pending_id: None,
             pin: Some("123456".to_string()),
             thread_id: Some("thread_1".to_string()),
             message_id: Some("msg_1".to_string()),
@@ -47903,6 +48038,7 @@ prs.save(Path({path:?}))
             label: "Codice Fiscale".to_string(),
             redacted_preview: "[VAULT:identity:fiscal_code]".to_string(),
             secret_value: Some("CNTFBA76L16F839Y".to_string()),
+            pending_id: None,
             pin: Some("123456".to_string()),
             thread_id: None,
             message_id: None,
@@ -47930,6 +48066,7 @@ prs.save(Path({path:?}))
             label: "Carta personale".to_string(),
             redacted_preview: "[VAULT:payments:card:last4=1111]".to_string(),
             secret_value: None,
+            pending_id: None,
             pin: None,
             thread_id: Some("thread_1".to_string()),
             message_id: Some("msg_1".to_string()),
@@ -47974,6 +48111,7 @@ prs.save(Path({path:?}))
             label: "Carta personale".to_string(),
             redacted_preview: "[VAULT:payments:card:last4=1111]".to_string(),
             secret_value: Some("4111111111111111".to_string()),
+            pending_id: None,
             pin: Some("123456".to_string()),
             thread_id: Some("thread_1".to_string()),
             message_id: Some("msg_1".to_string()),
@@ -48031,6 +48169,7 @@ prs.save(Path({path:?}))
             label: "Codice Fiscale".to_string(),
             redacted_preview: "[VAULT:identity:Codice Fiscale]".to_string(),
             secret_value: Some("CNTFBA76L16F839Y".to_string()),
+            pending_id: None,
             pin: Some("123456".to_string()),
             thread_id: None,
             message_id: None,
@@ -48076,6 +48215,51 @@ prs.save(Path({path:?}))
         )
         .expect("reveal updated");
         assert_eq!(revealed.secret_value, "CNTFBA76L16F839Z");
+    }
+
+    #[test]
+    fn vault_proposal_accept_uses_pending_sidecar_secret() {
+        let vault = local_first_vault::SQLiteVaultStore::open_in_memory().unwrap();
+        super::apply_vault_pin_setup(
+            &vault,
+            &super::VaultPinSetupRequest {
+                pin: "123456".to_string(),
+                current_pin: None,
+            },
+        )
+        .expect("pin");
+        let pending = super::privacy_guard::PendingVaultProposalStore::default();
+        let pending_id = pending.insert(super::privacy_guard::PendingVaultProposal {
+            category: "vehicles".to_string(),
+            label: "Targa auto".to_string(),
+            redacted_preview: "[VAULT:vehicles:plate]".to_string(),
+            secret_value: "FM470BN".to_string(),
+        });
+        let request = super::VaultProposalActionRequest {
+            category: "vehicles".to_string(),
+            label: "Targa auto".to_string(),
+            redacted_preview: "[VAULT:vehicles:plate]".to_string(),
+            secret_value: None,
+            pending_id: Some(pending_id.clone()),
+            pin: Some("123456".to_string()),
+            thread_id: None,
+            message_id: None,
+        };
+
+        let response = super::accept_vault_proposal_with_pending(&vault, Some(&pending), &request)
+            .expect("accept");
+
+        let record_id = response.record_id.parse().unwrap();
+        let revealed = super::reveal_vault_record_secret(
+            &vault,
+            &record_id,
+            &super::VaultRecordRevealRequest {
+                pin: "123456".to_string(),
+            },
+        )
+        .expect("reveal");
+        assert_eq!(revealed.secret_value, "FM470BN");
+        assert!(pending.take(&pending_id).is_none());
     }
 
     #[tokio::test]
@@ -51965,6 +52149,7 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             super::GenerateStreamEvent::Done {
                 text: "ok".to_string(),
                 metrics: super::TokenMetrics::zero(),
+                redacted_user_text: None,
             },
         )
         .await

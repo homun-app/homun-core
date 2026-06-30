@@ -123,6 +123,7 @@ fn generate_stream_event_deserializes_delta_and_done_payloads() {
                 peak_memory_gb: 5.4,
                 elapsed_seconds: 0.8,
             },
+            redacted_user_text: None,
         }
     );
 }

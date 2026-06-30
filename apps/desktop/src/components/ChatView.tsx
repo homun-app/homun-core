@@ -3253,6 +3253,7 @@ interface VaultProposal {
   category: string;
   label: string;
   redacted_preview: string;
+  pending_id?: string;
 }
 
 interface PaymentApprovalProposal {
@@ -5731,6 +5732,7 @@ function parseComposioConfirm(text: string): {
           category: parsed.category,
           label: parsed.label,
           redacted_preview: parsed.redacted_preview,
+          ...(typeof parsed.pending_id === "string" ? { pending_id: parsed.pending_id } : {}),
         };
       }
     } catch {
@@ -5968,11 +5970,13 @@ function VaultProposeCard({
     "idle",
   );
   const [note, setNote] = useState<string | null>(null);
+  const [pin, setPin] = useState("");
 
   const payload = {
     category: proposal.category,
     label: proposal.label,
     redacted_preview: proposal.redacted_preview,
+    ...(proposal.pending_id ? { pending_id: proposal.pending_id, pin } : {}),
     ...(threadId ? { thread_id: threadId } : {}),
     ...(messageId ? { message_id: messageId } : {}),
   };
@@ -6019,9 +6023,20 @@ function VaultProposeCard({
         <input readOnly value={proposal.redacted_preview} />
       </div>
       <p className="cmp-confirm-note">
-        Il dato non entra nella memoria normale in chiaro. La card salva solo metadati redatti nel
-        Vault; il valore segreto verrà richiesto separatamente.
+        Il dato non entra nella memoria normale in chiaro. La card salva metadati redatti nel Vault
+        e cifra il valore solo dopo il PIN locale.
       </p>
+      {proposal.pending_id && (
+        <div className="cmp-confirm-fields">
+          <label>PIN locale</label>
+          <input
+            value={pin}
+            onChange={(event) => setPin(event.target.value)}
+            placeholder="PIN"
+            type="password"
+          />
+        </div>
+      )}
       {status === "error" && <p className="cmp-confirm-err">Errore: {note}</p>}
       {(status === "saved" || status === "dismissed") && note && (
         <p className="cmp-confirm-note">{note}</p>
@@ -6031,7 +6046,7 @@ function VaultProposeCard({
           <button
             className="set-btn primary"
             type="button"
-            disabled={busy}
+            disabled={busy || (Boolean(proposal.pending_id) && pin.length === 0)}
             onClick={() => void save()}
           >
             Salva nel Vault

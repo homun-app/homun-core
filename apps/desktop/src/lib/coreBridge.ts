@@ -1826,6 +1826,7 @@ export interface VaultProposalActionInput {
   category: string;
   label: string;
   redacted_preview: string;
+  pending_id?: string;
   secret_value?: string;
   pin?: string;
   thread_id?: string;
@@ -3799,6 +3800,7 @@ async function submitBrowserRuntimeChatPromptStream(
   const decoder = new TextDecoder();
   let buffer = "";
   let text = "";
+  let redactedUserText: string | undefined;
   let metrics: Partial<CoreChatMessageMetrics> = {};
   let firstTokenSeconds: number | undefined;
 
@@ -3825,6 +3827,9 @@ async function submitBrowserRuntimeChatPromptStream(
           // resolved). Use it to replace the raw live-streamed preview, so token
           // streaming stays a preview and the committed message is the clean version.
           if (event.text) text = String(event.text);
+          if (typeof event.redacted_user_text === "string") {
+            redactedUserText = event.redacted_user_text;
+          }
           metrics = event.metrics ?? {};
         } else if (event.type === "error") {
           throw new Error(String(event.message ?? "Local runtime error"));
@@ -3846,7 +3851,7 @@ async function submitBrowserRuntimeChatPromptStream(
     user_message: {
       id: `browser_user_${Date.now()}`,
       role: "user",
-      text: visiblePrompt ?? prompt,
+      text: redactedUserText ?? visiblePrompt ?? prompt,
       timestamp,
       metadata: null,
       metrics: null,
@@ -3936,6 +3941,7 @@ async function resumeBrowserRuntimeChatPromptStream(
   const decoder = new TextDecoder();
   let buffer = "";
   let text = "";
+  let redactedUserText: string | undefined;
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
@@ -3951,6 +3957,9 @@ async function resumeBrowserRuntimeChatPromptStream(
       } else if (event.type === "done") {
         // Done is authoritative (sanitized final text) → replace the live preview.
         if (event.text) text = String(event.text);
+        if (typeof event.redacted_user_text === "string") {
+          redactedUserText = event.redacted_user_text;
+        }
       } else if (event.type === "error") {
         throw new Error(String(event.message ?? "Local runtime error"));
       }
@@ -3962,7 +3971,7 @@ async function resumeBrowserRuntimeChatPromptStream(
     user_message: {
       id: `browser_user_${Date.now()}`,
       role: "user",
-      text: userText,
+      text: redactedUserText ?? userText,
       timestamp,
       metadata: null,
       metrics: null,
@@ -4137,6 +4146,7 @@ function parseBrowserStreamEvent(line: string) {
   return JSON.parse(trimmed) as {
     type: "delta" | "done" | "error";
     text?: string;
+    redacted_user_text?: string;
     message?: string;
     metrics?: Partial<CoreChatMessageMetrics>;
   };

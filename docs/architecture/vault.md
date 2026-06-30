@@ -21,6 +21,8 @@ Non e' memoria: la memoria puo' contenere solo testo redatto o riferimenti
 - `pin.rs`: verifier PIN locale con salt e hash iterato, serializzabile senza PIN
   in chiaro.
 - `payment.rs`: policy di confronto per `PaymentApprovalSnapshot`.
+- `crates/desktop-gateway/src/privacy_guard.rs`: Privacy Guard pre-turn, con
+  classificazione model-first locale e sidecar pending per non salvare il raw nel transcript.
 - `crates/memory/src/redaction.rs`: usa il classifier Vault prima di salvare/esporre
   memoria normale.
 - `crates/desktop-gateway/src/browser_safety.rs`: variante approval-aware per il
@@ -78,7 +80,19 @@ al primo cambio PIN verificato.
 
 ## Classificazione e redaction
 
-Il classifier MVP e' deterministico e copre:
+La chat usa un **Privacy Guard pre-turn** prima del loop agentico principale:
+
+1. prova una classificazione modellistica sul ruolo `privacy_guard`, ma solo se
+   risolve su endpoint locale/loopback e modello non `:cloud`;
+2. valida l'output del modello accettando solo `secret_value` che sono sottostringhe
+   esatte del prompt utente;
+3. se trova dati sensibili, chiude il turno senza chiamare il modello chat: il
+   messaggio utente committato e' redatto e l'assistant contiene solo card
+   `VAULT_PROPOSE`;
+4. il raw secret vive in un sidecar volatile `pending_id`, consumabile una sola
+   volta da `/api/vault/proposals/accept` con PIN locale.
+
+Il classifier deterministico resta fallback/safety net e copre:
 
 - carte Luhn-valid da 13-19 cifre;
 - CVV/CVC/CV2 come dato one-shot;
@@ -98,7 +112,10 @@ Il backend espone un formatter per:
 ‹‹VAULT_PROPOSE››{"category":"payments","label":"Carta personale","redacted_preview":"[VAULT:payments:card:last4=1111]"}‹‹/VAULT_PROPOSE››
 ```
 
-Il frontend lo nasconde dalla prosa e mostra una card. `Salva nel Vault` chiama
+Il frontend lo nasconde dalla prosa e mostra una card. Le card create dal Privacy
+Guard includono `pending_id` e richiedono PIN locale: il raw non passa dal transcript,
+ma viene recuperato dal sidecar volatile e cifrato nel Vault solo dopo l'accept.
+`Salva nel Vault` chiama
 `/api/vault/proposals/accept` e persiste un `VaultRecord` in `~/.homun/vault.sqlite`
 con label, categoria, preview redatta, `thread_id`/`message_id` opzionali e un
 `SecretRef` opaco. Se la richiesta porta anche `secret_value`, deve portare un `pin`:
@@ -179,7 +196,7 @@ Login, script arbitrari e azioni high-risk non-payment restano bloccati.
 
 - Payment Approval Card completa con screenshot/fingerprint.
 - Telegram routing per riepilogo pagamento.
-- Edit dei record Vault e tool minimizzati per recuperarli/usarli.
+- Tool minimizzati per recuperare/usare record Vault nel browser.
 - Smoke live Electron su checkout fixture/browser reale.
 
 ## Regola di confine

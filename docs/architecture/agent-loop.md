@@ -1,12 +1,13 @@
 # Agent Loop — come funziona OGGI (mappa accurata)
 
-> Stato: 2026-06-27. Reverse-engineered da `crates/desktop-gateway/src/main.rs`
+> Stato: 2026-06-30. Reverse-engineered da `crates/desktop-gateway/src/main.rs`
 > (`stream_chat_via_openai`, ~:17897→:22990) e da `crates/orchestrator`. Questa pagina
 > descrive la **realtà attuale**, incluse le **divergenze dai [capisaldi](../CAPISALDI.md)**.
 > È un punto fermo: ogni modifica al loop aggiorna questa pagina + il diagramma.
 > Decisione di fondo: [ADR 0016](../decisions/0016-harness-owned-task-engine-cross-model.md),
 > [0018](../decisions/0018-adaptive-harness-subagents-triggers.md),
-> [0020](../decisions/0020-converge-chat-loop-onto-orchestrator.md).
+> [0020](../decisions/0020-converge-chat-loop-onto-orchestrator.md) e
+> [0021](../decisions/0021-single-guarded-loop-planning-as-tool.md).
 
 ## Cosa fa
 
@@ -19,7 +20,9 @@ Condiviso da chat (`generate_stream`) e canali/automazioni (`run_agent_turn`).
 
 ```mermaid
 flowchart TD
-    REQ[Messaggio utente] --> SEED{Piano da<br/>riprendere?}
+    REQ[Messaggio utente] --> PRIV{Privacy Guard<br/>pre-turn}
+    PRIV -- "dato sensibile" --> VAULT[Commit prompt redatto +<br/>card VAULT_PROPOSE<br/>raw solo in sidecar pending]
+    PRIV -- "ok" --> SEED{Piano da<br/>riprendere?}
     SEED -- "store durevole / marker" --> PLAN0[Semina piano canonico]
     SEED -- "no + flag ADR0020" --> ORCH[Planner orchestrator plan_only<br/>F1.d+F3: ora vede il browser, pianifica gli step]
     SEED -- no --> PLAN0
@@ -55,6 +58,11 @@ Punti caldi (con `file:line` in `main.rs`):
 - **Seed piano** (`:~18979`): prima dal **runtime-plan store durevole**
   (`load_runtime_plan_from_state`), poi dal marker `‹‹PLAN››` in contesto; opzionale
   planner orchestrator dietro `HOMUN_ORCHESTRATED_CHAT` (ADR 0020 P1).
+- **Privacy Guard pre-turn**: prima del loop e prima del modello chat, classifica
+  il prompt con ruolo `privacy_guard` locale (fallback deterministico). Se rileva
+  dati sensibili, emette solo `VAULT_PROPOSE`, passa al frontend il testo utente
+  redatto per il commit e conserva il raw in un sidecar `pending_id` consumabile
+  con PIN. Il loop ReAct non parte e il raw non entra nella history del modello chat.
 - **Round loop** (`:~19031`, `for round in 0..hard_round_ceiling()`).
 - **Guardie harness** (deterministiche): budget per-step F1 (`rounds_since_progress`,
   `:~19042`), wander-cap (`:~19046`), no-progress identico (`:~19574`), `is_final_round`

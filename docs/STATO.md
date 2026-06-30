@@ -664,6 +664,12 @@ GIÀ FATTO sessione 5g (NON ripartire; tutto su `main`):
 - **Vault edit save CORS**: corretto il blocco browser su `PATCH /api/vault/records/{id}`. Il gateway
   accettava la route, ma il CORS dichiarava solo `GET,POST,DELETE,OPTIONS`, quindi Chromium falliva il
   preflight e la UI mostrava il generico `Failed to fetch`. Aggiunto test di preflight `PATCH`.
+- **Privacy Guard pre-turn per Vault**: aggiunto gate prima del loop chat. Il guard prova il ruolo
+  modellistico locale `privacy_guard` (solo endpoint loopback e modello non `:cloud`), valida che i
+  secret siano sottostringhe esatte del prompt e altrimenti usa il classifier deterministico come safety
+  net. Se rileva dati sensibili, non chiama il modello chat: lo stream `Done` porta `redacted_user_text`,
+  il frontend committa il messaggio utente redatto e l'assistant mostra solo `VAULT_PROPOSE` con
+  `pending_id`. Il raw resta nel sidecar volatile e viene cifrato nel Vault solo dopo accept con PIN.
 - **Payment Approval runtime MVP**: aggiunto marker `PAYMENT_APPROVAL`, card chat con
   riepilogo merchant/dominio/importo/prodotto/metodo, endpoint
   `/api/vault/payment-approvals/approve` con PIN locale + CVV/CV2 one-shot, grant volatile

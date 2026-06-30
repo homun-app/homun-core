@@ -446,6 +446,11 @@ pub const ROLES: &[RoleInfo] = &[
         description: "Extracting facts/preferences from conversations: a fast and cheap model is best.",
     },
     RoleInfo {
+        key: "privacy_guard",
+        label: "Privacy guard",
+        description: "Pre-turn sensitive-data classification before chat: must be a local fast text model when possible.",
+    },
+    RoleInfo {
         key: "image_generation",
         label: "Image generation",
         description: "Generating images for presentations, documents and chat (e.g. deck covers, illustrations). Pin a local Ollama image model (Z-Image, Flux) or a cloud diffusion model (Nano Banana / gpt-image / fal). If unset, falls back to the local Ollama image default.",
@@ -498,9 +503,9 @@ pub fn role_requirements(role: &str) -> RoleReq {
             modality: "text",
             preferred_tier: Some(ModelTier::Balanced),
         },
-        // Memory extraction is simple structured output run in the background on
-        // every salient turn → prefer a fast, cheap model; no tools needed.
-        "memory" => RoleReq {
+        // Memory/privacy extraction are short structured-output tasks. Privacy
+        // Guard is resolved separately at the call site to require a local model.
+        "memory" | "privacy_guard" => RoleReq {
             needs_tools: false,
             needs_vision: false,
             modality: "text",
@@ -739,11 +744,9 @@ impl ProviderRegistry {
                 .then((active == Some(pb.id.as_str())).cmp(&(active == Some(pa.id.as_str()))))
         });
         if let Some((provider, model)) = candidates.first() {
-            let tier = model
-                .profile
-                .as_ref()
-                .map(|p| p.tier)
-                .unwrap_or_else(|| infer_profile(&model.id.to_ascii_lowercase(), &model.modality).tier);
+            let tier = model.profile.as_ref().map(|p| p.tier).unwrap_or_else(|| {
+                infer_profile(&model.id.to_ascii_lowercase(), &model.modality).tier
+            });
             return Some(ResolvedRole {
                 role: role.to_string(),
                 provider_id: provider.id.clone(),
