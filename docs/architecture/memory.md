@@ -76,8 +76,9 @@ flowchart TD
      (`main.rs:12770`);
    - **semantico** denso: embedding della query (off-lock) → `MemoryFacade::search_embeddings`
      (contratto `MemoryVectorIndex`) con floor rilassato `sim >= 0.5` e top-k. La prima
-     implementazione è `ExactMemoryVectorIndex`, costruita dagli embedding SQLite esistenti:
-     è una proiezione derivata e sostituibile, non una seconda memoria.
+     implementazione è `ExactMemoryVectorIndex`, costruita dagli embedding SQLite esistenti
+     e cacheata per scope dentro `MemoryFacade`; `upsert_embedding` aggiorna la cache se
+     già calda. È una proiezione derivata e sostituibile, non una seconda memoria.
    I due rank si fondono con **RRF (K = 60)** + boost di **importanza** (`0.012 *
    importance`) + **recency** (decay esponenziale ~30 giorni, `0.008 * exp(-age/30)`) in
    `hybrid_memory_score` (`main.rs:12706`). In testa, se pertinente, vengono inserite righe
@@ -180,9 +181,9 @@ richiesto con tool minimizzati e auditati. Vedi [vault.md](vault.md).
   dall'endpoint di embed.
 - **Vettoriale ancora exact/O(N), ma dietro contratto**: la recall non legge più direttamente
   `list_embeddings` dal gateway; passa da `MemoryFacade::search_embeddings` e dal trait
-  `MemoryVectorIndex`. Oggi il backend è `ExactMemoryVectorIndex` (stessa semantica cosine,
-  nessun rischio packaging); prossimo passo: sostituire quel backend con `sqlite-vec`/`usearch`
-  se il bundle macOS resta pulito.
+  `MemoryVectorIndex`. Oggi il backend è `ExactMemoryVectorIndex` cacheato per workspace
+  (stessa semantica cosine, meno ricostruzioni, nessun rischio packaging); prossimo passo:
+  sostituire quel backend con `sqlite-vec`/`usearch` se il bundle macOS resta pulito.
 - **Consolidamento off di default** (`HOMUN_AUTO_CONSOLIDATE_HOURS=0`): senza tick attivo la
   promozione `Candidate→Confirmed` e il dedup avvengono solo lungo le altre operazioni.
 - **Provenienza / catena causale decisione→artefatto→codice→esito**: prevista, oggi parziale.

@@ -732,6 +732,11 @@ GIÀ FATTO sessione 5g (NON ripartire; tutto su `main`):
   `memory_query_embedding_cache`, build gateway. Smoke live dopo restart gateway: S1 PASS 9.3s anche con
   `query_embedding_timed_out=true`/`degraded=true` (`vector_scan_ms=none`), confermando il fallback
   FTS + briefing senza blocco turno. Prossimo passo: spike backend ANN persistente e packaging macOS.
+- **Memory vector index cache**: `MemoryFacade::search_embeddings` ora costruisce lazy e riusa
+  `ExactMemoryVectorIndex` per scope user/workspace; `upsert_embedding` aggiorna la cache se gia'
+  materializzata. Questo non cambia ranking/RRF e non aggiunge dipendenze native, ma toglie la
+  ricostruzione dell'indice exact a ogni recall caldo. Aggiunto test
+  `facade_vector_index_cache_updates_after_embedding_upsert`; build gateway verde.
 - **bug "Continue" (validato live nell'app — puzzle Einstein ora 1 risposta pulita):** 2 cause distinte —
   (1) backend `df65d0b0`: il trace `‹‹REASONING››` rientrava nel contesto modello via
   `build_chat_runtime_prompt` → `strip_display_markers` canonico in lib.rs usato in `normalize_context_text`,

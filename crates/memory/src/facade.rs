@@ -12,8 +12,10 @@ use crate::{
     WikiFileStore, WikiPage, WorkspaceId, current_timestamp, ensure_artifacts_inside_root,
     ensure_transition, parse_wiki_markdown,
 };
+use std::collections::HashMap;
 use std::path::Path;
 use std::str::FromStr;
+use std::sync::Mutex;
 
 pub struct MemoryWikiProjection {
     pub page: WikiPage,
@@ -22,6 +24,7 @@ pub struct MemoryWikiProjection {
 pub struct MemoryFacade {
     store: SQLiteMemoryStore,
     policy: MemoryPolicyEngine,
+    vector_indexes: Mutex<HashMap<String, crate::ExactMemoryVectorIndex>>,
 }
 
 impl MemoryFacade {
@@ -29,6 +32,7 @@ impl MemoryFacade {
         Self {
             store,
             policy: MemoryPolicyEngine,
+            vector_indexes: Mutex::new(HashMap::new()),
         }
     }
 
@@ -268,9 +272,10 @@ impl MemoryFacade {
         model: &str,
         vector: &[f32],
     ) -> MemoryResult<()> {
-        Ok(self
-            .store
-            .upsert_embedding(reference, user_id, workspace_id, model, vector)?)
+        self.store
+            .upsert_embedding(reference, user_id, workspace_id, model, vector)?;
+        self.update_vector_index_cache(reference, user_id, workspace_id, vector)?;
+        Ok(())
     }
 
     pub fn list_embeddings(
@@ -288,9 +293,46 @@ impl MemoryFacade {
         query: &[f32],
         limit: usize,
     ) -> MemoryResult<Vec<VectorHit>> {
-        Ok(self
-            .store
-            .search_embeddings(user_id, workspace_id, query, limit)?)
+        let key = vector_index_scope_key(user_id, workspace_id);
+        let mut indexes = self
+            .vector_indexes
+            .lock()
+            .map_err(|_| MemoryError::Store("memory vector index cache poisoned".to_string()))?;
+        if !indexes.contains_key(&key) {
+            let embeddings = self.store.list_embeddings(user_id, workspace_id)?;
+            let index = crate::ExactMemoryVectorIndex::from_embeddings(embeddings)?;
+            indexes.insert(key.clone(), index);
+        }
+        let Some(index) = indexes.get(&key) else {
+            return Ok(Vec::new());
+        };
+        crate::MemoryVectorIndex::search(index, query, limit)
+    }
+
+    fn update_vector_index_cache(
+        &self,
+        reference: &MemoryRef,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+        vector: &[f32],
+    ) -> MemoryResult<()> {
+        let key = vector_index_scope_key(user_id, workspace_id);
+        let mut indexes = self
+            .vector_indexes
+            .lock()
+            .map_err(|_| MemoryError::Store("memory vector index cache poisoned".to_string()))?;
+        if let Some(index) = indexes.get_mut(&key) {
+            crate::MemoryVectorIndex::upsert(index, reference, vector)?;
+        }
+        Ok(())
+    }
+
+    #[doc(hidden)]
+    pub fn vector_index_cache_len_for_tests(&self) -> usize {
+        self.vector_indexes
+            .lock()
+            .map(|indexes| indexes.len())
+            .unwrap_or_default()
     }
 
     pub fn refs_without_embeddings(
@@ -1169,6 +1211,10 @@ fn merge_reason(mut metadata: serde_json::Value, reason: &str) -> serde_json::Va
     } else {
         serde_json::json!({ "previous_metadata": metadata, "last_lifecycle_reason": reason })
     }
+}
+
+fn vector_index_scope_key(user_id: &UserId, workspace_id: &WorkspaceId) -> String {
+    format!("{}|{}", user_id.as_str(), workspace_id.as_str())
 }
 
 fn merge_entity_metadata(
