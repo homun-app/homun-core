@@ -179,11 +179,13 @@ richiesto con tool minimizzati e auditati. Vedi [vault.md](vault.md).
 - **Embedding parziali storici**: i vettori venivano scritti lazy → recall semantico
   copriva una frazione. `spawn_embedding_catchup` colma il gap a regime, ma resta dipendente
   dall'endpoint di embed.
-- **Vettoriale ancora exact/O(N), ma dietro contratto**: la recall non legge più direttamente
+- **Vettoriale default ancora exact/O(N), ma dietro contratto**: la recall non legge più direttamente
   `list_embeddings` dal gateway; passa da `MemoryFacade::search_embeddings` e dal trait
   `MemoryVectorIndex`. Oggi il backend è `ExactMemoryVectorIndex` cacheato per workspace
-  (stessa semantica cosine, meno ricostruzioni, nessun rischio packaging); prossimo passo:
-  sostituire quel backend con `sqlite-vec`/`usearch` se il bundle macOS resta pulito.
+  (stessa semantica cosine, meno ricostruzioni, nessun rischio packaging). Esiste anche
+  `UsearchMemoryVectorIndex` dietro feature non-default `usearch-index`: compila e passa i
+  test minimi di ranking coseno, ma resta fuori dal path runtime finche' non misuriamo bundle
+  macOS, notarization e latenza su dataset reali.
 - **Consolidamento off di default** (`HOMUN_AUTO_CONSOLIDATE_HOURS=0`): senza tick attivo la
   promozione `Candidate→Confirmed` e il dedup avvengono solo lungo le altre operazioni.
 - **Provenienza / catena causale decisione→artefatto→codice→esito**: prevista, oggi parziale.
@@ -204,8 +206,8 @@ richiesto con tool minimizzati e auditati. Vedi [vault.md](vault.md).
   `MemoryEntity` (`:117`).
 - `crates/memory/src/store.rs` — schema SQLite (tutte le tabelle), `search_memory_refs`,
   `search_code_entities`, `search_embeddings`.
-- `crates/memory/src/vector_index.rs` — contratto `MemoryVectorIndex`, `VectorHit` e backend
-  exact derivato dagli embedding SQLite.
+- `crates/memory/src/vector_index.rs` — contratto `MemoryVectorIndex`, `VectorHit`, backend
+  exact derivato dagli embedding SQLite e backend opzionale `usearch-index`.
 - `crates/memory/src/{graph,graphify,wiki,wiki_sync,search,policy,lifecycle}.rs` — grafo,
   adapter Graphify, proiezione/sync markdown, recall, policy, ciclo di vita.
 - `crates/desktop-gateway/src/main.rs` — orchestrazione del ciclo per-turno:

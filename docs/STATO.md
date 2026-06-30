@@ -743,6 +743,12 @@ GIÀ FATTO sessione 5g (NON ripartire; tutto su `main`):
   operativa: non usare `sqlite-vec` finche' il pacchetto pubblicato non e' buildabile; prossimo
   candidato dietro lo stesso `MemoryVectorIndex` = `usearch`, oppure vendoring `sqlite-vec` solo con
   ADR esplicita.
+- **Spike ANN memoria / usearch**: introdotta feature non-default `local-first-memory/usearch-index`
+  con dipendenza opzionale `usearch 2.25.3` e backend `UsearchMemoryVectorIndex` dietro lo stesso
+  trait `MemoryVectorIndex`. Il backend mappa `MemoryRef` a chiavi `u64`, usa metrica coseno F32,
+  converte distance in score e resta fuori dal runtime default. Test verde:
+  `cargo test -p local-first-memory --features usearch-index usearch_index_returns_hits_ranked_by_cosine_similarity`.
+  Prossimo passo prima del wiring: benchmark su dataset reale + verifica peso bundle/notarization.
 - **bug "Continue" (validato live nell'app — puzzle Einstein ora 1 risposta pulita):** 2 cause distinte —
   (1) backend `df65d0b0`: il trace `‹‹REASONING››` rientrava nel contesto modello via
   `build_chat_runtime_prompt` → `strip_display_markers` canonico in lib.rs usato in `normalize_context_text`,

@@ -279,12 +279,17 @@ Implementato `crates/memory/src/vector_index.rs`:
 MemoryVectorIndex
 VectorHit
 ExactMemoryVectorIndex
+UsearchMemoryVectorIndex (feature non-default usearch-index)
 ```
 
 `MemoryFacade::search_embeddings` e `SQLiteMemoryStore::search_embeddings` usano il contratto.
 Il gateway (`relevant_memory_for_prompt`) chiama la facade, applicando ancora floor 0.5 e top 8.
 Follow-up 2026-06-30: aggiunta cache lazy per scope dentro `MemoryFacade`; `upsert_embedding`
 aggiorna la cache calda. Test: `facade_vector_index_cache_updates_after_embedding_upsert`.
+Follow-up 2026-06-30 sera: `usearch 2.25.3` compila su macOS ARM come dipendenza opzionale
+(`usearch-index`) e passa un test minimo di ranking coseno dietro `MemoryVectorIndex`.
+Non e' ancora cablato nel runtime default: prima servono numeri su latenza, footprint del bundle
+e comportamento di packaging/notarization.
 
 - [x] **Step 3: Backfill idempotente**
 
@@ -350,7 +355,8 @@ Spike backend ANN:
 sqlite-vec 0.1.10-alpha.4 su crates.io: build fallisce su macOS ARM.
 Errore: sqlite-vec.c include sqlite-vec-diskann.c, file non presente nel pacchetto pubblicato.
 Decisione: non introdurre feature/dependency sqlite-vec finche' il crate pubblicato non compila.
-Prossimo candidato: usearch dietro MemoryVectorIndex, oppure vendoring sqlite-vec solo con ADR esplicita.
+usearch 2.25.3: feature opzionale usearch-index introdotta e testata; resta fuori dal default.
+Prossimo passo: benchmark dataset reale + verifica bundle app prima di sostituire ExactMemoryVectorIndex.
 ```
 
 - [ ] **Step 6: Commit**
