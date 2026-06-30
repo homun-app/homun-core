@@ -283,6 +283,8 @@ ExactMemoryVectorIndex
 
 `MemoryFacade::search_embeddings` e `SQLiteMemoryStore::search_embeddings` usano il contratto.
 Il gateway (`relevant_memory_for_prompt`) chiama la facade, applicando ancora floor 0.5 e top 8.
+Follow-up 2026-06-30: aggiunta cache lazy per scope dentro `MemoryFacade`; `upsert_embedding`
+aggiorna la cache calda. Test: `facade_vector_index_cache_updates_after_embedding_upsert`.
 
 - [x] **Step 3: Backfill idempotente**
 
@@ -340,6 +342,15 @@ cargo test -p local-first-desktop-gateway memory_query_embedding_cache
 Live dopo restart gateway:
 S1 PASS 9.3s; query_embedding_ms=701, query_embedding_timed_out=true, degraded=true,
 vector_scan_ms=none. Il turno non si blocca e procede con FTS + briefing.
+```
+
+Spike backend ANN:
+
+```text
+sqlite-vec 0.1.10-alpha.4 su crates.io: build fallisce su macOS ARM.
+Errore: sqlite-vec.c include sqlite-vec-diskann.c, file non presente nel pacchetto pubblicato.
+Decisione: non introdurre feature/dependency sqlite-vec finche' il crate pubblicato non compila.
+Prossimo candidato: usearch dietro MemoryVectorIndex, oppure vendoring sqlite-vec solo con ADR esplicita.
 ```
 
 - [ ] **Step 6: Commit**
