@@ -639,6 +639,9 @@ GIÀ FATTO sessione 5g (NON ripartire; tutto su `main`):
   sull'accept path gia' cifrato del gateway, poi svuota valore e PIN dallo stato UI. Questo chiude
   il buco pratico del secret-store: le card chat restano metadata-only, mentre i valori reali si
   inseriscono da una superficie dedicata fuori dal transcript.
+- **Vault UI polish**: aggiunto gap dedicato tra le card del pannello Vault e rimosso il mix di lingue
+  introdotto dall'input manuale. Il pannello Vault e le sue label di navigazione passano ora da i18n
+  (`it`/`en`), inclusi badge/status/errori/placeholder.
 - **Payment Approval runtime MVP**: aggiunto marker `PAYMENT_APPROVAL`, card chat con
   riepilogo merchant/dominio/importo/prodotto/metodo, endpoint
   `/api/vault/payment-approvals/approve` con PIN locale + CVV/CV2 one-shot, grant volatile

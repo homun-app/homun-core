@@ -141,7 +141,7 @@ const SECTION_TITLES: Record<SettingsSectionId, string> = {
   appearance: "settings.appearance",
   runtime: "settings.runtime",
   privacy: "settings.privacy",
-  vault: "Vault",
+  vault: "settings.vault",
   memory: "nav.memory",
   artifacts: "settings.artifacts",
   contacts: "nav.contacts",
@@ -2235,13 +2235,14 @@ function PrivacyPane() {
 /* --------------------------------------------------------------------- vault */
 
 function VaultPane() {
+  const { t } = useTranslation();
   const vaultCategories = [
-    { value: "payments", label: "Pagamenti" },
-    { value: "identity", label: "Identita" },
-    { value: "health", label: "Salute" },
-    { value: "vehicles", label: "Veicoli" },
-    { value: "credentials", label: "Credenziali" },
-    { value: "private_notes", label: "Note private" },
+    { value: "payments", label: t("settings.vaultCategoryPayments") },
+    { value: "identity", label: t("settings.vaultCategoryIdentity") },
+    { value: "health", label: t("settings.vaultCategoryHealth") },
+    { value: "vehicles", label: t("settings.vaultCategoryVehicles") },
+    { value: "credentials", label: t("settings.vaultCategoryCredentials") },
+    { value: "private_notes", label: t("settings.vaultCategoryPrivateNotes") },
   ];
   const [configured, setConfigured] = useState<boolean | null>(null);
   const [currentPin, setCurrentPin] = useState("");
@@ -2273,11 +2274,11 @@ function VaultPane() {
     setError(null);
     setNote(null);
     if (pin !== pinConfirm) {
-      setError("I PIN non coincidono.");
+      setError(t("settings.vaultPinMismatch"));
       return;
     }
     if (configured && currentPin.length === 0) {
-      setError("Inserisci il PIN attuale per cambiarlo.");
+      setError(t("settings.vaultCurrentPinRequired"));
       return;
     }
     setBusy(true);
@@ -2290,7 +2291,7 @@ function VaultPane() {
       setCurrentPin("");
       setPin("");
       setPinConfirm("");
-      setNote("PIN locale configurato.");
+      setNote(t("settings.vaultPinConfigured"));
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -2304,7 +2305,7 @@ function VaultPane() {
     setBusy(true);
     try {
       const result = await coreBridge.vaultPinVerify(verifyPin);
-      setNote(result.ok ? "PIN verificato." : "PIN non valido.");
+      setNote(result.ok ? t("settings.vaultPinVerified") : t("settings.vaultPinInvalid"));
       setVerifyPin("");
     } catch (err) {
       setError((err as Error).message);
@@ -2318,15 +2319,15 @@ function VaultPane() {
     setNote(null);
     const label = manualSecretLabel.trim();
     if (!configured) {
-      setError("Configura prima il PIN locale.");
+      setError(t("settings.vaultConfigurePinFirst"));
       return;
     }
     if (label.length === 0 || manualSecretValue.trim().length === 0) {
-      setError("Inserisci etichetta e valore da salvare.");
+      setError(t("settings.vaultManualRequired"));
       return;
     }
     if (manualSecretPin.length === 0) {
-      setError("Inserisci il PIN locale per cifrare il dato.");
+      setError(t("settings.vaultManualPinRequired"));
       return;
     }
     setBusy(true);
@@ -2341,7 +2342,7 @@ function VaultPane() {
       setManualSecretLabel("");
       setManualSecretValue("");
       setManualSecretPin("");
-      setNote(`Dato salvato nel Vault (${result.record_id}).`);
+      setNote(t("settings.vaultManualSaved", { id: result.record_id }));
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -2350,28 +2351,33 @@ function VaultPane() {
   }
 
   return (
-    <>
-      <div className="set-section-label">Vault</div>
+    <div className="vault-pane">
+      <div className="set-section-label">{t("settings.vault")}</div>
       <div className="set-card">
         <div className="set-card-top">
-          <span className="set-card-name">PIN locale</span>
+          <span className="set-card-name">{t("settings.vaultLocalPin")}</span>
           <span className={`set-badge ${configured ? "green" : "muted"}`}>
-            {configured == null ? "Checking" : configured ? "Configured" : "Not configured"}
+            {configured == null
+              ? t("settings.vaultChecking")
+              : configured
+                ? t("settings.vaultConfigured")
+                : t("settings.vaultNotConfigured")}
           </span>
         </div>
         <p className="set-hint">
-          Il PIN resta locale e protegge CVV one-shot e future autorizzazioni di pagamento.
-          Il Vault non salva il PIN in chiaro.
+          {t("settings.vaultPinHint")}
         </p>
         <div className="set-card-divider" />
         <div className="set-rows">
           <div className="set-row">
             <div>
-              <div className="rk">{configured ? "Cambia PIN" : "Nuovo PIN"}</div>
+              <div className="rk">
+                {configured ? t("settings.vaultChangePin") : t("settings.vaultNewPin")}
+              </div>
               <div className="rv">
                 {configured
-                  ? "Richiede il PIN attuale. Il nuovo PIN deve avere 6-12 cifre."
-                  : "6-12 cifre. Il primo PIN locale viene creato su questo dispositivo."}
+                  ? t("settings.vaultChangePinDesc")
+                  : t("settings.vaultNewPinDesc")}
               </div>
             </div>
             <div style={{ display: "grid", gap: 8, minWidth: 220 }}>
@@ -2381,7 +2387,7 @@ function VaultPane() {
                   inputMode="numeric"
                   type="password"
                   value={currentPin}
-                  placeholder="PIN attuale"
+                  placeholder={t("settings.vaultCurrentPin")}
                   onChange={(event) => setCurrentPin(event.target.value)}
                 />
               )}
@@ -2390,7 +2396,7 @@ function VaultPane() {
                 inputMode="numeric"
                 type="password"
                 value={pin}
-                placeholder="PIN"
+                placeholder={t("settings.vaultPinPlaceholder")}
                 onChange={(event) => setPin(event.target.value)}
               />
               <input
@@ -2398,7 +2404,7 @@ function VaultPane() {
                 inputMode="numeric"
                 type="password"
                 value={pinConfirm}
-                placeholder="Conferma PIN"
+                placeholder={t("settings.vaultConfirmPin")}
                 onChange={(event) => setPinConfirm(event.target.value)}
               />
               <button
@@ -2412,14 +2418,14 @@ function VaultPane() {
                 }
                 onClick={() => void setupPin()}
               >
-                {configured ? "Cambia PIN" : "Salva PIN"}
+                {configured ? t("settings.vaultChangePin") : t("settings.vaultSavePin")}
               </button>
             </div>
           </div>
           <div className="set-row">
             <div>
-              <div className="rk">Verifica PIN</div>
-              <div className="rv">Controllo locale per debug del gate Vault.</div>
+              <div className="rk">{t("settings.vaultVerifyPin")}</div>
+              <div className="rv">{t("settings.vaultVerifyPinDesc")}</div>
             </div>
             <div style={{ display: "flex", gap: 8, minWidth: 260 }}>
               <input
@@ -2427,7 +2433,7 @@ function VaultPane() {
                 inputMode="numeric"
                 type="password"
                 value={verifyPin}
-                placeholder="PIN"
+                placeholder={t("settings.vaultPinPlaceholder")}
                 onChange={(event) => setVerifyPin(event.target.value)}
               />
               <button
@@ -2436,7 +2442,7 @@ function VaultPane() {
                 disabled={busy || verifyPin.length === 0}
                 onClick={() => void verify()}
               >
-                Verifica
+                {t("settings.vaultVerify")}
               </button>
             </div>
           </div>
@@ -2446,19 +2452,18 @@ function VaultPane() {
       </div>
       <div className="set-card">
         <div className="set-card-top">
-          <span className="set-card-name">Salva dato sensibile</span>
-          <span className="set-badge muted">Encrypted</span>
+          <span className="set-card-name">{t("settings.vaultSaveSensitive")}</span>
+          <span className="set-badge muted">{t("settings.vaultEncrypted")}</span>
         </div>
         <p className="set-hint">
-          Usa questo form per dati che non devono entrare nella chat. Il valore viene inviato
-          al gateway locale solo insieme al PIN e viene salvato cifrato.
+          {t("settings.vaultSaveSensitiveHint")}
         </p>
         <div className="set-card-divider" />
         <div className="set-rows">
           <div className="set-row">
             <div>
-              <div className="rk">Categoria</div>
-              <div className="rv">Serve per policy e ricerca futura nel Vault.</div>
+              <div className="rk">{t("settings.vaultCategory")}</div>
+              <div className="rv">{t("settings.vaultCategoryDesc")}</div>
             </div>
             <select
               className="set-input"
@@ -2475,26 +2480,26 @@ function VaultPane() {
           </div>
           <div className="set-row">
             <div>
-              <div className="rk">Etichetta</div>
-              <div className="rv">Metadato visibile, non mettere qui il valore segreto.</div>
+              <div className="rk">{t("settings.vaultLabel")}</div>
+              <div className="rv">{t("settings.vaultLabelDesc")}</div>
             </div>
             <input
               className="set-input"
               value={manualSecretLabel}
-              placeholder="Es. Carta personale, passaporto, allergie"
+              placeholder={t("settings.vaultLabelPlaceholder")}
               onChange={(event) => setManualSecretLabel(event.target.value)}
               style={{ minWidth: 320 }}
             />
           </div>
           <div className="set-row">
             <div>
-              <div className="rk">Valore</div>
-              <div className="rv">Campo locale: viene svuotato dopo il salvataggio.</div>
+              <div className="rk">{t("settings.vaultValue")}</div>
+              <div className="rv">{t("settings.vaultValueDesc")}</div>
             </div>
             <textarea
               className="set-input"
               value={manualSecretValue}
-              placeholder="Dato da cifrare"
+              placeholder={t("settings.vaultValuePlaceholder")}
               rows={3}
               onChange={(event) => setManualSecretValue(event.target.value)}
               style={{ minWidth: 320, resize: "vertical" }}
@@ -2502,8 +2507,8 @@ function VaultPane() {
           </div>
           <div className="set-row">
             <div>
-              <div className="rk">PIN locale</div>
-              <div className="rv">Sblocca la master key solo per questo salvataggio.</div>
+              <div className="rk">{t("settings.vaultLocalPin")}</div>
+              <div className="rv">{t("settings.vaultManualPinDesc")}</div>
             </div>
             <div style={{ display: "flex", gap: 8, minWidth: 320 }}>
               <input
@@ -2511,7 +2516,7 @@ function VaultPane() {
                 inputMode="numeric"
                 type="password"
                 value={manualSecretPin}
-                placeholder="PIN"
+                placeholder={t("settings.vaultPinPlaceholder")}
                 onChange={(event) => setManualSecretPin(event.target.value)}
               />
               <button
@@ -2526,13 +2531,13 @@ function VaultPane() {
                 }
                 onClick={() => void saveManualSecret()}
               >
-                Salva
+                {t("settings.vaultSave")}
               </button>
             </div>
           </div>
         </div>
       </div>
-    </>
+    </div>
   );
 }
 

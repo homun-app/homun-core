@@ -407,7 +407,7 @@ export const settingsSections: Array<{
   { id: "appearance", label: "settings.appearance", icon: Palette, group: "account" },
   { id: "runtime", label: "settings.runtime", icon: Cpu, group: "account" },
   { id: "privacy", label: "settings.privacy", icon: KeyRound, group: "account" },
-  { id: "vault", label: "Vault", icon: ShieldCheck, group: "account" },
+  { id: "vault", label: "settings.vault", icon: ShieldCheck, group: "account" },
   { id: "memory", label: "nav.memory", icon: Brain, group: "account" },
   { id: "artifacts", label: "settings.artifacts", icon: FileText, group: "account" },
   { id: "contacts", label: "nav.contacts", icon: Users, group: "account" },
@@ -415,7 +415,7 @@ export const settingsSections: Array<{
   { id: "connections", label: "settings.connectors", icon: Plug, group: "capabilities" },
   { id: "skills", label: "settings.skills", icon: Sparkles, group: "capabilities" },
   { id: "addon", label: "settings.addon", icon: Blocks, group: "capabilities" },
-  { id: "computer", label: "Local computer", icon: MonitorPlay, group: "capabilities" },
+  { id: "computer", label: "settings.computer", icon: MonitorPlay, group: "capabilities" },
 ];
 
 export const settingsGroupLabels: Record<"account" | "capabilities", string> = {

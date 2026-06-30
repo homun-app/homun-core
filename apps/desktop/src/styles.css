@@ -8887,6 +8887,10 @@ body.resizing-drawer {
   background: var(--surface);
   padding: var(--s4);
 }
+.vault-pane {
+  display: grid;
+  gap: var(--s5);
+}
 .set-card-top {
   display: flex;
   align-items: center;
