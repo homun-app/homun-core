@@ -15,6 +15,7 @@ mod search;
 mod store;
 mod types;
 mod ui;
+mod vector_index;
 mod wiki;
 mod wiki_sync;
 
@@ -35,5 +36,6 @@ pub use search::*;
 pub use store::*;
 pub use types::*;
 pub use ui::*;
+pub use vector_index::*;
 pub use wiki::*;
 pub use wiki_sync::*;

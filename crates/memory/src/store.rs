@@ -3,7 +3,7 @@ use crate::{
     KeyProvider, MemoryAccessDecision, MemoryAccessRequest, MemoryBackupReport, MemoryEntity,
     MemoryEvent, MemoryEvidence, MemoryHealth, MemoryMaintenanceReport, MemoryRecord, MemoryRef,
     MemoryRefKind, MemoryRelation, MemoryRestoreMode, PrivacyDomain, RoutineRecord, UserId,
-    WikiPage, WorkspaceId, current_timestamp, decrypt_json, encrypt_json,
+    VectorHit, WikiPage, WorkspaceId, current_timestamp, decrypt_json, encrypt_json,
 };
 use rusqlite::{Connection, Row, params};
 use std::fs;
@@ -884,6 +884,19 @@ impl SQLiteMemoryStore {
             out.push((reference, vector));
         }
         Ok(out)
+    }
+
+    pub fn search_embeddings(
+        &self,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+        query: &[f32],
+        limit: usize,
+    ) -> Result<Vec<VectorHit>, String> {
+        let embeddings = self.list_embeddings(user_id, workspace_id)?;
+        let index = crate::ExactMemoryVectorIndex::from_embeddings(embeddings)
+            .map_err(|error| error.to_string())?;
+        crate::MemoryVectorIndex::search(&index, query, limit).map_err(|error| error.to_string())
     }
 
     /// Memory refs in a scope that don't yet have an embedding (for lazy backfill).

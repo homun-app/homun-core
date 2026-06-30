@@ -74,8 +74,10 @@ flowchart TD
    - **lessicale** FTS5/bm25 via `facade.search_memories(...)` filtrato per policy, su
      `open_loop | goal | decision | fact | preference`, statuses `Confirmed + Candidate`
      (`main.rs:12770`);
-   - **semantico** denso: embedding della query (off-lock) → coseno su `list_embeddings`
-     con floor rilassato `sim >= 0.5` e top-k (`main.rs:12794`).
+   - **semantico** denso: embedding della query (off-lock) → `MemoryFacade::search_embeddings`
+     (contratto `MemoryVectorIndex`) con floor rilassato `sim >= 0.5` e top-k. La prima
+     implementazione è `ExactMemoryVectorIndex`, costruita dagli embedding SQLite esistenti:
+     è una proiezione derivata e sostituibile, non una seconda memoria.
    I due rank si fondono con **RRF (K = 60)** + boost di **importanza** (`0.012 *
    importance`) + **recency** (decay esponenziale ~30 giorni, `0.008 * exp(-age/30)`) in
    `hybrid_memory_score` (`main.rs:12706`). In testa, se pertinente, vengono inserite righe
@@ -176,10 +178,11 @@ richiesto con tool minimizzati e auditati. Vedi [vault.md](vault.md).
 - **Embedding parziali storici**: i vettori venivano scritti lazy → recall semantico
   copriva una frazione. `spawn_embedding_catchup` colma il gap a regime, ma resta dipendente
   dall'endpoint di embed.
-- **Vettoriale ancora O(N)**: la prima tranche produzione ha aggiunto timing redatto,
-  cache query embedding e budget/fallback sul percorso caldo, ma non ha ancora sostituito
-  il cosine scan lineare con un indice ANN/SQLite. Prossimo passo: scegliere e provare
-  l'indice `sqlite-vec`/`usearch` usando i numeri di `memory recall:`.
+- **Vettoriale ancora exact/O(N), ma dietro contratto**: la recall non legge più direttamente
+  `list_embeddings` dal gateway; passa da `MemoryFacade::search_embeddings` e dal trait
+  `MemoryVectorIndex`. Oggi il backend è `ExactMemoryVectorIndex` (stessa semantica cosine,
+  nessun rischio packaging); prossimo passo: sostituire quel backend con `sqlite-vec`/`usearch`
+  se il bundle macOS resta pulito.
 - **Consolidamento off di default** (`HOMUN_AUTO_CONSOLIDATE_HOURS=0`): senza tick attivo la
   promozione `Candidate→Confirmed` e il dedup avvengono solo lungo le altre operazioni.
 - **Provenienza / catena causale decisione→artefatto→codice→esito**: prevista, oggi parziale.
@@ -199,7 +202,9 @@ richiesto con tool minimizzati e auditati. Vedi [vault.md](vault.md).
 - `crates/memory/src/types.rs` — `MemoryRecord` (`:95`), `MemoryStatus` (`:73`),
   `MemoryEntity` (`:117`).
 - `crates/memory/src/store.rs` — schema SQLite (tutte le tabelle), `search_memory_refs`,
-  `search_code_entities`.
+  `search_code_entities`, `search_embeddings`.
+- `crates/memory/src/vector_index.rs` — contratto `MemoryVectorIndex`, `VectorHit` e backend
+  exact derivato dagli embedding SQLite.
 - `crates/memory/src/{graph,graphify,wiki,wiki_sync,search,policy,lifecycle}.rs` — grafo,
   adapter Graphify, proiezione/sync markdown, recall, policy, ciclo di vita.
 - `crates/desktop-gateway/src/main.rs` — orchestrazione del ciclo per-turno:

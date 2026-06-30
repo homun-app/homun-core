@@ -722,6 +722,16 @@ GIÀ FATTO sessione 5g (NON ripartire; tutto su `main`):
   Smoke live dopo restart gateway: S1 primo giro PASS 7.8s (`query_embedding_ms=163`, cache miss),
   secondo giro PASS 3.2s (`query_embedding_ms=0`, `query_embedding_cache_hit=true`). Prossimo passo:
   spike indice vettoriale `sqlite-vec`/`usearch` senza cambiare la semantica RRF.
+- **Memory vector index contract (Fase 2 slice 1)**: aggiunto `crates/memory/src/vector_index.rs`
+  con trait `MemoryVectorIndex`, `VectorHit` e backend `ExactMemoryVectorIndex`. `MemoryFacade` espone
+  ora `search_embeddings`; `SQLiteMemoryStore` costruisce una proiezione exact dagli embedding canonici
+  SQLite e il gateway usa questa API nel pass semantico della recall, applicando ancora floor 0.5/top 8.
+  Nessuna dipendenza ANN ancora: e' un taglio di confine testato per poter sostituire il backend con
+  `sqlite-vec`/`usearch` senza cambiare RRF o prompt. Test verdi: `local-first-memory exact_index`,
+  `facade_searches_embeddings_through_vector_index_contract`, `memory_recall_timing_trace_is_stable...`,
+  `memory_query_embedding_cache`, build gateway. Smoke live dopo restart gateway: S1 PASS 9.3s anche con
+  `query_embedding_timed_out=true`/`degraded=true` (`vector_scan_ms=none`), confermando il fallback
+  FTS + briefing senza blocco turno. Prossimo passo: spike backend ANN persistente e packaging macOS.
 - **bug "Continue" (validato live nell'app — puzzle Einstein ora 1 risposta pulita):** 2 cause distinte —
   (1) backend `df65d0b0`: il trace `‹‹REASONING››` rientrava nel contesto modello via
   `build_chat_runtime_prompt` → `strip_display_markers` canonico in lib.rs usato in `normalize_context_text`,

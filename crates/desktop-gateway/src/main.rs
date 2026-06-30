@@ -13314,18 +13314,17 @@ async fn relevant_memory_for_prompt(state: &AppState, prompt: &str) -> Option<St
     let mut dense_rank: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
     if let Some(query_vec) = query_vec.as_ref() {
         let vector_start = std::time::Instant::now();
-        let mut scored: Vec<(String, f32)> = Vec::new();
-        if let Ok(embeddings) = facade.list_embeddings(&user, &active) {
-            for (reference, vector) in embeddings {
-                let sim = cosine(query_vec, &vector);
-                if sim >= 0.5 {
-                    scored.push((reference.to_string(), sim));
-                }
+        if let Ok(hits) = facade.search_embeddings(&user, &active, query_vec, 32) {
+            for (i, hit) in hits
+                .into_iter()
+                .filter(|hit| hit.score >= 0.5)
+                .take(8)
+                .enumerate()
+            {
+                dense_rank
+                    .entry(hit.memory_ref.to_string())
+                    .or_insert(i + 1);
             }
-        }
-        scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        for (i, (reference, _)) in scored.into_iter().take(8).enumerate() {
-            dense_rank.entry(reference).or_insert(i + 1);
         }
         timing.vector_scan_ms = Some(elapsed_ms(vector_start));
         timing.vector_candidates = dense_rank.len();

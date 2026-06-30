@@ -8,7 +8,7 @@ use crate::{
     MemoryMaintenanceReport, MemoryPolicyEngine, MemoryRecord, MemoryRef, MemoryRefKind,
     MemoryRelation, MemoryResult, MemorySearchPage, MemorySearchRequest, MemorySearchResult,
     MemoryStatus, MemoryUpdatePatch, PrivacyDomain, RoutineInference, RoutineInferenceSummary,
-    RoutineRecord, RoutineStatus, SQLiteMemoryStore, UserId, WikiCorrectionSyncReport,
+    RoutineRecord, RoutineStatus, SQLiteMemoryStore, UserId, VectorHit, WikiCorrectionSyncReport,
     WikiFileStore, WikiPage, WorkspaceId, current_timestamp, ensure_artifacts_inside_root,
     ensure_transition, parse_wiki_markdown,
 };
@@ -279,6 +279,18 @@ impl MemoryFacade {
         workspace_id: &WorkspaceId,
     ) -> MemoryResult<Vec<(MemoryRef, Vec<f32>)>> {
         Ok(self.store.list_embeddings(user_id, workspace_id)?)
+    }
+
+    pub fn search_embeddings(
+        &self,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+        query: &[f32],
+        limit: usize,
+    ) -> MemoryResult<Vec<VectorHit>> {
+        Ok(self
+            .store
+            .search_embeddings(user_id, workspace_id, query, limit)?)
     }
 
     pub fn refs_without_embeddings(

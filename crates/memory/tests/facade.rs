@@ -118,6 +118,57 @@ fn facade_imports_graphify_artifacts_through_memory_boundary() {
     assert_eq!(summary.edges_imported, 1);
 }
 
+#[test]
+fn facade_searches_embeddings_through_vector_index_contract() {
+    let store = SQLiteMemoryStore::open_in_memory().unwrap();
+    let facade = MemoryFacade::new(store);
+    let user = UserId::new("user_1");
+    let workspace = WorkspaceId::new("workspace_1");
+    let close = MemoryRef::new(
+        MemoryRefKind::Memory,
+        user.clone(),
+        workspace.clone(),
+        "close",
+    );
+    let far = MemoryRef::new(
+        MemoryRefKind::Memory,
+        user.clone(),
+        workspace.clone(),
+        "far",
+    );
+    let other_workspace = MemoryRef::new(
+        MemoryRefKind::Memory,
+        user.clone(),
+        WorkspaceId::new("workspace_2"),
+        "other",
+    );
+
+    facade
+        .upsert_embedding(&far, &user, &workspace, "test-embed", &[0.6, 0.8])
+        .unwrap();
+    facade
+        .upsert_embedding(&close, &user, &workspace, "test-embed", &[1.0, 0.0])
+        .unwrap();
+    facade
+        .upsert_embedding(
+            &other_workspace,
+            &user,
+            &WorkspaceId::new("workspace_2"),
+            "test-embed",
+            &[1.0, 0.0],
+        )
+        .unwrap();
+
+    let hits = facade
+        .search_embeddings(&user, &workspace, &[1.0, 0.0], 10)
+        .unwrap();
+
+    assert_eq!(hits.len(), 2);
+    assert_eq!(hits[0].memory_ref, close);
+    assert_eq!(hits[1].memory_ref, far);
+    assert!(hits[0].score > hits[1].score);
+}
+
 fn request(domains: Vec<&str>) -> MemoryAccessRequest {
     MemoryAccessRequest {
         actor_id: "PlannerAgent".to_string(),
