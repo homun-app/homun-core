@@ -911,7 +911,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/memory/consolidate", post(memory_consolidate))
         .route("/api/memory/decide", post(memory_decide))
         .route("/api/vault/records", get(vault_records_list))
-        .route("/api/vault/records/{id}", delete(vault_record_delete))
+        .route(
+            "/api/vault/records/{id}",
+            delete(vault_record_delete).patch(vault_record_update),
+        )
         .route("/api/vault/proposals/accept", post(vault_proposal_accept))
         .route("/api/vault/proposals/dismiss", post(vault_proposal_dismiss))
         .route("/api/vault/pin/status", get(vault_pin_status))
@@ -35029,6 +35032,18 @@ struct VaultRecordsListResponse {
     records: Vec<VaultRecordSummary>,
 }
 
+#[derive(Debug, Deserialize)]
+struct VaultRecordUpdateRequest {
+    category: String,
+    label: String,
+}
+
+#[derive(Debug, Serialize)]
+struct VaultRecordUpdateResponse {
+    ok: bool,
+    record: VaultRecordSummary,
+}
+
 #[derive(Debug, Serialize)]
 struct VaultRecordDeleteResponse {
     ok: bool,
@@ -35114,6 +35129,16 @@ async fn vault_record_delete(
     let vault_store = lock_vault_store(&state)?;
     vault_store.delete(&record_id).map_err(vault_store_error)?;
     Ok(Json(VaultRecordDeleteResponse { ok: true }))
+}
+
+async fn vault_record_update(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(request): Json<VaultRecordUpdateRequest>,
+) -> Result<Json<VaultRecordUpdateResponse>, GatewayError> {
+    let record_id = VaultRecordId::new(id).map_err(invalid_vault_proposal)?;
+    let vault_store = lock_vault_store(&state)?;
+    update_vault_record_metadata(&vault_store, &record_id, &request).map(Json)
 }
 
 async fn vault_pin_status(
@@ -35238,6 +35263,42 @@ fn vault_record_summary(record: VaultRecord) -> VaultRecordSummary {
         label: record.label,
         redacted_preview,
     }
+}
+
+fn update_vault_record_metadata(
+    vault_store: &SQLiteVaultStore,
+    record_id: &VaultRecordId,
+    request: &VaultRecordUpdateRequest,
+) -> Result<VaultRecordUpdateResponse, GatewayError> {
+    let existing = vault_store
+        .get(record_id)
+        .map_err(vault_store_error)?
+        .ok_or_else(|| GatewayError {
+            status: StatusCode::NOT_FOUND,
+            code: "vault_record_not_found",
+            message: "Vault record not found".to_string(),
+        })?;
+    let label = request.label.trim();
+    if label.is_empty() {
+        return Err(invalid_vault_proposal(
+            "Vault record label is required".to_string(),
+        ));
+    }
+    let category = vault_category_from_marker(&request.category).map_err(invalid_vault_proposal)?;
+    let updated = VaultRecord::new(
+        existing.id,
+        category,
+        label,
+        existing.secret_ref,
+        existing.metadata,
+    )
+    .map_err(invalid_vault_proposal)?;
+    let summary = vault_record_summary(updated.clone());
+    vault_store.put(updated).map_err(vault_store_error)?;
+    Ok(VaultRecordUpdateResponse {
+        ok: true,
+        record: summary,
+    })
 }
 
 fn accept_vault_proposal(
@@ -47770,6 +47831,61 @@ prs.save(Path({path:?}))
         let record_id = response.record_id.parse().unwrap();
         vault.delete(&record_id).expect("delete");
         assert!(vault.list().expect("list after delete").is_empty());
+    }
+
+    #[test]
+    fn vault_record_update_changes_metadata_without_touching_secret_material() {
+        let vault = local_first_vault::SQLiteVaultStore::open_in_memory().unwrap();
+        let setup = super::VaultPinSetupRequest {
+            pin: "123456".to_string(),
+            current_pin: None,
+        };
+        super::apply_vault_pin_setup(&vault, &setup).expect("setup pin");
+        let request = super::VaultProposalActionRequest {
+            category: "payments".to_string(),
+            label: "Carta personale".to_string(),
+            redacted_preview: "[VAULT:payments:card:last4=1111]".to_string(),
+            secret_value: Some("4111111111111111".to_string()),
+            pin: Some("123456".to_string()),
+            thread_id: Some("thread_1".to_string()),
+            message_id: Some("msg_1".to_string()),
+        };
+        let response = super::accept_vault_proposal(&vault, &request).expect("accept");
+        let record_id = response.record_id.parse().unwrap();
+        let update = super::VaultRecordUpdateRequest {
+            category: "private_notes".to_string(),
+            label: "Carta backup".to_string(),
+        };
+
+        let updated = super::update_vault_record_metadata(&vault, &record_id, &update)
+            .expect("update metadata");
+
+        assert!(updated.ok);
+        assert_eq!(updated.record.id, response.record_id);
+        assert_eq!(updated.record.category, "private_notes");
+        assert_eq!(updated.record.label, "Carta backup");
+        assert_eq!(
+            updated.record.redacted_preview,
+            "[VAULT:payments:card:last4=1111]"
+        );
+        let verifier = vault.local_pin_verifier().unwrap().unwrap();
+        let key = vault
+            .unlock_local_master_key(&verifier, "123456")
+            .expect("master key");
+        let secret = vault
+            .get_secret_material(&record_id, &key)
+            .expect("encrypted secret")
+            .expect("saved secret");
+        assert_eq!(secret.expose_utf8().unwrap(), "4111111111111111");
+        let saved = local_first_vault::VaultStore::get(&vault, &record_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            saved.category,
+            local_first_vault::VaultCategory::PrivateNotes
+        );
+        assert_eq!(saved.label, "Carta backup");
+        assert!(!saved.metadata.to_string().contains("4111111111111111"));
     }
 
     #[test]

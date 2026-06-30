@@ -649,6 +649,10 @@ GIÀ FATTO sessione 5g (NON ripartire; tutto su `main`):
   delete `DELETE /api/vault/records/{id}`. Settings > Vault > Dati sensibili mostra i record salvati
   con categoria/label/preview redatta, ricarica dopo salvataggio e consente eliminarli. Il delete
   cancella anche l'eventuale `vault_secret_material`, evitando secret cifrati orfani.
+- **Vault record edit metadata-only**: aggiunto `PATCH /api/vault/records/{id}` e bridge/UI per modificare
+  categoria + label dei record salvati da Settings > Vault > Dati sensibili. L'edit preserva
+  `SecretRef`, `redacted_preview` e materiale cifrato; corretta anche la regressione per cui la lista dei
+  record era finita nella scheda PIN invece che in `Dati sensibili`.
 - **Payment Approval runtime MVP**: aggiunto marker `PAYMENT_APPROVAL`, card chat con
   riepilogo merchant/dominio/importo/prodotto/metodo, endpoint
   `/api/vault/payment-approvals/approve` con PIN locale + CVV/CV2 one-shot, grant volatile

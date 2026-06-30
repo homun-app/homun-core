@@ -1,6 +1,6 @@
 # Sottosistema Vault
 
-> Stato: 2026-06-29. MVP foundation implementata a livello Rust/frontend con
+> Stato: 2026-06-30. MVP foundation implementata a livello Rust/frontend con
 > persistenza metadata-only delle proposte Vault e runtime locale di approval
 > pagamento PIN+CVV one-shot. Spec di riferimento:
 > `docs/superpowers/specs/2026-06-29-vault-purchase-approval-design.md`.
@@ -30,9 +30,10 @@ Non e' memoria: la memoria puo' contenere solo testo redatto o riferimenti
 - `apps/desktop/src/components/SettingsView.tsx`: sezione Settings separata `Vault`
   per status/setup/verifica del PIN locale e inserimento manuale di dati sensibili
   senza passare dalla chat; la tab `Dati sensibili` mostra anche la lista
-  metadata-only dei record salvati e consente eliminarli.
+  metadata-only dei record salvati e consente modificarne label/categoria o
+  eliminarli.
 - `crates/desktop-gateway/src/main.rs`: endpoint
-  `/api/vault/records` (`GET`), `/api/vault/records/{id}` (`DELETE`),
+  `/api/vault/records` (`GET`), `/api/vault/records/{id}` (`PATCH`, `DELETE`),
   `/api/vault/proposals/accept`, `/api/vault/proposals/dismiss`,
   `/api/vault/pin/status|setup|verify` e
   `/api/vault/payment-approvals/approve`.
@@ -55,8 +56,10 @@ scrive in `vault_secret_material`, cifrato con una master key locale del Vault.
 
 La lista UI/API dei record usa solo un summary redatto (`id`, `category`, `label`,
 `redacted_preview`). Non espone `SecretRef` e non legge il materiale cifrato. La
-cancellazione del record elimina sia `vault_records` sia l'eventuale riga
-`vault_secret_material` associata, per non lasciare secret orfani.
+modifica metadata-only consente cambiare `category` e `label`, preservando
+`SecretRef`, `redacted_preview` e l'eventuale materiale cifrato. La cancellazione
+del record elimina sia `vault_records` sia l'eventuale riga `vault_secret_material`
+associata, per non lasciare secret orfani.
 
 `vault_local_pin` conserva solo `LocalPinVerifier` (`algorithm`, `iterations`,
 `salt_hex`, `digest_hex`). Il PIN non e' reversibile e non viene mai serializzato in

@@ -15,6 +15,7 @@ import {
   FileText,
   Folder,
   MonitorPlay,
+  Pencil,
   Play,
   Plus,
   RefreshCw,
@@ -2257,6 +2258,9 @@ function VaultPane() {
   const [vaultTab, setVaultTab] = useState<"sensitive" | "pin">("sensitive");
   const [vaultRecords, setVaultRecords] = useState<VaultRecordSummary[]>([]);
   const [recordsLoading, setRecordsLoading] = useState(false);
+  const [editingVaultRecord, setEditingVaultRecord] = useState<VaultRecordSummary | null>(null);
+  const [editVaultCategory, setEditVaultCategory] = useState("private_notes");
+  const [editVaultLabel, setEditVaultLabel] = useState("");
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -2265,6 +2269,20 @@ function VaultPane() {
     setVaultTab(tab);
     setNote(null);
     setError(null);
+  }
+
+  function startVaultRecordEdit(record: VaultRecordSummary) {
+    setEditingVaultRecord(record);
+    setEditVaultCategory(record.category);
+    setEditVaultLabel(record.label);
+    setNote(null);
+    setError(null);
+  }
+
+  function cancelVaultRecordEdit() {
+    setEditingVaultRecord(null);
+    setEditVaultLabel("");
+    setEditVaultCategory("private_notes");
   }
 
   async function refresh() {
@@ -2380,8 +2398,36 @@ function VaultPane() {
     setBusy(true);
     try {
       await coreBridge.vaultRecordDelete(record.id);
+      if (editingVaultRecord?.id === record.id) {
+        cancelVaultRecordEdit();
+      }
       await refreshVaultRecords();
       setNote(t("settings.vaultRecordDeleted", { label: record.label }));
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveVaultRecordEdit() {
+    setError(null);
+    setNote(null);
+    if (!editingVaultRecord) return;
+    const label = editVaultLabel.trim();
+    if (label.length === 0) {
+      setError(t("settings.vaultEditRequired"));
+      return;
+    }
+    setBusy(true);
+    try {
+      const result = await coreBridge.vaultRecordUpdate(editingVaultRecord.id, {
+        category: editVaultCategory,
+        label,
+      });
+      await refreshVaultRecords();
+      cancelVaultRecordEdit();
+      setNote(t("settings.vaultRecordUpdated", { label: result.record.label }));
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -2512,44 +2558,6 @@ function VaultPane() {
               </div>
             </div>
           </div>
-          <div className="set-card-divider" />
-          <div className="set-card-top">
-            <span className="set-card-name">{t("settings.vaultSavedRecords")}</span>
-            <button
-              className="set-btn"
-              type="button"
-              disabled={recordsLoading}
-              onClick={() => void refreshVaultRecords()}
-            >
-              {t("settings.refresh")}
-            </button>
-          </div>
-          <div className="vault-record-list">
-            {recordsLoading && vaultRecords.length === 0 && (
-              <p className="set-hint">{t("settings.loadingShort")}</p>
-            )}
-            {!recordsLoading && vaultRecords.length === 0 && (
-              <p className="set-hint">{t("settings.vaultNoRecords")}</p>
-            )}
-            {vaultRecords.map((record) => (
-              <div className="vault-record-row" key={record.id}>
-                <div>
-                  <div className="vault-record-title">{record.label}</div>
-                  <div className="vault-record-meta">
-                    {vaultCategoryLabel(record.category)} · {record.redacted_preview}
-                  </div>
-                </div>
-                <button
-                  className="set-btn danger"
-                  type="button"
-                  disabled={busy}
-                  onClick={() => void deleteVaultRecord(record)}
-                >
-                  {t("settings.deleteData")}
-                </button>
-              </div>
-            ))}
-          </div>
           {note && <p className="set-hint">{note}</p>}
           {error && <p className="cmp-confirm-err">{error}</p>}
         </div>
@@ -2640,6 +2648,102 @@ function VaultPane() {
                 </button>
               </div>
             </div>
+          </div>
+          <div className="set-card-divider" />
+          <div className="set-card-top">
+            <span className="set-card-name">{t("settings.vaultSavedRecords")}</span>
+            <button
+              className="set-btn"
+              type="button"
+              disabled={recordsLoading}
+              onClick={() => void refreshVaultRecords()}
+            >
+              {t("settings.refresh")}
+            </button>
+          </div>
+          <div className="vault-record-list">
+            {recordsLoading && vaultRecords.length === 0 && (
+              <p className="set-hint">{t("settings.loadingShort")}</p>
+            )}
+            {!recordsLoading && vaultRecords.length === 0 && (
+              <p className="set-hint">{t("settings.vaultNoRecords")}</p>
+            )}
+            {vaultRecords.map((record) => {
+              const editing = editingVaultRecord?.id === record.id;
+              return (
+                <div className="vault-record-row" key={record.id}>
+                  <div>
+                    <div className="vault-record-title">{record.label}</div>
+                    <div className="vault-record-meta">
+                      {vaultCategoryLabel(record.category)} · {record.redacted_preview}
+                    </div>
+                    {editing && (
+                      <div className="vault-record-edit">
+                        <select
+                          className="set-input"
+                          value={editVaultCategory}
+                          aria-label={t("settings.vaultEditCategory")}
+                          onChange={(event) => setEditVaultCategory(event.target.value)}
+                        >
+                          {vaultCategories.map((category) => (
+                            <option key={category.value} value={category.value}>
+                              {category.label}
+                            </option>
+                          ))}
+                        </select>
+                        <input
+                          className="set-input"
+                          value={editVaultLabel}
+                          aria-label={t("settings.vaultEditLabel")}
+                          onChange={(event) => setEditVaultLabel(event.target.value)}
+                        />
+                      </div>
+                    )}
+                  </div>
+                  <div className="vault-record-actions">
+                    {editing ? (
+                      <>
+                        <button
+                          className="set-btn"
+                          type="button"
+                          disabled={busy}
+                          onClick={cancelVaultRecordEdit}
+                        >
+                          {t("settings.vaultCancelEdit")}
+                        </button>
+                        <button
+                          className="set-btn primary"
+                          type="button"
+                          disabled={busy || editVaultLabel.trim().length === 0}
+                          onClick={() => void saveVaultRecordEdit()}
+                        >
+                          {t("settings.vaultSaveEdit")}
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        className="set-btn"
+                        type="button"
+                        disabled={busy}
+                        onClick={() => startVaultRecordEdit(record)}
+                      >
+                        <Pencil size={14} />
+                        {t("settings.vaultEdit")}
+                      </button>
+                    )}
+                    <button
+                      className="set-btn danger"
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void deleteVaultRecord(record)}
+                    >
+                      <Trash2 size={14} />
+                      {t("settings.deleteData")}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
           </div>
           {note && <p className="set-hint">{note}</p>}
           {error && <p className="cmp-confirm-err">{error}</p>}

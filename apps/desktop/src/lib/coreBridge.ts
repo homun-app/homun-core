@@ -9,6 +9,7 @@ import {
 } from "./gatewayConfig";
 import {
   gatewayGetJson,
+  gatewayPatchJson,
   gatewayPostJson,
   gatewayPutJson,
   gatewayDeleteJson,
@@ -1858,6 +1859,16 @@ export interface VaultRecordsListResult {
   records: VaultRecordSummary[];
 }
 
+export interface VaultRecordUpdateInput {
+  category: string;
+  label: string;
+}
+
+export interface VaultRecordUpdateResult {
+  ok: boolean;
+  record: VaultRecordSummary;
+}
+
 export interface PaymentApprovalSnapshot {
   approval_id: string;
   merchant: string;
@@ -1893,6 +1904,16 @@ async function electronVaultRecords(): Promise<VaultRecordsListResult> {
 
 async function electronVaultRecordDelete(id: string): Promise<{ ok: boolean }> {
   return gatewayDeleteJson<{ ok: boolean }>(`/api/vault/records/${encodeURIComponent(id)}`);
+}
+
+async function electronVaultRecordUpdate(
+  id: string,
+  input: VaultRecordUpdateInput,
+): Promise<VaultRecordUpdateResult> {
+  return gatewayPatchJson<VaultRecordUpdateResult>(
+    `/api/vault/records/${encodeURIComponent(id)}`,
+    input,
+  );
 }
 
 async function electronVaultPinStatus(): Promise<VaultPinStatus> {
@@ -2615,6 +2636,7 @@ export const coreBridge = {
     electronVaultProposalDismiss(input),
   vaultRecords: () => electronVaultRecords(),
   vaultRecordDelete: (id: string) => electronVaultRecordDelete(id),
+  vaultRecordUpdate: (id: string, input: VaultRecordUpdateInput) => electronVaultRecordUpdate(id, input),
   vaultPinStatus: () => electronVaultPinStatus(),
   vaultPinSetup: (pin: string, currentPin?: string) =>
     electronVaultPinSetup(pin, currentPin),
