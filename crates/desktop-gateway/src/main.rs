@@ -4465,6 +4465,10 @@ fn active_open_loop_record(memory: &MemoryRecord) -> bool {
         )
         && memory.superseded_by.is_none()
         && !memory.text.trim().is_empty()
+        // Runtime plans are harness-owned control-flow state. They are resumed
+        // only through the per-thread runtime-plan loader; injecting them as
+        // generic open loops lets unrelated threads contaminate a fresh prompt.
+        && memory.metadata.get("source").and_then(|v| v.as_str()) != Some("runtime_plan")
 }
 
 fn deduplicate_open_loops(
@@ -51746,6 +51750,15 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         let memory = plan_memories[0];
         assert_eq!(memory.memory_type, "open_loop");
         assert_eq!(memory.status, local_first_memory::MemoryStatus::Confirmed);
+        assert!(
+            !super::active_open_loop_record(memory),
+            "runtime plans must not leak through the generic open-loop briefing"
+        );
+        assert!(
+            super::runtime_plan_memory_matches(memory, "thread-1"),
+            "thread-scoped runtime-plan loader must still see the plan"
+        );
+        assert!(!super::runtime_plan_memory_matches(memory, "thread-2"));
         assert!(memory.text.contains("2/3 steps done"), "{}", memory.text);
         assert!(
             memory.text.contains("Next step: Run tests"),

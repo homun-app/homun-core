@@ -193,8 +193,10 @@ approval).
   `block_stalled_step`). **Validazione live 2026-06-29:** non promuovere ancora default-ON. Il
   tentativo con URL `.invalid` ha mostrato che il piano può essere sostituito/contaminato da un
   runtime-plan non correlato recuperato dalla memoria/recall, prima che il contatore F4 arrivi al
-  log atteso. Quindi il wiring resta gated: prima va chiusa l'identità/perimetro del runtime-plan
-  ripreso, poi si riprova il cap `3`.
+  log atteso. Fix successivo: i runtime-plan restano memorie `open_loop` per il lifecycle/graph,
+  ma non vengono più iniettati nel briefing generico `OPEN LOOPS`; il resume passa solo dal loader
+  per-thread (`runtime_plan_memory_matches`). Il wiring resta gated finché il cap `3` non viene
+  riverificato live.
 - **"Il modello a volte non produce la risposta" (F3-deep — cutoff/budget).** Un modello di
   ragionamento può spendere l'intero budget token a *pensare* (`finish_reason:length`, `content`
   vuoto): la frontiera canonica (`model_normalize::assistant_response`) produce allora

@@ -546,10 +546,10 @@ architecture/. Leggi [[homun-single-loop-evidence-verdict]] + decisions/0021.
 PROSSIMO PASSO (scegli con l'utente — la coda di fix chat-UX/funzionali di sessione è ESAURITA; restano
 F4 + backlog più profondo):
 - **F4 resta gated / NON default-ON.** Validazione live con URL `.invalid` + `continua` non ha prodotto il
-  log atteso `[plan] F4: blocked stalled step after 3 …`; ha invece esposto un problema più profondo:
-  il runtime-plan ripreso può essere sostituito/contaminato da un piano non correlato recuperato da
-  memoria/recall (nel test: piano `.invalid` → piano FIFA). Prima chiudere identità/perimetro del
-  runtime-plan ripreso, poi riprovare `HOMUN_PLAN_STALL_ABORT=1`.
+  log atteso `[plan] F4: blocked stalled step after 3 …`; aveva esposto contaminazione da runtime-plan
+  non correlati recuperati nel briefing memoria (piano `.invalid` → piano FIFA). Fix testato: le memorie
+  `source=runtime_plan` restano caricabili solo dal loader per-thread e non entrano più negli `OPEN LOOPS`
+  generici. Prossimo passo: riprovare live `HOMUN_PLAN_STALL_ABORT=1` e, se appare il log F4, promuoverlo.
 - **Già validati live:** form-fill `kind=fill` su `https://www.selenium.dev/selenium/web/web-form.html`
   (`browser-step[done]: fill`, valore `Fabio Test` nello snapshot); F3-deep con
   `HOMUN_DEBUG_MAIN_LOOP_MAX_TOKENS=1` sul solo loop principale → log `[answer] empty answer body
