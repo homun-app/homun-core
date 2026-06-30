@@ -675,10 +675,11 @@ GIÀ FATTO sessione 5g (NON ripartire; tutto su `main`):
   metadata-only con `pending_id`; il PIN serve quando l'utente fa reveal/edit, momento in cui il gateway
   materializza il pending, lo cifra in `vault_secret_material` e consuma il sidecar.
 - **Vault lookup nel loop chat**: corretto il caso "qual e' il mio codice fiscale?" dopo salvataggio
-  Vault. Il modello prima poteva consultare solo memoria normale e quindi negava il dato; ora ha il tool
-  read-only `vault_search`, che cerca solo metadati redatti (`id`, `category`, `label`,
-  `redacted_preview`) e istruisce il modello a dire che il record esiste nel Vault e richiede PIN locale
-  per reveal/edit, senza esporre o inferire il valore.
+  Vault. Il modello prima poteva consultare solo memoria normale e quindi negava il dato; ora `recall_memory`
+  prova internamente il Vault solo se la memoria non trova righe pertinenti. Il fallback cerca solo metadati
+  redatti (`id`, `category`, `label`, `redacted_preview`) e istruisce il modello a dire che il record esiste
+  nel Vault e richiede PIN locale per reveal/edit, senza esporre o inferire il valore. Il Vault non viene
+  presentato come MCP/tool autonomo.
 - **Payment Approval runtime MVP**: aggiunto marker `PAYMENT_APPROVAL`, card chat con
   riepilogo merchant/dominio/importo/prodotto/metodo, endpoint
   `/api/vault/payment-approvals/approve` con PIN locale + CVV/CV2 one-shot, grant volatile
