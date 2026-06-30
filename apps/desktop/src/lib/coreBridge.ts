@@ -1878,8 +1878,14 @@ async function electronVaultPinStatus(): Promise<VaultPinStatus> {
   return gatewayGetJson<VaultPinStatus>("/api/vault/pin/status");
 }
 
-async function electronVaultPinSetup(pin: string): Promise<VaultPinStatus> {
-  return gatewayPostJson<VaultPinStatus>("/api/vault/pin/setup", { pin });
+async function electronVaultPinSetup(
+  pin: string,
+  currentPin?: string,
+): Promise<VaultPinStatus> {
+  return gatewayPostJson<VaultPinStatus>("/api/vault/pin/setup", {
+    pin,
+    ...(currentPin ? { current_pin: currentPin } : {}),
+  });
 }
 
 async function electronVaultPinVerify(pin: string): Promise<VaultPinVerifyResult> {
@@ -2587,7 +2593,8 @@ export const coreBridge = {
   vaultProposalDismiss: (input: VaultProposalActionInput) =>
     electronVaultProposalDismiss(input),
   vaultPinStatus: () => electronVaultPinStatus(),
-  vaultPinSetup: (pin: string) => electronVaultPinSetup(pin),
+  vaultPinSetup: (pin: string, currentPin?: string) =>
+    electronVaultPinSetup(pin, currentPin),
   vaultPinVerify: (pin: string) => electronVaultPinVerify(pin),
   vaultPaymentApprovalApprove: (
     snapshot: PaymentApprovalSnapshot,

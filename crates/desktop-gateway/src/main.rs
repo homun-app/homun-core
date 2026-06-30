@@ -35018,6 +35018,8 @@ struct VaultPinStatusResponse {
 #[derive(Debug, Deserialize)]
 struct VaultPinSetupRequest {
     pin: String,
+    #[serde(default)]
+    current_pin: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -35091,8 +35093,13 @@ async fn vault_pin_setup(
     State(state): State<AppState>,
     Json(request): Json<VaultPinSetupRequest>,
 ) -> Result<Json<VaultPinSetupResponse>, GatewayError> {
-    let verifier = local_pin_verifier_from_request(&request).map_err(invalid_vault_pin)?;
-    lock_vault_store(&state)?
+    let vault_store = lock_vault_store(&state)?;
+    let existing = vault_store
+        .local_pin_verifier()
+        .map_err(vault_store_error)?;
+    let verifier =
+        local_pin_setup_verifier(existing.as_ref(), &request).map_err(invalid_vault_pin)?;
+    vault_store
         .set_local_pin_verifier(verifier)
         .map_err(vault_store_error)?;
     Ok(Json(VaultPinSetupResponse { configured: true }))
@@ -35151,6 +35158,21 @@ fn local_pin_verifier_from_request(
     request: &VaultPinSetupRequest,
 ) -> Result<LocalPinVerifier, String> {
     LocalPinVerifier::create(&request.pin)
+}
+
+fn local_pin_setup_verifier(
+    existing: Option<&LocalPinVerifier>,
+    request: &VaultPinSetupRequest,
+) -> Result<LocalPinVerifier, String> {
+    if let Some(existing) = existing {
+        let Some(current_pin) = request.current_pin.as_deref() else {
+            return Err("Current Vault PIN is required to change the PIN".to_string());
+        };
+        if !existing.verify(current_pin) {
+            return Err("Invalid current Vault PIN".to_string());
+        }
+    }
+    local_pin_verifier_from_request(request)
 }
 
 fn local_pin_verify_result(verifier: Option<&LocalPinVerifier>, pin: &str) -> bool {
@@ -47541,6 +47563,7 @@ prs.save(Path({path:?}))
     fn vault_pin_setup_rejects_invalid_pin_values() {
         let request = super::VaultPinSetupRequest {
             pin: "12345".to_string(),
+            current_pin: None,
         };
 
         let error = super::local_pin_verifier_from_request(&request).expect_err("short pin");
@@ -47551,12 +47574,43 @@ prs.save(Path({path:?}))
     fn vault_pin_verify_requires_configured_matching_pin() {
         let request = super::VaultPinSetupRequest {
             pin: "123456".to_string(),
+            current_pin: None,
         };
         let verifier = super::local_pin_verifier_from_request(&request).expect("verifier");
 
         assert!(super::local_pin_verify_result(Some(&verifier), "123456"));
         assert!(!super::local_pin_verify_result(Some(&verifier), "654321"));
         assert!(!super::local_pin_verify_result(None, "123456"));
+    }
+
+    #[test]
+    fn vault_pin_change_requires_current_pin_when_already_configured() {
+        let existing = local_first_vault::LocalPinVerifier::create("123456").unwrap();
+        let replacement_without_current = super::VaultPinSetupRequest {
+            pin: "654321".to_string(),
+            current_pin: None,
+        };
+        let error = super::local_pin_setup_verifier(Some(&existing), &replacement_without_current)
+            .expect_err("current pin required");
+        assert!(error.contains("Current Vault PIN"));
+
+        let replacement_with_wrong_current = super::VaultPinSetupRequest {
+            pin: "654321".to_string(),
+            current_pin: Some("111111".to_string()),
+        };
+        let error =
+            super::local_pin_setup_verifier(Some(&existing), &replacement_with_wrong_current)
+                .expect_err("current pin must match");
+        assert!(error.contains("Invalid current Vault PIN"));
+
+        let replacement_with_current = super::VaultPinSetupRequest {
+            pin: "654321".to_string(),
+            current_pin: Some("123456".to_string()),
+        };
+        let updated = super::local_pin_setup_verifier(Some(&existing), &replacement_with_current)
+            .expect("valid pin change");
+        assert!(updated.verify("654321"));
+        assert!(!updated.verify("123456"));
     }
 
     fn payment_snapshot() -> local_first_vault::PaymentApprovalSnapshot {

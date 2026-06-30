@@ -2236,6 +2236,7 @@ function PrivacyPane() {
 
 function VaultPane() {
   const [configured, setConfigured] = useState<boolean | null>(null);
+  const [currentPin, setCurrentPin] = useState("");
   const [pin, setPin] = useState("");
   const [pinConfirm, setPinConfirm] = useState("");
   const [verifyPin, setVerifyPin] = useState("");
@@ -2263,10 +2264,18 @@ function VaultPane() {
       setError("I PIN non coincidono.");
       return;
     }
+    if (configured && currentPin.length === 0) {
+      setError("Inserisci il PIN attuale per cambiarlo.");
+      return;
+    }
     setBusy(true);
     try {
-      const status = await coreBridge.vaultPinSetup(pin);
+      const status = await coreBridge.vaultPinSetup(
+        pin,
+        configured ? currentPin : undefined,
+      );
       setConfigured(status.configured);
+      setCurrentPin("");
       setPin("");
       setPinConfirm("");
       setNote("PIN locale configurato.");
@@ -2310,10 +2319,24 @@ function VaultPane() {
         <div className="set-rows">
           <div className="set-row">
             <div>
-              <div className="rk">Nuovo PIN</div>
-              <div className="rv">6-12 cifre. Sostituisce il PIN locale esistente.</div>
+              <div className="rk">{configured ? "Cambia PIN" : "Nuovo PIN"}</div>
+              <div className="rv">
+                {configured
+                  ? "Richiede il PIN attuale. Il nuovo PIN deve avere 6-12 cifre."
+                  : "6-12 cifre. Il primo PIN locale viene creato su questo dispositivo."}
+              </div>
             </div>
             <div style={{ display: "grid", gap: 8, minWidth: 220 }}>
+              {configured && (
+                <input
+                  className="set-input"
+                  inputMode="numeric"
+                  type="password"
+                  value={currentPin}
+                  placeholder="PIN attuale"
+                  onChange={(event) => setCurrentPin(event.target.value)}
+                />
+              )}
               <input
                 className="set-input"
                 inputMode="numeric"
@@ -2333,10 +2356,15 @@ function VaultPane() {
               <button
                 className="set-btn primary"
                 type="button"
-                disabled={busy || pin.length === 0 || pinConfirm.length === 0}
+                disabled={
+                  busy ||
+                  pin.length === 0 ||
+                  pinConfirm.length === 0 ||
+                  (configured === true && currentPin.length === 0)
+                }
                 onClick={() => void setupPin()}
               >
-                Salva PIN
+                {configured ? "Cambia PIN" : "Salva PIN"}
               </button>
             </div>
           </div>

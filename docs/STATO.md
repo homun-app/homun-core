@@ -625,7 +625,8 @@ GIÀ FATTO sessione 5g (NON ripartire; tutto su `main`):
 - **Vault PIN locale**: aggiunto `LocalPinVerifier` con salt/hash iterato, persistenza
   metadata-only in `vault_local_pin`, endpoint gateway `/api/vault/pin/status|setup|verify`
   e bridge frontend. Aggiunta sezione Settings separata `Vault` per configurare/verificare
-  il PIN, fuori da Memory.
+  il PIN, fuori da Memory. Corretto il bypass: se il PIN e' gia' configurato, cambiarlo
+  richiede `current_pin` valido; non basta avere accesso al computer e impostarne uno nuovo.
 - **Payment Approval runtime MVP**: aggiunto marker `PAYMENT_APPROVAL`, card chat con
   riepilogo merchant/dominio/importo/prodotto/metodo, endpoint
   `/api/vault/payment-approvals/approve` con PIN locale + CVV/CV2 one-shot, grant volatile

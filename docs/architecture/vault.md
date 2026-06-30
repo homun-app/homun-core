@@ -86,11 +86,14 @@ solo ack locale, senza audit persistente.
 Endpoint gateway:
 
 - `GET /api/vault/pin/status` -> `{ configured }`;
-- `POST /api/vault/pin/setup` con `{ pin }` -> crea/sostituisce il verifier;
+- `POST /api/vault/pin/setup` con `{ pin }` -> crea il primo verifier;
+- `POST /api/vault/pin/setup` con `{ current_pin, pin }` -> sostituisce il verifier solo se il PIN
+  corrente e' valido;
 - `POST /api/vault/pin/verify` con `{ pin }` -> `{ ok }`.
 
 Il PIN e' pensato come gate locale per CVV one-shot e approvazioni pagamento. Non
-sostituisce il TOTP futuro dell'app.
+sostituisce il TOTP futuro dell'app e non e' ancora una chiave di cifratura completa
+del vault; impedisce pero' il bypass banale "resetto il PIN e approvo".
 
 La UI espone il setup nella sezione Settings `Vault`, separata da `Memory`.
 
