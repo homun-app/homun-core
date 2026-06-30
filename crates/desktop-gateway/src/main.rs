@@ -910,6 +910,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/memory/wiki", get(memory_wiki).put(memory_wiki_save))
         .route("/api/memory/consolidate", post(memory_consolidate))
         .route("/api/memory/decide", post(memory_decide))
+        .route("/api/vault/records", get(vault_records_list))
+        .route("/api/vault/records/{id}", delete(vault_record_delete))
         .route("/api/vault/proposals/accept", post(vault_proposal_accept))
         .route("/api/vault/proposals/dismiss", post(vault_proposal_dismiss))
         .route("/api/vault/pin/status", get(vault_pin_status))
@@ -35015,6 +35017,24 @@ struct VaultProposalDismissResponse {
 }
 
 #[derive(Debug, Serialize)]
+struct VaultRecordSummary {
+    id: String,
+    category: String,
+    label: String,
+    redacted_preview: String,
+}
+
+#[derive(Debug, Serialize)]
+struct VaultRecordsListResponse {
+    records: Vec<VaultRecordSummary>,
+}
+
+#[derive(Debug, Serialize)]
+struct VaultRecordDeleteResponse {
+    ok: bool,
+}
+
+#[derive(Debug, Serialize)]
 struct VaultPinStatusResponse {
     configured: bool,
 }
@@ -35071,6 +35091,29 @@ async fn vault_proposal_dismiss(
     Json(_request): Json<VaultProposalActionRequest>,
 ) -> Result<Json<VaultProposalDismissResponse>, GatewayError> {
     Ok(Json(VaultProposalDismissResponse { ok: true }))
+}
+
+async fn vault_records_list(
+    State(state): State<AppState>,
+) -> Result<Json<VaultRecordsListResponse>, GatewayError> {
+    let vault_store = lock_vault_store(&state)?;
+    let records = vault_store
+        .list()
+        .map_err(vault_store_error)?
+        .into_iter()
+        .map(vault_record_summary)
+        .collect();
+    Ok(Json(VaultRecordsListResponse { records }))
+}
+
+async fn vault_record_delete(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<VaultRecordDeleteResponse>, GatewayError> {
+    let record_id = VaultRecordId::new(id).map_err(invalid_vault_proposal)?;
+    let vault_store = lock_vault_store(&state)?;
+    vault_store.delete(&record_id).map_err(vault_store_error)?;
+    Ok(Json(VaultRecordDeleteResponse { ok: true }))
 }
 
 async fn vault_pin_status(
@@ -35180,6 +35223,21 @@ fn vault_record_from_proposal(request: &VaultProposalActionRequest) -> Result<Va
         secret_ref,
         metadata,
     )
+}
+
+fn vault_record_summary(record: VaultRecord) -> VaultRecordSummary {
+    let redacted_preview = record
+        .metadata
+        .get("redacted_preview")
+        .and_then(|value| value.as_str())
+        .unwrap_or("[VAULT:redacted]")
+        .to_string();
+    VaultRecordSummary {
+        id: record.id.to_string(),
+        category: vault_category_key(record.category).to_string(),
+        label: record.label,
+        redacted_preview,
+    }
 }
 
 fn accept_vault_proposal(
@@ -35427,6 +35485,17 @@ fn vault_category_from_marker(category: &str) -> Result<VaultCategory, String> {
         "credentials" | "credential" => Ok(VaultCategory::Credentials),
         "private_notes" | "private-notes" | "private notes" => Ok(VaultCategory::PrivateNotes),
         other => Err(format!("unknown vault category: {other}")),
+    }
+}
+
+fn vault_category_key(category: VaultCategory) -> &'static str {
+    match category {
+        VaultCategory::Payments => "payments",
+        VaultCategory::Identity => "identity",
+        VaultCategory::Health => "health",
+        VaultCategory::Vehicles => "vehicles",
+        VaultCategory::Credentials => "credentials",
+        VaultCategory::PrivateNotes => "private_notes",
     }
 }
 
@@ -46610,6 +46679,7 @@ mod tests {
         TaskId, TaskPriority, TaskQueueSnapshot, TaskRecord, TaskStatus, TaskStore, TaskUiItem,
         UserId, WorkspaceId,
     };
+    use local_first_vault::VaultStore;
     use std::collections::HashMap;
     use std::sync::{Mutex, MutexGuard};
 
@@ -47661,6 +47731,45 @@ prs.save(Path({path:?}))
             "[VAULT:payments:card:last4=1111]"
         );
         assert!(!saved.metadata.to_string().contains("4111111111111111"));
+    }
+
+    #[test]
+    fn vault_record_summary_lists_redacted_metadata_and_delete_removes_record() {
+        let vault = local_first_vault::SQLiteVaultStore::open_in_memory().unwrap();
+        let request = super::VaultProposalActionRequest {
+            category: "payments".to_string(),
+            label: "Carta personale".to_string(),
+            redacted_preview: "[VAULT:payments:card:last4=1111]".to_string(),
+            secret_value: None,
+            pin: None,
+            thread_id: Some("thread_1".to_string()),
+            message_id: Some("msg_1".to_string()),
+        };
+        let response = super::accept_vault_proposal(&vault, &request).expect("accept");
+        let summaries = vault
+            .list()
+            .expect("list")
+            .into_iter()
+            .map(super::vault_record_summary)
+            .collect::<Vec<_>>();
+
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries[0].id, response.record_id);
+        assert_eq!(summaries[0].category, "payments");
+        assert_eq!(summaries[0].label, "Carta personale");
+        assert_eq!(
+            summaries[0].redacted_preview,
+            "[VAULT:payments:card:last4=1111]"
+        );
+        assert!(
+            !serde_json::to_string(&summaries)
+                .unwrap()
+                .contains("secret_ref")
+        );
+
+        let record_id = response.record_id.parse().unwrap();
+        vault.delete(&record_id).expect("delete");
+        assert!(vault.list().expect("list after delete").is_empty());
     }
 
     #[test]

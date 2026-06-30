@@ -1847,6 +1847,17 @@ export interface VaultPinVerifyResult {
   ok: boolean;
 }
 
+export interface VaultRecordSummary {
+  id: string;
+  category: string;
+  label: string;
+  redacted_preview: string;
+}
+
+export interface VaultRecordsListResult {
+  records: VaultRecordSummary[];
+}
+
 export interface PaymentApprovalSnapshot {
   approval_id: string;
   merchant: string;
@@ -1874,6 +1885,14 @@ async function electronVaultProposalDismiss(
   input: VaultProposalActionInput,
 ): Promise<{ ok: boolean }> {
   return gatewayPostJson<{ ok: boolean }>("/api/vault/proposals/dismiss", input);
+}
+
+async function electronVaultRecords(): Promise<VaultRecordsListResult> {
+  return gatewayGetJson<VaultRecordsListResult>("/api/vault/records");
+}
+
+async function electronVaultRecordDelete(id: string): Promise<{ ok: boolean }> {
+  return gatewayDeleteJson<{ ok: boolean }>(`/api/vault/records/${encodeURIComponent(id)}`);
 }
 
 async function electronVaultPinStatus(): Promise<VaultPinStatus> {
@@ -2594,6 +2613,8 @@ export const coreBridge = {
     electronVaultProposalAccept(input),
   vaultProposalDismiss: (input: VaultProposalActionInput) =>
     electronVaultProposalDismiss(input),
+  vaultRecords: () => electronVaultRecords(),
+  vaultRecordDelete: (id: string) => electronVaultRecordDelete(id),
   vaultPinStatus: () => electronVaultPinStatus(),
   vaultPinSetup: (pin: string, currentPin?: string) =>
     electronVaultPinSetup(pin, currentPin),

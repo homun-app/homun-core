@@ -17,6 +17,7 @@ const VAULT_KEY_NONCE_LEN: usize = 24;
 pub trait VaultStore {
     fn put(&self, record: VaultRecord) -> Result<(), String>;
     fn get(&self, id: &VaultRecordId) -> Result<Option<VaultRecord>, String>;
+    fn list(&self) -> Result<Vec<VaultRecord>, String>;
     fn delete(&self, id: &VaultRecordId) -> Result<(), String>;
 }
 
@@ -416,6 +417,14 @@ impl VaultStore for InMemoryVaultStore {
         Ok(records.get(id).cloned())
     }
 
+    fn list(&self) -> Result<Vec<VaultRecord>, String> {
+        let records = self
+            .records
+            .lock()
+            .map_err(|_| "vault store lock poisoned".to_string())?;
+        Ok(records.values().cloned().collect())
+    }
+
     fn delete(&self, id: &VaultRecordId) -> Result<(), String> {
         let mut records = self
             .records
@@ -499,15 +508,66 @@ impl VaultStore for SQLiteVaultStore {
         )?))
     }
 
-    fn delete(&self, id: &VaultRecordId) -> Result<(), String> {
-        self.conn
+    fn list(&self) -> Result<Vec<VaultRecord>, String> {
+        let conn = self
+            .conn
             .lock()
-            .map_err(|_| "vault sqlite lock poisoned".to_string())?
-            .execute(
-                "delete from vault_records where id = ?1",
-                params![id.to_string()],
+            .map_err(|_| "vault sqlite lock poisoned".to_string())?;
+        let mut stmt = conn
+            .prepare(
+                "select id, category, label, secret_ref, metadata_json
+                 from vault_records
+                 order by updated_at desc, label asc, id asc",
             )
             .map_err(|error| error.to_string())?;
+        let mut rows = stmt.query([]).map_err(|error| error.to_string())?;
+        let mut records = Vec::new();
+        while let Some(row) = rows.next().map_err(|error| error.to_string())? {
+            let record_id = VaultRecordId::from_str(
+                row.get::<_, String>(0)
+                    .map_err(|error| error.to_string())?
+                    .as_str(),
+            )?;
+            let category = category_from_key(
+                row.get::<_, String>(1)
+                    .map_err(|error| error.to_string())?
+                    .as_str(),
+            )?;
+            let label = row.get::<_, String>(2).map_err(|error| error.to_string())?;
+            let secret_ref = SecretRef::from_str(
+                row.get::<_, String>(3)
+                    .map_err(|error| error.to_string())?
+                    .as_str(),
+            )
+            .map_err(|error| error.to_string())?;
+            let metadata = serde_json::from_str(
+                row.get::<_, String>(4)
+                    .map_err(|error| error.to_string())?
+                    .as_str(),
+            )
+            .map_err(|error| error.to_string())?;
+            records.push(VaultRecord::new(
+                record_id, category, label, secret_ref, metadata,
+            )?);
+        }
+        Ok(records)
+    }
+
+    fn delete(&self, id: &VaultRecordId) -> Result<(), String> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| "vault sqlite lock poisoned".to_string())?;
+        conn.execute(
+            "delete from vault_secret_material where record_id = ?1",
+            params![id.to_string()],
+        )
+        .map_err(|error| error.to_string())?;
+        conn.execute(
+            "delete from vault_records where id = ?1",
+            params![id.to_string()],
+        )
+        .map_err(|error| error.to_string())?;
         Ok(())
     }
 }
@@ -622,6 +682,53 @@ mod tests {
     }
 
     #[test]
+    fn sqlite_vault_store_lists_metadata_only_records() {
+        let store = SQLiteVaultStore::open_in_memory().unwrap();
+        let first = VaultRecord::new(
+            VaultRecordId::new("vault_record_1").unwrap(),
+            VaultCategory::Payments,
+            "Carta personale",
+            SecretRef::new("user_1", "workspace_1", "vault", "card_1").unwrap(),
+            serde_json::json!({
+                "redacted_preview": "[VAULT:payments:card:last4=1111]"
+            }),
+        )
+        .unwrap();
+        let second = VaultRecord::new(
+            VaultRecordId::new("vault_record_2").unwrap(),
+            VaultCategory::Health,
+            "Allergie",
+            SecretRef::new("user_1", "workspace_1", "vault", "health_1").unwrap(),
+            serde_json::json!({
+                "redacted_preview": "[VAULT:health:allergies]"
+            }),
+        )
+        .unwrap();
+
+        store.put(first.clone()).unwrap();
+        store.put(second.clone()).unwrap();
+        let records = store.list().unwrap();
+
+        assert_eq!(records.len(), 2);
+        assert_eq!(
+            records
+                .iter()
+                .map(|record| record.label.as_str())
+                .collect::<Vec<_>>(),
+            vec!["Allergie", "Carta personale"]
+        );
+        assert_eq!(
+            records[0].metadata["redacted_preview"],
+            "[VAULT:health:allergies]"
+        );
+        assert!(
+            !records
+                .iter()
+                .any(|record| record.metadata.to_string().contains("4111111111111111"))
+        );
+    }
+
+    #[test]
     fn sqlite_vault_store_persists_local_pin_verifier_without_plaintext() {
         let store = SQLiteVaultStore::open_in_memory().unwrap();
         let verifier = LocalPinVerifier::create("123456").unwrap();
@@ -711,5 +818,44 @@ mod tests {
         let db = String::from_utf8_lossy(&bytes);
         assert!(!db.contains("4111111111111111"));
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn sqlite_vault_delete_removes_metadata_and_secret_material() {
+        let store = SQLiteVaultStore::open_in_memory().unwrap();
+        let verifier = LocalPinVerifier::create("123456").unwrap();
+        store.set_local_pin_verifier(verifier.clone()).unwrap();
+        let master_key = store
+            .ensure_local_master_key(&verifier, "123456")
+            .expect("master key");
+        let record_id = VaultRecordId::new("vault_card_1").unwrap();
+        let record = VaultRecord::new(
+            record_id.clone(),
+            VaultCategory::Payments,
+            "Carta personale",
+            SecretRef::new("user_1", "workspace_1", "vault", record_id.as_str()).unwrap(),
+            serde_json::json!({
+                "redacted_preview": "[VAULT:payments:card:last4=1111]"
+            }),
+        )
+        .unwrap();
+        store.put(record).unwrap();
+        store
+            .put_secret_material(
+                &record_id,
+                &master_key,
+                local_first_secrets::SecretMaterial::from_string("4111111111111111"),
+            )
+            .expect("put secret");
+
+        store.delete(&record_id).unwrap();
+
+        assert!(store.get(&record_id).unwrap().is_none());
+        assert!(
+            store
+                .get_secret_material(&record_id, &master_key)
+                .unwrap()
+                .is_none()
+        );
     }
 }

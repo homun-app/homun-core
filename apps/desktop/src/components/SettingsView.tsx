@@ -58,6 +58,7 @@ import {
   type InstalledPluginPackagesView,
   type PluginPackageUpdatesView,
   type TrustedPluginPublicKeysView,
+  type VaultRecordSummary,
   type LanguageInfo,
   type LlmConcurrencyView,
   type ProviderModelView,
@@ -2254,6 +2255,8 @@ function VaultPane() {
   const [manualSecretValue, setManualSecretValue] = useState("");
   const [manualSecretPin, setManualSecretPin] = useState("");
   const [vaultTab, setVaultTab] = useState<"sensitive" | "pin">("sensitive");
+  const [vaultRecords, setVaultRecords] = useState<VaultRecordSummary[]>([]);
+  const [recordsLoading, setRecordsLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -2273,8 +2276,21 @@ function VaultPane() {
     }
   }
 
+  async function refreshVaultRecords() {
+    setRecordsLoading(true);
+    try {
+      const result = await coreBridge.vaultRecords();
+      setVaultRecords(result.records);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setRecordsLoading(false);
+    }
+  }
+
   useEffect(() => {
     void refresh();
+    void refreshVaultRecords();
   }, []);
 
   async function setupPin() {
@@ -2349,12 +2365,32 @@ function VaultPane() {
       setManualSecretLabel("");
       setManualSecretValue("");
       setManualSecretPin("");
+      await refreshVaultRecords();
       setNote(t("settings.vaultManualSaved", { id: result.record_id }));
     } catch (err) {
       setError((err as Error).message);
     } finally {
       setBusy(false);
     }
+  }
+
+  async function deleteVaultRecord(record: VaultRecordSummary) {
+    setError(null);
+    setNote(null);
+    setBusy(true);
+    try {
+      await coreBridge.vaultRecordDelete(record.id);
+      await refreshVaultRecords();
+      setNote(t("settings.vaultRecordDeleted", { label: record.label }));
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function vaultCategoryLabel(category: string) {
+    return vaultCategories.find((item) => item.value === category)?.label ?? category;
   }
 
   return (
@@ -2475,6 +2511,44 @@ function VaultPane() {
                 </button>
               </div>
             </div>
+          </div>
+          <div className="set-card-divider" />
+          <div className="set-card-top">
+            <span className="set-card-name">{t("settings.vaultSavedRecords")}</span>
+            <button
+              className="set-btn"
+              type="button"
+              disabled={recordsLoading}
+              onClick={() => void refreshVaultRecords()}
+            >
+              {t("settings.refresh")}
+            </button>
+          </div>
+          <div className="vault-record-list">
+            {recordsLoading && vaultRecords.length === 0 && (
+              <p className="set-hint">{t("settings.loadingShort")}</p>
+            )}
+            {!recordsLoading && vaultRecords.length === 0 && (
+              <p className="set-hint">{t("settings.vaultNoRecords")}</p>
+            )}
+            {vaultRecords.map((record) => (
+              <div className="vault-record-row" key={record.id}>
+                <div>
+                  <div className="vault-record-title">{record.label}</div>
+                  <div className="vault-record-meta">
+                    {vaultCategoryLabel(record.category)} · {record.redacted_preview}
+                  </div>
+                </div>
+                <button
+                  className="set-btn danger"
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void deleteVaultRecord(record)}
+                >
+                  {t("settings.deleteData")}
+                </button>
+              </div>
+            ))}
           </div>
           {note && <p className="set-hint">{note}</p>}
           {error && <p className="cmp-confirm-err">{error}</p>}

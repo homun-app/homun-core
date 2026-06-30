@@ -645,6 +645,10 @@ GIÀ FATTO sessione 5g (NON ripartire; tutto su `main`):
 - **Vault tab layout**: il pannello Vault ora segue il pattern segmented-tabs dei Connectors, con
   schede separate `Dati sensibili` e `PIN locale`. Il salvataggio dei secret resta il default operativo,
   mentre setup/verifica PIN e relativi messaggi sono isolati nella seconda scheda.
+- **Vault record list/delete**: aggiunto read-model metadata-only `GET /api/vault/records` e
+  delete `DELETE /api/vault/records/{id}`. Settings > Vault > Dati sensibili mostra i record salvati
+  con categoria/label/preview redatta, ricarica dopo salvataggio e consente eliminarli. Il delete
+  cancella anche l'eventuale `vault_secret_material`, evitando secret cifrati orfani.
 - **Payment Approval runtime MVP**: aggiunto marker `PAYMENT_APPROVAL`, card chat con
   riepilogo merchant/dominio/importo/prodotto/metodo, endpoint
   `/api/vault/payment-approvals/approve` con PIN locale + CVV/CV2 one-shot, grant volatile

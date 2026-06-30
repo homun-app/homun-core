@@ -29,8 +29,10 @@ Non e' memoria: la memoria puo' contenere solo testo redatto o riferimenti
   `VAULT_PROPOSE`, con azioni salva/scarta, e del marker `PAYMENT_APPROVAL`.
 - `apps/desktop/src/components/SettingsView.tsx`: sezione Settings separata `Vault`
   per status/setup/verifica del PIN locale e inserimento manuale di dati sensibili
-  senza passare dalla chat.
+  senza passare dalla chat; la tab `Dati sensibili` mostra anche la lista
+  metadata-only dei record salvati e consente eliminarli.
 - `crates/desktop-gateway/src/main.rs`: endpoint
+  `/api/vault/records` (`GET`), `/api/vault/records/{id}` (`DELETE`),
   `/api/vault/proposals/accept`, `/api/vault/proposals/dismiss`,
   `/api/vault/pin/status|setup|verify` e
   `/api/vault/payment-approvals/approve`.
@@ -50,6 +52,11 @@ Categorie:
 non entra nei metadati: quando il gateway riceve un valore sensibile esplicito lo
 scrive in `vault_secret_material`, cifrato con una master key locale del Vault.
 `VaultRecord::new` rifiuta CVV/CV2 nei metadati.
+
+La lista UI/API dei record usa solo un summary redatto (`id`, `category`, `label`,
+`redacted_preview`). Non espone `SecretRef` e non legge il materiale cifrato. La
+cancellazione del record elimina sia `vault_records` sia l'eventuale riga
+`vault_secret_material` associata, per non lasciare secret orfani.
 
 `vault_local_pin` conserva solo `LocalPinVerifier` (`algorithm`, `iterations`,
 `salt_hex`, `digest_hex`). Il PIN non e' reversibile e non viene mai serializzato in
@@ -109,8 +116,9 @@ Il PIN e' pensato come gate locale per CVV one-shot e approvazioni pagamento e c
 wrapping key della master key locale del Vault. Non sostituisce il TOTP futuro
 dell'app.
 
-La UI espone setup/verifica e inserimento manuale nella sezione Settings `Vault`,
-separata da `Memory`.
+La UI espone setup/verifica PIN e inserimento/lista/delete manuale nella sezione
+Settings `Vault`, separata da `Memory`. Il layout segue il pattern tabs dei
+Connectors: `Dati sensibili` e `PIN locale`.
 
 ## Pagamenti
 
@@ -160,7 +168,7 @@ Login, script arbitrari e azioni high-risk non-payment restano bloccati.
 
 - Payment Approval Card completa con screenshot/fingerprint.
 - Telegram routing per riepilogo pagamento.
-- Lista/edit/delete dei record Vault e tool minimizzati per recuperarli/usarli.
+- Edit dei record Vault e tool minimizzati per recuperarli/usarli.
 - Smoke live Electron su checkout fixture/browser reale.
 
 ## Regola di confine

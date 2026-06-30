@@ -8891,6 +8891,31 @@ body.resizing-drawer {
   display: grid;
   gap: var(--s5);
 }
+.vault-record-list {
+  display: grid;
+  gap: 8px;
+  margin-top: var(--s3);
+}
+.vault-record-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  padding: 10px 12px;
+  background: var(--surface-muted);
+}
+.vault-record-title {
+  font-size: 13.5px;
+  font-weight: 600;
+}
+.vault-record-meta {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+  word-break: break-word;
+}
 .set-card-top {
   display: flex;
   align-items: center;

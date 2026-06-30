@@ -226,6 +226,13 @@ assertContains("src/styles.css", ".vault-pane", "Vault settings card spacing mus
 assertContains("src/components/SettingsView.tsx", "const [vaultTab, setVaultTab]", "Vault settings must split PIN and sensitive data into local tabs");
 assertContains("src/components/SettingsView.tsx", "className=\"set-seg vault-tabs\"", "Vault settings tabs must reuse the Settings segmented tabs pattern");
 assertContains("src/components/SettingsView.tsx", "role=\"tabpanel\"", "Vault settings tab bodies must expose tabpanel semantics");
+assertContains("src/lib/coreBridge.ts", "vaultRecords: () => electronVaultRecords()", "Vault bridge must expose record listing");
+assertContains("src/lib/coreBridge.ts", "vaultRecordDelete: (id: string) => electronVaultRecordDelete(id)", "Vault bridge must expose record deletion");
+assertContains("src/components/SettingsView.tsx", "coreBridge.vaultRecords()", "Vault settings must load saved records from the gateway");
+assertContains("src/components/SettingsView.tsx", "coreBridge.vaultRecordDelete(record.id)", "Vault settings must delete records through the gateway");
+assertContains("src/components/SettingsView.tsx", "vault-record-list", "Vault settings must render a saved-record list under sensitive data");
+assertRepoContains("crates/desktop-gateway/src/main.rs", "/api/vault/records", "Gateway must expose Vault record listing");
+assertRepoContains("crates/desktop-gateway/src/main.rs", "/api/vault/records/{id}", "Gateway must expose Vault record deletion");
 assertContains("src/components/SettingsView.tsx", "t(\"settings.vaultEncrypted\")", "Vault status badge must use translations");
 assertContains("src/i18n/locales/it.json", "\"vaultEncrypted\": \"Cifrato\"", "Italian locale must translate the Vault encrypted badge");
 assertContains("src/i18n/locales/en.json", "\"vaultEncrypted\": \"Encrypted\"", "English locale must translate the Vault encrypted badge");
