@@ -549,7 +549,10 @@ F4 + backlog più profondo):
   log atteso `[plan] F4: blocked stalled step after 3 …`; aveva esposto contaminazione da runtime-plan
   non correlati recuperati nel briefing memoria (piano `.invalid` → piano FIFA). Fix testato: le memorie
   `source=runtime_plan` restano caricabili solo dal loader per-thread e non entrano più negli `OPEN LOOPS`
-  generici. Prossimo passo: riprovare live `HOMUN_PLAN_STALL_ABORT=1` e, se appare il log F4, promuoverlo.
+  generici. Riprova live 2026-06-30 con binario fresco + `HOMUN_PLAN_STALL_ABORT=1`: niente contaminazione
+  osservata, ma niente log F4 perché i turni si chiudono/re-sintetizzano prima di accumulare tre resume
+  no-progress. Prossimo passo: test deterministico che forza un runtime-plan non-settled cross-turno, poi
+  nuova validazione live prima di promuovere default-ON.
 - **Già validati live:** form-fill `kind=fill` su `https://www.selenium.dev/selenium/web/web-form.html`
   (`browser-step[done]: fill`, valore `Fabio Test` nello snapshot); F3-deep con
   `HOMUN_DEBUG_MAIN_LOOP_MAX_TOKENS=1` sul solo loop principale → log `[answer] empty answer body
