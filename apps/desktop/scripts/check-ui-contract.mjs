@@ -223,6 +223,9 @@ assertContains("src/components/SettingsView.tsx", "pin: manualSecretPin", "Vault
 assertContains("src/components/SettingsView.tsx", "setManualSecretValue(\"\")", "Vault manual entry must clear the raw secret from renderer state after saving");
 assertContains("src/components/SettingsView.tsx", "className=\"vault-pane\"", "Vault settings cards must be laid out with explicit vertical spacing");
 assertContains("src/styles.css", ".vault-pane", "Vault settings card spacing must be owned by CSS, not inline margins");
+assertContains("src/components/SettingsView.tsx", "const [vaultTab, setVaultTab]", "Vault settings must split PIN and sensitive data into local tabs");
+assertContains("src/components/SettingsView.tsx", "className=\"set-seg vault-tabs\"", "Vault settings tabs must reuse the Settings segmented tabs pattern");
+assertContains("src/components/SettingsView.tsx", "role=\"tabpanel\"", "Vault settings tab bodies must expose tabpanel semantics");
 assertContains("src/components/SettingsView.tsx", "t(\"settings.vaultEncrypted\")", "Vault status badge must use translations");
 assertContains("src/i18n/locales/it.json", "\"vaultEncrypted\": \"Cifrato\"", "Italian locale must translate the Vault encrypted badge");
 assertContains("src/i18n/locales/en.json", "\"vaultEncrypted\": \"Encrypted\"", "English locale must translate the Vault encrypted badge");

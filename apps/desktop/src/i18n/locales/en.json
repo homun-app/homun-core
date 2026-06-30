@@ -803,6 +803,8 @@
     "localFirstDesc": "Memory, tasks and audit stay on the device unless you explicitly opt in.",
     "remoteApproval": "Remote approval",
     "vault": "Vault",
+    "vaultSensitiveDataTab": "Sensitive data",
+    "vaultPinTab": "Local PIN",
     "vaultLocalPin": "Local PIN",
     "vaultChecking": "Checking",
     "vaultConfigured": "Configured",

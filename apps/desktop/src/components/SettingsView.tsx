@@ -2253,9 +2253,16 @@ function VaultPane() {
   const [manualSecretLabel, setManualSecretLabel] = useState("");
   const [manualSecretValue, setManualSecretValue] = useState("");
   const [manualSecretPin, setManualSecretPin] = useState("");
+  const [vaultTab, setVaultTab] = useState<"sensitive" | "pin">("sensitive");
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  function selectVaultTab(tab: "sensitive" | "pin") {
+    setVaultTab(tab);
+    setNote(null);
+    setError(null);
+  }
 
   async function refresh() {
     try {
@@ -2353,190 +2360,217 @@ function VaultPane() {
   return (
     <div className="vault-pane">
       <div className="set-section-label">{t("settings.vault")}</div>
-      <div className="set-card">
-        <div className="set-card-top">
-          <span className="set-card-name">{t("settings.vaultLocalPin")}</span>
-          <span className={`set-badge ${configured ? "green" : "muted"}`}>
-            {configured == null
-              ? t("settings.vaultChecking")
-              : configured
-                ? t("settings.vaultConfigured")
-                : t("settings.vaultNotConfigured")}
-          </span>
-        </div>
-        <p className="set-hint">
-          {t("settings.vaultPinHint")}
-        </p>
-        <div className="set-card-divider" />
-        <div className="set-rows">
-          <div className="set-row">
-            <div>
-              <div className="rk">
-                {configured ? t("settings.vaultChangePin") : t("settings.vaultNewPin")}
+      <div className="set-seg vault-tabs" role="tablist" aria-label={t("settings.vault")}>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={vaultTab === "sensitive"}
+          className={`set-seg-item ${vaultTab === "sensitive" ? "active" : ""}`}
+          onClick={() => selectVaultTab("sensitive")}
+        >
+          {t("settings.vaultSensitiveDataTab")}
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={vaultTab === "pin"}
+          className={`set-seg-item ${vaultTab === "pin" ? "active" : ""}`}
+          onClick={() => selectVaultTab("pin")}
+        >
+          {t("settings.vaultPinTab")}
+        </button>
+      </div>
+
+      {vaultTab === "pin" && (
+        <div className="set-card" role="tabpanel">
+          <div className="set-card-top">
+            <span className="set-card-name">{t("settings.vaultLocalPin")}</span>
+            <span className={`set-badge ${configured ? "green" : "muted"}`}>
+              {configured == null
+                ? t("settings.vaultChecking")
+                : configured
+                  ? t("settings.vaultConfigured")
+                  : t("settings.vaultNotConfigured")}
+            </span>
+          </div>
+          <p className="set-hint">
+            {t("settings.vaultPinHint")}
+          </p>
+          <div className="set-card-divider" />
+          <div className="set-rows">
+            <div className="set-row">
+              <div>
+                <div className="rk">
+                  {configured ? t("settings.vaultChangePin") : t("settings.vaultNewPin")}
+                </div>
+                <div className="rv">
+                  {configured
+                    ? t("settings.vaultChangePinDesc")
+                    : t("settings.vaultNewPinDesc")}
+                </div>
               </div>
-              <div className="rv">
-                {configured
-                  ? t("settings.vaultChangePinDesc")
-                  : t("settings.vaultNewPinDesc")}
-              </div>
-            </div>
-            <div style={{ display: "grid", gap: 8, minWidth: 220 }}>
-              {configured && (
+              <div style={{ display: "grid", gap: 8, minWidth: 220 }}>
+                {configured && (
+                  <input
+                    className="set-input"
+                    inputMode="numeric"
+                    type="password"
+                    value={currentPin}
+                    placeholder={t("settings.vaultCurrentPin")}
+                    onChange={(event) => setCurrentPin(event.target.value)}
+                  />
+                )}
                 <input
                   className="set-input"
                   inputMode="numeric"
                   type="password"
-                  value={currentPin}
-                  placeholder={t("settings.vaultCurrentPin")}
-                  onChange={(event) => setCurrentPin(event.target.value)}
+                  value={pin}
+                  placeholder={t("settings.vaultPinPlaceholder")}
+                  onChange={(event) => setPin(event.target.value)}
                 />
-              )}
-              <input
-                className="set-input"
-                inputMode="numeric"
-                type="password"
-                value={pin}
-                placeholder={t("settings.vaultPinPlaceholder")}
-                onChange={(event) => setPin(event.target.value)}
-              />
-              <input
-                className="set-input"
-                inputMode="numeric"
-                type="password"
-                value={pinConfirm}
-                placeholder={t("settings.vaultConfirmPin")}
-                onChange={(event) => setPinConfirm(event.target.value)}
-              />
-              <button
-                className="set-btn primary"
-                type="button"
-                disabled={
-                  busy ||
-                  pin.length === 0 ||
-                  pinConfirm.length === 0 ||
-                  (configured === true && currentPin.length === 0)
-                }
-                onClick={() => void setupPin()}
-              >
-                {configured ? t("settings.vaultChangePin") : t("settings.vaultSavePin")}
-              </button>
+                <input
+                  className="set-input"
+                  inputMode="numeric"
+                  type="password"
+                  value={pinConfirm}
+                  placeholder={t("settings.vaultConfirmPin")}
+                  onChange={(event) => setPinConfirm(event.target.value)}
+                />
+                <button
+                  className="set-btn primary"
+                  type="button"
+                  disabled={
+                    busy ||
+                    pin.length === 0 ||
+                    pinConfirm.length === 0 ||
+                    (configured === true && currentPin.length === 0)
+                  }
+                  onClick={() => void setupPin()}
+                >
+                  {configured ? t("settings.vaultChangePin") : t("settings.vaultSavePin")}
+                </button>
+              </div>
+            </div>
+            <div className="set-row">
+              <div>
+                <div className="rk">{t("settings.vaultVerifyPin")}</div>
+                <div className="rv">{t("settings.vaultVerifyPinDesc")}</div>
+              </div>
+              <div style={{ display: "flex", gap: 8, minWidth: 260 }}>
+                <input
+                  className="set-input"
+                  inputMode="numeric"
+                  type="password"
+                  value={verifyPin}
+                  placeholder={t("settings.vaultPinPlaceholder")}
+                  onChange={(event) => setVerifyPin(event.target.value)}
+                />
+                <button
+                  className="set-btn"
+                  type="button"
+                  disabled={busy || verifyPin.length === 0}
+                  onClick={() => void verify()}
+                >
+                  {t("settings.vaultVerify")}
+                </button>
+              </div>
             </div>
           </div>
-          <div className="set-row">
-            <div>
-              <div className="rk">{t("settings.vaultVerifyPin")}</div>
-              <div className="rv">{t("settings.vaultVerifyPinDesc")}</div>
-            </div>
-            <div style={{ display: "flex", gap: 8, minWidth: 260 }}>
-              <input
-                className="set-input"
-                inputMode="numeric"
-                type="password"
-                value={verifyPin}
-                placeholder={t("settings.vaultPinPlaceholder")}
-                onChange={(event) => setVerifyPin(event.target.value)}
-              />
-              <button
-                className="set-btn"
-                type="button"
-                disabled={busy || verifyPin.length === 0}
-                onClick={() => void verify()}
-              >
-                {t("settings.vaultVerify")}
-              </button>
-            </div>
-          </div>
+          {note && <p className="set-hint">{note}</p>}
+          {error && <p className="cmp-confirm-err">{error}</p>}
         </div>
-        {note && <p className="set-hint">{note}</p>}
-        {error && <p className="cmp-confirm-err">{error}</p>}
-      </div>
-      <div className="set-card">
-        <div className="set-card-top">
-          <span className="set-card-name">{t("settings.vaultSaveSensitive")}</span>
-          <span className="set-badge muted">{t("settings.vaultEncrypted")}</span>
-        </div>
-        <p className="set-hint">
-          {t("settings.vaultSaveSensitiveHint")}
-        </p>
-        <div className="set-card-divider" />
-        <div className="set-rows">
-          <div className="set-row">
-            <div>
-              <div className="rk">{t("settings.vaultCategory")}</div>
-              <div className="rv">{t("settings.vaultCategoryDesc")}</div>
-            </div>
-            <select
-              className="set-input"
-              value={manualSecretCategory}
-              onChange={(event) => setManualSecretCategory(event.target.value)}
-              style={{ minWidth: 220 }}
-            >
-              {vaultCategories.map((category) => (
-                <option key={category.value} value={category.value}>
-                  {category.label}
-                </option>
-              ))}
-            </select>
+      )}
+      {vaultTab === "sensitive" && (
+        <div className="set-card" role="tabpanel">
+          <div className="set-card-top">
+            <span className="set-card-name">{t("settings.vaultSaveSensitive")}</span>
+            <span className="set-badge muted">{t("settings.vaultEncrypted")}</span>
           </div>
-          <div className="set-row">
-            <div>
-              <div className="rk">{t("settings.vaultLabel")}</div>
-              <div className="rv">{t("settings.vaultLabelDesc")}</div>
+          <p className="set-hint">
+            {t("settings.vaultSaveSensitiveHint")}
+          </p>
+          <div className="set-card-divider" />
+          <div className="set-rows">
+            <div className="set-row">
+              <div>
+                <div className="rk">{t("settings.vaultCategory")}</div>
+                <div className="rv">{t("settings.vaultCategoryDesc")}</div>
+              </div>
+              <select
+                className="set-input"
+                value={manualSecretCategory}
+                onChange={(event) => setManualSecretCategory(event.target.value)}
+                style={{ minWidth: 220 }}
+              >
+                {vaultCategories.map((category) => (
+                  <option key={category.value} value={category.value}>
+                    {category.label}
+                  </option>
+                ))}
+              </select>
             </div>
-            <input
-              className="set-input"
-              value={manualSecretLabel}
-              placeholder={t("settings.vaultLabelPlaceholder")}
-              onChange={(event) => setManualSecretLabel(event.target.value)}
-              style={{ minWidth: 320 }}
-            />
-          </div>
-          <div className="set-row">
-            <div>
-              <div className="rk">{t("settings.vaultValue")}</div>
-              <div className="rv">{t("settings.vaultValueDesc")}</div>
-            </div>
-            <textarea
-              className="set-input"
-              value={manualSecretValue}
-              placeholder={t("settings.vaultValuePlaceholder")}
-              rows={3}
-              onChange={(event) => setManualSecretValue(event.target.value)}
-              style={{ minWidth: 320, resize: "vertical" }}
-            />
-          </div>
-          <div className="set-row">
-            <div>
-              <div className="rk">{t("settings.vaultLocalPin")}</div>
-              <div className="rv">{t("settings.vaultManualPinDesc")}</div>
-            </div>
-            <div style={{ display: "flex", gap: 8, minWidth: 320 }}>
+            <div className="set-row">
+              <div>
+                <div className="rk">{t("settings.vaultLabel")}</div>
+                <div className="rv">{t("settings.vaultLabelDesc")}</div>
+              </div>
               <input
                 className="set-input"
-                inputMode="numeric"
-                type="password"
-                value={manualSecretPin}
-                placeholder={t("settings.vaultPinPlaceholder")}
-                onChange={(event) => setManualSecretPin(event.target.value)}
+                value={manualSecretLabel}
+                placeholder={t("settings.vaultLabelPlaceholder")}
+                onChange={(event) => setManualSecretLabel(event.target.value)}
+                style={{ minWidth: 320 }}
               />
-              <button
-                className="set-btn primary"
-                type="button"
-                disabled={
-                  busy ||
-                  !configured ||
-                  manualSecretLabel.trim().length === 0 ||
-                  manualSecretValue.trim().length === 0 ||
-                  manualSecretPin.length === 0
-                }
-                onClick={() => void saveManualSecret()}
-              >
-                {t("settings.vaultSave")}
-              </button>
+            </div>
+            <div className="set-row">
+              <div>
+                <div className="rk">{t("settings.vaultValue")}</div>
+                <div className="rv">{t("settings.vaultValueDesc")}</div>
+              </div>
+              <textarea
+                className="set-input"
+                value={manualSecretValue}
+                placeholder={t("settings.vaultValuePlaceholder")}
+                rows={3}
+                onChange={(event) => setManualSecretValue(event.target.value)}
+                style={{ minWidth: 320, resize: "vertical" }}
+              />
+            </div>
+            <div className="set-row">
+              <div>
+                <div className="rk">{t("settings.vaultLocalPin")}</div>
+                <div className="rv">{t("settings.vaultManualPinDesc")}</div>
+              </div>
+              <div style={{ display: "flex", gap: 8, minWidth: 320 }}>
+                <input
+                  className="set-input"
+                  inputMode="numeric"
+                  type="password"
+                  value={manualSecretPin}
+                  placeholder={t("settings.vaultPinPlaceholder")}
+                  onChange={(event) => setManualSecretPin(event.target.value)}
+                />
+                <button
+                  className="set-btn primary"
+                  type="button"
+                  disabled={
+                    busy ||
+                    !configured ||
+                    manualSecretLabel.trim().length === 0 ||
+                    manualSecretValue.trim().length === 0 ||
+                    manualSecretPin.length === 0
+                  }
+                  onClick={() => void saveManualSecret()}
+                >
+                  {t("settings.vaultSave")}
+                </button>
+              </div>
             </div>
           </div>
+          {note && <p className="set-hint">{note}</p>}
+          {error && <p className="cmp-confirm-err">{error}</p>}
         </div>
-      </div>
+      )}
     </div>
   );
 }

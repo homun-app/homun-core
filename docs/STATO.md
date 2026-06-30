@@ -642,6 +642,9 @@ GIÀ FATTO sessione 5g (NON ripartire; tutto su `main`):
 - **Vault UI polish**: aggiunto gap dedicato tra le card del pannello Vault e rimosso il mix di lingue
   introdotto dall'input manuale. Il pannello Vault e le sue label di navigazione passano ora da i18n
   (`it`/`en`), inclusi badge/status/errori/placeholder.
+- **Vault tab layout**: il pannello Vault ora segue il pattern segmented-tabs dei Connectors, con
+  schede separate `Dati sensibili` e `PIN locale`. Il salvataggio dei secret resta il default operativo,
+  mentre setup/verifica PIN e relativi messaggi sono isolati nella seconda scheda.
 - **Payment Approval runtime MVP**: aggiunto marker `PAYMENT_APPROVAL`, card chat con
   riepilogo merchant/dominio/importo/prodotto/metodo, endpoint
   `/api/vault/payment-approvals/approve` con PIN locale + CVV/CV2 one-shot, grant volatile
