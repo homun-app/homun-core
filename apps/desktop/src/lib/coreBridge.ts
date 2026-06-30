@@ -1825,6 +1825,8 @@ export interface VaultProposalActionInput {
   category: string;
   label: string;
   redacted_preview: string;
+  secret_value?: string;
+  pin?: string;
   thread_id?: string;
   message_id?: string;
 }

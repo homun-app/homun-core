@@ -1,10 +1,18 @@
 use crate::{LocalPinVerifier, VaultRecord, VaultRecordId};
-use local_first_secrets::SecretRef;
+use base64::Engine;
+use chacha20poly1305::aead::{Aead, KeyInit};
+use chacha20poly1305::{XChaCha20Poly1305, XNonce};
+use local_first_secrets::{SecretMaterial, SecretRef};
+use rand::RngCore;
 use rusqlite::{Connection, params};
+use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::Mutex;
+
+const VAULT_MASTER_KEY_LEN: usize = 32;
+const VAULT_KEY_NONCE_LEN: usize = 24;
 
 pub trait VaultStore {
     fn put(&self, record: VaultRecord) -> Result<(), String>;
@@ -60,6 +68,20 @@ impl SQLiteVaultStore {
                     id integer primary key check (id = 1),
                     verifier_json text not null,
                     updated_at text not null default CURRENT_TIMESTAMP
+                );
+                create table if not exists vault_local_keyring (
+                    id integer primary key check (id = 1),
+                    algorithm text not null,
+                    nonce text not null,
+                    ciphertext text not null,
+                    updated_at text not null default CURRENT_TIMESTAMP
+                );
+                create table if not exists vault_secret_material (
+                    record_id text primary key,
+                    algorithm text not null,
+                    nonce text not null,
+                    ciphertext text not null,
+                    updated_at text not null default CURRENT_TIMESTAMP
                 );",
             )
             .map_err(|error| error.to_string())?;
@@ -108,6 +130,271 @@ impl SQLiteVaultStore {
             .execute("delete from vault_local_pin where id = 1", [])
             .map_err(|error| error.to_string())?;
         Ok(())
+    }
+
+    pub fn ensure_local_master_key(
+        &self,
+        verifier: &LocalPinVerifier,
+        pin: &str,
+    ) -> Result<[u8; VAULT_MASTER_KEY_LEN], String> {
+        match self.unlock_local_master_key(verifier, pin) {
+            Ok(key) => Ok(key),
+            Err(error) if error == "Vault master key is not configured" => {
+                let mut key = [0_u8; VAULT_MASTER_KEY_LEN];
+                rand::rngs::OsRng.fill_bytes(&mut key);
+                self.store_wrapped_master_key(verifier, pin, &key)?;
+                Ok(key)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    pub fn unlock_local_master_key(
+        &self,
+        verifier: &LocalPinVerifier,
+        pin: &str,
+    ) -> Result<[u8; VAULT_MASTER_KEY_LEN], String> {
+        let row = self.load_wrapped_master_key()?;
+        let Some((algorithm, nonce, ciphertext)) = row else {
+            return Err("Vault master key is not configured".to_string());
+        };
+        if algorithm != "xchacha20poly1305-pin-v1" {
+            return Err("unsupported vault master key algorithm".to_string());
+        }
+        let plaintext = decrypt_master_key(verifier, pin, &nonce, &ciphertext)?;
+        if plaintext.len() != VAULT_MASTER_KEY_LEN {
+            return Err("invalid vault master key length".to_string());
+        }
+        let mut key = [0_u8; VAULT_MASTER_KEY_LEN];
+        key.copy_from_slice(&plaintext);
+        Ok(key)
+    }
+
+    pub fn rewrap_local_master_key(
+        &self,
+        old_verifier: &LocalPinVerifier,
+        old_pin: &str,
+        new_verifier: &LocalPinVerifier,
+        new_pin: &str,
+    ) -> Result<(), String> {
+        let key = self.unlock_local_master_key(old_verifier, old_pin)?;
+        self.store_wrapped_master_key(new_verifier, new_pin, &key)
+    }
+
+    fn store_wrapped_master_key(
+        &self,
+        verifier: &LocalPinVerifier,
+        pin: &str,
+        key: &[u8; VAULT_MASTER_KEY_LEN],
+    ) -> Result<(), String> {
+        let (nonce, ciphertext) = encrypt_master_key(verifier, pin, key)?;
+        self.conn
+            .lock()
+            .map_err(|_| "vault sqlite lock poisoned".to_string())?
+            .execute(
+                "insert into vault_local_keyring (id, algorithm, nonce, ciphertext)
+                 values (1, 'xchacha20poly1305-pin-v1', ?1, ?2)
+                 on conflict(id) do update set
+                    algorithm=excluded.algorithm,
+                    nonce=excluded.nonce,
+                    ciphertext=excluded.ciphertext,
+                    updated_at=CURRENT_TIMESTAMP",
+                params![nonce, ciphertext],
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(())
+    }
+
+    fn load_wrapped_master_key(&self) -> Result<Option<(String, String, String)>, String> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| "vault sqlite lock poisoned".to_string())?;
+        let mut stmt = conn
+            .prepare("select algorithm, nonce, ciphertext from vault_local_keyring where id = 1")
+            .map_err(|error| error.to_string())?;
+        let mut rows = stmt.query([]).map_err(|error| error.to_string())?;
+        let Some(row) = rows.next().map_err(|error| error.to_string())? else {
+            return Ok(None);
+        };
+        Ok(Some((
+            row.get::<_, String>(0).map_err(|error| error.to_string())?,
+            row.get::<_, String>(1).map_err(|error| error.to_string())?,
+            row.get::<_, String>(2).map_err(|error| error.to_string())?,
+        )))
+    }
+
+    pub fn put_secret_material(
+        &self,
+        record_id: &VaultRecordId,
+        master_key: &[u8; VAULT_MASTER_KEY_LEN],
+        material: SecretMaterial,
+    ) -> Result<(), String> {
+        let (nonce, ciphertext) = encrypt_with_master_key(master_key, material.expose_bytes())?;
+        self.conn
+            .lock()
+            .map_err(|_| "vault sqlite lock poisoned".to_string())?
+            .execute(
+                "insert into vault_secret_material (record_id, algorithm, nonce, ciphertext)
+                 values (?1, 'xchacha20poly1305-master-v1', ?2, ?3)
+                 on conflict(record_id) do update set
+                    algorithm=excluded.algorithm,
+                    nonce=excluded.nonce,
+                    ciphertext=excluded.ciphertext,
+                    updated_at=CURRENT_TIMESTAMP",
+                params![record_id.to_string(), nonce, ciphertext],
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(())
+    }
+
+    pub fn get_secret_material(
+        &self,
+        record_id: &VaultRecordId,
+        master_key: &[u8; VAULT_MASTER_KEY_LEN],
+    ) -> Result<Option<SecretMaterial>, String> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| "vault sqlite lock poisoned".to_string())?;
+        let mut stmt = conn
+            .prepare(
+                "select algorithm, nonce, ciphertext
+                 from vault_secret_material where record_id = ?1",
+            )
+            .map_err(|error| error.to_string())?;
+        let mut rows = stmt
+            .query(params![record_id.to_string()])
+            .map_err(|error| error.to_string())?;
+        let Some(row) = rows.next().map_err(|error| error.to_string())? else {
+            return Ok(None);
+        };
+        let algorithm = row.get::<_, String>(0).map_err(|error| error.to_string())?;
+        if algorithm != "xchacha20poly1305-master-v1" {
+            return Err("unsupported vault secret material algorithm".to_string());
+        }
+        let nonce = row.get::<_, String>(1).map_err(|error| error.to_string())?;
+        let ciphertext = row.get::<_, String>(2).map_err(|error| error.to_string())?;
+        decrypt_with_master_key(master_key, &nonce, &ciphertext)
+            .map(|bytes| Some(SecretMaterial::from_bytes(bytes)))
+    }
+}
+
+fn encrypt_master_key(
+    verifier: &LocalPinVerifier,
+    pin: &str,
+    key: &[u8; VAULT_MASTER_KEY_LEN],
+) -> Result<(String, String), String> {
+    if !verifier.verify(pin) {
+        return Err("Invalid Vault PIN".to_string());
+    }
+    let cipher = XChaCha20Poly1305::new_from_slice(&pin_wrap_key(verifier, pin)?)
+        .map_err(|error| error.to_string())?;
+    let mut nonce = [0_u8; VAULT_KEY_NONCE_LEN];
+    rand::rngs::OsRng.fill_bytes(&mut nonce);
+    let ciphertext = cipher
+        .encrypt(XNonce::from_slice(&nonce), key.as_ref())
+        .map_err(|_| "vault master key encryption failed".to_string())?;
+    Ok((
+        base64::engine::general_purpose::STANDARD.encode(nonce),
+        base64::engine::general_purpose::STANDARD.encode(ciphertext),
+    ))
+}
+
+fn decrypt_master_key(
+    verifier: &LocalPinVerifier,
+    pin: &str,
+    nonce: &str,
+    ciphertext: &str,
+) -> Result<Vec<u8>, String> {
+    if !verifier.verify(pin) {
+        return Err("Invalid Vault PIN".to_string());
+    }
+    let cipher = XChaCha20Poly1305::new_from_slice(&pin_wrap_key(verifier, pin)?)
+        .map_err(|error| error.to_string())?;
+    let nonce = base64::engine::general_purpose::STANDARD
+        .decode(nonce)
+        .map_err(|error| error.to_string())?;
+    let ciphertext = base64::engine::general_purpose::STANDARD
+        .decode(ciphertext)
+        .map_err(|error| error.to_string())?;
+    cipher
+        .decrypt(XNonce::from_slice(&nonce), ciphertext.as_ref())
+        .map_err(|_| "vault master key decryption failed".to_string())
+}
+
+fn pin_wrap_key(verifier: &LocalPinVerifier, pin: &str) -> Result<[u8; 32], String> {
+    let salt = hex_decode(&verifier.salt_hex)?;
+    let mut digest = Sha256::new();
+    digest.update(b"homun-vault-master-key-wrap-v1");
+    digest.update(&salt);
+    digest.update(pin.as_bytes());
+    let mut key: [u8; 32] = digest.finalize().into();
+    for _ in 1..verifier.iterations {
+        let mut next = Sha256::new();
+        next.update(b"homun-vault-master-key-wrap-v1");
+        next.update(key);
+        next.update(&salt);
+        next.update(pin.as_bytes());
+        key = next.finalize().into();
+    }
+    Ok(key)
+}
+
+fn encrypt_with_master_key(
+    master_key: &[u8; VAULT_MASTER_KEY_LEN],
+    plaintext: &[u8],
+) -> Result<(String, String), String> {
+    let cipher =
+        XChaCha20Poly1305::new_from_slice(master_key).map_err(|error| error.to_string())?;
+    let mut nonce = [0_u8; VAULT_KEY_NONCE_LEN];
+    rand::rngs::OsRng.fill_bytes(&mut nonce);
+    let ciphertext = cipher
+        .encrypt(XNonce::from_slice(&nonce), plaintext)
+        .map_err(|_| "vault secret encryption failed".to_string())?;
+    Ok((
+        base64::engine::general_purpose::STANDARD.encode(nonce),
+        base64::engine::general_purpose::STANDARD.encode(ciphertext),
+    ))
+}
+
+fn decrypt_with_master_key(
+    master_key: &[u8; VAULT_MASTER_KEY_LEN],
+    nonce: &str,
+    ciphertext: &str,
+) -> Result<Vec<u8>, String> {
+    let cipher =
+        XChaCha20Poly1305::new_from_slice(master_key).map_err(|error| error.to_string())?;
+    let nonce = base64::engine::general_purpose::STANDARD
+        .decode(nonce)
+        .map_err(|error| error.to_string())?;
+    let ciphertext = base64::engine::general_purpose::STANDARD
+        .decode(ciphertext)
+        .map_err(|error| error.to_string())?;
+    cipher
+        .decrypt(XNonce::from_slice(&nonce), ciphertext.as_ref())
+        .map_err(|_| "vault secret decryption failed".to_string())
+}
+
+fn hex_decode(value: &str) -> Result<Vec<u8>, String> {
+    if value.len() % 2 != 0 {
+        return Err("invalid hex length".to_string());
+    }
+    let mut bytes = Vec::with_capacity(value.len() / 2);
+    for pair in value.as_bytes().chunks(2) {
+        let high = hex_nibble(pair[0])?;
+        let low = hex_nibble(pair[1])?;
+        bytes.push((high << 4) | low);
+    }
+    Ok(bytes)
+}
+
+fn hex_nibble(byte: u8) -> Result<u8, String> {
+    match byte {
+        b'0'..=b'9' => Ok(byte - b'0'),
+        b'a'..=b'f' => Ok(byte - b'a' + 10),
+        b'A'..=b'F' => Ok(byte - b'A' + 10),
+        _ => Err("invalid hex digit".to_string()),
     }
 }
 
@@ -345,5 +632,84 @@ mod tests {
         assert!(saved.verify("123456"));
         assert!(!saved.verify("654321"));
         assert!(!serde_json::to_string(&saved).unwrap().contains("123456"));
+    }
+
+    #[test]
+    fn sqlite_vault_master_key_is_wrapped_by_pin_and_survives_authorized_pin_change() {
+        let store = SQLiteVaultStore::open_in_memory().unwrap();
+        let old_verifier = LocalPinVerifier::create("123456").unwrap();
+        store.set_local_pin_verifier(old_verifier.clone()).unwrap();
+
+        let original_key = store
+            .ensure_local_master_key(&old_verifier, "123456")
+            .expect("master key");
+
+        assert_eq!(
+            store
+                .unlock_local_master_key(&old_verifier, "123456")
+                .expect("unlock"),
+            original_key
+        );
+        assert!(
+            store
+                .unlock_local_master_key(&old_verifier, "654321")
+                .is_err()
+        );
+
+        let new_verifier = LocalPinVerifier::create("654321").unwrap();
+        store
+            .rewrap_local_master_key(&old_verifier, "123456", &new_verifier, "654321")
+            .expect("rewrap");
+        store.set_local_pin_verifier(new_verifier.clone()).unwrap();
+
+        assert_eq!(
+            store
+                .unlock_local_master_key(&new_verifier, "654321")
+                .expect("unlock with new pin"),
+            original_key
+        );
+        assert!(
+            store
+                .unlock_local_master_key(&new_verifier, "123456")
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn sqlite_vault_secret_material_is_encrypted_under_local_master_key() {
+        let path = std::env::temp_dir().join(format!(
+            "homun-vault-secret-material-{}.sqlite",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let store = SQLiteVaultStore::open(&path).unwrap();
+        let verifier = LocalPinVerifier::create("123456").unwrap();
+        store.set_local_pin_verifier(verifier.clone()).unwrap();
+        let master_key = store
+            .ensure_local_master_key(&verifier, "123456")
+            .expect("master key");
+        let record_id = VaultRecordId::new("vault_card_1").unwrap();
+        let secret = local_first_secrets::SecretMaterial::from_string("4111111111111111");
+
+        store
+            .put_secret_material(&record_id, &master_key, secret)
+            .expect("put secret");
+        let saved = store
+            .get_secret_material(&record_id, &master_key)
+            .expect("get secret")
+            .expect("saved secret");
+        assert_eq!(saved.expose_utf8().unwrap(), "4111111111111111");
+
+        let mut wrong_key = master_key;
+        wrong_key[0] ^= 0xff;
+        assert!(store.get_secret_material(&record_id, &wrong_key).is_err());
+
+        drop(store);
+        let bytes = std::fs::read(&path).unwrap();
+        let db = String::from_utf8_lossy(&bytes);
+        assert!(!db.contains("4111111111111111"));
+        let _ = std::fs::remove_file(path);
     }
 }

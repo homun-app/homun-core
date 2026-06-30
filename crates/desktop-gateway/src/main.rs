@@ -34991,6 +34991,10 @@ struct VaultProposalActionRequest {
     label: String,
     redacted_preview: String,
     #[serde(default)]
+    secret_value: Option<String>,
+    #[serde(default)]
+    pin: Option<String>,
+    #[serde(default)]
     thread_id: Option<String>,
     #[serde(default)]
     message_id: Option<String>,
@@ -35059,18 +35063,8 @@ async fn vault_proposal_accept(
     State(state): State<AppState>,
     Json(request): Json<VaultProposalActionRequest>,
 ) -> Result<Json<VaultProposalAcceptResponse>, GatewayError> {
-    let record = vault_record_from_proposal(&request).map_err(invalid_vault_proposal)?;
-    let response = VaultProposalAcceptResponse {
-        ok: true,
-        record_id: record.id.to_string(),
-        category: request.category,
-        label: request.label,
-        redacted_preview: request.redacted_preview,
-    };
-    lock_vault_store(&state)?
-        .put(record)
-        .map_err(vault_store_error)?;
-    Ok(Json(response))
+    let vault_store = lock_vault_store(&state)?;
+    accept_vault_proposal(&vault_store, &request).map(Json)
 }
 
 async fn vault_proposal_dismiss(
@@ -35094,15 +35088,49 @@ async fn vault_pin_setup(
     Json(request): Json<VaultPinSetupRequest>,
 ) -> Result<Json<VaultPinSetupResponse>, GatewayError> {
     let vault_store = lock_vault_store(&state)?;
+    apply_vault_pin_setup(&vault_store, &request)?;
+    Ok(Json(VaultPinSetupResponse { configured: true }))
+}
+
+fn apply_vault_pin_setup(
+    vault_store: &SQLiteVaultStore,
+    request: &VaultPinSetupRequest,
+) -> Result<(), GatewayError> {
     let existing = vault_store
         .local_pin_verifier()
         .map_err(vault_store_error)?;
-    let verifier =
+    let new_verifier =
         local_pin_setup_verifier(existing.as_ref(), &request).map_err(invalid_vault_pin)?;
+    if let Some(existing) = existing.as_ref() {
+        let current_pin = request.current_pin.as_deref().ok_or_else(|| {
+            invalid_vault_pin("Current Vault PIN is required to change the PIN".to_string())
+        })?;
+        match vault_store.rewrap_local_master_key(
+            existing,
+            current_pin,
+            &new_verifier,
+            &request.pin,
+        ) {
+            Ok(()) => {}
+            Err(error) if error == "Vault master key is not configured" => {
+                vault_store
+                    .ensure_local_master_key(existing, current_pin)
+                    .map_err(vault_store_error)?;
+                vault_store
+                    .rewrap_local_master_key(existing, current_pin, &new_verifier, &request.pin)
+                    .map_err(vault_store_error)?;
+            }
+            Err(error) => return Err(vault_store_error(error)),
+        }
+    } else {
+        vault_store
+            .ensure_local_master_key(&new_verifier, &request.pin)
+            .map_err(vault_store_error)?;
+    }
     vault_store
-        .set_local_pin_verifier(verifier)
+        .set_local_pin_verifier(new_verifier)
         .map_err(vault_store_error)?;
-    Ok(Json(VaultPinSetupResponse { configured: true }))
+    Ok(())
 }
 
 async fn vault_pin_verify(
@@ -35152,6 +35180,46 @@ fn vault_record_from_proposal(request: &VaultProposalActionRequest) -> Result<Va
         secret_ref,
         metadata,
     )
+}
+
+fn accept_vault_proposal(
+    vault_store: &SQLiteVaultStore,
+    request: &VaultProposalActionRequest,
+) -> Result<VaultProposalAcceptResponse, GatewayError> {
+    let record = vault_record_from_proposal(request).map_err(invalid_vault_proposal)?;
+    if let Some(secret_value) = request
+        .secret_value
+        .as_ref()
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+    {
+        let pin = request.pin.as_deref().ok_or_else(|| {
+            invalid_vault_pin("Vault PIN is required to save secret material".to_string())
+        })?;
+        let verifier = vault_store
+            .local_pin_verifier()
+            .map_err(vault_store_error)?
+            .ok_or_else(|| invalid_vault_pin("Vault PIN is not configured".to_string()))?;
+        let master_key = vault_store
+            .unlock_local_master_key(&verifier, pin)
+            .map_err(vault_store_error)?;
+        vault_store
+            .put_secret_material(
+                &record.id,
+                &master_key,
+                SecretMaterial::from_string(secret_value.to_string()),
+            )
+            .map_err(vault_store_error)?;
+    }
+    let response = VaultProposalAcceptResponse {
+        ok: true,
+        record_id: record.id.to_string(),
+        category: request.category.clone(),
+        label: request.label.clone(),
+        redacted_preview: request.redacted_preview.clone(),
+    };
+    vault_store.put(record).map_err(vault_store_error)?;
+    Ok(response)
 }
 
 fn local_pin_verifier_from_request(
@@ -47536,6 +47604,8 @@ prs.save(Path({path:?}))
             category: "payments".to_string(),
             label: "Carta personale".to_string(),
             redacted_preview: "[VAULT:payments:card:last4=1111]".to_string(),
+            secret_value: None,
+            pin: None,
             thread_id: Some("thread_1".to_string()),
             message_id: Some("msg_1".to_string()),
         };
@@ -47551,6 +47621,46 @@ prs.save(Path({path:?}))
         assert_eq!(record.metadata["message_id"], "msg_1");
         assert_eq!(record.secret_ref.provider_id(), "vault");
         assert_eq!(record.secret_ref.connection_id(), record.id.as_str());
+    }
+
+    #[test]
+    fn vault_proposal_accept_encrypts_secret_value_when_pin_is_provided() {
+        let vault = local_first_vault::SQLiteVaultStore::open_in_memory().unwrap();
+        let setup = super::VaultPinSetupRequest {
+            pin: "123456".to_string(),
+            current_pin: None,
+        };
+        super::apply_vault_pin_setup(&vault, &setup).expect("setup pin");
+        let request = super::VaultProposalActionRequest {
+            category: "payments".to_string(),
+            label: "Carta personale".to_string(),
+            redacted_preview: "[VAULT:payments:card:last4=1111]".to_string(),
+            secret_value: Some("4111111111111111".to_string()),
+            pin: Some("123456".to_string()),
+            thread_id: Some("thread_1".to_string()),
+            message_id: Some("msg_1".to_string()),
+        };
+
+        let response = super::accept_vault_proposal(&vault, &request).expect("accept");
+        let record_id = response.record_id.parse().unwrap();
+        let verifier = vault.local_pin_verifier().unwrap().unwrap();
+        let key = vault
+            .unlock_local_master_key(&verifier, "123456")
+            .expect("master key");
+        let secret = vault
+            .get_secret_material(&record_id, &key)
+            .expect("encrypted secret")
+            .expect("saved secret");
+
+        assert_eq!(secret.expose_utf8().unwrap(), "4111111111111111");
+        let saved = local_first_vault::VaultStore::get(&vault, &record_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            saved.metadata["redacted_preview"],
+            "[VAULT:payments:card:last4=1111]"
+        );
+        assert!(!saved.metadata.to_string().contains("4111111111111111"));
     }
 
     #[test]
@@ -47611,6 +47721,57 @@ prs.save(Path({path:?}))
             .expect("valid pin change");
         assert!(updated.verify("654321"));
         assert!(!updated.verify("123456"));
+    }
+
+    #[test]
+    fn vault_pin_setup_creates_and_rewraps_local_master_key() {
+        let vault = local_first_vault::SQLiteVaultStore::open_in_memory().unwrap();
+        let first_setup = super::VaultPinSetupRequest {
+            pin: "123456".to_string(),
+            current_pin: None,
+        };
+
+        super::apply_vault_pin_setup(&vault, &first_setup).expect("first setup");
+        let first_verifier = vault.local_pin_verifier().unwrap().unwrap();
+        let master_key = vault
+            .unlock_local_master_key(&first_verifier, "123456")
+            .expect("master key");
+
+        let change = super::VaultPinSetupRequest {
+            pin: "654321".to_string(),
+            current_pin: Some("123456".to_string()),
+        };
+        super::apply_vault_pin_setup(&vault, &change).expect("pin change");
+        let new_verifier = vault.local_pin_verifier().unwrap().unwrap();
+
+        assert_eq!(
+            vault
+                .unlock_local_master_key(&new_verifier, "654321")
+                .expect("rewrapped master key"),
+            master_key
+        );
+        assert!(
+            vault
+                .unlock_local_master_key(&new_verifier, "123456")
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn vault_pin_change_migrates_legacy_pin_without_master_key() {
+        let vault = local_first_vault::SQLiteVaultStore::open_in_memory().unwrap();
+        vault
+            .set_local_pin_verifier(local_first_vault::LocalPinVerifier::create("123456").unwrap())
+            .unwrap();
+        let change = super::VaultPinSetupRequest {
+            pin: "654321".to_string(),
+            current_pin: Some("123456".to_string()),
+        };
+
+        super::apply_vault_pin_setup(&vault, &change).expect("legacy pin change");
+        let verifier = vault.local_pin_verifier().unwrap().unwrap();
+
+        assert!(vault.unlock_local_master_key(&verifier, "654321").is_ok());
     }
 
     fn payment_snapshot() -> local_first_vault::PaymentApprovalSnapshot {

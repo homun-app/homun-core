@@ -46,12 +46,19 @@ Categorie:
 - `private_notes`: dati sensibili generici.
 
 `VaultRecord` conserva metadati non sensibili e un `SecretRef`. Il materiale segreto
-resta nello store segreti esistente (`local-first-secrets`) o nel backend sicuro
-futuro. `VaultRecord::new` rifiuta CVV/CV2 nei metadati.
+non entra nei metadati: quando il gateway riceve un valore sensibile esplicito lo
+scrive in `vault_secret_material`, cifrato con una master key locale del Vault.
+`VaultRecord::new` rifiuta CVV/CV2 nei metadati.
 
 `vault_local_pin` conserva solo `LocalPinVerifier` (`algorithm`, `iterations`,
 `salt_hex`, `digest_hex`). Il PIN non e' reversibile e non viene mai serializzato in
 chiaro; il gateway espone solo status/setup/verify dietro il bearer locale.
+
+`vault_local_keyring` conserva la master key del Vault cifrata con una chiave derivata
+dal PIN locale. Primo setup PIN crea la master key; cambio PIN autorizzato la
+re-cifra sotto il nuovo PIN. Un reset/sostituzione non autorizzato del verifier non
+puo' sbloccare il materiale gia' cifrato. I profili legacy con PIN gia' presente ma
+senza keyring creano la master key al primo cambio PIN verificato.
 
 ## Classificazione e redaction
 
@@ -78,8 +85,12 @@ Il backend espone un formatter per:
 Il frontend lo nasconde dalla prosa e mostra una card. `Salva nel Vault` chiama
 `/api/vault/proposals/accept` e persiste un `VaultRecord` in `~/.homun/vault.sqlite`
 con label, categoria, preview redatta, `thread_id`/`message_id` opzionali e un
-`SecretRef` opaco. `Non salvare` chiama `/api/vault/proposals/dismiss`; oggi e'
-solo ack locale, senza audit persistente.
+`SecretRef` opaco. Se la richiesta porta anche `secret_value`, deve portare un `pin`:
+il gateway sblocca la master key e salva il valore in `vault_secret_material`
+cifrato. Le card chat attuali non trasportano raw secret nel transcript, quindi
+salvano solo metadati redatti finche' non esiste un input UI dedicato. `Non salvare`
+chiama `/api/vault/proposals/dismiss`; oggi e' solo ack locale, senza audit
+persistente.
 
 ## PIN locale
 
@@ -91,9 +102,9 @@ Endpoint gateway:
   corrente e' valido;
 - `POST /api/vault/pin/verify` con `{ pin }` -> `{ ok }`.
 
-Il PIN e' pensato come gate locale per CVV one-shot e approvazioni pagamento. Non
-sostituisce il TOTP futuro dell'app e non e' ancora una chiave di cifratura completa
-del vault; impedisce pero' il bypass banale "resetto il PIN e approvo".
+Il PIN e' pensato come gate locale per CVV one-shot e approvazioni pagamento e come
+wrapping key della master key locale del Vault. Non sostituisce il TOTP futuro
+dell'app.
 
 La UI espone il setup nella sezione Settings `Vault`, separata da `Memory`.
 

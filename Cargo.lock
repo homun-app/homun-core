@@ -3430,6 +3430,8 @@ dependencies = [
 name = "local-first-vault"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
+ "chacha20poly1305",
  "local-first-secrets",
  "rand 0.8.6",
  "rusqlite",

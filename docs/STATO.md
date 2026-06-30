@@ -627,6 +627,13 @@ GIÀ FATTO sessione 5g (NON ripartire; tutto su `main`):
   e bridge frontend. Aggiunta sezione Settings separata `Vault` per configurare/verificare
   il PIN, fuori da Memory. Corretto il bypass: se il PIN e' gia' configurato, cambiarlo
   richiede `current_pin` valido; non basta avere accesso al computer e impostarne uno nuovo.
+- **Vault crypto locale**: aggiunta master key Vault cifrata dal PIN in `vault_local_keyring`;
+  primo setup PIN crea la key, cambio PIN autorizzato la re-cifra sotto il nuovo PIN. Aggiunta
+  `vault_secret_material` cifrata con la master key: `/api/vault/proposals/accept` puo' ora
+  salvare `secret_value` solo con PIN valido, lasciando nel record solo metadati redatti. Le
+  card chat correnti non trasportano raw secret, quindi restano metadata-only finche' non c'e'
+  un input UI dedicato. Migrazione legacy: se un PIN esisteva gia' senza keyring, il primo
+  cambio PIN verificato crea la master key e la re-cifra sotto il nuovo PIN.
 - **Payment Approval runtime MVP**: aggiunto marker `PAYMENT_APPROVAL`, card chat con
   riepilogo merchant/dominio/importo/prodotto/metodo, endpoint
   `/api/vault/payment-approvals/approve` con PIN locale + CVV/CV2 one-shot, grant volatile
