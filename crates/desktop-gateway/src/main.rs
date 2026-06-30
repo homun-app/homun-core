@@ -46767,7 +46767,13 @@ fn cors_layer() -> CorsLayer {
 
     CorsLayer::new()
         .allow_origin(AllowOrigin::list(origins))
-        .allow_methods([Method::GET, Method::POST, Method::DELETE, Method::OPTIONS])
+        .allow_methods([
+            Method::GET,
+            Method::POST,
+            Method::PATCH,
+            Method::DELETE,
+            Method::OPTIONS,
+        ])
         .allow_headers([CONTENT_TYPE, AUTHORIZATION])
         // Custom response headers are hidden from browser `fetch` unless exposed —
         // without this the UI reads `x-effective-model` as null (curl sees it fine).
@@ -48070,6 +48076,55 @@ prs.save(Path({path:?}))
         )
         .expect("reveal updated");
         assert_eq!(revealed.secret_value, "CNTFBA76L16F839Z");
+    }
+
+    #[tokio::test]
+    async fn cors_preflight_allows_patch_for_browser_gateway_writes() {
+        use axum::{
+            Router,
+            body::Body,
+            http::{
+                Request, StatusCode,
+                header::{
+                    ACCESS_CONTROL_ALLOW_METHODS, ACCESS_CONTROL_REQUEST_HEADERS,
+                    ACCESS_CONTROL_REQUEST_METHOD, ORIGIN,
+                },
+            },
+            routing::get,
+        };
+        use tower::ServiceExt;
+
+        async fn ok() -> &'static str {
+            "ok"
+        }
+
+        let app = Router::new()
+            .route("/api/vault/records/record_1", get(ok).patch(ok))
+            .layer(super::cors_layer());
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("OPTIONS")
+                    .uri("/api/vault/records/record_1")
+                    .header(ORIGIN, "http://localhost:1420")
+                    .header(ACCESS_CONTROL_REQUEST_METHOD, "PATCH")
+                    .header(ACCESS_CONTROL_REQUEST_HEADERS, "authorization,content-type")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let methods = response
+            .headers()
+            .get(ACCESS_CONTROL_ALLOW_METHODS)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or("");
+        assert!(
+            methods.split(',').any(|method| method.trim() == "PATCH"),
+            "allowed methods should include PATCH, got {methods:?}"
+        );
     }
 
     #[test]

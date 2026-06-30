@@ -661,6 +661,9 @@ GIÀ FATTO sessione 5g (NON ripartire; tutto su `main`):
   secret opzionale su `PATCH /api/vault/records/{id}`. L'edit inline continua a mostrare solo metadati; per
   vedere/correggere il valore cifrato richiede PIN locale, poi riscrive il secret cifrato e svuota lo stato
   alla chiusura/salvataggio.
+- **Vault edit save CORS**: corretto il blocco browser su `PATCH /api/vault/records/{id}`. Il gateway
+  accettava la route, ma il CORS dichiarava solo `GET,POST,DELETE,OPTIONS`, quindi Chromium falliva il
+  preflight e la UI mostrava il generico `Failed to fetch`. Aggiunto test di preflight `PATCH`.
 - **Payment Approval runtime MVP**: aggiunto marker `PAYMENT_APPROVAL`, card chat con
   riepilogo merchant/dominio/importo/prodotto/metodo, endpoint
   `/api/vault/payment-approvals/approve` con PIN locale + CVV/CV2 one-shot, grant volatile
