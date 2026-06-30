@@ -1862,11 +1862,19 @@ export interface VaultRecordsListResult {
 export interface VaultRecordUpdateInput {
   category: string;
   label: string;
+  secret_value?: string;
+  pin?: string;
 }
 
 export interface VaultRecordUpdateResult {
   ok: boolean;
   record: VaultRecordSummary;
+}
+
+export interface VaultRecordRevealResult {
+  ok: boolean;
+  record: VaultRecordSummary;
+  secret_value: string;
 }
 
 export interface PaymentApprovalSnapshot {
@@ -1913,6 +1921,16 @@ async function electronVaultRecordUpdate(
   return gatewayPatchJson<VaultRecordUpdateResult>(
     `/api/vault/records/${encodeURIComponent(id)}`,
     input,
+  );
+}
+
+async function electronVaultRecordReveal(
+  id: string,
+  pin: string,
+): Promise<VaultRecordRevealResult> {
+  return gatewayPostJson<VaultRecordRevealResult>(
+    `/api/vault/records/${encodeURIComponent(id)}/reveal`,
+    { pin },
   );
 }
 
@@ -2637,6 +2655,7 @@ export const coreBridge = {
   vaultRecords: () => electronVaultRecords(),
   vaultRecordDelete: (id: string) => electronVaultRecordDelete(id),
   vaultRecordUpdate: (id: string, input: VaultRecordUpdateInput) => electronVaultRecordUpdate(id, input),
+  vaultRecordReveal: (id: string, pin: string) => electronVaultRecordReveal(id, pin),
   vaultPinStatus: () => electronVaultPinStatus(),
   vaultPinSetup: (pin: string, currentPin?: string) =>
     electronVaultPinSetup(pin, currentPin),

@@ -657,6 +657,10 @@ GIÀ FATTO sessione 5g (NON ripartire; tutto su `main`):
 - **Vault lista-first + Add modale**: la scheda `Dati sensibili` ora apre prima la lista dei record salvati
   con azioni `Add`/`Refresh`; l'inserimento raw si fa in una modale themed (`set-modal`) e chiusura/salvataggio
   svuotano valore e PIN dallo stato renderer.
+- **Vault edit con unlock PIN**: aggiunto reveal dedicato `POST /api/vault/records/{id}/reveal` e update
+  secret opzionale su `PATCH /api/vault/records/{id}`. L'edit inline continua a mostrare solo metadati; per
+  vedere/correggere il valore cifrato richiede PIN locale, poi riscrive il secret cifrato e svuota lo stato
+  alla chiusura/salvataggio.
 - **Payment Approval runtime MVP**: aggiunto marker `PAYMENT_APPROVAL`, card chat con
   riepilogo merchant/dominio/importo/prodotto/metodo, endpoint
   `/api/vault/payment-approvals/approve` con PIN locale + CVV/CV2 one-shot, grant volatile

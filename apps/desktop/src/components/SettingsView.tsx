@@ -2262,6 +2262,9 @@ function VaultPane() {
   const [editingVaultRecord, setEditingVaultRecord] = useState<VaultRecordSummary | null>(null);
   const [editVaultCategory, setEditVaultCategory] = useState("private_notes");
   const [editVaultLabel, setEditVaultLabel] = useState("");
+  const [editVaultPin, setEditVaultPin] = useState("");
+  const [editVaultSecretValue, setEditVaultSecretValue] = useState("");
+  const [editVaultSecretUnlocked, setEditVaultSecretUnlocked] = useState(false);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -2276,6 +2279,9 @@ function VaultPane() {
     setEditingVaultRecord(record);
     setEditVaultCategory(record.category);
     setEditVaultLabel(record.label);
+    setEditVaultPin("");
+    setEditVaultSecretValue("");
+    setEditVaultSecretUnlocked(false);
     setNote(null);
     setError(null);
   }
@@ -2284,6 +2290,9 @@ function VaultPane() {
     setEditingVaultRecord(null);
     setEditVaultLabel("");
     setEditVaultCategory("private_notes");
+    setEditVaultPin("");
+    setEditVaultSecretValue("");
+    setEditVaultSecretUnlocked(false);
   }
 
   function openVaultAddModal() {
@@ -2439,10 +2448,34 @@ function VaultPane() {
       const result = await coreBridge.vaultRecordUpdate(editingVaultRecord.id, {
         category: editVaultCategory,
         label,
+        ...(editVaultSecretUnlocked
+          ? { secret_value: editVaultSecretValue, pin: editVaultPin }
+          : {}),
       });
       await refreshVaultRecords();
       cancelVaultRecordEdit();
       setNote(t("settings.vaultRecordUpdated", { label: result.record.label }));
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function revealVaultRecordSecret() {
+    setError(null);
+    setNote(null);
+    if (!editingVaultRecord) return;
+    if (editVaultPin.length === 0) {
+      setError(t("settings.vaultManualPinRequired"));
+      return;
+    }
+    setBusy(true);
+    try {
+      const result = await coreBridge.vaultRecordReveal(editingVaultRecord.id, editVaultPin);
+      setEditVaultSecretValue(result.secret_value);
+      setEditVaultSecretUnlocked(true);
+      setNote(t("settings.vaultSecretUnlocked"));
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -2641,6 +2674,36 @@ function VaultPane() {
                             aria-label={t("settings.vaultEditLabel")}
                             onChange={(event) => setEditVaultLabel(event.target.value)}
                           />
+                          <input
+                            className="set-input"
+                            inputMode="numeric"
+                            type="password"
+                            value={editVaultPin}
+                            placeholder={t("settings.vaultPinPlaceholder")}
+                            aria-label={t("settings.vaultEditPin")}
+                            onChange={(event) => {
+                              setEditVaultPin(event.target.value);
+                              setEditVaultSecretUnlocked(false);
+                              setEditVaultSecretValue("");
+                            }}
+                          />
+                          <button
+                            className="set-btn"
+                            type="button"
+                            disabled={busy || editVaultPin.length === 0}
+                            onClick={() => void revealVaultRecordSecret()}
+                          >
+                            {t("settings.vaultUnlockValue")}
+                          </button>
+                          {editVaultSecretUnlocked && (
+                            <textarea
+                              className="set-input vault-secret-edit"
+                              value={editVaultSecretValue}
+                              rows={3}
+                              aria-label={t("settings.vaultSecretValue")}
+                              onChange={(event) => setEditVaultSecretValue(event.target.value)}
+                            />
+                          )}
                         </div>
                       )}
                     </div>
@@ -2658,7 +2721,11 @@ function VaultPane() {
                           <button
                             className="set-btn primary"
                             type="button"
-                            disabled={busy || editVaultLabel.trim().length === 0}
+                            disabled={
+                              busy ||
+                              editVaultLabel.trim().length === 0 ||
+                              (editVaultSecretUnlocked && editVaultPin.length === 0)
+                            }
                             onClick={() => void saveVaultRecordEdit()}
                           >
                             {t("settings.vaultSaveEdit")}

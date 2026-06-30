@@ -911,6 +911,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/memory/consolidate", post(memory_consolidate))
         .route("/api/memory/decide", post(memory_decide))
         .route("/api/vault/records", get(vault_records_list))
+        .route("/api/vault/records/{id}/reveal", post(vault_record_reveal))
         .route(
             "/api/vault/records/{id}",
             delete(vault_record_delete).patch(vault_record_update),
@@ -35036,12 +35037,28 @@ struct VaultRecordsListResponse {
 struct VaultRecordUpdateRequest {
     category: String,
     label: String,
+    #[serde(default)]
+    secret_value: Option<String>,
+    #[serde(default)]
+    pin: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
 struct VaultRecordUpdateResponse {
     ok: bool,
     record: VaultRecordSummary,
+}
+
+#[derive(Debug, Deserialize)]
+struct VaultRecordRevealRequest {
+    pin: String,
+}
+
+#[derive(Debug, Serialize)]
+struct VaultRecordRevealResponse {
+    ok: bool,
+    record: VaultRecordSummary,
+    secret_value: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -35138,7 +35155,17 @@ async fn vault_record_update(
 ) -> Result<Json<VaultRecordUpdateResponse>, GatewayError> {
     let record_id = VaultRecordId::new(id).map_err(invalid_vault_proposal)?;
     let vault_store = lock_vault_store(&state)?;
-    update_vault_record_metadata(&vault_store, &record_id, &request).map(Json)
+    update_vault_record(&vault_store, &record_id, &request).map(Json)
+}
+
+async fn vault_record_reveal(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(request): Json<VaultRecordRevealRequest>,
+) -> Result<Json<VaultRecordRevealResponse>, GatewayError> {
+    let record_id = VaultRecordId::new(id).map_err(invalid_vault_proposal)?;
+    let vault_store = lock_vault_store(&state)?;
+    reveal_vault_record_secret(&vault_store, &record_id, &request).map(Json)
 }
 
 async fn vault_pin_status(
@@ -35265,19 +35292,67 @@ fn vault_record_summary(record: VaultRecord) -> VaultRecordSummary {
     }
 }
 
-fn update_vault_record_metadata(
+fn load_vault_record(
     vault_store: &SQLiteVaultStore,
     record_id: &VaultRecordId,
-    request: &VaultRecordUpdateRequest,
-) -> Result<VaultRecordUpdateResponse, GatewayError> {
-    let existing = vault_store
+) -> Result<VaultRecord, GatewayError> {
+    vault_store
         .get(record_id)
         .map_err(vault_store_error)?
         .ok_or_else(|| GatewayError {
             status: StatusCode::NOT_FOUND,
             code: "vault_record_not_found",
             message: "Vault record not found".to_string(),
+        })
+}
+
+fn unlock_vault_master_key(
+    vault_store: &SQLiteVaultStore,
+    pin: &str,
+) -> Result<[u8; 32], GatewayError> {
+    let verifier = vault_store
+        .local_pin_verifier()
+        .map_err(vault_store_error)?
+        .ok_or_else(|| invalid_vault_pin("Vault PIN is not configured".to_string()))?;
+    if !verifier.verify(pin) {
+        return Err(invalid_vault_pin("Invalid Vault PIN".to_string()));
+    }
+    vault_store
+        .unlock_local_master_key(&verifier, pin)
+        .map_err(vault_store_error)
+}
+
+fn reveal_vault_record_secret(
+    vault_store: &SQLiteVaultStore,
+    record_id: &VaultRecordId,
+    request: &VaultRecordRevealRequest,
+) -> Result<VaultRecordRevealResponse, GatewayError> {
+    let record = load_vault_record(vault_store, record_id)?;
+    let master_key = unlock_vault_master_key(vault_store, &request.pin)?;
+    let secret = vault_store
+        .get_secret_material(record_id, &master_key)
+        .map_err(vault_store_error)?
+        .ok_or_else(|| GatewayError {
+            status: StatusCode::NOT_FOUND,
+            code: "vault_secret_not_found",
+            message: "Vault secret material not found".to_string(),
         })?;
+    let secret_value = secret
+        .expose_utf8()
+        .map_err(|error| vault_store_error(error.to_string()))?;
+    Ok(VaultRecordRevealResponse {
+        ok: true,
+        record: vault_record_summary(record),
+        secret_value,
+    })
+}
+
+fn update_vault_record(
+    vault_store: &SQLiteVaultStore,
+    record_id: &VaultRecordId,
+    request: &VaultRecordUpdateRequest,
+) -> Result<VaultRecordUpdateResponse, GatewayError> {
+    let existing = load_vault_record(vault_store, record_id)?;
     let label = request.label.trim();
     if label.is_empty() {
         return Err(invalid_vault_proposal(
@@ -35295,6 +35370,24 @@ fn update_vault_record_metadata(
     .map_err(invalid_vault_proposal)?;
     let summary = vault_record_summary(updated.clone());
     vault_store.put(updated).map_err(vault_store_error)?;
+    if let Some(secret_value) = request
+        .secret_value
+        .as_ref()
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+    {
+        let pin = request.pin.as_deref().ok_or_else(|| {
+            invalid_vault_pin("Vault PIN is required to update secret material".to_string())
+        })?;
+        let master_key = unlock_vault_master_key(vault_store, pin)?;
+        vault_store
+            .put_secret_material(
+                record_id,
+                &master_key,
+                SecretMaterial::from_string(secret_value.to_string()),
+            )
+            .map_err(vault_store_error)?;
+    }
     Ok(VaultRecordUpdateResponse {
         ok: true,
         record: summary,
@@ -47884,10 +47977,12 @@ prs.save(Path({path:?}))
         let update = super::VaultRecordUpdateRequest {
             category: "private_notes".to_string(),
             label: "Carta backup".to_string(),
+            secret_value: None,
+            pin: None,
         };
 
-        let updated = super::update_vault_record_metadata(&vault, &record_id, &update)
-            .expect("update metadata");
+        let updated =
+            super::update_vault_record(&vault, &record_id, &update).expect("update metadata");
 
         assert!(updated.ok);
         assert_eq!(updated.record.id, response.record_id);
@@ -47915,6 +48010,66 @@ prs.save(Path({path:?}))
         );
         assert_eq!(saved.label, "Carta backup");
         assert!(!saved.metadata.to_string().contains("4111111111111111"));
+    }
+
+    #[test]
+    fn vault_record_reveal_and_update_secret_require_pin() {
+        let vault = local_first_vault::SQLiteVaultStore::open_in_memory().unwrap();
+        let setup = super::VaultPinSetupRequest {
+            pin: "123456".to_string(),
+            current_pin: None,
+        };
+        super::apply_vault_pin_setup(&vault, &setup).expect("setup pin");
+        let request = super::VaultProposalActionRequest {
+            category: "identity".to_string(),
+            label: "Codice Fiscale".to_string(),
+            redacted_preview: "[VAULT:identity:Codice Fiscale]".to_string(),
+            secret_value: Some("CNTFBA76L16F839Y".to_string()),
+            pin: Some("123456".to_string()),
+            thread_id: None,
+            message_id: None,
+        };
+        let response = super::accept_vault_proposal(&vault, &request).expect("accept");
+        let record_id = response.record_id.parse().unwrap();
+
+        let revealed = super::reveal_vault_record_secret(
+            &vault,
+            &record_id,
+            &super::VaultRecordRevealRequest {
+                pin: "123456".to_string(),
+            },
+        )
+        .expect("reveal");
+
+        assert_eq!(revealed.record.label, "Codice Fiscale");
+        assert_eq!(revealed.secret_value, "CNTFBA76L16F839Y");
+        let wrong_pin = super::reveal_vault_record_secret(
+            &vault,
+            &record_id,
+            &super::VaultRecordRevealRequest {
+                pin: "000000".to_string(),
+            },
+        )
+        .expect_err("wrong pin rejected");
+        assert_eq!(wrong_pin.code, "invalid_vault_pin");
+        let update = super::VaultRecordUpdateRequest {
+            category: "identity".to_string(),
+            label: "Codice Fiscale corretto".to_string(),
+            secret_value: Some("CNTFBA76L16F839Z".to_string()),
+            pin: Some("123456".to_string()),
+        };
+        let updated = super::update_vault_record(&vault, &record_id, &update).expect("update");
+
+        assert_eq!(updated.record.label, "Codice Fiscale corretto");
+        let revealed = super::reveal_vault_record_secret(
+            &vault,
+            &record_id,
+            &super::VaultRecordRevealRequest {
+                pin: "123456".to_string(),
+            },
+        )
+        .expect("reveal updated");
+        assert_eq!(revealed.secret_value, "CNTFBA76L16F839Z");
     }
 
     #[test]

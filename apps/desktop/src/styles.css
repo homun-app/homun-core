@@ -8942,10 +8942,14 @@ body.resizing-drawer {
 }
 .vault-record-edit {
   display: grid;
-  grid-template-columns: minmax(160px, 0.4fr) minmax(220px, 1fr);
+  grid-template-columns: minmax(150px, 0.35fr) minmax(220px, 1fr);
   gap: 8px;
   margin-top: 10px;
   max-width: 620px;
+}
+.vault-record-edit .vault-secret-edit {
+  grid-column: 1 / -1;
+  resize: vertical;
 }
 .vault-add-modal {
   width: min(720px, 100%);

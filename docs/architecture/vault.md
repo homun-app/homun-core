@@ -34,6 +34,7 @@ Non e' memoria: la memoria puo' contenere solo testo redatto o riferimenti
   I record salvati consentono modifica label/categoria o eliminazione.
 - `crates/desktop-gateway/src/main.rs`: endpoint
   `/api/vault/records` (`GET`), `/api/vault/records/{id}` (`PATCH`, `DELETE`),
+  `/api/vault/records/{id}/reveal` (`POST` con PIN),
   `/api/vault/proposals/accept`, `/api/vault/proposals/dismiss`,
   `/api/vault/pin/status|setup|verify` e
   `/api/vault/payment-approvals/approve`.
@@ -57,9 +58,12 @@ scrive in `vault_secret_material`, cifrato con una master key locale del Vault.
 La lista UI/API dei record usa solo un summary redatto (`id`, `category`, `label`,
 `redacted_preview`). Non espone `SecretRef` e non legge il materiale cifrato. La
 modifica metadata-only consente cambiare `category` e `label`, preservando
-`SecretRef`, `redacted_preview` e l'eventuale materiale cifrato. La cancellazione
-del record elimina sia `vault_records` sia l'eventuale riga `vault_secret_material`
-associata, per non lasciare secret orfani.
+`SecretRef`, `redacted_preview` e l'eventuale materiale cifrato. Se l'utente vuole
+correggere il valore cifrato, la UI richiede il PIN locale e chiama il reveal
+dedicato: solo dopo unlock il valore entra nello stato renderer e puo' essere
+riscritto cifrato con lo stesso PIN. La cancellazione del record elimina sia
+`vault_records` sia l'eventuale riga `vault_secret_material` associata, per non
+lasciare secret orfani.
 
 `vault_local_pin` conserva solo `LocalPinVerifier` (`algorithm`, `iterations`,
 `salt_hex`, `digest_hex`). Il PIN non e' reversibile e non viene mai serializzato in
@@ -124,7 +128,8 @@ La UI espone setup/verifica PIN e lista/edit/delete manuale nella sezione Settin
 `Vault`, separata da `Memory`. Il layout segue il pattern tabs dei Connectors:
 `Dati sensibili` e `PIN locale`. `Dati sensibili` privilegia la lista; il valore raw
 si inserisce solo nella modale `Add`, che svuota valore e PIN alla chiusura o dopo il
-salvataggio.
+salvataggio. L'edit inline mostra solo metadati finche' l'utente non inserisce il PIN
+e sblocca esplicitamente il valore.
 
 ## Pagamenti
 
