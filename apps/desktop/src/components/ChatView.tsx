@@ -3212,6 +3212,7 @@ const CONNECT_SUGGEST_RE = /‹‹CONNECT_SUGGEST››([\s\S]*?)‹‹\/CONNECT
 const COMPOSIO_DONE_RE = /‹‹COMPOSIO_DONE››([\s\S]*?)‹‹\/COMPOSIO_DONE››/;
 const COMPOSIO_RECONNECT_RE = /‹‹COMPOSIO_RECONNECT››([\s\S]*?)‹‹\/COMPOSIO_RECONNECT››/;
 const VAULT_PROPOSE_RE = /‹‹VAULT_PROPOSE››([\s\S]*?)‹‹\/VAULT_PROPOSE››/;
+const VAULT_REVEAL_RE = /‹‹VAULT_REVEAL››([\s\S]*?)‹‹\/VAULT_REVEAL››/;
 const PAYMENT_APPROVAL_RE = /‹‹PAYMENT_APPROVAL››([\s\S]*?)‹‹\/PAYMENT_APPROVAL››/;
 // Single/multi-choice question card (Claude-Code style): the model emits the choices
 // instead of listing them in prose, and the click sends the answer back.
@@ -3226,7 +3227,7 @@ const GOAL_PROPOSE_RE = /‹‹GOAL_PROPOSE››([\s\S]*?)‹‹\/GOAL_PROPOSE�
 // Strips an UNCLOSED plan/goal marker (open present, no close) from the visible prose.
 const UNCLOSED_PROPOSE_RE = /‹‹(?:PLAN_PROPOSE|GOAL_PROPOSE)››[\s\S]*$/;
 const COMPOSIO_MARKERS_RE =
-  /‹‹(?:COMPOSIO_(?:CONFIRM|DONE|RECONNECT)|MCP_CONFIRM|FS_AUTHORIZE|CONNECT_SUGGEST|VAULT_PROPOSE|PAYMENT_APPROVAL|CHOICES|PLAN_PROPOSE|GOAL_PROPOSE|PLAN)››[\s\S]*?‹‹\/(?:COMPOSIO_(?:CONFIRM|DONE|RECONNECT)|MCP_CONFIRM|FS_AUTHORIZE|CONNECT_SUGGEST|VAULT_PROPOSE|PAYMENT_APPROVAL|CHOICES|PLAN_PROPOSE|GOAL_PROPOSE|PLAN)››/g;
+  /‹‹(?:COMPOSIO_(?:CONFIRM|DONE|RECONNECT)|MCP_CONFIRM|FS_AUTHORIZE|CONNECT_SUGGEST|VAULT_PROPOSE|VAULT_REVEAL|PAYMENT_APPROVAL|CHOICES|PLAN_PROPOSE|GOAL_PROPOSE|PLAN)››[\s\S]*?‹‹\/(?:COMPOSIO_(?:CONFIRM|DONE|RECONNECT)|MCP_CONFIRM|FS_AUTHORIZE|CONNECT_SUGGEST|VAULT_PROPOSE|VAULT_REVEAL|PAYMENT_APPROVAL|CHOICES|PLAN_PROPOSE|GOAL_PROPOSE|PLAN)››/g;
 const PROPOSE_MARKERS_VISIBLE_RE =
   /‹‹(?:PLAN_PROPOSE|GOAL_PROPOSE)››[\s\S]*?‹‹\/(?:PLAN_PROPOSE|GOAL_PROPOSE)››/g;
 
@@ -3254,6 +3255,13 @@ interface VaultProposal {
   label: string;
   redacted_preview: string;
   pending_id?: string;
+}
+
+interface VaultRevealProposal {
+  record_id: string;
+  category: string;
+  label: string;
+  redacted_preview: string;
 }
 
 interface PaymentApprovalProposal {
@@ -5659,6 +5667,7 @@ function parseComposioConfirm(text: string): {
   fsAuthorize: { path: string; op: string } | null;
   connectSuggest: ConnectSuggest | null;
   vaultPropose: VaultProposal | null;
+  vaultReveal: VaultRevealProposal | null;
   paymentApproval: PaymentApprovalProposal | null;
   choices: ChoicePrompt | null;
   planPropose: PlanProposal | null;
@@ -5733,6 +5742,29 @@ function parseComposioConfirm(text: string): {
           label: parsed.label,
           redacted_preview: parsed.redacted_preview,
           ...(typeof parsed.pending_id === "string" ? { pending_id: parsed.pending_id } : {}),
+        };
+      }
+    } catch {
+      /* malformed → just hide it */
+    }
+  }
+  let vaultReveal: VaultRevealProposal | null = null;
+  const vaultRevealMatch = text.match(VAULT_REVEAL_RE);
+  if (vaultRevealMatch) {
+    try {
+      const parsed = JSON.parse(vaultRevealMatch[1]) as Partial<VaultRevealProposal>;
+      if (
+        parsed &&
+        typeof parsed.record_id === "string" &&
+        typeof parsed.category === "string" &&
+        typeof parsed.label === "string" &&
+        typeof parsed.redacted_preview === "string"
+      ) {
+        vaultReveal = {
+          record_id: parsed.record_id,
+          category: parsed.category,
+          label: parsed.label,
+          redacted_preview: parsed.redacted_preview,
         };
       }
     } catch {
@@ -5854,6 +5886,7 @@ function parseComposioConfirm(text: string): {
     fsAuthorize,
     connectSuggest,
     vaultPropose,
+    vaultReveal,
     paymentApproval,
     choices,
     planPropose,
@@ -5895,6 +5928,7 @@ function AssistantMessageBody({
     fsAuthorize,
     connectSuggest,
     vaultPropose,
+    vaultReveal,
     paymentApproval,
     choices,
     planPropose,
@@ -5937,6 +5971,7 @@ function AssistantMessageBody({
           threadId={threadId}
         />
       )}
+      {vaultReveal && !streaming && <VaultRevealCard proposal={vaultReveal} />}
       {paymentApproval && !streaming && (
         <PaymentApprovalCard
           proposal={paymentApproval}
@@ -6052,6 +6087,104 @@ function VaultProposeCard({
           Do not save
         </button>
       </div>
+    </div>
+  );
+}
+
+function VaultRevealCard({ proposal }: { proposal: VaultRevealProposal }) {
+  const [pin, setPin] = useState("");
+  const [status, setStatus] = useState<"idle" | "running" | "revealed" | "error">("idle");
+  const [secretValue, setSecretValue] = useState("");
+  const [showValue, setShowValue] = useState(true);
+  const [note, setNote] = useState<string | null>(null);
+  const busy = status === "running";
+
+  const reveal = async () => {
+    setStatus("running");
+    setNote(null);
+    try {
+      const result = await coreBridge.vaultRecordReveal(proposal.record_id, pin);
+      setSecretValue(result.secret_value);
+      setPin("");
+      setShowValue(true);
+      setStatus("revealed");
+    } catch (error) {
+      setStatus("error");
+      setNote((error as Error).message);
+    }
+  };
+
+  return (
+    <div className="cmp-confirm">
+      <div className="cmp-confirm-head">
+        <ShieldCheck size={15} />
+        <strong>Vault unlock required</strong>
+        <span className="cmp-confirm-name">{proposal.category}</span>
+      </div>
+      <div className="cmp-confirm-fields">
+        <label>Record</label>
+        <input className="set-input" readOnly value={proposal.label} />
+        <label>Redacted preview</label>
+        <input className="set-input" readOnly value={proposal.redacted_preview} />
+      </div>
+      {status !== "revealed" ? (
+        <>
+          <p className="cmp-confirm-note">
+            Enter your local PIN to reveal this value on this device. The value is not saved back
+            into the chat transcript.
+          </p>
+          <div className="cmp-confirm-fields">
+            <label>Local PIN</label>
+            <input
+              className="set-input"
+              inputMode="numeric"
+              type="password"
+              value={pin}
+              disabled={busy}
+              onChange={(event) => setPin(event.target.value)}
+            />
+          </div>
+          {status === "error" && <p className="cmp-confirm-err">Error: {note}</p>}
+          <div className="cmp-confirm-actions">
+            <button
+              className="set-btn primary"
+              type="button"
+              disabled={busy || pin.length === 0}
+              onClick={() => void reveal()}
+            >
+              {busy ? "Unlocking..." : "Reveal value"}
+            </button>
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="cmp-confirm-fields">
+            <label>Value</label>
+            <input
+              className="set-input"
+              readOnly
+              type={showValue ? "text" : "password"}
+              value={secretValue}
+            />
+          </div>
+          <div className="cmp-confirm-actions">
+            <button className="set-btn" type="button" onClick={() => setShowValue((value) => !value)}>
+              {showValue ? "Hide value" : "Show value"}
+            </button>
+            <button
+              className="set-btn"
+              type="button"
+              onClick={() => {
+                setSecretValue("");
+                setStatus("idle");
+                setShowValue(true);
+              }}
+            >
+              Lock
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 }

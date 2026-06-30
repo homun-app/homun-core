@@ -28,7 +28,8 @@ Non e' memoria: la memoria puo' contenere solo testo redatto o riferimenti
 - `crates/desktop-gateway/src/browser_safety.rs`: variante approval-aware per il
   click finale di pagamento.
 - `apps/desktop/src/components/ChatView.tsx`: parsing/rendering del marker
-  `VAULT_PROPOSE`, con azioni salva/scarta, e del marker `PAYMENT_APPROVAL`.
+  `VAULT_PROPOSE`, con azioni salva/scarta, del marker `VAULT_REVEAL`, con unlock
+  PIN locale in-chat, e del marker `PAYMENT_APPROVAL`.
 - `apps/desktop/src/components/SettingsView.tsx`: sezione Settings separata `Vault`
   per status/setup/verifica del PIN locale e inserimento manuale di dati sensibili
   senza passare dalla chat; la tab `Dati sensibili` e' lista-first, mostra i record
@@ -75,7 +76,11 @@ prova internamente un fallback sui soli metadati redatti del Vault (`id`,
 "non lo so" quando un record e' gia' nel Vault, senza esporre materiale segreto. Se
 trova una corrispondenza, il modello deve dire che il dato e' salvato nel Vault e che
 serve unlock locale con PIN per rivelarlo o editarlo; non deve inferire ne' inventare
-il valore dal metadata.
+il valore dal metadata. Se l'utente ha chiesto di vedere il valore, il risultato di
+`recall_memory` include anche un marker `VAULT_REVEAL` da copiare nella risposta: la
+UI mostra una card che chiede il PIN e chiama `/api/vault/records/{id}/reveal`. Il
+valore rivelato resta nello stato locale della card e non viene riscritto nel
+transcript.
 
 `vault_local_pin` conserva solo `LocalPinVerifier` (`algorithm`, `iterations`,
 `salt_hex`, `digest_hex`). Il PIN non e' reversibile e non viene mai serializzato in
@@ -138,6 +143,16 @@ endpoint con `secret_value` e PIN locale: il valore entra nel gateway cifrato e 
 nel transcript della chat. `Non salvare`
 chiama `/api/vault/proposals/dismiss`; oggi e' solo ack locale, senza audit
 persistente.
+
+Per record gia' salvati, la chat puo' ricevere:
+
+```text
+‹‹VAULT_REVEAL››{"record_id":"vault_...","category":"identity","label":"Codice Fiscale","redacted_preview":"[VAULT:identity:fiscal_code]"}‹‹/VAULT_REVEAL››
+```
+
+Il frontend nasconde il marker dalla prosa e mostra una card con campo PIN locale.
+La chiamata di reveal usa l'endpoint PIN-gated e mostra il valore solo nel componente
+corrente; il transcript conserva il marker/metadata redatto, non il valore.
 
 ## PIN locale
 
@@ -215,7 +230,10 @@ Login, script arbitrari e azioni high-risk non-payment restano bloccati.
 
 Il modello non riceve dump del Vault e non vede il Vault come MCP/tool autonomo. Il
 fallback interno di `recall_memory` espone solo metadati redatti per sapere che un
-record esiste. Quando servira' il valore, usera' tool minimizzati PIN-gated
+record esiste. Il canale Telegram configurato per le autorizzazioni puo' ricevere
+riepiloghi e prompt di approvazione, ma non valori segreti grezzi; il reveal del
+valore resta PIN-gated in app o in un futuro flusso dedicato e approvato. Quando
+servira' il valore in un task agentico, usera' tool minimizzati PIN-gated
 (`vault_get_field`, `vault_fill_browser_field`) con scopo, dominio, audit e policy.
 Per i form, la direzione preferita e' compilare direttamente il browser senza far
 transitare il valore sensibile nel testo del modello.

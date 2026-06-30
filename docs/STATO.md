@@ -680,6 +680,10 @@ GIÀ FATTO sessione 5g (NON ripartire; tutto su `main`):
   redatti (`id`, `category`, `label`, `redacted_preview`) e istruisce il modello a dire che il record esiste
   nel Vault e richiede PIN locale per reveal/edit, senza esporre o inferire il valore. Il Vault non viene
   presentato come MCP/tool autonomo.
+- **Vault reveal in chat**: aggiunto marker `VAULT_REVEAL` e card renderer PIN-gated. Quando il fallback
+  Vault di `recall_memory` trova un record e l'utente chiede il valore, il modello puo' emettere la card:
+  la UI chiede il PIN locale, chiama `/api/vault/records/{id}/reveal` e mostra il valore solo nello stato
+  locale del componente, senza riscriverlo nel transcript.
 - **Payment Approval runtime MVP**: aggiunto marker `PAYMENT_APPROVAL`, card chat con
   riepilogo merchant/dominio/importo/prodotto/metodo, endpoint
   `/api/vault/payment-approvals/approve` con PIN locale + CVV/CV2 one-shot, grant volatile

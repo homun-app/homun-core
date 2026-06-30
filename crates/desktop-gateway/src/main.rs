@@ -13313,7 +13313,10 @@ fn recall_memory_response_with_vault_fallback(
     } else {
         format!("Relevant memories from memory:\n{}", lines.join("\n"))
     };
-    if !lines.is_empty() {
+    let should_check_vault = lines.is_empty()
+        || query_should_offer_vault_reveal(query)
+        || (query_has_sensitive_vault_term(query) && memory_lines_mention_vault(&lines));
+    if !should_check_vault {
         return memory_block;
     }
     let vault_matches = match search_vault_records(vault_store, query, 5) {
@@ -13326,16 +13329,96 @@ fn recall_memory_response_with_vault_fallback(
     let vault_lines = vault_matches
         .into_iter()
         .map(|record| {
+            let marker = vault_reveal_marker(&record);
             format!(
-                "- [{}] {} — {} ({})",
-                record.category, record.label, record.redacted_preview, record.id
+                "- [{}] {} — {} ({})\n  reveal_card: {}",
+                record.category, record.label, record.redacted_preview, record.id, marker
             )
         })
         .collect::<Vec<_>>()
         .join("\n");
     format!(
-        "{memory_block}\n\nVault records matching the request (redacted metadata only; do NOT reveal or guess the secret value; tell the user local PIN unlock is required to reveal or edit):\n{vault_lines}"
+        "{memory_block}\n\nVault records matching the request (redacted metadata only; do NOT reveal or guess the secret value). If the user asked to see the value, you MUST copy the reveal_card marker exactly on its own line in your final answer so the UI can ask for the local PIN and reveal it locally:\n{vault_lines}"
     )
+}
+
+fn query_should_offer_vault_reveal(query: &str) -> bool {
+    let terms = vault_metadata_terms(query);
+    let has_sensitive_term = terms.iter().any(|term| vault_term_is_sensitive(term));
+    let asks_for_value = terms.iter().any(|term| {
+        matches!(
+            term.as_str(),
+            "qual" | "quale" | "mostra" | "vedere" | "visualizza" | "dimmi" | "dammi"
+        )
+    });
+    has_sensitive_term && asks_for_value
+}
+
+fn query_has_sensitive_vault_term(query: &str) -> bool {
+    vault_metadata_terms(query)
+        .iter()
+        .any(|term| vault_term_is_sensitive(term))
+}
+
+fn vault_term_is_sensitive(term: &str) -> bool {
+    matches!(
+        term,
+        "codice"
+            | "fiscale"
+            | "fiscal"
+            | "identity"
+            | "targa"
+            | "plate"
+            | "license"
+            | "vehicles"
+            | "passaporto"
+            | "passport"
+            | "documento"
+            | "carta"
+            | "card"
+            | "password"
+            | "token"
+            | "salute"
+            | "health"
+    )
+}
+
+fn memory_lines_mention_vault(lines: &[String]) -> bool {
+    lines
+        .iter()
+        .any(|line| line.to_ascii_lowercase().contains("vault"))
+}
+
+fn vault_reveal_marker(record: &VaultRecordSummary) -> String {
+    let payload = serde_json::json!({
+        "record_id": record.id,
+        "category": record.category,
+        "label": record.label,
+        "redacted_preview": record.redacted_preview,
+    });
+    format!("{VAULT_REVEAL_OPEN}{payload}{VAULT_REVEAL_CLOSE}")
+}
+
+fn extract_vault_reveal_marker(text: &str) -> Option<String> {
+    let open = text.find(VAULT_REVEAL_OPEN)?;
+    let after_open = open + VAULT_REVEAL_OPEN.len();
+    let close_rel = text[after_open..].find(VAULT_REVEAL_CLOSE)?;
+    let close = after_open + close_rel + VAULT_REVEAL_CLOSE.len();
+    Some(text[open..close].to_string())
+}
+
+fn append_vault_reveal_marker_if_missing(mut text: String, marker: Option<&str>) -> String {
+    let Some(marker) = marker.filter(|marker| !marker.trim().is_empty()) else {
+        return text;
+    };
+    if text.contains(VAULT_REVEAL_OPEN) {
+        return text;
+    }
+    if !text.trim().is_empty() {
+        text.push_str("\n\n");
+    }
+    text.push_str(marker);
+    text
 }
 
 async fn generate_stream(
@@ -19151,7 +19234,12 @@ value (identity document, fiscal/tax code, vehicle plate, health note, credentia
 note), call recall_memory before saying you don't know it: if normal memory has no match, the gateway \
 checks Vault metadata internally and returns only redacted metadata. Never reveal, infer, or guess the \
 secret value from metadata. If a matching record exists, say it is saved in the Vault and local PIN unlock \
-is required to reveal or edit it. \
+is required to reveal or edit it. If recall_memory returns a `reveal_card:` line, COPY the marker after \
+`reveal_card:` EXACTLY into your final answer on its own line; do not paraphrase it. The UI hides that \
+marker and renders the PIN unlock card. Do NOT send or forward raw Vault secret values through \
+generic external channels/tools such as send_message. The configured Telegram authorization channel may \
+receive Vault/payment summaries or approval prompts, but raw-value reveal stays behind the local PIN \
+unlock card unless a dedicated approved reveal flow exists. \
 PLAN (plan-mode): for a non-trivial MULTI-STEP task (development, refactor, involved research, \
 actions with effects) FIRST propose the plan and STOP — do NOT start executing in this turn. Emit \
 on its own line `‹‹PLAN_PROPOSE››{{\"summary\":\"objective in brief\",\"steps\":[\"step 1\",\"step 2\"]}}‹‹/PLAN_PROPOSE››` \
@@ -19758,6 +19846,7 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
     let capability_route_for_runtime = capability_route.clone();
     tokio::spawn(async move {
         let mut accumulated = String::new();
+        let mut pending_vault_reveal_marker: Option<String> = None;
         // Last upstream model error this turn (e.g. a 410 "model retired"), already
         // human-readable. Surfaced as the final answer if the turn produces no text,
         // so a dead/blocked model is obvious instead of a generic "no answer".
@@ -23778,6 +23867,10 @@ Tell the user clearly; do NOT claim it's done."
                             }
                         }
                     }
+                    if name == "recall_memory" {
+                        pending_vault_reveal_marker =
+                            extract_vault_reveal_marker(&result).or(pending_vault_reveal_marker);
+                    }
                     // F2: record this tool's outcome as evidence for the current plan
                     // step (the verifier's input). Skip the plan tool itself so the
                     // evidence reflects the actual WORK, not the bookkeeping. Bounded.
@@ -23825,15 +23918,20 @@ Tell the user clearly; do NOT claim it's done."
                 if pending_confirm {
                     // A write is awaiting the user's confirmation card — end the turn
                     // here (no synthesis, no further tool rounds).
+                    let final_text = append_vault_reveal_marker_if_missing(
+                        collapse_plan_markers(&accumulated),
+                        pending_vault_reveal_marker.as_deref(),
+                    );
                     let _ = emit_stream_event(
                         &tx,
                         GenerateStreamEvent::Done {
-                            text: collapse_plan_markers(&accumulated),
+                            text: final_text.clone(),
                             metrics: TokenMetrics::zero(),
                             redacted_user_text: None,
                         },
                     )
                     .await;
+                    memory_answer = final_text;
                     final_done = true;
                     break;
                 }
@@ -23993,7 +24091,10 @@ Tell the user clearly; do NOT claim it's done."
             }
             // Anti-churn: the live stream carried one ‹‹PLAN›› block per plan tool call;
             // the PERSISTED answer keeps the plan card exactly once (latest state).
-            let final_answer = collapse_plan_markers(&accumulated);
+            let final_answer = append_vault_reveal_marker_if_missing(
+                collapse_plan_markers(&accumulated),
+                pending_vault_reveal_marker.as_deref(),
+            );
             memory_answer = final_answer.clone();
             let _ = emit_stream_event(
                 &tx,
@@ -24102,7 +24203,10 @@ Tell me if you want me to retry or rephrase."
             }
             // Anti-churn safety net for the `accumulated` fallback (synth_text never
             // carries plan blocks, so this is a no-op when synthesis succeeded).
-            let final_text = collapse_plan_markers(&final_text);
+            let final_text = append_vault_reveal_marker_if_missing(
+                collapse_plan_markers(&final_text),
+                pending_vault_reveal_marker.as_deref(),
+            );
             memory_answer = final_text.clone();
             let _ = emit_stream_event(
                 &tx,
@@ -35149,6 +35253,8 @@ const COMPOSIO_CONFIRM_CLOSE: &str = "‹‹/COMPOSIO_CONFIRM››";
 const PAYMENT_APPROVAL_OPEN: &str = "‹‹PAYMENT_APPROVAL››";
 const PAYMENT_APPROVAL_CLOSE: &str = "‹‹/PAYMENT_APPROVAL››";
 const PAYMENT_APPROVAL_TTL_SECONDS: u64 = 300;
+const VAULT_REVEAL_OPEN: &str = "‹‹VAULT_REVEAL››";
+const VAULT_REVEAL_CLOSE: &str = "‹‹/VAULT_REVEAL››";
 
 fn payment_approval_marker(snapshot: &PaymentApprovalSnapshot) -> String {
     let marker = serde_json::json!({ "snapshot": snapshot });
@@ -48352,8 +48458,59 @@ prs.save(Path({path:?}))
 
         assert!(answer.contains("No memories relevant"));
         assert!(answer.contains("Vault records matching"));
+        assert!(answer.contains(super::VAULT_REVEAL_OPEN));
         assert!(answer.contains("Codice Fiscale"));
         assert!(answer.contains("[VAULT:identity:fiscal_code]"));
+        assert!(!answer.contains("CNTFBA76L16F839Y"));
+    }
+
+    #[test]
+    fn vault_reveal_marker_is_appended_when_model_omits_it() {
+        let marker = "‹‹VAULT_REVEAL››{\"record_id\":\"vault_1\",\"category\":\"identity\",\"label\":\"Codice Fiscale\",\"redacted_preview\":\"[VAULT:identity:fiscal_code]\"}‹‹/VAULT_REVEAL››";
+
+        let added = super::append_vault_reveal_marker_if_missing(
+            "Il dato è nel Vault.".to_string(),
+            Some(marker),
+        );
+        assert!(added.contains(marker));
+
+        let unchanged = super::append_vault_reveal_marker_if_missing(added.clone(), Some(marker));
+        assert_eq!(unchanged.matches(super::VAULT_REVEAL_OPEN).count(), 1);
+        assert_eq!(super::extract_vault_reveal_marker(&added).as_deref(), Some(marker));
+    }
+
+    #[test]
+    fn recall_memory_still_offers_vault_reveal_when_memory_mentions_record() {
+        let vault = local_first_vault::SQLiteVaultStore::open_in_memory().unwrap();
+        super::apply_vault_pin_setup(
+            &vault,
+            &super::VaultPinSetupRequest {
+                pin: "123456".to_string(),
+                current_pin: None,
+            },
+        )
+        .expect("pin");
+        let request = super::VaultProposalActionRequest {
+            category: "identity".to_string(),
+            label: "Codice Fiscale".to_string(),
+            redacted_preview: "[VAULT:identity:fiscal_code]".to_string(),
+            secret_value: Some("CNTFBA76L16F839Y".to_string()),
+            pending_id: None,
+            pin: Some("123456".to_string()),
+            thread_id: None,
+            message_id: None,
+        };
+        super::accept_vault_proposal(&vault, &request).expect("accept");
+
+        let answer = super::recall_memory_response_with_vault_fallback(
+            &vault,
+            "codice fiscale",
+            vec!["- [episode] Il codice fiscale è nel Vault.".to_string()],
+            false,
+        );
+
+        assert!(answer.contains("Relevant memories from memory"));
+        assert!(answer.contains(super::VAULT_REVEAL_OPEN));
         assert!(!answer.contains("CNTFBA76L16F839Y"));
     }
 
