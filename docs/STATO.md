@@ -754,6 +754,11 @@ GIÀ FATTO sessione 5g (NON ripartire; tutto su `main`):
   `Maximize2` e il pannello full è più largo (`min(1040px, ...)`) senza scivolare sotto il drawer.
   Aggiornato `test:ui-contract` per bloccare la regressione. Verifiche verdi:
   `npm --prefix apps/desktop run test:ui-contract`, `npm --prefix apps/desktop run build`.
+- **Browser discovery locale**: rafforzata `browser_open_research_discovery_instruction`: per news
+  correnti/ricerche web aperte senza sito esplicito il loop deve partire da search/discovery, non
+  da una singola fonte, e deve allineare lingua del prompt + locale browser (`hl=`/`gl=` quando
+  usa URL di ricerca/news). Test verde:
+  `cargo test -p local-first-desktop-gateway browser_method_guides_open_ended_news_through_discovery_first`.
 - **bug "Continue" (validato live nell'app — puzzle Einstein ora 1 risposta pulita):** 2 cause distinte —
   (1) backend `df65d0b0`: il trace `‹‹REASONING››` rientrava nel contesto modello via
   `build_chat_runtime_prompt` → `strip_display_markers` canonico in lib.rs usato in `normalize_context_text`,

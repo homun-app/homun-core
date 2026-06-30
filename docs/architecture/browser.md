@@ -126,7 +126,10 @@ flowchart TD
   quando l'utente chiede news o ricerca web corrente senza nominare un sito/URL, il loop
   deve partire da una pagina di search/discovery (risultati o news discovery), leggere più
   candidati recenti e solo dopo scegliere le fonti. Saltare direttamente a una singola
-  testata è ammesso solo se l'utente l'ha nominata o se il contesto la impone.
+  testata è ammesso solo se l'utente l'ha nominata o se il contesto la impone. La pagina
+  di discovery deve seguire lingua del prompt e locale del browser; se usa URL di search/news
+  con parametri di mercato deve preferire parametri coerenti (`hl=it`, `gl=IT` per richieste
+  italiane) invece di defaultare a un mercato casuale.
 
 ---
 

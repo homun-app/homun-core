@@ -6804,6 +6804,9 @@ fn browser_open_research_discovery_instruction() -> &'static str {
     "For open-ended current news or broad web research where the user did NOT name \
 a specific site/URL, start with search/discovery (for example a search results or \
 news discovery page), scan multiple recent candidates, then choose the best sources. \
+match the user's language and the browser locale when choosing discovery pages; when \
+using a search/news URL, include locale parameters such as hl=it and gl=IT when \
+appropriate instead of defaulting to an unrelated market. \
 Do not jump directly to one outlet unless the user explicitly named it."
 }
 
@@ -48455,6 +48458,10 @@ prs.save(Path({path:?}))
         let guidance = super::browser_open_research_discovery_instruction();
         assert!(guidance.contains("open-ended current news"));
         assert!(guidance.contains("start with search/discovery"));
+        assert!(guidance.contains("match the user's language"));
+        assert!(guidance.contains("browser locale"));
+        assert!(guidance.contains("hl="));
+        assert!(guidance.contains("gl="));
         assert!(guidance.contains("Do not jump directly to one outlet"));
     }
 
