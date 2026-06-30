@@ -80,6 +80,11 @@ flowchart TD
    importance`) + **recency** (decay esponenziale ~30 giorni, `0.008 * exp(-age/30)`) in
    `hybrid_memory_score` (`main.rs:12706`). In testa, se pertinente, vengono inserite righe
    di stato workflow / provenienza artefatto (`main.rs:12846`). Cap 10 righe.
+   In debug (`HOMUN_DEBUG=1`) la recall emette una riga redatta `memory recall:` con
+   tempi e cardinalita' del percorso caldo (`lock_wait_ms`, `fts_ms`,
+   `query_embedding_ms`, `vector_scan_ms`, `graph_context_ms`, candidate count e
+   `degraded`). La riga non contiene il prompt ne' testo di memoria: serve a misurare
+   il costo reale prima di introdurre cache o indice vettoriale.
 2. **Briefing sempre-attivo** — separato dal RAG per-prompt, raggiunge il modello **ogni
    turno**:
    - `gather_profile_memory` (`main.rs:2302`) via `context_pack`: identità + preferenze
@@ -166,6 +171,10 @@ richiesto con tool minimizzati e auditati. Vedi [vault.md](vault.md).
 - **Embedding parziali storici**: i vettori venivano scritti lazy → recall semantico
   copriva una frazione. `spawn_embedding_catchup` colma il gap a regime, ma resta dipendente
   dall'endpoint di embed.
+- **Vettoriale ancora O(N)**: la prima tranche produzione ha aggiunto timing redatto
+  del percorso caldo, ma non ha ancora sostituito il cosine scan lineare con un indice
+  ANN/SQLite. Prossimo passo: usare i numeri di `memory recall:` per scegliere tra
+  cache query embedding, budget/fallback e indice `sqlite-vec`/`usearch`.
 - **Consolidamento off di default** (`HOMUN_AUTO_CONSOLIDATE_HOURS=0`): senza tick attivo la
   promozione `Candidate→Confirmed` e il dedup avvengono solo lungo le altre operazioni.
 - **Provenienza / catena causale decisione→artefatto→codice→esito**: prevista, oggi parziale.

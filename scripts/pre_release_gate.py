@@ -54,7 +54,18 @@ def build_plan(env: dict[str, str]) -> list[Step]:
         Step("gateway tests", ["cargo", "test", "-p", "local-first-desktop-gateway", "--", "--nocapture"]),
         Step("ui contract", ["npm", "run", "test:ui-contract"], cwd=DESKTOP),
         Step("desktop build", ["npm", "run", "build"], cwd=DESKTOP),
-        Step("eval unit tests", [PYTHON, "-m", "unittest", "scripts.test_eval_suite", "scripts.test_pre_release_gate", "-v"]),
+        Step(
+            "eval unit tests",
+            [
+                PYTHON,
+                "-m",
+                "unittest",
+                "scripts.test_eval_suite",
+                "scripts.test_pre_release_gate",
+                "scripts.test_production_smoke",
+                "-v",
+            ],
+        ),
         Step("eval syntax", [PYTHON, "-m", "py_compile", "scripts/eval_suite.py"]),
     ]
     if truthy(env.get("HOMUN_RUN_MODEL_EVAL")):
@@ -68,6 +79,20 @@ def build_plan(env: dict[str, str]) -> list[Step]:
             if key in env
         }
         plan.append(Step("gateway eval", [PYTHON, "-c", GATEWAY_EVAL_SNIPPET], env=gateway_env))
+    if truthy(env.get("HOMUN_RUN_PRODUCTION_SMOKE")):
+        gateway_base = env.get("HOMUN_EVAL_GATEWAY_BASE", "http://127.0.0.1:18765")
+        smoke_env = {
+            key: env[key]
+            for key in ("HOMUN_EVAL_GATEWAY_TOKEN", "HOMUN_DESKTOP_GATEWAY_TOKEN")
+            if key in env
+        }
+        plan.append(
+            Step(
+                "production smoke",
+                [PYTHON, "scripts/production_smoke.py", "--gateway-base", gateway_base],
+                env=smoke_env,
+            )
+        )
     return plan
 
 

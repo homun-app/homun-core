@@ -697,6 +697,21 @@ GIÀ FATTO sessione 5g (NON ripartire; tutto su `main`):
   bloccato/sbloccato → CVV one-shot consumato). Nel farlo emerso e corretto un bug di
   `ChatStore::message`: il select non includeva `attachments_json`, quindi ogni lookup singolo via
   `message_from_row` falliva con `InvalidColumnIndex(10)` e poteva impedire i rewrite delle card.
+- **Roadmap produzione Homun**: creata `docs/superpowers/plans/2026-06-30-homun-production-roadmap.md`
+  come piano operativo per non buttare il lavoro fatto e avvicinare il prodotto alla beta:
+  baseline/smoke, hot-path memoria, retrieval vettoriale indicizzato, structured chat events,
+  browser reliability, Vault/payment production slice, readiness release e modularizzazione mirata
+  del gateway. Prossimo passo raccomandato: Fase 0 + Fase 1 (baseline e misure memoria), non refactor
+  globale.
+- **Roadmap produzione avviata (Fase 0/1)**: aggiunto `scripts/production_smoke.py` con gli 8 scenari
+  baseline (chat, memoria, Vault reveal/propose, browse, form-fill, URL morto, payment approval) e
+  flag opzionale `HOMUN_RUN_PRODUCTION_SMOKE=1` dentro `scripts/pre_release_gate.py`. Aggiunto anche
+  timing redatto della recall memoria (`[memory] memory recall: ...`) sotto `HOMUN_DEBUG=1`: misura
+  lock wait, FTS, embedding query, vector scan, graph context, candidate count e stato degraded senza
+  loggare prompt o memoria. Smoke live dopo restart gateway: S1 passato in 6.7s con
+  `query_embedding_ms=1477`, lock/FTS/vector ~0; S3 Vault reveal passato in 61s con
+  `VAULT_REVEAL` e plaintext vietato assente, recall `query_embedding_ms=224`, `fts_ms=2`, lock 0.
+  Prossimo passo tecnico: cache/budget query embedding, poi spike indice vettoriale.
 - **bug "Continue" (validato live nell'app — puzzle Einstein ora 1 risposta pulita):** 2 cause distinte —
   (1) backend `df65d0b0`: il trace `‹‹REASONING››` rientrava nel contesto modello via
   `build_chat_runtime_prompt` → `strip_display_markers` canonico in lib.rs usato in `normalize_context_text`,

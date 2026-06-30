@@ -13014,6 +13014,50 @@ struct MemoryCandidate {
     age_days: f32,
 }
 
+#[derive(Debug, Clone, Serialize, Default)]
+struct MemoryRecallTiming {
+    lock_wait_ms: u64,
+    profile_ms: u64,
+    open_loops_ms: u64,
+    fts_ms: u64,
+    query_embedding_ms: Option<u64>,
+    vector_scan_ms: Option<u64>,
+    graph_context_ms: u64,
+    total_ms: u64,
+    vector_candidates: usize,
+    fts_candidates: usize,
+    degraded: bool,
+}
+
+fn elapsed_ms(start: std::time::Instant) -> u64 {
+    start.elapsed().as_millis().min(u128::from(u64::MAX)) as u64
+}
+
+fn memory_recall_timing_trace_line(timing: &MemoryRecallTiming) -> String {
+    format!(
+        "memory recall: total_ms={} lock_wait_ms={} profile_ms={} open_loops_ms={} \
+fts_ms={} query_embedding_ms={} vector_scan_ms={} graph_context_ms={} \
+fts_candidates={} vector_candidates={} degraded={}",
+        timing.total_ms,
+        timing.lock_wait_ms,
+        timing.profile_ms,
+        timing.open_loops_ms,
+        timing.fts_ms,
+        timing
+            .query_embedding_ms
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "none".to_string()),
+        timing
+            .vector_scan_ms
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "none".to_string()),
+        timing.graph_context_ms,
+        timing.fts_candidates,
+        timing.vector_candidates,
+        timing.degraded
+    )
+}
+
 /// Combined relevance score: RRF-fuse the two retrieval ranks (a memory strong in BOTH
 /// lexical AND semantic is rewarded, unlike a plain concat), then add MILD boosts for
 /// importance and recency so relevance still leads but a crucial/fresh memory edges out
@@ -13040,13 +13084,20 @@ fn memory_age_days(created_at: &str, now_secs: i64) -> f32 {
 }
 
 async fn relevant_memory_for_prompt(state: &AppState, prompt: &str) -> Option<String> {
+    let total_start = std::time::Instant::now();
+    let mut timing = MemoryRecallTiming::default();
     let query = prompt.trim();
     if query.chars().count() < 8 {
         return None;
     }
     // Embed the query OFF the lock (the only await) for the semantic pass below.
+    let embedding_start = std::time::Instant::now();
     let query_vec = embed_text(&state.http, query).await;
+    timing.query_embedding_ms = Some(elapsed_ms(embedding_start));
+    timing.degraded = query_vec.is_none();
+    let lock_start = std::time::Instant::now();
     let facade = lock_memory_facade(state).ok()?;
+    timing.lock_wait_ms = elapsed_ms(lock_start);
     let user = gateway_memory_user_id();
     // PROJECT ISOLATION: recall is scoped to the ACTIVE workspace only. In a project we do
     // NOT cross-search the personal scope — "di cosa abbiamo discusso?" must stay about THIS
@@ -13057,6 +13108,7 @@ async fn relevant_memory_for_prompt(state: &AppState, prompt: &str) -> Option<St
 
     // All memories in scope, keyed by ref — the source of text/metadata/created_at for
     // whatever the two passes surface.
+    let profile_start = std::time::Instant::now();
     let records: std::collections::HashMap<String, local_first_memory::MemoryRecord> = facade
         .list_memories_for_ui(&user, &active)
         .map(|ms| {
@@ -13065,6 +13117,7 @@ async fn relevant_memory_for_prompt(state: &AppState, prompt: &str) -> Option<St
                 .collect()
         })
         .unwrap_or_default();
+    timing.profile_ms = elapsed_ms(profile_start);
 
     // Lexical pass (FTS/bm25, policy-filtered) → rank per reference.
     let access = MemoryAccessRequest {
@@ -13083,6 +13136,7 @@ async fn relevant_memory_for_prompt(state: &AppState, prompt: &str) -> Option<St
         broad_query: false,
     };
     let mut fts_rank: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let fts_start = std::time::Instant::now();
     if let Ok(page) = facade.search_memories(MemorySearchRequest {
         access,
         query: query.to_string(),
@@ -13103,12 +13157,15 @@ async fn relevant_memory_for_prompt(state: &AppState, prompt: &str) -> Option<St
                 .or_insert(item.rank);
         }
     }
+    timing.fts_ms = elapsed_ms(fts_start);
+    timing.fts_candidates = fts_rank.len();
 
     // Semantic pass (dense cosine) → rank per reference. Top-k fallback: take the best
     // few above a relaxed floor (not a hard 0.6 cutoff) — RRF weights weak ones gently,
     // so a strong-but-sub-threshold paraphrase still gets a chance instead of vanishing.
     let mut dense_rank: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
     if let Some(query_vec) = query_vec.as_ref() {
+        let vector_start = std::time::Instant::now();
         let mut scored: Vec<(String, f32)> = Vec::new();
         if let Ok(embeddings) = facade.list_embeddings(&user, &active) {
             for (reference, vector) in embeddings {
@@ -13122,6 +13179,8 @@ async fn relevant_memory_for_prompt(state: &AppState, prompt: &str) -> Option<St
         for (i, (reference, _)) in scored.into_iter().take(8).enumerate() {
             dense_rank.entry(reference).or_insert(i + 1);
         }
+        timing.vector_scan_ms = Some(elapsed_ms(vector_start));
+        timing.vector_candidates = dense_rank.len();
     }
 
     // Fuse: union of both passes, ranked by RRF + importance + recency.
@@ -13159,6 +13218,7 @@ async fn relevant_memory_for_prompt(state: &AppState, prompt: &str) -> Option<St
             lines.push(line);
         }
     }
+    let graph_start = std::time::Instant::now();
     if let Some(workflow) = workflow_status_context_for_query(&facade, &user, &active, query) {
         lines.insert(0, workflow);
     } else if let Some(provenance) =
@@ -13166,7 +13226,12 @@ async fn relevant_memory_for_prompt(state: &AppState, prompt: &str) -> Option<St
     {
         lines.insert(0, provenance);
     }
+    timing.graph_context_ms = elapsed_ms(graph_start);
     lines.truncate(10);
+    timing.total_ms = elapsed_ms(total_start);
+    if verbose_debug() {
+        eprintln!("[memory] {}", memory_recall_timing_trace_line(&timing));
+    }
     if lines.is_empty() {
         return None;
     }
@@ -48476,7 +48541,10 @@ prs.save(Path({path:?}))
 
         let unchanged = super::append_vault_reveal_marker_if_missing(added.clone(), Some(marker));
         assert_eq!(unchanged.matches(super::VAULT_REVEAL_OPEN).count(), 1);
-        assert_eq!(super::extract_vault_reveal_marker(&added).as_deref(), Some(marker));
+        assert_eq!(
+            super::extract_vault_reveal_marker(&added).as_deref(),
+            Some(marker)
+        );
     }
 
     #[test]
@@ -48512,6 +48580,35 @@ prs.save(Path({path:?}))
         assert!(answer.contains("Relevant memories from memory"));
         assert!(answer.contains(super::VAULT_REVEAL_OPEN));
         assert!(!answer.contains("CNTFBA76L16F839Y"));
+    }
+
+    #[test]
+    fn memory_recall_timing_trace_is_stable_and_redacted() {
+        let timing = super::MemoryRecallTiming {
+            lock_wait_ms: 3,
+            profile_ms: 5,
+            open_loops_ms: 7,
+            fts_ms: 11,
+            query_embedding_ms: Some(13),
+            vector_scan_ms: Some(17),
+            graph_context_ms: 19,
+            total_ms: 23,
+            vector_candidates: 29,
+            fts_candidates: 31,
+            degraded: true,
+        };
+
+        let line = super::memory_recall_timing_trace_line(&timing);
+
+        assert!(line.starts_with("memory recall:"));
+        assert!(line.contains("total_ms=23"));
+        assert!(line.contains("lock_wait_ms=3"));
+        assert!(line.contains("query_embedding_ms=13"));
+        assert!(line.contains("vector_candidates=29"));
+        assert!(line.contains("fts_candidates=31"));
+        assert!(line.contains("degraded=true"));
+        assert!(!line.contains("codice"));
+        assert!(!line.contains("fiscale"));
     }
 
     #[test]
