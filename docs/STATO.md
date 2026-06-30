@@ -669,7 +669,11 @@ GIÀ FATTO sessione 5g (NON ripartire; tutto su `main`):
   secret siano sottostringhe esatte del prompt e altrimenti usa il classifier deterministico come safety
   net. Se rileva dati sensibili, non chiama il modello chat: lo stream `Done` porta `redacted_user_text`,
   il frontend committa il messaggio utente redatto e l'assistant mostra solo `VAULT_PROPOSE` con
-  `pending_id`. Il raw resta nel sidecar volatile e viene cifrato nel Vault solo dopo accept con PIN.
+  `pending_id`. Il raw resta nel sidecar volatile.
+- **Vault proposal UX/policy fix**: la card `VAULT_PROPOSE` ora usa i token tema (niente card chiara
+  hardcoded), non chiede PIN per salvare e si compatta dopo save/dismiss. L'accept salva un record
+  metadata-only con `pending_id`; il PIN serve quando l'utente fa reveal/edit, momento in cui il gateway
+  materializza il pending, lo cifra in `vault_secret_material` e consuma il sidecar.
 - **Payment Approval runtime MVP**: aggiunto marker `PAYMENT_APPROVAL`, card chat con
   riepilogo merchant/dominio/importo/prodotto/metodo, endpoint
   `/api/vault/payment-approvals/approve` con PIN locale + CVV/CV2 one-shot, grant volatile

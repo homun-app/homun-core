@@ -35286,7 +35286,13 @@ async fn vault_record_reveal(
 ) -> Result<Json<VaultRecordRevealResponse>, GatewayError> {
     let record_id = VaultRecordId::new(id).map_err(invalid_vault_proposal)?;
     let vault_store = lock_vault_store(&state)?;
-    reveal_vault_record_secret(&vault_store, &record_id, &request).map(Json)
+    reveal_vault_record_secret(
+        &vault_store,
+        Some(&state.pending_vault_proposals),
+        &record_id,
+        &request,
+    )
+    .map(Json)
 }
 
 async fn vault_pin_status(
@@ -35385,6 +35391,7 @@ fn vault_record_from_proposal(request: &VaultProposalActionRequest) -> Result<Va
     .map_err(|error| error.to_string())?;
     let metadata = serde_json::json!({
         "redacted_preview": request.redacted_preview,
+        "pending_id": request.pending_id,
         "source": "vault_propose",
         "thread_id": request.thread_id,
         "message_id": request.message_id,
@@ -35445,19 +35452,19 @@ fn unlock_vault_master_key(
 
 fn reveal_vault_record_secret(
     vault_store: &SQLiteVaultStore,
+    pending_store: Option<&privacy_guard::PendingVaultProposalStore>,
     record_id: &VaultRecordId,
     request: &VaultRecordRevealRequest,
 ) -> Result<VaultRecordRevealResponse, GatewayError> {
     let record = load_vault_record(vault_store, record_id)?;
     let master_key = unlock_vault_master_key(vault_store, &request.pin)?;
-    let secret = vault_store
+    let secret = match vault_store
         .get_secret_material(record_id, &master_key)
         .map_err(vault_store_error)?
-        .ok_or_else(|| GatewayError {
-            status: StatusCode::NOT_FOUND,
-            code: "vault_secret_not_found",
-            message: "Vault secret material not found".to_string(),
-        })?;
+    {
+        Some(secret) => secret,
+        None => materialize_pending_vault_secret(vault_store, pending_store, &record, &master_key)?,
+    };
     let secret_value = secret
         .expose_utf8()
         .map_err(|error| vault_store_error(error.to_string()))?;
@@ -35466,6 +35473,53 @@ fn reveal_vault_record_secret(
         record: vault_record_summary(record),
         secret_value,
     })
+}
+
+fn materialize_pending_vault_secret(
+    vault_store: &SQLiteVaultStore,
+    pending_store: Option<&privacy_guard::PendingVaultProposalStore>,
+    record: &VaultRecord,
+    master_key: &[u8; 32],
+) -> Result<SecretMaterial, GatewayError> {
+    let pending_id = record
+        .metadata
+        .get("pending_id")
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| GatewayError {
+            status: StatusCode::NOT_FOUND,
+            code: "vault_secret_not_found",
+            message: "Vault secret material not found".to_string(),
+        })?;
+    let pending_store = pending_store.ok_or_else(|| GatewayError {
+        status: StatusCode::NOT_FOUND,
+        code: "vault_pending_unavailable",
+        message: "Pending Vault secret is no longer available".to_string(),
+    })?;
+    let pending = pending_store.get(pending_id).ok_or_else(|| GatewayError {
+        status: StatusCode::NOT_FOUND,
+        code: "vault_pending_expired",
+        message: "Pending Vault secret expired".to_string(),
+    })?;
+    let redacted_preview = record
+        .metadata
+        .get("redacted_preview")
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    if pending.category != vault_category_key(record.category)
+        || pending.label != record.label
+        || pending.redacted_preview != redacted_preview
+    {
+        return Err(invalid_vault_proposal(
+            "Pending Vault proposal does not match this record".to_string(),
+        ));
+    }
+    let material = SecretMaterial::from_string(pending.secret_value.clone());
+    vault_store
+        .put_secret_material(&record.id, master_key, material.clone())
+        .map_err(vault_store_error)?;
+    let _ = pending_store.take(pending_id);
+    Ok(material)
 }
 
 fn update_vault_record(
@@ -35566,7 +35620,7 @@ fn accept_vault_proposal_with_pending(
     let pending_store = pending_store.ok_or_else(|| {
         invalid_vault_proposal("Pending Vault proposal store is unavailable".to_string())
     })?;
-    let pending = pending_store.take(pending_id).ok_or_else(|| {
+    let pending = pending_store.get(pending_id).ok_or_else(|| {
         invalid_vault_proposal("Pending Vault proposal expired or was already used".to_string())
     })?;
     if pending.category != request.category
@@ -35576,6 +35630,15 @@ fn accept_vault_proposal_with_pending(
         return Err(invalid_vault_proposal(
             "Pending Vault proposal does not match this card".to_string(),
         ));
+    }
+    if request
+        .pin
+        .as_deref()
+        .map(str::trim)
+        .filter(|pin| !pin.is_empty())
+        .is_none()
+    {
+        return accept_vault_proposal(vault_store, request);
     }
     let resolved = VaultProposalActionRequest {
         category: request.category.clone(),
@@ -35587,7 +35650,9 @@ fn accept_vault_proposal_with_pending(
         thread_id: request.thread_id.clone(),
         message_id: request.message_id.clone(),
     };
-    accept_vault_proposal(vault_store, &resolved)
+    let response = accept_vault_proposal(vault_store, &resolved)?;
+    let _ = pending_store.take(pending_id);
+    Ok(response)
 }
 
 fn local_pin_verifier_from_request(
@@ -48179,6 +48244,7 @@ prs.save(Path({path:?}))
 
         let revealed = super::reveal_vault_record_secret(
             &vault,
+            None,
             &record_id,
             &super::VaultRecordRevealRequest {
                 pin: "123456".to_string(),
@@ -48190,6 +48256,7 @@ prs.save(Path({path:?}))
         assert_eq!(revealed.secret_value, "CNTFBA76L16F839Y");
         let wrong_pin = super::reveal_vault_record_secret(
             &vault,
+            None,
             &record_id,
             &super::VaultRecordRevealRequest {
                 pin: "000000".to_string(),
@@ -48208,6 +48275,7 @@ prs.save(Path({path:?}))
         assert_eq!(updated.record.label, "Codice Fiscale corretto");
         let revealed = super::reveal_vault_record_secret(
             &vault,
+            None,
             &record_id,
             &super::VaultRecordRevealRequest {
                 pin: "123456".to_string(),
@@ -48218,7 +48286,7 @@ prs.save(Path({path:?}))
     }
 
     #[test]
-    fn vault_proposal_accept_uses_pending_sidecar_secret() {
+    fn vault_proposal_accept_saves_pending_without_pin_then_reveal_materializes_secret() {
         let vault = local_first_vault::SQLiteVaultStore::open_in_memory().unwrap();
         super::apply_vault_pin_setup(
             &vault,
@@ -48241,17 +48309,19 @@ prs.save(Path({path:?}))
             redacted_preview: "[VAULT:vehicles:plate]".to_string(),
             secret_value: None,
             pending_id: Some(pending_id.clone()),
-            pin: Some("123456".to_string()),
+            pin: None,
             thread_id: None,
             message_id: None,
         };
 
         let response = super::accept_vault_proposal_with_pending(&vault, Some(&pending), &request)
             .expect("accept");
+        assert!(pending.get(&pending_id).is_some());
 
         let record_id = response.record_id.parse().unwrap();
         let revealed = super::reveal_vault_record_secret(
             &vault,
+            Some(&pending),
             &record_id,
             &super::VaultRecordRevealRequest {
                 pin: "123456".to_string(),

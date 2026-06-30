@@ -184,6 +184,10 @@ impl PendingVaultProposalStore {
     pub(crate) fn take(&self, id: &str) -> Option<PendingVaultProposal> {
         self.inner.lock().ok()?.remove(id)
     }
+
+    pub(crate) fn get(&self, id: &str) -> Option<PendingVaultProposal> {
+        self.inner.lock().ok()?.get(id).cloned()
+    }
 }
 
 pub(crate) struct PrivacyGuardIntercept {

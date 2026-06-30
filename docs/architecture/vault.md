@@ -89,8 +89,9 @@ La chat usa un **Privacy Guard pre-turn** prima del loop agentico principale:
 3. se trova dati sensibili, chiude il turno senza chiamare il modello chat: il
    messaggio utente committato e' redatto e l'assistant contiene solo card
    `VAULT_PROPOSE`;
-4. il raw secret vive in un sidecar volatile `pending_id`, consumabile una sola
-   volta da `/api/vault/proposals/accept` con PIN locale.
+4. il raw secret vive in un sidecar volatile `pending_id`: il salvataggio chat
+   conferma il record metadata-only senza PIN; il sidecar viene materializzato e
+   cifrato solo al primo reveal/edit con PIN locale.
 
 Il classifier deterministico resta fallback/safety net e copre:
 
@@ -113,15 +114,16 @@ Il backend espone un formatter per:
 ```
 
 Il frontend lo nasconde dalla prosa e mostra una card. Le card create dal Privacy
-Guard includono `pending_id` e richiedono PIN locale: il raw non passa dal transcript,
-ma viene recuperato dal sidecar volatile e cifrato nel Vault solo dopo l'accept.
-`Salva nel Vault` chiama
+Guard includono `pending_id`, ma non chiedono PIN al salvataggio: il raw non passa
+dal transcript e `Save to Vault` crea subito un record metadata-only. Il PIN serve
+quando l'utente vuole vedere o correggere il valore: il reveal recupera il sidecar
+volatile, lo cifra in `vault_secret_material` e poi lo consuma. `Save to Vault` chiama
 `/api/vault/proposals/accept` e persiste un `VaultRecord` in `~/.homun/vault.sqlite`
 con label, categoria, preview redatta, `thread_id`/`message_id` opzionali e un
 `SecretRef` opaco. Se la richiesta porta anche `secret_value`, deve portare un `pin`:
 il gateway sblocca la master key e salva il valore in `vault_secret_material`
 cifrato. Le card chat attuali non trasportano raw secret nel transcript, quindi
-salvano solo metadati redatti. Per valori manuali, Settings > Vault usa lo stesso
+salvano metadati redatti + `pending_id`. Per valori manuali, Settings > Vault usa lo stesso
 endpoint con `secret_value` e PIN locale: il valore entra nel gateway cifrato e non
 nel transcript della chat. `Non salvare`
 chiama `/api/vault/proposals/dismiss`; oggi e' solo ack locale, senza audit

@@ -345,7 +345,7 @@ assertContains("src/lib/coreBridge.ts", "message_id: ctx.messageId", "Payment ap
 assertContains("src/data/mockData.ts", "id: \"vault\"", "Vault must be a separate Settings section");
 assertContains("src/components/SettingsView.tsx", "coreBridge.vaultPinSetup", "Vault Settings must configure the local PIN through the bridge");
 assertContains("src/components/ChatView.tsx", "coreBridge.vaultProposalAccept", "Vault proposal card must expose an accept action");
-assertContains("src/components/ChatView.tsx", "Salva nel Vault", "Vault proposal card must offer an explicit save action");
+assertContains("src/components/ChatView.tsx", "Save to Vault", "Vault proposal card must offer an explicit save action");
 assertContains("src/App.tsx", "mapCoreMemoryDashboard", "desktop memory page must map the gateway memory dashboard read model");
 assertContains("src/App.tsx", "mapCoreCapabilitySnapshot", "desktop connections page must map the gateway capability read model");
 assertContains("src/lib/chatApi.ts", "/api/chat/threads", "chat threads must load from the local Rust gateway first");

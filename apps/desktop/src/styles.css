@@ -9995,14 +9995,16 @@ body.resizing-drawer {
 
 /* Composio write-confirmation card (inline in chat) */
 .cmp-confirm {
-  border: 1px solid #e0a93b;
-  background: #fdf6e8;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text);
   border-radius: 12px;
   padding: var(--s4);
   margin-top: var(--s3);
   display: flex;
   flex-direction: column;
   gap: var(--s3);
+  box-shadow: var(--shadow-soft);
 }
 /* Single/multi-choice question card (Claude-Code style). */
 .choices-card {
@@ -10242,20 +10244,20 @@ body.resizing-drawer {
   font-size: 11.5px;
   color: var(--muted);
 }
-.cmp-confirm.destructive { border-color: #c0392b; background: #fdecea; }
-.cmp-confirm.destructive .cmp-confirm-head svg { color: #c0392b; }
+.cmp-confirm.destructive { border-color: color-mix(in srgb, var(--danger, #c0392b) 50%, var(--line)); background: var(--surface); }
+.cmp-confirm.destructive .cmp-confirm-head svg { color: var(--danger, #c0392b); }
 .cmp-confirm-warn {
   margin: 0;
   font-size: 12.5px;
   font-weight: 600;
-  color: #a5281b;
+  color: var(--danger, #a5281b);
 }
 .cmp-confirm-head { display: flex; align-items: center; gap: 8px; font-size: 13.5px; }
-.cmp-confirm-head svg { color: #b5851f; }
+.cmp-confirm-head svg { color: var(--brand); }
 .cmp-confirm-head code {
   font-family: var(--mono, ui-monospace, monospace);
   font-size: 12px;
-  background: rgba(0,0,0,0.06);
+  background: var(--surface-muted);
   border-radius: 5px;
   padding: 1px 6px;
 }
@@ -10268,7 +10270,7 @@ body.resizing-drawer {
 .cmp-field-check { display: flex; align-items: center; gap: 8px; font-size: 13px; }
 .cmp-field-check input { width: 15px; height: 15px; }
 .cmp-confirm-empty { font-size: 12.5px; color: var(--muted); margin: 0; }
-.cmp-confirm-err { font-size: 12.5px; color: #b42318; margin: 0; }
+.cmp-confirm-err { font-size: 12.5px; color: var(--danger, #b42318); margin: 0; }
 .cmp-confirm-actions { display: flex; gap: var(--s2); }
 .cmp-confirm-note { font-size: 11.5px; color: var(--muted); line-height: 1.45; margin: var(--s2) 0 0; }
 .cmp-confirm.done {

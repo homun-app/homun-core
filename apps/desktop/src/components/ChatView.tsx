@@ -5970,13 +5970,12 @@ function VaultProposeCard({
     "idle",
   );
   const [note, setNote] = useState<string | null>(null);
-  const [pin, setPin] = useState("");
 
   const payload = {
     category: proposal.category,
     label: proposal.label,
     redacted_preview: proposal.redacted_preview,
-    ...(proposal.pending_id ? { pending_id: proposal.pending_id, pin } : {}),
+    ...(proposal.pending_id ? { pending_id: proposal.pending_id } : {}),
     ...(threadId ? { thread_id: threadId } : {}),
     ...(messageId ? { message_id: messageId } : {}),
   };
@@ -6009,53 +6008,50 @@ function VaultProposeCard({
 
   const busy = status === "saving";
 
+  if (status === "saved") {
+    return (
+      <div className="cmp-confirm done">
+        <Check size={15} />
+        <span>Saved to Vault</span>
+      </div>
+    );
+  }
+
+  if (status === "dismissed") {
+    return (
+      <div className="cmp-confirm done">
+        <Check size={15} />
+        <span>Vault proposal dismissed</span>
+      </div>
+    );
+  }
+
   return (
     <div className="cmp-confirm">
       <div className="cmp-confirm-head">
         <ShieldCheck size={15} />
-        <strong>Dato sensibile rilevato</strong>
+        <strong>Sensitive data detected</strong>
         <span className="cmp-confirm-name">{proposal.category}</span>
       </div>
       <div className="cmp-confirm-fields">
         <label>Record</label>
-        <input readOnly value={proposal.label} />
-        <label>Preview redatta</label>
-        <input readOnly value={proposal.redacted_preview} />
+        <input className="set-input" readOnly value={proposal.label} />
+        <label>Redacted preview</label>
+        <input className="set-input" readOnly value={proposal.redacted_preview} />
       </div>
       <p className="cmp-confirm-note">
-        Il dato non entra nella memoria normale in chiaro. La card salva metadati redatti nel Vault
-        e cifra il valore solo dopo il PIN locale.
+        The value stays out of normal memory. Save stores the redacted record now; local PIN is
+        required later to reveal or edit the value.
       </p>
-      {proposal.pending_id && (
-        <div className="cmp-confirm-fields">
-          <label>PIN locale</label>
-          <input
-            value={pin}
-            onChange={(event) => setPin(event.target.value)}
-            placeholder="PIN"
-            type="password"
-          />
-        </div>
-      )}
-      {status === "error" && <p className="cmp-confirm-err">Errore: {note}</p>}
-      {(status === "saved" || status === "dismissed") && note && (
-        <p className="cmp-confirm-note">{note}</p>
-      )}
-      {status !== "saved" && status !== "dismissed" && (
-        <div className="cmp-confirm-actions">
-          <button
-            className="set-btn primary"
-            type="button"
-            disabled={busy || (Boolean(proposal.pending_id) && pin.length === 0)}
-            onClick={() => void save()}
-          >
-            Salva nel Vault
-          </button>
-          <button className="set-btn" type="button" disabled={busy} onClick={() => void dismiss()}>
-            Non salvare
-          </button>
-        </div>
-      )}
+      {status === "error" && <p className="cmp-confirm-err">Error: {note}</p>}
+      <div className="cmp-confirm-actions">
+        <button className="set-btn primary" type="button" disabled={busy} onClick={() => void save()}>
+          Save to Vault
+        </button>
+        <button className="set-btn" type="button" disabled={busy} onClick={() => void dismiss()}>
+          Do not save
+        </button>
+      </div>
     </div>
   );
 }
