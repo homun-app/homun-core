@@ -654,6 +654,9 @@ GIÀ FATTO sessione 5g (NON ripartire; tutto su `main`):
   categoria + label dei record salvati da Settings > Vault > Dati sensibili. L'edit preserva
   `SecretRef`, `redacted_preview` e materiale cifrato; corretta anche la regressione per cui la lista dei
   record era finita nella scheda PIN invece che in `Dati sensibili`.
+- **Vault lista-first + Add modale**: la scheda `Dati sensibili` ora apre prima la lista dei record salvati
+  con azioni `Add`/`Refresh`; l'inserimento raw si fa in una modale themed (`set-modal`) e chiusura/salvataggio
+  svuotano valore e PIN dallo stato renderer.
 - **Payment Approval runtime MVP**: aggiunto marker `PAYMENT_APPROVAL`, card chat con
   riepilogo merchant/dominio/importo/prodotto/metodo, endpoint
   `/api/vault/payment-approvals/approve` con PIN locale + CVV/CV2 one-shot, grant volatile

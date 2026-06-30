@@ -29,9 +29,9 @@ Non e' memoria: la memoria puo' contenere solo testo redatto o riferimenti
   `VAULT_PROPOSE`, con azioni salva/scarta, e del marker `PAYMENT_APPROVAL`.
 - `apps/desktop/src/components/SettingsView.tsx`: sezione Settings separata `Vault`
   per status/setup/verifica del PIN locale e inserimento manuale di dati sensibili
-  senza passare dalla chat; la tab `Dati sensibili` mostra anche la lista
-  metadata-only dei record salvati e consente modificarne label/categoria o
-  eliminarli.
+  senza passare dalla chat; la tab `Dati sensibili` e' lista-first, mostra i record
+  metadata-only salvati e apre l'inserimento manuale in una modale themed `Add`.
+  I record salvati consentono modifica label/categoria o eliminazione.
 - `crates/desktop-gateway/src/main.rs`: endpoint
   `/api/vault/records` (`GET`), `/api/vault/records/{id}` (`PATCH`, `DELETE`),
   `/api/vault/proposals/accept`, `/api/vault/proposals/dismiss`,
@@ -120,9 +120,11 @@ Il PIN e' pensato come gate locale per CVV one-shot e approvazioni pagamento e c
 wrapping key della master key locale del Vault. Non sostituisce il TOTP futuro
 dell'app.
 
-La UI espone setup/verifica PIN e inserimento/lista/delete manuale nella sezione
-Settings `Vault`, separata da `Memory`. Il layout segue il pattern tabs dei
-Connectors: `Dati sensibili` e `PIN locale`.
+La UI espone setup/verifica PIN e lista/edit/delete manuale nella sezione Settings
+`Vault`, separata da `Memory`. Il layout segue il pattern tabs dei Connectors:
+`Dati sensibili` e `PIN locale`. `Dati sensibili` privilegia la lista; il valore raw
+si inserisce solo nella modale `Add`, che svuota valore e PIN alla chiusura o dopo il
+salvataggio.
 
 ## Pagamenti
 

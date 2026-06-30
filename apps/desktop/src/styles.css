@@ -8896,6 +8896,16 @@ body.resizing-drawer {
   gap: 8px;
   margin-top: var(--s3);
 }
+.vault-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.vault-toolbar-actions .set-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
 .vault-record-row {
   display: flex;
   align-items: center;
@@ -8936,6 +8946,32 @@ body.resizing-drawer {
   gap: 8px;
   margin-top: 10px;
   max-width: 620px;
+}
+.vault-add-modal {
+  width: min(720px, 100%);
+}
+.vault-add-modal .mdl-detail-head {
+  align-items: flex-start;
+}
+.vault-add-modal .set-badge {
+  margin-left: auto;
+  margin-right: 38px;
+}
+.vault-add-form .set-row {
+  grid-template-columns: minmax(170px, 0.36fr) minmax(260px, 1fr);
+}
+.vault-add-form .set-input {
+  width: 100%;
+}
+.vault-add-form textarea.set-input {
+  resize: vertical;
+  min-height: 112px;
+}
+.vault-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: var(--s2);
 }
 .set-card-top {
   display: flex;

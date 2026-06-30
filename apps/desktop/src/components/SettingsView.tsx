@@ -2256,6 +2256,7 @@ function VaultPane() {
   const [manualSecretValue, setManualSecretValue] = useState("");
   const [manualSecretPin, setManualSecretPin] = useState("");
   const [vaultTab, setVaultTab] = useState<"sensitive" | "pin">("sensitive");
+  const [vaultAddOpen, setVaultAddOpen] = useState(false);
   const [vaultRecords, setVaultRecords] = useState<VaultRecordSummary[]>([]);
   const [recordsLoading, setRecordsLoading] = useState(false);
   const [editingVaultRecord, setEditingVaultRecord] = useState<VaultRecordSummary | null>(null);
@@ -2283,6 +2284,19 @@ function VaultPane() {
     setEditingVaultRecord(null);
     setEditVaultLabel("");
     setEditVaultCategory("private_notes");
+  }
+
+  function openVaultAddModal() {
+    setVaultAddOpen(true);
+    setNote(null);
+    setError(null);
+  }
+
+  function closeVaultAddModal() {
+    setVaultAddOpen(false);
+    setManualSecretValue("");
+    setManualSecretPin("");
+    setError(null);
   }
 
   async function refresh() {
@@ -2383,6 +2397,7 @@ function VaultPane() {
       setManualSecretLabel("");
       setManualSecretValue("");
       setManualSecretPin("");
+      setVaultAddOpen(false);
       await refreshVaultRecords();
       setNote(t("settings.vaultManualSaved", { id: result.record_id }));
     } catch (err) {
@@ -2563,191 +2578,222 @@ function VaultPane() {
         </div>
       )}
       {vaultTab === "sensitive" && (
-        <div className="set-card" role="tabpanel">
-          <div className="set-card-top">
-            <span className="set-card-name">{t("settings.vaultSaveSensitive")}</span>
-            <span className="set-badge muted">{t("settings.vaultEncrypted")}</span>
-          </div>
-          <p className="set-hint">
-            {t("settings.vaultSaveSensitiveHint")}
-          </p>
-          <div className="set-card-divider" />
-          <div className="set-rows">
-            <div className="set-row">
-              <div>
-                <div className="rk">{t("settings.vaultCategory")}</div>
-                <div className="rv">{t("settings.vaultCategoryDesc")}</div>
-              </div>
-              <select
-                className="set-input"
-                value={manualSecretCategory}
-                onChange={(event) => setManualSecretCategory(event.target.value)}
-                style={{ minWidth: 220 }}
-              >
-                {vaultCategories.map((category) => (
-                  <option key={category.value} value={category.value}>
-                    {category.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="set-row">
-              <div>
-                <div className="rk">{t("settings.vaultLabel")}</div>
-                <div className="rv">{t("settings.vaultLabelDesc")}</div>
-              </div>
-              <input
-                className="set-input"
-                value={manualSecretLabel}
-                placeholder={t("settings.vaultLabelPlaceholder")}
-                onChange={(event) => setManualSecretLabel(event.target.value)}
-                style={{ minWidth: 320 }}
-              />
-            </div>
-            <div className="set-row">
-              <div>
-                <div className="rk">{t("settings.vaultValue")}</div>
-                <div className="rv">{t("settings.vaultValueDesc")}</div>
-              </div>
-              <textarea
-                className="set-input"
-                value={manualSecretValue}
-                placeholder={t("settings.vaultValuePlaceholder")}
-                rows={3}
-                onChange={(event) => setManualSecretValue(event.target.value)}
-                style={{ minWidth: 320, resize: "vertical" }}
-              />
-            </div>
-            <div className="set-row">
-              <div>
-                <div className="rk">{t("settings.vaultLocalPin")}</div>
-                <div className="rv">{t("settings.vaultManualPinDesc")}</div>
-              </div>
-              <div style={{ display: "flex", gap: 8, minWidth: 320 }}>
-                <input
-                  className="set-input"
-                  inputMode="numeric"
-                  type="password"
-                  value={manualSecretPin}
-                  placeholder={t("settings.vaultPinPlaceholder")}
-                  onChange={(event) => setManualSecretPin(event.target.value)}
-                />
+        <>
+          <div className="set-card" role="tabpanel">
+            <div className="set-card-top">
+              <span className="set-card-name">{t("settings.vaultSavedRecords")}</span>
+              <div className="vault-toolbar-actions">
                 <button
                   className="set-btn primary"
                   type="button"
-                  disabled={
-                    busy ||
-                    !configured ||
-                    manualSecretLabel.trim().length === 0 ||
-                    manualSecretValue.trim().length === 0 ||
-                    manualSecretPin.length === 0
-                  }
-                  onClick={() => void saveManualSecret()}
+                  onClick={openVaultAddModal}
                 >
-                  {t("settings.vaultSave")}
+                  <Plus size={14} />
+                  {t("common.add")}
+                </button>
+                <button
+                  className="set-btn"
+                  type="button"
+                  disabled={recordsLoading}
+                  onClick={() => void refreshVaultRecords()}
+                >
+                  {t("settings.refresh")}
                 </button>
               </div>
             </div>
-          </div>
-          <div className="set-card-divider" />
-          <div className="set-card-top">
-            <span className="set-card-name">{t("settings.vaultSavedRecords")}</span>
-            <button
-              className="set-btn"
-              type="button"
-              disabled={recordsLoading}
-              onClick={() => void refreshVaultRecords()}
-            >
-              {t("settings.refresh")}
-            </button>
-          </div>
-          <div className="vault-record-list">
-            {recordsLoading && vaultRecords.length === 0 && (
-              <p className="set-hint">{t("settings.loadingShort")}</p>
-            )}
-            {!recordsLoading && vaultRecords.length === 0 && (
-              <p className="set-hint">{t("settings.vaultNoRecords")}</p>
-            )}
-            {vaultRecords.map((record) => {
-              const editing = editingVaultRecord?.id === record.id;
-              return (
-                <div className="vault-record-row" key={record.id}>
-                  <div>
-                    <div className="vault-record-title">{record.label}</div>
-                    <div className="vault-record-meta">
-                      {vaultCategoryLabel(record.category)} · {record.redacted_preview}
-                    </div>
-                    {editing && (
-                      <div className="vault-record-edit">
-                        <select
-                          className="set-input"
-                          value={editVaultCategory}
-                          aria-label={t("settings.vaultEditCategory")}
-                          onChange={(event) => setEditVaultCategory(event.target.value)}
-                        >
-                          {vaultCategories.map((category) => (
-                            <option key={category.value} value={category.value}>
-                              {category.label}
-                            </option>
-                          ))}
-                        </select>
-                        <input
-                          className="set-input"
-                          value={editVaultLabel}
-                          aria-label={t("settings.vaultEditLabel")}
-                          onChange={(event) => setEditVaultLabel(event.target.value)}
-                        />
+            <p className="set-hint">
+              {t("settings.vaultSaveSensitiveHint")}
+            </p>
+            <div className="set-card-divider" />
+            <div className="vault-record-list">
+              {recordsLoading && vaultRecords.length === 0 && (
+                <p className="set-hint">{t("settings.loadingShort")}</p>
+              )}
+              {!recordsLoading && vaultRecords.length === 0 && (
+                <p className="set-hint">{t("settings.vaultNoRecords")}</p>
+              )}
+              {vaultRecords.map((record) => {
+                const editing = editingVaultRecord?.id === record.id;
+                return (
+                  <div className="vault-record-row" key={record.id}>
+                    <div>
+                      <div className="vault-record-title">{record.label}</div>
+                      <div className="vault-record-meta">
+                        {vaultCategoryLabel(record.category)} · {record.redacted_preview}
                       </div>
-                    )}
-                  </div>
-                  <div className="vault-record-actions">
-                    {editing ? (
-                      <>
+                      {editing && (
+                        <div className="vault-record-edit">
+                          <select
+                            className="set-input"
+                            value={editVaultCategory}
+                            aria-label={t("settings.vaultEditCategory")}
+                            onChange={(event) => setEditVaultCategory(event.target.value)}
+                          >
+                            {vaultCategories.map((category) => (
+                              <option key={category.value} value={category.value}>
+                                {category.label}
+                              </option>
+                            ))}
+                          </select>
+                          <input
+                            className="set-input"
+                            value={editVaultLabel}
+                            aria-label={t("settings.vaultEditLabel")}
+                            onChange={(event) => setEditVaultLabel(event.target.value)}
+                          />
+                        </div>
+                      )}
+                    </div>
+                    <div className="vault-record-actions">
+                      {editing ? (
+                        <>
+                          <button
+                            className="set-btn"
+                            type="button"
+                            disabled={busy}
+                            onClick={cancelVaultRecordEdit}
+                          >
+                            {t("settings.vaultCancelEdit")}
+                          </button>
+                          <button
+                            className="set-btn primary"
+                            type="button"
+                            disabled={busy || editVaultLabel.trim().length === 0}
+                            onClick={() => void saveVaultRecordEdit()}
+                          >
+                            {t("settings.vaultSaveEdit")}
+                          </button>
+                        </>
+                      ) : (
                         <button
                           className="set-btn"
                           type="button"
                           disabled={busy}
-                          onClick={cancelVaultRecordEdit}
+                          onClick={() => startVaultRecordEdit(record)}
                         >
-                          {t("settings.vaultCancelEdit")}
+                          <Pencil size={14} />
+                          {t("settings.vaultEdit")}
                         </button>
-                        <button
-                          className="set-btn primary"
-                          type="button"
-                          disabled={busy || editVaultLabel.trim().length === 0}
-                          onClick={() => void saveVaultRecordEdit()}
-                        >
-                          {t("settings.vaultSaveEdit")}
-                        </button>
-                      </>
-                    ) : (
+                      )}
                       <button
-                        className="set-btn"
+                        className="set-btn danger"
                         type="button"
                         disabled={busy}
-                        onClick={() => startVaultRecordEdit(record)}
+                        onClick={() => void deleteVaultRecord(record)}
                       >
-                        <Pencil size={14} />
-                        {t("settings.vaultEdit")}
+                        <Trash2 size={14} />
+                        {t("settings.deleteData")}
                       </button>
-                    )}
-                    <button
-                      className="set-btn danger"
-                      type="button"
-                      disabled={busy}
-                      onClick={() => void deleteVaultRecord(record)}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            {note && <p className="set-hint">{note}</p>}
+            {error && <p className="cmp-confirm-err">{error}</p>}
+          </div>
+
+          {vaultAddOpen && (
+            <div className="set-modal-overlay" role="dialog" aria-modal="true" aria-label={t("settings.vaultSaveSensitive")}>
+              <div className="set-modal-scrim" onClick={closeVaultAddModal} />
+              <div className="set-modal vault-add-modal">
+                <button className="set-modal-close" type="button" aria-label={t("common.close")} onClick={closeVaultAddModal}>
+                  <X size={16} />
+                </button>
+                <div className="mdl-detail-head">
+                  <div>
+                    <h3>{t("settings.vaultSaveSensitive")}</h3>
+                    <p className="mdl-detail-sub">{t("settings.vaultSaveSensitiveHint")}</p>
+                  </div>
+                  <span className="set-badge muted">{t("settings.vaultEncrypted")}</span>
+                </div>
+                <div className="set-rows vault-add-form">
+                  <div className="set-row">
+                    <div>
+                      <div className="rk">{t("settings.vaultCategory")}</div>
+                      <div className="rv">{t("settings.vaultCategoryDesc")}</div>
+                    </div>
+                    <select
+                      className="set-input"
+                      value={manualSecretCategory}
+                      onChange={(event) => setManualSecretCategory(event.target.value)}
                     >
-                      <Trash2 size={14} />
-                      {t("settings.deleteData")}
-                    </button>
+                      {vaultCategories.map((category) => (
+                        <option key={category.value} value={category.value}>
+                          {category.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="set-row">
+                    <div>
+                      <div className="rk">{t("settings.vaultLabel")}</div>
+                      <div className="rv">{t("settings.vaultLabelDesc")}</div>
+                    </div>
+                    <input
+                      className="set-input"
+                      value={manualSecretLabel}
+                      placeholder={t("settings.vaultLabelPlaceholder")}
+                      onChange={(event) => setManualSecretLabel(event.target.value)}
+                    />
+                  </div>
+                  <div className="set-row">
+                    <div>
+                      <div className="rk">{t("settings.vaultValue")}</div>
+                      <div className="rv">{t("settings.vaultValueDesc")}</div>
+                    </div>
+                    <textarea
+                      className="set-input"
+                      value={manualSecretValue}
+                      placeholder={t("settings.vaultValuePlaceholder")}
+                      rows={4}
+                      onChange={(event) => setManualSecretValue(event.target.value)}
+                    />
+                  </div>
+                  <div className="set-row">
+                    <div>
+                      <div className="rk">{t("settings.vaultLocalPin")}</div>
+                      <div className="rv">{t("settings.vaultManualPinDesc")}</div>
+                    </div>
+                    <input
+                      className="set-input"
+                      inputMode="numeric"
+                      type="password"
+                      value={manualSecretPin}
+                      placeholder={t("settings.vaultPinPlaceholder")}
+                      onChange={(event) => setManualSecretPin(event.target.value)}
+                    />
                   </div>
                 </div>
-              );
-            })}
-          </div>
-          {note && <p className="set-hint">{note}</p>}
-          {error && <p className="cmp-confirm-err">{error}</p>}
-        </div>
+                <div className="vault-modal-actions">
+                  <button
+                    className="set-btn"
+                    type="button"
+                    disabled={busy}
+                    onClick={closeVaultAddModal}
+                  >
+                    {t("common.cancel")}
+                  </button>
+                  <button
+                    className="set-btn primary"
+                    type="button"
+                    disabled={
+                      busy ||
+                      !configured ||
+                      manualSecretLabel.trim().length === 0 ||
+                      manualSecretValue.trim().length === 0 ||
+                      manualSecretPin.length === 0
+                    }
+                    onClick={() => void saveManualSecret()}
+                  >
+                    {t("settings.vaultSave")}
+                  </button>
+                </div>
+                {error && <p className="cmp-confirm-err">{error}</p>}
+              </div>
+            </div>
+          )}
+        </>
       )}
     </div>
   );

@@ -221,6 +221,10 @@ assertContains("src/components/ChatView.tsx", "computerCardCollapsed", "local co
 assertContains("src/components/SettingsView.tsx", "secret_value: manualSecretValue.trim()", "Vault manual entry must send raw secret material through the encrypted gateway path");
 assertContains("src/components/SettingsView.tsx", "pin: manualSecretPin", "Vault manual entry must require the local PIN when saving secret material");
 assertContains("src/components/SettingsView.tsx", "setManualSecretValue(\"\")", "Vault manual entry must clear the raw secret from renderer state after saving");
+assertContains("src/components/SettingsView.tsx", "const [vaultAddOpen, setVaultAddOpen]", "Vault manual entry must open from an explicit Add modal state");
+assertContains("src/components/SettingsView.tsx", "className=\"set-modal vault-add-modal\"", "Vault manual entry form must render inside a themed modal");
+assertContains("src/components/SettingsView.tsx", "openVaultAddModal", "Vault saved-record list must expose an Add action");
+assertNotContains("src/components/SettingsView.tsx", "span className=\"set-card-name\">{t(\"settings.vaultSaveSensitive\")}</span>", "Vault sensitive tab must not lead with the embedded save form");
 assertContains("src/components/SettingsView.tsx", "className=\"vault-pane\"", "Vault settings cards must be laid out with explicit vertical spacing");
 assertContains("src/styles.css", ".vault-pane", "Vault settings card spacing must be owned by CSS, not inline margins");
 assertContains("src/components/SettingsView.tsx", "const [vaultTab, setVaultTab]", "Vault settings must split PIN and sensitive data into local tabs");
