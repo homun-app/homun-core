@@ -359,11 +359,20 @@ usearch 2.25.3: feature opzionale usearch-index introdotta e testata; resta fuor
 Prossimo passo: benchmark dataset reale + verifica bundle app prima di sostituire ExactMemoryVectorIndex.
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add crates/memory docs/architecture/memory.md docs/STATO.md
 git commit -m "perf: add indexed vector recall for memory"
+```
+
+Evidenza commit:
+
+```text
+e5b2fdcc perf: add memory vector index boundary
+1456b114 perf: cache exact memory vector index
+71d1e384 docs: record memory ann spike result
+20bdf763 perf: add optional usearch memory vector backend
 ```
 
 ---
@@ -447,13 +456,17 @@ git commit -m "feat: add structured chat stream events"
 - Modify: `apps/desktop/src/components/WorkspaceIsland.tsx` / current browser panel component.
 - Modify: browser sidecar TypeScript files.
 
-- [ ] **Step 1: Panel grande stabile**
+- [x] **Step 1: Panel grande stabile**
 
 Requisito:
 
 ```text
 expanded panel resta nel content area, non va sotto sidebar, usa icona corretta, browser preview grande.
 ```
+
+Evidenza 2026-06-30: `ChatComputerPanel` full e' `fixed` nell'area chat, compact expand usa
+`Maximize2`, `test:ui-contract` blocca la regressione, `npm --prefix apps/desktop run build`
+verde. Commit: `fb12c4f8`.
 
 - [ ] **Step 2: Browser smoke fixtures**
 
@@ -468,7 +481,10 @@ recover CDP wedge
 expanded panel visual check
 ```
 
-- [ ] **Step 3: Search/discovery policy**
+Parziale 2026-06-30: production smoke copre gia' S5/S6/S7/S8 e aggiunge S9 per
+discovery locale; manca ancora una fixture visuale automatica dell'expanded panel.
+
+- [x] **Step 3: Search/discovery policy**
 
 Regola:
 
@@ -476,6 +492,9 @@ Regola:
 prompt italiano + browser locale italiano -> Google/Google News hl=it gl=IT quando serve discovery
 non andare direttamente su una fonte singola salvo richiesta esplicita
 ```
+
+Evidenza 2026-06-30: `browser_open_research_discovery_instruction` include discovery-first,
+lingua/locale browser e `hl=`/`gl=`; test dedicato verde. Commit: `7723052c`.
 
 - [ ] **Step 4: Commit**
 
