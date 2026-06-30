@@ -633,7 +633,8 @@ GIÀ FATTO sessione 5g (NON ripartire; tutto su `main`):
   salvare `secret_value` solo con PIN valido, lasciando nel record solo metadati redatti. Le
   card chat correnti non trasportano raw secret, quindi restano metadata-only; i valori raw
   entrano dal form dedicato in Settings > Vault. Migrazione legacy: se un PIN esisteva gia' senza keyring, il primo
-  cambio PIN verificato crea la master key e la re-cifra sotto il nuovo PIN.
+  salvataggio Vault con PIN valido crea la master key; anche il primo cambio PIN verificato la crea e la re-cifra
+  sotto il nuovo PIN.
 - **Vault input dedicato**: Settings > Vault ora include un form separato dalla chat per salvare
   manualmente dati sensibili raw. Il renderer invia `secret_value` solo insieme al PIN locale
   sull'accept path gia' cifrato del gateway, poi svuota valore e PIN dallo stato UI. Questo chiude

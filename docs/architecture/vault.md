@@ -69,7 +69,8 @@ chiaro; il gateway espone solo status/setup/verify dietro il bearer locale.
 dal PIN locale. Primo setup PIN crea la master key; cambio PIN autorizzato la
 re-cifra sotto il nuovo PIN. Un reset/sostituzione non autorizzato del verifier non
 puo' sbloccare il materiale gia' cifrato. I profili legacy con PIN gia' presente ma
-senza keyring creano la master key al primo cambio PIN verificato.
+senza keyring creano la master key al primo salvataggio Vault con PIN valido oppure
+al primo cambio PIN verificato.
 
 ## Classificazione e redaction
 

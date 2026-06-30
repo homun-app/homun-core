@@ -35320,7 +35320,7 @@ fn accept_vault_proposal(
             .map_err(vault_store_error)?
             .ok_or_else(|| invalid_vault_pin("Vault PIN is not configured".to_string()))?;
         let master_key = vault_store
-            .unlock_local_master_key(&verifier, pin)
+            .ensure_local_master_key(&verifier, pin)
             .map_err(vault_store_error)?;
         vault_store
             .put_secret_material(
@@ -47792,6 +47792,35 @@ prs.save(Path({path:?}))
             "[VAULT:payments:card:last4=1111]"
         );
         assert!(!saved.metadata.to_string().contains("4111111111111111"));
+    }
+
+    #[test]
+    fn vault_proposal_accept_migrates_legacy_pin_without_master_key() {
+        let vault = local_first_vault::SQLiteVaultStore::open_in_memory().unwrap();
+        let verifier = local_first_vault::LocalPinVerifier::create("123456").unwrap();
+        vault.set_local_pin_verifier(verifier).unwrap();
+        let request = super::VaultProposalActionRequest {
+            category: "identity".to_string(),
+            label: "Codice Fiscale".to_string(),
+            redacted_preview: "[VAULT:identity:fiscal_code]".to_string(),
+            secret_value: Some("CNTFBA76L16F839Y".to_string()),
+            pin: Some("123456".to_string()),
+            thread_id: None,
+            message_id: None,
+        };
+
+        let response = super::accept_vault_proposal(&vault, &request).expect("accept");
+
+        let record_id = response.record_id.parse().unwrap();
+        let verifier = vault.local_pin_verifier().unwrap().unwrap();
+        let key = vault
+            .unlock_local_master_key(&verifier, "123456")
+            .expect("master key");
+        let secret = vault
+            .get_secret_material(&record_id, &key)
+            .expect("encrypted secret")
+            .expect("saved secret");
+        assert_eq!(secret.expose_utf8().unwrap(), "CNTFBA76L16F839Y");
     }
 
     #[test]
