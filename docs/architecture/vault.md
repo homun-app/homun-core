@@ -38,7 +38,7 @@ Non e' memoria: la memoria puo' contenere solo testo redatto o riferimenti
   `/api/vault/records` (`GET`), `/api/vault/records/{id}` (`PATCH`, `DELETE`),
   `/api/vault/records/{id}/reveal` (`POST` con PIN),
   `/api/vault/proposals/accept`, `/api/vault/proposals/dismiss`,
-  `/api/vault/pin/status|setup|verify` e
+  `/api/vault/pin/status|setup|verify`, tool chat read-only `vault_search` e
   `/api/vault/payment-approvals/approve`.
 
 ## Modello dati
@@ -66,6 +66,13 @@ dedicato: solo dopo unlock il valore entra nello stato renderer e puo' essere
 riscritto cifrato con lo stesso PIN. La cancellazione del record elimina sia
 `vault_records` sia l'eventuale riga `vault_secret_material` associata, per non
 lasciare secret orfani.
+
+Il loop chat ha anche un tool read-only `vault_search`: cerca solo nei metadati
+redatti (`id`, `category`, `label`, `redacted_preview`) e restituisce summary senza
+materiale segreto. Serve a evitare che il modello risponda "non lo so" quando un
+record e' gia' nel Vault. Se trova una corrispondenza, il modello deve dire che il
+dato e' salvato nel Vault e che serve unlock locale con PIN per rivelarlo o editarlo;
+non deve inferire ne' inventare il valore dal metadata.
 
 `vault_local_pin` conserva solo `LocalPinVerifier` (`algorithm`, `iterations`,
 `salt_hex`, `digest_hex`). Il PIN non e' reversibile e non viene mai serializzato in
@@ -198,12 +205,13 @@ Login, script arbitrari e azioni high-risk non-payment restano bloccati.
 
 - Payment Approval Card completa con screenshot/fingerprint.
 - Telegram routing per riepilogo pagamento.
-- Tool minimizzati per recuperare/usare record Vault nel browser.
+- Tool minimizzati PIN-gated per rivelare/riempire record Vault nel browser.
 - Smoke live Electron su checkout fixture/browser reale.
 
 ## Regola di confine
 
-Il modello non riceve dump del Vault. Quando servira' un valore, usera' tool
-minimizzati (`vault_search`, `vault_get_field`, `vault_fill_browser_field`) con scopo,
+Il modello non riceve dump del Vault. Il tool `vault_search` espone solo metadati
+redatti per sapere che un record esiste. Quando servira' il valore, usera' tool
+minimizzati PIN-gated (`vault_get_field`, `vault_fill_browser_field`) con scopo,
 dominio, audit e policy. Per i form, la direzione preferita e' compilare direttamente
 il browser senza far transitare il valore sensibile nel testo del modello.

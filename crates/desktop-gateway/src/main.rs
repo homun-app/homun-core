@@ -6111,6 +6111,29 @@ fn recall_memory_tool_schema() -> serde_json::Value {
     })
 }
 
+fn vault_search_tool_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": "vault_search",
+            "description": "Search the user's encrypted Vault metadata for sensitive records already saved \
+    by the user. Returns ONLY redacted metadata (id, category, label, redacted preview), never the secret \
+    value. Use it before saying a sensitive personal detail is unknown. If a matching record exists, tell \
+    the user it is in the Vault and that local PIN unlock is required to reveal or edit it.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Sensitive item to find, e.g. codice fiscale, car plate, passport, card."
+                    }
+                },
+                "required": ["query"]
+            }
+        }
+    })
+}
+
 fn record_decision_tool_schema() -> serde_json::Value {
     serde_json::json!({
         "type": "function",
@@ -19106,6 +19129,11 @@ why things are the way they are (do NOT re-scan everything from scratch). AFTER 
 ANY domain: code, a document (e.g. a customer quote), data, configurations — call \
 record_decision with what you decided, the WHY, the rejected alternatives and the objects touched, so \
 the rationale stays and doesn't have to be reconstructed. \
+SENSITIVE VAULT: if the user asks for a sensitive personal value (identity document, fiscal/tax code, \
+vehicle plate, health note, credentials, payment data, private note), call vault_search BEFORE saying \
+you don't know it. vault_search returns redacted metadata only; never reveal, infer, or guess the secret \
+value from metadata. If a matching record exists, say it is saved in the Vault and local PIN unlock is \
+required to reveal or edit it. \
 PLAN (plan-mode): for a non-trivial MULTI-STEP task (development, refactor, involved research, \
 actions with effects) FIRST propose the plan and STOP — do NOT start executing in this turn. Emit \
 on its own line `‹‹PLAN_PROPOSE››{{\"summary\":\"objective in brief\",\"steps\":[\"step 1\",\"step 2\"]}}‹‹/PLAN_PROPOSE››` \
@@ -19271,6 +19299,7 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
         browser_tabs_tool_schema(),
         browser_dialog_tool_schema(),
         recall_memory_tool_schema(),
+        vault_search_tool_schema(),
         query_code_graph_tool_schema(),
         query_git_history_tool_schema(),
         github_search_tool_schema(),
@@ -22601,6 +22630,42 @@ available tools (for data from the web use the browser: browser_navigate on the 
                         })
                         .await
                         .unwrap_or_else(|e| format!("Save error: {e}"))
+                    } else if name == "vault_search" {
+                        if contact_only || !can_see_contacts {
+                            "Vault not accessible in a conversation with this contact. Do NOT reveal personal data of the user or third parties."
+                                .to_string()
+                        } else {
+                            let query = serde_json::from_str::<serde_json::Value>(args_raw)
+                                .ok()
+                                .and_then(|a| {
+                                    a.get("query").and_then(|q| q.as_str()).map(String::from)
+                                })
+                                .unwrap_or_default();
+                            let _ = emit_stream_event(
+                                &tx,
+                                GenerateStreamEvent::Delta {
+                                    text: format!(
+                                        "‹‹ACT››🔐 Searching Vault: {}‹‹/ACT››",
+                                        if query.is_empty() {
+                                            "(query)"
+                                        } else {
+                                            query.as_str()
+                                        }
+                                    ),
+                                },
+                            )
+                            .await;
+                            let st = state_owned.clone();
+                            tokio::task::spawn_blocking(move || {
+                                lock_vault_store(&st)
+                                    .map(|vault| vault_search_tool_result(&vault, &query))
+                                    .unwrap_or_else(|error| {
+                                        format!("Vault search failed: {}", error.message)
+                                    })
+                            })
+                            .await
+                            .unwrap_or_else(|error| format!("Vault search failed: {error}"))
+                        }
                     } else if name == "recall_memory" {
                         // PERIMETER (anti-exfiltration): a `contact_only` turn (a non-self
                         // contact on a channel) must NOT reach personal/Secret memory or the
@@ -35420,6 +35485,98 @@ fn vault_record_summary(record: VaultRecord) -> VaultRecordSummary {
     }
 }
 
+fn search_vault_records(
+    vault_store: &SQLiteVaultStore,
+    query: &str,
+    limit: usize,
+) -> Result<Vec<VaultRecordSummary>, GatewayError> {
+    let terms = vault_search_terms(query);
+    if terms.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut scored = vault_store
+        .list()
+        .map_err(vault_store_error)?
+        .into_iter()
+        .filter_map(|record| {
+            let summary = vault_record_summary(record);
+            let haystack = vault_search_haystack(&summary);
+            let score = terms
+                .iter()
+                .filter(|term| {
+                    haystack
+                        .iter()
+                        .any(|candidate| candidate.contains(term.as_str()))
+                })
+                .count();
+            (score > 0).then_some((score, summary))
+        })
+        .collect::<Vec<_>>();
+    scored.sort_by(|(left_score, left), (right_score, right)| {
+        right_score
+            .cmp(left_score)
+            .then_with(|| left.label.cmp(&right.label))
+            .then_with(|| left.id.cmp(&right.id))
+    });
+    Ok(scored
+        .into_iter()
+        .take(limit.max(1))
+        .map(|(_, summary)| summary)
+        .collect())
+}
+
+fn vault_search_haystack(summary: &VaultRecordSummary) -> Vec<String> {
+    [
+        summary.id.as_str(),
+        summary.category.as_str(),
+        summary.label.as_str(),
+        summary.redacted_preview.as_str(),
+    ]
+    .iter()
+    .flat_map(|value| vault_search_terms(value))
+    .collect()
+}
+
+fn vault_search_terms(text: &str) -> Vec<String> {
+    let mut terms = text
+        .split(|c: char| !c.is_alphanumeric())
+        .map(|part| part.trim().to_ascii_lowercase())
+        .filter(|part| part.len() >= 3)
+        .collect::<Vec<_>>();
+    if terms
+        .iter()
+        .any(|term| term == "codice" || term == "fiscale")
+    {
+        terms.push("fiscal".to_string());
+        terms.push("identity".to_string());
+    }
+    if terms
+        .iter()
+        .any(|term| term == "targa" || term == "plate" || term == "auto")
+    {
+        terms.push("vehicles".to_string());
+        terms.push("license".to_string());
+    }
+    terms.sort();
+    terms.dedup();
+    terms
+}
+
+fn vault_search_tool_result(vault_store: &SQLiteVaultStore, query: &str) -> String {
+    match search_vault_records(vault_store, query, 5) {
+        Ok(records) if records.is_empty() => {
+            "No matching Vault record found. Do not claim the user never saved it; say no matching Vault record was found."
+                .to_string()
+        }
+        Ok(records) => serde_json::json!({
+            "matches": records,
+            "policy": "Vault search returns redacted metadata only. Do not reveal or guess the secret value. Tell the user a local PIN unlock is required to reveal or edit it."
+        })
+        .to_string(),
+        Err(error) => format!("Vault search failed: {}", error.message),
+    }
+}
+
 fn load_vault_record(
     vault_store: &SQLiteVaultStore,
     record_id: &VaultRecordId,
@@ -48161,6 +48318,40 @@ prs.save(Path({path:?}))
         let record_id = response.record_id.parse().unwrap();
         vault.delete(&record_id).expect("delete");
         assert!(vault.list().expect("list after delete").is_empty());
+    }
+
+    #[test]
+    fn vault_search_matches_saved_metadata_without_secret_material() {
+        let vault = local_first_vault::SQLiteVaultStore::open_in_memory().unwrap();
+        let request = super::VaultProposalActionRequest {
+            category: "identity".to_string(),
+            label: "Codice Fiscale".to_string(),
+            redacted_preview: "[VAULT:identity:fiscal_code]".to_string(),
+            secret_value: Some("CNTFBA76L16F839Y".to_string()),
+            pending_id: None,
+            pin: Some("123456".to_string()),
+            thread_id: None,
+            message_id: None,
+        };
+        super::apply_vault_pin_setup(
+            &vault,
+            &super::VaultPinSetupRequest {
+                pin: "123456".to_string(),
+                current_pin: None,
+            },
+        )
+        .expect("pin");
+        super::accept_vault_proposal(&vault, &request).expect("accept");
+
+        let found =
+            super::search_vault_records(&vault, "qual è il mio codice fiscale", 5).expect("search");
+        let json = serde_json::to_string(&found).unwrap();
+
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].label, "Codice Fiscale");
+        assert_eq!(found[0].category, "identity");
+        assert!(json.contains("[VAULT:identity:fiscal_code]"));
+        assert!(!json.contains("CNTFBA76L16F839Y"));
     }
 
     #[test]
