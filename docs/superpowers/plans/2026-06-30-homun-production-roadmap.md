@@ -129,6 +129,8 @@ struct MemoryRecallTiming {
     open_loops_ms: u64,
     fts_ms: u64,
     query_embedding_ms: Option<u64>,
+    query_embedding_cache_hit: bool,
+    query_embedding_timed_out: bool,
     vector_scan_ms: Option<u64>,
     graph_context_ms: u64,
     total_ms: u64,
@@ -159,7 +161,7 @@ S1 Simple no-tool chat: PASS 6.7s; memory recall query_embedding_ms=1477, lock/F
 S3 Vault reveal card: PASS 61.0s; VAULT_REVEAL presente, plaintext vietato assente; recall query_embedding_ms=224, fts_ms=2, lock 0
 ```
 
-- [ ] **Step 3: Cache query embedding**
+- [x] **Step 3: Cache query embedding**
 
 Implementare cache piccola in memoria, keyed su:
 
@@ -175,7 +177,15 @@ ttl: 24h
 eviction: LRU o VecDeque semplice se il codebase non ha LRU
 ```
 
-- [ ] **Step 4: Budget e fallback**
+Implementato in `relevant_memory_for_prompt` tramite cache in-process LRU/TTL:
+
+```text
+HOMUN_MEMORY_QUERY_EMBED_CACHE_MAX=512
+HOMUN_MEMORY_QUERY_EMBED_CACHE_TTL_SECS=86400
+key = embed_base + embed_model + workspace_scope + normalized_query
+```
+
+- [x] **Step 4: Budget e fallback**
 
 Se embedding query supera budget o fallisce:
 
@@ -183,6 +193,24 @@ Se embedding query supera budget o fallisce:
 procedi con FTS + briefing sempre-attivo
 marca MemoryRecallTiming.degraded=true
 non bloccare il turno
+```
+
+Implementato con `HOMUN_MEMORY_QUERY_EMBED_TIMEOUT_MS` (default 700 ms): timeout o errore
+impostano `query_embedding_timed_out`/`degraded` e lasciano vivo il percorso FTS + briefing.
+
+Evidenza slice cache/budget:
+
+```text
+cargo test -p local-first-desktop-gateway memory_recall
+cargo test -p local-first-desktop-gateway memory_query_embedding_cache
+cargo test -p local-first-desktop-gateway vault_
+python3 -m unittest scripts.test_pre_release_gate scripts.test_production_smoke -v
+npm run test:ui-contract (da apps/desktop)
+cargo build -p local-first-desktop-gateway --bin local-first-desktop-gateway
+
+Live dopo restart gateway:
+S1 primo giro PASS 7.8s; query_embedding_ms=163 cache_hit=false timed_out=false
+S1 secondo giro PASS 3.2s; query_embedding_ms=0 cache_hit=true timed_out=false
 ```
 
 - [ ] **Step 5: Commit**

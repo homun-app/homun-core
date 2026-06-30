@@ -712,6 +712,16 @@ GIÀ FATTO sessione 5g (NON ripartire; tutto su `main`):
   `query_embedding_ms=1477`, lock/FTS/vector ~0; S3 Vault reveal passato in 61s con
   `VAULT_REVEAL` e plaintext vietato assente, recall `query_embedding_ms=224`, `fts_ms=2`, lock 0.
   Prossimo passo tecnico: cache/budget query embedding, poi spike indice vettoriale.
+- **Memory hot-path cache/budget**: aggiunta cache in-process LRU/TTL per embedding query della recall,
+  keyed su endpoint embedding, modello, workspace e query normalizzata (`HOMUN_MEMORY_QUERY_EMBED_CACHE_MAX`,
+  `HOMUN_MEMORY_QUERY_EMBED_CACHE_TTL_SECS`). Aggiunto budget `HOMUN_MEMORY_QUERY_EMBED_TIMEOUT_MS`
+  (default 700 ms): se l'embedding della query fallisce o va in timeout, la recall degrada a FTS +
+  briefing sempre-attivo invece di bloccare il turno; il log redatto espone ora `query_embedding_cache_hit`
+  e `query_embedding_timed_out`. Test verdi: `memory_recall`, `memory_query_embedding_cache`, `vault_`,
+  `scripts.test_pre_release_gate`, `scripts.test_production_smoke`, `test:ui-contract`, build gateway.
+  Smoke live dopo restart gateway: S1 primo giro PASS 7.8s (`query_embedding_ms=163`, cache miss),
+  secondo giro PASS 3.2s (`query_embedding_ms=0`, `query_embedding_cache_hit=true`). Prossimo passo:
+  spike indice vettoriale `sqlite-vec`/`usearch` senza cambiare la semantica RRF.
 - **bug "Continue" (validato live nell'app — puzzle Einstein ora 1 risposta pulita):** 2 cause distinte —
   (1) backend `df65d0b0`: il trace `‹‹REASONING››` rientrava nel contesto modello via
   `build_chat_runtime_prompt` → `strip_display_markers` canonico in lib.rs usato in `normalize_context_text`,

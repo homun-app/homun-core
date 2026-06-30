@@ -13021,6 +13021,8 @@ struct MemoryRecallTiming {
     open_loops_ms: u64,
     fts_ms: u64,
     query_embedding_ms: Option<u64>,
+    query_embedding_cache_hit: bool,
+    query_embedding_timed_out: bool,
     vector_scan_ms: Option<u64>,
     graph_context_ms: u64,
     total_ms: u64,
@@ -13036,7 +13038,8 @@ fn elapsed_ms(start: std::time::Instant) -> u64 {
 fn memory_recall_timing_trace_line(timing: &MemoryRecallTiming) -> String {
     format!(
         "memory recall: total_ms={} lock_wait_ms={} profile_ms={} open_loops_ms={} \
-fts_ms={} query_embedding_ms={} vector_scan_ms={} graph_context_ms={} \
+fts_ms={} query_embedding_ms={} query_embedding_cache_hit={} query_embedding_timed_out={} \
+vector_scan_ms={} graph_context_ms={} \
 fts_candidates={} vector_candidates={} degraded={}",
         timing.total_ms,
         timing.lock_wait_ms,
@@ -13047,6 +13050,8 @@ fts_candidates={} vector_candidates={} degraded={}",
             .query_embedding_ms
             .map(|value| value.to_string())
             .unwrap_or_else(|| "none".to_string()),
+        timing.query_embedding_cache_hit,
+        timing.query_embedding_timed_out,
         timing
             .vector_scan_ms
             .map(|value| value.to_string())
@@ -13056,6 +13061,151 @@ fts_candidates={} vector_candidates={} degraded={}",
         timing.vector_candidates,
         timing.degraded
     )
+}
+
+#[derive(Debug, Clone)]
+struct MemoryQueryEmbeddingCacheEntry {
+    vector: Vec<f32>,
+    inserted_at: std::time::Instant,
+    last_access: u64,
+}
+
+#[derive(Debug, Default)]
+struct MemoryQueryEmbeddingCache {
+    entries: std::collections::HashMap<String, MemoryQueryEmbeddingCacheEntry>,
+    tick: u64,
+}
+
+impl MemoryQueryEmbeddingCache {
+    fn get(&mut self, key: &str, ttl: std::time::Duration) -> Option<Vec<f32>> {
+        let now = std::time::Instant::now();
+        let expired = self
+            .entries
+            .get(key)
+            .is_some_and(|entry| now.duration_since(entry.inserted_at) > ttl);
+        if expired {
+            self.entries.remove(key);
+            return None;
+        }
+        let vector = self.entries.get(key).map(|entry| entry.vector.clone())?;
+        self.tick = self.tick.saturating_add(1);
+        if let Some(entry) = self.entries.get_mut(key) {
+            entry.last_access = self.tick;
+        }
+        Some(vector)
+    }
+
+    fn insert(&mut self, key: String, vector: Vec<f32>, max_entries: usize) {
+        if max_entries == 0 {
+            return;
+        }
+        self.tick = self.tick.saturating_add(1);
+        self.entries.insert(
+            key,
+            MemoryQueryEmbeddingCacheEntry {
+                vector,
+                inserted_at: std::time::Instant::now(),
+                last_access: self.tick,
+            },
+        );
+        while self.entries.len() > max_entries {
+            let Some(oldest_key) = self
+                .entries
+                .iter()
+                .min_by_key(|(_, entry)| entry.last_access)
+                .map(|(key, _)| key.clone())
+            else {
+                break;
+            };
+            self.entries.remove(&oldest_key);
+        }
+    }
+}
+
+fn memory_query_embedding_cache() -> &'static std::sync::Mutex<MemoryQueryEmbeddingCache> {
+    static CACHE: std::sync::OnceLock<std::sync::Mutex<MemoryQueryEmbeddingCache>> =
+        std::sync::OnceLock::new();
+    CACHE.get_or_init(|| std::sync::Mutex::new(MemoryQueryEmbeddingCache::default()))
+}
+
+fn memory_query_embedding_cache_max_entries() -> usize {
+    env::var("HOMUN_MEMORY_QUERY_EMBED_CACHE_MAX")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(512)
+}
+
+fn memory_query_embedding_cache_ttl() -> std::time::Duration {
+    let seconds = env::var("HOMUN_MEMORY_QUERY_EMBED_CACHE_TTL_SECS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(86_400);
+    std::time::Duration::from_secs(seconds)
+}
+
+fn memory_query_embedding_timeout() -> std::time::Duration {
+    let ms = env::var("HOMUN_MEMORY_QUERY_EMBED_TIMEOUT_MS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(700);
+    std::time::Duration::from_millis(ms.max(1))
+}
+
+fn normalize_memory_embedding_query(query: &str) -> String {
+    query
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
+}
+
+fn memory_query_embedding_cache_key(query: &str, workspace: &MemoryWorkspaceId) -> String {
+    format!(
+        "{}|{}|{}|{}",
+        embed_base(),
+        embed_model(),
+        workspace.as_str(),
+        normalize_memory_embedding_query(query)
+    )
+}
+
+async fn embed_query_for_memory_recall(
+    http: &reqwest::Client,
+    query: &str,
+    workspace: &MemoryWorkspaceId,
+    timing: &mut MemoryRecallTiming,
+) -> Option<Vec<f32>> {
+    let key = memory_query_embedding_cache_key(query, workspace);
+    if let Ok(mut cache) = memory_query_embedding_cache().lock() {
+        if let Some(vector) = cache.get(&key, memory_query_embedding_cache_ttl()) {
+            timing.query_embedding_cache_hit = true;
+            timing.query_embedding_ms = Some(0);
+            return Some(vector);
+        }
+    }
+
+    let embedding_start = std::time::Instant::now();
+    let result =
+        match tokio::time::timeout(memory_query_embedding_timeout(), embed_text(http, query)).await
+        {
+            Ok(vector) => vector,
+            Err(_) => {
+                timing.query_embedding_timed_out = true;
+                timing.query_embedding_ms = Some(elapsed_ms(embedding_start));
+                return None;
+            }
+        };
+    timing.query_embedding_ms = Some(elapsed_ms(embedding_start));
+    if let Some(vector) = result.as_ref() {
+        if let Ok(mut cache) = memory_query_embedding_cache().lock() {
+            cache.insert(
+                key,
+                vector.clone(),
+                memory_query_embedding_cache_max_entries(),
+            );
+        }
+    }
+    result
 }
 
 /// Combined relevance score: RRF-fuse the two retrieval ranks (a memory strong in BOTH
@@ -13090,10 +13240,9 @@ async fn relevant_memory_for_prompt(state: &AppState, prompt: &str) -> Option<St
     if query.chars().count() < 8 {
         return None;
     }
+    let active = gateway_memory_workspace_id();
     // Embed the query OFF the lock (the only await) for the semantic pass below.
-    let embedding_start = std::time::Instant::now();
-    let query_vec = embed_text(&state.http, query).await;
-    timing.query_embedding_ms = Some(elapsed_ms(embedding_start));
+    let query_vec = embed_query_for_memory_recall(&state.http, query, &active, &mut timing).await;
     timing.degraded = query_vec.is_none();
     let lock_start = std::time::Instant::now();
     let facade = lock_memory_facade(state).ok()?;
@@ -13103,7 +13252,6 @@ async fn relevant_memory_for_prompt(state: &AppState, prompt: &str) -> Option<St
     // NOT cross-search the personal scope — "di cosa abbiamo discusso?" must stay about THIS
     // project, not personal facts/episodes. (Stable personal PREFERENCES still reach the
     // model via the always-on briefing, gather_profile_memory — that's separate.)
-    let active = gateway_memory_workspace_id();
     let now_secs = OffsetDateTime::now_utc().unix_timestamp();
 
     // All memories in scope, keyed by ref — the source of text/metadata/created_at for
@@ -48590,6 +48738,8 @@ prs.save(Path({path:?}))
             open_loops_ms: 7,
             fts_ms: 11,
             query_embedding_ms: Some(13),
+            query_embedding_cache_hit: true,
+            query_embedding_timed_out: false,
             vector_scan_ms: Some(17),
             graph_context_ms: 19,
             total_ms: 23,
@@ -48604,11 +48754,45 @@ prs.save(Path({path:?}))
         assert!(line.contains("total_ms=23"));
         assert!(line.contains("lock_wait_ms=3"));
         assert!(line.contains("query_embedding_ms=13"));
+        assert!(line.contains("query_embedding_cache_hit=true"));
+        assert!(line.contains("query_embedding_timed_out=false"));
         assert!(line.contains("vector_candidates=29"));
         assert!(line.contains("fts_candidates=31"));
         assert!(line.contains("degraded=true"));
         assert!(!line.contains("codice"));
         assert!(!line.contains("fiscale"));
+    }
+
+    #[test]
+    fn memory_query_embedding_cache_key_normalizes_workspace_query() {
+        let workspace = super::MemoryWorkspaceId::new("personal");
+
+        let first = super::memory_query_embedding_cache_key("  Codice   Fiscale ", &workspace);
+        let second = super::memory_query_embedding_cache_key("codice fiscale", &workspace);
+        let other_workspace = super::memory_query_embedding_cache_key(
+            "codice fiscale",
+            &super::MemoryWorkspaceId::new("project"),
+        );
+
+        assert_eq!(first, second);
+        assert_ne!(second, other_workspace);
+        assert!(second.ends_with("|personal|codice fiscale"));
+    }
+
+    #[test]
+    fn memory_query_embedding_cache_reuses_and_evicts_lru() {
+        let mut cache = super::MemoryQueryEmbeddingCache::default();
+        let ttl = std::time::Duration::from_secs(60);
+
+        cache.insert("a".to_string(), vec![1.0], 2);
+        cache.insert("b".to_string(), vec![2.0], 2);
+        assert_eq!(cache.get("a", ttl), Some(vec![1.0]));
+
+        cache.insert("c".to_string(), vec![3.0], 2);
+
+        assert_eq!(cache.get("a", ttl), Some(vec![1.0]));
+        assert_eq!(cache.get("b", ttl), None);
+        assert_eq!(cache.get("c", ttl), Some(vec![3.0]));
     }
 
     #[test]
