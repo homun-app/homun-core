@@ -2235,11 +2235,23 @@ function PrivacyPane() {
 /* --------------------------------------------------------------------- vault */
 
 function VaultPane() {
+  const vaultCategories = [
+    { value: "payments", label: "Pagamenti" },
+    { value: "identity", label: "Identita" },
+    { value: "health", label: "Salute" },
+    { value: "vehicles", label: "Veicoli" },
+    { value: "credentials", label: "Credenziali" },
+    { value: "private_notes", label: "Note private" },
+  ];
   const [configured, setConfigured] = useState<boolean | null>(null);
   const [currentPin, setCurrentPin] = useState("");
   const [pin, setPin] = useState("");
   const [pinConfirm, setPinConfirm] = useState("");
   const [verifyPin, setVerifyPin] = useState("");
+  const [manualSecretCategory, setManualSecretCategory] = useState("private_notes");
+  const [manualSecretLabel, setManualSecretLabel] = useState("");
+  const [manualSecretValue, setManualSecretValue] = useState("");
+  const [manualSecretPin, setManualSecretPin] = useState("");
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -2294,6 +2306,42 @@ function VaultPane() {
       const result = await coreBridge.vaultPinVerify(verifyPin);
       setNote(result.ok ? "PIN verificato." : "PIN non valido.");
       setVerifyPin("");
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveManualSecret() {
+    setError(null);
+    setNote(null);
+    const label = manualSecretLabel.trim();
+    if (!configured) {
+      setError("Configura prima il PIN locale.");
+      return;
+    }
+    if (label.length === 0 || manualSecretValue.trim().length === 0) {
+      setError("Inserisci etichetta e valore da salvare.");
+      return;
+    }
+    if (manualSecretPin.length === 0) {
+      setError("Inserisci il PIN locale per cifrare il dato.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const result = await coreBridge.vaultProposalAccept({
+        category: manualSecretCategory,
+        label,
+        redacted_preview: `[VAULT:${manualSecretCategory}:${label}]`,
+        secret_value: manualSecretValue.trim(),
+        pin: manualSecretPin,
+      });
+      setManualSecretLabel("");
+      setManualSecretValue("");
+      setManualSecretPin("");
+      setNote(`Dato salvato nel Vault (${result.record_id}).`);
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -2395,6 +2443,94 @@ function VaultPane() {
         </div>
         {note && <p className="set-hint">{note}</p>}
         {error && <p className="cmp-confirm-err">{error}</p>}
+      </div>
+      <div className="set-card">
+        <div className="set-card-top">
+          <span className="set-card-name">Salva dato sensibile</span>
+          <span className="set-badge muted">Encrypted</span>
+        </div>
+        <p className="set-hint">
+          Usa questo form per dati che non devono entrare nella chat. Il valore viene inviato
+          al gateway locale solo insieme al PIN e viene salvato cifrato.
+        </p>
+        <div className="set-card-divider" />
+        <div className="set-rows">
+          <div className="set-row">
+            <div>
+              <div className="rk">Categoria</div>
+              <div className="rv">Serve per policy e ricerca futura nel Vault.</div>
+            </div>
+            <select
+              className="set-input"
+              value={manualSecretCategory}
+              onChange={(event) => setManualSecretCategory(event.target.value)}
+              style={{ minWidth: 220 }}
+            >
+              {vaultCategories.map((category) => (
+                <option key={category.value} value={category.value}>
+                  {category.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="set-row">
+            <div>
+              <div className="rk">Etichetta</div>
+              <div className="rv">Metadato visibile, non mettere qui il valore segreto.</div>
+            </div>
+            <input
+              className="set-input"
+              value={manualSecretLabel}
+              placeholder="Es. Carta personale, passaporto, allergie"
+              onChange={(event) => setManualSecretLabel(event.target.value)}
+              style={{ minWidth: 320 }}
+            />
+          </div>
+          <div className="set-row">
+            <div>
+              <div className="rk">Valore</div>
+              <div className="rv">Campo locale: viene svuotato dopo il salvataggio.</div>
+            </div>
+            <textarea
+              className="set-input"
+              value={manualSecretValue}
+              placeholder="Dato da cifrare"
+              rows={3}
+              onChange={(event) => setManualSecretValue(event.target.value)}
+              style={{ minWidth: 320, resize: "vertical" }}
+            />
+          </div>
+          <div className="set-row">
+            <div>
+              <div className="rk">PIN locale</div>
+              <div className="rv">Sblocca la master key solo per questo salvataggio.</div>
+            </div>
+            <div style={{ display: "flex", gap: 8, minWidth: 320 }}>
+              <input
+                className="set-input"
+                inputMode="numeric"
+                type="password"
+                value={manualSecretPin}
+                placeholder="PIN"
+                onChange={(event) => setManualSecretPin(event.target.value)}
+              />
+              <button
+                className="set-btn primary"
+                type="button"
+                disabled={
+                  busy ||
+                  !configured ||
+                  manualSecretLabel.trim().length === 0 ||
+                  manualSecretValue.trim().length === 0 ||
+                  manualSecretPin.length === 0
+                }
+                onClick={() => void saveManualSecret()}
+              >
+                Salva
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
     </>
   );

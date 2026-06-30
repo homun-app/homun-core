@@ -218,6 +218,10 @@ assertContains("src/components/ChatView.tsx", "composer-surface", "prompt compos
 assertContains("src/components/ChatView.tsx", "local-computer-card", "active task must expose a local computer activity card");
 assertContains("src/components/ChatView.tsx", "timelineCollapsed", "computer timeline must keep collapsed state");
 assertContains("src/components/ChatView.tsx", "computerCardCollapsed", "local computer card must be collapsible after answers");
+assertContains("src/components/SettingsView.tsx", "secret_value: manualSecretValue.trim()", "Vault manual entry must send raw secret material through the encrypted gateway path");
+assertContains("src/components/SettingsView.tsx", "pin: manualSecretPin", "Vault manual entry must require the local PIN when saving secret material");
+assertContains("src/components/SettingsView.tsx", "setManualSecretValue(\"\")", "Vault manual entry must clear the raw secret from renderer state after saving");
+assertContains("src/lib/coreBridge.ts", "secret_value?: string", "Vault bridge must expose optional raw secret material only for the encrypted accept path");
 assertContains("src/components/ChatComputerPanel.tsx", "const browserRunning = Boolean(live?.active && live?.novnc_url)", "live computer browser state must distinguish running activity from idle availability");
 assertContains("src/components/ChatComputerPanel.tsx", "const terminalRunning = Boolean(live?.terminal_active || terminal.some((entry) => entry.running))", "terminal dock must be driven by running terminal activity, not completed history");
 assertContains("src/components/ChatComputerPanel.tsx", "const ownedLiveActivity = hasLiveActivity && live?.thread_id === threadId", "live computer activity must not appear across chats without a matching owner");

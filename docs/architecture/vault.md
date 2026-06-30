@@ -28,7 +28,8 @@ Non e' memoria: la memoria puo' contenere solo testo redatto o riferimenti
 - `apps/desktop/src/components/ChatView.tsx`: parsing/rendering del marker
   `VAULT_PROPOSE`, con azioni salva/scarta, e del marker `PAYMENT_APPROVAL`.
 - `apps/desktop/src/components/SettingsView.tsx`: sezione Settings separata `Vault`
-  per status/setup/verifica del PIN locale.
+  per status/setup/verifica del PIN locale e inserimento manuale di dati sensibili
+  senza passare dalla chat.
 - `crates/desktop-gateway/src/main.rs`: endpoint
   `/api/vault/proposals/accept`, `/api/vault/proposals/dismiss`,
   `/api/vault/pin/status|setup|verify` e
@@ -88,7 +89,9 @@ con label, categoria, preview redatta, `thread_id`/`message_id` opzionali e un
 `SecretRef` opaco. Se la richiesta porta anche `secret_value`, deve portare un `pin`:
 il gateway sblocca la master key e salva il valore in `vault_secret_material`
 cifrato. Le card chat attuali non trasportano raw secret nel transcript, quindi
-salvano solo metadati redatti finche' non esiste un input UI dedicato. `Non salvare`
+salvano solo metadati redatti. Per valori manuali, Settings > Vault usa lo stesso
+endpoint con `secret_value` e PIN locale: il valore entra nel gateway cifrato e non
+nel transcript della chat. `Non salvare`
 chiama `/api/vault/proposals/dismiss`; oggi e' solo ack locale, senza audit
 persistente.
 
@@ -106,7 +109,8 @@ Il PIN e' pensato come gate locale per CVV one-shot e approvazioni pagamento e c
 wrapping key della master key locale del Vault. Non sostituisce il TOTP futuro
 dell'app.
 
-La UI espone il setup nella sezione Settings `Vault`, separata da `Memory`.
+La UI espone setup/verifica e inserimento manuale nella sezione Settings `Vault`,
+separata da `Memory`.
 
 ## Pagamenti
 
@@ -154,10 +158,9 @@ Login, script arbitrari e azioni high-risk non-payment restano bloccati.
 
 ## Non implementato ancora
 
-- Keychain/secret-store completo del valore sensibile associato al `SecretRef`.
-- Sezione UI Vault completa.
 - Payment Approval Card completa con screenshot/fingerprint.
 - Telegram routing per riepilogo pagamento.
+- Lista/edit/delete dei record Vault e tool minimizzati per recuperarli/usarli.
 - Smoke live Electron su checkout fixture/browser reale.
 
 ## Regola di confine
