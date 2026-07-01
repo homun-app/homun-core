@@ -185,6 +185,170 @@ pub fn cosine(a: &[f32], b: &[f32]) -> f32 {
 /// stessa cosa (dedup). Spostato fedelmente dal gateway (`main.rs:2692`).
 pub const DEDUP_JACCARD: f32 = 0.55;
 
+// ──────────────────────────────────────────────────────────────────────────
+// Orchestrazione del recall (Step 1) — core senza graph-context
+// ──────────────────────────────────────────────────────────────────────────
+
+use crate::{
+    DataSensitivity, MemoryAccessRequest, MemoryFacade, MemoryRecord, MemorySearchRequest,
+    MemoryStatus, PrivacyDomain, UserId, WorkspaceId,
+};
+
+/// Soglia minima di lunghezza della query perché il recall parta (il gateway
+/// salta query < 8 char). Spostato fedelmente (`main.rs:13576`).
+const RECALL_MIN_QUERY_CHARS: usize = 8;
+
+/// Soglia di score denso sotto la quale un hit vettoriale è scartato (paraphrase
+/// troppo debole). Spostato fedelmente (`main.rs:13656`).
+const RECALL_DENSE_MIN_SCORE: f32 = 0.5;
+
+/// Recall RAG episodico — fase 1: embed della query, **OFF the lock**. Spostato
+/// fedelmente dal gateway (`main.rs:13581`). Questa è l'unica parte async; il
+/// chiamante la esegue PRIMA di prendere il lock della facade, così il
+/// `MutexGuard` non attraversa un await (che romperebbe `Send`).
+pub async fn embed_query(embedding: &dyn EmbeddingClient, query: &str) -> Vec<f32> {
+    embedding.embed(query.trim()).await
+}
+
+/// Recall RAG episodico — fase 2: FTS + vector search + fusione RRF + formatting,
+/// **sotto lock** (sync). Prende la `query_vec` già embedded (da [`embed_query`])
+/// e la facade già lockata dal chiamante. Spostato fedelmente dal corpo di
+/// `relevant_memory_for_prompt` (`main.rs:13591-13726`).
+///
+/// Lo scope è **argomento esplicito** (`user`, `workspace`) — isolation by
+/// construction (chiude il debito Tappa 1). Il graph-context enrichment è un
+/// callback opzionale `+ Sync` che il gateway inietta.
+pub fn recall_search_on_facade(
+    facade: &MemoryFacade,
+    user: &UserId,
+    workspace: &WorkspaceId,
+    query: &str,
+    query_vec: &[f32],
+    graph_context: Option<&(dyn Fn(&MemoryFacade, &UserId, &WorkspaceId, &str) -> Option<String> + Sync)>,
+) -> Option<String> {
+    let query = query.trim();
+    if query.chars().count() < RECALL_MIN_QUERY_CHARS {
+        return None;
+    }
+    let now_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+
+    // All memories in scope, keyed by ref.
+    let records: std::collections::HashMap<String, MemoryRecord> = facade
+        .list_memories_for_ui(user, workspace)
+        .map(|ms| ms.into_iter().map(|m| (m.reference.to_string(), m)).collect())
+        .unwrap_or_default();
+
+    // Lexical pass (FTS/bm25) → rank per reference.
+    let mut fts_rank: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let access = MemoryAccessRequest {
+        actor_id: "chat_rag".to_string(),
+        user_id: user.clone(),
+        workspace_id: workspace.clone(),
+        purpose: "chat_context".to_string(),
+        allowed_domains: vec![
+            PrivacyDomain::new("personal"),
+            PrivacyDomain::new("work"),
+            PrivacyDomain::new("general"),
+        ],
+        max_sensitivity: DataSensitivity::Private,
+        allow_raw_payload: false,
+        allow_export: true,
+        broad_query: false,
+    };
+    if let Ok(page) = facade.search_memories(MemorySearchRequest {
+        access,
+        query: query.to_string(),
+        statuses: vec![MemoryStatus::Confirmed, MemoryStatus::Candidate],
+        memory_types: vec![
+            "open_loop".to_string(),
+            "goal".to_string(),
+            "decision".to_string(),
+            "fact".to_string(),
+            "preference".to_string(),
+        ],
+        limit: 8,
+        offset: 0,
+    }) {
+        for item in page.items {
+            fts_rank
+                .entry(item.reference.to_string())
+                .or_insert(item.rank);
+        }
+    }
+
+    // Semantic pass (dense) → rank per reference.
+    let mut dense_rank: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    if !query_vec.is_empty() {
+        if let Ok(hits) = facade.search_embeddings(user, workspace, query_vec, 32) {
+            for (i, hit) in hits
+                .into_iter()
+                .filter(|hit| hit.score >= RECALL_DENSE_MIN_SCORE)
+                .take(8)
+                .enumerate()
+            {
+                dense_rank
+                    .entry(hit.memory_ref.to_string())
+                    .or_insert(i + 1);
+            }
+        }
+    }
+
+    // Fuse: union → RRF + importance + recency.
+    let mut refs: std::collections::HashSet<String> = std::collections::HashSet::new();
+    refs.extend(fts_rank.keys().cloned());
+    refs.extend(dense_rank.keys().cloned());
+    let mut candidates: Vec<(MemoryCandidate, String)> = Vec::new();
+    for reference in refs {
+        let Some(record) = records.get(&reference) else {
+            continue;
+        };
+        let importance = record
+            .metadata
+            .get("importance")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.5) as f32;
+        let candidate = MemoryCandidate {
+            fts_rank: fts_rank.get(&reference).copied(),
+            dense_rank: dense_rank.get(&reference).copied(),
+            importance,
+            age_days: memory_age_days(&record.created_at, now_secs),
+            reference: reference.clone(),
+        };
+        let line = format!("- {}", format_recall_entry(&record.text, &record.metadata));
+        candidates.push((candidate, line));
+    }
+    candidates.sort_by(|a, b| {
+        hybrid_memory_score(&b.0)
+            .partial_cmp(&hybrid_memory_score(&a.0))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    let mut lines: Vec<String> = Vec::new();
+    for (_, line) in candidates {
+        if !lines.contains(&line) {
+            lines.push(line);
+        }
+    }
+
+    // Graph-context enrichment (opzionale, iniettato dal gateway).
+    if let Some(enrich) = graph_context {
+        if let Some(extra) = enrich(facade, user, workspace, query) {
+            lines.insert(0, extra);
+        }
+    }
+    lines.truncate(10);
+    if lines.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "MEMORY RELEVANT TO THE REQUEST (this is what you/the user have ALREADY established — \
+treat it as established fact; do NOT say \"I have no decision in memory\" if it's below here):\n{}",
+        lines.join("\n")
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -256,5 +420,73 @@ mod tests {
     fn format_recall_entry_passes_through_without_decision_metadata() {
         let out = format_recall_entry("un fatto semplice", &serde_json::json!({}));
         assert_eq!(out, "un fatto semplice");
+    }
+
+    /// ADR 0022 (Tappa 4) — il recall è ora testabile IN ISOLAMENTO (no HTTP).
+    /// Questo è il test "0 profilazione → ora possibile" dell'ADR: una facade
+    /// in-memory + un mock embedding deterministico → recall trova la decisione.
+    #[test]
+    fn recall_search_finds_decision_via_fts_in_isolation() {
+        use crate::{MemoryFacade, MemoryRefKind, SQLiteMemoryStore};
+        let store = SQLiteMemoryStore::open_in_memory().unwrap();
+        let facade = MemoryFacade::new(store);
+        let user = UserId::new("iso-user");
+        let ws = WorkspaceId::new("proj-iso");
+        // Una decisione confirmed nello scope.
+        let now = crate::current_timestamp();
+        let record = MemoryRecord {
+            reference: crate::MemoryRef::generated(MemoryRefKind::Memory, user.clone(), ws.clone()),
+            user_id: user.clone(),
+            workspace_id: ws.clone(),
+            memory_type: "decision".to_string(),
+            text: "Scelto Postgres per il DB relazionale del progetto".to_string(),
+            aliases: vec![],
+            language_hints: vec![],
+            confidence: 0.9,
+            status: crate::MemoryStatus::Confirmed,
+            privacy_domain: PrivacyDomain::new("work"),
+            sensitivity: DataSensitivity::Public,
+            metadata: serde_json::json!({}),
+            created_at: now.clone(),
+            updated_at: now,
+            last_seen_at: None,
+            supersedes: vec![],
+            superseded_by: None,
+            correction_of: None,
+        };
+        facade.upsert_memory(&record).unwrap();
+
+        // query_vec vuoto: il recall cade sul solo passaggio FTS (deterministico).
+        let block = recall_search_on_facade(
+            &facade,
+            &user,
+            &ws,
+            "quale database abbiamo scelto per il progetto?",
+            &[],
+            None,
+        )
+        .expect("recall deve trovare la decisione via FTS");
+        assert!(
+            block.contains("Postgres"),
+            "il recall deve citare la decisione: {block}"
+        );
+        assert!(
+            block.starts_with("MEMORY RELEVANT"),
+            "il recall deve produrre il blocco canonico"
+        );
+    }
+
+    #[test]
+    fn recall_search_returns_none_for_short_query() {
+        use crate::SQLiteMemoryStore;
+        let store = SQLiteMemoryStore::open_in_memory().unwrap();
+        let facade = MemoryFacade::new(store);
+        let user = UserId::new("short-user");
+        let ws = WorkspaceId::new("proj-short");
+        // Query < 8 char → None (come nel gateway).
+        assert_eq!(
+            recall_search_on_facade(&facade, &user, &ws, "ok", &[], None),
+            None
+        );
     }
 }

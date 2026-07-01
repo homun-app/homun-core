@@ -614,8 +614,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // incapsula brief/recall/learn. Costruito dopo il letterale perché
     // `InProcessMemoryRecallService` prende in prestito lo stesso `AppState`.
     if memory_service_enabled() {
-        state.memory_service =
-            Some(Arc::new(InProcessMemoryRecallService::new(state.clone())) as Arc<dyn MemoryRecallService>);
+        let embedding: Arc<dyn local_first_memory::EmbeddingClient> =
+            Arc::new(GatewayEmbeddingClient { http: state.http.clone() });
+        state.memory_service = Some(
+            Arc::new(InProcessMemoryRecallService::new(state.clone(), embedding))
+                as Arc<dyn MemoryRecallService>,
+        );
     }
     // Fix any pre-existing 0644 data files (created before the umask above was set):
     // the SQLite stores and the WhatsApp session are world-readable on old installs.
@@ -4890,11 +4894,46 @@ fn scope_from_active_workspace() -> MemoryScope {
 /// `relevant_memory_for_prompt`/`learn_from_exchange`.
 struct InProcessMemoryRecallService {
     state: AppState,
+    /// ADR 0022 (Tappa 4): embedding client astratto (capability trait). Il
+    /// recall orchestrato nel crate lo consuma; questa impl gateway wrappa la
+    /// cache LRU+TTL esistente (`embed_query_for_memory_recall`).
+    embedding: std::sync::Arc<dyn local_first_memory::EmbeddingClient>,
 }
 
 impl InProcessMemoryRecallService {
-    fn new(state: AppState) -> Self {
-        Self { state }
+    fn new(
+        state: AppState,
+        embedding: std::sync::Arc<dyn local_first_memory::EmbeddingClient>,
+    ) -> Self {
+        Self { state, embedding }
+    }
+}
+
+/// ADR 0022 (Tappa 4) — impl gateway del capability `EmbeddingClient`. Wrappa
+/// `embed_query_for_memory_recall` (cache LRU+TTL + timeout + degradazione). Il
+/// recall orchestrato nel crate lo consuma senza conoscere HTTP.
+struct GatewayEmbeddingClient {
+    http: reqwest::Client,
+}
+
+impl local_first_memory::EmbeddingClient for GatewayEmbeddingClient {
+    fn embed<'a>(
+        &'a self,
+        text: &'a str,
+    ) -> local_first_memory::BoxFuture<'a, Vec<f32>> {
+        let http = self.http.clone();
+        Box::pin(async move {
+            // `embed_query_for_memory_recall` deriva workspace/timing internamente;
+            // per il recall orchestrato l'embedding è solo del testo della query.
+            // Usiamo embed_text direttamente (no cache globale qui, ma il gateway
+            // cache è per-workspace — vedremo se serve thread through lo scope).
+            // Per parità col path inline, riusiamo embed_query_for_memory_recall.
+            let active = gateway_memory_workspace_id();
+            let mut timing = MemoryRecallTiming::default();
+            embed_query_for_memory_recall(&http, text, &active, &mut timing)
+                .await
+                .unwrap_or_default()
+        })
     }
 }
 
@@ -4982,14 +5021,47 @@ impl MemoryRecallService for InProcessMemoryRecallService {
         query: &'a str,
         scope: &'a MemoryScope,
     ) -> local_first_memory::BoxFuture<'a, RecallPack> {
-        // Scope: delega a relevant_memory_for_prompt, che deriva lo scope dal
-        // workspace attivo e applica PROJECT ISOLATION (main.rs:13360). Assert di
-        // coerenza come in brief(); isolation-by-construction piena in Tappa 4.
-        debug_assert!(scope.workspace_id() == gateway_memory_workspace_id());
+        // ADR 0022 (Tappa 4): recall ora ORCHESTRATO nel crate via
+        // `recall_on_facade`. Lo scope è argomento esplicito (isolation by
+        // construction — chiude il debito Tappa 1). Il graph-context è iniettato
+        // come callback dal gateway (pure-facade, sarà spostato in sub-tappa).
+        let user = gateway_memory_user_id();
+        // Lo scope del trait è autoritativo: lo usiamo, non più la globale.
+        let workspace = scope.workspace_id();
+        let embedding = self.embedding.clone();
         let state = self.state.clone();
+        let scope_owned = scope.clone();
         Box::pin(async move {
-            let block = relevant_memory_for_prompt(&state, query).await;
-            RecallPack::from_block(query, scope.clone(), block)
+            // Fase 1: embed OFF the lock (l'unico await prima del lock, come nel
+            // path gateway originale — così il MutexGuard non attraversa un await).
+            let query_vec = local_first_memory::embed_query(embedding.as_ref(), query).await;
+            // Fase 2: lock + search sync. Il guard vive solo in questo scope sync.
+            let block = {
+                let Ok(facade) = lock_memory_facade(&state) else {
+                    return RecallPack::from_block(query, scope_owned, None);
+                };
+                // Graph-context callback: inietta workflow_status / artifact_provenance.
+                // Le fn libere del gateway sono Sync; il closure è + Sync.
+                let graph_context: Option<
+                    &(dyn Fn(&local_first_memory::MemoryFacade, &MemoryUserId, &MemoryWorkspaceId, &str) -> Option<String> + Sync),
+                > = Some(&|facade, user, workspace, q| {
+                    if let Some(workflow) =
+                        workflow_status_context_for_query(facade, user, workspace, q)
+                    {
+                        return Some(workflow);
+                    }
+                    artifact_provenance_context_for_query(facade, user, workspace, q)
+                });
+                local_first_memory::recall_search_on_facade(
+                    &facade,
+                    &user,
+                    &workspace,
+                    query,
+                    &query_vec,
+                    graph_context,
+                )
+            };
+            RecallPack::from_block(query, scope_owned, block)
         })
     }
 
@@ -54484,6 +54556,15 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         }
     }
 
+    /// Embedding client mock per i test del service: ritorna vettore vuoto (recall
+    /// cade sul solo passaggio FTS — deterministico, no HTTP).
+    struct NoopEmbeddingClient;
+    impl local_first_memory::EmbeddingClient for NoopEmbeddingClient {
+        fn embed<'a>(&'a self, _text: &'a str) -> local_first_memory::BoxFuture<'a, Vec<f32>> {
+            Box::pin(async move { Vec::new() })
+        }
+    }
+
     /// AppState di test con una `MemoryFacade` in-memory passata in input e tutti
     /// gli altri store in-memory/empty. `brief()` tocca SOLO `memory_facade` +
     /// globali (workspace/user id), quindi i campi non-memoria sono popolati con
@@ -54598,7 +54679,7 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             let state = test_app_state_for_brief(facade);
             super::set_memory_workspace(super::PERSONAL_WORKSPACE);
             let scope = super::scope_from_active_workspace();
-            let service = super::InProcessMemoryRecallService::new(state.clone());
+            let service = super::InProcessMemoryRecallService::new(state.clone(), std::sync::Arc::new(NoopEmbeddingClient));
             let service_blocks = service.brief(&scope, message).ordered_blocks();
             let inline_blocks = inline_briefing_blocks(&state, message);
             assert_eq!(
@@ -54621,7 +54702,7 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             let state = test_app_state_for_brief(facade);
             super::set_memory_workspace("proj-parity");
             let scope = super::scope_from_active_workspace();
-            let service = super::InProcessMemoryRecallService::new(state.clone());
+            let service = super::InProcessMemoryRecallService::new(state.clone(), std::sync::Arc::new(NoopEmbeddingClient));
             let service_blocks = service.brief(&scope, message).ordered_blocks();
             let inline_blocks = inline_briefing_blocks(&state, message);
             assert_eq!(
