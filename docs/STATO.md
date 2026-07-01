@@ -775,6 +775,9 @@ GIÀ FATTO sessione 5g (NON ripartire; tutto su `main`):
   `Maximize2` e il pannello full è più largo (`min(1040px, ...)`) senza scivolare sotto il drawer.
   Aggiornato `test:ui-contract` per bloccare la regressione. Verifiche verdi:
   `npm --prefix apps/desktop run test:ui-contract`, `npm --prefix apps/desktop run build`.
+- **Electron dev liveness**: fixato crash/uscita dopo pochi secondi del dev shell: `BrowserWindow`
+  ora è trattenuta in una `Set` main-process e rilasciata solo su `closed`, evitando GC/chiusura
+  silenziosa che faceva terminare Electron e quindi anche il gateway. Contratto UI aggiornato.
 - **Browser discovery locale**: rafforzata `browser_open_research_discovery_instruction`: per news
   correnti/ricerche web aperte senza sito esplicito il loop deve partire da search/discovery, non
   da una singola fonte, e deve allineare lingua del prompt + locale browser (`hl=`/`gl=` quando

@@ -81,6 +81,9 @@ assertContains("electron/main.cjs", "ensureGateway", "Electron shell must own de
 assertContains("electron/main.cjs", "HOMUN_DESKTOP_GATEWAY_TOKEN", "Electron shell must generate/pass the local gateway token");
 assertContains("electron/main.cjs", "HOMUN_DESKTOP_RESOURCES_DIR", "Electron shell must support production-like local resource smoke tests");
 assertContains("electron/main.cjs", "before-quit", "Electron shell must stop managed gateway process on app quit");
+assertContains("electron/main.cjs", "const mainWindows = new Set();", "Electron shell must retain BrowserWindow references");
+assertContains("electron/main.cjs", "mainWindows.add(window);", "Electron shell must keep created windows alive");
+assertContains("electron/main.cjs", "mainWindows.delete(window);", "Electron shell must release windows only after close");
 assertContains("electron/preload.cjs", "contextBridge.exposeInMainWorld", "Electron preload must expose only minimal runtime config");
 assertNotContains("electron/preload.cjs", "platform: process.platform", "renderer must not depend on platform-specific native control alignment");
 assertNotContains("electron/preload.cjs", "windowAction", "renderer must not own native window control behavior");

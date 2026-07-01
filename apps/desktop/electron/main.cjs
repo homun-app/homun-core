@@ -19,6 +19,7 @@ const RESOURCES_ROOT =
   (app.isPackaged ? process.resourcesPath : REPO_ROOT);
 let gatewayProcess = null;
 let isQuitting = false;
+const mainWindows = new Set();
 
 // Brand icon (Homun pictogram on a white rounded square). Used as the window
 // icon on Windows/Linux and as the macOS dock icon in dev. macOS ignores the
@@ -359,6 +360,10 @@ function createWindow() {
       sandbox: true,
       webSecurity: true,
     },
+  });
+  mainWindows.add(window);
+  window.on("closed", () => {
+    mainWindows.delete(window);
   });
 
   window.webContents.setWindowOpenHandler(({ url }) => {
