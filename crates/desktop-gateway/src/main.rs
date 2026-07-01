@@ -77,12 +77,13 @@ use local_first_local_computer_session::{
 };
 use local_first_local_computer_session::{LocalComputerReadModel, LocalComputerSessionStore};
 use local_first_memory::{
-    DataSensitivity as MemoryDataSensitivity, ExtractedEntity, ExtractedMemory, ExtractedRelation,
-    MemoryAccessRequest, MemoryCreateRequest, MemoryDashboard, MemoryEntity, MemoryExtraction,
-    MemoryFacade, MemoryLifecycleRequest, MemoryRecord, MemoryRef, MemoryRefKind, MemoryRelation,
-    MemorySearchRequest, MemoryStatus, MemoryUiReadModel, MemoryUpdatePatch, MemoryWikiProjection,
-    PERSONAL_WORKSPACE, PrivacyDomain, SQLiteMemoryStore, UserId as MemoryUserId, WikiFileStore,
-    WikiPage, WorkspaceId as MemoryWorkspaceId,
+    BriefingPack, DataSensitivity as MemoryDataSensitivity, Exchange, ExtractedEntity,
+    ExtractedMemory, ExtractedRelation, MemoryAccessRequest, MemoryCreateRequest, MemoryDashboard,
+    MemoryEntity, MemoryExtraction, MemoryFacade, MemoryLifecycleRequest, MemoryRecord,
+    MemoryRecallService, MemoryRef, MemoryRefKind, MemoryRelation, MemoryScope, MemorySearchRequest,
+    MemoryStatus, MemoryUiReadModel, MemoryUpdatePatch, MemoryWikiProjection, PERSONAL_WORKSPACE,
+    PrivacyDomain, RecallPack, SQLiteMemoryStore, UserId as MemoryUserId, WikiFileStore, WikiPage,
+    WorkspaceId as MemoryWorkspaceId,
 };
 use local_first_orchestrator::{
     DriveOutcome, DriveStepStatus, ExecutionPlan, MemoryContextProvider, MemoryContextSnippet,
@@ -145,6 +146,9 @@ pub(crate) struct AppState {
     computer_store: Arc<Mutex<LocalComputerSessionStore>>,
     browser_url_policies: Arc<Mutex<BrowserUrlPolicyStore>>,
     memory_facade: Arc<Mutex<MemoryFacade>>,
+    /// ADR 0022 (Tappa 1): service memoria che incapsula brief/recall/learn.
+    /// `Some` solo quando `HOMUN_MEMORY_SERVICE=on`; `None` → orchestrazione inline attuale.
+    memory_service: Option<Arc<dyn MemoryRecallService>>,
     vault_store: Arc<Mutex<SQLiteVaultStore>>,
     pending_vault_proposals: Arc<privacy_guard::PendingVaultProposalStore>,
     capability_registry: Arc<Mutex<CapabilityRegistryStore>>,
@@ -570,7 +574,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .and_then(|value| value.trim().parse().ok())
         .unwrap_or(std::net::IpAddr::from([127, 0, 0, 1]));
     let addr = SocketAddr::from((host, port));
-    let state = AppState {
+    let mut state = AppState {
         http: reqwest::Client::new(),
         chat_store: Arc::new(Mutex::new(ChatStore::open(gateway_database_path()?)?)),
         task_store: Arc::new(Mutex::new(TaskStore::open(gateway_task_database_path()?)?)),
@@ -584,6 +588,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             SQLiteMemoryStore::open(gateway_memory_database_path()?)
                 .map_err(std::io::Error::other)?,
         ))),
+        // ADR 0022 (Tappa 1): costruisci il service solo se il flag è ON.
+        // L'impl delega interamente alla memoria_facade sopra (condivisa via Arc),
+        // quindi niente nuovi store, niente big-bang.
+        memory_service: None,
         vault_store: Arc::new(Mutex::new(
             SQLiteVaultStore::open(gateway_vault_database_path()?)
                 .map_err(std::io::Error::other)?,
@@ -602,6 +610,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         novnc_tickets: Arc::new(Mutex::new(std::collections::HashMap::new())),
         novnc_view_ticket: Arc::new(Mutex::new(None)),
     };
+    // ADR 0022 — Tappa 1: se il flag è ON, costruisci il service memoria che
+    // incapsula brief/recall/learn. Costruito dopo il letterale perché
+    // `InProcessMemoryRecallService` prende in prestito lo stesso `AppState`.
+    if memory_service_enabled() {
+        state.memory_service =
+            Some(Arc::new(InProcessMemoryRecallService::new(state.clone())) as Arc<dyn MemoryRecallService>);
+    }
     // Fix any pre-existing 0644 data files (created before the umask above was set):
     // the SQLite stores and the WhatsApp session are world-readable on old installs.
     if let Ok(dir) = gateway_data_dir() {
@@ -4848,7 +4863,165 @@ fn recent_work_block(state: &AppState) -> Option<String> {
     ))
 }
 
-/// One-shot JSON call to the memory role model (same path as the extractor).
+/// Costruisce il `MemoryScope` corrispondente al workspace attivo del gateway.
+///
+/// L'assemblaggio canonico del briefing deriva lo scope dal workspace attivo
+/// (`gateway_memory_workspace_id`); questo helper lo proietta nel `MemoryScope`
+/// del crate memoria. Lo scope `Thread` (episodico) non compare nel briefing
+/// always-on canonico, quindi qui mappiamo solo Personal/Project.
+fn scope_from_active_workspace() -> MemoryScope {
+    let ws = gateway_memory_workspace_id();
+    if ws.as_str() == PERSONAL_WORKSPACE {
+        MemoryScope::Personal
+    } else {
+        MemoryScope::Project(ws)
+    }
+}
+
+/// Impl in-process di [`MemoryRecallService`] che **delega** alle funzioni
+/// esistenti del gateway senza cambiarne il behaviour (ADR 0022, Tappa 1).
+///
+/// L'estrazione vera (migrazione delle funzioni nel crate `memory`) è la Tappa
+/// 4: qui si incapsula *delegando*. Mantiene `AppState` (clone a basso costo,
+/// tutti i campi sono `Arc`) e condivide la stessa `Arc<Mutex<MemoryFacade>>`.
+///
+/// Parità: `brief` riproduce esattamente la sequenza di assemblaggio del
+/// system prompt (`main.rs:19476-19509`); `recall`/`learn` avvolgono
+/// `relevant_memory_for_prompt`/`learn_from_exchange`.
+struct InProcessMemoryRecallService {
+    state: AppState,
+}
+
+impl InProcessMemoryRecallService {
+    fn new(state: AppState) -> Self {
+        Self { state }
+    }
+}
+
+impl MemoryRecallService for InProcessMemoryRecallService {
+    fn brief(&self, scope: &MemoryScope, user_message: &str) -> BriefingPack {
+        // Parità con l'assemblaggio inline (main.rs:19476-19509). I predicati
+        // should_inject_* sono prompt-dipendenti: questo è il motivo per cui il
+        // trait porta `user_message` (vedi service.rs).
+        let (memory_personal, memory_project) =
+            gather_profile_memory_for_prompt(&self.state, user_message);
+        let memory_open_loops = if should_inject_open_loops_for_prompt(user_message) {
+            gather_open_loops(&self.state, 6)
+        } else {
+            Vec::new()
+        };
+        let profile_block = format_memory_block(
+            &memory_open_loops,
+            &memory_personal,
+            &memory_project,
+            CHAT_MEMORY_BUDGET_CHARS,
+        );
+        // NOTA: objective/brief/recent_work ritornano già None per PERSONAL_WORKSPACE,
+        // quindi la shape è intrinsecamente snella per MemoryScope::Personal (invariant P1).
+        let pack = BriefingPack {
+            profile_block,
+            objective: project_objective_block(&self.state),
+            brief: project_brief_block(&self.state),
+            recent_work: recent_work_block(&self.state),
+        };
+        // `scope` è portato per il contratto (isolation by construction); l'impl delegante
+        // usa il workspace attivo del gateway, coerente con `relevant_memory_for_prompt`.
+        // Lo scope diventa realmente autoritativo in Tappa 4. Qui l'assert garantisce
+        // coerenza in debug (discrepanza = segnale di un bug nel wiring, non da zittire).
+        debug_assert!(scope.workspace_id() == gateway_memory_workspace_id());
+        pack
+    }
+
+    fn recall<'a>(
+        &'a self,
+        query: &'a str,
+        scope: &'a MemoryScope,
+    ) -> local_first_memory::BoxFuture<'a, RecallPack> {
+        // Scope: delega a relevant_memory_for_prompt, che deriva lo scope dal
+        // workspace attivo e applica PROJECT ISOLATION (main.rs:13360). Assert di
+        // coerenza come in brief(); isolation-by-construction piena in Tappa 4.
+        debug_assert!(scope.workspace_id() == gateway_memory_workspace_id());
+        let state = self.state.clone();
+        Box::pin(async move {
+            let block = relevant_memory_for_prompt(&state, query).await;
+            RecallPack::from_block(query, scope.clone(), block)
+        })
+    }
+
+    fn learn<'a>(
+        &'a self,
+        exchange: &'a Exchange,
+        scope: &'a MemoryScope,
+    ) -> local_first_memory::BoxFuture<'a, ()> {
+        debug_assert!(scope.workspace_id() == gateway_memory_workspace_id());
+        let state = self.state.clone();
+        let user_message = exchange.user_message.clone();
+        let assistant_message = exchange.assistant_message.clone();
+        let actions = exchange.actions.clone();
+        let thread_id = exchange.thread_id.clone();
+        let speaker = exchange.speaker.clone();
+        let prev_assistant = exchange.prev_assistant.clone();
+        Box::pin(async move {
+            learn_from_exchange(
+                &state,
+                &user_message,
+                &assistant_message,
+                &actions,
+                thread_id.as_deref(),
+                speaker.as_deref(),
+                prev_assistant.as_deref(),
+            )
+            .await;
+        })
+    }
+}
+
+/// ADR 0022 — Tappa 1: apprendimento post-turno. Quando `HOMUN_MEMORY_SERVICE=on`
+/// instrada via `MemoryRecallService::learn` (che delega a `learn_from_exchange`);
+/// altrimenti path attuale. Usato dai 4 call site di apprendimento per non
+/// duplicare il branching del flag.
+fn learn_via_service_or_inline(
+    state: &AppState,
+    user_message: &str,
+    assistant_message: &str,
+    actions: &str,
+    thread_id: Option<&str>,
+    speaker: Option<&str>,
+    prev_assistant: Option<&str>,
+) -> local_first_memory::BoxFuture<'static, ()> {
+    if let Some(service) = state.memory_service.clone() {
+        let scope = scope_from_active_workspace();
+        let exchange = Exchange {
+            user_message: user_message.to_string(),
+            assistant_message: assistant_message.to_string(),
+            actions: actions.to_string(),
+            thread_id: thread_id.map(str::to_string),
+            speaker: speaker.map(str::to_string),
+            prev_assistant: prev_assistant.map(str::to_string),
+        };
+        Box::pin(async move { service.learn(&exchange, &scope).await })
+    } else {
+        let state = state.clone();
+        let user_message = user_message.to_string();
+        let assistant_message = assistant_message.to_string();
+        let actions = actions.to_string();
+        let thread_id = thread_id.map(str::to_string);
+        let speaker = speaker.map(str::to_string);
+        let prev_assistant = prev_assistant.map(str::to_string);
+        Box::pin(async move {
+            learn_from_exchange(
+                &state,
+                &user_message,
+                &assistant_message,
+                &actions,
+                thread_id.as_deref(),
+                speaker.as_deref(),
+                prev_assistant.as_deref(),
+            )
+            .await;
+        })
+    }
+}
 async fn call_memory_json(
     state: &AppState,
     system: &str,
@@ -6904,6 +7077,15 @@ fn plan_reconcile_on_delivery_flag(value: Option<&str>) -> bool {
 
 fn plan_reconcile_on_delivery_enabled() -> bool {
     plan_reconcile_on_delivery_flag(std::env::var("HOMUN_PLAN_RECONCILE").ok().as_deref())
+}
+
+/// ADR 0022 — Tappa 1: instrada brief/recall/learn tramite `MemoryRecallService`
+/// invece dell'orchestrazione inline. Default OFF (parità conservativa); flip ON
+/// per validare l'incapsulamento. Stessa disciplina di `plan_stall_abort_enabled`.
+fn memory_service_enabled() -> bool {
+    std::env::var("HOMUN_MEMORY_SERVICE")
+        .map(|value| value == "1" || value.eq_ignore_ascii_case("on"))
+        .unwrap_or(false)
 }
 
 fn browser_open_research_discovery_instruction() -> &'static str {
@@ -19473,39 +19655,58 @@ save/export a file to a folder, call save_artifact(file, destination)."
         // Always-on memory profile (M1): inject what we durably know about the user
         // (personal scope) and the active project, so the chat is continuous instead
         // of starting cold every turn. Sensitive items are excluded here by design.
-        let (memory_personal, memory_project) =
-            gather_profile_memory_for_prompt(state, &request.prompt);
-        let memory_open_loops = if should_inject_open_loops_for_prompt(&request.prompt) {
-            gather_open_loops(state, 6)
+        //
+        // ADR 0022 — Tappa 1: quando `HOMUN_MEMORY_SERVICE=on`, l'assemblaggio del
+        // briefing è incapsulato in `MemoryRecallService::brief` (che delega alle
+        // stesse funzioni, nello stesso ordine). Flag OFF → path inline attuale.
+        let system = if let Some(service) = state.memory_service.as_ref() {
+            let scope = scope_from_active_workspace();
+            let pack = service.brief(&scope, &request.prompt);
+            // ordered_blocks() = [profile, objective, brief, recent_work] — stesso
+            // ordine dell'assemblaggio inline qui sotto. Mantiene la parità.
+            let mut system = system;
+            for block in pack.ordered_blocks() {
+                if let Some(block) = block {
+                    system = format!("{system}\n\n{block}");
+                }
+            }
+            system
         } else {
-            Vec::new()
-        };
-        let system = match format_memory_block(
-            &memory_open_loops,
-            &memory_personal,
-            &memory_project,
-            CHAT_MEMORY_BUDGET_CHARS,
-        ) {
-            Some(block) => format!("{system}\n\n{block}"),
-            None => system,
-        };
-        // Project OBJECTIVE (always-on, FIRST): the north star + focus directive, so the
-        // assistant keeps every implementation aligned and flags drift.
-        let system = match project_objective_block(state) {
-            Some(block) => format!("{system}\n\n{block}"),
-            None => system,
-        };
-        // Project BRIEF (always-on): recent state, so "where this project is" is present
-        // every turn — not just when the prompt happens to match.
-        let system = match project_brief_block(state) {
-            Some(block) => format!("{system}\n\n{block}"),
-            None => system,
-        };
-        // Recent work (always-on): the last commits, so a new conversation resumes the
-        // thread of what was just being done instead of starting cold.
-        let system = match recent_work_block(state) {
-            Some(block) => format!("{system}\n\n{block}"),
-            None => system,
+            let (memory_personal, memory_project) =
+                gather_profile_memory_for_prompt(state, &request.prompt);
+            let memory_open_loops = if should_inject_open_loops_for_prompt(&request.prompt) {
+                gather_open_loops(state, 6)
+            } else {
+                Vec::new()
+            };
+            let system = match format_memory_block(
+                &memory_open_loops,
+                &memory_personal,
+                &memory_project,
+                CHAT_MEMORY_BUDGET_CHARS,
+            ) {
+                Some(block) => format!("{system}\n\n{block}"),
+                None => system,
+            };
+            // Project OBJECTIVE (always-on, FIRST): the north star + focus directive, so the
+            // assistant keeps every implementation aligned and flags drift.
+            let system = match project_objective_block(state) {
+                Some(block) => format!("{system}\n\n{block}"),
+                None => system,
+            };
+            // Project BRIEF (always-on): recent state, so "where this project is" is present
+            // every turn — not just when the prompt happens to match.
+            let system = match project_brief_block(state) {
+                Some(block) => format!("{system}\n\n{block}"),
+                None => system,
+            };
+            // Recent work (always-on): the last commits, so a new conversation resumes the
+            // thread of what was just being done instead of starting cold.
+            let system = match recent_work_block(state) {
+                Some(block) => format!("{system}\n\n{block}"),
+                None => system,
+            };
+            system
         };
         // Goal-propose affordance (projects only): when the model articulates the project's
         // objective, it emits a marker → the UI shows a "Salva come obiettivo" card. This is
@@ -19528,10 +19729,20 @@ normal answers."
         };
         // RAG: inject memory relevant to THIS prompt (decisions/facts), so the model
         // answers from what was already decided instead of saying it has nothing.
+        // ADR 0022 — Tappa 1: via service quando il flag è ON, altrimenti path attuale.
         let system = if should_inject_relevant_memory_for_prompt(&request.prompt) {
-            match relevant_memory_for_prompt(state, &request.prompt).await {
-                Some(block) => format!("{system}\n\n{block}"),
-                None => system,
+            if let Some(service) = state.memory_service.as_ref() {
+                let scope = scope_from_active_workspace();
+                let pack = service.recall(&request.prompt, &scope).await;
+                match pack.block {
+                    Some(block) => format!("{system}\n\n{block}"),
+                    None => system,
+                }
+            } else {
+                match relevant_memory_for_prompt(state, &request.prompt).await {
+                    Some(block) => format!("{system}\n\n{block}"),
+                    None => system,
+                }
             }
         } else {
             system
@@ -20383,7 +20594,7 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
                             let learn_thread = thread_id.clone();
                             let learn_prev = memory_prev_assistant.clone();
                             tokio::spawn(async move {
-                                learn_from_exchange(
+                                learn_via_service_or_inline(
                                     &learn_state,
                                     &learn_user,
                                     &learn_answer,
@@ -24571,7 +24782,7 @@ Tell me if you want me to retry or rephrase."
             let learn_actions = tool_trace.join("\n");
             let learn_prev = memory_prev_assistant.clone();
             tokio::spawn(async move {
-                learn_from_exchange(
+                learn_via_service_or_inline(
                     &learn_state,
                     &learn_user,
                     &learn_answer,
@@ -28293,7 +28504,7 @@ async fn handle_channel_inbound(
         let content = message.content.clone();
         tokio::spawn(async move {
             // thread_id=None: record_channel_message already stored the episode.
-            learn_from_exchange(&st, &content, "", "", None, speaker.as_deref(), None).await;
+            learn_via_service_or_inline(&st, &content, "", "", None, speaker.as_deref(), None).await;
         });
     }
     match action {
@@ -43053,7 +43264,7 @@ async fn memory_wiki_save(
     let body = req.body.clone();
     let reconcile_ws = ws.clone();
     tokio::spawn(async move {
-        learn_from_exchange(
+        learn_via_service_or_inline(
             &st,
             "Manual correction of the project memory wiki",
             &body,
@@ -54181,6 +54392,205 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             block.find("OPEN LOOPS").unwrap() < block.find("Personal:").unwrap(),
             "open loops must come before personal"
         );
+    }
+
+    /// ADR 0022 — Tappa 1: parità strutturale del briefing.
+    ///
+    /// Verifica il wiring dell'invariant P1 (cross-chat = solo progetti):
+    /// `scope_from_active_workspace()` deve proiettare il workspace personale in
+    /// `MemoryScope::Personal`, e un workspace nominato in `Project(_)`. È il
+    /// punto in cui il gating del gateway (env/active workspace) incontra il
+    /// contratto del crate memoria. L'invariant che i blocchi `project_*` siano
+    /// `None` per Personal è codificato nei loro guard `PERSONAL_WORKSPACE`
+    /// (`main.rs:4755/4791/4817`) e validato dal test del crate memoria
+    /// `briefing_pack_personal_shape_is_well_formed_with_profile_only`.
+    #[test]
+    fn scope_from_active_workspace_projects_personal_and_project() {
+        // Salvaguarda e ripristina lo scope memory globale (test condiviso).
+        let prev = std::env::var("HOMUN_USER_ID").ok();
+        // SAFETY: test isolato; ripristinato sotto.
+        unsafe { std::env::set_var("HOMUN_USER_ID", "local-user"); }
+
+        super::set_memory_workspace(super::PERSONAL_WORKSPACE);
+        let personal = super::scope_from_active_workspace();
+        assert!(
+            matches!(personal, super::MemoryScope::Personal),
+            "workspace personale deve proiettarsi in MemoryScope::Personal"
+        );
+
+        super::set_memory_workspace("proj-acme");
+        let project = super::scope_from_active_workspace();
+        match project {
+            super::MemoryScope::Project(ws) => {
+                assert_eq!(ws.as_str(), "proj-acme");
+            }
+            other => panic!("workspace nominato deve proiettarsi in Project(_), got {other:?}"),
+        }
+
+        // Ripristino.
+        super::set_memory_workspace(super::PERSONAL_WORKSPACE);
+        match prev {
+            Some(value) => {
+                unsafe { std::env::set_var("HOMUN_USER_ID", value); }
+            }
+            None => {
+                unsafe { std::env::remove_var("HOMUN_USER_ID"); }
+            }
+        }
+    }
+
+    /// AppState di test con una `MemoryFacade` in-memory passata in input e tutti
+    /// gli altri store in-memory/empty. `brief()` tocca SOLO `memory_facade` +
+    /// globali (workspace/user id), quindi i campi non-memoria sono popolati con
+    /// valori cheap/default. Rende possibile il test di parità runtime
+    /// service-vs-inline (DoD Tappa 1) senza costruire store reali su disco.
+    fn test_app_state_for_brief(memory_facade: super::MemoryFacade) -> super::AppState {
+        let secret_dir = isolated_gateway_test_dir("brief-parity-secrets");
+        let secret_store = local_first_secrets::EncryptedFileSecretStore::open(
+            secret_dir.join("secrets.json"),
+            local_first_secrets::DevelopmentSecretKeyProvider::new([0u8; 32]),
+        )
+        .expect("secret store");
+        super::AppState {
+            http: reqwest::Client::new(),
+            chat_store: std::sync::Arc::new(std::sync::Mutex::new(
+                super::ChatStore::in_memory().expect("chat store"),
+            )),
+            task_store: std::sync::Arc::new(std::sync::Mutex::new(
+                local_first_task_runtime::TaskStore::open_in_memory().expect("task store"),
+            )),
+            computer_store: std::sync::Arc::new(std::sync::Mutex::new(
+                super::LocalComputerSessionStore::open_in_memory().expect("computer store"),
+            )),
+            browser_url_policies: std::sync::Arc::new(std::sync::Mutex::new(
+                super::BrowserUrlPolicyStore::open_in_memory().expect("browser url policy store"),
+            )),
+            memory_facade: std::sync::Arc::new(std::sync::Mutex::new(memory_facade)),
+            memory_service: None,
+            vault_store: std::sync::Arc::new(std::sync::Mutex::new(
+                local_first_vault::SQLiteVaultStore::open_in_memory().expect("vault store"),
+            )),
+            pending_vault_proposals: std::sync::Arc::new(
+                crate::privacy_guard::PendingVaultProposalStore::default(),
+            ),
+            capability_registry: std::sync::Arc::new(std::sync::Mutex::new(
+                super::CapabilityRegistryStore::open_in_memory().expect("capability registry"),
+            )),
+            task_executor_status: std::sync::Arc::new(std::sync::Mutex::new(
+                super::TaskExecutorStatus::new(false),
+            )),
+            task_executor_registry: super::TaskExecutorRegistry::with_defaults(),
+            browser_capability_client: std::sync::Arc::new(std::sync::Mutex::new(None)),
+            browser_thread_sessions: std::sync::Arc::new(std::sync::Mutex::new(
+                std::collections::HashMap::new(),
+            )),
+            payment_approvals: std::sync::Arc::new(std::sync::Mutex::new(
+                std::collections::HashMap::new(),
+            )),
+            secret_store: std::sync::Arc::new(secret_store),
+            auth_token: "test-token".into(),
+            novnc_tickets: std::sync::Arc::new(std::sync::Mutex::new(
+                std::collections::HashMap::new(),
+            )),
+            novnc_view_ticket: std::sync::Arc::new(std::sync::Mutex::new(None)),
+        }
+    }
+
+    /// Ricostruisce l'assemblaggio inline del briefing (la sequenza che vive in
+    /// `stream_chat_via_openai`, `main.rs:19610+`) chiamando le stesse funzioni del
+    /// gateway. Serve da riferimento per il test di parità: l'impl delegante di
+    /// `brief()` DEVE produrre gli stessi blocchi, nello stesso ordine.
+    fn inline_briefing_blocks(
+        state: &super::AppState,
+        user_message: &str,
+    ) -> Vec<Option<String>> {
+        let (memory_personal, memory_project) =
+            super::gather_profile_memory_for_prompt(state, user_message);
+        let memory_open_loops = if super::should_inject_open_loops_for_prompt(user_message) {
+            super::gather_open_loops(state, 6)
+        } else {
+            Vec::new()
+        };
+        let profile_block = super::format_memory_block(
+            &memory_open_loops,
+            &memory_personal,
+            &memory_project,
+            super::CHAT_MEMORY_BUDGET_CHARS,
+        );
+        vec![
+            profile_block,
+            super::project_objective_block(state),
+            super::project_brief_block(state),
+            super::recent_work_block(state),
+        ]
+    }
+
+    /// ADR 0022 — Tappa 1: TEST DI PARITÀ RUNTIME (DoD).
+    ///
+    /// Per entrambi gli scope (Personal e Project), il briefing prodotto dal
+    /// service (`InProcessMemoryRecallService::brief`) DEVE essere identico —
+    /// blocco per blocco, nello stesso ordine — all'assemblaggio inline del
+    /// gateway. Se questo fallisce, l'incapsulamento ha cambiato semantics: NON
+    /// si aggiusta il service, si investiga (kickoff, stop-and-ask).
+    #[test]
+    fn brief_via_service_matches_inline_assembly_personal_and_project() {
+        // Il metodo brief() viene dal trait MemoryRecallService: portiamolo in scope.
+        use super::MemoryRecallService;
+        // User id stabile per entrambi gli scope (le funzioni leggono la globale).
+        let prev_user = std::env::var("HOMUN_USER_ID").ok();
+        unsafe { std::env::set_var("HOMUN_USER_ID", "parity-user"); }
+
+        // Messaggio "normale" (non-breve): attiva sia il profile-memory completo
+        // sia gli open-loops. È il caso in cui i due gating prompt-dipendenti
+        // hanno effetto, quindi la parità è significativa.
+        let message = "Qual è lo stato del preventivo Rossi e cosa resta da fare?";
+
+        // --- Scope PERSONAL ---
+        {
+            let facade = super::MemoryFacade::new(
+                local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
+            );
+            let state = test_app_state_for_brief(facade);
+            super::set_memory_workspace(super::PERSONAL_WORKSPACE);
+            let scope = super::scope_from_active_workspace();
+            let service = super::InProcessMemoryRecallService::new(state.clone());
+            let service_blocks = service.brief(&scope, message).ordered_blocks();
+            let inline_blocks = inline_briefing_blocks(&state, message);
+            assert_eq!(
+                service_blocks, inline_blocks,
+                "PARITÀ PERSONAL: service.brief() deve produrre gli stessi blocchi dell'inline"
+            );
+            // Invariant P1: per Personal, i blocchi project_* sono None.
+            assert!(
+                service_blocks[1].is_none() && service_blocks[2].is_none()
+                    && service_blocks[3].is_none(),
+                "Personal briefing deve avere shape snella (objective/brief/recent_work = None)"
+            );
+        }
+
+        // --- Scope PROJECT ---
+        {
+            let facade = super::MemoryFacade::new(
+                local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
+            );
+            let state = test_app_state_for_brief(facade);
+            super::set_memory_workspace("proj-parity");
+            let scope = super::scope_from_active_workspace();
+            let service = super::InProcessMemoryRecallService::new(state.clone());
+            let service_blocks = service.brief(&scope, message).ordered_blocks();
+            let inline_blocks = inline_briefing_blocks(&state, message);
+            assert_eq!(
+                service_blocks, inline_blocks,
+                "PARITÀ PROJECT: service.brief() deve produrre gli stessi blocchi dell'inline"
+            );
+        }
+
+        // Ripristino.
+        super::set_memory_workspace(super::PERSONAL_WORKSPACE);
+        match prev_user {
+            Some(value) => unsafe { std::env::set_var("HOMUN_USER_ID", value); },
+            None => unsafe { std::env::remove_var("HOMUN_USER_ID"); },
+        }
     }
 
     #[test]

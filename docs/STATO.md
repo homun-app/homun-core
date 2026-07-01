@@ -12,6 +12,19 @@
   direzione 0020, emenda 0016. Browse instradato a motore #1 (`plan_is_browse_only`). Basata su 3 cluster
   di ricerca + prova empirica. Vedi [decisions/0021](decisions/0021-single-guarded-loop-planning-as-tool.md)
   e [[homun-single-loop-evidence-verdict]].
+- **MEMORIA FLUIDA — ADR 0022, Tappa 1 completata (2026-07-01):** introdotto il trait
+  `MemoryRecallService` (`brief`/`recall`/`learn`) in `crates/memory/src/service.rs` con tipi
+  contratto tipizzati (`BriefingPack`/`RecallPack`/`Exchange`). Impl `InProcessMemoryRecallService`
+  nel gateway che **delega** alle funzioni esistenti (zero behaviour change). Instradamento dietro
+  feature flag `HOMUN_MEMORY_SERVICE` (default OFF). Parità verificata: ordine canonico dei blocchi,
+  shape snella `brief(Personal)` (invariant P1), object-safety (`Arc<dyn>`). **Frontend:** payload di
+  `ChatEventPart` tipizzati (B2) + nuovo type `recall` (A1, non ancora renderizzato — A2/A3 next).
+  **Invariants rispettati:** cross-chat solo progetti; isolamento Personale↔Progetto preservato;
+  briefing sempre always-on; nessuna funzione migrata nel crate (quello è Tappa 4). **Resta:**
+  Tappa 1.5 (cache briefing), 2 (pool/WAL), 3 (recall on-demand via tool), 4 (migrazione monolite) +
+  UI A2 (fase recalling), A3 (memory badge), A5 (Project context panel), A4 (MemoryView al nav).
+  Vedi [roadmap](roadmap-fluidita-memoria.md), [ADR 0022](decisions/0022-memory-as-out-of-path-service.md),
+  [kickoff](../prompts/kickoff-memory-service.md).
 - **Linea pratica corrente (sessione 5g):** batch di fix chat-UX/funzionali nell'app reale (dettagli nel
   rolling in fondo) — risolti "bloccato" (self-heal CDP motore #1), "continua"/autonomia, reasoning
   collassato, isola live+persistente, F1/F2/planner; **form-fill `kind=fill`** (contratto schema-piatto↔
