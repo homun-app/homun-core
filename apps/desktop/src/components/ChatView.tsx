@@ -1910,28 +1910,32 @@ export function ChatView({
       </header>
 
       <div className="chat-status-stack" aria-label="Live workspace status">
-        {thread.workspaceId && <ProjectContextPanel threadId={thread.threadId} />}
-        <WorkspaceIsland
-          threadId={thread.threadId}
-          activitySteps={conversationActivity}
-          artifacts={workbenchArtifacts}
-          computerActivity={computerLiveStatus.activity}
-          computerLive={computerLiveStatus.active}
-          fileCount={uploadedFiles.length}
-          goalCount={projectGoalCount}
-          memoryCount={projectMemoryCount}
-          planSteps={workspacePlanSteps}
-          streaming={promptSubmitting || Boolean(streamingAssistantId)}
-          status={streamStatus}
-          threadHasMessages={threadMessages.length > 0}
-          onCaptureScreenshot={IS_DESKTOP ? () => void captureScreenshot() : undefined}
-          onExportChat={() => void exportChatMarkdown()}
-          onOpenWorkbench={(tab) => {
-            setArtifactsInitial(null);
-            setWorkbenchTab(tab);
-            setArtifactsOpen(true);
-          }}
-        />
+        {/* ADR 0022: un unico pannello unificato — ProjectContextPanel (solo progetti)
+            + WorkspaceIsland fusi visivamente in una sola card contigua, senza gap. */}
+        <div className={`unified-status-panel${thread.workspaceId ? " has-project-context" : ""}`}>
+          {thread.workspaceId && <ProjectContextPanel threadId={thread.threadId} />}
+          <WorkspaceIsland
+            threadId={thread.threadId}
+            activitySteps={conversationActivity}
+            artifacts={workbenchArtifacts}
+            computerActivity={computerLiveStatus.activity}
+            computerLive={computerLiveStatus.active}
+            fileCount={uploadedFiles.length}
+            goalCount={projectGoalCount}
+            memoryCount={projectMemoryCount}
+            planSteps={workspacePlanSteps}
+            streaming={promptSubmitting || Boolean(streamingAssistantId)}
+            status={streamStatus}
+            threadHasMessages={threadMessages.length > 0}
+            onCaptureScreenshot={IS_DESKTOP ? () => void captureScreenshot() : undefined}
+            onExportChat={() => void exportChatMarkdown()}
+            onOpenWorkbench={(tab) => {
+              setArtifactsInitial(null);
+              setWorkbenchTab(tab);
+              setArtifactsOpen(true);
+            }}
+          />
+        </div>
         <ChatComputerPanel threadId={thread.threadId} onLiveChange={setComputerLiveStatus} />
       </div>
 

@@ -359,8 +359,10 @@ fn create_or_update(
     let record = facade
         .create_memory_candidate(create)
         .map_err(|e| e.to_string())?;
-    // Auto-confirm medium+ confidence (low-risk).
-    if confidence >= 0.6 {
+    // Auto-confirm medium+ confidence (low-risk). Soglia abbassata a 0.5 (era 0.6):
+    // l'estrattore LLM a volte assegna confidence 0.5-0.6 a fatti validi, lasciandoli
+    // invisibili (candidate) nel briefing. 0.5 li rende visibili subito.
+    if confidence >= 0.5 {
         let _ = facade.confirm_memory(&request, &record.reference, "auto-confirm learn");
     }
     Ok(())
@@ -582,6 +584,12 @@ pub fn persist_learn_extraction(
             backfill(facade, user, active, 12);
         }
     }
+    // ADR 0022 (post-UI): promuovi i candidate vecchi (che hanno sopravvissuto
+    // abbastanza turni senza reject) → diventano confirmed e visibili nel briefing.
+    promote_aged_candidates(facade, user, &WorkspaceId::new(PERSONAL_WORKSPACE));
+    if has_project {
+        promote_aged_candidates(facade, user, active);
+    }
     true
 }
 
@@ -612,6 +620,61 @@ pub fn is_confirmation_reply(user_message: &str) -> bool {
             | "cancella" | "stop" | "cambio idea" | "non salvare" | "salva" | "sì"
             | "si" | "yes" | "no" | "esatto" | "giusto" | "corretto" | "certo" | "d'accordo"
     )
+}
+
+/// ADR 0022 (post-UI): promotion automatica dei candidate. Un record `candidate`
+/// che sopravvive abbastanza a lungo (soglia temporale) senza essere rejectato
+/// viene promosso a `confirmed` — così i fatti estratti con confidence bassa
+/// (sotto la soglia di auto-confirm) diventano visibili nel briefing dopo un po',
+/// invece di restare invisibili per sempre.
+///
+/// Chiamata in coda a `persist_learn_extraction` per ogni scope toccato. Soglia
+/// default: 10 minuti (knob `HOMUN_CANDIDATE_PROMOTE_MINS`).
+pub fn promote_aged_candidates(facade: &MemoryFacade, user: &UserId, workspace: &WorkspaceId) -> usize {
+    let promote_after_secs: i64 = std::env::var("HOMUN_CANDIDATE_PROMOTE_MINS")
+        .ok()
+        .and_then(|v| v.trim().parse::<i64>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(10)
+        * 60;
+    let now_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let items = match facade.list_memories_for_ui(user, workspace) {
+        Ok(items) => items,
+        Err(_) => return 0,
+    };
+    let request = crate::MemoryLifecycleRequest {
+        actor_id: "auto-promote".to_string(),
+        user_id: user.clone(),
+        workspace_id: workspace.clone(),
+        purpose: "promote_aged".to_string(),
+    };
+    let mut promoted = 0;
+    for m in items {
+        if m.status != crate::MemoryStatus::Candidate {
+            continue;
+        }
+        // Età del candidate dal created_at (unix:<secs> o <secs>).
+        let created_secs = m
+            .created_at
+            .strip_prefix("unix:")
+            .unwrap_or(&m.created_at)
+            .split('.')
+            .next()
+            .and_then(|p| p.parse::<i64>().ok())
+            .unwrap_or(now_secs);
+        if now_secs - created_secs >= promote_after_secs {
+            if facade
+                .confirm_memory(&request, &m.reference, "auto-promoted (aged candidate)")
+                .is_ok()
+            {
+                promoted += 1;
+            }
+        }
+    }
+    promoted
 }
 
 #[cfg(test)]
