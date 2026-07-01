@@ -191,6 +191,32 @@ pub struct WorkflowRunSummary {
     pub finished_at: Option<String>,
 }
 
+/// ADR 0022 (Piano UI) — un singolo hit richiamato dalla memoria.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RecallStreamHit {
+    /// Riferimento stabile del record memoria.
+    pub r#ref: String,
+    /// Testo/summary del record.
+    pub text: String,
+    /// Score di rilevanza (0.0-1.0, ibrido RRF).
+    pub score: f32,
+    /// `memory_type` del record (decision/fact/goal/…).
+    #[serde(rename = "type")]
+    pub kind: String,
+}
+
+/// ADR 0022 (Piano UI A2/A3) — payload dell'evento `Recall` stream. Shape identica
+/// al frontend `RecallEventPayload`: `scope` rispetta l'invariant Personale↔Progetto.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RecallStreamPayload {
+    /// La query usata per la recall.
+    pub query: String,
+    /// Gli hits richiamati (vuoto se nessun match).
+    pub hits: Vec<RecallStreamHit>,
+    /// Scope della recall ("personal" | "project").
+    pub scope: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TokenMetrics {
     pub prompt_tokens: u32,
@@ -342,6 +368,12 @@ pub enum GenerateStreamEvent {
     },
     ToolResult {
         payload: serde_json::Value,
+    },
+    /// ADR 0022 (Piano UI A2/A3): risultato di una recall RAG episodica — ciò che
+    /// l'agente ha richiamato dalla memoria per questo turno. Shape identica al
+    /// frontend `RecallEventPayload` (A1), così il parse è trasparente.
+    Recall {
+        payload: RecallStreamPayload,
     },
     Done {
         text: String,

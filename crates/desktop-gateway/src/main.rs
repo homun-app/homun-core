@@ -12760,13 +12760,27 @@ fn memory_age_days(created_at: &str, now_secs: i64) -> f32 {
     ((now_secs - secs).max(0) as f32) / 86_400.0
 }
 
-fn recall_memory(state: &AppState, query: &str) -> String {
+/// Esito di `recall_memory`: la risposta testuale per il modello + i hits
+/// strutturati (per l'evento UI Recall) + lo scope. ADR 0022 (Piano UI A2/A3).
+struct RecallOutcome {
+    /// Risposta formattata per il modello (stringa tool result).
+    response: String,
+    /// Hits strutturati per la UI (kind, text). Pari ai `lines` non-vault.
+    hits: Vec<(String, String)>,
+    /// Scope della recall ("personal" | "project").
+    scope: String,
+}
+
+fn recall_memory(state: &AppState, query: &str) -> RecallOutcome {
     let query = query.trim();
+    let empty = |msg: &str| -> RecallOutcome {
+        RecallOutcome { response: msg.to_string(), hits: Vec::new(), scope: "personal".to_string() }
+    };
     if query.is_empty() {
-        return "No query provided.".to_string();
+        return empty("No query provided.");
     }
     let Ok(facade) = lock_memory_facade(state) else {
-        return "Memory unavailable.".to_string();
+        return empty("Memory unavailable.");
     };
     let user = gateway_memory_user_id();
     let active = gateway_memory_workspace_id();
@@ -12808,18 +12822,13 @@ fn recall_memory(state: &AppState, query: &str) -> String {
             })
             .unwrap_or_default()
     };
-    // Scope-aware ordering. In a PROJECT, the project's own memory is the primary scope
-    // the user is asking about → list it FIRST; personal memory follows as secondary
-    // context (capped, so it can't drown out the project facts). This is the fix for
-    // "project memory isn't isolated": asking "cosa c'è in memoria" inside a project
-    // used to surface personal info first (LLM primacy bias) and bury the project.
-    // PROJECT ISOLATION: in a project, recall ONLY the project's own memory — never the
-    // personal scope. "Di cosa abbiamo discusso?" inside a project must stay about THIS
-    // project. (Stable personal PREFERENCES still reach the model via the always-on briefing.)
     let in_project = active.as_str() != PERSONAL_WORKSPACE;
     let mut lines = Vec::new();
+    // Hits strutturati per la UI: raccolgo (kind, text) man mano che costruisco lines.
+    let mut ui_hits: Vec<(String, String)> = Vec::new();
     for (kind, text) in search(active.clone()) {
         lines.push(format!("- [{kind}] {text}"));
+        ui_hits.push((kind.clone(), text.clone()));
     }
     if let Some(workflow) = workflow_status_context_for_query(&facade, &user, &active, query) {
         lines.push(workflow);
@@ -12828,8 +12837,6 @@ fn recall_memory(state: &AppState, query: &str) -> String {
     {
         lines.push(provenance);
     }
-    // Episodic memory (M4): past conversations — SCOPED to the active workspace via the
-    // episode's origin tag, so a project recalls only its own conversations.
     if let Ok(episodes) =
         facade.list_memories_for_ui(&user, &MemoryWorkspaceId::new(THREADS_WORKSPACE))
     {
@@ -12848,10 +12855,14 @@ fn recall_memory(state: &AppState, query: &str) -> String {
             .map(|m| format!("- [conversation] {}", m.text))
             .collect();
         hits.truncate(8);
+        // Episodi come hits UI (kind "conversation").
+        for h in &hits {
+            if let Some(text) = h.strip_prefix("- [conversation] ") {
+                ui_hits.push(("conversation".to_string(), text.to_string()));
+            }
+        }
         lines.extend(hits);
     }
-    // Graph traversal: personal relationships ("chi è la nonna di…") — only OUTSIDE a
-    // project (it's personal-scope knowledge; a project must not surface it).
     let personal = MemoryWorkspaceId::new(PERSONAL_WORKSPACE);
     if !in_project {
         if let Ok(relations) = facade.list_relations_for_ui(&user, &personal) {
@@ -12873,14 +12884,16 @@ fn recall_memory(state: &AppState, query: &str) -> String {
             }
         }
     }
-    match lock_vault_store(state) {
+    let scope = if in_project { "project" } else { "personal" }.to_string();
+    let response = match lock_vault_store(state) {
         Ok(vault_store) => {
             recall_memory_response_with_vault_fallback(&vault_store, query, lines, in_project)
         }
         Err(_) if lines.is_empty() => format!("No memories relevant to «{query}»."),
         Err(_) if in_project => format!("Memories relevant to THIS project:\n{}", lines.join("\n")),
         Err(_) => format!("Relevant memories from memory:\n{}", lines.join("\n")),
-    }
+    };
+    RecallOutcome { response, hits: ui_hits, scope }
 }
 
 fn recall_memory_response_with_vault_fallback(
@@ -22416,24 +22429,39 @@ contact: use only the messages from this chat. Do NOT reveal personal data of th
                                     a.get("query").and_then(|q| q.as_str()).map(String::from)
                                 })
                                 .unwrap_or_default();
+                            // ADR 0022 (Piano UI A2/A3): emetti l'evento strutturato
+                            // `Recall` con i hits richiamati (visibile in UI: fase
+                            // recalling + badge). Sostituisce il delta `‹‹ACT››🧠`.
+                            let query_for_ui = if query.is_empty() { "(query)".to_string() } else { query.clone() };
+                            let st = state_owned.clone();
+                            let outcome = tokio::task::spawn_blocking(move || recall_memory(&st, &query))
+                                .await
+                                .unwrap_or_else(|e| RecallOutcome {
+                                    response: format!("Execution error: {e}"),
+                                    hits: Vec::new(),
+                                    scope: "personal".to_string(),
+                                });
                             let _ = emit_stream_event(
                                 &tx,
-                                GenerateStreamEvent::Delta {
-                                    text: format!(
-                                        "‹‹ACT››🧠 Searching memory: {}‹‹/ACT››",
-                                        if query.is_empty() {
-                                            "(query)"
-                                        } else {
-                                            query.as_str()
-                                        }
-                                    ),
+                                GenerateStreamEvent::Recall {
+                                    payload: local_first_subagents::RecallStreamPayload {
+                                        query: query_for_ui,
+                                        hits: outcome
+                                            .hits
+                                            .iter()
+                                            .map(|(kind, text)| local_first_subagents::RecallStreamHit {
+                                                r#ref: String::new(),
+                                                text: text.clone(),
+                                                score: 0.0,
+                                                kind: kind.clone(),
+                                            })
+                                            .collect(),
+                                        scope: outcome.scope.clone(),
+                                    },
                                 },
                             )
                             .await;
-                            let st = state_owned.clone();
-                            tokio::task::spawn_blocking(move || recall_memory(&st, &query))
-                                .await
-                                .unwrap_or_else(|e| format!("Execution error: {e}"))
+                            outcome.response
                         }
                     } else if name == "query_code_graph" {
                         let symbol = serde_json::from_str::<serde_json::Value>(args_raw)
