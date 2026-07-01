@@ -3018,82 +3018,36 @@ async fn backfill_embeddings(
     workspace: &MemoryWorkspaceId,
     limit: usize,
 ) {
-    // (pending = new memories needing an embedding; seen = (ref, type, vector) of
-    // memories that ALREADY have an embedding — the seed for semantic dedup below).
-    let (pending, mut seen): (
-        Vec<(MemoryRef, String, String)>,
-        Vec<(String, String, Vec<f32>)>,
-    ) = {
-        let Ok(facade) = lock_memory_facade(state) else {
-            return;
-        };
-        let Ok(refs) = facade.refs_without_embeddings(user, workspace, limit) else {
-            return;
-        };
-        if refs.is_empty() {
-            return;
-        }
-        let meta: std::collections::HashMap<String, (String, String)> = facade
-            .list_memories_for_ui(user, workspace)
-            .map(|mems| {
-                mems.into_iter()
-                    .map(|m| (m.reference.to_string(), (m.text, m.memory_type)))
-                    .collect()
-            })
-            .unwrap_or_default();
-        let mut seen: Vec<(String, String, Vec<f32>)> = Vec::new();
-        if let Ok(embeddings) = facade.list_embeddings(user, workspace) {
-            for (reference, vector) in embeddings {
-                let rs = reference.to_string();
-                if let Some((_text, mtype)) = meta.get(&rs) {
-                    seen.push((rs, mtype.clone(), vector));
-                }
-            }
-        }
-        let pending = refs
-            .into_iter()
-            .filter_map(|r| {
-                meta.get(&r.to_string())
-                    .map(|(text, mtype)| (r, text.clone(), mtype.clone()))
-            })
-            .collect();
-        (pending, seen)
-    };
+    // ADR 0022 (Tappa 4): backfill ORCHESTRATO nel crate via 3 fasi Send-safe
+    // (collect lock → embed off-lock → persist lock). Il guard non attraversa await.
+    let embedding: std::sync::Arc<dyn local_first_memory::EmbeddingClient> =
+        std::sync::Arc::new(GatewayEmbeddingClient { http: state.http.clone() });
     let model = embed_model();
+    // Fase 1 (lock): collect pending + seen.
+    let collected = {
+        let Ok(facade) = lock_memory_facade(state) else { return };
+        local_first_memory::backfill_collect_pending(&facade, user, workspace, limit)
+    };
+    let Some((pending, mut seen)) = collected else { return };
+    // Fase 2 + 3: embed off-lock, poi persist sotto lock per ciascuno.
     for (reference, text, mtype) in pending {
-        if let Some(vector) = embed_text(&state.http, &text).await {
-            // Semantic dedup on WRITE: if a near-identical memory of the SAME type
-            // already exists (a paraphrase the lexical Jaccard pre-filter missed),
-            // drop this one instead of letting duplicates pile up. Soft-delete →
-            // reversible. Same-type + high cosine keeps genuinely distinct facts safe.
-            // Artifact identity is not semantic: two deliverables can have similar
-            // descriptions but different thread/path/name lifecycle.
-            let is_dup = memory_type_participates_in_semantic_dedup(&mtype)
-                && seen.iter().any(|(rs, ty, v)| {
-                    ty == &mtype
-                        && rs != &reference.to_string()
-                        && cosine(&vector, v) >= DEDUP_COSINE
-                });
-            if let Ok(facade) = lock_memory_facade(state) {
-                if is_dup {
-                    let lifecycle = MemoryLifecycleRequest {
-                        actor_id: "memory-dedup".to_string(),
-                        user_id: user.clone(),
-                        workspace_id: workspace.clone(),
-                        purpose: "semantic_dedup".to_string(),
-                    };
-                    let _ = facade.delete_memory(&lifecycle, &reference, "duplicato semantico");
-                    continue;
-                }
-                let _ = facade.upsert_embedding(&reference, user, workspace, &model, &vector);
-            }
-            seen.push((reference.to_string(), mtype, vector));
+        let vector = embedding.embed(&text).await;
+        if vector.is_empty() {
+            continue;
+        }
+        if let Ok(facade) = lock_memory_facade(state) {
+            local_first_memory::backfill_persist_one(
+                &facade,
+                user,
+                workspace,
+                &reference,
+                &mtype,
+                &vector,
+                &model,
+                &mut seen,
+            );
         }
     }
-}
-
-fn memory_type_participates_in_semantic_dedup(memory_type: &str) -> bool {
-    !matches!(memory_type, "artifact")
 }
 
 /// Fills the required `privacy_domain`/`sensitivity` on an extracted item when the
@@ -52802,13 +52756,13 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
 
     #[test]
     fn artifact_memories_do_not_participate_in_semantic_dedup() {
-        assert!(!super::memory_type_participates_in_semantic_dedup(
+        assert!(!local_first_memory::memory_type_participates_in_semantic_dedup(
             "artifact"
         ));
-        assert!(super::memory_type_participates_in_semantic_dedup(
+        assert!(local_first_memory::memory_type_participates_in_semantic_dedup(
             "decision"
         ));
-        assert!(super::memory_type_participates_in_semantic_dedup(
+        assert!(local_first_memory::memory_type_participates_in_semantic_dedup(
             "open_loop"
         ));
     }
