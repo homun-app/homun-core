@@ -38,6 +38,20 @@
   Dietro lo stesso flag `HOMUN_MEMORY_SERVICE`. **Parità Tappa 1 preservata** (la cache non cambia
   output, solo costo) + test cache hit/miss/eviction/invalidazione. **Resta:** 2 (pool/WAL), 3
   (recall on-demand), 4 (migrazione monolite) + UI A2/A3/A5/A4.
+- **MEMORIA FLUIDA — ADR 0022, Tappa 2 completata (2026-07-01):** pool reader/writer WAL nello store,
+  per rimuovere la serializzazione globale `Mutex<MemoryFacade>` → `Connection`. In WAL mode i read
+  concorrenti non bloccano il writer, e consolidation/backfill in background non bloccano più il
+  recall del turno. **Pool custom interno** (nessuna nuova dipendenza): `SQLiteMemoryStore` detiene
+  `Connections` enum — `Single(Mutex<Connection>)` (legacy, flag OFF, invariato) o `Pooled`
+  (writer `Mutex<Connection>` + N reader round-robin, WAL mode, flag ON). Trasparente a
+  facade/gateway (stessa API `&self`). ~40 metodi migrati a `read_conn()`/`write_conn()`; gli ibridi
+  (`import_graphify_batch`, `init`, `upsert_memory`+FTS) hanno varianti `*_on(&Connection)` per
+  evitare re-entrancy/deadlock. **Bug trovato e fixato dai test:** `is_tombstoned` re-lockava il
+  Mutex Single quando chiamato da metodi che già tenevano il guard → deadlock; fix con
+  `is_tombstoned_on`. Dietro flag `HOMUN_MEMORY_POOL` (default OFF), ortogonale a `HOMUN_MEMORY_SERVICE`.
+  **Test:** parità single-vs-pool (read/FTS), concorrenza WAL (4 reader + 1 writer, stato coerente),
+  `import_graphify_batch` in pool, embeddings roundtrip — tutti verdi. WAL richiede DB su disco
+  (in-memory cada su Single per i test). **Resta:** 3 (recall on-demand), 4 (migrazione monolite) + UI.
 - **Linea pratica corrente (sessione 5g):** batch di fix chat-UX/funzionali nell'app reale (dettagli nel
   rolling in fondo) — risolti "bloccato" (self-heal CDP motore #1), "continua"/autonomia, reasoning
   collassato, isola live+persistente, F1/F2/planner; **form-fill `kind=fill`** (contratto schema-piatto↔
