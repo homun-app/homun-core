@@ -802,6 +802,15 @@ GIÀ FATTO sessione 5g (NON ripartire; tutto su `main`):
   `cargo test -p local-first-desktop-gateway standalone_choice_card_requests_do_not_inject_cross_thread_memory -- --nocapture`,
   `cargo build -p local-first-desktop-gateway --bin local-first-desktop-gateway`,
   `npm --prefix apps/desktop run test:ui-contract`.
+- **Live follow-up 4 (due chat avviate insieme)**: evidenza DB/endpoint: il piano ha completato,
+  mentre il secondo thread era rimasto con solo `ready` ma compariva ancora in `/api/chat/active_streams`.
+  Root cause osservata: lo stream registry viene creato prima del primo evento/commit; se una richiesta
+  resta muta in preflight, la UI vede un busy fantasma. Ora gli stream senza alcun evento scadono dal
+  busy dopo 30s, separati dagli stream con attivita' reale che mantengono il timeout lungo 180s. Test
+  verdi: `cargo test -p local-first-desktop-gateway silent_stream_entry_counts_as_stale_for_activity -- --nocapture`,
+  `cargo test -p local-first-desktop-gateway idle_stream_entry_counts_as_stale_for_activity -- --nocapture`,
+  `cargo build -p local-first-desktop-gateway --bin local-first-desktop-gateway`,
+  `npm --prefix apps/desktop run test:ui-contract`.
 - **Browser live panel / espansione**: il dock `ChatComputerPanel` in modalità full ora esce dallo
   status stack e si ancora `fixed` dentro l'area chat, a destra della sidebar; il compact expand usa
   `Maximize2` e il pannello full è più largo (`min(1040px, ...)`) senza scivolare sotto il drawer.

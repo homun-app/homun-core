@@ -30733,12 +30733,26 @@ fn schedule_stream_registry_cleanup(resume_id: String) {
 }
 
 const STREAM_ACTIVITY_IDLE_STALE_SECS: u64 = 180;
+const STREAM_SILENT_IDLE_STALE_SECS: u64 = 30;
 
 fn stream_entry_is_activity_stale(entry: &StreamEntry, now: u64) -> bool {
     let last = entry
         .last_event_at
         .load(std::sync::atomic::Ordering::Relaxed);
-    last > 0 && now.saturating_sub(last) > STREAM_ACTIVITY_IDLE_STALE_SECS
+    if last == 0 {
+        return false;
+    }
+    let has_events = entry
+        .lines
+        .lock()
+        .map(|lines| !lines.is_empty())
+        .unwrap_or(false);
+    let stale_after = if has_events {
+        STREAM_ACTIVITY_IDLE_STALE_SECS
+    } else {
+        STREAM_SILENT_IDLE_STALE_SECS
+    };
+    now.saturating_sub(last) > stale_after
 }
 
 /// Thread ids that currently have a live (not-yet-finished) in-flight generation.
@@ -53098,6 +53112,23 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             finished: std::sync::atomic::AtomicBool::new(false),
             last_event_at: std::sync::atomic::AtomicU64::new(
                 now.saturating_sub(super::STREAM_ACTIVITY_IDLE_STALE_SECS + 1),
+            ),
+            thread_id: Some("thread-a".to_string()),
+        };
+
+        assert!(super::stream_entry_is_activity_stale(&entry, now));
+    }
+
+    #[test]
+    fn silent_stream_entry_counts_as_stale_for_activity() {
+        let (tx, _) = tokio::sync::broadcast::channel::<String>(4);
+        let now = super::now_epoch_secs();
+        let entry = super::StreamEntry {
+            lines: std::sync::Mutex::new(Vec::new()),
+            tx,
+            finished: std::sync::atomic::AtomicBool::new(false),
+            last_event_at: std::sync::atomic::AtomicU64::new(
+                now.saturating_sub(super::STREAM_SILENT_IDLE_STALE_SECS + 1),
             ),
             thread_id: Some("thread-a".to_string()),
         };
