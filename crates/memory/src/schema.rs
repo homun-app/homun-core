@@ -19,6 +19,11 @@ use serde_json::{Value, json};
 /// memory is private and local; it is never bound to a single project.
 pub const PERSONAL_WORKSPACE: &str = "__personal__";
 
+/// Reserved workspace id for the THREADS (episodic, per-conversation) scope.
+/// Mirror of the gateway constant — moved here so the wiki rebuilders (consolidate)
+/// can short-circuit on it without a gateway dependency.
+pub const THREADS_WORKSPACE: &str = "__threads__";
+
 /// Metadata key under which a record's `DecisionDetails` is stored, so other
 /// metadata (source, thread_id, …) can coexist on the same record.
 pub const DECISION_METADATA_KEY: &str = "decision";

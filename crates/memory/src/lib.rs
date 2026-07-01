@@ -1,3 +1,4 @@
+mod consolidate;
 mod crypto;
 mod embedding;
 mod error;
@@ -23,6 +24,7 @@ mod vector_index;
 mod wiki;
 mod wiki_sync;
 
+pub use consolidate::*;
 pub use crypto::*;
 pub use embedding::*;
 pub use error::*;
