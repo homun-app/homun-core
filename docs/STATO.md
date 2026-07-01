@@ -767,7 +767,9 @@ GIÀ FATTO sessione 5g (NON ripartire; tutto su `main`):
   card di proattività salvano `choice_prompt` strutturato senza `‹‹CHOICES››` nel testo. Restano
   fallback marker solo per chat vecchie/non migrate. Sesto taglio: `ChatView` scarta i delta-marker
   legacy completi quando sono già arrivati come eventi strutturati, così la prosa live non si
-  contamina con token display.
+  contamina con token display. Settimo taglio: il gateway non emette più il delta-marker legacy
+  per default quando un marker è convertibile in evento strutturato; compat esterna opt-in con
+  `HOMUN_STREAM_LEGACY_MARKER_DELTAS=1`.
 - **Browser live panel / espansione**: il dock `ChatComputerPanel` in modalità full ora esce dallo
   status stack e si ancora `fixed` dentro l'area chat, a destra della sidebar; il compact expand usa
   `Maximize2` e il pannello full è più largo (`min(1040px, ...)`) senza scivolare sotto il drawer.

@@ -30564,7 +30564,10 @@ fn legacy_marker_json(text: &str, open: &str, close: &str) -> Option<serde_json:
     legacy_marker_body(text, open, close).and_then(|body| serde_json::from_str(body).ok())
 }
 
-fn expand_legacy_delta_to_chat_events(text: &str) -> Vec<GenerateStreamEvent> {
+fn expand_legacy_delta_to_chat_events_with_mode(
+    text: &str,
+    include_legacy_delta: bool,
+) -> Vec<GenerateStreamEvent> {
     let mut events = Vec::new();
     if let Some(body) = legacy_marker_body(text, "‹‹ACT››", "‹‹/ACT››") {
         events.push(GenerateStreamEvent::Activity {
@@ -30595,10 +30598,20 @@ fn expand_legacy_delta_to_chat_events(text: &str) -> Vec<GenerateStreamEvent> {
     ) {
         events.push(GenerateStreamEvent::PaymentApproval { payload });
     }
+    if !events.is_empty() && !include_legacy_delta {
+        return events;
+    }
     events.push(GenerateStreamEvent::Delta {
         text: text.to_string(),
     });
     events
+}
+
+fn stream_legacy_marker_deltas_enabled() -> bool {
+    std::env::var("HOMUN_STREAM_LEGACY_MARKER_DELTAS")
+        .ok()
+        .map(|value| matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "on"))
+        .unwrap_or(false)
 }
 
 fn stream_entry_has_terminal_event(entry: &StreamEntry) -> bool {
@@ -30799,7 +30812,10 @@ async fn emit_single_stream_event(sink: &StreamSink, event: GenerateStreamEvent)
 async fn emit_stream_event(sink: &StreamSink, event: GenerateStreamEvent) -> Result<(), ()> {
     match event {
         GenerateStreamEvent::Delta { text } => {
-            for expanded in expand_legacy_delta_to_chat_events(&text) {
+            for expanded in expand_legacy_delta_to_chat_events_with_mode(
+                &text,
+                stream_legacy_marker_deltas_enabled(),
+            ) {
                 emit_single_stream_event(sink, expanded).await?;
             }
             Ok(())
@@ -52888,33 +52904,25 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
 
     #[test]
     fn legacy_marker_deltas_expand_to_structured_stream_events() {
-        let activity = super::expand_legacy_delta_to_chat_events("‹‹ACT››🧭 Planning‹‹/ACT››");
+        let activity =
+            super::expand_legacy_delta_to_chat_events_with_mode("‹‹ACT››🧭 Planning‹‹/ACT››", false);
         assert_eq!(
             activity,
-            vec![
-                super::GenerateStreamEvent::Activity {
-                    text: "🧭 Planning".to_string()
-                },
-                super::GenerateStreamEvent::Delta {
-                    text: "‹‹ACT››🧭 Planning‹‹/ACT››".to_string()
-                },
-            ]
+            vec![super::GenerateStreamEvent::Activity {
+                text: "🧭 Planning".to_string()
+            }]
         );
 
-        let plan = super::expand_legacy_delta_to_chat_events("‹‹PLAN››- [x] Done‹‹/PLAN››");
+        let plan =
+            super::expand_legacy_delta_to_chat_events_with_mode("‹‹PLAN››- [x] Done‹‹/PLAN››", false);
         assert_eq!(
             plan,
-            vec![
-                super::GenerateStreamEvent::PlanUpdate {
-                    markdown: "- [x] Done".to_string()
-                },
-                super::GenerateStreamEvent::Delta {
-                    text: "‹‹PLAN››- [x] Done‹‹/PLAN››".to_string()
-                },
-            ]
+            vec![super::GenerateStreamEvent::PlanUpdate {
+                markdown: "- [x] Done".to_string()
+            }]
         );
 
-        let plain = super::expand_legacy_delta_to_chat_events("hello");
+        let plain = super::expand_legacy_delta_to_chat_events_with_mode("hello", false);
         assert_eq!(
             plain,
             vec![super::GenerateStreamEvent::Delta {
@@ -52925,8 +52933,9 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
 
     #[test]
     fn legacy_card_marker_deltas_expand_to_structured_stream_events() {
-        let choices = super::expand_legacy_delta_to_chat_events(
+        let choices = super::expand_legacy_delta_to_chat_events_with_mode(
             "‹‹CHOICES››{\"question\":\"Confermi?\",\"options\":[\"Si\",\"No\"]}‹‹/CHOICES››",
+            false,
         );
         assert!(matches!(
             &choices[0],
@@ -52934,8 +52943,9 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
                 if payload["question"] == "Confermi?"
         ));
 
-        let vault = super::expand_legacy_delta_to_chat_events(
+        let vault = super::expand_legacy_delta_to_chat_events_with_mode(
             "‹‹VAULT_REVEAL››{\"record_id\":\"vault_1\",\"label\":\"Codice Fiscale\"}‹‹/VAULT_REVEAL››",
+            false,
         );
         assert!(matches!(
             &vault[0],
@@ -52943,8 +52953,9 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
                 if payload["record_id"] == "vault_1"
         ));
 
-        let payment = super::expand_legacy_delta_to_chat_events(
+        let payment = super::expand_legacy_delta_to_chat_events_with_mode(
             "‹‹PAYMENT_APPROVAL››{\"snapshot\":{\"approval_id\":\"pay_1\"}}‹‹/PAYMENT_APPROVAL››",
+            false,
         );
         assert!(matches!(
             &payment[0],
@@ -52952,8 +52963,25 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
                 if payload["snapshot"]["approval_id"] == "pay_1"
         ));
         assert!(matches!(
-            payment.last(),
-            Some(super::GenerateStreamEvent::Delta { .. })
+            payment.as_slice(),
+            [super::GenerateStreamEvent::PaymentApproval { .. }]
+        ));
+    }
+
+    #[test]
+    fn legacy_marker_delta_expansion_can_keep_delta_for_compat_clients() {
+        let activity = super::expand_legacy_delta_to_chat_events_with_mode(
+            "‹‹ACT››🧭 Planning‹‹/ACT››",
+            true,
+        );
+        assert_eq!(activity.len(), 2);
+        assert!(matches!(
+            activity[0],
+            super::GenerateStreamEvent::Activity { .. }
+        ));
+        assert!(matches!(
+            activity[1],
+            super::GenerateStreamEvent::Delta { .. }
         ));
     }
 
@@ -53007,7 +53035,7 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
     }
 
     #[tokio::test]
-    async fn emit_stream_event_publishes_structured_event_before_legacy_marker_delta() {
+    async fn emit_stream_event_publishes_structured_event_without_legacy_marker_delta_by_default() {
         let (mpsc, mut rx) =
             tokio::sync::mpsc::channel::<Result<axum::body::Bytes, std::io::Error>>(4);
         let (tx, _) = tokio::sync::broadcast::channel::<String>(4);
@@ -53033,16 +53061,11 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         .expect("event emits");
 
         let first = rx.recv().await.expect("first event").expect("bytes");
-        let second = rx
-            .try_recv()
-            .expect("second structured/legacy event")
-            .expect("bytes");
         assert!(String::from_utf8_lossy(&first).contains(r#""type":"activity""#));
-        assert!(String::from_utf8_lossy(&second).contains(r#""type":"delta""#));
+        assert!(rx.try_recv().is_err());
         let lines = entry.lines.lock().expect("stream lines");
-        assert_eq!(lines.len(), 2);
+        assert_eq!(lines.len(), 1);
         assert!(lines[0].contains(r#""type":"activity""#));
-        assert!(lines[1].contains(r#""type":"delta""#));
     }
 
     #[test]

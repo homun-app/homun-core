@@ -74,8 +74,9 @@ Punti caldi (con `file:line` in `main.rs`):
   `listenChatStreamDelta` è una vista filtrata dei soli `delta`, e `ChatView` conserva `eventParts`
   live per rendere Choice/Vault/Payment/Plan/Piano dai payload tipizzati prima del fallback marker.
   Il testo streaming resta sola prosa: il frontend non sintetizza più marker legacy da `eventParts`.
-  Se il gateway invia ancora il delta legacy dello stesso marker, `ChatView` lo scarta dopo aver
-  ricevuto l'evento strutturato, così il marker non entra nella prosa visibile.
+  Il gateway non invia più il delta legacy dello stesso marker per default; chi integra un client
+  vecchio solo-delta può riattivarlo con `HOMUN_STREAM_LEGACY_MARKER_DELTAS=1`. `ChatView` mantiene
+  comunque un filtro difensivo per scartare marker completi se arrivano da una sorgente legacy.
   I nuovi messaggi salvano anche `chat_messages.event_parts_json`, una proiezione derivata dei
   marker; l'API messaggi la espone come `event_parts` e il frontend la idrata su reload/storico,
   così il rendering storico non dipende esclusivamente da regex sul testo. Le nuove seed card
