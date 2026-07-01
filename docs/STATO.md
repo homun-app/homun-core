@@ -793,6 +793,15 @@ GIÀ FATTO sessione 5g (NON ripartire; tutto su `main`):
   personale e' limitato alle preferenze. Il piano mostrava anche una card falsa: `chat_store` derivava
   `choice_prompt` da un marker `CHOICES` citato dentro `REASONING`; ora i marker annidati nel reasoning
   non producono card/eventi persistiti.
+- **Live follow-up 3 (click su choice card)**: la richiesta standalone di choice ora e' pulita, ma il
+  click `Confermo` riapriva comunque memoria/profile globali tramite un gate diverso da quello degli
+  open-loop. Consolidato il gate cross-thread: conferme/choice brevi (`Confermo`, `cambio idea`, `ok`,
+  `procedi`, ecc.) saltano sia open-loop sia RAG `relevant_memory_for_prompt`, e il profilo personale
+  resta in modalita' sole preferenze. Test verdi:
+  `cargo test -p local-first-desktop-gateway short_choice_replies_do_not_inject_global_open_loops -- --nocapture`,
+  `cargo test -p local-first-desktop-gateway standalone_choice_card_requests_do_not_inject_cross_thread_memory -- --nocapture`,
+  `cargo build -p local-first-desktop-gateway --bin local-first-desktop-gateway`,
+  `npm --prefix apps/desktop run test:ui-contract`.
 - **Browser live panel / espansione**: il dock `ChatComputerPanel` in modalità full ora esce dallo
   status stack e si ancora `fixed` dentro l'area chat, a destra della sidebar; il compact expand usa
   `Maximize2` e il pannello full è più largo (`min(1040px, ...)`) senza scivolare sotto il drawer.

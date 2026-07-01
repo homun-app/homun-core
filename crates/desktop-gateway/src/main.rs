@@ -2351,7 +2351,7 @@ fn gather_profile_memory_for_prompt(
 }
 
 fn profile_memory_personal_preferences_only_for_prompt(user_message: &str) -> bool {
-    !should_inject_relevant_memory_for_prompt(user_message)
+    !should_inject_cross_thread_memory_for_prompt(user_message)
 }
 
 fn gather_profile_memory_with_options(
@@ -2540,6 +2540,10 @@ fn is_confirmation_reply(user_message: &str) -> bool {
 }
 
 fn should_inject_open_loops_for_prompt(user_message: &str) -> bool {
+    should_inject_cross_thread_memory_for_prompt(user_message)
+}
+
+fn should_inject_cross_thread_memory_for_prompt(user_message: &str) -> bool {
     let low = user_message.trim().to_lowercase();
     if low.is_empty() {
         return false;
@@ -2590,13 +2594,7 @@ fn is_standalone_choice_card_request(compact_lower_prompt: &str) -> bool {
 }
 
 fn should_inject_relevant_memory_for_prompt(user_message: &str) -> bool {
-    let compact = user_message
-        .trim()
-        .to_lowercase()
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ");
-    !compact.is_empty() && !is_standalone_choice_card_request(&compact)
+    should_inject_cross_thread_memory_for_prompt(user_message)
 }
 
 fn should_force_synthesis_for_empty_visible_answer(accumulated: &str, content: &str) -> bool {
@@ -54723,9 +54721,21 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
     #[test]
     fn short_choice_replies_do_not_inject_global_open_loops() {
         assert!(!super::should_inject_open_loops_for_prompt("Confermo"));
+        assert!(!super::should_inject_relevant_memory_for_prompt("Confermo"));
+        assert!(super::profile_memory_personal_preferences_only_for_prompt(
+            "Confermo"
+        ));
         assert!(!super::should_inject_open_loops_for_prompt("cambio idea"));
+        assert!(!super::should_inject_relevant_memory_for_prompt(
+            "cambio idea"
+        ));
+        assert!(super::profile_memory_personal_preferences_only_for_prompt(
+            "cambio idea"
+        ));
         assert!(!super::should_inject_open_loops_for_prompt("ok"));
+        assert!(!super::should_inject_relevant_memory_for_prompt("ok"));
         assert!(!super::should_inject_open_loops_for_prompt("procedi"));
+        assert!(!super::should_inject_relevant_memory_for_prompt("procedi"));
         assert!(!super::should_inject_open_loops_for_prompt(
             "Fammi scegliere tra Confermo e Cambio idea usando una card di scelta, non una lista testuale."
         ));
