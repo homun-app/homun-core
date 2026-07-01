@@ -199,6 +199,13 @@ function chatEventPartFromStream(event: CoreChatStreamEvent): ChatEventPart | nu
   }
 }
 
+const STRUCTURED_MARKER_DELTA_RE =
+  /^‹‹(?:ACT|REASONING|PLAN|CHOICES|VAULT_PROPOSE|VAULT_REVEAL|PAYMENT_APPROVAL)››[\s\S]*?‹‹\/(?:ACT|REASONING|PLAN|CHOICES|VAULT_PROPOSE|VAULT_REVEAL|PAYMENT_APPROVAL)››$/;
+
+function shouldDropStructuredMarkerDelta(delta: string) {
+  return STRUCTURED_MARKER_DELTA_RE.test(delta.trim());
+}
+
 interface ChatStreamStatus {
   requestId: string;
   phase: ChatStreamPhase;
@@ -685,6 +692,7 @@ export function ChatView({
           return;
         }
         if (payload.type !== "delta") return;
+        if (shouldDropStructuredMarkerDelta(payload.delta)) return;
         const firstDelta = streamedText.length === 0;
         streamChunks += 1;
         streamedText += payload.delta;
@@ -905,6 +913,7 @@ export function ChatView({
           return;
         }
         if (payload.type !== "delta") return;
+        if (shouldDropStructuredMarkerDelta(payload.delta)) return;
         streamedText += payload.delta;
         setStreamHasVisibleText(true);
         scheduleStreamingMessage();
@@ -1228,6 +1237,7 @@ export function ChatView({
         return;
       }
       if (payload.type !== "delta") return;
+      if (shouldDropStructuredMarkerDelta(payload.delta)) return;
       streamedText += payload.delta;
       setStreamHasVisibleText(true);
       scheduleStreamingMessage();
@@ -1538,6 +1548,7 @@ export function ChatView({
         return;
       }
       if (payload.type !== "delta") return;
+      if (shouldDropStructuredMarkerDelta(payload.delta)) return;
       const firstDelta = streamedText.length === message.text.length;
       streamedText += payload.delta;
       if (firstDelta) {

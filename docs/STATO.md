@@ -765,7 +765,9 @@ GIÀ FATTO sessione 5g (NON ripartire; tutto su `main`):
   resta solo prosa e anche il pannello Piano legge `plan_update` strutturato prima dei marker
   legacy. Quinto taglio: `seedAssistantMessage` accetta `event_parts` espliciti e le nuove choice
   card di proattività salvano `choice_prompt` strutturato senza `‹‹CHOICES››` nel testo. Restano
-  fallback marker solo per chat vecchie/non migrate.
+  fallback marker solo per chat vecchie/non migrate. Sesto taglio: `ChatView` scarta i delta-marker
+  legacy completi quando sono già arrivati come eventi strutturati, così la prosa live non si
+  contamina con token display.
 - **Browser live panel / espansione**: il dock `ChatComputerPanel` in modalità full ora esce dallo
   status stack e si ancora `fixed` dentro l'area chat, a destra della sidebar; il compact expand usa
   `Maximize2` e il pannello full è più largo (`min(1040px, ...)`) senza scivolare sotto il drawer.
