@@ -52,6 +52,23 @@
   **Test:** parità single-vs-pool (read/FTS), concorrenza WAL (4 reader + 1 writer, stato coerente),
   `import_graphify_batch` in pool, embeddings roundtrip — tutti verdi. WAL richiede DB su disco
   (in-memory cada su Single per i test). **Resta:** 3 (recall on-demand), 4 (migrazione monolite) + UI.
+- **MEMORIA FLUIDA — ADR 0022, Tappa 4 (recall+learn) completata (2026-07-01):** l'orchestrazione
+  memoria **migrata dal monolite nel crate**. `recall` e `learn` (i due metodi core del trait
+  `MemoryRecallService`) ora vivono in `crates/memory/` (`recall.rs` + `learn.rs`) e sono orchestrate
+  — non più delegate al gateway. `main.rs` conserva solo le chiamate `service.recall()`/`brief()`/
+  `learn()`; ~609 righe di orchestration rimosse dal monolite (relevant_memory_for_prompt +
+  learn_from_exchange cancellate; entrambi i flag path ON e OFF usano ora le fn del crate).
+  **Capability trait** (`EmbeddingClient`, `LlmClient`) nel crate: il crate resta puro (no reqwest/
+  tokio), il gateway impl i trait (HTTP embedding + LLM estrattore). Pattern = `MemoryVectorIndex`.
+  **Scope autoritativo**: `recall(query, scope)` usa l'argomento scope, non più la globale gateway
+  (chiude il debito "isolation-by-construction" della Tappa 1). **Send-safe**: 3 fasi (sync lock →
+  capability await off-lock → sync re-lock) così il MutexGuard non attraversa l'await. **Testabile in
+  isolation**: recall/learn testabili con mock embedding/LLM deterministici (32 test crate, incluso
+  recall che trova una decisione via FTS su facade in-memory, no HTTP). Parità preservata (brief/cache
+  gateway test verdi). **Smoke runtime ON** pulito. **Resta (off-path, follow-up):** consolidate
+  (`consolidate_scope`, LLM curatore + wiki rebuild) e backfill (`backfill_embeddings`) — sono su tick
+  periodici, non sul path del trait; main.rs dimagrisce ulteriormente quando migrano. + Tappa 3
+  (recall on-demand via tool) + UI A2/A3/A5/A4.
 - **Linea pratica corrente (sessione 5g):** batch di fix chat-UX/funzionali nell'app reale (dettagli nel
   rolling in fondo) — risolti "bloccato" (self-heal CDP motore #1), "continua"/autonomia, reasoning
   collassato, isola live+persistente, F1/F2/planner; **form-fill `kind=fill`** (contratto schema-piatto↔
