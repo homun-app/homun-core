@@ -199,36 +199,6 @@ function chatEventPartFromStream(event: CoreChatStreamEvent): ChatEventPart | nu
   }
 }
 
-function eventPartToLegacyMarker(part: ChatEventPart): string {
-  switch (part.type) {
-    case "reasoning":
-      return `‹‹REASONING››${part.text}‹‹/REASONING››`;
-    case "activity":
-      return `‹‹ACT››${part.text}‹‹/ACT››`;
-    case "plan_update":
-      return `‹‹PLAN››${part.markdown}‹‹/PLAN››`;
-    case "choice_prompt":
-      return `‹‹CHOICES››${JSON.stringify(part.payload)}‹‹/CHOICES››`;
-    case "vault_propose":
-      return `‹‹VAULT_PROPOSE››${JSON.stringify(part.payload)}‹‹/VAULT_PROPOSE››`;
-    case "vault_reveal":
-      return `‹‹VAULT_REVEAL››${JSON.stringify(part.payload)}‹‹/VAULT_REVEAL››`;
-    case "payment_approval":
-      return `‹‹PAYMENT_APPROVAL››${JSON.stringify(part.payload)}‹‹/PAYMENT_APPROVAL››`;
-    case "tool_result":
-      return "";
-  }
-}
-
-function visibleStreamingText(text: string, eventParts: ChatEventPart[]) {
-  if (!eventParts.length) return text;
-  const markerText = eventParts
-    .map(eventPartToLegacyMarker)
-    .filter((marker) => marker.length > 0)
-    .join("");
-  return `${markerText}${text}`;
-}
-
 interface ChatStreamStatus {
   requestId: string;
   phase: ChatStreamPhase;
@@ -641,7 +611,7 @@ export function ChatView({
         ...promptMessages,
         {
           ...streamingMessage,
-          text: visibleStreamingText(streamedText, streamEventParts),
+          text: streamedText,
           eventParts: streamEventParts,
         },
       ]);
@@ -902,7 +872,7 @@ export function ChatView({
         ...promptMessages,
         {
           ...streamingMessage,
-          text: visibleStreamingText(streamedText, streamEventParts),
+          text: streamedText,
           eventParts: streamEventParts,
         },
       ]);
@@ -1208,7 +1178,7 @@ export function ChatView({
           item.id === message.id
             ? {
                 ...item,
-                text: visibleStreamingText(streamedText, streamEventParts),
+                text: streamedText,
                 eventParts: streamEventParts,
               }
             : item,
@@ -1526,7 +1496,7 @@ export function ChatView({
           item.id === message.id
             ? {
                 ...item,
-                text: visibleStreamingText(streamedText, streamEventParts),
+                text: streamedText,
                 eventParts: streamEventParts,
               }
             : item,
@@ -3557,9 +3527,14 @@ function parseArtifacts(text: string): ParsedArtifact[] {
 // The latest one in the conversation drives the Workbench "Piano" panel.
 const PLAN_RE = /‹‹PLAN››([\s\S]*?)‹‹\/PLAN››/g;
 
-function latestPlanMarkdown(messages: { text?: string }[]): string | null {
+function latestPlanMarkdown(messages: { text?: string; eventParts?: ChatEventPart[] }[]): string | null {
   let latest: string | null = null;
   for (const message of messages) {
+    const structuredPlan = latestPlanUpdateMarkdown(message.eventParts);
+    if (structuredPlan) {
+      latest = structuredPlan;
+      continue;
+    }
     const text = message.text ?? "";
     if (!text.includes("‹‹PLAN››")) continue;
     for (const match of text.matchAll(PLAN_RE)) latest = match[1].trim();

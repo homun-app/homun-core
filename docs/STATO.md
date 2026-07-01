@@ -761,8 +761,9 @@ GIÀ FATTO sessione 5g (NON ripartire; tutto su `main`):
   solo dal testo. Secondo taglio: `ChatView` ascolta `listenChatStreamEvent`, conserva
   `eventParts` live per messaggio e usa i payload tipizzati per Choice/Vault/Payment/Plan prima
   del fallback marker. Terzo taglio: l'API messaggi espone `event_parts` e il frontend li idrata
-  su reload/storico. Resta da rimuovere la sintesi marker live usata solo come ponte di
-  compatibilità per `RichMessage`/pannello.
+  su reload/storico. Quarto taglio: rimosso il ponte live `eventParts`→marker; il testo streaming
+  resta solo prosa e anche il pannello Piano legge `plan_update` strutturato prima dei marker
+  legacy. Restano fallback marker solo per chat vecchie/non migrate.
 - **Browser live panel / espansione**: il dock `ChatComputerPanel` in modalità full ora esce dallo
   status stack e si ancora `fixed` dentro l'area chat, a destra della sidebar; il compact expand usa
   `Maximize2` e il pannello full è più largo (`min(1040px, ...)`) senza scivolare sotto il drawer.

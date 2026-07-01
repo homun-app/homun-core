@@ -72,7 +72,8 @@ Punti caldi (con `file:line` in `main.rs`):
   `choice_prompt`, `vault_propose`, `vault_reveal`, `payment_approval`. I marker restano nel
   testo solo come compatibilità/persistenza storica; il frontend espone `CoreChatStreamEvent`,
   `listenChatStreamDelta` è una vista filtrata dei soli `delta`, e `ChatView` conserva `eventParts`
-  live per rendere Choice/Vault/Payment/Plan dai payload tipizzati prima del fallback marker.
+  live per rendere Choice/Vault/Payment/Plan/Piano dai payload tipizzati prima del fallback marker.
+  Il testo streaming resta sola prosa: il frontend non sintetizza più marker legacy da `eventParts`.
   I nuovi messaggi salvano anche `chat_messages.event_parts_json`, una proiezione derivata dei
   marker; l'API messaggi la espone come `event_parts` e il frontend la idrata su reload/storico,
   così il rendering storico non dipende esclusivamente da regex sul testo.
