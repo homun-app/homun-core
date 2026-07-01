@@ -5193,9 +5193,11 @@ impl MemoryRecallService for InProcessMemoryRecallService {
 }
 
 /// ADR 0022 — Tappa 1: apprendimento post-turno. Quando `HOMUN_MEMORY_SERVICE=on`
-/// instrada via `MemoryRecallService::learn` (che delega a `learn_from_exchange`);
-/// altrimenti path attuale. Usato dai 4 call site di apprendimento per non
-/// duplicare il branching del flag.
+/// ADR 0022 — Tappa 1/4: apprendimento post-turno. Quando il service è ON
+/// (`HOMUN_MEMORY_SERVICE`) instrada via `MemoryRecallService::learn`; anche nel
+/// path OFF usa le STESSE fn del crate (3 fasi: prepare_learn_prompt →
+/// LlmClient.chat → persist_learn_extraction) con capability client costruiti
+/// al volo — così `learn_from_exchange` non è più duplicata nel gateway.
 fn learn_via_service_or_inline(
     state: &AppState,
     user_message: &str,
@@ -5217,6 +5219,7 @@ fn learn_via_service_or_inline(
         };
         Box::pin(async move { service.learn(&exchange, &scope).await })
     } else {
+        // Path OFF: stessa orchestrazione del crate, capability client al volo.
         let state = state.clone();
         let user_message = user_message.to_string();
         let assistant_message = assistant_message.to_string();
@@ -5225,16 +5228,56 @@ fn learn_via_service_or_inline(
         let speaker = speaker.map(str::to_string);
         let prev_assistant = prev_assistant.map(str::to_string);
         Box::pin(async move {
-            learn_from_exchange(
-                &state,
-                &user_message,
-                &assistant_message,
-                &actions,
+            let user = gateway_memory_user_id();
+            let active = gateway_memory_workspace_id();
+            let project_name = if active.as_str() != PERSONAL_WORKSPACE {
+                load_workspaces_file()
+                    .workspaces
+                    .into_iter()
+                    .find(|w| w.id.as_str() == active.as_str())
+                    .map(|w| w.name)
+            } else {
+                None
+            };
+            let llm: std::sync::Arc<dyn local_first_memory::LlmClient> =
+                std::sync::Arc::new(GatewayLlmClient { http: state.http.clone() });
+            // Fase 1 (lock): prompt.
+            let prompt = {
+                let Ok(facade) = lock_memory_facade(&state) else { return };
+                local_first_memory::prepare_learn_prompt(
+                    &facade,
+                    &user,
+                    &active,
+                    &user_message,
+                    &assistant_message,
+                    &actions,
+                    speaker.as_deref(),
+                    prev_assistant.as_deref(),
+                    project_name.as_deref(),
+                )
+            };
+            let Some((system, user_content)) = prompt else { return };
+            // Fase 2 (off-lock): LLM.
+            let Some(content) = llm.chat(&system, &user_content).await else { return };
+            // Fase 3 (lock): persist + hooks.
+            let Ok(facade) = lock_memory_facade(&state) else { return };
+            let hooks = local_first_memory::LearnHooks {
+                persist_graph: Some(&|facade, user, workspace, entities, relations, project_ws| {
+                    persist_graph(facade, user, workspace, entities, relations, project_ws);
+                }),
+                store_episode: Some(&|facade, user, thread_id, episode, active| {
+                    store_episode(facade, user, thread_id, episode, active);
+                }),
+                backfill_embeddings: None,
+            };
+            local_first_memory::persist_learn_extraction(
+                &facade,
+                &user,
+                &active,
+                &content,
                 thread_id.as_deref(),
-                speaker.as_deref(),
-                prev_assistant.as_deref(),
-            )
-            .await;
+                hooks,
+            );
         })
     }
 }
@@ -6102,459 +6145,6 @@ fn summarize_tool_action(name: &str, args_raw: &str) -> Option<String> {
         _ => return None,
     };
     Some(line)
-}
-
-async fn learn_from_exchange(
-    state: &AppState,
-    user_message: &str,
-    assistant_message: &str,
-    // A compact, newline-joined trace of the consequential ACTIONS this turn
-    // performed (files edited, commands run, documents/artifacts changed, connector
-    // calls). Empty when the turn was pure conversation. Drives decision capture so
-    // the "why" of a mutation is remembered — for ANY domain, not just coding.
-    actions: &str,
-    thread_id: Option<&str>,
-    // When Some(name), the message comes from a channel CONTACT (not the user):
-    // facts are attributed to them, not to person:self.
-    speaker: Option<&str>,
-    // The assistant's PREVIOUS turn — the question/assertion that a short reply like
-    // "sì" or "no, è una V9" would be answering. Lets a bare confirmation be grounded
-    // into the fact it confirms. None when there's no prior turn.
-    prev_assistant: Option<&str>,
-) {
-    // A confirmation turn ("la tua moto è una Moto Guzzi V7?" → "sì") is not salient on
-    // its own, but it commits a durable fact — keep it (grounded by prev_assistant
-    // below) so the confirmation doesn't evaporate and get re-asked next time.
-    let is_confirmation =
-        prev_assistant.is_some_and(|p| !p.trim().is_empty()) && is_confirmation_reply(user_message);
-    // Learn when the exchange is salient OR a confirmation OR the turn DID something
-    // concrete — so a terse prompt ("sistemalo", "aggiorna il preventivo") that
-    // triggers real actions still records the decision + its rationale.
-    if actions.trim().is_empty() && !is_salient_exchange(user_message) && !is_confirmation {
-        return;
-    }
-    let Some((base_url, model, api_key)) = extractor_openai_config() else {
-        return;
-    };
-    let base_system = "You are a MEMORY extractor. From the last exchange extract DURABLE and REUSABLE \
-knowledge: (1) facts and preferences about the USER (who they are, people in their life, how they \
-prefer to work); (2) DECISIONS made during the work (technical or project choices) with the WHY \
-and the rejected alternatives; (3) OPEN LOOPS — work left INCOMPLETE: an \"open_loop\" must describe \
-the FULL situation (what is DONE, what is MISSING or does NOT exist yet, what BLOCKS it and WHY), so a \
-fresh chat reconstructs the REAL state, not a cleaned subset (memory_type \"open_loop\"; ONLY for \
-genuinely unfinished work, NEVER for done items); (4) SALIENT STATE & FINDINGS — INCLUDING NEGATIVES: \
-what does NOT exist yet, was NOT found, or is blocked/missing (e.g. \"the Rossi quote is only a verbal \
-draft, no file yet\"; \"the report file was not found\"). These ARE durable state — capture them (as a \
-\"fact\" or folded into the open_loop), capturing the CONCLUSION/state, NOT the assistant's search \
-process or its mistakes. Do NOT extract the transient chatter of the task, NOT general world facts, \
-NOT the assistant's pure conversational replies. \
-EPISTEMIC STATE — DISTINGUISH what is TRUE/HAPPENED/DECIDED from what is only ASKED, SEARCHED, \
-HYPOTHETICAL or UNDER EVALUATION. A question, a price/options search, an \"if/maybe/I'm \
-considering\" are NOT facts about the user's life: do NOT register them as accomplished (e.g. if the \
-user ASKS for ferry prices, do NOT write \"has a planned trip\"). Register a plan/event as a fact \
-ONLY if the user states it as real/confirmed (\"I booked\", \"I'm leaving\", \"my trip is\"). If an \
-evaluation is still useful, phrase it cautiously (\"searched/considered …\"), low confidence, and \
-set metadata.certainty: \"committed\" = confirmed/happened, \"considered\" = only searched/evaluated, \
-\"intended\" = declared intention but not confirmed. \
-CONFIRMATIONS/CORRECTIONS: if above there is an \"ASSISTANT (previous turn…)\" block, the user is \
-REPLYING to what the assistant had hypothesized or asked. If they CONFIRM (\"yes\", \"exactly\", \
-\"confirmed\") or CORRECT (\"no, it's a V9\"), that fact becomes REAL: register it as committed with \
-high confidence (>=0.85), using the CORRECTED version if the user corrected. Confirmation turns a \
-hypothesis into an acquired fact (e.g. assistant \"is your motorbike a Moto Guzzi V7 Stone?\" + user \
-\"yes\" → committed fact \"The user owns a Moto Guzzi V7 Stone\"). \
-FIDELITY (no hallucinations): register ONLY what is explicit in the exchange; do NOT deduce or \
-embellish undeclared roles, transactions or relations — e.g. from \"I looked at an ad for a \
-motorcycle accessory\" do NOT deduce \"is selling their motorbike\" nor \"X is interested in buying \
-it\". If a role/relation/transaction is not stated in clear terms, do not write it. \
-DO NOT REGISTER (it is noise, not durable memory): recurring tasks or reminders and schedules the \
-user sets (they live in the task system, not in memory); service connections/integrations (e.g. \
-\"Gmail connected\", \"connected X\"); operational or build details (installed libraries/dependencies, \
-commands, file names) unless they are a real project DECISION with a why; and NEVER register as a \
-memory a request to FORGET/delete something. Do not save as project memory facts that concern \
-ANOTHER project or tool unrelated to the current work. \
-Reply with valid JSON ONLY, \
-nothing else:\n\
-{\"memories\":[{\"memory_type\":\"fact|preference|decision|goal|open_loop\",\"text\":\"short sentence in 3rd person \
-in the user's language\",\"sensitivity\":\"internal|private|confidential|secret\",\"confidence\":0.0-1.0,\
-\"metadata\":{\"scope\":\"personal|project\",\"certainty\":\"committed|considered|intended\",\"decision\":{\"rationale\":\"the why\",\
-\"alternatives\":[{\"option\":\"alternative\",\"rejected_because\":\"reason\"}]}}}],\
-\"entities\":[{\"entity_type\":\"person|organization|place|event|project|tool|object|topic\",\"name\":\"Name\",\
-\"canonical_key\":\"person:normalized-name\",\"aliases\":[\"short form\"],\
-\"sensitivity\":\"internal|private\",\"privacy_domain\":\"personal\",\"metadata\":{\"scope\":\"personal|project\"}}],\
-\"relations\":[{\"source_ref\":\"person:fabio\",\"relation_type\":\"child_of|parent_of|partner_of|sibling_of|works_as|possiede|relates_to\",\
-\"target_ref\":\"person:sara\",\"sensitivity\":\"internal\",\"privacy_domain\":\"personal\"}],\
-\"episode\":\"one-sentence summary of what was discussed or decided in this exchange\"}\n\
-RULES: scope \"personal\" = applies everywhere (preferences, people, personal data); scope \"project\" \
-= specific to the current project/work (technical decisions, files, choices). For memory_type \
-\"decision\" metadata.decision is MANDATORY (rationale, and alternatives if cited) and the scope is \
-usually \"project\". memory_type \"goal\" = an OBJECTIVE or DIRECTION of the project. If the user \
-uses words like \"objective\", \"milestone\", \"we want it to\", \"it must stay/become\", \"the goal \
-is\" referring to the project as a whole, emit memory_type=\"goal\" (scope \"project\") and NOT \
-\"decision\". Clear difference: decision = a TECHNICAL choice already made with a why (e.g. \"chose \
-JSON for persistence because human-readable\"); goal = the DIRECTION to keep (e.g. \"taskline must \
-stay minimal, stdlib only, zero dependencies\" → goal, NOT decision). When in doubt between goal and \
-decision for an EXPLICIT declared objective, choose goal. ENTITIES = the things cited, WELL TYPED: \
-person = people; organization = companies, services, institutions (Trenitalia, Gmail, a bank); place \
-= locations (cities, towns, addresses); event = trips, purchases, appointments, deadlines (e.g. \
-\"Trip to Barcelona in September\"); project = work projects; tool = software, files, libraries \
-(ALWAYS metadata.scope \"project\" — never personal entities); object = a GOOD the user OWNS \
-(vehicle, device, house, personal instrument: e.g. \"Moto Guzzi V7 Stone 850 2021\") — metadata.scope \
-\"personal\"; topic = recurring interests/subjects (e.g. \"tennis\"). canonical_key STABLE \
-\"type:normalized-name\" (e.g. \"organization:trenitalia\", \"event:trip-barcelona-2026\"). entity \
-metadata.scope: \"personal\" for people/places/events/organizations in the user's life, \"project\" \
-for files/libraries/tools of the current work. For the USER themselves ALWAYS use canonical_key \
-\"person:self\" (both in entities and relations), e.g. for \"I have a daughter Sara\": relation \
-parent_of person:self → person:sara. \
-POSSESSIONS: when the user declares or CONFIRMS owning a good (\"my motorbike\", \"I own a Moto Guzzi \
-V7\", \"my car/house\"), emit THREE things together: (a) a committed fact \"The user owns <good>\"; \
-(b) the good entity (entity_type \"object\", scope \"personal\"); (c) the relation possiede \
-person:self → object:<good>. E.g. \"yes, it's my Moto Guzzi V7 Stone 850 2021\" → entity {object, \
-\"Moto Guzzi V7 Stone 850 2021\", canonical_key \"object:moto-guzzi-v7-stone-850-2021\"} + relation \
-{possiede, person:self → object:moto-guzzi-v7-stone-850-2021} + committed fact. \
-RELATIONS = use the SAME canonical_key in source_ref/target_ref. Insert entities and relations ONLY \
-if explicit, otherwise leave the arrays empty. sensitivity: PII (tax ID, address, health, documents) \
-= \"secret\"; personal facts (children, partner, city) = \"private\"; preferences and decisions = \
-\"internal\". confidence >=0.8 only if explicit and unambiguous. \"episode\" is ALWAYS a short \
-sentence about the exchange (even if memories/entities/relations are empty). If there is nothing to \
-remember: {\"memories\":[],\"entities\":[],\"relations\":[],\"episode\":\"…\"}. \
-OPEN LOOP CLOSURE: if the exchange or ACTIONS PERFORMED explicitly prove an existing open loop is \
-now complete, do NOT emit another open_loop. Emit the durable fact/decision/outcome and add \
-metadata.closes_open_loop with a short copy/paraphrase of the existing open loop. Use this only for \
-completion with evidence, never for partial progress.";
-    // Channel mode: clarify that the speaker is a contact so facts are attributed
-    // to them (e.g. person:marco), not mistakenly to the user (person:self).
-    let system = match speaker {
-        Some(name) => format!(
-            "{base_system}\n\nIMPORTANT: this message comes from the CONTACT «{name}» via a \
-messaging channel, NOT from the user. Attribute facts to «{name}» (canonical_key \
-person:<normalized-name>); use person:self ONLY if the message explicitly talks about the user. \
-ALSO capture plans, future events, trips, appointments, commitments and news (work, health, \
-family, life) of the contact, with the time frame if indicated — these are NOT 'transient content', \
-they should be remembered."
-        ),
-        None => base_system.to_string(),
-    };
-    // Generic decision capture: when the turn performed actions, tell the extractor
-    // to record the corresponding DECISIONS (what + why), in ANY domain — code,
-    // documents (e.g. a client's quote), data — not only technical ones.
-    let system = if actions.trim().is_empty() {
-        system
-    } else {
-        format!(
-            "{system}\n\nIf you find 'ACTIONS PERFORMED' below, extract the corresponding DECISIONS \
-(memory_type \"decision\", scope \"project\"): WHAT was done and WHY, including the why in the 'text' \
-sentence (e.g. «Modified the ACME quote because the client asked for a 10% discount»). Applies to \
-ANY domain — code, documents, data — not only technical. metadata.decision with rationale and \
-affects (the touched objects: file, document, contact…)."
-        )
-    };
-    // #5 scope discipline: NAME the current project so the extractor can tell THIS
-    // project's facts from another project/tool merely mentioned in passing (which must
-    // NOT be tagged scope=project — that's how dev facts leaked into a travel project).
-    let system = {
-        let active = gateway_memory_workspace_id();
-        if active.as_str() != PERSONAL_WORKSPACE {
-            let name = load_workspaces_file()
-                .workspaces
-                .into_iter()
-                .find(|w| w.id.as_str() == active.as_str())
-                .map(|w| w.name)
-                .unwrap_or_else(|| "(unnamed)".to_string());
-            format!(
-                "{system}\n\nCURRENT PROJECT: «{name}». Tag scope=\"project\" ONLY for facts or \
-decisions that concern THIS project. If the user talks about ANOTHER unrelated project/tool, do NOT \
-save it as memory of this project: use scope \"personal\" if it is a durable fact about the user, \
-otherwise do not save it."
-            )
-        } else {
-            system
-        }
-    };
-    // Source-suppression: tell the extractor which decisions are ALREADY stored so it
-    // doesn't re-emit them every turn (complements dedup — fewer near-duplicates born).
-    // Lock is scoped to this block and dropped before the async model call below.
-    let known_decisions = {
-        let active = gateway_memory_workspace_id();
-        if active.as_str() == PERSONAL_WORKSPACE {
-            String::new()
-        } else if let Ok(facade) = lock_memory_facade(state) {
-            facade
-                .list_memories_for_ui(&gateway_memory_user_id(), &active)
-                .map(|memories| {
-                    memories
-                        .into_iter()
-                        .filter(|m| {
-                            m.memory_type == "decision"
-                                && matches!(
-                                    m.status,
-                                    MemoryStatus::Confirmed | MemoryStatus::Candidate
-                                )
-                        })
-                        .take(40)
-                        .map(|m| {
-                            format!(
-                                "- {}",
-                                m.text
-                                    .lines()
-                                    .next()
-                                    .unwrap_or(&m.text)
-                                    .chars()
-                                    .take(110)
-                                    .collect::<String>()
-                            )
-                        })
-                        .collect::<Vec<_>>()
-                        .join("\n")
-                })
-                .unwrap_or_default()
-        } else {
-            String::new()
-        }
-    };
-    let system = if known_decisions.trim().is_empty() {
-        system
-    } else {
-        format!(
-            "{system}\n\nDECISIONS ALREADY IN MEMORY (do NOT re-register them: extract ONLY NEW or \
-substantially updated decisions relative to these):\n{known_decisions}"
-        )
-    };
-    let known_open_loops = {
-        let user = gateway_memory_user_id();
-        let active = gateway_memory_workspace_id();
-        let mut lines = Vec::new();
-        if let Ok(facade) = lock_memory_facade(state) {
-            for (label, workspace) in [
-                ("personal", MemoryWorkspaceId::new(PERSONAL_WORKSPACE)),
-                ("project", active.clone()),
-            ] {
-                if label == "project" && workspace.as_str() == PERSONAL_WORKSPACE {
-                    continue;
-                }
-                for memory in facade
-                    .list_memories_for_ui(&user, &workspace)
-                    .unwrap_or_default()
-                    .into_iter()
-                    .filter(active_open_loop_record)
-                    .take(8)
-                {
-                    lines.push(format!(
-                        "- ({label}) {}",
-                        memory.text.trim().replace('\n', " ")
-                    ));
-                }
-            }
-        }
-        lines.join("\n")
-    };
-    let system = if known_open_loops.trim().is_empty() {
-        system
-    } else {
-        format!(
-            "{system}\n\nOPEN LOOPS ALREADY IN MEMORY. If this exchange/ACTIONS explicitly complete \
-one of these, set metadata.scope to the matching scope and metadata.closes_open_loop to the matching \
-loop text/paraphrase:\n{known_open_loops}"
-        )
-    };
-    let exchange = match speaker {
-        Some(name) => {
-            format!("MESSAGE from {name} (channel):\n{user_message}\n\nREPLY: {assistant_message}")
-        }
-        None => {
-            // On a confirmation turn, prepend the assistant's PREVIOUS question so a
-            // bare "sì"/"no, …" can be grounded into the fact it confirms or corrects.
-            let preface = match prev_assistant {
-                Some(p) if is_confirmation && !p.trim().is_empty() => format!(
-                    "ASSISTANT (previous turn — what the user is replying to): {}\n\n",
-                    p.trim()
-                ),
-                _ => String::new(),
-            };
-            format!("{preface}USER: {user_message}\n\nASSISTANT: {assistant_message}")
-        }
-    };
-    let user_content = if actions.trim().is_empty() {
-        exchange
-    } else {
-        format!("{exchange}\n\nACTIONS PERFORMED this turn:\n{actions}")
-    };
-    let payload = serde_json::json!({
-        "model": model,
-        "temperature": 0.0,
-        // Generous budget: the active model may be a reasoning model that spends
-        // tokens "thinking" before emitting content — too small a cap leaves
-        // content empty (finish_reason=length). json_object steers it to emit the
-        // JSON directly into content.
-        "max_tokens": 2000,
-        "response_format": { "type": "json_object" },
-        "messages": [
-            { "role": "system", "content": system },
-            { "role": "user", "content": user_content },
-        ],
-    });
-    let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
-    // Generous timeout: the role model may be a slow cloud reasoning model
-    // (e.g. glm-4.6 via ollama). Extraction is background, so a long wait is fine.
-    let mut builder = state
-        .http
-        .post(&endpoint)
-        .timeout(std::time::Duration::from_secs(120));
-    if let Some(key) = api_key.as_ref() {
-        builder = builder.bearer_auth(key);
-    }
-    let Ok(resp) = builder.json(&payload).send().await else {
-        return;
-    };
-    if !resp.status().is_success() {
-        return;
-    }
-    let Ok(body) = resp.json::<serde_json::Value>().await else {
-        return;
-    };
-    let content = body
-        .get("choices")
-        .and_then(|c| c.get(0))
-        .and_then(|c| c.get("message"))
-        .and_then(|m| m.get("content"))
-        .and_then(|c| c.as_str())
-        .unwrap_or("");
-    // Resilient parse: deserialize memories / entities / relations INDEPENDENTLY
-    // and item-by-item, so a malformed entity never makes us lose the facts (they
-    // share one JSON blob from the model).
-    let Ok(root) = serde_json::from_str::<serde_json::Value>(strip_json_fences(content)) else {
-        return;
-    };
-    let memories: Vec<ExtractedMemory> = root
-        .get("memories")
-        .and_then(|v| v.as_array())
-        .map(|a| {
-            a.iter()
-                .filter_map(|i| serde_json::from_value(fill_extraction_defaults(i)).ok())
-                .collect()
-        })
-        .unwrap_or_default();
-    let entities: Vec<ExtractedEntity> = root
-        .get("entities")
-        .and_then(|v| v.as_array())
-        .map(|a| {
-            a.iter()
-                .filter_map(|i| serde_json::from_value(fill_extraction_defaults(i)).ok())
-                .collect()
-        })
-        .unwrap_or_default();
-    let relations: Vec<ExtractedRelation> = root
-        .get("relations")
-        .and_then(|v| v.as_array())
-        .map(|a| {
-            a.iter()
-                .filter_map(|i| serde_json::from_value(fill_extraction_defaults(i)).ok())
-                .collect()
-        })
-        .unwrap_or_default();
-    let mut extraction = MemoryExtraction {
-        memories,
-        entities,
-        relations,
-    };
-    // M4: one-line episodic summary of this turn (stored in the thread scope).
-    let episode = root
-        .get("episode")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .trim()
-        .to_string();
-    // Take the graph (entities/relations) out before we consume the memories;
-    // keep durable memory types only (facts, preferences, decisions).
-    let graph_entities = std::mem::take(&mut extraction.entities);
-    let graph_relations = std::mem::take(&mut extraction.relations);
-    extraction.memories.retain(|m| {
-        matches!(
-            m.memory_type.as_str(),
-            "fact" | "preference" | "decision" | "goal" | "open_loop"
-        )
-    });
-    if extraction.memories.is_empty()
-        && graph_entities.is_empty()
-        && graph_relations.is_empty()
-        && episode.is_empty()
-    {
-        return;
-    }
-    // The model is unreliable about the privacy DOMAIN; pin it to "personal" so the
-    // read queries (profile + recall) can find what we store. Sensitivity (gates
-    // auto-confirm + injection) and SCOPE (personal vs project) stay its call.
-    for memory in &mut extraction.memories {
-        memory.privacy_domain = PrivacyDomain::new("personal");
-    }
-
-    let user_id = gateway_memory_user_id();
-    let active = gateway_memory_workspace_id();
-    let has_project = active.as_str() != PERSONAL_WORKSPACE;
-
-    // Route each memory to its scope: explicit metadata.scope wins; otherwise
-    // decisions default to the project, everything else to personal.
-    let mut personal_mems: Vec<ExtractedMemory> = Vec::new();
-    let mut project_mems: Vec<ExtractedMemory> = Vec::new();
-    for memory in extraction.memories {
-        let scope = memory
-            .metadata
-            .get("scope")
-            .and_then(|s| s.as_str())
-            .unwrap_or("");
-        let to_project = has_project
-            && (scope == "project"
-                || (scope.is_empty() && memory.memory_type.as_str() == "decision"));
-        if to_project {
-            project_mems.push(memory);
-        } else {
-            personal_mems.push(memory);
-        }
-    }
-
-    // Scoped block: the (non-Send) memory lock MUST be dropped before the awaits below,
-    // since this future is spawned on the runtime (Send-required).
-    {
-        let Ok(facade) = lock_memory_facade(state) else {
-            return;
-        };
-        persist_scope_memories(
-            &facade,
-            &user_id,
-            &MemoryWorkspaceId::new(PERSONAL_WORKSPACE),
-            personal_mems,
-        );
-        if has_project {
-            persist_scope_memories(&facade, &user_id, &active, project_mems);
-            // Markdown face: regenerate the project's "Decisioni" wiki page.
-            rebuild_decisions_wiki(&facade, &user_id, &active);
-        }
-        // Graph: people/places/events/orgs → personal; tools/files (scope=project)
-        // → the active project's graph.
-        persist_graph(
-            &facade,
-            &user_id,
-            &MemoryWorkspaceId::new(PERSONAL_WORKSPACE),
-            graph_entities,
-            graph_relations,
-            has_project.then_some(&active),
-        );
-        // Episodic memory (M4): one line per turn, tagged with the conversation's scope.
-        if let Some(tid) = thread_id {
-            store_episode(&facade, &user_id, tid, &episode, active.as_str());
-        }
-    }
-    // Lock released — incrementally embed new memories (semantic layer) off the hot
-    // path: a bounded batch per turn so vectors accumulate in the background.
-    backfill_embeddings(
-        state,
-        &user_id,
-        &MemoryWorkspaceId::new(PERSONAL_WORKSPACE),
-        12,
-    )
-    .await;
-    if has_project {
-        backfill_embeddings(state, &user_id, &active, 12).await;
-    }
 }
 
 /// Tool schema for on-demand deep memory recall (M3). The always-on profile is a
@@ -13740,162 +13330,6 @@ fn memory_age_days(created_at: &str, now_secs: i64) -> f32 {
     ((now_secs - secs).max(0) as f32) / 86_400.0
 }
 
-async fn relevant_memory_for_prompt(state: &AppState, prompt: &str) -> Option<String> {
-    let total_start = std::time::Instant::now();
-    let mut timing = MemoryRecallTiming::default();
-    let query = prompt.trim();
-    if query.chars().count() < 8 {
-        return None;
-    }
-    let active = gateway_memory_workspace_id();
-    // Embed the query OFF the lock (the only await) for the semantic pass below.
-    let query_vec = embed_query_for_memory_recall(&state.http, query, &active, &mut timing).await;
-    timing.degraded = query_vec.is_none();
-    let lock_start = std::time::Instant::now();
-    let facade = lock_memory_facade(state).ok()?;
-    timing.lock_wait_ms = elapsed_ms(lock_start);
-    let user = gateway_memory_user_id();
-    // PROJECT ISOLATION: recall is scoped to the ACTIVE workspace only. In a project we do
-    // NOT cross-search the personal scope — "di cosa abbiamo discusso?" must stay about THIS
-    // project, not personal facts/episodes. (Stable personal PREFERENCES still reach the
-    // model via the always-on briefing, gather_profile_memory — that's separate.)
-    let now_secs = OffsetDateTime::now_utc().unix_timestamp();
-
-    // All memories in scope, keyed by ref — the source of text/metadata/created_at for
-    // whatever the two passes surface.
-    let profile_start = std::time::Instant::now();
-    let records: std::collections::HashMap<String, local_first_memory::MemoryRecord> = facade
-        .list_memories_for_ui(&user, &active)
-        .map(|ms| {
-            ms.into_iter()
-                .map(|m| (m.reference.to_string(), m))
-                .collect()
-        })
-        .unwrap_or_default();
-    timing.profile_ms = elapsed_ms(profile_start);
-
-    // Lexical pass (FTS/bm25, policy-filtered) → rank per reference.
-    let access = MemoryAccessRequest {
-        actor_id: "chat_rag".to_string(),
-        user_id: user.clone(),
-        workspace_id: active.clone(),
-        purpose: "chat_context".to_string(),
-        allowed_domains: vec![
-            PrivacyDomain::new("personal"),
-            PrivacyDomain::new("work"),
-            PrivacyDomain::new("general"),
-        ],
-        max_sensitivity: MemoryDataSensitivity::Private,
-        allow_raw_payload: false,
-        allow_export: true,
-        broad_query: false,
-    };
-    let mut fts_rank: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-    let fts_start = std::time::Instant::now();
-    if let Ok(page) = facade.search_memories(MemorySearchRequest {
-        access,
-        query: query.to_string(),
-        statuses: vec![MemoryStatus::Confirmed, MemoryStatus::Candidate],
-        memory_types: vec![
-            "open_loop".to_string(),
-            "goal".to_string(),
-            "decision".to_string(),
-            "fact".to_string(),
-            "preference".to_string(),
-        ],
-        limit: 8,
-        offset: 0,
-    }) {
-        for item in page.items {
-            fts_rank
-                .entry(item.reference.to_string())
-                .or_insert(item.rank);
-        }
-    }
-    timing.fts_ms = elapsed_ms(fts_start);
-    timing.fts_candidates = fts_rank.len();
-
-    // Semantic pass (dense cosine) → rank per reference. Top-k fallback: take the best
-    // few above a relaxed floor (not a hard 0.6 cutoff) — RRF weights weak ones gently,
-    // so a strong-but-sub-threshold paraphrase still gets a chance instead of vanishing.
-    let mut dense_rank: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-    if let Some(query_vec) = query_vec.as_ref() {
-        let vector_start = std::time::Instant::now();
-        if let Ok(hits) = facade.search_embeddings(&user, &active, query_vec, 32) {
-            for (i, hit) in hits
-                .into_iter()
-                .filter(|hit| hit.score >= 0.5)
-                .take(8)
-                .enumerate()
-            {
-                dense_rank
-                    .entry(hit.memory_ref.to_string())
-                    .or_insert(i + 1);
-            }
-        }
-        timing.vector_scan_ms = Some(elapsed_ms(vector_start));
-        timing.vector_candidates = dense_rank.len();
-    }
-
-    // Fuse: union of both passes, ranked by RRF + importance + recency.
-    let mut refs: std::collections::HashSet<String> = std::collections::HashSet::new();
-    refs.extend(fts_rank.keys().cloned());
-    refs.extend(dense_rank.keys().cloned());
-    let mut candidates: Vec<(MemoryCandidate, String)> = Vec::new();
-    for reference in refs {
-        let Some(record) = records.get(&reference) else {
-            continue;
-        };
-        let importance = record
-            .metadata
-            .get("importance")
-            .and_then(|v| v.as_f64())
-            .unwrap_or(0.5) as f32;
-        let candidate = MemoryCandidate {
-            fts_rank: fts_rank.get(&reference).copied(),
-            dense_rank: dense_rank.get(&reference).copied(),
-            importance,
-            age_days: memory_age_days(&record.created_at, now_secs),
-            reference: reference.clone(),
-        };
-        let line = format!("- {}", format_recall_entry(&record.text, &record.metadata));
-        candidates.push((candidate, line));
-    }
-    candidates.sort_by(|a, b| {
-        hybrid_memory_score(&b.0)
-            .partial_cmp(&hybrid_memory_score(&a.0))
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-    let mut lines: Vec<String> = Vec::new();
-    for (_, line) in candidates {
-        if !lines.contains(&line) {
-            lines.push(line);
-        }
-    }
-    let graph_start = std::time::Instant::now();
-    if let Some(workflow) = workflow_status_context_for_query(&facade, &user, &active, query) {
-        lines.insert(0, workflow);
-    } else if let Some(provenance) =
-        artifact_provenance_context_for_query(&facade, &user, &active, query)
-    {
-        lines.insert(0, provenance);
-    }
-    timing.graph_context_ms = elapsed_ms(graph_start);
-    lines.truncate(10);
-    timing.total_ms = elapsed_ms(total_start);
-    if verbose_debug() {
-        eprintln!("[memory] {}", memory_recall_timing_trace_line(&timing));
-    }
-    if lines.is_empty() {
-        return None;
-    }
-    Some(format!(
-        "MEMORY RELEVANT TO THE REQUEST (this is what you/the user have ALREADY established — \
-treat it as established fact; do NOT say \"I have no decision in memory\" if it's below here):\n{}",
-        lines.join("\n")
-    ))
-}
-
 fn recall_memory(state: &AppState, query: &str) -> String {
     let query = query.trim();
     if query.is_empty() {
@@ -19945,7 +19379,9 @@ normal answers."
         };
         // RAG: inject memory relevant to THIS prompt (decisions/facts), so the model
         // answers from what was already decided instead of saying it has nothing.
-        // ADR 0022 — Tappa 1: via service quando il flag è ON, altrimenti path attuale.
+        // ADR 0022 — Tappa 1/4: via service quando il flag è ON; anche nel path OFF
+        // usa le fn del crate (embed_query + recall_search_on_facade) con capability
+        // client al volo — così `relevant_memory_for_prompt` non è più duplicata.
         let system = if should_inject_relevant_memory_for_prompt(&request.prompt) {
             if let Some(service) = state.memory_service.as_ref() {
                 let scope = scope_from_active_workspace();
@@ -19955,7 +19391,37 @@ normal answers."
                     None => system,
                 }
             } else {
-                match relevant_memory_for_prompt(state, &request.prompt).await {
+                // Path OFF: stessa orchestrazione del crate, capability client al volo.
+                let user = gateway_memory_user_id();
+                let workspace = gateway_memory_workspace_id();
+                let embedding: std::sync::Arc<dyn local_first_memory::EmbeddingClient> =
+                    std::sync::Arc::new(GatewayEmbeddingClient { http: state.http.clone() });
+                let query_vec =
+                    local_first_memory::embed_query(embedding.as_ref(), &request.prompt).await;
+                let block = match lock_memory_facade(state) {
+                    Ok(facade) => {
+                        let graph_context: Option<
+                            &(dyn Fn(&local_first_memory::MemoryFacade, &MemoryUserId, &MemoryWorkspaceId, &str) -> Option<String> + Sync),
+                        > = Some(&|facade, user, workspace, q| {
+                            if let Some(workflow) =
+                                workflow_status_context_for_query(facade, user, workspace, q)
+                            {
+                                return Some(workflow);
+                            }
+                            artifact_provenance_context_for_query(facade, user, workspace, q)
+                        });
+                        local_first_memory::recall_search_on_facade(
+                            &facade,
+                            &user,
+                            &workspace,
+                            &request.prompt,
+                            &query_vec,
+                            graph_context,
+                        )
+                    }
+                    Err(_) => None,
+                };
+                match block {
                     Some(block) => format!("{system}\n\n{block}"),
                     None => system,
                 }
