@@ -41,8 +41,10 @@ import type {
 // l'addon ne fa sparire la voce di nav.
 export const navItems: NavItem[] = [
   { id: "chat", label: "chat.newTask", icon: MessageSquare },
-  // "Apprendimento" è confluito in Homun. "Memory" è stata unificata nelle
-  // Impostazioni → Memory (un'unica superficie, fuori più pulito).
+  // ADR 0022 (Piano UI A4): Memory torna nel nav top-level come vista dedicata
+  // (la memoria è un differenziatore di prodotto; averla visibile e raggiungibile
+  // direttamente la valorizza). Resta raggiungibile anche da Impostazioni → Memory.
+  { id: "memory", label: "nav.memory", icon: Database, navSection: "workspace" },
   // "Pianificato" (coda dei run) è confluito in Automazioni: la regola è la cosa
   // di prima classe; i run si vedono nei thread. Manteniamo l'icona-calendario.
   { id: "automations", label: "nav.automations", icon: CalendarClock },

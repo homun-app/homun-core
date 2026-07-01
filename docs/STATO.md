@@ -73,6 +73,17 @@
   `main.rs` conserva solo chiamate/wrapper; ~600 righe di corpi spostate. 34 test crate + parità
   gateway verdi. Smoke tutti-flag-ON pulito. **Resta:** pulizia residua (fn gateway morte nei test,
   follow-up meccanico) + Tappa 3 (recall on-demand via tool) + UI A2/A3/A5/A4.
+- **MEMORIA VISIBILE — Piano UI A2/A3/A4 + U1 completati (2026-07-01):** la memoria è ora
+  VISIBILE end-to-end (differenziatore P3). **U1 (backend):** nuovo evento stream `Recall`
+  strutturato (variante `GenerateStreamEvent::Recall` + `RecallStreamPayload`{query,hits,score,scope}),
+  emesso quando il tool `recall_memory` gira — il modello riceve la stringa, la UI riceve i dati.
+  `recall_memory` ritorna `RecallOutcome { response, hits, scope }`. **A2 (fase recalling):** nuova
+  fase `recalling` in `ChatStreamPhase` + "Sto controllando la memoria…" / "Checking memory…" con
+  count hits, mostrata live quando arriva l'evento. **A3 (memory badge):** badge "📝 Ha richiamato N
+  ricordi" nel footer del messaggio assistant, derivato dalle `eventParts` recall (hover = testi).
+  **A4 (MemoryView al nav):** MemoryView (440 righe) ora ha voce di nav top-level (oltre a
+  Impostazioni). i18n en+it. Typecheck pulito. Smoke ON pulito + evento `recall` verificato nello
+  stream. **Resta:** A5 (Project context panel, solo progetti) + pulizia residua.
 - **Linea pratica corrente (sessione 5g):** batch di fix chat-UX/funzionali nell'app reale (dettagli nel
   rolling in fondo) — risolti "bloccato" (self-heal CDP motore #1), "continua"/autonomia, reasoning
   collassato, isola live+persistente, F1/F2/planner; **form-fill `kind=fill`** (contratto schema-piatto↔
