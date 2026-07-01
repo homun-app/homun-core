@@ -10223,6 +10223,41 @@ body.resizing-drawer {
   opacity: 0.5;
   cursor: not-allowed;
 }
+/* D3 (Piano UI): inline code-diff card rendered inside an assistant message. */
+.diff-card {
+  margin-top: var(--s3);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control, 10px);
+  background: var(--surface);
+}
+.diff-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.diff-card-path {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.diff-card-label {
+  flex: none;
+  font-size: 11px;
+  color: var(--muted);
+}
+.diff-card .diff-view {
+  border: none;
+  border-radius: 0;
+  margin: 0 -12px -10px;
+}
+
 .choices-card.done {
   flex-direction: row;
   align-items: center;

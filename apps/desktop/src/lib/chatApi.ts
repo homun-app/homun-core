@@ -33,7 +33,8 @@ type StreamEvent =
         | "vault_reveal"
         | "payment_approval"
         | "tool_result"
-        | "recall";
+        | "recall"
+        | "diff";
       request_id: string;
       text?: string;
       markdown?: string;
@@ -821,6 +822,7 @@ function streamEventToCoreEvent(
     case "payment_approval":
     case "tool_result":
     case "recall":
+    case "diff":
       // Payload raw dallo stream (JSON.parse → unknown). La validazione runtime
       // avviene nei parser downstream (parseVaultProposalPayload, ecc.); qui
       // trasportiamo il payload nel tipo dichiarato dell'evento (B2/A1).

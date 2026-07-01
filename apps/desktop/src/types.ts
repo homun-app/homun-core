@@ -79,6 +79,7 @@ export type {
   ToolResultPayload,
   RecallHitPayload,
   RecallEventPayload,
+  DiffEventPayload,
 } from "./lib/coreBridge";
 import type {
   ChoicePromptPayload,
@@ -87,6 +88,7 @@ import type {
   PaymentApprovalPayload,
   ToolResultPayload,
   RecallEventPayload,
+  DiffEventPayload,
 } from "./lib/coreBridge";
 
 export type ChatEventPart =
@@ -98,7 +100,8 @@ export type ChatEventPart =
   | { type: "vault_reveal"; payload: VaultRevealPayload }
   | { type: "payment_approval"; payload: PaymentApprovalPayload }
   | { type: "tool_result"; payload: ToolResultPayload }
-  | { type: "recall"; payload: RecallEventPayload };
+  | { type: "recall"; payload: RecallEventPayload }
+  | { type: "diff"; payload: DiffEventPayload };
 
 export interface ChatMessageMetrics {
   promptTokens: number;

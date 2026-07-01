@@ -217,6 +217,23 @@ pub struct RecallStreamPayload {
     pub scope: String,
 }
 
+/// Piano UI D3: payload di una modifica di codice proposta (diff inline).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DiffStreamPayload {
+    /// Path del file modificato.
+    pub path: String,
+    /// Etichetta opzionale (es. "Edit file X").
+    pub label: Option<String>,
+    /// Contenuto precedente (None se file nuovo).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub old: Option<String>,
+    /// Contenuto nuovo.
+    pub new: String,
+    /// Linguaggio per l'evidenziazione (es. "rust", "ts").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TokenMetrics {
     pub prompt_tokens: u32,
@@ -368,6 +385,12 @@ pub enum GenerateStreamEvent {
     },
     ToolResult {
         payload: serde_json::Value,
+    },
+    /// Piano UI D3: una modifica di codice proposta dal modello (path + contenuto
+    /// prima/dopo), renderizzata inline come diff. Il modello emette il marker
+    /// `‹‹DIFF››{json}‹‹/DIFF››` nel text; il gateway lo espande in questo evento.
+    Diff {
+        payload: DiffStreamPayload,
     },
     /// ADR 0022 (Piano UI A2/A3): risultato di una recall RAG episodica — ciò che
     /// l'agente ha richiamato dalla memoria per questo turno. Shape identica al

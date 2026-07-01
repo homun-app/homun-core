@@ -158,7 +158,8 @@ function mapCoreChatEventParts(parts: unknown[] | null | undefined): ChatEventPa
       type === "vault_reveal" ||
       type === "payment_approval" ||
       type === "tool_result" ||
-      type === "recall"
+      type === "recall" ||
+      type === "diff"
     ) {
       // Ricostruiamo da `unknown` (record persistito). La validazione runtime è
       // nei parser downstream (parseVaultProposalPayload, parseChoicePromptPayload…);

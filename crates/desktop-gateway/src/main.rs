@@ -30069,6 +30069,14 @@ fn expand_legacy_delta_to_chat_events_with_mode(
         legacy_marker_json(text, "‹‹PAYMENT_APPROVAL››", "‹‹/PAYMENT_APPROVAL››")
     {
         events.push(GenerateStreamEvent::PaymentApproval { payload });
+    } else if let Some(payload) =
+        legacy_marker_json(text, "‹‹DIFF››", "‹‹/DIFF››")
+    {
+        // Piano UI D3: marker diff → evento strutturato Diff.
+        if let Ok(diff) = serde_json::from_value::<local_first_subagents::DiffStreamPayload>(payload)
+        {
+            events.push(GenerateStreamEvent::Diff { payload: diff });
+        }
     }
     if !events.is_empty() && !include_legacy_delta {
         return events;

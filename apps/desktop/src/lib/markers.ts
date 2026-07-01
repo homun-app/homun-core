@@ -40,6 +40,10 @@ export const ACTIVITY_MARKER_RE = /‹‹ACT››[\s\S]*?‹‹\/ACT››/g;
 export const ARTIFACT_MARKER_RE = /‹‹ARTIFACT››[\s\S]*?‹‹\/ARTIFACT››/g;
 // Operational plan markers: rendered out-of-band in the "Piano" workbench panel.
 export const PLAN_MARKER_RE = /‹‹PLAN››[\s\S]*?‹‹\/PLAN››/g;
+// D3 (Piano UI): inline code diff proposed by the model. Rendered out-of-band as a
+// DiffCard (eventParts path); the ‹‹DIFF››…‹‹/DIFF›› wrapper must be stripped from prose
+// so the raw JSON payload never shows in the answer body.
+export const DIFF_MARKER_RE = /‹‹DIFF››[\s\S]*?‹‹\/DIFF››/g;
 // Plain "[file generato: …]" notes the gateway adds for the model are dropped too.
 export const ARTIFACT_NOTE_RE = /\n?\[file generato: [^\]]*\]/g;
 // The model sometimes invents a markdown image link for a generated file
@@ -122,6 +126,7 @@ export function stripAllMarkers(text: string): string {
   clean = clean.replace(ACTIVITY_MARKER_RE, "");
   clean = clean.replace(ARTIFACT_MARKER_RE, "");
   clean = clean.replace(PLAN_MARKER_RE, "");
+  clean = clean.replace(DIFF_MARKER_RE, "");
   clean = clean.replace(STRAY_REASONING_MARKER_RE, "");
   clean = clean.replace(ARTIFACT_NOTE_RE, "");
   return clean.trim();

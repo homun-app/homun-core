@@ -145,6 +145,7 @@ import type {
   ApprovelItem,
   RuntimeHealth,
   TaskItem,
+  DiffEventPayload,
 } from "../types";
 
 const CHAT_VIEW_SESSION_ID =
@@ -216,6 +217,7 @@ function chatEventPartFromStream(event: CoreChatStreamEvent): ChatEventPart | nu
     case "payment_approval":
     case "tool_result":
     case "recall":
+    case "diff":
       return { type: event.type, payload: event.payload } as ChatEventPart;
     default:
       return null;
@@ -241,6 +243,7 @@ function normalizeChatEventParts(parts: unknown[] | undefined): ChatEventPart[] 
       case "payment_approval":
       case "tool_result":
       case "recall":
+      case "diff":
         return [{ type: item.type, payload: item.payload } as ChatEventPart];
       default:
         return [];
@@ -6218,6 +6221,11 @@ const AssistantMessageBody = memo(
       {goalPropose && !streaming && threadId && (
         <GoalProposeCard objectives={goalPropose} threadId={threadId} />
       )}
+      {eventParts
+        ?.filter((p): p is Extract<ChatEventPart, { type: "diff" }> => p.type === "diff")
+        .map((part, index) => (
+          <DiffCard key={`diff-${index}`} payload={part.payload} />
+        ))}
     </>
   );
   },
@@ -6230,6 +6238,20 @@ const AssistantMessageBody = memo(
     prev.threadId === next.threadId &&
     prev.eventParts === next.eventParts,
 );
+
+// D3 (Piano UI): inline code-diff card. Renders the model's proposed change for a single
+// file path with a header and the unified line diff (added=green, removed=red).
+function DiffCard({ payload }: { payload: DiffEventPayload }) {
+  return (
+    <div className="diff-card">
+      <div className="diff-card-header">
+        <span className="diff-card-path">📄 {payload.path}</span>
+        {payload.label && <span className="diff-card-label">{payload.label}</span>}
+      </div>
+      <DiffView oldText={payload.old ?? ""} newText={payload.new} />
+    </div>
+  );
+}
 
 function VaultProposeCard({
   proposal,

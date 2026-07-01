@@ -11,6 +11,7 @@ import {
   ACTIVITY_MARKER_RE,
   ARTIFACT_MARKER_RE,
   PLAN_MARKER_RE,
+  DIFF_MARKER_RE,
   ARTIFACT_NOTE_RE,
   BROKEN_IMAGE_RE,
   LEAKED_TOOLCALL_RE,
@@ -85,12 +86,14 @@ function renderAnswer(text: string, streaming: boolean) {
     text.includes("‹‹COMPOSIO_") ||
     text.includes("‹‹ACT››") ||
     text.includes("‹‹ARTIFACT››") ||
-    text.includes("‹‹PLAN››")
+    text.includes("‹‹PLAN››") ||
+    text.includes("‹‹DIFF››")
       ? text
           .replace(CONTROL_MARKER_RE, "")
           .replace(ACTIVITY_MARKER_RE, "")
           .replace(ARTIFACT_MARKER_RE, "")
           .replace(PLAN_MARKER_RE, "")
+          .replace(DIFF_MARKER_RE, "")
           .replace(ARTIFACT_NOTE_RE, "")
           .trim()
       : text;

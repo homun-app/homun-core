@@ -366,6 +366,15 @@ export interface RecallHitPayload {
   score: number;
   type: string;
 }
+
+/** D3 (Piano UI): una modifica di codice proposta dal modello (diff inline). */
+export interface DiffEventPayload {
+  path: string;
+  label?: string;
+  old?: string;
+  new: string;
+  language?: string;
+}
 export interface RecallEventPayload {
   query: string;
   hits: RecallHitPayload[];
@@ -383,6 +392,7 @@ export type CoreChatStreamEvent =
   | { type: "payment_approval"; request_id: string; payload: PaymentApprovalPayload }
   | { type: "tool_result"; request_id: string; payload: ToolResultPayload }
   | { type: "recall"; request_id: string; payload: RecallEventPayload }
+  | { type: "diff"; request_id: string; payload: DiffEventPayload }
   | { type: "done"; request_id: string }
   | { type: "error"; request_id: string; message?: string };
 
