@@ -199,6 +199,31 @@ function chatEventPartFromStream(event: CoreChatStreamEvent): ChatEventPart | nu
   }
 }
 
+function normalizeChatEventParts(parts: unknown[] | undefined): ChatEventPart[] {
+  if (!Array.isArray(parts)) return [];
+  return parts.flatMap((part): ChatEventPart[] => {
+    if (!part || typeof part !== "object") return [];
+    const item = part as Record<string, unknown>;
+    switch (item.type) {
+      case "reasoning":
+      case "activity":
+        return typeof item.text === "string" ? [{ type: item.type, text: item.text }] : [];
+      case "plan_update":
+        return typeof item.markdown === "string"
+          ? [{ type: "plan_update", markdown: item.markdown }]
+          : [];
+      case "choice_prompt":
+      case "vault_propose":
+      case "vault_reveal":
+      case "payment_approval":
+      case "tool_result":
+        return [{ type: item.type, payload: item.payload }];
+      default:
+        return [];
+    }
+  });
+}
+
 const STRUCTURED_MARKER_DELTA_RE =
   /^‹‹(?:ACT|REASONING|PLAN|CHOICES|VAULT_PROPOSE|VAULT_REVEAL|PAYMENT_APPROVAL)››[\s\S]*?‹‹\/(?:ACT|REASONING|PLAN|CHOICES|VAULT_PROPOSE|VAULT_REVEAL|PAYMENT_APPROVAL)››$/;
 
@@ -2662,6 +2687,7 @@ function chatMessageFromAssistantResult(
             result.assistant_message.metrics.runtime_status_before ?? undefined,
         }
       : undefined,
+    eventParts: normalizeChatEventParts(result.assistant_message.event_parts),
   };
 }
 

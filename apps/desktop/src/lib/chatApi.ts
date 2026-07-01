@@ -68,6 +68,7 @@ export interface CoreBranchPoint {
 
 const streamEventListeners = new Set<(payload: CoreChatStreamEvent) => void>();
 const streamListeners = new Set<(payload: CoreChatStreamDelta) => void>();
+const activeStreamSockets = new Map<string, WebSocket>();
 let activeThreadId = "thread_active_prompt";
 let localThreads: CoreChatThread[] = [
   {
@@ -523,7 +524,8 @@ export const chatApi = {
   },
 
   async cancelChatPromptStream(requestId: string) {
-    void requestId;
+    activeStreamSockets.get(requestId)?.close(4000, "cancelled by user");
+    activeStreamSockets.delete(requestId);
   },
 
   debugChatStream(
@@ -698,6 +700,7 @@ async function consumeChatWebSocketStream(
     const startedAt = performance.now();
     let lastDebugChunks = 0;
     const socket = new WebSocket(url);
+    activeStreamSockets.set(requestId, socket);
 
     function debug(stage: string, detail?: string) {
       void chatApi.debugChatStream(requestId, {
@@ -715,6 +718,7 @@ async function consumeChatWebSocketStream(
     ) {
       if (settled) return;
       settled = true;
+      activeStreamSockets.delete(requestId);
       socket.close();
       action(value);
     }
@@ -722,6 +726,7 @@ async function consumeChatWebSocketStream(
     function fail(error: Error) {
       if (settled) return;
       settled = true;
+      activeStreamSockets.delete(requestId);
       socket.close();
       reject(error);
     }

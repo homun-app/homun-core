@@ -208,9 +208,13 @@ assertRepoContains("crates/desktop-gateway/src/main.rs", "approval_continuation_
 assertNotContains("src/App.tsx", "runAgentTurnHeadless", "frontend must not expose a headless agent-turn path");
 assertRepoNotContains("crates/desktop-gateway/src/main.rs", "async fn run_agent_turn(", "backend must not keep a headless agent-turn helper that can bypass visible placeholders");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "run_agent_turn_into_message", "backend agent turns must stream into persisted assistant messages");
+assertRepoContains("crates/desktop-gateway/src/main.rs", "If the user explicitly asks to create, show, update, verify, or test a plan", "chat loop must force explicit plan requests through update_plan");
 assertContains("src/App.tsx", "pendingEventThreadIdsRef", "event-driven thread navigation must not drop updates while React is switching active threads");
 assertContains("src/App.tsx", "event.type === \"thread.turn_started\"", "desktop client must handle visible turn start events");
 assertContains("src/lib/coreBridge.ts", "assistant_message_id?: string", "app event contract must expose persisted assistant message ids");
+assertContains("src/components/ChatView.tsx", "eventParts: normalizeChatEventParts(result.assistant_message.event_parts)", "completed chat turns must preserve structured event parts from the gateway result");
+assertContains("src/lib/chatApi.ts", "const activeStreamSockets = new Map<string, WebSocket>();", "chat stream cancellation must track sockets by request id");
+assertContains("src/lib/chatApi.ts", "activeStreamSockets.get(requestId)?.close(4000, \"cancelled by user\");", "chat stream cancellation must close the matching WebSocket");
 assertContains("src/plugins/registry.tsx", "navSection?: \"work\" | \"create\" | \"workspace\" | \"more\"", "plugin manifest must declare sidebar placement by operational role");
 assertContains("src/plugins/presentations/index.tsx", "navSection: \"create\"", "presentations addon must be promoted into the create section");
 assertContains("src/plugins/proattivita/index.tsx", "navSection: \"work\"", "proactivity addon must be promoted into the work section");

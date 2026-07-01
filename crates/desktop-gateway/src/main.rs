@@ -2519,6 +2519,37 @@ fn is_confirmation_reply(user_message: &str) -> bool {
     CONFIRM_LEAD.contains(&lead)
 }
 
+fn should_inject_open_loops_for_prompt(user_message: &str) -> bool {
+    let low = user_message.trim().to_lowercase();
+    if low.is_empty() {
+        return false;
+    }
+    let compact = low.split_whitespace().collect::<Vec<_>>().join(" ");
+    if is_confirmation_reply(&compact) {
+        return false;
+    }
+    // Choice-card answers are often terse labels. They must be interpreted from
+    // the current thread history, not from global unfinished work.
+    const SHORT_CHOICE_REPLIES: [&str; 12] = [
+        "ok",
+        "okay",
+        "va bene",
+        "procedi",
+        "conferma",
+        "confermato",
+        "annulla",
+        "cancella",
+        "stop",
+        "cambio idea",
+        "non salvare",
+        "salva",
+    ];
+    if compact.split_whitespace().count() <= 3 && SHORT_CHOICE_REPLIES.contains(&compact.as_str()) {
+        return false;
+    }
+    true
+}
+
 /// Auto-confirm policy (M2): only durable, high-confidence knowledge enters memory
 /// without asking. The ceiling is `Private` — NOT `Internal` — on purpose: the
 /// extractor tags ordinary personal facts (possessions, family, city) as `private`
@@ -19368,7 +19399,11 @@ save/export a file to a folder, call save_artifact(file, destination)."
         // (personal scope) and the active project, so the chat is continuous instead
         // of starting cold every turn. Sensitive items are excluded here by design.
         let (memory_personal, memory_project) = gather_profile_memory(state);
-        let memory_open_loops = gather_open_loops(state, 6);
+        let memory_open_loops = if should_inject_open_loops_for_prompt(&request.prompt) {
+            gather_open_loops(state, 6)
+        } else {
+            Vec::new()
+        };
         let system = match format_memory_block(
             &memory_open_loops,
             &memory_personal,
@@ -19464,6 +19499,9 @@ actions with effects) FIRST propose the plan and STOP — do NOT start executing
 on its own line `‹‹PLAN_PROPOSE››{{\"summary\":\"objective in brief\",\"steps\":[\"step 1\",\"step 2\"]}}‹‹/PLAN_PROPOSE››` \
 (valid JSON). The user will see the Accept/Edit buttons. EXECUTE the plan ONLY in the NEXT turn, \
 after the user has approved it (e.g. «I approve the plan…»); if they ask for changes, revise and re-propose. \
+If the user explicitly asks to create, show, update, verify, or test a plan, use the plan machinery: \
+call update_plan for an operational plan or emit PLAN_PROPOSE for approval-gated plan-mode; do NOT \
+write a free-form numbered plan only in prose. \
 Once executing, use update_plan to update the step status (doing→done), shown in the \
 \"Plan\" panel. To move a step's status (e.g. doing→done) call step_advance with its id (shown in \
 parentheses after the title in the plan card) and the new status — this updates that ONE step \
@@ -54605,6 +54643,17 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             "cercami un tappo serbatoio per la mia moto guzzi"
         ));
         assert!(!is_confirmation_reply(""));
+    }
+
+    #[test]
+    fn short_choice_replies_do_not_inject_global_open_loops() {
+        assert!(!super::should_inject_open_loops_for_prompt("Confermo"));
+        assert!(!super::should_inject_open_loops_for_prompt("cambio idea"));
+        assert!(!super::should_inject_open_loops_for_prompt("ok"));
+        assert!(!super::should_inject_open_loops_for_prompt("procedi"));
+        assert!(super::should_inject_open_loops_for_prompt(
+            "riprendi la ricerca del treno per Roma"
+        ));
     }
 
     #[test]

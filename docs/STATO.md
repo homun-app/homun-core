@@ -770,6 +770,15 @@ GIÀ FATTO sessione 5g (NON ripartire; tutto su `main`):
   contamina con token display. Settimo taglio: il gateway non emette più il delta-marker legacy
   per default quando un marker è convertibile in evento strutturato; compat esterna opt-in con
   `HOMUN_STREAM_LEGACY_MARKER_DELTAS=1`.
+- **Structured events / choice scope / stop stream**: chiusa la regressione live del 2026-07-01 dove
+  una choice card generica ("Confermo") riprendeva un open-loop globale del treno: le risposte brevi
+  da choice non iniettano piu' `OPEN LOOPS` globali e devono essere interpretate dalla cronologia del
+  thread corrente. Il frontend ora conserva `event_parts` strutturati anche nel messaggio finale
+  restituito dal gateway, evitando che Plan/Choice/Work island spariscano dopo `done`. `cancelChatPromptStream`
+  non e' piu' no-op: chiude il WebSocket dello stream per `request_id`. Resta da validare live se serve
+  anche una cancellazione backend/provider hard per task browser gia' in corso dopo chiusura socket.
+  Il prompt di sistema forza inoltre le richieste esplicite di piano verso `update_plan`/`PLAN_PROPOSE`
+  invece di piani liberi in prosa.
 - **Browser live panel / espansione**: il dock `ChatComputerPanel` in modalità full ora esce dallo
   status stack e si ancora `fixed` dentro l'area chat, a destra della sidebar; il compact expand usa
   `Maximize2` e il pannello full è più largo (`min(1040px, ...)`) senza scivolare sotto il drawer.

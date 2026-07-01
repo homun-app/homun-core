@@ -265,6 +265,7 @@ export interface CorePromptMessage {
   metadata: string | null;
   metrics: CoreChatMessageMetrics | null;
   attachments?: CoreChatAttachment[];
+  event_parts?: unknown[];
 }
 
 export interface CorePromptSubmissionResult {
