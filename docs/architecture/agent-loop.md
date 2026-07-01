@@ -74,7 +74,8 @@ Punti caldi (con `file:line` in `main.rs`):
   `listenChatStreamDelta` è una vista filtrata dei soli `delta`, e `ChatView` conserva `eventParts`
   live per rendere Choice/Vault/Payment/Plan dai payload tipizzati prima del fallback marker.
   I nuovi messaggi salvano anche `chat_messages.event_parts_json`, una proiezione derivata dei
-  marker, così il rendering storico non dipende esclusivamente da regex sul testo.
+  marker; l'API messaggi la espone come `event_parts` e il frontend la idrata su reload/storico,
+  così il rendering storico non dipende esclusivamente da regex sul testo.
 - **Fork act-vs-answer** (`:~19552`): il **modello** decide se chiamare tool o rispondere.
   Punto di **massima varianza**.
 - **F2 verify** (`verify_step_complete`, `:~13783`): un `done` rivendicato è tenuto
@@ -245,7 +246,8 @@ approval).
   `expand_legacy_delta_to_chat_events`, `apps/desktop/src/lib/coreBridge.ts` /
   `chatApi.ts` (`CoreChatStreamEvent`).
 - Persistenza chat: `chat_messages.event_parts_json` in `crates/desktop-gateway/src/chat_store.rs`
-  conserva una proiezione strutturata derivata dai marker per i nuovi messaggi.
+  conserva una proiezione strutturata derivata dai marker per i nuovi messaggi; l'API la espone
+  come `ChatMessage.event_parts` e `apps/desktop/src/App.tsx` la mappa in `ChatMessage.eventParts`.
 - Piano: `runtime_execution_plan`, `merge_execution_plan`/`merge_plan`, `verify_step_complete`,
   `load_runtime_plan_from_state`, `parse_plan_marker`, `collapse_plan_markers`.
 - Motore #2: `crates/orchestrator` (`brain.rs` incl. `drive`, `driver.rs` il driver in-turn +

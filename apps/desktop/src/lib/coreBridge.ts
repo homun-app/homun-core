@@ -64,6 +64,7 @@ export interface CoreChatMessage {
   linked_task_id: string | null;
   linked_automation_ref: string | null;
   attachments: CoreChatAttachment[];
+  event_parts?: unknown[];
 }
 
 export interface CoreChatMessageMetrics {

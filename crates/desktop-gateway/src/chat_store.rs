@@ -592,7 +592,7 @@ impl ChatStore {
         let mut stmt = self.conn.prepare(
             "select id, role, text, timestamp, metadata, metrics_json, feedback,
                     saved_memory_ref, linked_task_id, linked_automation_ref, attachments_json,
-                    parent_id
+                    event_parts_json, parent_id
                from chat_messages
               where thread_id = ?1
               order by rowid asc",
@@ -601,7 +601,7 @@ impl ChatStore {
         let mut parents: HashMap<String, Option<String>> = HashMap::new();
         let mut by_id: HashMap<String, ChatMessage> = HashMap::new();
         let rows = stmt.query_map(params![thread_id], |row| {
-            let parent: Option<String> = row.get(11)?;
+            let parent: Option<String> = row.get(12)?;
             Ok((message_from_row(row)?, parent))
         })?;
         for row in rows {
@@ -727,7 +727,8 @@ impl ChatStore {
         self.conn
             .query_row(
                 "select id, role, text, timestamp, metadata, metrics_json, feedback,
-                        saved_memory_ref, linked_task_id, linked_automation_ref, attachments_json
+                        saved_memory_ref, linked_task_id, linked_automation_ref, attachments_json,
+                        event_parts_json
                    from chat_messages
                   where thread_id = ?1 and id = ?2",
                 params![thread_id, message_id],
@@ -2970,6 +2971,7 @@ fn message_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChatMessage> {
         linked_task_id: row.get(8)?,
         linked_automation_ref: row.get(9)?,
         attachments: attachments_from_row(row, 10)?,
+        event_parts: event_parts_from_row(row, 11)?,
     })
 }
 
@@ -3083,6 +3085,18 @@ fn attachments_from_row(
         .map(|json| serde_json::from_str(&json).map_err(json_error))
         .transpose()
         .map(|attachments| attachments.unwrap_or_default())
+}
+
+fn event_parts_from_row(
+    row: &rusqlite::Row<'_>,
+    index: usize,
+) -> rusqlite::Result<Vec<serde_json::Value>> {
+    let event_parts_json: Option<String> = row.get(index)?;
+    event_parts_json
+        .filter(|json| !json.trim().is_empty())
+        .map(|json| serde_json::from_str(&json).map_err(json_error))
+        .transpose()
+        .map(|event_parts| event_parts.unwrap_or_default())
 }
 
 fn json_error(error: serde_json::Error) -> rusqlite::Error {
@@ -3263,6 +3277,7 @@ mod tests {
             linked_task_id: None,
             linked_automation_ref: None,
             attachments: Vec::new(),
+            event_parts: Vec::new(),
         };
         let assistant = ChatMessage {
             id: "assistant_1".to_string(),
@@ -3276,6 +3291,7 @@ mod tests {
             linked_task_id: None,
             linked_automation_ref: None,
             attachments: Vec::new(),
+            event_parts: Vec::new(),
         };
 
         let messages = store
@@ -3312,6 +3328,7 @@ mod tests {
             linked_task_id: None,
             linked_automation_ref: None,
             attachments: Vec::new(),
+            event_parts: Vec::new(),
         };
 
         store.insert_message(&thread.thread_id, &assistant).unwrap();
@@ -3327,6 +3344,16 @@ mod tests {
             serde_json::from_str(&event_parts_json.expect("event parts stored")).unwrap();
         assert_eq!(parts[0]["type"], "plan_update");
         assert_eq!(parts[0]["markdown"], "- [x] Done");
+
+        let snapshot = store.messages(&thread.thread_id).unwrap();
+        let reloaded = snapshot
+            .messages
+            .iter()
+            .find(|message| message.id == assistant.id)
+            .expect("assistant message reloaded");
+        let public_json = serde_json::to_value(reloaded).unwrap();
+        assert_eq!(public_json["event_parts"][0]["type"], "plan_update");
+        assert_eq!(public_json["event_parts"][0]["markdown"], "- [x] Done");
     }
 
     #[test]
@@ -3353,6 +3380,7 @@ mod tests {
             linked_task_id: None,
             linked_automation_ref: None,
             attachments: vec![attachment.clone()],
+            event_parts: Vec::new(),
         };
         let assistant = mk_message("assistant_after_file", "assistant");
 
@@ -3514,6 +3542,7 @@ mod tests {
             linked_task_id: None,
             linked_automation_ref: None,
             attachments: Vec::new(),
+            event_parts: Vec::new(),
         };
         store
             .append_assistant_message(&thread.thread_id, &assistant)
@@ -3544,6 +3573,7 @@ mod tests {
             linked_task_id: None,
             linked_automation_ref: None,
             attachments: Vec::new(),
+            event_parts: Vec::new(),
         }
     }
 

@@ -150,6 +150,8 @@ pub struct ChatMessage {
     pub linked_automation_ref: Option<String>,
     #[serde(default)]
     pub attachments: Vec<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub event_parts: Vec<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -260,6 +262,7 @@ pub fn seeded_ready_message(thread_id: &str, timestamp: String) -> ChatMessage {
         linked_task_id: None,
         linked_automation_ref: None,
         attachments: Vec::new(),
+        event_parts: Vec::new(),
     }
 }
 

@@ -28915,6 +28915,7 @@ fn channel_chat_message(role: &str, text: &str) -> ChatMessage {
         linked_task_id: None,
         linked_automation_ref: None,
         attachments: Vec::new(),
+        event_parts: Vec::new(),
     }
 }
 
@@ -32138,6 +32139,7 @@ fn append_task_result_to_chat(
         linked_task_id: Some(task_id.to_string()),
         linked_automation_ref: None,
         attachments: Vec::new(),
+        event_parts: Vec::new(),
     };
     lock_store(state)?
         .append_assistant_message(&thread.thread_id, &message)

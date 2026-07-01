@@ -51,6 +51,7 @@ import { showSystemNotification, notificationPermission } from "./lib/systemNoti
 import type {
   ApprovelItem,
   ChatAttachment,
+  ChatEventPart,
   ChatMessage,
   ChatThread,
   ConnectionItem,
@@ -123,7 +124,44 @@ function mapCoreChatMessage(message: CoreChatMessage): ChatMessage {
     linkedTaskId: message.linked_task_id ?? undefined,
     linkedAutomationRef: message.linked_automation_ref ?? undefined,
     attachments: (message.attachments ?? []).map(mapCoreChatAttachment),
+    eventParts: mapCoreChatEventParts(message.event_parts),
   };
+}
+
+function mapCoreChatEventParts(parts: unknown[] | null | undefined): ChatEventPart[] | undefined {
+  if (!Array.isArray(parts) || parts.length === 0) {
+    return undefined;
+  }
+  const mapped: ChatEventPart[] = [];
+  for (const part of parts) {
+    if (!part || typeof part !== "object") {
+      continue;
+    }
+    const record = part as Record<string, unknown>;
+    const type = record.type;
+    if (type === "reasoning" || type === "activity") {
+      if (typeof record.text === "string") {
+        mapped.push({ type, text: record.text });
+      }
+      continue;
+    }
+    if (type === "plan_update") {
+      if (typeof record.markdown === "string") {
+        mapped.push({ type, markdown: record.markdown });
+      }
+      continue;
+    }
+    if (
+      type === "choice_prompt" ||
+      type === "vault_propose" ||
+      type === "vault_reveal" ||
+      type === "payment_approval" ||
+      type === "tool_result"
+    ) {
+      mapped.push({ type, payload: record.payload });
+    }
+  }
+  return mapped.length > 0 ? mapped : undefined;
 }
 
 function mapCoreChatAttachment(attachment: CoreChatAttachment): NonNullable<ChatMessage["attachments"]>[number] {
