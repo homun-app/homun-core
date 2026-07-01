@@ -84,6 +84,18 @@
   **A4 (MemoryView al nav):** MemoryView (440 righe) ora ha voce di nav top-level (oltre a
   Impostazioni). i18n en+it. Typecheck pulito. Smoke ON pulito + evento `recall` verificato nello
   stream. **Resta:** A5 (Project context panel, solo progetti) + pulizia residua.
+- **PIANO UI COMPLETATO (2026-07-01):** tutte le priorità A/B/C/D del piano UI sono fatte.
+  **A5 (Project context panel ⭐):** nuovo endpoint `/api/memory/project-briefing` + provenance
+  cross-chat (thread_id stampato sui record durevoli in learn) + `ProjectContextPanel` (collapsible,
+  objective/brief/open-loops/decisions con "appreso in un'altra chat", solo progetti). **B1/B3
+  (marker consolidation):** 31 regex in `lib/markers.ts` unico + `RichMessage` consuma `eventParts`
+  (structured primary, regex fallback). **C1/C2/C4 (jank ⭐):** memo separation (`conversationArtifacts`
+  ecc. dipendono da messaggi persisted, non streaming — il vero cut su thread lunghi) + `AssistantMessageBody`
+  in `React.memo` (i messaggi finalizzati NON re-renderizzano durante lo stream altrui). **C3** confermato
+  (no virtualizzazione message list). **D1 (activity signal):** verb-tense + timer elapsed + detail/count.
+  **D2** confermato (approval inline card, già fatto). **D3 (DiffPart):** nuovo event type `diff` + marker
+  `‹‹DIFF››` + `DiffCard` inline (DiffView old-vs-new). **C5 (WebSocket) differito** (HTTP NDJSON funziona,
+  WS è dead code; follow-up). 6 commit, tsc + cargo check verdi ad ogni step.
 - **Linea pratica corrente (sessione 5g):** batch di fix chat-UX/funzionali nell'app reale (dettagli nel
   rolling in fondo) — risolti "bloccato" (self-heal CDP motore #1), "continua"/autonomia, reasoning
   collassato, isola live+persistente, F1/F2/planner; **form-fill `kind=fill`** (contratto schema-piatto↔
