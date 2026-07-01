@@ -25,6 +25,19 @@
   UI A2 (fase recalling), A3 (memory badge), A5 (Project context panel), A4 (MemoryView al nav).
   Vedi [roadmap](roadmap-fluidita-memoria.md), [ADR 0022](decisions/0022-memory-as-out-of-path-service.md),
   [kickoff](../prompts/kickoff-memory-service.md).
+- **MEMORIA FLUIDA — ADR 0022, Tappa 1.5 completata (2026-07-01):** cache/snapshot del briefing
+  always-on, per renderlo fluido senza spostarlo off-path. Turni consecutivi nella stessa chat
+  pagano ~zero (cache hit); nuova chat o turno dopo una scrittura paga un rebuild. **Invalidazione
+  via generation counter** nel `MemoryFacade` (crate memoria): ogni scrittura mutante
+  (`upsert_memory`/`create_memory_candidate`/`confirm_memory`/`merge_memories`/`delete_memory`/
+  wiki/project) incrementa la generation dello scope; la cache del briefing hit solo se generation
+  AND `prompt_fingerprint` (i blocchi profile/open-loops sono prompt-dipendenti) combaciano.
+  Copre automaticamente tutti i ~25 call site del gateway senza toccarli. **`recent_work_block`
+  escluso dalla cache** (dipende da git log, non memoria → ricalcolato fresco ogni `brief()`).
+  Cache process-global via `OnceLock` + `BriefingCache` (bounded, `HOMUN_BRIEFING_CACHE_MAX`).
+  Dietro lo stesso flag `HOMUN_MEMORY_SERVICE`. **Parità Tappa 1 preservata** (la cache non cambia
+  output, solo costo) + test cache hit/miss/eviction/invalidazione. **Resta:** 2 (pool/WAL), 3
+  (recall on-demand), 4 (migrazione monolite) + UI A2/A3/A5/A4.
 - **Linea pratica corrente (sessione 5g):** batch di fix chat-UX/funzionali nell'app reale (dettagli nel
   rolling in fondo) — risolti "bloccato" (self-heal CDP motore #1), "continua"/autonomia, reasoning
   collassato, isola live+persistente, F1/F2/planner; **form-fill `kind=fill`** (contratto schema-piatto↔

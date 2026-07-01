@@ -77,13 +77,13 @@ use local_first_local_computer_session::{
 };
 use local_first_local_computer_session::{LocalComputerReadModel, LocalComputerSessionStore};
 use local_first_memory::{
-    BriefingPack, DataSensitivity as MemoryDataSensitivity, Exchange, ExtractedEntity,
-    ExtractedMemory, ExtractedRelation, MemoryAccessRequest, MemoryCreateRequest, MemoryDashboard,
-    MemoryEntity, MemoryExtraction, MemoryFacade, MemoryLifecycleRequest, MemoryRecord,
-    MemoryRecallService, MemoryRef, MemoryRefKind, MemoryRelation, MemoryScope, MemorySearchRequest,
-    MemoryStatus, MemoryUiReadModel, MemoryUpdatePatch, MemoryWikiProjection, PERSONAL_WORKSPACE,
-    PrivacyDomain, RecallPack, SQLiteMemoryStore, UserId as MemoryUserId, WikiFileStore, WikiPage,
-    WorkspaceId as MemoryWorkspaceId,
+    BriefingPack, CachedBriefing, DataSensitivity as MemoryDataSensitivity, Exchange,
+    ExtractedEntity, ExtractedMemory, ExtractedRelation, MemoryAccessRequest, MemoryCreateRequest,
+    MemoryDashboard, MemoryEntity, MemoryExtraction, MemoryFacade, MemoryLifecycleRequest,
+    MemoryRecord, MemoryRecallService, MemoryRef, MemoryRefKind, MemoryRelation, MemoryScope,
+    MemorySearchRequest, MemoryStatus, MemoryUiReadModel, MemoryUpdatePatch, MemoryWikiProjection,
+    PERSONAL_WORKSPACE, PrivacyDomain, RecallPack, SQLiteMemoryStore, UserId as MemoryUserId,
+    WikiFileStore, WikiPage, WorkspaceId as MemoryWorkspaceId, briefing_cache, prompt_fingerprint,
 };
 use local_first_orchestrator::{
     DriveOutcome, DriveStepStatus, ExecutionPlan, MemoryContextProvider, MemoryContextSnippet,
@@ -4900,9 +4900,42 @@ impl InProcessMemoryRecallService {
 
 impl MemoryRecallService for InProcessMemoryRecallService {
     fn brief(&self, scope: &MemoryScope, user_message: &str) -> BriefingPack {
-        // Parità con l'assemblaggio inline (main.rs:19476-19509). I predicati
-        // should_inject_* sono prompt-dipendenti: questo è il motivo per cui il
-        // trait porta `user_message` (vedi service.rs).
+        // `scope` è portato per il contratto (isolation by construction); l'impl delegante
+        // usa il workspace attivo del gateway, coerente con `relevant_memory_for_prompt`.
+        // Lo scope diventa realmente autoritativo in Tappa 4. Qui l'assert garantisce
+        // coerenza in debug (discrepanza = segnale di un bug nel wiring, non da zittire).
+        debug_assert!(scope.workspace_id() == gateway_memory_workspace_id());
+
+        // recent_work NON è cached: dipende da git log (non dalla memoria), va
+        // ricalcolato fresco ogni brief() come nel path inline.
+        let recent_work = recent_work_block(&self.state);
+
+        // ADR 0022 (Tappa 1.5) — cache del briefing per i 3 blocchi memory-backed.
+        // Hit solo se generation AND prompt_fingerprint combaciano.
+        let user = gateway_memory_user_id();
+        let workspace = gateway_memory_workspace_id();
+        let generation = {
+            let facade = lock_memory_facade(&self.state).ok();
+            facade
+                .map(|facade| facade.briefing_generation(&user, &workspace))
+                .unwrap_or(0)
+        };
+        let fingerprint = prompt_fingerprint(user_message);
+        let scope_key = format!("{}|{}", user.as_str(), workspace.as_str());
+
+        if let Some(cached) = briefing_cache().get(&scope_key, generation, fingerprint) {
+            // Cache hit: riutilizzo i 3 blocchi cached + recent_work fresco.
+            return BriefingPack {
+                profile_block: cached.profile_block,
+                objective: cached.objective,
+                brief: cached.brief,
+                recent_work,
+            };
+        }
+
+        // Cache miss: rebuild dei 3 blocchi memory-backed (parità con l'inline,
+        // main.rs:19476-19509). I predicati should_inject_* sono prompt-dipendenti:
+        // per questo il trait porta `user_message` e la cache key include la fingerprint.
         let (memory_personal, memory_project) =
             gather_profile_memory_for_prompt(&self.state, user_message);
         let memory_open_loops = if should_inject_open_loops_for_prompt(user_message) {
@@ -4916,20 +4949,32 @@ impl MemoryRecallService for InProcessMemoryRecallService {
             &memory_project,
             CHAT_MEMORY_BUDGET_CHARS,
         );
-        // NOTA: objective/brief/recent_work ritornano già None per PERSONAL_WORKSPACE,
-        // quindi la shape è intrinsecamente snella per MemoryScope::Personal (invariant P1).
-        let pack = BriefingPack {
+        // objective/brief ritornano già None per PERSONAL_WORKSPACE, quindi la shape
+        // è intrinsecamente snella per MemoryScope::Personal (invariant P1).
+        let objective = project_objective_block(&self.state);
+        let brief = project_brief_block(&self.state);
+
+        // Salva in cache per i turni successivi (stessa generation + fingerprint).
+        briefing_cache().put(
+            scope_key,
+            CachedBriefing {
+                generation,
+                prompt_fingerprint: fingerprint,
+                pack_sans_recent_work: BriefingPack {
+                    profile_block: profile_block.clone(),
+                    objective: objective.clone(),
+                    brief: brief.clone(),
+                    recent_work: None, // non cached
+                },
+            },
+        );
+
+        BriefingPack {
             profile_block,
-            objective: project_objective_block(&self.state),
-            brief: project_brief_block(&self.state),
-            recent_work: recent_work_block(&self.state),
-        };
-        // `scope` è portato per il contratto (isolation by construction); l'impl delegante
-        // usa il workspace attivo del gateway, coerente con `relevant_memory_for_prompt`.
-        // Lo scope diventa realmente autoritativo in Tappa 4. Qui l'assert garantisce
-        // coerenza in debug (discrepanza = segnale di un bug nel wiring, non da zittire).
-        debug_assert!(scope.workspace_id() == gateway_memory_workspace_id());
-        pack
+            objective,
+            brief,
+            recent_work,
+        }
     }
 
     fn recall<'a>(
@@ -54587,6 +54632,70 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
 
         // Ripristino.
         super::set_memory_workspace(super::PERSONAL_WORKSPACE);
+        match prev_user {
+            Some(value) => unsafe { std::env::set_var("HOMUN_USER_ID", value); },
+            None => unsafe { std::env::remove_var("HOMUN_USER_ID"); },
+        }
+    }
+
+    /// ADR 0022 (Tappa 1.5) — la cache del briefing si invalida a ogni scrittura
+    /// memoria via generation counter. Test end-to-end: dopo una scrittura nello
+    /// scope, la generation del facade incrementa → il `brief()` successivo NON
+    /// serve la cache stale (cache miss → rebuild che riflette la nuova memoria).
+    #[test]
+    fn briefing_cache_invalidates_after_memory_write() {
+        use super::MemoryRecallService;
+        let prev_user = std::env::var("HOMUN_USER_ID").ok();
+        unsafe { std::env::set_var("HOMUN_USER_ID", "invalidate-user"); }
+
+        let facade = super::MemoryFacade::new(
+            local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
+        );
+        let user = local_first_memory::UserId::new("invalidate-user");
+        let workspace = local_first_memory::WorkspaceId::new(super::PERSONAL_WORKSPACE);
+
+        // Generation 0 (store vuoto, nessuna scrittura).
+        let gen_before = facade.briefing_generation(&user, &workspace);
+        assert_eq!(gen_before, 0, "generation parte da 0");
+
+        // Una scrittura invalidante: upsert di un record (come fa learn).
+        // `created_at`/`updated_at` sono ISO strings; il valore esatto non conta
+        // per questo test (verifica solo la generation counter).
+        let now = "2026-07-01T00:00:00Z".to_string();
+        let record = local_first_memory::MemoryRecord {
+            reference: local_first_memory::MemoryRef::generated(
+                local_first_memory::MemoryRefKind::Memory,
+                user.clone(),
+                workspace.clone(),
+            ),
+            user_id: user.clone(),
+            workspace_id: workspace.clone(),
+            memory_type: "fact".to_string(),
+            text: "L'utente usa una Moto Guzzi V7".to_string(),
+            aliases: vec![],
+            language_hints: vec![],
+            confidence: 0.9,
+            status: local_first_memory::MemoryStatus::Confirmed,
+            privacy_domain: local_first_memory::PrivacyDomain::new("personal"),
+            sensitivity: local_first_memory::DataSensitivity::Private,
+            metadata: serde_json::json!({}),
+            created_at: now.clone(),
+            updated_at: now,
+            last_seen_at: None,
+            supersedes: vec![],
+            superseded_by: None,
+            correction_of: None,
+        };
+        facade.upsert_memory(&record).unwrap();
+
+        // La generation DEVE essere incrementata dalla scrittura.
+        let gen_after = facade.briefing_generation(&user, &workspace);
+        assert!(
+            gen_after > gen_before,
+            "una scrittura deve incrementare la generation (invalida la cache)"
+        );
+
+        // Ripristino.
         match prev_user {
             Some(value) => unsafe { std::env::set_var("HOMUN_USER_ID", value); },
             None => unsafe { std::env::remove_var("HOMUN_USER_ID"); },

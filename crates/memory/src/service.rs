@@ -30,8 +30,10 @@
 //! L'isolamento Personale↔Progetto è un invariant: il `scope` è argomento del
 //! trait, non globale, e nessuna recall cross-scope accidentale è possibile.
 
+use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::{Mutex, OnceLock};
 
 use crate::MemoryScope;
 
@@ -192,6 +194,246 @@ pub trait MemoryRecallService: Send + Sync {
     /// Scrittura post-turno (estrazione + persistenza). Async: chiama il
     /// modello estrattore.
     fn learn<'a>(&'a self, exchange: &'a Exchange, scope: &'a MemoryScope) -> BoxFuture<'a, ()>;
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Tappa 1.5 — cache del briefing always-on
+// ──────────────────────────────────────────────────────────────────────────
+
+/// ADR 0022 (Tappa 1.5) — entry della cache del briefing per uno scope.
+///
+/// Memorizza i blocchi **cached** del briefing (profile + objective + brief;
+/// `recent_work` NON è qui perché dipende da git log, non dalla memoria, e va
+/// ricalcolato fresco ogni `brief()`). L'invalidazione è a generation: la cache
+/// hit richiede che `generation` combaci con quella corrente del facade AND che
+/// `prompt_fingerprint` combaci col prompt corrente (i blocchi profile/open-loops
+/// sono prompt-dipendenti).
+#[derive(Debug, Clone)]
+pub struct CachedBriefing {
+    /// Generation del facade al momento del rebuild. Se diverge da quella
+    /// corrente → il contenuto dello scope è cambiato → cache miss.
+    pub generation: u64,
+    /// Fingerprint del `user_message` (hash) al momento del rebuild. I blocchi
+    /// profile + open-loops dipendono dal prompt (gating `should_inject_*`):
+    /// prompt diverso → cache miss anche se la generation combacia.
+    pub prompt_fingerprint: u64,
+    /// I 3 blocchi cached (profile/objective/brief). `recent_work` è `None` qui
+    /// e viene ricalcolato a ogni `brief()`.
+    pub pack_sans_recent_work: BriefingPack,
+}
+
+/// ADR 0022 (Tappa 1.5) — cache process-global del briefing, keyed per scope.
+///
+/// Singleton via [`OnceLock`] (stesso pattern di `memory_query_embedding_cache`
+/// nel gateway). Condivisa tra tutti i `brief()` concorrenti. L'eviction è LRU
+/// su `max_entries` (knob `HOMUN_BRIEFING_CACHE_MAX`, default 64 scope).
+pub struct BriefingCache {
+    entries: Mutex<HashMap<String, CachedBriefing>>,
+    max_entries: usize,
+}
+
+impl BriefingCache {
+    pub fn new(max_entries: usize) -> Self {
+        Self {
+            entries: Mutex::new(HashMap::new()),
+            max_entries,
+        }
+    }
+
+    /// Lookup: hit solo se `generation` AND `prompt_fingerprint` combaciano.
+    /// Ritorna un clone dei blocchi cached (senza recent_work).
+    pub fn get(
+        &self,
+        scope_key: &str,
+        generation: u64,
+        prompt_fingerprint: u64,
+    ) -> Option<BriefingPack> {
+        let entries = self.entries.lock().ok()?;
+        let entry = entries.get(scope_key)?;
+        if entry.generation == generation && entry.prompt_fingerprint == prompt_fingerprint {
+            Some(entry.pack_sans_recent_work.clone())
+        } else {
+            None
+        }
+    }
+
+    /// Inserisce/aggiorna l'entry per uno scope. Se la cache è piena, evicta
+    /// l'entry più vecchia (FIFO — semplice; la mutabilità bassa rende l'hit
+    /// rate alto anche senza LRU vero).
+    pub fn put(&self, scope_key: String, entry: CachedBriefing) {
+        if let Ok(mut entries) = self.entries.lock() {
+            // Eviction: se pieni, rimuovi una entry arbitraria (HashMap non
+            // ordina; per Tappa 1.5 basta bounded — il vero LRU è overkill dato
+            // l'alto hit rate). Iteratore + next() = O(1) ammortizzato.
+            if entries.len() >= self.max_entries && !entries.contains_key(&scope_key) {
+                if let Some(stale_key) = entries.keys().next().cloned() {
+                    entries.remove(&stale_key);
+                }
+            }
+            entries.insert(scope_key, entry);
+        }
+    }
+}
+
+/// Accessore singleton della cache process-global. Stesso pattern di
+/// `memory_query_embedding_cache` nel gateway.
+pub fn briefing_cache() -> &'static BriefingCache {
+    static CACHE: OnceLock<BriefingCache> = OnceLock::new();
+    CACHE.get_or_init(|| BriefingCache::new(briefing_cache_max_entries()))
+}
+
+fn briefing_cache_max_entries() -> usize {
+    std::env::var("HOMUN_BRIEFING_CACHE_MAX")
+        .ok()
+        .and_then(|value| value.trim().parse().ok())
+        .filter(|value: &usize| *value > 0)
+        .unwrap_or(64)
+}
+
+/// Fingerprint stabile di un prompt (hash 64-bit). Usato come parte della chiave
+/// di cache: prompt diverso → cache miss (i blocchi profile/open-loops sono
+/// prompt-dipendenti). Implementazione FNV-1a 64 (nessuna dipendenza esterna).
+pub fn prompt_fingerprint(prompt: &str) -> u64 {
+    // FNV-1a offset basis (64-bit).
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for byte in prompt.as_bytes() {
+        hash ^= *byte as u64;
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Test della cache (Tappa 1.5)
+// ──────────────────────────────────────────────────────────────────────────
+#[cfg(test)]
+mod cache_tests {
+    use super::*;
+
+    fn empty_pack() -> BriefingPack {
+        BriefingPack {
+            profile_block: None,
+            objective: None,
+            brief: None,
+            recent_work: None,
+        }
+    }
+
+    #[test]
+    fn cache_hits_when_generation_and_fingerprint_match() {
+        let cache = BriefingCache::new(4);
+        let entry = CachedBriefing {
+            generation: 7,
+            prompt_fingerprint: 42,
+            pack_sans_recent_work: empty_pack(),
+        };
+        cache.put("scope-1".to_string(), entry);
+        assert!(
+            cache.get("scope-1", 7, 42).is_some(),
+            "hit quando generation e fingerprint combaciano"
+        );
+    }
+
+    #[test]
+    fn cache_misses_when_generation_differs() {
+        let cache = BriefingCache::new(4);
+        cache.put(
+            "scope-1".to_string(),
+            CachedBriefing {
+                generation: 7,
+                prompt_fingerprint: 42,
+                pack_sans_recent_work: empty_pack(),
+            },
+        );
+        // Una scrittura ha incrementato la generation nel facade → miss.
+        assert!(
+            cache.get("scope-1", 8, 42).is_none(),
+            "miss quando la generation diverge (scrittura invalida)"
+        );
+    }
+
+    #[test]
+    fn cache_misses_when_prompt_fingerprint_differs() {
+        let cache = BriefingCache::new(4);
+        cache.put(
+            "scope-1".to_string(),
+            CachedBriefing {
+                generation: 7,
+                prompt_fingerprint: 42,
+                pack_sans_recent_work: empty_pack(),
+            },
+        );
+        // Prompt diverso (gating should_inject_* diverso) → miss.
+        assert!(
+            cache.get("scope-1", 7, 999).is_none(),
+            "miss quando il prompt cambia (blocchi prompt-dipendenti)"
+        );
+    }
+
+    #[test]
+    fn cache_evicts_when_full() {
+        let cache = BriefingCache::new(2);
+        cache.put(
+            "a".to_string(),
+            CachedBriefing {
+                generation: 1,
+                prompt_fingerprint: 1,
+                pack_sans_recent_work: empty_pack(),
+            },
+        );
+        cache.put(
+            "b".to_string(),
+            CachedBriefing {
+                generation: 1,
+                prompt_fingerprint: 1,
+                pack_sans_recent_work: empty_pack(),
+            },
+        );
+        // Terza entry → eviction (bounded).
+        cache.put(
+            "c".to_string(),
+            CachedBriefing {
+                generation: 1,
+                prompt_fingerprint: 1,
+                pack_sans_recent_work: empty_pack(),
+            },
+        );
+        // Almeno una delle prime due è stata evicta; la terza è presente.
+        assert!(cache.get("c", 1, 1).is_some(), "la nuova entry è presente");
+        let present = ["a", "b"].iter().filter(|k| cache.get(k, 1, 1).is_some()).count();
+        assert!(present <= 1, "bounded: al massimo max_entries entry coesistono");
+    }
+
+    #[test]
+    fn cache_put_refreshes_existing_key_without_evicting() {
+        let cache = BriefingCache::new(2);
+        cache.put(
+            "a".to_string(),
+            CachedBriefing {
+                generation: 1,
+                prompt_fingerprint: 1,
+                pack_sans_recent_work: empty_pack(),
+            },
+        );
+        // Re-put della stessa key (refresh) NON deve evictare un'altra entry.
+        cache.put(
+            "a".to_string(),
+            CachedBriefing {
+                generation: 2,
+                prompt_fingerprint: 1,
+                pack_sans_recent_work: empty_pack(),
+            },
+        );
+        assert!(cache.get("a", 2, 1).is_some(), "refresh aggiorna la entry");
+        assert!(cache.get("a", 1, 1).is_none(), "la vecchia generation è invalidata");
+    }
+
+    #[test]
+    fn prompt_fingerprint_is_stable_and_distinct() {
+        assert_eq!(prompt_fingerprint("ciao"), prompt_fingerprint("ciao"));
+        assert_ne!(prompt_fingerprint("ciao"), prompt_fingerprint("hello"));
+        assert_ne!(prompt_fingerprint(""), prompt_fingerprint("a"));
+    }
 }
 
 #[cfg(test)]

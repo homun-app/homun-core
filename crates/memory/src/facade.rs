@@ -25,6 +25,13 @@ pub struct MemoryFacade {
     store: SQLiteMemoryStore,
     policy: MemoryPolicyEngine,
     vector_indexes: Mutex<HashMap<String, crate::MemoryVectorIndexCache>>,
+    /// ADR 0022 (Tappa 1.5) — generation counter per scope, usato per invalidare
+    /// la cache del briefing. Ogni scrittura che muta il contenuto di uno scope
+    /// (memorie/wiki) incrementa la generation; la cache del briefing confronta
+    /// la sua generation con questa per decidere hit/miss. Keyed come il vector
+    /// index (`vector_index_scope_key`). `Mutex` perché le scritture sono da thread
+    /// concorrenti (learn/consolidate/backfill).
+    briefing_generations: Mutex<HashMap<String, u64>>,
 }
 
 impl MemoryFacade {
@@ -33,7 +40,33 @@ impl MemoryFacade {
             store,
             policy: MemoryPolicyEngine,
             vector_indexes: Mutex::new(HashMap::new()),
+            briefing_generations: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// ADR 0022 (Tappa 1.5) — generation corrente del contenuto di uno scope.
+    /// Incrementata a ogni scrittura. La cache del briefing la usa per invalidarsi:
+    /// se la sua generation differisce da questa, il briefing è stale → rebuild.
+    /// 0 = mai scritto (o non ancora mutato): equivalente a "nessuna cache possibile".
+    pub fn briefing_generation(&self, user_id: &UserId, workspace_id: &WorkspaceId) -> u64 {
+        let key = vector_index_scope_key(user_id, workspace_id);
+        self.briefing_generations
+            .lock()
+            .map(|generations| *generations.get(&key).unwrap_or(&0))
+            .unwrap_or(0)
+    }
+
+    /// ADR 0022 (Tappa 1.5) — incrementa la generation di uno scope. Chiamato da
+    /// ogni metodo mutating del facade per invalidare la cache del briefing.
+    fn bump_briefing_generation(&self, user_id: &UserId, workspace_id: &WorkspaceId) {
+        if let Ok(mut generations) = self.briefing_generations.lock() {
+            let key = vector_index_scope_key(user_id, workspace_id);
+            let entry = generations.entry(key).or_insert(0);
+            *entry = entry.wrapping_add(1);
+        }
+        // Se il lock è avvelenato, non incrementiamo: la cache potrebbe servire
+        // stale, ma un lock avvelenato indica già un panic altrove (blast radius
+        // maggiore del briefing). Meglio non propagare il panico qui.
     }
 
     /// Hard purge of all memory data for a workspace. Delegates to the store.
@@ -42,7 +75,9 @@ impl MemoryFacade {
         user_id: &UserId,
         workspace_id: &WorkspaceId,
     ) -> Result<usize, String> {
-        self.store.purge_workspace(user_id, workspace_id)
+        let count = self.store.purge_workspace(user_id, workspace_id)?;
+        self.bump_briefing_generation(user_id, workspace_id);
+        Ok(count)
     }
 
     /// Reclaims free space in the SQLite database file.
@@ -55,7 +90,9 @@ impl MemoryFacade {
     }
 
     pub fn upsert_memory(&self, memory: &MemoryRecord) -> MemoryResult<()> {
-        Ok(self.store.upsert_memory(memory)?)
+        self.store.upsert_memory(memory)?;
+        self.bump_briefing_generation(&memory.user_id, &memory.workspace_id);
+        Ok(())
     }
 
     pub fn upsert_entity(&self, entity: &MemoryEntity) -> MemoryResult<()> {
@@ -75,9 +112,9 @@ impl MemoryFacade {
         workspace_id: &WorkspaceId,
         reason: &str,
     ) -> MemoryResult<()> {
-        Ok(self
-            .store
-            .tombstone(reference, user_id, workspace_id, reason)?)
+        self.store.tombstone(reference, user_id, workspace_id, reason)?;
+        self.bump_briefing_generation(user_id, workspace_id);
+        Ok(())
     }
 
     pub fn tombstone_ref(
@@ -87,9 +124,9 @@ impl MemoryFacade {
         workspace_id: &WorkspaceId,
         reason: &str,
     ) -> MemoryResult<()> {
-        Ok(self
-            .store
-            .tombstone(reference, user_id, workspace_id, reason)?)
+        self.store.tombstone(reference, user_id, workspace_id, reason)?;
+        self.bump_briefing_generation(user_id, workspace_id);
+        Ok(())
     }
 
     pub fn link_evidence(&self, evidence: &MemoryEvidence) -> MemoryResult<()> {
@@ -135,6 +172,7 @@ impl MemoryFacade {
             })?;
         }
         self.audit_lifecycle(&create.request, AccessDecisionKind::Allow, vec![])?;
+        self.bump_briefing_generation(&memory.user_id, &memory.workspace_id);
         Ok(memory)
     }
 
@@ -172,6 +210,7 @@ impl MemoryFacade {
         memory.updated_at = current_timestamp();
         self.store.upsert_memory(&memory)?;
         self.audit_lifecycle(request, AccessDecisionKind::Allow, vec![])?;
+        self.bump_briefing_generation(&request.user_id, &request.workspace_id);
         Ok(memory)
     }
 
@@ -225,6 +264,7 @@ impl MemoryFacade {
         canonical.metadata = merge_reason(canonical.metadata, reason);
         self.store.upsert_memory(&canonical)?;
         self.audit_lifecycle(request, AccessDecisionKind::Allow, vec![])?;
+        self.bump_briefing_generation(&request.user_id, &request.workspace_id);
         Ok(canonical)
     }
 
@@ -257,11 +297,14 @@ impl MemoryFacade {
         self.store
             .tombstone(reference, &request.user_id, &request.workspace_id, reason)?;
         self.audit_lifecycle(request, AccessDecisionKind::Allow, vec![])?;
+        self.bump_briefing_generation(&request.user_id, &request.workspace_id);
         Ok(())
     }
 
     pub fn record_wiki_page_for_ui(&self, page: &WikiPage) -> MemoryResult<()> {
-        Ok(self.store.record_wiki_page(page)?)
+        self.store.record_wiki_page(page)?;
+        self.bump_briefing_generation(&page.user_id, &page.workspace_id);
+        Ok(())
     }
 
     pub fn upsert_embedding(
@@ -845,7 +888,9 @@ impl MemoryFacade {
         wiki: &WikiFileStore,
         projection: &MemoryWikiProjection,
     ) -> MemoryResult<()> {
-        Ok(wiki.write_page(&self.store, &projection.page)?)
+        wiki.write_page(&self.store, &projection.page)?;
+        self.bump_briefing_generation(&projection.page.user_id, &projection.page.workspace_id);
+        Ok(())
     }
 
     pub fn import_wiki_correction(
@@ -921,6 +966,7 @@ impl MemoryFacade {
         };
         self.store.upsert_memory(&candidate)?;
         self.audit_lifecycle(request, AccessDecisionKind::Allow, vec![])?;
+        self.bump_briefing_generation(&request.user_id, &request.workspace_id);
         Ok(WikiCorrectionSyncReport {
             created_candidates: 1,
             unchanged: 0,
@@ -1167,6 +1213,7 @@ impl MemoryFacade {
         memory.metadata = merge_reason(memory.metadata, reason);
         self.store.upsert_memory(&memory)?;
         self.audit_lifecycle(request, AccessDecisionKind::Allow, vec![])?;
+        self.bump_briefing_generation(&request.user_id, &request.workspace_id);
         Ok(memory)
     }
 
