@@ -2536,6 +2536,18 @@ body.resizing-drawer {
   color: var(--muted);
 }
 
+/* ADR 0022 (Piano UI A3): memory recall badge nel footer del messaggio assistant. */
+.memory-recall-badge {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-size: 11px;
+  color: var(--muted);
+  background: var(--bg-elevated, rgba(127, 127, 127, 0.12));
+  cursor: help;
+  white-space: nowrap;
+}
+
 .message.system p,
 .message.system .rich-message {
   max-width: 640px;

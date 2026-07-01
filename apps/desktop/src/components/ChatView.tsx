@@ -178,7 +178,7 @@ interface ReplyContext {
 
 type MessageFeedback = NonNullable<ChatMessage["feedback"]>;
 type MessageContentKind = "user" | "system" | "text" | "code" | "diagram";
-type ChatStreamPhase = "accepted" | "thinking" | "writing";
+type ChatStreamPhase = "accepted" | "thinking" | "writing" | "recalling";
 
 function chatEventPartFromStream(event: CoreChatStreamEvent): ChatEventPart | null {
   switch (event.type) {
@@ -714,6 +714,20 @@ export function ChatView({
         if (cancelledStreamIdsRef.current.has(requestId)) return;
         const part = chatEventPartFromStream(payload);
         if (part) {
+          // ADR 0022 (Piano UI A2): quando arriva un evento recall, mostra la fase
+          // "Sto controllando la memoria…" (precedenza su thinking/writing).
+          if (part.type === "recall") {
+            const count = part.payload?.hits?.length ?? 0;
+            setStreamStatus({
+              requestId,
+              phase: "recalling",
+              title: t("chat.recalling"),
+              detail:
+                count > 0
+                  ? t("chat.recallingHits", { count })
+                  : t("chat.recallingNoHits"),
+            });
+          }
           streamEventParts = [...streamEventParts, part];
           scheduleStreamingMessage();
           return;
@@ -2143,6 +2157,28 @@ export function ChatView({
                       return (
                         <span>
                           {formatChatDuration(secs)} · {tokens} token
+                        </span>
+                      );
+                    })()}
+                    {/* ADR 0022 (Piano UI A3): memory badge — quante memorie sono
+                        state richiamate per questa risposta. Derivato dalle
+                        eventParts recall (se l'evento Recall è stato emesso). */}
+                    {(() => {
+                      const recallCount =
+                        displayMessage.eventParts
+                          ?.filter((p) => p.type === "recall")
+                          .reduce((sum, p) => sum + (p.payload?.hits?.length ?? 0), 0) ?? 0;
+                      if (recallCount === 0) return null;
+                      return (
+                        <span
+                          className="memory-recall-badge"
+                          title={displayMessage.eventParts
+                            ?.filter((p) => p.type === "recall")
+                            .flatMap((p) => p.payload?.hits ?? [])
+                            .map((h) => `• ${h.text}`)
+                            .join("\n")}
+                        >
+                          📝 {t("chat.memoryBadge", { count: recallCount })}
                         </span>
                       );
                     })()}
