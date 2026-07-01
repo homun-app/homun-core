@@ -616,8 +616,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if memory_service_enabled() {
         let embedding: Arc<dyn local_first_memory::EmbeddingClient> =
             Arc::new(GatewayEmbeddingClient { http: state.http.clone() });
+        let llm: Arc<dyn local_first_memory::LlmClient> =
+            Arc::new(GatewayLlmClient { http: state.http.clone() });
         state.memory_service = Some(
-            Arc::new(InProcessMemoryRecallService::new(state.clone(), embedding))
+            Arc::new(InProcessMemoryRecallService::new(state.clone(), embedding, llm))
                 as Arc<dyn MemoryRecallService>,
         );
     }
@@ -4898,14 +4900,18 @@ struct InProcessMemoryRecallService {
     /// recall orchestrato nel crate lo consuma; questa impl gateway wrappa la
     /// cache LRU+TTL esistente (`embed_query_for_memory_recall`).
     embedding: std::sync::Arc<dyn local_first_memory::EmbeddingClient>,
+    /// ADR 0022 (Tappa 4): LLM client per l'estrazione memoria (learn). Wrappa
+    /// `extractor_openai_config` + POST `/chat/completions`.
+    llm: std::sync::Arc<dyn local_first_memory::LlmClient>,
 }
 
 impl InProcessMemoryRecallService {
     fn new(
         state: AppState,
         embedding: std::sync::Arc<dyn local_first_memory::EmbeddingClient>,
+        llm: std::sync::Arc<dyn local_first_memory::LlmClient>,
     ) -> Self {
-        Self { state, embedding }
+        Self { state, embedding, llm }
     }
 }
 
@@ -4933,6 +4939,56 @@ impl local_first_memory::EmbeddingClient for GatewayEmbeddingClient {
             embed_query_for_memory_recall(&http, text, &active, &mut timing)
                 .await
                 .unwrap_or_default()
+        })
+    }
+}
+
+/// ADR 0022 (Tappa 4) — impl gateway del capability `LlmClient` per l'estrazione
+/// memoria (learn). Risolve `extractor_openai_config` e POST `/chat/completions`.
+/// L'orchestrazione learn_on_facade nel crate lo consuma senza conoscere HTTP.
+struct GatewayLlmClient {
+    http: reqwest::Client,
+}
+
+impl local_first_memory::LlmClient for GatewayLlmClient {
+    fn chat<'a>(
+        &'a self,
+        system: &'a str,
+        user_content: &'a str,
+    ) -> local_first_memory::BoxFuture<'a, Option<String>> {
+        let http = self.http.clone();
+        Box::pin(async move {
+            let Some((base_url, model, api_key)) = extractor_openai_config() else {
+                return None;
+            };
+            let payload = serde_json::json!({
+                "model": model,
+                "temperature": 0.0,
+                "max_tokens": 2000,
+                "response_format": { "type": "json_object" },
+                "messages": [
+                    { "role": "system", "content": system },
+                    { "role": "user", "content": user_content },
+                ],
+            });
+            let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
+            let mut builder = http
+                .post(&endpoint)
+                .timeout(std::time::Duration::from_secs(120));
+            if let Some(key) = api_key.as_ref() {
+                builder = builder.bearer_auth(key);
+            }
+            let resp = builder.json(&payload).send().await.ok()?;
+            if !resp.status().is_success() {
+                return None;
+            }
+            let body = resp.json::<serde_json::Value>().await.ok()?;
+            body.get("choices")
+                .and_then(|c| c.get(0))
+                .and_then(|c| c.get("message"))
+                .and_then(|m| m.get("content"))
+                .and_then(|c| c.as_str())
+                .map(str::to_string)
         })
     }
 }
@@ -5070,7 +5126,13 @@ impl MemoryRecallService for InProcessMemoryRecallService {
         exchange: &'a Exchange,
         scope: &'a MemoryScope,
     ) -> local_first_memory::BoxFuture<'a, ()> {
-        debug_assert!(scope.workspace_id() == gateway_memory_workspace_id());
+        // ADR 0022 (Tappa 4): learn ora ORCHESTRATO nel crate via
+        // `learn_on_facade`. Lo scope è argomento esplicito (isolation by
+        // construction). project_name + hooks (grafo/episode/backfill) sono
+        // gateway-side e iniettati (saranno migrati in sub-tappa).
+        let user = gateway_memory_user_id();
+        let workspace = scope.workspace_id();
+        let llm = self.llm.clone();
         let state = self.state.clone();
         let user_message = exchange.user_message.clone();
         let assistant_message = exchange.assistant_message.clone();
@@ -5079,16 +5141,53 @@ impl MemoryRecallService for InProcessMemoryRecallService {
         let speaker = exchange.speaker.clone();
         let prev_assistant = exchange.prev_assistant.clone();
         Box::pin(async move {
-            learn_from_exchange(
-                &state,
-                &user_message,
-                &assistant_message,
-                &actions,
+            let active = workspace.clone();
+            let project_name = if active.as_str() != PERSONAL_WORKSPACE {
+                load_workspaces_file()
+                    .workspaces
+                    .into_iter()
+                    .find(|w| w.id.as_str() == active.as_str())
+                    .map(|w| w.name)
+            } else {
+                None
+            };
+            // Fase 1 (sync, lock): prepara il prompt (gating + known loops).
+            let prompt = {
+                let Ok(facade) = lock_memory_facade(&state) else { return };
+                local_first_memory::prepare_learn_prompt(
+                    &facade,
+                    &user,
+                    &active,
+                    &user_message,
+                    &assistant_message,
+                    &actions,
+                    speaker.as_deref(),
+                    prev_assistant.as_deref(),
+                    project_name.as_deref(),
+                )
+            };
+            let Some((system, user_content)) = prompt else { return };
+            // Fase 2 (off-lock): LLM estrattore via capability trait (no guard attiva).
+            let Some(content) = llm.chat(&system, &user_content).await else { return };
+            // Fase 3 (sync, lock re-acquisito): parse + routing + persist + hooks.
+            let Ok(facade) = lock_memory_facade(&state) else { return };
+            let hooks = local_first_memory::LearnHooks {
+                persist_graph: Some(&|facade, user, workspace, entities, relations, project_ws| {
+                    persist_graph(facade, user, workspace, entities, relations, project_ws);
+                }),
+                store_episode: Some(&|facade, user, thread_id, episode, active| {
+                    store_episode(facade, user, thread_id, episode, active);
+                }),
+                backfill_embeddings: None, // backfill async: resta al tick periodico.
+            };
+            local_first_memory::persist_learn_extraction(
+                &facade,
+                &user,
+                &active,
+                &content,
                 thread_id.as_deref(),
-                speaker.as_deref(),
-                prev_assistant.as_deref(),
-            )
-            .await;
+                hooks,
+            );
         })
     }
 }
@@ -54565,6 +54664,18 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         }
     }
 
+    /// LLM client mock per i test del service: ritorna None (learn skippa — no HTTP).
+    struct NoopLlmClient;
+    impl local_first_memory::LlmClient for NoopLlmClient {
+        fn chat<'a>(
+            &'a self,
+            _system: &'a str,
+            _user: &'a str,
+        ) -> local_first_memory::BoxFuture<'a, Option<String>> {
+            Box::pin(async move { None })
+        }
+    }
+
     /// AppState di test con una `MemoryFacade` in-memory passata in input e tutti
     /// gli altri store in-memory/empty. `brief()` tocca SOLO `memory_facade` +
     /// globali (workspace/user id), quindi i campi non-memoria sono popolati con
@@ -54679,7 +54790,7 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             let state = test_app_state_for_brief(facade);
             super::set_memory_workspace(super::PERSONAL_WORKSPACE);
             let scope = super::scope_from_active_workspace();
-            let service = super::InProcessMemoryRecallService::new(state.clone(), std::sync::Arc::new(NoopEmbeddingClient));
+            let service = super::InProcessMemoryRecallService::new(state.clone(), std::sync::Arc::new(NoopEmbeddingClient), std::sync::Arc::new(NoopLlmClient));
             let service_blocks = service.brief(&scope, message).ordered_blocks();
             let inline_blocks = inline_briefing_blocks(&state, message);
             assert_eq!(
@@ -54702,7 +54813,7 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             let state = test_app_state_for_brief(facade);
             super::set_memory_workspace("proj-parity");
             let scope = super::scope_from_active_workspace();
-            let service = super::InProcessMemoryRecallService::new(state.clone(), std::sync::Arc::new(NoopEmbeddingClient));
+            let service = super::InProcessMemoryRecallService::new(state.clone(), std::sync::Arc::new(NoopEmbeddingClient), std::sync::Arc::new(NoopLlmClient));
             let service_blocks = service.brief(&scope, message).ordered_blocks();
             let inline_blocks = inline_briefing_blocks(&state, message);
             assert_eq!(

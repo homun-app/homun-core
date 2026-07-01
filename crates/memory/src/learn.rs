@@ -384,7 +384,301 @@ fn _cosine_link(a: &[f32], b: &[f32]) -> f32 {
     cosine(a, b)
 }
 
-// TODO(Tappa 4 step 2 completare): persist_graph + store_episode + l'orchestrazione
-// learn_on_facade (chiamata LlmClient + build_extractor_system + parse + routing +
-// persist). Per ora i building block sono nel crate; l'orchestrazione completa e il
-// wiring del gateway verranno nel prossimo sub-commit (verifica+test ad ogni step).
+// ──────────────────────────────────────────────────────────────────────────
+// Orchestrazione learn (Step 2b)
+// ──────────────────────────────────────────────────────────────────────────
+
+/// Callback iniettate dal gateway per le parti di learn che restano gateway-side
+/// per ora (grafo, episode, backfill embeddings). `None` = skip (test isolation).
+/// Pattern = graph_context del recall.
+pub struct LearnHooks<'a> {
+    /// Persiste entità/relazioni nel grafo (personal + project). Firma speculare
+    /// a `persist_graph` del gateway.
+    pub persist_graph: Option<&'a (dyn Fn(&MemoryFacade, &UserId, &WorkspaceId, Vec<ExtractedEntity>, Vec<ExtractedRelation>, Option<&WorkspaceId>) + Sync)>,
+    /// Memorizza l'episodio one-line (M4) nel thread scope.
+    pub store_episode: Option<&'a (dyn Fn(&MemoryFacade, &UserId, &str, &str, &str) + Sync)>,
+    /// Backfill embeddings incrementale (background). Firma: (facade, user, ws, batch).
+    pub backfill_embeddings: Option<&'a (dyn Fn(&MemoryFacade, &UserId, &WorkspaceId, usize) + Sync)>,
+}
+
+/// Orchestrazione learn: gating salience → build prompt (con facade per known
+/// loops/decisions) → LLM estrattore → parse JSON resiliente → routing scope
+/// → persist memories (+ hooks opzionali per grafo/episode/backfill).
+///
+/// **Split in 3 fasi** (come il recall) per risolvere il Send-bound: il
+/// `MutexGuard` della facade NON deve attraversare l'await della LLM call.
+/// Il chiamante (gateway) orchesta: (1) [`prepare_learn_prompt`] sync sotto
+/// lock → (2) LLM call off-lock via `LlmClient` → (3) [`persist_learn_extraction`]
+/// sync sotto lock re-acquisito.
+///
+/// Lo scope è **argomento esplicito**: isolation by construction.
+
+/// Fase 1 (sync, sotto lock): gating + build system prompt + exchange.
+/// Ritorna `Some((system, user_content))` o `None` se skip (no-op).
+pub fn prepare_learn_prompt(
+    facade: &MemoryFacade,
+    user: &UserId,
+    active: &WorkspaceId,
+    user_message: &str,
+    assistant_message: &str,
+    actions: &str,
+    speaker: Option<&str>,
+    prev_assistant: Option<&str>,
+    project_name: Option<&str>,
+) -> Option<(String, String)> {
+    let is_confirmation = prev_assistant
+        .is_some_and(|p| !p.trim().is_empty())
+        && is_confirmation_reply(user_message);
+    if actions.trim().is_empty() && !is_salient_exchange(user_message) && !is_confirmation {
+        return None;
+    }
+    let system = build_extractor_system(facade, user, active, speaker, actions, project_name);
+    let exchange = match speaker {
+        Some(name) => {
+            format!("MESSAGE from {name} (channel):\n{user_message}\n\nREPLY: {assistant_message}")
+        }
+        None => {
+            let preface = match prev_assistant {
+                Some(p) if is_confirmation && !p.trim().is_empty() => format!(
+                    "ASSISTANT (previous turn — what the user is replying to): {}\n\n",
+                    p.trim()
+                ),
+                _ => String::new(),
+            };
+            format!("{preface}USER: {user_message}\n\nASSISTANT: {assistant_message}")
+        }
+    };
+    let user_content = if actions.trim().is_empty() {
+        exchange
+    } else {
+        format!("{exchange}\n\nACTIONS PERFORMED this turn:\n{actions}")
+    };
+    Some((system, user_content))
+}
+
+/// Fase 3 (sync, sotto lock re-acquisito): parse JSON resiliente + routing
+/// scope + persist memories + hooks (grafo/episode/backfill). Spostato fedelmente
+/// dal corpo di `learn_from_exchange` (post-LLM).
+pub fn persist_learn_extraction(
+    facade: &MemoryFacade,
+    user: &UserId,
+    active: &WorkspaceId,
+    content: &str,
+    thread_id: Option<&str>,
+    hooks: LearnHooks<'_>,
+) -> bool {
+    let Ok(root) = serde_json::from_str::<serde_json::Value>(strip_json_fences(content)) else {
+        return false;
+    };
+    let memories: Vec<ExtractedMemory> = root
+        .get("memories")
+        .and_then(|v| v.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|i| serde_json::from_value(fill_extraction_defaults(i)).ok())
+                .collect()
+        })
+        .unwrap_or_default();
+    let entities: Vec<ExtractedEntity> = root
+        .get("entities")
+        .and_then(|v| v.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|i| serde_json::from_value(fill_extraction_defaults(i)).ok())
+                .collect()
+        })
+        .unwrap_or_default();
+    let relations: Vec<ExtractedRelation> = root
+        .get("relations")
+        .and_then(|v| v.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|i| serde_json::from_value(fill_extraction_defaults(i)).ok())
+                .collect()
+        })
+        .unwrap_or_default();
+    let episode = root
+        .get("episode")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let mut extraction = MemoryExtraction {
+        memories,
+        entities,
+        relations,
+    };
+    let graph_entities = std::mem::take(&mut extraction.entities);
+    let graph_relations = std::mem::take(&mut extraction.relations);
+    extraction.memories.retain(|m| {
+        matches!(
+            m.memory_type.as_str(),
+            "fact" | "preference" | "decision" | "goal" | "open_loop"
+        )
+    });
+    if extraction.memories.is_empty()
+        && graph_entities.is_empty()
+        && graph_relations.is_empty()
+        && episode.is_empty()
+    {
+        return false;
+    }
+    for memory in &mut extraction.memories {
+        memory.privacy_domain = PrivacyDomain::new("personal");
+    }
+    let has_project = active.as_str() != PERSONAL_WORKSPACE;
+    let mut personal_mems: Vec<ExtractedMemory> = Vec::new();
+    let mut project_mems: Vec<ExtractedMemory> = Vec::new();
+    for memory in extraction.memories {
+        let scope = memory
+            .metadata
+            .get("scope")
+            .and_then(|s| s.as_str())
+            .unwrap_or("");
+        let to_project = has_project
+            && (scope == "project"
+                || (scope.is_empty() && memory.memory_type.as_str() == "decision"));
+        if to_project {
+            project_mems.push(memory);
+        } else {
+            personal_mems.push(memory);
+        }
+    }
+    persist_scope_memories(
+        facade,
+        user,
+        &WorkspaceId::new(PERSONAL_WORKSPACE),
+        personal_mems,
+    );
+    if has_project {
+        persist_scope_memories(facade, user, active, project_mems);
+    }
+    if let Some(persist_graph) = hooks.persist_graph {
+        persist_graph(
+            facade,
+            user,
+            &WorkspaceId::new(PERSONAL_WORKSPACE),
+            graph_entities,
+            graph_relations,
+            has_project.then_some(active),
+        );
+    }
+    if let Some(store_episode) = hooks.store_episode {
+        if let Some(tid) = thread_id {
+            store_episode(facade, user, tid, &episode, active.as_str());
+        }
+    }
+    if let Some(backfill) = hooks.backfill_embeddings {
+        backfill(facade, user, &WorkspaceId::new(PERSONAL_WORKSPACE), 12);
+        if has_project {
+            backfill(facade, user, active, 12);
+        }
+    }
+    true
+}
+
+// I predicati di salience/confirmation sono piccoli e pure; li definiamo qui
+// (spostati fedelmente dal gateway) così learn_on_facade è self-contained.
+// NB: il gateway ha ancora le sue copie (usate altrove); verranno rimosse nello
+// Step 5.
+
+/// `is_salient_exchange` spostato fedelmente dal gateway.
+pub fn is_salient_exchange(user_message: &str) -> bool {
+    let trimmed = user_message.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    // Standalone choice-card / short replies non sono salient (non estraiamo).
+    if is_confirmation_reply(trimmed) {
+        return false;
+    }
+    trimmed.chars().count() >= 12
+}
+
+/// `is_confirmation_reply` spostato fedelmente dal gateway.
+pub fn is_confirmation_reply(user_message: &str) -> bool {
+    let normalized = user_message.trim().to_lowercase();
+    matches!(
+        normalized.as_str(),
+        "ok" | "okay" | "va bene" | "procedi" | "conferma" | "confermato" | "annulla"
+            | "cancella" | "stop" | "cambio idea" | "non salvare" | "salva" | "sì"
+            | "si" | "yes" | "no" | "esatto" | "giusto" | "corretto" | "certo" | "d'accordo"
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{MemoryFacade, SQLiteMemoryStore};
+
+    /// LLM mock che ritorna un JSON estratto fisso (una preferenza personale).
+    /// Deterministico, no HTTP. L'end-to-end async (learn_on_facade) si testa nel
+    /// gateway (che ha tokio); qui testiamo i building block sync.
+    struct MockExtractor;
+    impl crate::LlmClient for MockExtractor {
+        fn chat<'a>(&'a self, _system: &'a str, _user: &'a str) -> BoxFuture<'a, Option<String>> {
+            Box::pin(async move {
+                Some(
+                    r#"{"memories":[{"memory_type":"preference","text":"Prefers replies in Italian","sensitivity":"internal","confidence":0.9,"metadata":{"scope":"personal","certainty":"committed"}}],"entities":[],"relations":[],"episode":"The user stated a language preference."}"#
+                        .to_string(),
+                )
+            })
+        }
+    }
+
+    #[test]
+    fn mock_extractor_compiles_and_is_send_sync() {
+        // Verifica che il mock impl LlmClient ed è Send+Sync (richiesto dal trait).
+        fn assert_send_sync<T: Send + Sync>(_: &T) {}
+        let mock = MockExtractor;
+        assert_send_sync(&mock);
+    }
+
+    #[test]
+    fn salience_and_confirmation_predicates_are_sound() {
+        assert!(is_salient_exchange("Qual è la decisione sul database?"));
+        assert!(!is_salient_exchange("ok"));
+        assert!(!is_salient_exchange(""));
+        assert!(is_confirmation_reply("ok"));
+        assert!(is_confirmation_reply("Sì"));
+        assert!(!is_confirmation_reply("una frase lunga e non di conferma"));
+    }
+
+    #[test]
+    fn strip_json_fences_handles_wrapped_and_bare() {
+        assert_eq!(strip_json_fences("```json\n{\"a\":1}\n```"), "{\"a\":1}");
+        assert_eq!(strip_json_fences("```\n{\"a\":1}\n```"), "{\"a\":1}");
+        assert_eq!(strip_json_fences("{\"a\":1}"), "{\"a\":1}");
+    }
+
+    #[test]
+    fn persist_scope_memories_dedups_against_existing() {
+        let facade = MemoryFacade::new(SQLiteMemoryStore::open_in_memory().unwrap());
+        let user = UserId::new("dedup-user");
+        let ws = WorkspaceId::new(PERSONAL_WORKSPACE);
+        // Pre-existing memory.
+        let existing = ExtractedMemory {
+            memory_type: "fact".into(),
+            text: "The user owns a Moto Guzzi V7 Stone".into(),
+            aliases: vec![],
+            language_hints: vec![],
+            confidence: 0.9,
+            privacy_domain: PrivacyDomain::new("personal"),
+            sensitivity: crate::DataSensitivity::Public,
+            metadata: serde_json::json!({"scope": "personal"}),
+            evidence_refs: vec![],
+        };
+        persist_scope_memories(&facade, &user, &ws, vec![existing.clone()]);
+        let count_after_first = facade.list_memories_for_ui(&user, &ws).unwrap().len();
+        assert_eq!(count_after_first, 1);
+        // Re-persist the SAME memory (paraphrase, high jaccard) → dedup, no new row.
+        let paraphrase = ExtractedMemory {
+            text: "The user owns a Moto Guzzi V7 Stone".into(),
+            ..existing
+        };
+        persist_scope_memories(&facade, &user, &ws, vec![paraphrase]);
+        let count_after_dup = facade.list_memories_for_ui(&user, &ws).unwrap().len();
+        assert_eq!(count_after_dup, 1, "paraphrase ad alta jaccard dedupplicata");
+    }
+}
+
