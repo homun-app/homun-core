@@ -63,7 +63,7 @@ import {
   WandSparkles,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import ForceGraph2D from "react-force-graph-2d";
 import type {
@@ -395,10 +395,16 @@ export function ChatView({
   }, [optimisticMessages, messages]);
   // All artifacts generated in this conversation (from persisted ‹‹ARTIFACT››
   // markers) — drives the Artifacts workspace panel.
+  // ADR 0022 (Piano UI C2): dipende dai messaggi PERSISTED (`messages`), NON da
+  // `threadMessages` (che include optimisticMessages e cambia ogni frame di stream).
+  // Così questo memo NON ricalcola durante lo streaming del messaggio corrente —
+  // il vero riduttore di jank su thread lunghi. Gli artifact del messaggio streaming
+  // si vedono quando viene persisted.
   const conversationArtifacts = useMemo(() => {
     const seen = new Set<string>();
     const out: ParsedArtifact[] = [];
-    for (const message of threadMessages) {
+    for (const message of messages) {
+      if (message.role === "assistant" && message.id.endsWith("_ready")) continue;
       for (const artifact of parseArtifacts(message.text ?? "")) {
         if (!seen.has(artifact.name)) {
           seen.add(artifact.name);
@@ -407,7 +413,7 @@ export function ChatView({
       }
     }
     return out;
-  }, [threadMessages]);
+  }, [messages]);
   const workbenchArtifacts = useMemo(() => {
     const seen = new Set<string>();
     const out: ParsedArtifact[] = [];
@@ -433,8 +439,11 @@ export function ChatView({
   }, [conversationArtifacts, memoryArtifacts, thread.threadId]);
   // The agent's operational plan for this conversation (latest update_plan), shown
   // in the Workbench "Piano" panel.
-  const conversationPlan = useMemo(() => latestPlanMarkdown(threadMessages), [threadMessages]);
-  const conversationActivity = useMemo(() => latestActivitySteps(threadMessages), [threadMessages]);
+  // ADR 0022 (Piano UI C2): plan/activity derivati dai messaggi PERSISTED, non da
+  // threadMessages (che cambia ogni frame di stream). Il plan/activity del messaggio
+  // streaming si vede quando viene persisted.
+  const conversationPlan = useMemo(() => latestPlanMarkdown(messages), [messages]);
+  const conversationActivity = useMemo(() => latestActivitySteps(messages), [messages]);
   const workspacePlanSteps = useMemo(
     () => (conversationPlan ? parsePlanSteps(conversationPlan) : []),
     [conversationPlan],
@@ -444,7 +453,8 @@ export function ChatView({
   const uploadedFiles = useMemo(() => {
     const seen = new Set<string>();
     const out: ChatAttachment[] = [];
-    for (const message of threadMessages) {
+    for (const message of messages) {
+      if (message.role === "assistant" && message.id.endsWith("_ready")) continue;
       for (const attachment of message.attachments ?? []) {
         if (!seen.has(attachment.title)) {
           seen.add(attachment.title);
@@ -453,7 +463,7 @@ export function ChatView({
       }
     }
     return out;
-  }, [threadMessages]);
+  }, [messages]);
   const activeApprovels = approvals.filter((approval) =>
     approval.requestedBy.includes(computerSessionId),
   );
@@ -6099,23 +6109,29 @@ function humanizeToolSlugs(text: string): string {
 /** Renders an assistant message body, surfacing a write-confirmation card when
  *  the model proposed a write action that needs approval (once / always), or a
  *  static "done" note once it has been executed. */
-function AssistantMessageBody({
-  text,
-  eventParts,
-  streaming,
-  messageId,
-  threadId,
-  onOpenArtifact,
-  onChoose,
-}: {
-  text: string;
-  eventParts?: ChatEventPart[];
-  streaming?: boolean;
-  messageId?: string;
-  threadId?: string;
-  onOpenArtifact?: (artifact: ParsedArtifact) => void;
-  onChoose?: (answer: string) => void;
-}) {
+// ADR 0022 (Piano UI C4): memo per stabilizzare l'identity dei messaggi non-
+// streaming. Durante lo stream di un messaggio, l'array optimisticMessages è
+// fresco ogni frame → senza memo TUTTI i messaggi re-renderizzano. Questo comparatore
+// re-renderizza un messaggio solo se il suo text/eventParts/streaming cambiano;
+// i messaggi finalizzati (text stabile) NON re-renderizzano durante lo stream altrui.
+const AssistantMessageBody = memo(
+  function AssistantMessageBody({
+    text,
+    eventParts,
+    streaming,
+    messageId,
+    threadId,
+    onOpenArtifact,
+    onChoose,
+  }: {
+    text: string;
+    eventParts?: ChatEventPart[];
+    streaming?: boolean;
+    messageId?: string;
+    threadId?: string;
+    onOpenArtifact?: (artifact: ParsedArtifact) => void;
+    onChoose?: (answer: string) => void;
+  }) {
   const {
     visible,
     action,
@@ -6186,7 +6202,16 @@ function AssistantMessageBody({
       )}
     </>
   );
-}
+  },
+  // Comparatore: re-renderizza solo se il contenuto del messaggio cambia.
+  // Le callback (onOpenArtifact/onChoose) sono stabili nel caller — skip.
+  (prev, next) =>
+    prev.text === next.text &&
+    prev.streaming === next.streaming &&
+    prev.messageId === next.messageId &&
+    prev.threadId === next.threadId &&
+    prev.eventParts === next.eventParts,
+);
 
 function VaultProposeCard({
   proposal,
