@@ -779,6 +779,14 @@ GIÀ FATTO sessione 5g (NON ripartire; tutto su `main`):
   anche una cancellazione backend/provider hard per task browser gia' in corso dopo chiusura socket.
   Il prompt di sistema forza inoltre le richieste esplicite di piano verso `update_plan`/`PLAN_PROPOSE`
   invece di piani liberi in prosa.
+- **Live follow-up structured events**: il test reale ha mostrato due buchi residui: (1) la choice
+  standalone "Fammi scegliere tra Confermo e Cambio idea..." veniva ancora contaminata da RAG/memoria
+  cross-thread e proponeva il vecchio treno; ora le richieste standalone/meta di choice card saltano
+  sia open-loop globali sia `relevant_memory_for_prompt`, mentre un task concreto che chiede una card
+  mantiene la memoria. (2) il piano test ha prodotto solo marker (`PLAN`/`ARTIFACT`) + risultato dentro
+  `REASONING`; ora il guard F3 forza la sintesi quando il corpo visibile combinato e' vuoto anche se
+  `accumulated` contiene marker. `example.com` nel test concorrente ha completato e scritto risposta
+  nel DB; se la UI resta bloccata, il prossimo taglio e' stato stream/render o cancellazione backend hard.
 - **Browser live panel / espansione**: il dock `ChatComputerPanel` in modalità full ora esce dallo
   status stack e si ancora `fixed` dentro l'area chat, a destra della sidebar; il compact expand usa
   `Maximize2` e il pannello full è più largo (`min(1040px, ...)`) senza scivolare sotto il drawer.

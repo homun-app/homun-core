@@ -2525,6 +2525,9 @@ fn should_inject_open_loops_for_prompt(user_message: &str) -> bool {
         return false;
     }
     let compact = low.split_whitespace().collect::<Vec<_>>().join(" ");
+    if is_standalone_choice_card_request(&compact) {
+        return false;
+    }
     if is_confirmation_reply(&compact) {
         return false;
     }
@@ -2548,6 +2551,39 @@ fn should_inject_open_loops_for_prompt(user_message: &str) -> bool {
         return false;
     }
     true
+}
+
+fn is_standalone_choice_card_request(compact_lower_prompt: &str) -> bool {
+    let has_choice_card_language = compact_lower_prompt.contains("card di scelta")
+        || compact_lower_prompt.contains("choice card")
+        || compact_lower_prompt.contains("choices card")
+        || compact_lower_prompt.contains("card scelta");
+    let asks_to_choose = compact_lower_prompt.starts_with("fammi scegliere")
+        || compact_lower_prompt.starts_with("fai scegliere")
+        || compact_lower_prompt.starts_with("let me choose")
+        || compact_lower_prompt.starts_with("make me choose")
+        || (compact_lower_prompt.contains("scegliere tra")
+            && compact_lower_prompt.contains("non una lista"))
+        || (compact_lower_prompt.contains("choose between")
+            && compact_lower_prompt.contains("not a text"));
+    has_choice_card_language && asks_to_choose
+}
+
+fn should_inject_relevant_memory_for_prompt(user_message: &str) -> bool {
+    let compact = user_message
+        .trim()
+        .to_lowercase()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    !compact.is_empty() && !is_standalone_choice_card_request(&compact)
+}
+
+fn should_force_synthesis_for_empty_visible_answer(accumulated: &str, content: &str) -> bool {
+    let mut combined = String::with_capacity(accumulated.len() + content.len());
+    combined.push_str(accumulated);
+    combined.push_str(content);
+    answer_body_is_empty(&combined)
 }
 
 /// Auto-confirm policy (M2): only durable, high-confidence knowledge enters memory
@@ -19452,9 +19488,13 @@ normal answers."
         };
         // RAG: inject memory relevant to THIS prompt (decisions/facts), so the model
         // answers from what was already decided instead of saying it has nothing.
-        let system = match relevant_memory_for_prompt(state, &request.prompt).await {
-            Some(block) => format!("{system}\n\n{block}"),
-            None => system,
+        let system = if should_inject_relevant_memory_for_prompt(&request.prompt) {
+            match relevant_memory_for_prompt(state, &request.prompt).await {
+                Some(block) => format!("{system}\n\n{block}"),
+                None => system,
+            }
+        } else {
+            system
         };
         // Anti-rewrite anchor: existing code components matching the request, so the
         // model extends/reuses instead of re-implementing (no-regression by default).
@@ -24321,7 +24361,7 @@ Tell the user clearly; do NOT claim it's done."
             // token budget and an explicit "write the FINAL ANSWER now" directive. `break`
             // leaves the round loop, so the synthesis runs exactly once — no spin, no counter;
             // if it too comes back empty, its own fallback chain ends the turn cleanly.
-            if answer_body_is_empty(&content) && accumulated.trim().is_empty() {
+            if should_force_synthesis_for_empty_visible_answer(&accumulated, &content) {
                 if verbose_debug() {
                     let fr = body
                         .get("choices")
@@ -53394,10 +53434,18 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             "‹‹REASONING››long chain of thought‹‹/REASONING››"
         ));
         assert!(answer_body_is_empty("‹‹PLAN››- [x] step‹‹/PLAN››"));
+        assert!(super::should_force_synthesis_for_empty_visible_answer(
+            "‹‹PLAN››- [x] **Step** (`s1`): done‹‹/PLAN››‹‹ARTIFACT››{\"name\":\"x.md\",\"size\":1,\"thread\":\"t\"}‹‹/ARTIFACT››",
+            "‹‹REASONING››The final answer is hidden in reasoning.‹‹/REASONING››"
+        ));
         // A real answer — with or without a reasoning trace above it — is NOT empty.
         assert!(!answer_body_is_empty("Here is the answer."));
         assert!(!answer_body_is_empty(
             "‹‹REASONING››thought‹‹/REASONING››\nHere is the answer."
+        ));
+        assert!(!super::should_force_synthesis_for_empty_visible_answer(
+            "‹‹PLAN››- [x] **Step** (`s1`): done‹‹/PLAN››",
+            "\nHere is the answer."
         ));
     }
 
@@ -54651,8 +54699,24 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         assert!(!super::should_inject_open_loops_for_prompt("cambio idea"));
         assert!(!super::should_inject_open_loops_for_prompt("ok"));
         assert!(!super::should_inject_open_loops_for_prompt("procedi"));
+        assert!(!super::should_inject_open_loops_for_prompt(
+            "Fammi scegliere tra Confermo e Cambio idea usando una card di scelta, non una lista testuale."
+        ));
         assert!(super::should_inject_open_loops_for_prompt(
             "riprendi la ricerca del treno per Roma"
+        ));
+    }
+
+    #[test]
+    fn standalone_choice_card_requests_do_not_inject_cross_thread_memory() {
+        assert!(!super::should_inject_relevant_memory_for_prompt(
+            "Fammi scegliere tra Confermo e Cambio idea usando una card di scelta, non una lista testuale."
+        ));
+        assert!(!super::should_inject_relevant_memory_for_prompt(
+            "Let me choose between Confirm and Change idea with a choice card."
+        ));
+        assert!(super::should_inject_relevant_memory_for_prompt(
+            "Cerca i treni da Milano a Roma e usa una card di scelta per farmi scegliere"
         ));
     }
 
