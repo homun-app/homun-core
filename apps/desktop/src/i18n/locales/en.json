@@ -1155,5 +1155,13 @@
     "newActivity": "New activity",
     "newMessage": "New message",
     "scheduledReady": "Scheduled task ready"
+  },
+  "projectContext": {
+    "title": "Project context",
+    "objective": "Objective",
+    "brief": "Brief",
+    "openLoops": "Open loops",
+    "decisions": "Decisions",
+    "learnedInChat": "learned in another chat"
   }
 }

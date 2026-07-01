@@ -2818,6 +2818,7 @@ export const coreBridge = {
   exportLocalData: () => electronExportLocalData(),
   memoryItems: () => electronMemoryItems(),
   projectGoals: (threadId: string) => electronProjectGoals(threadId),
+  projectBriefing: (threadId: string) => electronProjectBriefing(threadId),
   suggestGoals: (threadId: string) => electronSuggestGoals(threadId),
   promoteGoals: (workspace: string, refs: string[]) => electronPromoteGoals(workspace, refs),
   addGoal: (workspace: string, text: string) => electronAddGoal(workspace, text),
@@ -3336,6 +3337,23 @@ export type ProjectGoalsData = {
   decisions: { reference: string; text: string }[];
 };
 
+/** ADR 0022 (Piano UI A5): project briefing — ciò che l'agente SA stabilmente del
+ *  progetto (objective/brief/open-loops/decisions/goals) con provenance cross-chat. */
+export type ProjectBriefingItem = {
+  reference: string;
+  text: string;
+  thread_id: string | null;
+};
+export type ProjectBriefingData = {
+  workspace: string;
+  is_project: boolean;
+  objective: string | null;
+  brief: { body: string } | null;
+  open_loops: ProjectBriefingItem[];
+  decisions: ProjectBriefingItem[];
+  goals: ProjectBriefingItem[];
+};
+
 /// Goals + promotable decisions for the active chat's project (resolved from threadId).
 async function electronProjectGoals(threadId: string): Promise<ProjectGoalsData | null> {
   try {
@@ -3345,6 +3363,20 @@ async function electronProjectGoals(threadId: string): Promise<ProjectGoalsData 
     );
     if (!response.ok) return null;
     return (await response.json()) as ProjectGoalsData;
+  } catch {
+    return null;
+  }
+}
+
+/// ADR 0022 (Piano UI A5): project briefing for the active chat's project.
+async function electronProjectBriefing(threadId: string): Promise<ProjectBriefingData | null> {
+  try {
+    const response = await fetch(
+      `${DESKTOP_GATEWAY_URL}/api/memory/project-briefing?thread=${encodeURIComponent(threadId)}`,
+      { headers: gatewayHeaders() },
+    );
+    if (!response.ok) return null;
+    return (await response.json()) as ProjectBriefingData;
   } catch {
     return null;
   }

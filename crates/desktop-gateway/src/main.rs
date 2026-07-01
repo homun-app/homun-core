@@ -928,6 +928,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             get(project_graph_subdirs),
         )
         .route("/api/memory/goals", get(memory_goals_list))
+        .route("/api/memory/project-briefing", get(memory_project_briefing))
         .route("/api/memory/goals/suggest", post(memory_goals_suggest))
         .route("/api/memory/goals/promote", post(memory_goals_promote))
         .route("/api/memory/goals/add", post(memory_goals_add))
@@ -41677,6 +41678,86 @@ async fn memory_goals_list(
         "is_project": is_project,
         "goals": pick("goal"),
         "decisions": pick("decision"),
+    })))
+}
+
+/// ADR 0022 (Piano UI A5): project context panel — ciò che l'agente SA stabilmente
+/// del progetto (objective/brief/open-loops/decisions), per la UI. Risolve lo
+/// scope dal threadId (None per Personal/Threads — invariant P1). Incl. provenance
+/// `thread_id`/`origin_thread_title` per i record che lo registrano (cross-chat).
+async fn memory_project_briefing(
+    State(state): State<AppState>,
+    Query(q): Query<GoalsListQuery>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let user = gateway_memory_user_id();
+    let (ws, is_project) = if let Some(tid) = q.thread.as_deref().filter(|t| !t.trim().is_empty()) {
+        let resolved = lock_store(&state)
+            .ok()
+            .and_then(|s| s.workspace_for_thread(tid).ok())
+            .filter(|w| !w.trim().is_empty())
+            .map(MemoryWorkspaceId::new)
+            .unwrap_or_else(gateway_memory_workspace_id);
+        let is_proj =
+            resolved.as_str() != PERSONAL_WORKSPACE && resolved.as_str() != THREADS_WORKSPACE;
+        (resolved, is_proj)
+    } else if let Some(w) = q.workspace.filter(|w| !w.trim().is_empty()) {
+        let resolved = MemoryWorkspaceId::new(w);
+        let is_proj =
+            resolved.as_str() != PERSONAL_WORKSPACE && resolved.as_str() != THREADS_WORKSPACE;
+        (resolved, is_proj)
+    } else {
+        let resolved = gateway_memory_workspace_id();
+        let is_proj =
+            resolved.as_str() != PERSONAL_WORKSPACE && resolved.as_str() != THREADS_WORKSPACE;
+        (resolved, is_proj)
+    };
+    if !is_project {
+        // Personal/Threads: shape snella (invariant P1 — no project briefing).
+        return Ok(Json(serde_json::json!({
+            "workspace": ws.as_str(),
+            "is_project": false,
+            "objective": null,
+            "brief": null,
+            "open_loops": [],
+            "decisions": [],
+        })));
+    }
+    let facade = lock_memory_facade(&state)?;
+    let items = facade.list_memories_for_ui(&user, &ws).unwrap_or_default();
+    // Objective (goals) + decisions + open-loops, con provenance thread_id.
+    let pick_with_provenance = |t: &str| -> Vec<serde_json::Value> {
+        items
+            .iter()
+            .filter(|m| {
+                m.memory_type == t
+                    && matches!(m.status, MemoryStatus::Confirmed | MemoryStatus::Candidate)
+            })
+            .map(|m| {
+                let origin_thread = m.metadata.get("thread_id").and_then(|v| v.as_str());
+                serde_json::json!({
+                    "reference": m.reference.to_string(),
+                    "text": m.text,
+                    "thread_id": origin_thread,
+                })
+            })
+            .collect()
+    };
+    // Brief: la wiki page `brief.md`.
+    let brief = facade
+        .list_wiki_pages_for_ui(&user, &ws)
+        .ok()
+        .and_then(|pages| pages.into_iter().find(|p| p.path == "brief.md"))
+        .map(|p| serde_json::json!({ "body": p.body }));
+    // Objective block testuale (formato come nel system prompt).
+    let objective_text = project_objective_block(&state);
+    Ok(Json(serde_json::json!({
+        "workspace": ws.as_str(),
+        "is_project": true,
+        "objective": objective_text,
+        "brief": brief,
+        "open_loops": pick_with_provenance("open_loop"),
+        "decisions": pick_with_provenance("decision"),
+        "goals": pick_with_provenance("goal"),
     })))
 }
 

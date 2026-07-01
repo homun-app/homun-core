@@ -112,6 +112,7 @@ import { MarkdownEditor } from "./MarkdownEditor";
 import { RichMessage } from "./RichMessage";
 import { CodeView, DiffView, diffStats } from "./CodeView";
 import { ChatComputerPanel } from "./ChatComputerPanel";
+import { ProjectContextPanel } from "./ProjectContextPanel";
 import type {
   ChatMessage,
   ChatMessageMetrics,
@@ -1878,6 +1879,7 @@ export function ChatView({
       </header>
 
       <div className="chat-status-stack" aria-label="Live workspace status">
+        {thread.workspaceId && <ProjectContextPanel threadId={thread.threadId} />}
         <WorkspaceIsland
           threadId={thread.threadId}
           activitySteps={conversationActivity}

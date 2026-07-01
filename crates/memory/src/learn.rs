@@ -525,6 +525,14 @@ pub fn persist_learn_extraction(
     }
     for memory in &mut extraction.memories {
         memory.privacy_domain = PrivacyDomain::new("personal");
+        // ADR 0022 (Piano UI A5): provenance cross-chat — stampa il thread_id
+        // d'origine sul record durevole, così la UI può mostrare "appreso in
+        // chat 'X'". Solo se il thread è noto (chiamante gateway lo passa).
+        if let Some(tid) = thread_id {
+            if memory.metadata.get("thread_id").is_none() {
+                memory.metadata["thread_id"] = serde_json::Value::String(tid.to_string());
+            }
+        }
     }
     let has_project = active.as_str() != PERSONAL_WORKSPACE;
     let mut personal_mems: Vec<ExtractedMemory> = Vec::new();

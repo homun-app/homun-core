@@ -2085,6 +2085,137 @@ body.resizing-drawer {
   backdrop-filter: blur(14px);
 }
 
+/* Project context panel (ADR 0022 / Piano UI A5) — what the agent STABLY knows
+   about the active project. Mirrors the workspace-island aesthetic: compact,
+   muted, rounded, with a subtle border/background. Collapses to a one-line pill. */
+.project-context-panel {
+  position: relative;
+  pointer-events: none;
+}
+
+.project-context-panel .pcp-pill,
+.project-context-panel .pcp-body {
+  pointer-events: auto;
+}
+
+.project-context-panel .pcp-pill {
+  min-width: 0;
+  max-width: 100%;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  height: 30px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  color: var(--muted);
+  box-shadow: var(--shadow-soft);
+  backdrop-filter: blur(12px);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.project-context-panel .pcp-pill:hover,
+.project-context-panel .pcp-pill:focus-visible {
+  background: var(--surface);
+  border-color: var(--line-strong);
+  color: var(--text);
+}
+
+.project-context-panel .pcp-pill svg {
+  flex: none;
+}
+
+.project-context-panel .pcp-pill-icon {
+  font-size: 13px;
+  line-height: 1;
+}
+
+.project-context-panel .pcp-pill-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-context-panel.expanded .pcp-body {
+  width: 320px;
+  max-width: 100%;
+  max-height: min(460px, calc(100vh - 128px));
+  overflow: auto;
+  margin-top: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--surface) 96%, transparent);
+  box-shadow: var(--shadow-menu);
+  backdrop-filter: blur(14px);
+}
+
+.project-context-panel .pcp-section + .pcp-section {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.project-context-panel .pcp-section-title {
+  margin: 0 0 4px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.project-context-panel .pcp-objective,
+.project-context-panel .pcp-brief {
+  margin: 0;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.project-context-panel .pcp-brief {
+  color: var(--muted);
+}
+
+.project-context-panel .pcp-list {
+  margin: 0;
+  padding-left: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.project-context-panel .pcp-list li {
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.project-context-panel .pcp-item {
+  display: inline;
+}
+
+.project-context-panel .pcp-item-text {
+  /* flows inline with the provenance tag */
+}
+
+.project-context-panel .pcp-provenance {
+  display: inline-block;
+  margin-left: 5px;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  background: transparent;
+  font-size: 10px;
+  font-weight: 600;
+  vertical-align: 1px;
+  white-space: nowrap;
+}
+
 .wi-head,
 .wi-row,
 .wi-actions {
