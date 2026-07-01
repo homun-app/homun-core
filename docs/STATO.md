@@ -65,10 +65,14 @@
   capability await off-lock → sync re-lock) così il MutexGuard non attraversa l'await. **Testabile in
   isolation**: recall/learn testabili con mock embedding/LLM deterministici (32 test crate, incluso
   recall che trova una decisione via FTS su facade in-memory, no HTTP). Parità preservata (brief/cache
-  gateway test verdi). **Smoke runtime ON** pulito. **Resta (off-path, follow-up):** consolidate
-  (`consolidate_scope`, LLM curatore + wiki rebuild) e backfill (`backfill_embeddings`) — sono su tick
-  periodici, non sul path del trait; main.rs dimagrisce ulteriormente quando migrano. + Tappa 3
-  (recall on-demand via tool) + UI A2/A3/A5/A4.
+  gateway test verdi). **Smoke runtime ON** pulito. **Tappa 4 COMPLETATA (final):** consolidate
+  (`consolidate_scope`, LLM curatore + wiki rebuild, 3 fasi Send-safe) e backfill (`backfill_embeddings`,
+  3 fasi) migrati nel crate (`consolidate.rs` + `embedding.rs`). Wiki rebuilder
+  (`rebuild_decisions/status/project_brief`) + `deduplicate_open_loops` pure-facade nel crate.
+  **Tutta l'orchestrazione memoria è ora nel crate** (recall+learn+consolidate+backfill):
+  `main.rs` conserva solo chiamate/wrapper; ~600 righe di corpi spostate. 34 test crate + parità
+  gateway verdi. Smoke tutti-flag-ON pulito. **Resta:** pulizia residua (fn gateway morte nei test,
+  follow-up meccanico) + Tappa 3 (recall on-demand via tool) + UI A2/A3/A5/A4.
 - **Linea pratica corrente (sessione 5g):** batch di fix chat-UX/funzionali nell'app reale (dettagli nel
   rolling in fondo) — risolti "bloccato" (self-heal CDP motore #1), "continua"/autonomia, reasoning
   collassato, isola live+persistente, F1/F2/planner; **form-fill `kind=fill`** (contratto schema-piatto↔
