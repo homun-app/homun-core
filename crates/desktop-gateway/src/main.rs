@@ -2340,7 +2340,24 @@ const CHAT_MEMORY_BUDGET_CHARS: usize = 4000;
 /// (explicit user saves) — Confidential/Secret (e.g. a codice fiscale) are NEVER
 /// auto-injected here; they surface only via on-demand recall (M3). Returns
 /// `(personal, project)` summaries. Best-effort: any failure yields empties.
-fn gather_profile_memory(state: &AppState) -> (Vec<String>, Vec<String>) {
+fn gather_profile_memory_for_prompt(
+    state: &AppState,
+    user_message: &str,
+) -> (Vec<String>, Vec<String>) {
+    gather_profile_memory_with_options(
+        state,
+        profile_memory_personal_preferences_only_for_prompt(user_message),
+    )
+}
+
+fn profile_memory_personal_preferences_only_for_prompt(user_message: &str) -> bool {
+    !should_inject_relevant_memory_for_prompt(user_message)
+}
+
+fn gather_profile_memory_with_options(
+    state: &AppState,
+    personal_preferences_only_override: bool,
+) -> (Vec<String>, Vec<String>) {
     let Ok(facade) = lock_memory_facade(state) else {
         return (Vec::new(), Vec::new());
     };
@@ -2381,7 +2398,10 @@ fn gather_profile_memory(state: &AppState) -> (Vec<String>, Vec<String>) {
     // facts are NOT dumped here, they reach the project on-demand via query-gated RAG
     // (relevant_memory_for_prompt) or explicit recall. Outside a project, the full
     // personal profile is the point, so inject it all.
-    let personal = read(MemoryWorkspaceId::new(PERSONAL_WORKSPACE), in_project);
+    let personal = read(
+        MemoryWorkspaceId::new(PERSONAL_WORKSPACE),
+        in_project || personal_preferences_only_override,
+    );
     let project = if in_project {
         read(active, false)
     } else {
@@ -19434,7 +19454,8 @@ save/export a file to a folder, call save_artifact(file, destination)."
         // Always-on memory profile (M1): inject what we durably know about the user
         // (personal scope) and the active project, so the chat is continuous instead
         // of starting cold every turn. Sensitive items are excluded here by design.
-        let (memory_personal, memory_project) = gather_profile_memory(state);
+        let (memory_personal, memory_project) =
+            gather_profile_memory_for_prompt(state, &request.prompt);
         let memory_open_loops = if should_inject_open_loops_for_prompt(&request.prompt) {
             gather_open_loops(state, 6)
         } else {
@@ -30655,25 +30676,24 @@ fn expand_legacy_delta_to_chat_events_with_mode(
         events.push(GenerateStreamEvent::PlanUpdate {
             markdown: body.to_string(),
         });
-    } else if let Some(body) = legacy_marker_body(text, "‹‹REASONING››", "‹‹/REASONING››") {
+    } else if let Some(body) = legacy_marker_body(text, "‹‹REASONING››", "‹‹/REASONING››")
+    {
         events.push(GenerateStreamEvent::Reasoning {
             text: body.to_string(),
         });
-    } else if let Some(payload) = legacy_marker_json(text, "‹‹CHOICES››", "‹‹/CHOICES››") {
+    } else if let Some(payload) = legacy_marker_json(text, "‹‹CHOICES››", "‹‹/CHOICES››")
+    {
         events.push(GenerateStreamEvent::ChoicePrompt { payload });
     } else if let Some(payload) =
         legacy_marker_json(text, "‹‹VAULT_PROPOSE››", "‹‹/VAULT_PROPOSE››")
     {
         events.push(GenerateStreamEvent::VaultPropose { payload });
-    } else if let Some(payload) =
-        legacy_marker_json(text, "‹‹VAULT_REVEAL››", "‹‹/VAULT_REVEAL››")
+    } else if let Some(payload) = legacy_marker_json(text, "‹‹VAULT_REVEAL››", "‹‹/VAULT_REVEAL››")
     {
         events.push(GenerateStreamEvent::VaultReveal { payload });
-    } else if let Some(payload) = legacy_marker_json(
-        text,
-        "‹‹PAYMENT_APPROVAL››",
-        "‹‹/PAYMENT_APPROVAL››",
-    ) {
+    } else if let Some(payload) =
+        legacy_marker_json(text, "‹‹PAYMENT_APPROVAL››", "‹‹/PAYMENT_APPROVAL››")
+    {
         events.push(GenerateStreamEvent::PaymentApproval { payload });
     }
     if !events.is_empty() && !include_legacy_delta {
@@ -30688,7 +30708,12 @@ fn expand_legacy_delta_to_chat_events_with_mode(
 fn stream_legacy_marker_deltas_enabled() -> bool {
     std::env::var("HOMUN_STREAM_LEGACY_MARKER_DELTAS")
         .ok()
-        .map(|value| matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "on"))
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "on"
+            )
+        })
         .unwrap_or(false)
 }
 
@@ -52982,8 +53007,10 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
 
     #[test]
     fn legacy_marker_deltas_expand_to_structured_stream_events() {
-        let activity =
-            super::expand_legacy_delta_to_chat_events_with_mode("‹‹ACT››🧭 Planning‹‹/ACT››", false);
+        let activity = super::expand_legacy_delta_to_chat_events_with_mode(
+            "‹‹ACT››🧭 Planning‹‹/ACT››",
+            false,
+        );
         assert_eq!(
             activity,
             vec![super::GenerateStreamEvent::Activity {
@@ -52991,8 +53018,10 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             }]
         );
 
-        let plan =
-            super::expand_legacy_delta_to_chat_events_with_mode("‹‹PLAN››- [x] Done‹‹/PLAN››", false);
+        let plan = super::expand_legacy_delta_to_chat_events_with_mode(
+            "‹‹PLAN››- [x] Done‹‹/PLAN››",
+            false,
+        );
         assert_eq!(
             plan,
             vec![super::GenerateStreamEvent::PlanUpdate {
@@ -53048,10 +53077,8 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
 
     #[test]
     fn legacy_marker_delta_expansion_can_keep_delta_for_compat_clients() {
-        let activity = super::expand_legacy_delta_to_chat_events_with_mode(
-            "‹‹ACT››🧭 Planning‹‹/ACT››",
-            true,
-        );
+        let activity =
+            super::expand_legacy_delta_to_chat_events_with_mode("‹‹ACT››🧭 Planning‹‹/ACT››", true);
         assert_eq!(activity.len(), 2);
         assert!(matches!(
             activity[0],
@@ -54712,10 +54739,16 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         assert!(!super::should_inject_relevant_memory_for_prompt(
             "Fammi scegliere tra Confermo e Cambio idea usando una card di scelta, non una lista testuale."
         ));
+        assert!(super::profile_memory_personal_preferences_only_for_prompt(
+            "Fammi scegliere tra Confermo e Cambio idea usando una card di scelta, non una lista testuale."
+        ));
         assert!(!super::should_inject_relevant_memory_for_prompt(
             "Let me choose between Confirm and Change idea with a choice card."
         ));
         assert!(super::should_inject_relevant_memory_for_prompt(
+            "Cerca i treni da Milano a Roma e usa una card di scelta per farmi scegliere"
+        ));
+        assert!(!super::profile_memory_personal_preferences_only_for_prompt(
             "Cerca i treni da Milano a Roma e usa una card di scelta per farmi scegliere"
         ));
     }

@@ -787,6 +787,12 @@ GIÀ FATTO sessione 5g (NON ripartire; tutto su `main`):
   `REASONING`; ora il guard F3 forza la sintesi quando il corpo visibile combinato e' vuoto anche se
   `accumulated` contiene marker. `example.com` nel test concorrente ha completato e scritto risposta
   nel DB; se la UI resta bloccata, il prossimo taglio e' stato stream/render o cancellazione backend hard.
+- **Live follow-up 2 (concorrenza choice/plan/example)**: `example.com` continua a completare nel DB.
+  La choice era ancora contaminata perche' il profilo personale always-on nelle chat personali iniettava
+  fatti episodici/open-loop anche senza RAG; ora per richieste standalone/meta di choice-card il profilo
+  personale e' limitato alle preferenze. Il piano mostrava anche una card falsa: `chat_store` derivava
+  `choice_prompt` da un marker `CHOICES` citato dentro `REASONING`; ora i marker annidati nel reasoning
+  non producono card/eventi persistiti.
 - **Browser live panel / espansione**: il dock `ChatComputerPanel` in modalità full ora esce dallo
   status stack e si ancora `fixed` dentro l'area chat, a destra della sidebar; il compact expand usa
   `Maximize2` e il pannello full è più largo (`min(1040px, ...)`) senza scivolare sotto il drawer.

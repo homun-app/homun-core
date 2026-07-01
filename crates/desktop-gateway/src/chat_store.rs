@@ -2159,8 +2159,10 @@ impl ChatStore {
         // be mirrored. This is intentionally thread-scoped: a WhatsApp/Telegram
         // conversation in the app must continue on the originating channel.
         if !self.column_exists("chat_threads", "channel_recipient")? {
-            self.conn
-                .execute("alter table chat_threads add column channel_recipient text", [])?;
+            self.conn.execute(
+                "alter table chat_threads add column channel_recipient text",
+                [],
+            )?;
         }
         // Contacts P2: per-contact persona/tone + response mode. response_mode '' =
         // inherit the channel/global default (backward compatible: existing contacts
@@ -3018,14 +3020,47 @@ fn event_parts_to_json(message: &ChatMessage) -> rusqlite::Result<Option<String>
             .map_err(json_error);
     }
     let text = &message.text;
+    let text_without_reasoning = strip_marker_blocks(text, "REASONING");
     let mut parts = Vec::new();
-    push_text_marker_part(text, &mut parts, "ACT", "activity", "text");
     push_text_marker_part(text, &mut parts, "REASONING", "reasoning", "text");
-    push_text_marker_part(text, &mut parts, "PLAN", "plan_update", "markdown");
-    push_json_marker_part(text, &mut parts, "CHOICES", "choice_prompt");
-    push_json_marker_part(text, &mut parts, "VAULT_PROPOSE", "vault_propose");
-    push_json_marker_part(text, &mut parts, "VAULT_REVEAL", "vault_reveal");
-    push_json_marker_part(text, &mut parts, "PAYMENT_APPROVAL", "payment_approval");
+    push_text_marker_part(
+        &text_without_reasoning,
+        &mut parts,
+        "ACT",
+        "activity",
+        "text",
+    );
+    push_text_marker_part(
+        &text_without_reasoning,
+        &mut parts,
+        "PLAN",
+        "plan_update",
+        "markdown",
+    );
+    push_json_marker_part(
+        &text_without_reasoning,
+        &mut parts,
+        "CHOICES",
+        "choice_prompt",
+    );
+    push_json_marker_part(
+        &text_without_reasoning,
+        &mut parts,
+        "VAULT_PROPOSE",
+        "vault_propose",
+    );
+    push_json_marker_part(
+        &text_without_reasoning,
+        &mut parts,
+        "VAULT_REVEAL",
+        "vault_reveal",
+    );
+    push_json_marker_part(
+        &text_without_reasoning,
+        &mut parts,
+        "PAYMENT_APPROVAL",
+        "payment_approval",
+    );
     if parts.is_empty() {
         Ok(None)
     } else {
@@ -3079,6 +3114,20 @@ fn marker_bodies(text: &str, marker: &str) -> Vec<String> {
         cursor = body_end + close.len();
     }
     bodies
+}
+
+fn strip_marker_blocks(text: &str, marker: &str) -> String {
+    let open = format!("‹‹{marker}››");
+    let close = format!("‹‹/{marker}››");
+    let mut out = text.to_string();
+    while let Some(start) = out.find(&open) {
+        let end = match out[start..].find(&close) {
+            Some(rel) => start + rel + close.len(),
+            None => out.len(),
+        };
+        out.replace_range(start..end, "");
+    }
+    out
 }
 
 fn attachments_from_row(
@@ -3363,6 +3412,48 @@ mod tests {
     }
 
     #[test]
+    fn committed_chat_message_ignores_card_markers_inside_reasoning() {
+        let store = ChatStore::in_memory().unwrap();
+        let thread = store.create_thread("default").unwrap();
+        let assistant = ChatMessage {
+            id: "assistant_reasoning_quotes_choice".to_string(),
+            role: "assistant".to_string(),
+            text: "‹‹REASONING››I quoted a marker: ```\n‹‹CHOICES››{\"question\":\"Hidden?\",\"options\":[\"Yes\",\"No\"]}‹‹/CHOICES››\n```‹‹/REASONING››\nVisible answer.".to_string(),
+            timestamp: current_timestamp_seconds(),
+            metadata: None,
+            metrics: None,
+            feedback: None,
+            saved_memory_ref: None,
+            linked_task_id: None,
+            linked_automation_ref: None,
+            attachments: Vec::new(),
+            event_parts: Vec::new(),
+        };
+
+        store.insert_message(&thread.thread_id, &assistant).unwrap();
+        let snapshot = store.messages(&thread.thread_id).unwrap();
+        let reloaded = snapshot
+            .messages
+            .iter()
+            .find(|message| message.id == assistant.id)
+            .expect("assistant message reloaded");
+        assert!(
+            reloaded
+                .event_parts
+                .iter()
+                .all(|part| part["type"] != "choice_prompt"),
+            "quoted CHOICES inside reasoning must not render as a live choice card: {:?}",
+            reloaded.event_parts
+        );
+        assert!(
+            reloaded
+                .event_parts
+                .iter()
+                .any(|part| part["type"] == "reasoning")
+        );
+    }
+
+    #[test]
     fn committed_chat_message_preserves_explicit_event_parts_without_markers() {
         let store = ChatStore::in_memory().unwrap();
         let thread = store.create_thread("default").unwrap();
@@ -3520,7 +3611,8 @@ mod tests {
             .set_channel_thread_recipient(&scheduled.thread_id, "task")
             .unwrap();
         assert_eq!(
-            store.thread(&scheduled.thread_id)
+            store
+                .thread(&scheduled.thread_id)
                 .unwrap()
                 .unwrap()
                 .channel_recipient
@@ -3531,7 +3623,10 @@ mod tests {
 
     #[test]
     fn channel_thread_recipient_does_not_downgrade_whatsapp_pn_to_lid() {
-        assert!(super::should_replace_channel_recipient(None, "393@s.whatsapp.net"));
+        assert!(super::should_replace_channel_recipient(
+            None,
+            "393@s.whatsapp.net"
+        ));
         assert!(super::should_replace_channel_recipient(
             Some("393@lid"),
             "393@s.whatsapp.net"
