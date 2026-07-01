@@ -319,6 +319,30 @@ pub enum GenerateStreamEvent {
     Delta {
         text: String,
     },
+    Reasoning {
+        text: String,
+    },
+    Activity {
+        text: String,
+    },
+    PlanUpdate {
+        markdown: String,
+    },
+    ChoicePrompt {
+        payload: serde_json::Value,
+    },
+    VaultPropose {
+        payload: serde_json::Value,
+    },
+    VaultReveal {
+        payload: serde_json::Value,
+    },
+    PaymentApproval {
+        payload: serde_json::Value,
+    },
+    ToolResult {
+        payload: serde_json::Value,
+    },
     Done {
         text: String,
         metrics: TokenMetrics,

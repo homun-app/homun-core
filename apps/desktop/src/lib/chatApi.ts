@@ -4,6 +4,7 @@ import type {
   CoreChatMessage,
   CoreChatMessagesSnapshot,
   CoreChatStreamDelta,
+  CoreChatStreamEvent,
   CoreChatThread,
   CoreChatThreadSnapshot,
   CorePromptSubmissionResult,
@@ -21,6 +22,21 @@ type StreamEvent =
       type: "delta";
       request_id: string;
       text: string;
+    }
+  | {
+      type:
+        | "reasoning"
+        | "activity"
+        | "plan_update"
+        | "choice_prompt"
+        | "vault_propose"
+        | "vault_reveal"
+        | "payment_approval"
+        | "tool_result";
+      request_id: string;
+      text?: string;
+      markdown?: string;
+      payload?: unknown;
     }
   | {
       type: "done";
@@ -50,6 +66,7 @@ export interface CoreBranchPoint {
   options: CoreBranchOption[];
 }
 
+const streamEventListeners = new Set<(payload: CoreChatStreamEvent) => void>();
 const streamListeners = new Set<(payload: CoreChatStreamDelta) => void>();
 let activeThreadId = "thread_active_prompt";
 let localThreads: CoreChatThread[] = [
@@ -468,6 +485,13 @@ export const chatApi = {
     });
   },
 
+  listenChatStreamEvent(handler: (payload: CoreChatStreamEvent) => void) {
+    streamEventListeners.add(handler);
+    return Promise.resolve(() => {
+      streamEventListeners.delete(handler);
+    });
+  },
+
   async submitChatPromptStream(
     requestId: string,
     threadId: string,
@@ -518,6 +542,7 @@ export const chatApi = {
   },
 
   notifyChatStreamDelta,
+  notifyChatStreamEvent,
 };
 
 function createLocalChatThread() {
@@ -636,11 +661,20 @@ async function consumeChatStreamResponse(
         const event = parseStreamEvent(line);
         if (!event || event.request_id !== requestId) continue;
         if (event.type === "delta") {
-          notifyChatStreamDelta({ request_id: requestId, delta: event.text });
+          notifyChatStreamDelta({ type: "delta", request_id: requestId, delta: event.text });
         } else if (event.type === "done") {
+          notifyChatStreamEvent({ type: "done", request_id: requestId });
           result = event.result;
         } else if (event.type === "error") {
+          notifyChatStreamEvent({
+            type: "error",
+            request_id: requestId,
+            message: event.message,
+          });
           throw new Error(event.message ?? "Local chat gateway error");
+        } else {
+          const payload = streamEventToCoreEvent(event, requestId);
+          if (payload) notifyChatStreamEvent(payload);
         }
       }
     }
@@ -707,13 +741,22 @@ async function consumeChatWebSocketStream(
           lastDebugChunks = chunks;
           debug("client_received_delta");
         }
-        notifyChatStreamDelta({ request_id: requestId, delta: event.text });
+        notifyChatStreamDelta({ type: "delta", request_id: requestId, delta: event.text });
       } else if (event.type === "done") {
         debug("client_received_done");
+        notifyChatStreamEvent({ type: "done", request_id: requestId });
         settle(resolve, event.result);
       } else if (event.type === "error") {
         debug("client_received_error", event.message);
+        notifyChatStreamEvent({
+          type: "error",
+          request_id: requestId,
+          message: event.message,
+        });
         fail(new Error(event.message ?? "Local chat gateway error"));
+      } else {
+        const payload = streamEventToCoreEvent(event, requestId);
+        if (payload) notifyChatStreamEvent(payload);
       }
     });
     socket.addEventListener("error", () => {
@@ -738,8 +781,42 @@ async function chatStreamWebSocketUrl(): Promise<string> {
 }
 
 function notifyChatStreamDelta(payload: CoreChatStreamDelta) {
+  notifyChatStreamEvent(payload);
+}
+
+function notifyChatStreamEvent(payload: CoreChatStreamEvent) {
+  for (const listener of streamEventListeners) {
+    listener(payload);
+  }
+  if (payload.type !== "delta") return;
   for (const listener of streamListeners) {
     listener(payload);
+  }
+}
+
+function streamEventToCoreEvent(
+  event: StreamEvent,
+  requestId: string,
+): CoreChatStreamEvent | null {
+  switch (event.type) {
+    case "reasoning":
+      return { type: "reasoning", request_id: requestId, text: String(event.text ?? "") };
+    case "activity":
+      return { type: "activity", request_id: requestId, text: String(event.text ?? "") };
+    case "plan_update":
+      return {
+        type: "plan_update",
+        request_id: requestId,
+        markdown: String(event.markdown ?? ""),
+      };
+    case "choice_prompt":
+    case "vault_propose":
+    case "vault_reveal":
+    case "payment_approval":
+    case "tool_result":
+      return { type: event.type, request_id: requestId, payload: event.payload };
+    default:
+      return null;
   }
 }
 

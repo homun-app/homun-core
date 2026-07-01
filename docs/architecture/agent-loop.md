@@ -67,6 +67,13 @@ Punti caldi (con `file:line` in `main.rs`):
 - **Guardie harness** (deterministiche): budget per-step F1 (`rounds_since_progress`,
   `:~19042`), wander-cap (`:~19046`), no-progress identico (`:~19574`), `is_final_round`
   (`:~19186`) che **rimuove i tool** dal payload sull'ultimo round.
+- **Stream live tipizzato**: `emit_stream_event` espande i vecchi delta marker in eventi NDJSON
+  canonici prima di inviare il delta legacy: `activity`, `plan_update`, `reasoning`,
+  `choice_prompt`, `vault_propose`, `vault_reveal`, `payment_approval`. I marker restano nel
+  testo solo come compatibilità/persistenza storica; il frontend espone `CoreChatStreamEvent` e
+  `listenChatStreamDelta` è una vista filtrata dei soli `delta`. I nuovi messaggi salvano anche
+  `chat_messages.event_parts_json`, una proiezione derivata dei marker, così il rendering storico
+  non dipende esclusivamente da regex sul testo.
 - **Fork act-vs-answer** (`:~19552`): il **modello** decide se chiamare tool o rispondere.
   Punto di **massima varianza**.
 - **F2 verify** (`verify_step_complete`, `:~13783`): un `done` rivendicato è tenuto
@@ -233,6 +240,11 @@ approval).
 ## File chiave
 
 - Loop: `crates/desktop-gateway/src/main.rs` → `stream_chat_via_openai`.
+- Stream live: `local_first_subagents::GenerateStreamEvent`, `emit_stream_event`,
+  `expand_legacy_delta_to_chat_events`, `apps/desktop/src/lib/coreBridge.ts` /
+  `chatApi.ts` (`CoreChatStreamEvent`).
+- Persistenza chat: `chat_messages.event_parts_json` in `crates/desktop-gateway/src/chat_store.rs`
+  conserva una proiezione strutturata derivata dai marker per i nuovi messaggi.
 - Piano: `runtime_execution_plan`, `merge_execution_plan`/`merge_plan`, `verify_step_complete`,
   `load_runtime_plan_from_state`, `parse_plan_marker`, `collapse_plan_markers`.
 - Motore #2: `crates/orchestrator` (`brain.rs` incl. `drive`, `driver.rs` il driver in-turn +

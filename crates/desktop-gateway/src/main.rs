@@ -30546,6 +30546,56 @@ fn stream_event_is_terminal(line: &str) -> bool {
     line.contains("\"type\":\"done\"") || line.contains("\"type\":\"error\"")
 }
 
+fn legacy_marker_body<'a>(text: &'a str, open: &str, close: &str) -> Option<&'a str> {
+    let trimmed = text.trim();
+    if trimmed.starts_with(open) && trimmed.ends_with(close) {
+        Some(&trimmed[open.len()..trimmed.len() - close.len()])
+    } else {
+        None
+    }
+}
+
+fn legacy_marker_json(text: &str, open: &str, close: &str) -> Option<serde_json::Value> {
+    legacy_marker_body(text, open, close).and_then(|body| serde_json::from_str(body).ok())
+}
+
+fn expand_legacy_delta_to_chat_events(text: &str) -> Vec<GenerateStreamEvent> {
+    let mut events = Vec::new();
+    if let Some(body) = legacy_marker_body(text, "‹‹ACT››", "‹‹/ACT››") {
+        events.push(GenerateStreamEvent::Activity {
+            text: body.to_string(),
+        });
+    } else if let Some(body) = legacy_marker_body(text, "‹‹PLAN››", "‹‹/PLAN››") {
+        events.push(GenerateStreamEvent::PlanUpdate {
+            markdown: body.to_string(),
+        });
+    } else if let Some(body) = legacy_marker_body(text, "‹‹REASONING››", "‹‹/REASONING››") {
+        events.push(GenerateStreamEvent::Reasoning {
+            text: body.to_string(),
+        });
+    } else if let Some(payload) = legacy_marker_json(text, "‹‹CHOICES››", "‹‹/CHOICES››") {
+        events.push(GenerateStreamEvent::ChoicePrompt { payload });
+    } else if let Some(payload) =
+        legacy_marker_json(text, "‹‹VAULT_PROPOSE››", "‹‹/VAULT_PROPOSE››")
+    {
+        events.push(GenerateStreamEvent::VaultPropose { payload });
+    } else if let Some(payload) =
+        legacy_marker_json(text, "‹‹VAULT_REVEAL››", "‹‹/VAULT_REVEAL››")
+    {
+        events.push(GenerateStreamEvent::VaultReveal { payload });
+    } else if let Some(payload) = legacy_marker_json(
+        text,
+        "‹‹PAYMENT_APPROVAL››",
+        "‹‹/PAYMENT_APPROVAL››",
+    ) {
+        events.push(GenerateStreamEvent::PaymentApproval { payload });
+    }
+    events.push(GenerateStreamEvent::Delta {
+        text: text.to_string(),
+    });
+    events
+}
+
 fn stream_entry_has_terminal_event(entry: &StreamEntry) -> bool {
     entry
         .lines
@@ -30718,7 +30768,7 @@ async fn app_events() -> Response {
         .expect("valid streaming response")
 }
 
-async fn emit_stream_event(sink: &StreamSink, event: GenerateStreamEvent) -> Result<(), ()> {
+async fn emit_single_stream_event(sink: &StreamSink, event: GenerateStreamEvent) -> Result<(), ()> {
     let line = serde_json::to_string(&event).map_err(|_| ())?;
     let terminal = stream_event_is_terminal(&line);
     sink.entry
@@ -30739,6 +30789,18 @@ async fn emit_stream_event(sink: &StreamSink, event: GenerateStreamEvent) -> Res
     // generation keeps running and recording into the registry).
     let _ = sink.mpsc.send(Ok(Bytes::from(format!("{line}\n")))).await;
     Ok(())
+}
+
+async fn emit_stream_event(sink: &StreamSink, event: GenerateStreamEvent) -> Result<(), ()> {
+    match event {
+        GenerateStreamEvent::Delta { text } => {
+            for expanded in expand_legacy_delta_to_chat_events(&text) {
+                emit_single_stream_event(sink, expanded).await?;
+            }
+            Ok(())
+        }
+        other => emit_single_stream_event(sink, other).await,
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -52819,6 +52881,77 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
     }
 
     #[test]
+    fn legacy_marker_deltas_expand_to_structured_stream_events() {
+        let activity = super::expand_legacy_delta_to_chat_events("‹‹ACT››🧭 Planning‹‹/ACT››");
+        assert_eq!(
+            activity,
+            vec![
+                super::GenerateStreamEvent::Activity {
+                    text: "🧭 Planning".to_string()
+                },
+                super::GenerateStreamEvent::Delta {
+                    text: "‹‹ACT››🧭 Planning‹‹/ACT››".to_string()
+                },
+            ]
+        );
+
+        let plan = super::expand_legacy_delta_to_chat_events("‹‹PLAN››- [x] Done‹‹/PLAN››");
+        assert_eq!(
+            plan,
+            vec![
+                super::GenerateStreamEvent::PlanUpdate {
+                    markdown: "- [x] Done".to_string()
+                },
+                super::GenerateStreamEvent::Delta {
+                    text: "‹‹PLAN››- [x] Done‹‹/PLAN››".to_string()
+                },
+            ]
+        );
+
+        let plain = super::expand_legacy_delta_to_chat_events("hello");
+        assert_eq!(
+            plain,
+            vec![super::GenerateStreamEvent::Delta {
+                text: "hello".to_string()
+            }]
+        );
+    }
+
+    #[test]
+    fn legacy_card_marker_deltas_expand_to_structured_stream_events() {
+        let choices = super::expand_legacy_delta_to_chat_events(
+            "‹‹CHOICES››{\"question\":\"Confermi?\",\"options\":[\"Si\",\"No\"]}‹‹/CHOICES››",
+        );
+        assert!(matches!(
+            &choices[0],
+            super::GenerateStreamEvent::ChoicePrompt { payload }
+                if payload["question"] == "Confermi?"
+        ));
+
+        let vault = super::expand_legacy_delta_to_chat_events(
+            "‹‹VAULT_REVEAL››{\"record_id\":\"vault_1\",\"label\":\"Codice Fiscale\"}‹‹/VAULT_REVEAL››",
+        );
+        assert!(matches!(
+            &vault[0],
+            super::GenerateStreamEvent::VaultReveal { payload }
+                if payload["record_id"] == "vault_1"
+        ));
+
+        let payment = super::expand_legacy_delta_to_chat_events(
+            "‹‹PAYMENT_APPROVAL››{\"snapshot\":{\"approval_id\":\"pay_1\"}}‹‹/PAYMENT_APPROVAL››",
+        );
+        assert!(matches!(
+            &payment[0],
+            super::GenerateStreamEvent::PaymentApproval { payload }
+                if payload["snapshot"]["approval_id"] == "pay_1"
+        ));
+        assert!(matches!(
+            payment.last(),
+            Some(super::GenerateStreamEvent::Delta { .. })
+        ));
+    }
+
+    #[test]
     fn idle_stream_entry_counts_as_stale_for_activity() {
         let (tx, _) = tokio::sync::broadcast::channel::<String>(4);
         let now = super::now_epoch_secs();
@@ -52865,6 +52998,45 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         let _ = rx.recv().await;
 
         assert!(entry.finished.load(std::sync::atomic::Ordering::Relaxed));
+    }
+
+    #[tokio::test]
+    async fn emit_stream_event_publishes_structured_event_before_legacy_marker_delta() {
+        let (mpsc, mut rx) =
+            tokio::sync::mpsc::channel::<Result<axum::body::Bytes, std::io::Error>>(4);
+        let (tx, _) = tokio::sync::broadcast::channel::<String>(4);
+        let entry = std::sync::Arc::new(super::StreamEntry {
+            lines: std::sync::Mutex::new(Vec::new()),
+            tx,
+            finished: std::sync::atomic::AtomicBool::new(false),
+            last_event_at: std::sync::atomic::AtomicU64::new(super::now_epoch_secs()),
+            thread_id: Some("thread-a".to_string()),
+        });
+        let sink = super::StreamSink {
+            mpsc,
+            entry: entry.clone(),
+        };
+
+        super::emit_stream_event(
+            &sink,
+            super::GenerateStreamEvent::Delta {
+                text: "‹‹ACT››🧭 Planning‹‹/ACT››".to_string(),
+            },
+        )
+        .await
+        .expect("event emits");
+
+        let first = rx.recv().await.expect("first event").expect("bytes");
+        let second = rx
+            .try_recv()
+            .expect("second structured/legacy event")
+            .expect("bytes");
+        assert!(String::from_utf8_lossy(&first).contains(r#""type":"activity""#));
+        assert!(String::from_utf8_lossy(&second).contains(r#""type":"delta""#));
+        let lines = entry.lines.lock().expect("stream lines");
+        assert_eq!(lines.len(), 2);
+        assert!(lines[0].contains(r#""type":"activity""#));
+        assert!(lines[1].contains(r#""type":"delta""#));
     }
 
     #[test]

@@ -1926,6 +1926,7 @@ impl ChatStore {
                 linked_task_id text,
                 linked_automation_ref text,
                 attachments_json text,
+                event_parts_json text,
                 foreign key(thread_id) references chat_threads(thread_id) on delete cascade
             );
 
@@ -2229,6 +2230,12 @@ impl ChatStore {
         if !self.column_exists("chat_messages", "attachments_json")? {
             self.conn.execute(
                 "alter table chat_messages add column attachments_json text",
+                [],
+            )?;
+        }
+        if !self.column_exists("chat_messages", "event_parts_json")? {
+            self.conn.execute(
+                "alter table chat_messages add column event_parts_json text",
                 [],
             )?;
         }
@@ -2759,8 +2766,8 @@ impl ChatStore {
             "insert or ignore into chat_messages (
                 id, thread_id, role, text, timestamp, metadata, metrics_json, feedback,
                 saved_memory_ref, linked_task_id, linked_automation_ref, attachments_json,
-                parent_id
-            ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                parent_id, event_parts_json
+            ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
             params![
                 message.id,
                 thread_id,
@@ -2775,6 +2782,7 @@ impl ChatStore {
                 message.linked_automation_ref,
                 attachments_to_json(message)?,
                 parent_id,
+                event_parts_to_json(&message.text)?,
             ],
         )?;
         // Advance the active leaf only when a row was actually inserted —
@@ -2799,8 +2807,8 @@ impl ChatStore {
             "update chat_messages
                 set role = ?1, text = ?2, timestamp = ?3, metadata = ?4, metrics_json = ?5,
                     feedback = ?6, saved_memory_ref = ?7, linked_task_id = ?8,
-                    linked_automation_ref = ?9, attachments_json = ?10
-              where id = ?11 and thread_id = ?12",
+                    linked_automation_ref = ?9, attachments_json = ?10, event_parts_json = ?11
+              where id = ?12 and thread_id = ?13",
             params![
                 message.role,
                 message.text,
@@ -2812,6 +2820,7 @@ impl ChatStore {
                 message.linked_task_id,
                 message.linked_automation_ref,
                 attachments_to_json(message)?,
+                event_parts_to_json(&message.text)?,
                 message_id,
                 thread_id,
             ],
@@ -2998,6 +3007,70 @@ fn attachments_to_json(message: &ChatMessage) -> rusqlite::Result<Option<String>
             .map(Some)
             .map_err(json_error)
     }
+}
+
+fn event_parts_to_json(text: &str) -> rusqlite::Result<Option<String>> {
+    let mut parts = Vec::new();
+    push_text_marker_part(text, &mut parts, "ACT", "activity", "text");
+    push_text_marker_part(text, &mut parts, "REASONING", "reasoning", "text");
+    push_text_marker_part(text, &mut parts, "PLAN", "plan_update", "markdown");
+    push_json_marker_part(text, &mut parts, "CHOICES", "choice_prompt");
+    push_json_marker_part(text, &mut parts, "VAULT_PROPOSE", "vault_propose");
+    push_json_marker_part(text, &mut parts, "VAULT_REVEAL", "vault_reveal");
+    push_json_marker_part(text, &mut parts, "PAYMENT_APPROVAL", "payment_approval");
+    if parts.is_empty() {
+        Ok(None)
+    } else {
+        serde_json::to_string(&parts).map(Some).map_err(json_error)
+    }
+}
+
+fn push_text_marker_part(
+    text: &str,
+    parts: &mut Vec<serde_json::Value>,
+    marker: &str,
+    event_type: &str,
+    field: &str,
+) {
+    for body in marker_bodies(text, marker) {
+        parts.push(serde_json::json!({
+            "type": event_type,
+            field: body,
+        }));
+    }
+}
+
+fn push_json_marker_part(
+    text: &str,
+    parts: &mut Vec<serde_json::Value>,
+    marker: &str,
+    event_type: &str,
+) {
+    for body in marker_bodies(text, marker) {
+        if let Ok(payload) = serde_json::from_str::<serde_json::Value>(&body) {
+            parts.push(serde_json::json!({
+                "type": event_type,
+                "payload": payload,
+            }));
+        }
+    }
+}
+
+fn marker_bodies(text: &str, marker: &str) -> Vec<String> {
+    let open = format!("‹‹{marker}››");
+    let close = format!("‹‹/{marker}››");
+    let mut bodies = Vec::new();
+    let mut cursor = 0usize;
+    while let Some(open_rel) = text[cursor..].find(&open) {
+        let body_start = cursor + open_rel + open.len();
+        let Some(close_rel) = text[body_start..].find(&close) else {
+            break;
+        };
+        let body_end = body_start + close_rel;
+        bodies.push(text[body_start..body_end].to_string());
+        cursor = body_end + close.len();
+    }
+    bodies
 }
 
 fn attachments_from_row(
@@ -3221,6 +3294,39 @@ mod tests {
                 .iter()
                 .any(|item| item.title == "joke")
         );
+    }
+
+    #[test]
+    fn committed_chat_message_derives_event_parts_for_legacy_markers() {
+        let store = ChatStore::in_memory().unwrap();
+        let thread = store.create_thread("default").unwrap();
+        let assistant = ChatMessage {
+            id: "assistant_with_plan".to_string(),
+            role: "assistant".to_string(),
+            text: "‹‹PLAN››- [x] Done‹‹/PLAN››".to_string(),
+            timestamp: current_timestamp_seconds(),
+            metadata: None,
+            metrics: None,
+            feedback: None,
+            saved_memory_ref: None,
+            linked_task_id: None,
+            linked_automation_ref: None,
+            attachments: Vec::new(),
+        };
+
+        store.insert_message(&thread.thread_id, &assistant).unwrap();
+        let event_parts_json: Option<String> = store
+            .conn
+            .query_row(
+                "select event_parts_json from chat_messages where id = ?1",
+                params![assistant.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let parts: serde_json::Value =
+            serde_json::from_str(&event_parts_json.expect("event parts stored")).unwrap();
+        assert_eq!(parts[0]["type"], "plan_update");
+        assert_eq!(parts[0]["markdown"], "- [x] Done");
     }
 
     #[test]

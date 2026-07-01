@@ -311,9 +311,23 @@ export interface FsFilePayload {
 }
 
 export interface CoreChatStreamDelta {
+  type: "delta";
   request_id: string;
   delta: string;
 }
+
+export type CoreChatStreamEvent =
+  | CoreChatStreamDelta
+  | { type: "reasoning"; request_id: string; text: string }
+  | { type: "activity"; request_id: string; text: string }
+  | { type: "plan_update"; request_id: string; markdown: string }
+  | { type: "choice_prompt"; request_id: string; payload: unknown }
+  | { type: "vault_propose"; request_id: string; payload: unknown }
+  | { type: "vault_reveal"; request_id: string; payload: unknown }
+  | { type: "payment_approval"; request_id: string; payload: unknown }
+  | { type: "tool_result"; request_id: string; payload: unknown }
+  | { type: "done"; request_id: string }
+  | { type: "error"; request_id: string; message?: string };
 
 export interface CorePromptExecutionPlan {
   title: string;
@@ -2981,6 +2995,8 @@ export const coreBridge = {
     ),
   listenChatStreamDelta: (handler: (payload: CoreChatStreamDelta) => void) =>
     chatApi.listenChatStreamDelta(handler),
+  listenChatStreamEvent: (handler: (payload: CoreChatStreamEvent) => void) =>
+    chatApi.listenChatStreamEvent(handler),
   submitUserPrompt: (sessionId: string, prompt: string) =>
     submitBrowserRuntimeChatPromptStream(
       `electron_prompt_${Date.now()}`,
@@ -3821,8 +3837,13 @@ async function submitBrowserRuntimeChatPromptStream(
             firstTokenSeconds = roundedSeconds((performance.now() - startedAt) / 1000);
           }
           text += String(event.text ?? "");
-          chatApi.notifyChatStreamDelta({ request_id: requestId, delta: String(event.text ?? "") });
+          chatApi.notifyChatStreamDelta({
+            type: "delta",
+            request_id: requestId,
+            delta: String(event.text ?? ""),
+          });
         } else if (event.type === "done") {
+          chatApi.notifyChatStreamEvent({ type: "done", request_id: requestId });
           // Done carries the AUTHORITATIVE final text (gateway-sanitized, markers/cards
           // resolved). Use it to replace the raw live-streamed preview, so token
           // streaming stays a preview and the committed message is the clean version.
@@ -3832,7 +3853,15 @@ async function submitBrowserRuntimeChatPromptStream(
           }
           metrics = event.metrics ?? {};
         } else if (event.type === "error") {
+          chatApi.notifyChatStreamEvent({
+            type: "error",
+            request_id: requestId,
+            message: String(event.message ?? "Local runtime error"),
+          });
           throw new Error(String(event.message ?? "Local runtime error"));
+        } else {
+          const payload = browserStreamEventToCoreEvent(event, requestId);
+          if (payload) chatApi.notifyChatStreamEvent(payload);
         }
       }
     }
@@ -3953,15 +3982,28 @@ async function resumeBrowserRuntimeChatPromptStream(
       if (!event) continue;
       if (event.type === "delta") {
         text += String(event.text ?? "");
-        chatApi.notifyChatStreamDelta({ request_id: requestId, delta: String(event.text ?? "") });
+        chatApi.notifyChatStreamDelta({
+          type: "delta",
+          request_id: requestId,
+          delta: String(event.text ?? ""),
+        });
       } else if (event.type === "done") {
+        chatApi.notifyChatStreamEvent({ type: "done", request_id: requestId });
         // Done is authoritative (sanitized final text) → replace the live preview.
         if (event.text) text = String(event.text);
         if (typeof event.redacted_user_text === "string") {
           redactedUserText = event.redacted_user_text;
         }
       } else if (event.type === "error") {
+        chatApi.notifyChatStreamEvent({
+          type: "error",
+          request_id: requestId,
+          message: String(event.message ?? "Local runtime error"),
+        });
         throw new Error(String(event.message ?? "Local runtime error"));
+      } else {
+        const payload = browserStreamEventToCoreEvent(event, requestId);
+        if (payload) chatApi.notifyChatStreamEvent(payload);
       }
     }
   }
@@ -4144,12 +4186,52 @@ function parseBrowserStreamEvent(line: string) {
   const trimmed = line.trim();
   if (!trimmed) return null;
   return JSON.parse(trimmed) as {
-    type: "delta" | "done" | "error";
+    type:
+      | "delta"
+      | "reasoning"
+      | "activity"
+      | "plan_update"
+      | "choice_prompt"
+      | "vault_propose"
+      | "vault_reveal"
+      | "payment_approval"
+      | "tool_result"
+      | "done"
+      | "error";
     text?: string;
+    markdown?: string;
+    payload?: unknown;
     redacted_user_text?: string;
     message?: string;
     metrics?: Partial<CoreChatMessageMetrics>;
   };
+}
+
+function browserStreamEventToCoreEvent(
+  event: ReturnType<typeof parseBrowserStreamEvent>,
+  requestId: string,
+): CoreChatStreamEvent | null {
+  if (!event) return null;
+  switch (event.type) {
+    case "reasoning":
+      return { type: "reasoning", request_id: requestId, text: String(event.text ?? "") };
+    case "activity":
+      return { type: "activity", request_id: requestId, text: String(event.text ?? "") };
+    case "plan_update":
+      return {
+        type: "plan_update",
+        request_id: requestId,
+        markdown: String(event.markdown ?? ""),
+      };
+    case "choice_prompt":
+    case "vault_propose":
+    case "vault_reveal":
+    case "payment_approval":
+    case "tool_result":
+      return { type: event.type, request_id: requestId, payload: event.payload };
+    default:
+      return null;
+  }
 }
 
 function browserComputerSession(

@@ -751,6 +751,16 @@ GIÀ FATTO sessione 5g (NON ripartire; tutto su `main`):
   `cargo test -p local-first-memory`, fallback `--no-default-features` su exact + facade search.
   Idea aperta: Postgres/pgvector e graph DB Docker hanno senso come backend remoto/dev-benchmark
   dietro adapter, non come sostituzione immediata dello store SQLite local-first canonico.
+- **ChatStreamEvent canonico (migrazione ampia, primo taglio)**: introdotto il contratto
+  `GenerateStreamEvent`/`CoreChatStreamEvent` con `delta`, `reasoning`, `activity`,
+  `plan_update`, `choice_prompt`, `vault_propose`, `vault_reveal`, `payment_approval`,
+  `tool_result`, `done`, `error`. Il gateway espande centralmente i vecchi delta marker
+  (`ACT/PLAN/REASONING/CHOICES/VAULT/PAYMENT`) in eventi NDJSON tipizzati prima del delta legacy;
+  `listenChatStreamDelta` resta wrapper/filtro compat. I nuovi messaggi salvano anche
+  `chat_messages.event_parts_json` derivato dai marker, così il rendering storico non dipende
+  solo dal testo. Prossimo passo: far consumare a `ChatView` i parts/eventi tipizzati per
+  renderizzare Reasoning/Plan/Activity/Choice/Vault/Payment come percorso principale, lasciando
+  le regex solo per vecchie chat.
 - **Browser live panel / espansione**: il dock `ChatComputerPanel` in modalità full ora esce dallo
   status stack e si ancora `fixed` dentro l'area chat, a destra della sidebar; il compact expand usa
   `Maximize2` e il pannello full è più largo (`min(1040px, ...)`) senza scivolare sotto il drawer.

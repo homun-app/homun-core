@@ -144,6 +144,10 @@ nel transcript della chat. `Non salvare`
 chiama `/api/vault/proposals/dismiss`; oggi e' solo ack locale, senza audit
 persistente.
 
+Nel live stream il gateway emette anche l'evento tipizzato `vault_propose` prima
+del delta marker legacy. Il marker resta per vecchie chat e persistenza, non come
+unico contratto del renderer.
+
 Per record gia' salvati, la chat puo' ricevere:
 
 ```text
@@ -153,6 +157,7 @@ Per record gia' salvati, la chat puo' ricevere:
 Il frontend nasconde il marker dalla prosa e mostra una card con campo PIN locale.
 La chiamata di reveal usa l'endpoint PIN-gated e mostra il valore solo nel componente
 corrente; il transcript conserva il marker/metadata redatto, non il valore.
+Nel live stream lo stesso payload arriva anche come `vault_reveal` tipizzato.
 
 ## PIN locale
 
@@ -216,6 +221,10 @@ Il browser safety gate resta conservativo:
 - `high_risk_reason_with_payment_approval` puo' sbloccare solo controlli finali di
   pagamento se l'azione porta un `payment_approval_id` che combacia con quello
   approvato.
+
+Nel live stream il payload arriva anche come `payment_approval` tipizzato prima
+del delta marker legacy, così la card può migrare al renderer strutturato senza
+dipendere da regex sul testo.
 
 Login, script arbitrari e azioni high-risk non-payment restano bloccati.
 
