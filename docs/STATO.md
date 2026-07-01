@@ -811,6 +811,18 @@ GIÀ FATTO sessione 5g (NON ripartire; tutto su `main`):
   `cargo test -p local-first-desktop-gateway idle_stream_entry_counts_as_stale_for_activity -- --nocapture`,
   `cargo build -p local-first-desktop-gateway --bin local-first-desktop-gateway`,
   `npm --prefix apps/desktop run test:ui-contract`.
+- **Live follow-up 5 (rilancio doppio dopo fix)**: choice standalone + click `Confermo` validati live:
+  nessuna contaminazione con treni/preventivi, risposta scoped al test della card. Il thread piano ha
+  completato dopo ~35s e `active_streams` e' tornato vuoto, quindi il busy fantasma non resta appeso.
+  Bug residuo trovato: il testo finale diceva completato ma il marker `PLAN` persistito restava 1/2
+  perche' il ramo di sintesi/fallback collassava il piano senza riapplicare la riconciliazione
+  dell'ultimo step aperto. Ora il `Done` finale riconcilia il marker anche in risposta normale e
+  forced-synthesis. Test verdi:
+  `cargo test -p local-first-desktop-gateway reconcile_final_plan_marker_closes_last_open_step_on_delivery -- --nocapture`,
+  `cargo test -p local-first-desktop-gateway replace_latest_plan_marker_updates_delivered_plan_status -- --nocapture`,
+  `cargo test -p local-first-desktop-gateway short_choice_replies_do_not_inject_global_open_loops -- --nocapture`,
+  `cargo build -p local-first-desktop-gateway --bin local-first-desktop-gateway`,
+  `npm --prefix apps/desktop run test:ui-contract`.
 - **Browser live panel / espansione**: il dock `ChatComputerPanel` in modalità full ora esce dallo
   status stack e si ancora `fixed` dentro l'area chat, a destra della sidebar; il compact expand usa
   `Maximize2` e il pannello full è più largo (`min(1040px, ...)`) senza scivolare sotto il drawer.

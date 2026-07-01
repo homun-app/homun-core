@@ -6733,6 +6733,27 @@ fn replace_latest_plan_marker(text: &str, steps: &[serde_json::Value]) -> String
     out
 }
 
+fn reconcile_final_plan_marker_on_delivery(plan: &ExecutionPlan, text: &str) -> String {
+    let mut plan_steps = execution_plan_steps(plan);
+    let open_left = plan_steps
+        .iter()
+        .filter(|step| plan_step_status(step) != "done")
+        .count();
+    if !plan_reconcile_on_delivery_enabled()
+        || !answer_concludes_plan(open_left, strip_chat_markers(text).trim().chars().count())
+    {
+        return text.to_string();
+    }
+    if let Some(open_index) = plan_steps
+        .iter()
+        .position(|step| plan_step_status(step) != "done")
+    {
+        plan_steps[open_index]["status"] = serde_json::json!("done");
+        return replace_latest_plan_marker(text, &plan_steps);
+    }
+    text.to_string()
+}
+
 fn plan_step_status(step: &serde_json::Value) -> &str {
     step.get("status")
         .and_then(|s| s.as_str())
@@ -24408,7 +24429,10 @@ Tell the user clearly; do NOT claim it's done."
             // Anti-churn: the live stream carried one ‹‹PLAN›› block per plan tool call;
             // the PERSISTED answer keeps the plan card exactly once (latest state).
             let final_answer = append_vault_reveal_marker_if_missing(
-                collapse_plan_markers(&accumulated),
+                reconcile_final_plan_marker_on_delivery(
+                    &plan,
+                    &collapse_plan_markers(&accumulated),
+                ),
                 pending_vault_reveal_marker.as_deref(),
             );
             memory_answer = final_answer.clone();
@@ -24520,7 +24544,7 @@ Tell me if you want me to retry or rephrase."
             // Anti-churn safety net for the `accumulated` fallback (synth_text never
             // carries plan blocks, so this is a no-op when synthesis succeeded).
             let final_text = append_vault_reveal_marker_if_missing(
-                collapse_plan_markers(&final_text),
+                reconcile_final_plan_marker_on_delivery(&plan, &collapse_plan_markers(&final_text)),
                 pending_vault_reveal_marker.as_deref(),
             );
             memory_answer = final_text.clone();
@@ -49551,6 +49575,24 @@ prs.save(Path({path:?}))
         assert!(updated.contains("- [x] **Deliver answer** (`s2`): sent"));
         assert!(!updated.contains("- [ ] **Deliver answer**"));
         assert!(updated.ends_with("\nDone."));
+    }
+
+    #[test]
+    fn reconcile_final_plan_marker_closes_last_open_step_on_delivery() {
+        let plan = super::runtime_execution_plan(&[
+            serde_json::json!({"id":"s1","title":"Emit card","status":"done","detail":"ok"}),
+            serde_json::json!({"id":"s2","title":"Deliver result","status":"doing","detail":"pending"}),
+        ]);
+        let answer = format!(
+            "‹‹PLAN››{}‹‹/PLAN››\n{}",
+            super::build_plan_markdown(&super::execution_plan_steps(&plan)),
+            "Risultato finale: completato. ".repeat(40)
+        );
+
+        let updated = super::reconcile_final_plan_marker_on_delivery(&plan, &answer);
+
+        assert!(updated.contains("- [x] **Deliver result** (`s2`)"));
+        assert!(!updated.contains("- [-] **Deliver result**"));
     }
 
     #[test]
