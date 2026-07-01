@@ -108,6 +108,27 @@ import {
 import { captureAppScreenshot, fileLocalPathFromBridge, IS_DESKTOP } from "../lib/gatewayConfig";
 import { copyText } from "../lib/clipboard";
 import { connectComposioToolkit } from "../lib/composioConnect";
+import {
+  STRUCTURED_MARKER_DELTA_RE,
+  COMPOSIO_CONFIRM_RE,
+  MCP_CONFIRM_RE,
+  FS_AUTHORIZE_RE,
+  CONNECT_SUGGEST_RE,
+  COMPOSIO_DONE_RE,
+  COMPOSIO_RECONNECT_RE,
+  VAULT_PROPOSE_RE,
+  VAULT_REVEAL_RE,
+  PAYMENT_APPROVAL_RE,
+  CHOICES_RE,
+  PLAN_PROPOSE_RE,
+  GOAL_PROPOSE_RE,
+  UNCLOSED_PROPOSE_RE,
+  COMPOSIO_MARKERS_RE,
+  PROPOSE_MARKERS_VISIBLE_RE,
+  ACTIVITY_RE,
+  ARTIFACT_RE,
+  PLAN_RE,
+} from "../lib/markers";
 import { MarkdownEditor } from "./MarkdownEditor";
 import { RichMessage } from "./RichMessage";
 import { CodeView, DiffView, diffStats } from "./CodeView";
@@ -226,9 +247,6 @@ function normalizeChatEventParts(parts: unknown[] | undefined): ChatEventPart[] 
     }
   });
 }
-
-const STRUCTURED_MARKER_DELTA_RE =
-  /^‹‹(?:ACT|REASONING|PLAN|CHOICES|VAULT_PROPOSE|VAULT_REVEAL|PAYMENT_APPROVAL)››[\s\S]*?‹‹\/(?:ACT|REASONING|PLAN|CHOICES|VAULT_PROPOSE|VAULT_REVEAL|PAYMENT_APPROVAL)››$/;
 
 function shouldDropStructuredMarkerDelta(delta: string) {
   return STRUCTURED_MARKER_DELTA_RE.test(delta.trim());
@@ -3361,32 +3379,6 @@ interface ComposioPendingAction {
   kind?: "composio" | "mcp";
 }
 
-const COMPOSIO_CONFIRM_RE = /‹‹COMPOSIO_CONFIRM››([\s\S]*?)‹‹\/COMPOSIO_CONFIRM››/;
-const MCP_CONFIRM_RE = /‹‹MCP_CONFIRM››([\s\S]*?)‹‹\/MCP_CONFIRM››/;
-const FS_AUTHORIZE_RE = /‹‹FS_AUTHORIZE››([\s\S]*?)‹‹\/FS_AUTHORIZE››/;
-const CONNECT_SUGGEST_RE = /‹‹CONNECT_SUGGEST››([\s\S]*?)‹‹\/CONNECT_SUGGEST››/;
-const COMPOSIO_DONE_RE = /‹‹COMPOSIO_DONE››([\s\S]*?)‹‹\/COMPOSIO_DONE››/;
-const COMPOSIO_RECONNECT_RE = /‹‹COMPOSIO_RECONNECT››([\s\S]*?)‹‹\/COMPOSIO_RECONNECT››/;
-const VAULT_PROPOSE_RE = /‹‹VAULT_PROPOSE››([\s\S]*?)‹‹\/VAULT_PROPOSE››/;
-const VAULT_REVEAL_RE = /‹‹VAULT_REVEAL››([\s\S]*?)‹‹\/VAULT_REVEAL››/;
-const PAYMENT_APPROVAL_RE = /‹‹PAYMENT_APPROVAL››([\s\S]*?)‹‹\/PAYMENT_APPROVAL››/;
-// Single/multi-choice question card (Claude-Code style): the model emits the choices
-// instead of listing them in prose, and the click sends the answer back.
-const CHOICES_RE = /‹‹CHOICES››([\s\S]*?)‹‹\/CHOICES››/;
-// Plan-mode: the model proposes a plan and STOPS; the card gates execution behind
-// Accetta / Edit (the answer becomes the next user message).
-// Require a closed marker before rendering an actionable plan card. During streaming an
-// incomplete marker is hidden from prose below, but it is not accepted as a proposal.
-const PLAN_PROPOSE_RE = /‹‹PLAN_PROPOSE››([\s\S]*?)‹‹\/PLAN_PROPOSE››/;
-// Goal-propose: the model proposes the project's objective(s); the card lets the user save.
-const GOAL_PROPOSE_RE = /‹‹GOAL_PROPOSE››([\s\S]*?)‹‹\/GOAL_PROPOSE››/;
-// Strips an UNCLOSED plan/goal marker (open present, no close) from the visible prose.
-const UNCLOSED_PROPOSE_RE = /‹‹(?:PLAN_PROPOSE|GOAL_PROPOSE)››[\s\S]*$/;
-const COMPOSIO_MARKERS_RE =
-  /‹‹(?:COMPOSIO_(?:CONFIRM|DONE|RECONNECT)|MCP_CONFIRM|FS_AUTHORIZE|CONNECT_SUGGEST|VAULT_PROPOSE|VAULT_REVEAL|PAYMENT_APPROVAL|CHOICES|PLAN_PROPOSE|GOAL_PROPOSE|PLAN)››[\s\S]*?‹‹\/(?:COMPOSIO_(?:CONFIRM|DONE|RECONNECT)|MCP_CONFIRM|FS_AUTHORIZE|CONNECT_SUGGEST|VAULT_PROPOSE|VAULT_REVEAL|PAYMENT_APPROVAL|CHOICES|PLAN_PROPOSE|GOAL_PROPOSE|PLAN)››/g;
-const PROPOSE_MARKERS_VISIBLE_RE =
-  /‹‹(?:PLAN_PROPOSE|GOAL_PROPOSE)››[\s\S]*?‹‹\/(?:PLAN_PROPOSE|GOAL_PROPOSE)››/g;
-
 /** One clickable suggestion in an in-chat connect-card. */
 interface ConnectSuggestItem {
   kind: "mcp" | "skill" | "composio";
@@ -3557,7 +3549,6 @@ function parsePlanSteps(markdown: string): PlanStep[] {
 // Tool-activity trace markers (browser / skill / sandbox / connected-tool steps).
 // They are extracted into a compact collapsible panel so the answer body stays
 // clean — the pattern Claude/assistant-ui use for "tool activity".
-const ACTIVITY_RE = /‹‹ACT››([\s\S]*?)‹‹\/ACT››/g;
 
 function parseActivitySteps(text: string): string[] {
   if (!text.includes("‹‹ACT››")) return [];
@@ -3567,7 +3558,6 @@ function parseActivitySteps(text: string): string[] {
 }
 
 // Generated-file artifacts surfaced by the gateway (skill outputs in $OUTPUT_DIR).
-const ARTIFACT_RE = /‹‹ARTIFACT››([\s\S]*?)‹‹\/ARTIFACT››/g;
 
 interface ParsedArtifact {
   name: string;
@@ -3602,7 +3592,6 @@ function parseArtifacts(text: string): ParsedArtifact[] {
 
 // Operational plan emitted by the agent via the update_plan tool (‹‹PLAN›› markers).
 // The latest one in the conversation drives the Workbench "Piano" panel.
-const PLAN_RE = /‹‹PLAN››([\s\S]*?)‹‹\/PLAN››/g;
 
 function latestPlanMarkdown(messages: { text?: string; eventParts?: ChatEventPart[] }[]): string | null {
   let latest: string | null = null;
@@ -6144,7 +6133,7 @@ function AssistantMessageBody({
   const readable = useMemo(() => humanizeToolSlugs(visible), [visible]);
   return (
     <>
-      {readable && <RichMessage text={readable} streaming={streaming} />}
+      {readable && <RichMessage text={readable} streaming={streaming} eventParts={eventParts} />}
       {!streaming && onOpenArtifact && <MessageArtifacts text={text} onOpen={onOpenArtifact} />}
       {doneTool && !streaming && (
         <div className="cmp-confirm done">
