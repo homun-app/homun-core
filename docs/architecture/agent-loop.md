@@ -70,10 +70,11 @@ Punti caldi (con `file:line` in `main.rs`):
 - **Stream live tipizzato**: `emit_stream_event` espande i vecchi delta marker in eventi NDJSON
   canonici prima di inviare il delta legacy: `activity`, `plan_update`, `reasoning`,
   `choice_prompt`, `vault_propose`, `vault_reveal`, `payment_approval`. I marker restano nel
-  testo solo come compatibilità/persistenza storica; il frontend espone `CoreChatStreamEvent` e
-  `listenChatStreamDelta` è una vista filtrata dei soli `delta`. I nuovi messaggi salvano anche
-  `chat_messages.event_parts_json`, una proiezione derivata dei marker, così il rendering storico
-  non dipende esclusivamente da regex sul testo.
+  testo solo come compatibilità/persistenza storica; il frontend espone `CoreChatStreamEvent`,
+  `listenChatStreamDelta` è una vista filtrata dei soli `delta`, e `ChatView` conserva `eventParts`
+  live per rendere Choice/Vault/Payment/Plan dai payload tipizzati prima del fallback marker.
+  I nuovi messaggi salvano anche `chat_messages.event_parts_json`, una proiezione derivata dei
+  marker, così il rendering storico non dipende esclusivamente da regex sul testo.
 - **Fork act-vs-answer** (`:~19552`): il **modello** decide se chiamare tool o rispondere.
   Punto di **massima varianza**.
 - **F2 verify** (`verify_step_complete`, `:~13783`): un `done` rivendicato è tenuto

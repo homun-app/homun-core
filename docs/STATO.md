@@ -758,9 +758,10 @@ GIÀ FATTO sessione 5g (NON ripartire; tutto su `main`):
   (`ACT/PLAN/REASONING/CHOICES/VAULT/PAYMENT`) in eventi NDJSON tipizzati prima del delta legacy;
   `listenChatStreamDelta` resta wrapper/filtro compat. I nuovi messaggi salvano anche
   `chat_messages.event_parts_json` derivato dai marker, così il rendering storico non dipende
-  solo dal testo. Prossimo passo: far consumare a `ChatView` i parts/eventi tipizzati per
-  renderizzare Reasoning/Plan/Activity/Choice/Vault/Payment come percorso principale, lasciando
-  le regex solo per vecchie chat.
+  solo dal testo. Secondo taglio: `ChatView` ascolta `listenChatStreamEvent`, conserva
+  `eventParts` live per messaggio e usa i payload tipizzati per Choice/Vault/Payment/Plan prima
+  del fallback marker. Resta da esporre `event_parts_json` nell'API messaggi storici e poi
+  rimuovere la sintesi marker live usata solo come ponte di compatibilità per `RichMessage`/pannello.
 - **Browser live panel / espansione**: il dock `ChatComputerPanel` in modalità full ora esce dallo
   status stack e si ancora `fixed` dentro l'area chat, a destra della sidebar; il compact expand usa
   `Maximize2` e il pannello full è più largo (`min(1040px, ...)`) senza scivolare sotto il drawer.

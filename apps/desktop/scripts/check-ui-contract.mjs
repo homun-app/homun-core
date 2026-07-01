@@ -500,6 +500,8 @@ assertRepoContains("crates/desktop-gateway/src/main.rs", "/api/chat/build_prompt
 assertRepoContains("crates/desktop-gateway/src/main.rs", "/api/chat/generate_stream", "desktop gateway must expose chat stream endpoint");
 assertRepoContains("apps/desktop/src/lib/coreBridge.ts", "export type CoreChatStreamEvent", "desktop renderer must expose structured chat stream events");
 assertRepoContains("apps/desktop/src/lib/chatApi.ts", "listenChatStreamEvent", "chat API must expose structured chat stream subscription");
+assertRepoContains("apps/desktop/src/components/ChatView.tsx", "listenChatStreamEvent", "ChatView must consume structured chat stream events");
+assertRepoContains("apps/desktop/src/components/ChatView.tsx", "eventParts", "ChatView must pass structured event parts into assistant rendering");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "/api/tasks/queue", "desktop gateway must expose task queue read model endpoint");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "/api/tasks/executor", "desktop gateway must expose task executor status endpoint");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "/api/tasks/run_next", "desktop gateway must expose the first local task executor endpoint");

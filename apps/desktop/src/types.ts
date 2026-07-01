@@ -64,7 +64,18 @@ export interface ChatMessage {
   linkedTaskId?: string;
   linkedAutomationRef?: string;
   attachments?: ChatAttachment[];
+  eventParts?: ChatEventPart[];
 }
+
+export type ChatEventPart =
+  | { type: "reasoning"; text: string }
+  | { type: "activity"; text: string }
+  | { type: "plan_update"; markdown: string }
+  | { type: "choice_prompt"; payload: unknown }
+  | { type: "vault_propose"; payload: unknown }
+  | { type: "vault_reveal"; payload: unknown }
+  | { type: "payment_approval"; payload: unknown }
+  | { type: "tool_result"; payload: unknown };
 
 export interface ChatMessageMetrics {
   promptTokens: number;

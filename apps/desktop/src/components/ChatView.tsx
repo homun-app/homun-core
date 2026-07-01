@@ -80,6 +80,7 @@ import {
   type ActiveModelInfo,
   type ChatAttachmentInput,
   type CoreBranchPoint,
+  type CoreChatStreamEvent,
   type CoreComputerSessionSnapshot,
   type CorePromptSubmissionResult,
   type CoreTaskQueueSnapshot,
@@ -114,6 +115,7 @@ import { ChatComputerPanel } from "./ChatComputerPanel";
 import type {
   ChatMessage,
   ChatMessageMetrics,
+  ChatEventPart,
   ChatAttachment,
   ChatThread,
   ComputerSession,
@@ -177,6 +179,55 @@ interface ReplyContext {
 type MessageFeedback = NonNullable<ChatMessage["feedback"]>;
 type MessageContentKind = "user" | "system" | "text" | "code" | "diagram";
 type ChatStreamPhase = "accepted" | "thinking" | "writing";
+
+function chatEventPartFromStream(event: CoreChatStreamEvent): ChatEventPart | null {
+  switch (event.type) {
+    case "reasoning":
+      return { type: "reasoning", text: event.text };
+    case "activity":
+      return { type: "activity", text: event.text };
+    case "plan_update":
+      return { type: "plan_update", markdown: event.markdown };
+    case "choice_prompt":
+    case "vault_propose":
+    case "vault_reveal":
+    case "payment_approval":
+    case "tool_result":
+      return { type: event.type, payload: event.payload };
+    default:
+      return null;
+  }
+}
+
+function eventPartToLegacyMarker(part: ChatEventPart): string {
+  switch (part.type) {
+    case "reasoning":
+      return `‹‹REASONING››${part.text}‹‹/REASONING››`;
+    case "activity":
+      return `‹‹ACT››${part.text}‹‹/ACT››`;
+    case "plan_update":
+      return `‹‹PLAN››${part.markdown}‹‹/PLAN››`;
+    case "choice_prompt":
+      return `‹‹CHOICES››${JSON.stringify(part.payload)}‹‹/CHOICES››`;
+    case "vault_propose":
+      return `‹‹VAULT_PROPOSE››${JSON.stringify(part.payload)}‹‹/VAULT_PROPOSE››`;
+    case "vault_reveal":
+      return `‹‹VAULT_REVEAL››${JSON.stringify(part.payload)}‹‹/VAULT_REVEAL››`;
+    case "payment_approval":
+      return `‹‹PAYMENT_APPROVAL››${JSON.stringify(part.payload)}‹‹/PAYMENT_APPROVAL››`;
+    case "tool_result":
+      return "";
+  }
+}
+
+function visibleStreamingText(text: string, eventParts: ChatEventPart[]) {
+  if (!eventParts.length) return text;
+  const markerText = eventParts
+    .map(eventPartToLegacyMarker)
+    .filter((marker) => marker.length > 0)
+    .join("");
+  return `${markerText}${text}`;
+}
 
 interface ChatStreamStatus {
   requestId: string;
@@ -579,6 +630,7 @@ export function ChatView({
       metadata: "Local model",
     };
     let streamedText = "";
+    let streamEventParts: ChatEventPart[] = [];
     let streamChunks = 0;
     const streamStartedAt = performance.now();
     let unlistenStream: (() => void) | undefined;
@@ -589,7 +641,8 @@ export function ChatView({
         ...promptMessages,
         {
           ...streamingMessage,
-          text: streamedText,
+          text: visibleStreamingText(streamedText, streamEventParts),
+          eventParts: streamEventParts,
         },
       ]);
       afterStreamingFramePaint();
@@ -625,6 +678,7 @@ export function ChatView({
         {
           ...streamingMessage,
           text: streamedText || "Answer interrupted.",
+          eventParts: streamEventParts,
           metadata: "Interrotta localmente",
         },
       ];
@@ -651,9 +705,16 @@ export function ChatView({
         userText: userVisibleText,
         assistantMessageId: streamingMessage.id,
       });
-      unlistenStream = await coreBridge.listenChatStreamDelta((payload) => {
+      unlistenStream = await coreBridge.listenChatStreamEvent((payload) => {
         if (payload.request_id !== requestId) return;
         if (cancelledStreamIdsRef.current.has(requestId)) return;
+        const part = chatEventPartFromStream(payload);
+        if (part) {
+          streamEventParts = [...streamEventParts, part];
+          scheduleStreamingMessage();
+          return;
+        }
+        if (payload.type !== "delta") return;
         const firstDelta = streamedText.length === 0;
         streamChunks += 1;
         streamedText += payload.delta;
@@ -693,6 +754,7 @@ export function ChatView({
         return;
       }
       streamedText = result.assistant_message.text || streamedText;
+      streamEventParts = [];
       await persistAutoTitleForCompletedTurn(
         promptMessages,
         streamedText,
@@ -832,10 +894,18 @@ export function ChatView({
     };
     const promptMessages = [...messages, userMessage];
     let streamedText = "";
+    let streamEventParts: ChatEventPart[] = [];
     let unlistenStream: (() => void) | undefined;
     const flushStreamingMessage = () => {
       streamingFrameRef.current = null;
-      setOptimisticMessages([...promptMessages, { ...streamingMessage, text: streamedText }]);
+      setOptimisticMessages([
+        ...promptMessages,
+        {
+          ...streamingMessage,
+          text: visibleStreamingText(streamedText, streamEventParts),
+          eventParts: streamEventParts,
+        },
+      ]);
       afterStreamingFramePaint();
     };
     const scheduleStreamingMessage = () => {
@@ -856,8 +926,15 @@ export function ChatView({
       detail: t("chat.reattachingGeneration"),
     });
     try {
-      unlistenStream = await coreBridge.listenChatStreamDelta((payload) => {
+      unlistenStream = await coreBridge.listenChatStreamEvent((payload) => {
         if (payload.request_id !== requestId) return;
+        const part = chatEventPartFromStream(payload);
+        if (part) {
+          streamEventParts = [...streamEventParts, part];
+          scheduleStreamingMessage();
+          return;
+        }
+        if (payload.type !== "delta") return;
         streamedText += payload.delta;
         setStreamHasVisibleText(true);
         scheduleStreamingMessage();
@@ -871,6 +948,7 @@ export function ChatView({
         options?.commitResult ?? true,
       );
       streamedText = result.assistant_message.text || streamedText;
+      streamEventParts = [];
       if (options?.commitResult !== false) {
         await persistAutoTitleForCompletedTurn(
           promptMessages,
@@ -1121,12 +1199,19 @@ export function ChatView({
   ) {
     const requestId = `chat_stream_regen_${Date.now()}_${Math.random().toString(36).slice(2)}`;
     let streamedText = "";
+    let streamEventParts: ChatEventPart[] = [];
     let unlistenStream: (() => void) | undefined;
     const flushStreamingMessage = () => {
       streamingFrameRef.current = null;
       setOptimisticMessages(
         baseMessages.map((item) =>
-          item.id === message.id ? { ...item, text: streamedText } : item,
+          item.id === message.id
+            ? {
+                ...item,
+                text: visibleStreamingText(streamedText, streamEventParts),
+                eventParts: streamEventParts,
+              }
+            : item,
         ),
       );
       afterStreamingFramePaint();
@@ -1163,9 +1248,16 @@ export function ChatView({
       detail: t("chat.generatingAlternativeVariant"),
     });
     cancelStreamingRequestRef.current = cancelStreamingRequest;
-    unlistenStream = await coreBridge.listenChatStreamDelta((payload) => {
+    unlistenStream = await coreBridge.listenChatStreamEvent((payload) => {
       if (payload.request_id !== requestId) return;
       if (cancelledStreamIdsRef.current.has(requestId)) return;
+      const part = chatEventPartFromStream(payload);
+      if (part) {
+        streamEventParts = [...streamEventParts, part];
+        scheduleStreamingMessage();
+        return;
+      }
+      if (payload.type !== "delta") return;
       streamedText += payload.delta;
       setStreamHasVisibleText(true);
       scheduleStreamingMessage();
@@ -1424,13 +1516,20 @@ export function ChatView({
   ) {
     const requestId = `chat_stream_continue_${Date.now()}_${Math.random().toString(36).slice(2)}`;
     let streamedText = message.text;
+    let streamEventParts: ChatEventPart[] = message.eventParts ?? [];
     let unlistenStream: (() => void) | undefined;
     let cancelledLocally = false;
     const flushStreamingMessage = () => {
       streamingFrameRef.current = null;
       setOptimisticMessages(
         baseMessages.map((item) =>
-          item.id === message.id ? { ...item, text: streamedText } : item,
+          item.id === message.id
+            ? {
+                ...item,
+                text: visibleStreamingText(streamedText, streamEventParts),
+                eventParts: streamEventParts,
+              }
+            : item,
         ),
       );
       afterStreamingFramePaint();
@@ -1459,9 +1558,16 @@ export function ChatView({
       detail: t("chat.generationLimitReached", { attempt }),
     });
     cancelStreamingRequestRef.current = cancelStreamingRequest;
-    unlistenStream = await coreBridge.listenChatStreamDelta((payload) => {
+    unlistenStream = await coreBridge.listenChatStreamEvent((payload) => {
       if (payload.request_id !== requestId) return;
       if (cancelledStreamIdsRef.current.has(requestId)) return;
+      const part = chatEventPartFromStream(payload);
+      if (part) {
+        streamEventParts = [...streamEventParts, part];
+        scheduleStreamingMessage();
+        return;
+      }
+      if (payload.type !== "delta") return;
       const firstDelta = streamedText.length === message.text.length;
       streamedText += payload.delta;
       if (firstDelta) {
@@ -1489,6 +1595,7 @@ export function ChatView({
         return baseMessages;
       }
       streamedText = result.assistant_message.text || streamedText;
+      streamEventParts = [];
       cancelScheduledStreamingFrame();
       const updatedMessage = chatMessageFromAssistantResult(result, streamedText);
       const nextMessages = baseMessages.map((item) =>
@@ -1813,6 +1920,7 @@ export function ChatView({
                   {displayMessage.text && (
                     <AssistantMessageBody
                       text={displayMessage.text}
+                      eventParts={displayMessage.eventParts}
                       streaming
                       messageId={displayMessage.id}
                       threadId={thread.threadId}
@@ -1857,6 +1965,7 @@ export function ChatView({
               ) : displayMessage.text ? (
                 <AssistantMessageBody
                   text={displayMessage.text}
+                  eventParts={displayMessage.eventParts}
                   messageId={displayMessage.id}
                   threadId={thread.threadId}
                   onOpenArtifact={(artifact) => {
@@ -3303,6 +3412,85 @@ interface PlanStep {
   status: "todo" | "doing" | "done" | "blocked";
   title: string;
   detail: string;
+}
+
+function eventPayload(parts: ChatEventPart[] | undefined, type: ChatEventPart["type"]) {
+  const part = parts?.find((item) => item.type === type);
+  return part && "payload" in part ? part.payload : null;
+}
+
+function latestPlanUpdateMarkdown(parts: ChatEventPart[] | undefined) {
+  const plans = (parts ?? []).filter(
+    (item): item is Extract<ChatEventPart, { type: "plan_update" }> =>
+      item.type === "plan_update",
+  );
+  return plans.length > 0 ? plans[plans.length - 1].markdown : null;
+}
+
+function parseVaultProposalPayload(payload: unknown): VaultProposal | null {
+  const parsed = payload as Partial<VaultProposal> | null;
+  if (
+    parsed &&
+    typeof parsed.category === "string" &&
+    typeof parsed.label === "string" &&
+    typeof parsed.redacted_preview === "string"
+  ) {
+    return {
+      category: parsed.category,
+      label: parsed.label,
+      redacted_preview: parsed.redacted_preview,
+      ...(typeof parsed.pending_id === "string" ? { pending_id: parsed.pending_id } : {}),
+    };
+  }
+  return null;
+}
+
+function parseVaultRevealPayload(payload: unknown): VaultRevealProposal | null {
+  const parsed = payload as Partial<VaultRevealProposal> | null;
+  if (
+    parsed &&
+    typeof parsed.record_id === "string" &&
+    typeof parsed.category === "string" &&
+    typeof parsed.label === "string" &&
+    typeof parsed.redacted_preview === "string"
+  ) {
+    return {
+      record_id: parsed.record_id,
+      category: parsed.category,
+      label: parsed.label,
+      redacted_preview: parsed.redacted_preview,
+    };
+  }
+  return null;
+}
+
+function parsePaymentApprovalPayload(payload: unknown): PaymentApprovalProposal | null {
+  const parsed = payload as { snapshot?: Partial<PaymentApprovalSnapshot> } | null;
+  const snapshot = parsed?.snapshot;
+  if (
+    snapshot &&
+    typeof snapshot.approval_id === "string" &&
+    typeof snapshot.merchant === "string" &&
+    typeof snapshot.domain === "string" &&
+    typeof snapshot.amount_minor === "number" &&
+    typeof snapshot.currency === "string" &&
+    typeof snapshot.product_summary === "string" &&
+    typeof snapshot.payment_method_label === "string" &&
+    typeof snapshot.checkout_fingerprint === "string"
+  ) {
+    return { snapshot: snapshot as PaymentApprovalSnapshot };
+  }
+  return null;
+}
+
+function parseChoicePromptPayload(payload: unknown): ChoicePrompt | null {
+  const parsed = payload as Partial<ChoicePrompt> | null;
+  if (!parsed || !Array.isArray(parsed.options) || parsed.options.length === 0) return null;
+  return {
+    question: typeof parsed.question === "string" ? parsed.question : "",
+    multi: parsed.multi === true,
+    options: parsed.options.filter((option) => typeof option === "string" && option.trim()),
+  };
 }
 
 /** Parses the ‹‹PLAN›› markdown (`- [x] **Title** (`s1`): detail`) into typed steps. */
@@ -5659,7 +5847,7 @@ function MessageActivity({ text, live = false }: { text: string; live?: boolean 
 
 /** Splits an assistant message into visible text + an optional pending write
  *  action (editable card) OR an already-executed marker (static "done" note). */
-function parseComposioConfirm(text: string): {
+function parseComposioConfirm(text: string, eventParts?: ChatEventPart[]): {
   visible: string;
   action: ComposioPendingAction | null;
   doneTool: string | null;
@@ -5726,87 +5914,47 @@ function parseComposioConfirm(text: string): {
       /* malformed → just hide it */
     }
   }
-  let vaultPropose: VaultProposal | null = null;
+  let vaultPropose: VaultProposal | null = parseVaultProposalPayload(
+    eventPayload(eventParts, "vault_propose"),
+  );
   const vaultMatch = text.match(VAULT_PROPOSE_RE);
-  if (vaultMatch) {
+  if (!vaultPropose && vaultMatch) {
     try {
-      const parsed = JSON.parse(vaultMatch[1]) as Partial<VaultProposal>;
-      if (
-        parsed &&
-        typeof parsed.category === "string" &&
-        typeof parsed.label === "string" &&
-        typeof parsed.redacted_preview === "string"
-      ) {
-        vaultPropose = {
-          category: parsed.category,
-          label: parsed.label,
-          redacted_preview: parsed.redacted_preview,
-          ...(typeof parsed.pending_id === "string" ? { pending_id: parsed.pending_id } : {}),
-        };
-      }
+      vaultPropose = parseVaultProposalPayload(JSON.parse(vaultMatch[1]));
     } catch {
       /* malformed → just hide it */
     }
   }
-  let vaultReveal: VaultRevealProposal | null = null;
+  let vaultReveal: VaultRevealProposal | null = parseVaultRevealPayload(
+    eventPayload(eventParts, "vault_reveal"),
+  );
   const vaultRevealMatch = text.match(VAULT_REVEAL_RE);
-  if (vaultRevealMatch) {
+  if (!vaultReveal && vaultRevealMatch) {
     try {
-      const parsed = JSON.parse(vaultRevealMatch[1]) as Partial<VaultRevealProposal>;
-      if (
-        parsed &&
-        typeof parsed.record_id === "string" &&
-        typeof parsed.category === "string" &&
-        typeof parsed.label === "string" &&
-        typeof parsed.redacted_preview === "string"
-      ) {
-        vaultReveal = {
-          record_id: parsed.record_id,
-          category: parsed.category,
-          label: parsed.label,
-          redacted_preview: parsed.redacted_preview,
-        };
-      }
+      vaultReveal = parseVaultRevealPayload(JSON.parse(vaultRevealMatch[1]));
     } catch {
       /* malformed → just hide it */
     }
   }
-  let paymentApproval: PaymentApprovalProposal | null = null;
+  let paymentApproval: PaymentApprovalProposal | null = parsePaymentApprovalPayload(
+    eventPayload(eventParts, "payment_approval"),
+  );
   const paymentMatch = text.match(PAYMENT_APPROVAL_RE);
-  if (paymentMatch) {
+  if (!paymentApproval && paymentMatch) {
     try {
-      const parsed = JSON.parse(paymentMatch[1]) as { snapshot?: Partial<PaymentApprovalSnapshot> };
-      const snapshot = parsed?.snapshot;
-      if (
-        snapshot &&
-        typeof snapshot.approval_id === "string" &&
-        typeof snapshot.merchant === "string" &&
-        typeof snapshot.domain === "string" &&
-        typeof snapshot.amount_minor === "number" &&
-        typeof snapshot.currency === "string" &&
-        typeof snapshot.product_summary === "string" &&
-        typeof snapshot.payment_method_label === "string" &&
-        typeof snapshot.checkout_fingerprint === "string"
-      ) {
-        paymentApproval = { snapshot: snapshot as PaymentApprovalSnapshot };
-      }
+      paymentApproval = parsePaymentApprovalPayload(JSON.parse(paymentMatch[1]));
     } catch {
       /* malformed → just hide it */
     }
   }
   // Single/multi-choice question card.
-  let choices: ChoicePrompt | null = null;
+  let choices: ChoicePrompt | null = parseChoicePromptPayload(
+    eventPayload(eventParts, "choice_prompt"),
+  );
   const chMatch = text.match(CHOICES_RE);
-  if (chMatch) {
+  if (!choices && chMatch) {
     try {
-      const parsed = JSON.parse(chMatch[1]) as ChoicePrompt;
-      if (parsed && Array.isArray(parsed.options) && parsed.options.length > 0) {
-        choices = {
-          question: typeof parsed.question === "string" ? parsed.question : "",
-          multi: parsed.multi === true,
-          options: parsed.options.filter((o) => typeof o === "string" && o.trim().length > 0),
-        };
-      }
+      choices = parseChoicePromptPayload(JSON.parse(chMatch[1]));
     } catch {
       /* malformed → just hide it */
     }
@@ -5860,9 +6008,14 @@ function parseComposioConfirm(text: string): {
   // Live operational plan (update_plan): take the LATEST ‹‹PLAN›› in the message and
   // render it inline with per-step status. PLAN_RE is global → matchAll gives all.
   let planSteps: PlanStep[] = [];
-  const planMatches = [...text.matchAll(PLAN_RE)];
-  if (planMatches.length > 0) {
+  const structuredPlan = latestPlanUpdateMarkdown(eventParts);
+  if (structuredPlan) {
+    planSteps = parsePlanSteps(structuredPlan);
+  } else {
+    const planMatches = [...text.matchAll(PLAN_RE)];
+    if (planMatches.length > 0) {
     planSteps = parsePlanSteps(planMatches[planMatches.length - 1][1]);
+    }
   }
   const done = text.match(COMPOSIO_DONE_RE);
   const doneTool = done ? done[1].trim() : null;
@@ -5907,6 +6060,7 @@ function humanizeToolSlugs(text: string): string {
  *  static "done" note once it has been executed. */
 function AssistantMessageBody({
   text,
+  eventParts,
   streaming,
   messageId,
   threadId,
@@ -5914,6 +6068,7 @@ function AssistantMessageBody({
   onChoose,
 }: {
   text: string;
+  eventParts?: ChatEventPart[];
   streaming?: boolean;
   messageId?: string;
   threadId?: string;
@@ -5933,7 +6088,7 @@ function AssistantMessageBody({
     choices,
     planPropose,
     goalPropose,
-  } = useMemo(() => parseComposioConfirm(text), [text]);
+  } = useMemo(() => parseComposioConfirm(text, eventParts), [text, eventParts]);
   const readable = useMemo(() => humanizeToolSlugs(visible), [visible]);
   return (
     <>
