@@ -2666,6 +2666,17 @@ body.resizing-drawer {
   font-size: 13px;
   color: var(--muted);
 }
+.assistant-thinking-state .thinking-elapsed {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.7;
+  margin-left: 2px;
+}
+.assistant-thinking-state .thinking-detail {
+  font-size: 12px;
+  color: var(--muted);
+  opacity: 0.8;
+  margin-left: 4px;
+}
 
 /* ADR 0022 (Piano UI A3): memory recall badge nel footer del messaggio assistant. */
 .memory-recall-badge {

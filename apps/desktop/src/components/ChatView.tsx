@@ -2306,8 +2306,22 @@ export function ChatView({
   );
 }
 
+// ADR 0022 (Piano UI D1): activity signal = verb-tense + timer + count (non
+// spinner-only). I typing-dots restano come affiancamento visivo, ma il label
+// mostra la fase verb-tense + un timer elapsed + il detail (count per recall).
 function AssistantThinkingState({ status }: { status: ChatStreamStatus | null }) {
   const { t } = useTranslation();
+  // Timer elapsed dalla comparsa dello stato (per mostrare "thinking… 3s").
+  const [elapsed, setElapsed] = useState(0);
+  const startRef = useRef<number | null>(null);
+  useEffect(() => {
+    startRef.current = Date.now();
+    setElapsed(0);
+    const id = window.setInterval(() => {
+      if (startRef.current) setElapsed(Math.floor((Date.now() - startRef.current) / 1000));
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [status?.requestId, status?.phase]);
   return (
     <div className="assistant-thinking-state" aria-live="polite">
       <span className="typing-dots" aria-hidden="true">
@@ -2315,7 +2329,11 @@ function AssistantThinkingState({ status }: { status: ChatStreamStatus | null })
         <i />
         <i />
       </span>
-      <span className="thinking-label">{status?.title ?? t("chat.thinking")}</span>
+      <span className="thinking-label">
+        {status?.title ?? t("chat.thinking")}
+        {elapsed > 0 && <span className="thinking-elapsed"> {elapsed}s</span>}
+      </span>
+      {status?.detail && <span className="thinking-detail">{status.detail}</span>}
     </div>
   );
 }
