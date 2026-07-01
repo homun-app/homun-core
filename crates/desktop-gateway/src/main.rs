@@ -13983,6 +13983,8 @@ fn is_placeholder_chat_title(title: &str) -> bool {
 #[derive(Debug, Deserialize)]
 struct SeedAssistantRequest {
     text: String,
+    #[serde(default)]
+    event_parts: Vec<serde_json::Value>,
 }
 
 /// Append a literal assistant message to a thread. Used to open a proactivity-card
@@ -14001,8 +14003,10 @@ async fn seed_assistant_message(
             message: "Empty message.".to_string(),
         });
     }
+    let mut message = channel_chat_message("assistant", text);
+    message.event_parts = request.event_parts;
     let snapshot = lock_store(&state)?
-        .append_assistant_message(&thread_id, &channel_chat_message("assistant", text))
+        .append_assistant_message(&thread_id, &message)
         .map_err(GatewayError::store)?;
     publish_app_event(serde_json::json!({
         "type": "thread.updated",

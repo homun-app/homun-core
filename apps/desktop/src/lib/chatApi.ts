@@ -163,11 +163,11 @@ export const chatApi = {
 
   /** Append a literal assistant message (e.g. a proactivity card's question) so a
    *  chat opens with Homun already asking, instead of a composer draft. */
-  async seedAssistantMessage(threadId: string, text: string) {
+  async seedAssistantMessage(threadId: string, text: string, eventParts?: unknown[]) {
     return hydrateMessagesSnapshot(
       await gatewayJson<CoreChatMessagesSnapshot>(
         `/api/chat/threads/${encodeURIComponent(threadId)}/assistant_message`,
-        { method: "POST", body: JSON.stringify({ text }) },
+        { method: "POST", body: JSON.stringify({ text, event_parts: eventParts ?? [] }) },
       ),
     );
   },

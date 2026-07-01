@@ -2783,7 +2783,7 @@ impl ChatStore {
                 message.linked_automation_ref,
                 attachments_to_json(message)?,
                 parent_id,
-                event_parts_to_json(&message.text)?,
+                event_parts_to_json(message)?,
             ],
         )?;
         // Advance the active leaf only when a row was actually inserted —
@@ -2821,7 +2821,7 @@ impl ChatStore {
                 message.linked_task_id,
                 message.linked_automation_ref,
                 attachments_to_json(message)?,
-                event_parts_to_json(&message.text)?,
+                event_parts_to_json(message)?,
                 message_id,
                 thread_id,
             ],
@@ -3011,7 +3011,13 @@ fn attachments_to_json(message: &ChatMessage) -> rusqlite::Result<Option<String>
     }
 }
 
-fn event_parts_to_json(text: &str) -> rusqlite::Result<Option<String>> {
+fn event_parts_to_json(message: &ChatMessage) -> rusqlite::Result<Option<String>> {
+    if !message.event_parts.is_empty() {
+        return serde_json::to_string(&message.event_parts)
+            .map(Some)
+            .map_err(json_error);
+    }
+    let text = &message.text;
     let mut parts = Vec::new();
     push_text_marker_part(text, &mut parts, "ACT", "activity", "text");
     push_text_marker_part(text, &mut parts, "REASONING", "reasoning", "text");
@@ -3354,6 +3360,46 @@ mod tests {
         let public_json = serde_json::to_value(reloaded).unwrap();
         assert_eq!(public_json["event_parts"][0]["type"], "plan_update");
         assert_eq!(public_json["event_parts"][0]["markdown"], "- [x] Done");
+    }
+
+    #[test]
+    fn committed_chat_message_preserves_explicit_event_parts_without_markers() {
+        let store = ChatStore::in_memory().unwrap();
+        let thread = store.create_thread("default").unwrap();
+        let assistant = ChatMessage {
+            id: "assistant_with_choices".to_string(),
+            role: "assistant".to_string(),
+            text: "Choose one.".to_string(),
+            timestamp: current_timestamp_seconds(),
+            metadata: None,
+            metrics: None,
+            feedback: None,
+            saved_memory_ref: None,
+            linked_task_id: None,
+            linked_automation_ref: None,
+            attachments: Vec::new(),
+            event_parts: vec![serde_json::json!({
+                "type": "choice_prompt",
+                "payload": {
+                    "question": "",
+                    "multi": false,
+                    "options": ["Yes", "No"]
+                }
+            })],
+        };
+
+        store
+            .append_assistant_message(&thread.thread_id, &assistant)
+            .unwrap();
+        let snapshot = store.messages(&thread.thread_id).unwrap();
+        let reloaded = snapshot
+            .messages
+            .iter()
+            .find(|message| message.id == assistant.id)
+            .expect("assistant message reloaded");
+        assert_eq!(reloaded.text, "Choose one.");
+        assert_eq!(reloaded.event_parts[0]["type"], "choice_prompt");
+        assert_eq!(reloaded.event_parts[0]["payload"]["options"][0], "Yes");
     }
 
     #[test]

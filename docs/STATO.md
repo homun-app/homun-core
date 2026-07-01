@@ -763,7 +763,9 @@ GIÀ FATTO sessione 5g (NON ripartire; tutto su `main`):
   del fallback marker. Terzo taglio: l'API messaggi espone `event_parts` e il frontend li idrata
   su reload/storico. Quarto taglio: rimosso il ponte live `eventParts`→marker; il testo streaming
   resta solo prosa e anche il pannello Piano legge `plan_update` strutturato prima dei marker
-  legacy. Restano fallback marker solo per chat vecchie/non migrate.
+  legacy. Quinto taglio: `seedAssistantMessage` accetta `event_parts` espliciti e le nuove choice
+  card di proattività salvano `choice_prompt` strutturato senza `‹‹CHOICES››` nel testo. Restano
+  fallback marker solo per chat vecchie/non migrate.
 - **Browser live panel / espansione**: il dock `ChatComputerPanel` in modalità full ora esce dallo
   status stack e si ancora `fixed` dentro l'area chat, a destra della sidebar; il compact expand usa
   `Maximize2` e il pannello full è più largo (`min(1040px, ...)`) senza scivolare sotto il drawer.

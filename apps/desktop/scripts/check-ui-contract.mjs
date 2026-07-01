@@ -506,6 +506,7 @@ assertRepoContains("apps/desktop/src/lib/coreBridge.ts", "event_parts", "core ch
 assertRepoContains("apps/desktop/src/App.tsx", "mapCoreChatEventParts", "desktop app must hydrate persisted structured event parts");
 assertRepoNotContains("apps/desktop/src/components/ChatView.tsx", "eventPartToLegacyMarker", "ChatView must not synthesize legacy markers from structured event parts");
 assertRepoNotContains("apps/desktop/src/components/ChatView.tsx", "visibleStreamingText", "streaming messages must keep prose text separate from structured event parts");
+assertNotContains("src/App.tsx", "‹‹CHOICES››", "new proactivity choice prompts must use structured event parts, not marker text");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "/api/tasks/queue", "desktop gateway must expose task queue read model endpoint");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "/api/tasks/executor", "desktop gateway must expose task executor status endpoint");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "/api/tasks/run_next", "desktop gateway must expose the first local task executor endpoint");

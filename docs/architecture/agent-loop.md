@@ -76,7 +76,9 @@ Punti caldi (con `file:line` in `main.rs`):
   Il testo streaming resta sola prosa: il frontend non sintetizza più marker legacy da `eventParts`.
   I nuovi messaggi salvano anche `chat_messages.event_parts_json`, una proiezione derivata dei
   marker; l'API messaggi la espone come `event_parts` e il frontend la idrata su reload/storico,
-  così il rendering storico non dipende esclusivamente da regex sul testo.
+  così il rendering storico non dipende esclusivamente da regex sul testo. Le nuove seed card
+  assistente possono passare `event_parts` espliciti (es. `choice_prompt`) senza incorporare marker
+  nel testo persistito.
 - **Fork act-vs-answer** (`:~19552`): il **modello** decide se chiamare tool o rispondere.
   Punto di **massima varianza**.
 - **F2 verify** (`verify_step_complete`, `:~13783`): un `done` rivendicato è tenuto
