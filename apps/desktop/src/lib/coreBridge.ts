@@ -318,16 +318,71 @@ export interface CoreChatStreamDelta {
   delta: string;
 }
 
+/** B2 (Piano UI) — payload tipizzati dei ChatEventPart. Definiti qui (lower layer)
+ *  e re-esportati da `types.ts` per evitare un import circolare. Le shape vengono
+ *  dai parser runtime in ChatView (un tempo `unknown`). */
+
+/** Prompt di una scelta singola/multipla che il modello pone all'utente. */
+export interface ChoicePromptPayload {
+  question: string;
+  multi: boolean;
+  options: string[];
+}
+
+/** Proposta di salvataggio di un segreto nel vault. */
+export interface VaultProposePayload {
+  category: string;
+  label: string;
+  redacted_preview: string;
+  pending_id?: string;
+}
+
+/** Rivelazione di un segreto già in vault. */
+export interface VaultRevealPayload {
+  record_id: string;
+  category: string;
+  label: string;
+  redacted_preview: string;
+}
+
+/** Richiesta di approvazione di un pagamento — snapshot immutabile. */
+export interface PaymentApprovalPayload {
+  snapshot: PaymentApprovalSnapshot;
+}
+
+/** Risultato di un tool eseguito dal modello. Contratto lasso (nessun consumer
+ *  tipizzato oggi); stringere quando recall/structured output lo richiederà. */
+export interface ToolResultPayload {
+  name?: string;
+  output?: unknown;
+}
+
+/** A1 (Piano UI): risultato di una recall RAG episodica. NON ancora renderizzato
+ *  (A2 fase recalling + A3 badge = tappe successive). `scope` rispetta l'invariant
+ *  Personale↔Progetto (recall sempre within-scope). */
+export interface RecallHitPayload {
+  ref: string;
+  text: string;
+  score: number;
+  type: string;
+}
+export interface RecallEventPayload {
+  query: string;
+  hits: RecallHitPayload[];
+  scope: "personal" | "project";
+}
+
 export type CoreChatStreamEvent =
   | CoreChatStreamDelta
   | { type: "reasoning"; request_id: string; text: string }
   | { type: "activity"; request_id: string; text: string }
   | { type: "plan_update"; request_id: string; markdown: string }
-  | { type: "choice_prompt"; request_id: string; payload: unknown }
-  | { type: "vault_propose"; request_id: string; payload: unknown }
-  | { type: "vault_reveal"; request_id: string; payload: unknown }
-  | { type: "payment_approval"; request_id: string; payload: unknown }
-  | { type: "tool_result"; request_id: string; payload: unknown }
+  | { type: "choice_prompt"; request_id: string; payload: ChoicePromptPayload }
+  | { type: "vault_propose"; request_id: string; payload: VaultProposePayload }
+  | { type: "vault_reveal"; request_id: string; payload: VaultRevealPayload }
+  | { type: "payment_approval"; request_id: string; payload: PaymentApprovalPayload }
+  | { type: "tool_result"; request_id: string; payload: ToolResultPayload }
+  | { type: "recall"; request_id: string; payload: RecallEventPayload }
   | { type: "done"; request_id: string }
   | { type: "error"; request_id: string; message?: string };
 
@@ -4230,7 +4285,11 @@ function browserStreamEventToCoreEvent(
     case "vault_reveal":
     case "payment_approval":
     case "tool_result":
-      return { type: event.type, request_id: requestId, payload: event.payload };
+      return {
+        type: event.type,
+        request_id: requestId,
+        payload: event.payload,
+      } as CoreChatStreamEvent;
     default:
       return null;
   }

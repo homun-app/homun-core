@@ -193,7 +193,8 @@ function chatEventPartFromStream(event: CoreChatStreamEvent): ChatEventPart | nu
     case "vault_reveal":
     case "payment_approval":
     case "tool_result":
-      return { type: event.type, payload: event.payload };
+    case "recall":
+      return { type: event.type, payload: event.payload } as ChatEventPart;
     default:
       return null;
   }
@@ -217,7 +218,8 @@ function normalizeChatEventParts(parts: unknown[] | undefined): ChatEventPart[] 
       case "vault_reveal":
       case "payment_approval":
       case "tool_result":
-        return [{ type: item.type, payload: item.payload }];
+      case "recall":
+        return [{ type: item.type, payload: item.payload } as ChatEventPart];
       default:
         return [];
     }

@@ -156,9 +156,13 @@ function mapCoreChatEventParts(parts: unknown[] | null | undefined): ChatEventPa
       type === "vault_propose" ||
       type === "vault_reveal" ||
       type === "payment_approval" ||
-      type === "tool_result"
+      type === "tool_result" ||
+      type === "recall"
     ) {
-      mapped.push({ type, payload: record.payload });
+      // Ricostruiamo da `unknown` (record persistito). La validazione runtime è
+      // nei parser downstream (parseVaultProposalPayload, parseChoicePromptPayload…);
+      // qui trasportiamo il payload nel tipo dichiarato della union (B2/A1).
+      mapped.push({ type, payload: record.payload } as ChatEventPart);
     }
   }
   return mapped.length > 0 ? mapped : undefined;
