@@ -76,9 +76,11 @@ flowchart TD
      (`main.rs:12770`);
    - **semantico** denso: embedding della query (off-lock) → `MemoryFacade::search_embeddings`
      (contratto `MemoryVectorIndex`) con floor rilassato `sim >= 0.5` e top-k. La prima
-     implementazione è `ExactMemoryVectorIndex`, costruita dagli embedding SQLite esistenti
-     e cacheata per scope dentro `MemoryFacade`; `upsert_embedding` aggiorna la cache se
-     già calda. È una proiezione derivata e sostituibile, non una seconda memoria.
+     implementazione runtime è `MemoryVectorIndexCache`, costruita dagli embedding SQLite
+     esistenti e cacheata per scope dentro `MemoryFacade`; con le feature default usa
+     `UsearchMemoryVectorIndex` (coseno F32), mentre `ExactMemoryVectorIndex` resta il
+     fallback compilabile con `--no-default-features`. `upsert_embedding` aggiorna la cache
+     se già calda. È una proiezione derivata e sostituibile, non una seconda memoria.
    I due rank si fondono con **RRF (K = 60)** + boost di **importanza** (`0.012 *
    importance`) + **recency** (decay esponenziale ~30 giorni, `0.008 * exp(-age/30)`) in
    `hybrid_memory_score` (`main.rs:12706`). In testa, se pertinente, vengono inserite righe
@@ -179,13 +181,11 @@ richiesto con tool minimizzati e auditati. Vedi [vault.md](vault.md).
 - **Embedding parziali storici**: i vettori venivano scritti lazy → recall semantico
   copriva una frazione. `spawn_embedding_catchup` colma il gap a regime, ma resta dipendente
   dall'endpoint di embed.
-- **Vettoriale default ancora exact/O(N), ma dietro contratto**: la recall non legge più direttamente
+- **Vettoriale default `usearch`, dietro contratto**: la recall non legge più direttamente
   `list_embeddings` dal gateway; passa da `MemoryFacade::search_embeddings` e dal trait
-  `MemoryVectorIndex`. Oggi il backend è `ExactMemoryVectorIndex` cacheato per workspace
-  (stessa semantica cosine, meno ricostruzioni, nessun rischio packaging). Esiste anche
-  `UsearchMemoryVectorIndex` dietro feature non-default `usearch-index`: compila e passa i
-  test minimi di ranking coseno, ma resta fuori dal path runtime finche' non misuriamo bundle
-  macOS, notarization e latenza su dataset reali.
+  `MemoryVectorIndex`. Oggi il backend default è `UsearchMemoryVectorIndex` via feature
+  default `usearch-index`, cacheato per workspace come proiezione derivata dagli embedding
+  canonici SQLite. `ExactMemoryVectorIndex` resta fallback con `--no-default-features`.
 - **Consolidamento off di default** (`HOMUN_AUTO_CONSOLIDATE_HOURS=0`): senza tick attivo la
   promozione `Candidate→Confirmed` e il dedup avvengono solo lungo le altre operazioni.
 - **Provenienza / catena causale decisione→artefatto→codice→esito**: prevista, oggi parziale.

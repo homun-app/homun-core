@@ -24,7 +24,7 @@ pub struct MemoryWikiProjection {
 pub struct MemoryFacade {
     store: SQLiteMemoryStore,
     policy: MemoryPolicyEngine,
-    vector_indexes: Mutex<HashMap<String, crate::ExactMemoryVectorIndex>>,
+    vector_indexes: Mutex<HashMap<String, crate::MemoryVectorIndexCache>>,
 }
 
 impl MemoryFacade {
@@ -300,7 +300,7 @@ impl MemoryFacade {
             .map_err(|_| MemoryError::Store("memory vector index cache poisoned".to_string()))?;
         if !indexes.contains_key(&key) {
             let embeddings = self.store.list_embeddings(user_id, workspace_id)?;
-            let index = crate::ExactMemoryVectorIndex::from_embeddings(embeddings)?;
+            let index = crate::MemoryVectorIndexCache::from_embeddings(embeddings)?;
             indexes.insert(key.clone(), index);
         }
         let Some(index) = indexes.get(&key) else {
@@ -333,6 +333,19 @@ impl MemoryFacade {
             .lock()
             .map(|indexes| indexes.len())
             .unwrap_or_default()
+    }
+
+    #[doc(hidden)]
+    pub fn vector_index_backend_for_tests(
+        &self,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+    ) -> Option<&'static str> {
+        let key = vector_index_scope_key(user_id, workspace_id);
+        self.vector_indexes
+            .lock()
+            .ok()
+            .and_then(|indexes| indexes.get(&key).map(|index| index.backend_name()))
     }
 
     pub fn refs_without_embeddings(

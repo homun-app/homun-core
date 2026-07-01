@@ -169,6 +169,34 @@ fn facade_searches_embeddings_through_vector_index_contract() {
     assert!(hits[0].score > hits[1].score);
 }
 
+#[cfg(feature = "usearch-index")]
+#[test]
+fn facade_uses_usearch_as_default_vector_index_backend() {
+    let store = SQLiteMemoryStore::open_in_memory().unwrap();
+    let facade = MemoryFacade::new(store);
+    let user = UserId::new("user_1");
+    let workspace = WorkspaceId::new("workspace_1");
+    let memory_ref = MemoryRef::new(
+        MemoryRefKind::Memory,
+        user.clone(),
+        workspace.clone(),
+        "default-backend",
+    );
+
+    facade
+        .upsert_embedding(&memory_ref, &user, &workspace, "test-embed", &[1.0, 0.0])
+        .unwrap();
+    let hits = facade
+        .search_embeddings(&user, &workspace, &[1.0, 0.0], 10)
+        .unwrap();
+
+    assert_eq!(hits[0].memory_ref, memory_ref);
+    assert_eq!(
+        facade.vector_index_backend_for_tests(&user, &workspace),
+        Some("usearch")
+    );
+}
+
 #[test]
 fn facade_vector_index_cache_updates_after_embedding_upsert() {
     let store = SQLiteMemoryStore::open_in_memory().unwrap();

@@ -3,7 +3,7 @@
 > Aggiornato a OGNI sessione (vedi [METHODOLOGY.md](METHODOLOGY.md) §6). Resta **conciso**: è
 > uno *stato*, non un changelog (lo storico va in `archive/`). Da qui si riparte dopo una
 > compattazione o a inizio sessione.
-> **Ultimo aggiornamento: 2026-06-29.**
+> **Ultimo aggiornamento: 2026-07-01.**
 
 ## Dove siamo
 
@@ -733,22 +733,24 @@ GIÀ FATTO sessione 5g (NON ripartire; tutto su `main`):
   `query_embedding_timed_out=true`/`degraded=true` (`vector_scan_ms=none`), confermando il fallback
   FTS + briefing senza blocco turno. Prossimo passo: spike backend ANN persistente e packaging macOS.
 - **Memory vector index cache**: `MemoryFacade::search_embeddings` ora costruisce lazy e riusa
-  `ExactMemoryVectorIndex` per scope user/workspace; `upsert_embedding` aggiorna la cache se gia'
-  materializzata. Questo non cambia ranking/RRF e non aggiunge dipendenze native, ma toglie la
-  ricostruzione dell'indice exact a ogni recall caldo. Aggiunto test
-  `facade_vector_index_cache_updates_after_embedding_upsert`; build gateway verde.
+  l'indice vettoriale per scope user/workspace; `upsert_embedding` aggiorna la cache se gia'
+  materializzata. Questo non cambia ranking/RRF e toglie la ricostruzione dell'indice a ogni
+  recall caldo. Aggiunto test `facade_vector_index_cache_updates_after_embedding_upsert`;
+  build gateway verde.
 - **Spike ANN memoria**: provato `sqlite-vec 0.1.10-alpha.4` come feature opzionale, ma il crate
   pubblicato su crates.io non compila su macOS ARM (`sqlite-vec.c` include `sqlite-vec-diskann.c`,
   file assente nel pacchetto). La feature e la dipendenza NON sono state introdotte. Decisione
   operativa: non usare `sqlite-vec` finche' il pacchetto pubblicato non e' buildabile; prossimo
   candidato dietro lo stesso `MemoryVectorIndex` = `usearch`, oppure vendoring `sqlite-vec` solo con
   ADR esplicita.
-- **Spike ANN memoria / usearch**: introdotta feature non-default `local-first-memory/usearch-index`
-  con dipendenza opzionale `usearch 2.25.3` e backend `UsearchMemoryVectorIndex` dietro lo stesso
-  trait `MemoryVectorIndex`. Il backend mappa `MemoryRef` a chiavi `u64`, usa metrica coseno F32,
-  converte distance in score e resta fuori dal runtime default. Test verde:
-  `cargo test -p local-first-memory --features usearch-index usearch_index_returns_hits_ranked_by_cosine_similarity`.
-  Prossimo passo prima del wiring: benchmark su dataset reale + verifica peso bundle/notarization.
+- **Memory ANN default / usearch**: `local-first-memory` abilita ora di default la feature
+  `usearch-index`; `MemoryFacade` usa `MemoryVectorIndexCache`, che materializza
+  `UsearchMemoryVectorIndex` per gli scope con embedding e resta `usearch-pending` se lo scope
+  e' vuoto fino al primo upsert. `ExactMemoryVectorIndex` rimane fallback compilabile con
+  `--no-default-features`. Test verdi: `facade_uses_usearch_as_default_vector_index_backend`,
+  `cargo test -p local-first-memory`, fallback `--no-default-features` su exact + facade search.
+  Idea aperta: Postgres/pgvector e graph DB Docker hanno senso come backend remoto/dev-benchmark
+  dietro adapter, non come sostituzione immediata dello store SQLite local-first canonico.
 - **Browser live panel / espansione**: il dock `ChatComputerPanel` in modalità full ora esce dallo
   status stack e si ancora `fixed` dentro l'area chat, a destra della sidebar; il compact expand usa
   `Maximize2` e il pannello full è più largo (`min(1040px, ...)`) senza scivolare sotto il drawer.

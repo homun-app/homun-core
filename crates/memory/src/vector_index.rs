@@ -69,6 +69,82 @@ impl MemoryVectorIndex for ExactMemoryVectorIndex {
     }
 }
 
+pub enum MemoryVectorIndexCache {
+    #[cfg(feature = "usearch-index")]
+    Usearch(UsearchMemoryVectorIndex),
+    #[cfg(feature = "usearch-index")]
+    PendingUsearch,
+    Exact(ExactMemoryVectorIndex),
+}
+
+impl MemoryVectorIndexCache {
+    pub fn from_embeddings<I>(embeddings: I) -> MemoryResult<Self>
+    where
+        I: IntoIterator<Item = (MemoryRef, Vec<f32>)>,
+    {
+        #[cfg(feature = "usearch-index")]
+        {
+            return UsearchMemoryVectorIndex::from_embeddings(embeddings)
+                .map(|index| index.map(Self::Usearch).unwrap_or(Self::PendingUsearch));
+        }
+
+        #[cfg(not(feature = "usearch-index"))]
+        {
+            ExactMemoryVectorIndex::from_embeddings(embeddings).map(Self::Exact)
+        }
+    }
+
+    pub fn backend_name(&self) -> &'static str {
+        match self {
+            #[cfg(feature = "usearch-index")]
+            Self::Usearch(_) => "usearch",
+            #[cfg(feature = "usearch-index")]
+            Self::PendingUsearch => "usearch-pending",
+            Self::Exact(_) => "exact",
+        }
+    }
+}
+
+impl MemoryVectorIndex for MemoryVectorIndexCache {
+    fn upsert(&mut self, memory_ref: &MemoryRef, embedding: &[f32]) -> MemoryResult<()> {
+        match self {
+            #[cfg(feature = "usearch-index")]
+            Self::Usearch(index) => index.upsert(memory_ref, embedding),
+            #[cfg(feature = "usearch-index")]
+            Self::PendingUsearch => {
+                let mut index = UsearchMemoryVectorIndex::new(embedding.len())?;
+                index.upsert(memory_ref, embedding)?;
+                *self = Self::Usearch(index);
+                Ok(())
+            }
+            Self::Exact(index) => index.upsert(memory_ref, embedding),
+        }
+    }
+
+    fn delete(&mut self, memory_ref: &MemoryRef) -> MemoryResult<()> {
+        match self {
+            #[cfg(feature = "usearch-index")]
+            Self::Usearch(index) => index.delete(memory_ref),
+            #[cfg(feature = "usearch-index")]
+            Self::PendingUsearch => Ok(()),
+            Self::Exact(index) => index.delete(memory_ref),
+        }
+    }
+
+    fn search(&self, query: &[f32], limit: usize) -> MemoryResult<Vec<VectorHit>> {
+        match self {
+            #[cfg(feature = "usearch-index")]
+            Self::Usearch(index) => index.search(query, limit),
+            #[cfg(feature = "usearch-index")]
+            Self::PendingUsearch => {
+                validate_embedding(query)?;
+                Ok(Vec::new())
+            }
+            Self::Exact(index) => index.search(query, limit),
+        }
+    }
+}
+
 #[cfg(feature = "usearch-index")]
 pub struct UsearchMemoryVectorIndex {
     index: usearch::Index,
