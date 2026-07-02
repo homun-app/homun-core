@@ -40,6 +40,39 @@ pub enum SandboxPolicy {
     },
 }
 
+/// The resolved sandbox MODE (rootless) — the user/policy CHOICE, before a caller
+/// binds it to concrete writable roots. Roots differ per tool: `run_in_project` gets
+/// project + tool caches (`workspace_write_roots`), the file-write tools stay
+/// project-only (`jail_in_root`). Keeping the mode rootless is what lets one resolver
+/// serve both without leaking one consumer's roots into the other.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SandboxMode {
+    ReadOnly,
+    WorkspaceWrite,
+    Danger,
+}
+
+impl SandboxMode {
+    /// Forgiving parse (settings/env are user-facing strings). Anything unknown or
+    /// empty falls back to `Danger` — the current default, so an unrecognized value
+    /// never silently enables a fence.
+    pub fn parse(raw: &str) -> SandboxMode {
+        match raw.trim().to_ascii_lowercase().replace('_', "-").as_str() {
+            "read-only" | "readonly" => SandboxMode::ReadOnly,
+            "workspace-write" | "workspace" => SandboxMode::WorkspaceWrite,
+            _ => SandboxMode::Danger,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SandboxMode::ReadOnly => "read-only",
+            SandboxMode::WorkspaceWrite => "workspace-write",
+            SandboxMode::Danger => "danger",
+        }
+    }
+}
+
 /// Codex `AskForApproval` — WHEN to stop and ask (the UX axis), independent of the fence.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AskForApproval {
@@ -265,6 +298,20 @@ mod tests {
         } else {
             SandboxKind::None
         }
+    }
+
+    #[test]
+    fn sandbox_mode_parses_forgivingly_and_defaults_to_danger() {
+        assert_eq!(SandboxMode::parse("read-only"), SandboxMode::ReadOnly);
+        assert_eq!(SandboxMode::parse("readonly"), SandboxMode::ReadOnly);
+        assert_eq!(SandboxMode::parse("workspace-write"), SandboxMode::WorkspaceWrite);
+        assert_eq!(SandboxMode::parse("workspace_write"), SandboxMode::WorkspaceWrite);
+        assert_eq!(SandboxMode::parse("danger-full-access"), SandboxMode::Danger);
+        assert_eq!(SandboxMode::parse("garbage"), SandboxMode::Danger);
+        assert_eq!(SandboxMode::parse(""), SandboxMode::Danger);
+        assert_eq!(SandboxMode::ReadOnly.as_str(), "read-only");
+        assert_eq!(SandboxMode::WorkspaceWrite.as_str(), "workspace-write");
+        assert_eq!(SandboxMode::Danger.as_str(), "danger");
     }
 
     // ---- assess_tool_safety: the full truth table ------------------------------

@@ -18614,14 +18614,31 @@ struct ChatToolCtx<'a> {
     round: usize,
 }
 
-/// ADR 0023 (`docs/decisions/0023-sandbox-enforcement-and-unified-approval.md`)
-/// gate: when `HOMUN_TOOL_SAFETY=1`, the two write-confirm branches route their
-/// decision through `tool_safety::assess_tool_safety` instead of the ad-hoc
-/// boolean. Default OFF (unset / any other value) → the exact legacy boolean, so
-/// this is behavior-preserving until the flag is flipped. Kept as a fn (not a
-/// `LazyLock`) so tests can toggle the env var per case.
+/// The single source of truth for the sandbox axis. Precedence, mirroring
+/// `adaptive_floor_mode`: env override > persisted RuntimeSettings > default(`danger`).
+/// `HOMUN_TOOL_SAFETY=1` stays a back-compat alias for `workspace-write` so existing
+/// validations/tests keep meaning the same thing; `HOMUN_SANDBOX_MODE` is the explicit
+/// per-run override. Default `danger` → behavior-preserving (no fence) until a later
+/// Settings-UI task flips the persisted default.
+fn resolved_sandbox_mode() -> crate::tool_safety::SandboxMode {
+    use crate::tool_safety::SandboxMode;
+    if let Ok(m) = std::env::var("HOMUN_SANDBOX_MODE") {
+        if !m.trim().is_empty() {
+            return SandboxMode::parse(&m);
+        }
+    }
+    if std::env::var("HOMUN_TOOL_SAFETY").as_deref() == Ok("1") {
+        return SandboxMode::WorkspaceWrite;
+    }
+    SandboxMode::parse(&load_runtime_settings().sandbox_mode)
+}
+
+/// ADR 0023 gate, now DERIVED from the sandbox axis (was `HOMUN_TOOL_SAFETY==1`).
+/// Deliberately NOT influenced by the approval axis: with the default mode `danger`
+/// this returns false (legacy behavior); `HOMUN_TOOL_SAFETY=1` → `workspace-write` →
+/// true, exactly as before. Kept a fn (not LazyLock) so tests toggle env per case.
 fn tool_safety_enabled() -> bool {
-    std::env::var("HOMUN_TOOL_SAFETY").as_deref() == Ok("1")
+    resolved_sandbox_mode() != crate::tool_safety::SandboxMode::Danger
 }
 
 /// Emit an approval confirmation card and return the model-facing "AWAITING" string.
@@ -27335,16 +27352,25 @@ struct RuntimeSettings {
     /// Adaptive scaffolding floor (ADR 0018): `off` (default) | `shadow` | `on`.
     #[serde(default = "default_adaptive_floor")]
     adaptive_floor: String,
+    /// Sandbox mode (ADR 0023): `danger` (default) | `read-only` | `workspace-write`.
+    /// The persisted source for `resolved_sandbox_mode`; exposed in Settings by a later task.
+    #[serde(default = "default_sandbox_mode")]
+    sandbox_mode: String,
 }
 
 fn default_adaptive_floor() -> String {
     "off".to_string()
 }
 
+fn default_sandbox_mode() -> String {
+    "danger".to_string()
+}
+
 impl Default for RuntimeSettings {
     fn default() -> Self {
         Self {
             adaptive_floor: default_adaptive_floor(),
+            sandbox_mode: default_sandbox_mode(),
         }
     }
 }
@@ -27386,6 +27412,9 @@ async fn set_runtime_settings(
 ) -> Result<Json<RuntimeSettings>, GatewayError> {
     // Normalize so the chat path never sees an unknown mode.
     settings.adaptive_floor = normalize_adaptive_floor(&settings.adaptive_floor);
+    settings.sandbox_mode = crate::tool_safety::SandboxMode::parse(&settings.sandbox_mode)
+        .as_str()
+        .to_string();
     save_runtime_settings(&settings).map_err(|message| GatewayError {
         status: StatusCode::INTERNAL_SERVER_ERROR,
         code: "runtime_settings_save",
@@ -57254,6 +57283,29 @@ data: [DONE]\n";
         assert!(out.contains("✓ Access granted to /Users/fabio/Projects"));
         // No-op when the marker is absent (idempotent on already-rewritten text).
         assert_eq!(crate::rewrite_fs_authorize_to_done("hi", "/x"), "hi");
+    }
+
+    #[test]
+    fn resolved_sandbox_mode_precedence_env_over_default() {
+        use crate::tool_safety::SandboxMode;
+        use super::{resolved_sandbox_mode, tool_safety_enabled};
+        // Hermetic: drive every case through env so the test never depends on the
+        // developer's on-disk ~/.homun/runtime-settings.json. Env-mutation follows the
+        // Rust-2024 `unsafe` convention used elsewhere in this module.
+        unsafe {
+            std::env::remove_var("HOMUN_SANDBOX_MODE");
+            std::env::set_var("HOMUN_TOOL_SAFETY", "1");
+        }
+        assert_eq!(resolved_sandbox_mode(), SandboxMode::WorkspaceWrite); // alias
+        unsafe { std::env::set_var("HOMUN_SANDBOX_MODE", "read-only"); }
+        assert_eq!(resolved_sandbox_mode(), SandboxMode::ReadOnly); // explicit override beats alias
+        unsafe {
+            std::env::set_var("HOMUN_SANDBOX_MODE", "danger");
+            std::env::remove_var("HOMUN_TOOL_SAFETY");
+        }
+        assert_eq!(resolved_sandbox_mode(), SandboxMode::Danger); // explicit danger
+        assert!(!tool_safety_enabled()); // danger → disabled
+        unsafe { std::env::remove_var("HOMUN_SANDBOX_MODE"); } // clean up
     }
 
     #[test]
