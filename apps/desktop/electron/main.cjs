@@ -6,6 +6,12 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
+const { createLogWriter, resolveLogsDir, pipeChildStream } = require("./lib/logging.cjs");
+
+// Shell-side diagnostics (~/.homun/logs/desktop.log). Created eagerly so even
+// a failure during startup leaves a trail.
+const LOGS_DIR = resolveLogsDir();
+const desktopLog = createLogWriter(LOGS_DIR, "desktop.log");
 
 const DEV_SERVER_URL = process.env.HOMUN_DESKTOP_URL ?? "http://127.0.0.1:1420/";
 const GATEWAY_PORT = process.env.HOMUN_DESKTOP_GATEWAY_PORT ?? "18765";
@@ -300,12 +306,24 @@ function spawnGateway() {
   }
 
   if (gatewayBin) {
+    // Packaged: capture the gateway's stdout/stderr into a rotating file —
+    // "ignore" made every field bug unreproducible (no trail at all). Dev
+    // keeps "inherit" so cargo/terminal output stays visible.
+    const captureToFile = app.isPackaged || process.env.HOMUN_DESKTOP_RESOURCES_DIR;
     gatewayProcess = spawn(gatewayBin, [], {
       cwd: REPO_ROOT,
       env,
-      stdio: app.isPackaged ? "ignore" : "inherit",
+      stdio: captureToFile ? ["ignore", "pipe", "pipe"] : "inherit",
       windowsHide: true,
     });
+    if (captureToFile) {
+      const gatewayLog = createLogWriter(LOGS_DIR, "gateway.log");
+      pipeChildStream(gatewayProcess.stdout, gatewayLog);
+      pipeChildStream(gatewayProcess.stderr, gatewayLog, "err");
+      // "close" (not "exit"): exit can fire before stdio drains, and the last
+      // lines (a panic message!) are the most valuable ones.
+      gatewayProcess.once("close", () => gatewayLog.stream.end());
+    }
   } else {
     gatewayProcess = spawn("cargo", ["run", "-p", "local-first-desktop-gateway"], {
       cwd: REPO_ROOT,
@@ -315,10 +333,12 @@ function spawnGateway() {
     });
   }
 
-  gatewayProcess.on("exit", () => {
+  gatewayProcess.on("exit", (code, signal) => {
     gatewayProcess = null;
     if (!isQuitting) {
-      console.error("Desktop gateway exited unexpectedly");
+      const line = `gateway exited unexpectedly (code=${code} signal=${signal})`;
+      console.error(line);
+      desktopLog.log(line);
     }
   });
 }
