@@ -27496,14 +27496,33 @@ fn normalize_adaptive_floor(raw: &str) -> String {
     .to_string()
 }
 
+/// Merge a partial runtime-settings PATCH onto the current settings: only the top-level
+/// keys present in `patch` override; everything else is preserved. This is what makes two
+/// independent Settings controls (adaptive_floor, sandbox_mode) not clobber each other —
+/// each posts only its own field. Unknown keys in the patch are ignored (deserialized-away).
+fn merge_runtime_settings(current: &RuntimeSettings, patch: &serde_json::Value) -> RuntimeSettings {
+    // Serialize current to a JSON object, overlay the patch's top-level keys, deserialize back.
+    let mut base = serde_json::to_value(current).unwrap_or_else(|_| serde_json::json!({}));
+    if let (Some(base_obj), Some(patch_obj)) = (base.as_object_mut(), patch.as_object()) {
+        for (k, v) in patch_obj {
+            base_obj.insert(k.clone(), v.clone());
+        }
+    }
+    serde_json::from_value(base).unwrap_or_else(|_| current.clone())
+}
+
 async fn get_runtime_settings() -> Json<RuntimeSettings> {
     Json(load_runtime_settings())
 }
 
 async fn set_runtime_settings(
-    Json(mut settings): Json<RuntimeSettings>,
+    Json(patch): Json<serde_json::Value>,
 ) -> Result<Json<RuntimeSettings>, GatewayError> {
-    // Normalize so the chat path never sees an unknown mode.
+    // PATCH semantics: merge the partial body onto the persisted settings so a client that
+    // posts only its own field (e.g. `{ "adaptive_floor": "on" }`) does not reset the others.
+    let current = load_runtime_settings();
+    let mut settings = merge_runtime_settings(&current, &patch);
+    // Normalize both fields so the persisted file never holds a non-canonical value.
     settings.adaptive_floor = normalize_adaptive_floor(&settings.adaptive_floor);
     settings.sandbox_mode = crate::tool_safety::SandboxMode::parse(&settings.sandbox_mode)
         .as_str()
@@ -48198,7 +48217,8 @@ mod tests {
         inbound_action, is_auto_confirmable, is_confirmation_reply, is_internal_task_kind,
         is_low_value_source_url, is_salient_exchange, is_semantic_duplicate, jail_in_root,
         legacy_dir_action, llm_concurrency_view, mcp_error_hint, mcp_provider_slug,
-        mcp_stdio_config_from_metadata, mcp_stdio_config_to_metadata, memory_age_days, merge_plan,
+        mcp_stdio_config_from_metadata, mcp_stdio_config_to_metadata, memory_age_days,
+        merge_plan, merge_runtime_settings, RuntimeSettings,
         message_has_image_url, next_plan_stall, normalize_for_dedup, parse_plan_marker,
         parse_review_suggestion, plan_done_count, plan_incomplete_reason, plan_is_complete,
         plan_is_settled, plan_next_open, plan_stall_exhausted, plan_step_status,
@@ -48228,6 +48248,28 @@ mod tests {
     use local_first_vault::VaultStore;
     use std::collections::HashMap;
     use std::sync::{Mutex, MutexGuard};
+
+    #[test]
+    fn merge_runtime_settings_preserves_unpatched_fields() {
+        let current = RuntimeSettings {
+            adaptive_floor: "on".to_string(),
+            sandbox_mode: "danger".to_string(),
+        };
+        // Patch only sandbox_mode → adaptive_floor must be preserved.
+        let merged =
+            merge_runtime_settings(&current, &serde_json::json!({ "sandbox_mode": "read-only" }));
+        assert_eq!(merged.adaptive_floor, "on");
+        assert_eq!(merged.sandbox_mode, "read-only");
+        // Patch only adaptive_floor → sandbox_mode preserved.
+        let merged2 =
+            merge_runtime_settings(&current, &serde_json::json!({ "adaptive_floor": "off" }));
+        assert_eq!(merged2.adaptive_floor, "off");
+        assert_eq!(merged2.sandbox_mode, "danger");
+        // Empty patch → unchanged.
+        let merged3 = merge_runtime_settings(&current, &serde_json::json!({}));
+        assert_eq!(merged3.adaptive_floor, "on");
+        assert_eq!(merged3.sandbox_mode, "danger");
+    }
 
     static GATEWAY_DATA_DIR_TEST_LOCK: Mutex<()> = Mutex::new(());
 
