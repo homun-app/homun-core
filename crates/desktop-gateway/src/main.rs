@@ -27445,7 +27445,7 @@ struct RuntimeSettings {
     /// Adaptive scaffolding floor (ADR 0018): `off` (default) | `shadow` | `on`.
     #[serde(default = "default_adaptive_floor")]
     adaptive_floor: String,
-    /// Sandbox mode (ADR 0023): `danger` (default) | `read-only` | `workspace-write`.
+    /// Sandbox mode (ADR 0023): `workspace-write` (default) | `read-only` | `danger`.
     /// The persisted source for `resolved_sandbox_mode`; exposed in Settings by a later task.
     #[serde(default = "default_sandbox_mode")]
     sandbox_mode: String,
@@ -27455,8 +27455,14 @@ fn default_adaptive_floor() -> String {
     "off".to_string()
 }
 
+/// The shipped default sandbox mode. As of ADR 0023 #1 this is `workspace-write`
+/// (OS fence ON: bash runs sandboxed with writes confined to the project + tool
+/// caches, and file-writes stay project-jailed) — the honest state now that the
+/// fence covers both bash and the write tools. Selecting `danger` in Settings or
+/// `HOMUN_SANDBOX_MODE=danger` opts out. Kept as a canonical string so it round-trips
+/// through `SandboxMode::parse`.
 fn default_sandbox_mode() -> String {
-    "danger".to_string()
+    "workspace-write".to_string()
 }
 
 impl Default for RuntimeSettings {
@@ -48386,6 +48392,64 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         assert!(!status_success, "write must be denied under read-only");
         assert!(!file_exists, "file must NOT be created");
+    }
+
+    // Runtime security gate for the FLIPPED default (macOS, #[ignore]d): actually
+    // EXECUTE a fenced workspace-write command and prove the OS fence is BOTH usable
+    // (in-project write succeeds) AND enforcing (a write outside the writable root is
+    // denied). This is the key evidence that flipping the shipped default to
+    // workspace-write (ADR 0023 #1) is safe. Run with:
+    //   cargo test -p local-first-desktop-gateway \
+    //     workspace_write_allows_in_project_denies_outside -- --ignored --nocapture
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    #[ignore]
+    async fn workspace_write_allows_in_project_denies_outside() {
+        use super::build_sandbox_command;
+        use crate::tool_safety::SandboxPolicy;
+        // The workspace-write profile ALWAYS grants writes to the system temp dir
+        // (scratch), so to prove ENFORCEMENT the "outside" target must live OUTSIDE
+        // BOTH the writable project root AND $TMPDIR. Two sibling dirs under $HOME
+        // satisfy that: only the project dir is a writable root; the sibling is not.
+        let home = std::env::var("HOME").expect("HOME set on macOS test host");
+        let home = std::path::PathBuf::from(home);
+        let pid = std::process::id();
+        let project_root = home.join(format!(".homun-ww-proj-{pid}"));
+        let outside_dir = home.join(format!(".homun-ww-outside-{pid}"));
+        std::fs::create_dir_all(&project_root).unwrap();
+        std::fs::create_dir_all(&outside_dir).unwrap();
+
+        let policy = SandboxPolicy::WorkspaceWrite {
+            writable_roots: vec![project_root.clone()],
+            network_access: true,
+        };
+
+        // USABLE: an in-project write must SUCCEED.
+        let mut allow_cmd =
+            build_sandbox_command(&policy, "echo hi > allowed.txt").unwrap();
+        allow_cmd.current_dir(&project_root);
+        let allow_out = allow_cmd.output().await.unwrap();
+        let allow_success = allow_out.status.success();
+        let allowed_exists = project_root.join("allowed.txt").exists();
+
+        // ENFORCING: a write to a sibling path OUTSIDE the writable root must FAIL.
+        // Absolute path under a second $HOME dir that is NOT a writable root.
+        let outside_file = outside_dir.join("evil.txt");
+        let deny_command = format!("echo evil > {}", outside_file.display());
+        let mut deny_cmd = build_sandbox_command(&policy, &deny_command).unwrap();
+        deny_cmd.current_dir(&project_root);
+        let deny_out = deny_cmd.output().await.unwrap();
+        let deny_success = deny_out.status.success();
+        let outside_exists = outside_file.exists();
+
+        // Clean up BEFORE asserting so a failing assert cannot leak dirs under $HOME.
+        let _ = std::fs::remove_dir_all(&project_root);
+        let _ = std::fs::remove_dir_all(&outside_dir);
+
+        assert!(allow_success, "in-project write must SUCCEED under workspace-write");
+        assert!(allowed_exists, "allowed.txt must be created in the project root");
+        assert!(!deny_success, "write outside the writable root must be DENIED");
+        assert!(!outside_exists, "the outside file must NOT be created");
     }
 
     #[test]
