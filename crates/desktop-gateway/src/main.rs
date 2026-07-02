@@ -35,6 +35,9 @@ mod sandbox;
 // macOS Seatbelt (`sandbox-exec`) profile generator from a SandboxPolicy (ADR 0023,
 // step 3; pure string generation — not wired yet).
 mod seatbelt;
+// Pure parser for Codex-format patches (ADR 0023 follow-up, Task A; applier +
+// gateway wiring land in later tasks).
+mod apply_patch;
 mod task_registry;
 mod temporal;
 mod tool_exec;
