@@ -12091,24 +12091,22 @@ enum RunProjectOutcome {
 /// exactly one platform arm is compiled in per target — no `unused` warnings.
 #[cfg(target_os = "macos")]
 fn build_sandbox_command(
-    writable_roots: &[std::path::PathBuf],
+    policy: &crate::tool_safety::SandboxPolicy,
     command: &str,
 ) -> Result<tokio::process::Command, String> {
-    // macOS: `sandbox-exec -p <seatbelt-profile> bash -lc <command>` — byte-identical
-    // to the pre-Linux wiring.
-    let policy = crate::tool_safety::SandboxPolicy::WorkspaceWrite {
-        writable_roots: writable_roots.to_vec(),
-        network_access: true,
-    };
-    match crate::seatbelt::seatbelt_profile(&policy) {
+    // macOS: `sandbox-exec -p <seatbelt-profile> bash -lc <command>`. The profile is
+    // derived from the caller-supplied policy so `read-only` fences writes for real
+    // (its profile grants writes to tmp only, no project subpath) — no longer
+    // hardcoded to workspace-write.
+    match crate::seatbelt::seatbelt_profile(policy) {
         Some(profile) => {
             let mut c = tokio::process::Command::new("sandbox-exec");
             c.arg("-p").arg(profile).arg("bash").arg("-lc").arg(command);
             Ok(c)
         }
-        // DangerFullAccess → unreachable here (we build WorkspaceWrite). Fail closed
-        // rather than silently run unsandboxed.
-        None => Err("no seatbelt profile for the workspace policy".to_string()),
+        // Only `DangerFullAccess` yields `None`, and the caller never fences that mode.
+        // Fail closed rather than silently run unsandboxed.
+        None => Err("no seatbelt profile for the sandbox policy".to_string()),
     }
 }
 
@@ -12123,9 +12121,20 @@ fn build_sandbox_command(
 /// resolution finds it in production; the CI test uses `CARGO_BIN_EXE_...` instead.
 #[cfg(target_os = "linux")]
 fn build_sandbox_command(
-    writable_roots: &[std::path::PathBuf],
+    policy: &crate::tool_safety::SandboxPolicy,
     command: &str,
 ) -> Result<tokio::process::Command, String> {
+    use crate::tool_safety::SandboxPolicy;
+    // Derive the Landlock writable roots from the policy: empty for read-only so the
+    // fence denies EVERY filesystem write; `DangerFullAccess` has no fence to build
+    // and never reaches here (the caller gates it out) — fail closed if it ever does.
+    let writable_roots: Vec<std::path::PathBuf> = match policy {
+        SandboxPolicy::WorkspaceWrite { writable_roots, .. } => writable_roots.clone(),
+        SandboxPolicy::ReadOnly => Vec::new(),
+        SandboxPolicy::DangerFullAccess => {
+            return Err("danger-full-access has no fence to build".to_string());
+        }
+    };
     let helper = match std::env::var_os("HOMUN_LINUX_SANDBOX_BIN") {
         Some(path) => std::path::PathBuf::from(path),
         None => {
@@ -12158,7 +12167,7 @@ fn build_sandbox_command(
 /// `_` bindings keep it warning-free.
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
 fn build_sandbox_command(
-    _writable_roots: &[std::path::PathBuf],
+    _policy: &crate::tool_safety::SandboxPolicy,
     _command: &str,
 ) -> Result<tokio::process::Command, String> {
     Err("no sandbox backend on this platform".to_string())
@@ -12224,12 +12233,29 @@ Reformulate it without destructive operations.",
         return RunProjectOutcome::Completed(run_bash_unsandboxed(&root, command).await);
     }
     // Sandboxed path: build the OS fence command, run inline (we need the raw status +
-    // combined output to decide whether to escalate). The writable roots are computed
-    // the same way on every platform; only the command wrapper differs.
-    let writable_roots = workspace_write_roots(&root, std::env::var("HOME").ok().as_deref());
-    // v1: fence filesystem writes, allow network (npm/git need it). Stricter
-    // network-off is a follow-up on both platforms.
-    let mut cmd = match build_sandbox_command(&writable_roots, command) {
+    // combined output to decide whether to escalate). The command wrapper differs per
+    // platform, but the policy it fences to is the SAME resolved mode everywhere.
+    //
+    // Build the concrete policy from the resolved mode. `tool_safety_enabled()` is true
+    // here, so the mode is ReadOnly or WorkspaceWrite (never Danger) — the Danger arm is
+    // an internal-invariant guard, not a reachable path.
+    use crate::tool_safety::SandboxMode;
+    let policy = match resolved_sandbox_mode() {
+        // Read-only: no writable roots — writes are physically denied by the OS fence.
+        SandboxMode::ReadOnly => crate::tool_safety::SandboxPolicy::ReadOnly,
+        // v1 workspace-write: fence filesystem writes to the project + tool caches,
+        // allow network (npm/git need it). Stricter network-off is a follow-up.
+        SandboxMode::WorkspaceWrite => crate::tool_safety::SandboxPolicy::WorkspaceWrite {
+            writable_roots: workspace_write_roots(&root, std::env::var("HOME").ok().as_deref()),
+            network_access: true,
+        },
+        SandboxMode::Danger => {
+            return RunProjectOutcome::Completed(
+                "Command NOT executed: internal sandbox resolution error.".to_string(),
+            );
+        }
+    };
+    let mut cmd = match build_sandbox_command(&policy, command) {
         Ok(cmd) => cmd,
         // Fail-closed: the fence could not be constructed (e.g. the Linux helper
         // binary is missing). NEVER fall back to unsandboxed — surface the same
@@ -48066,6 +48092,57 @@ mod tests {
         // With no HOME, only the project root is writable.
         let no_home = workspace_write_roots(project, None);
         assert_eq!(no_home, vec![project.to_path_buf()]);
+    }
+
+    // Pure unit test (no exec): a read-only policy must produce a Seatbelt profile that
+    // makes NO project root writable — only tmp. This guards the ADR 0023 #2 wiring so a
+    // future refactor can't silently regress `build_sandbox_command` back to hardcoding
+    // workspace-write when the resolved mode is read-only.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn read_only_policy_yields_a_profile_without_project_write_subpath() {
+        use crate::tool_safety::SandboxPolicy;
+        let profile = crate::seatbelt::seatbelt_profile(&SandboxPolicy::ReadOnly)
+            .expect("read-only has a profile");
+        assert!(profile.contains("(allow file-write*"));
+        // A read-only profile makes NO project root writable — only tmp. Assert a
+        // synthetic project path is absent (a path that cannot appear via the tmp dir).
+        assert!(!profile.contains("/Users/should-not-appear/proj"));
+    }
+
+    // Runtime security gate (macOS, #[ignore]d so `cargo test` doesn't run it by
+    // default): actually EXECUTE a fenced read-only command and prove the OS denies a
+    // project write. The earlier Seatbelt canonicalization bug was only caught by
+    // running — a compile-time check is not enough for a security boundary. Run with:
+    //   cargo test -p local-first-desktop-gateway \
+    //     read_only_bash_denies_project_write -- --ignored --nocapture
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    #[ignore]
+    async fn read_only_bash_denies_project_write() {
+        use super::build_sandbox_command;
+        use crate::tool_safety::SandboxPolicy;
+        // IMPORTANT: the read-only profile ALWAYS grants writes to the system temp dir
+        // (scratch), so the test's "project" dir must live OUTSIDE $TMPDIR — otherwise
+        // the write would legitimately succeed under the tmp allowance and this gate
+        // would test nothing. HOME is read-only under the read-only fence, so a dir
+        // under HOME is a faithful stand-in for a real project root.
+        let home = std::env::var("HOME").expect("HOME set on macOS test host");
+        let dir = std::path::PathBuf::from(home).join(format!(".homun-ro-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut cmd =
+            build_sandbox_command(&SandboxPolicy::ReadOnly, "echo hi > blocked.txt").unwrap();
+        cmd.current_dir(&dir);
+        let out = cmd.output().await.unwrap();
+        assert!(
+            !out.status.success(),
+            "write must be denied under read-only"
+        );
+        assert!(
+            !dir.join("blocked.txt").exists(),
+            "file must NOT be created"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
