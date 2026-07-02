@@ -20,6 +20,7 @@ mod process_skills;
 // Reverse proxy for the contained computer's noVNC live view (HTTP assets + WS),
 // so a remote browser on the cloud build can watch the agent's computer.
 mod novnc_proxy;
+mod panic_log;
 mod pdf_render;
 mod plugin_packages;
 mod privacy_guard;
@@ -548,6 +549,10 @@ fn migrate_legacy_data_dir() {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // P0 observability: leave a trail for every panic, even when the shell
+    // isn't capturing stdio. Fall back to the OS temp dir if HOME is unusable.
+    panic_log::install(gateway_logs_dir().unwrap_or_else(|_| std::env::temp_dir()));
+
     // SECURITY (data at rest): make everything this process writes owner-only.
     // The personal stores (memory.sqlite, desktop-gateway.sqlite, the WhatsApp
     // session, …) are PLAINTEXT SQLite — 0644 would expose the user's memory,
@@ -46048,6 +46053,14 @@ fn gateway_database_path() -> Result<PathBuf, std::io::Error> {
 
     let base = gateway_data_dir()?;
     Ok(base.join("desktop-gateway.sqlite"))
+}
+
+/// Diagnostic logs directory (panic trail, crash marker). Lives beside the
+/// SQLite stores so the desktop shell bundles diagnostics from one root.
+fn gateway_logs_dir() -> Result<PathBuf, std::io::Error> {
+    let base = gateway_data_dir()?.join("logs");
+    fs::create_dir_all(&base)?;
+    Ok(base)
 }
 
 fn gateway_task_database_path() -> Result<PathBuf, std::io::Error> {
