@@ -361,8 +361,9 @@ plugin.json+SKILL.md+.mcp.json = la formalizzazione che manca a F0–F3), e2e. P
   chokepoint UNICO su `CapabilityFacade::call_tool` (oggi il dispatch tool è sparso su 5 `match name`).
   È il prerequisito di ADR 0023 (sandbox) e realizza fisicamente 0021. Confine = trait iniettati (non
   `AppState`). Transport staged: crate in-process (Fase A) prima, processo satellite (Fase B) poi.
-  **Proposed, non implementato.** ⚠️ Gli ADR 0021/0022/0023/0024 sono tutti **Proposed**: la direzione
-  architettturale va ratificata prima di un'estrazione da 5.700 righe.
+  **Proposed, non implementato.** ⚠️ 0021 è Accepted ma 0022/0023/0024 sono **Proposed**: la direzione
+  architettturale (memoria off-path + sandbox + estrazione motore) va ratificata prima di un'estrazione
+  da 5.700 righe.
 - **Debito pre-esistente sfiorato:** `test:ui-contract` era rosso per drift `ChatView.tsx`↔script
   (`eventParts` aggiunto a `RichMessage` da altra sessione); allineato lo script nel Task 8.
 
