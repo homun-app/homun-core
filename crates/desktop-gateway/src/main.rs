@@ -35,6 +35,9 @@ mod tool_exec;
 mod tool_safety;
 mod tool_trace_dump;
 
+// ADR 0023 tool-safety vocabulary + pure decision fn, used by the write-confirm
+// branches in `execute_chat_tool` behind `HOMUN_TOOL_SAFETY`.
+use crate::tool_safety::{AskForApproval, SafetyDecision, SandboxPolicy, assess_tool_safety};
 use axum::{
     Json, Router,
     body::Body,
@@ -18386,6 +18389,53 @@ struct ChatToolCtx<'a> {
     round: usize,
 }
 
+/// ADR 0023 (`docs/decisions/0023-sandbox-enforcement-and-unified-approval.md`)
+/// gate: when `HOMUN_TOOL_SAFETY=1`, the two write-confirm branches route their
+/// decision through `tool_safety::assess_tool_safety` instead of the ad-hoc
+/// boolean. Default OFF (unset / any other value) → the exact legacy boolean, so
+/// this is behavior-preserving until the flag is flipped. Kept as a fn (not a
+/// `LazyLock`) so tests can toggle the env var per case.
+fn tool_safety_enabled() -> bool {
+    std::env::var("HOMUN_TOOL_SAFETY").as_deref() == Ok("1")
+}
+
+/// Emit an approval confirmation card and return the model-facing "AWAITING" string.
+/// Verbatim unification of the MCP and Composio confirmation blocks — the only
+/// per-family differences are the marker delimiters and the human label. The `card`
+/// text is byte-identical to what both inline blocks produced before (same prefix,
+/// same marker JSON, trailing `\n`), so the resume flow that parses the marker is
+/// unaffected. Side-effects (push to `accumulated`, stream the delta, set
+/// `pending_confirm`) are preserved in the same order.
+async fn emit_approval_card(
+    ctx: &mut ChatToolCtx<'_>,
+    marker_open: &str,
+    marker_close: &str,
+    name: &str,
+    label: &str,
+    args_val: &serde_json::Value,
+) -> String {
+    let approval =
+        create_pending_approval(ctx.state, name, args_val, label, ctx.thread_id, true);
+    let marker = match approval.as_ref() {
+        Some(approval) => serde_json::json!({
+            "approval_id": approval.approval_id,
+            "tool": name,
+            "arguments": args_val,
+        }),
+        None => serde_json::json!({ "tool": name, "arguments": args_val }),
+    }
+    .to_string();
+    let card = format!(
+        "\n\nI need your confirmation for the action below.\n{marker_open}{marker}{marker_close}\n"
+    );
+    ctx.accumulated.push_str(&card);
+    let _ = emit_stream_event(ctx.tx, GenerateStreamEvent::Delta { text: card }).await;
+    *ctx.pending_confirm = true;
+    "AWAITING USER CONFIRMATION: the action was proposed via a \
+confirmation card in the interface. Do NOT say it was executed."
+        .to_string()
+}
+
 /// Pure per-tool-call dispatch for the chat loop: the single `if name == … else if …`
 /// chain, extracted verbatim from `stream_chat_via_openai`'s dispatch loop (fase 1b).
 /// Turn-state is read/mutated through `ctx.<field>` exactly as inline (disjoint field
@@ -21334,36 +21384,39 @@ require your confirmation in the app. Propose it and stop."
             &mcp_tool,
             &args_val,
         );
-        if ctx.composio_writes.contains(name) && !ctx.autonomous && !workspace_scoped {
-            let approval = create_pending_approval(
-                ctx.state,
+        let is_write = ctx.composio_writes.contains(name);
+        let needs_confirm = if tool_safety_enabled() {
+            // ADR 0023: route the decision through the pure policy fn. `Never`
+            // (autonomous) → AutoApprove; `OnRequest` + unauthorized write →
+            // AskUser. Sandbox is DangerFullAccess for now (no OS fence wired
+            // yet), so this yields the same verdict as the legacy boolean.
+            let approval = if ctx.autonomous {
+                AskForApproval::Never
+            } else {
+                AskForApproval::OnRequest
+            };
+            matches!(
+                assess_tool_safety(
+                    approval,
+                    &SandboxPolicy::DangerFullAccess,
+                    is_write,
+                    workspace_scoped,
+                ),
+                SafetyDecision::AskUser
+            )
+        } else {
+            is_write && !ctx.autonomous && !workspace_scoped
+        };
+        if needs_confirm {
+            emit_approval_card(
+                ctx,
+                MCP_CONFIRM_OPEN,
+                MCP_CONFIRM_CLOSE,
                 name,
-                &args_val,
                 &mcp_tool,
-                ctx.thread_id,
-                true,
-            );
-            let marker = match approval.as_ref() {
-                Some(approval) => serde_json::json!({
-                    "approval_id": approval.approval_id,
-                    "tool": name,
-                    "arguments": args_val,
-                }),
-                None => serde_json::json!({ "tool": name, "arguments": args_val }),
-            }
-            .to_string();
-            let card = format!(
-                "\n\nI need your confirmation for the action below.\n\
-‹‹MCP_CONFIRM››{marker}‹‹/MCP_CONFIRM››\n"
-            );
-            ctx.accumulated.push_str(&card);
-            let _ =
-                emit_stream_event(ctx.tx, GenerateStreamEvent::Delta { text: card })
-                    .await;
-            *ctx.pending_confirm = true;
-            "AWAITING USER CONFIRMATION: the action was proposed via a \
-confirmation card in the interface. Do NOT say it was executed."
-                .to_string()
+                &args_val,
+            )
+            .await
         } else {
             let _ = emit_stream_event(
                 ctx.tx,
@@ -21444,44 +21497,44 @@ Connectors → MCP; do NOT claim it's done.",
         // A connected-service (Composio) tool. Writes need explicit
         // confirmation unless the user marked this tool "always allow" OR the
         // run is an autonomous automation (explicit per-automation opt-in).
-        let needs_confirm = ctx.composio_writes.contains(name)
-            && !composio_tool_allowed(name)
-            && !ctx.autonomous;
+        let is_write = ctx.composio_writes.contains(name);
+        let pre_authorized = composio_tool_allowed(name);
+        let needs_confirm = if tool_safety_enabled() {
+            // ADR 0023: same routing as the MCP branch. `pre_authorized` is the
+            // user's always-allow list; `Never` (autonomous) short-circuits to
+            // AutoApprove. Equals the legacy boolean below under DangerFullAccess.
+            let approval = if ctx.autonomous {
+                AskForApproval::Never
+            } else {
+                AskForApproval::OnRequest
+            };
+            matches!(
+                assess_tool_safety(
+                    approval,
+                    &SandboxPolicy::DangerFullAccess,
+                    is_write,
+                    pre_authorized,
+                ),
+                SafetyDecision::AskUser
+            )
+        } else {
+            is_write && !pre_authorized && !ctx.autonomous
+        };
         if needs_confirm {
             // Do NOT execute. Emit a confirmation card carrying the exact
             // action; the user runs it (once/always) via the card. The model
             // must never claim it's done — the real outcome comes from the card.
             let args_val: serde_json::Value = serde_json::from_str(args_raw)
                 .unwrap_or_else(|_| serde_json::json!({}));
-            let approval = create_pending_approval(
-                ctx.state,
+            emit_approval_card(
+                ctx,
+                COMPOSIO_CONFIRM_OPEN,
+                COMPOSIO_CONFIRM_CLOSE,
                 name,
-                &args_val,
                 &humanize_composio_tool(name),
-                ctx.thread_id,
-                true,
-            );
-            let marker = match approval.as_ref() {
-                Some(approval) => serde_json::json!({
-                    "approval_id": approval.approval_id,
-                    "tool": name,
-                    "arguments": args_val,
-                }),
-                None => serde_json::json!({ "tool": name, "arguments": args_val }),
-            }
-            .to_string();
-            let card = format!(
-                "\n\nI need your confirmation for the action below.\n\
-‹‹COMPOSIO_CONFIRM››{marker}‹‹/COMPOSIO_CONFIRM››\n"
-            );
-            ctx.accumulated.push_str(&card);
-            let _ =
-                emit_stream_event(ctx.tx, GenerateStreamEvent::Delta { text: card })
-                    .await;
-            *ctx.pending_confirm = true;
-            "AWAITING USER CONFIRMATION: the action was proposed via a \
-confirmation card in the interface. Do NOT say it was executed."
-                .to_string()
+                &args_val,
+            )
+            .await
         } else {
             let _ = emit_stream_event(
                 ctx.tx,
