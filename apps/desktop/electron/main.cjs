@@ -601,6 +601,57 @@ ipcMain.handle("lfpa:capture-page", async () => {
   }
 });
 
+// "Report a problem": builds a LOCAL archive of the diagnostics the user can
+// attach to a bug report. Privacy by design (caposaldo #3): ONLY ~/.homun/logs
+// + a small report.json (versions/specs) — NEVER the SQLite stores (memory,
+// chats, vault). Works with the gateway down — that's exactly when it's needed.
+ipcMain.handle("lfpa:feedback-bundle", async () => {
+  try {
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+    const staging = fs.mkdtempSync(path.join(os.tmpdir(), "homun-feedback-"));
+    const payload = path.join(staging, `homun-feedback-${stamp}`);
+    fs.mkdirSync(payload, { recursive: true });
+    if (fs.existsSync(LOGS_DIR)) {
+      fs.cpSync(LOGS_DIR, path.join(payload, "logs"), { recursive: true });
+    }
+    const report = {
+      generatedAt: new Date().toISOString(),
+      appVersion: app.getVersion(),
+      packaged: app.isPackaged,
+      platform: process.platform,
+      arch: process.arch,
+      electron: process.versions.electron,
+      node: process.versions.node,
+      totalMemGb: Math.round(os.totalmem() / 1e9),
+      cpuCount: os.cpus().length,
+    };
+    fs.writeFileSync(path.join(payload, "report.json"), JSON.stringify(report, null, 2));
+
+    const outDir = path.join(os.homedir(), ".homun", "feedback");
+    fs.mkdirSync(outDir, { recursive: true });
+    const archive = path.join(outDir, `homun-feedback-${stamp}.tar.gz`);
+    // System tar: bsdtar on macOS/Windows 10+, GNU tar on Linux — no new dep.
+    const tar = spawnSync("tar", ["-czf", archive, "-C", staging, path.basename(payload)], {
+      encoding: "utf8",
+    });
+    let result;
+    if (tar.status === 0) {
+      result = { ok: true, path: archive };
+    } else {
+      // No tar on PATH (rare): ship the uncompressed folder instead.
+      const fallback = path.join(outDir, path.basename(payload));
+      fs.cpSync(payload, fallback, { recursive: true });
+      result = { ok: true, path: fallback, uncompressed: true };
+    }
+    fs.rmSync(staging, { recursive: true, force: true });
+    desktopLog.log(`feedback bundle created at ${result.path}`);
+    shell.showItemInFolder(result.path);
+    return result;
+  } catch (error) {
+    return { ok: false, error: String(error?.message ?? error) };
+  }
+});
+
 // Bring the window to the front when the user clicks a system notification.
 ipcMain.handle("lfpa:focus-window", () => {
   const win = BrowserWindow.getAllWindows()[0] ?? null;

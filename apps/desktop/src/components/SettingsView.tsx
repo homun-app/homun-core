@@ -14,6 +14,7 @@ import {
   EyeOff,
   FileText,
   Folder,
+  LifeBuoy,
   MonitorPlay,
   Pencil,
   Play,
@@ -105,6 +106,7 @@ import {
   IS_DESKTOP,
   getAppVersion,
   checkDesktopUpdate,
+  createFeedbackBundle,
   installDesktopUpdate,
   onDesktopUpdateProgress,
   openDesktopUpdateDownload,
@@ -857,6 +859,19 @@ function AboutVersionRow() {
   const [progress, setProgress] = useState(0);
   // mac (signed) auto-installs; Windows/Linux (unsigned) only get a download link.
   const [canAutoInstall, setCanAutoInstall] = useState(true);
+  const [bundling, setBundling] = useState(false);
+  const [bundlePath, setBundlePath] = useState<string | null>(null);
+
+  const makeBundle = async () => {
+    setBundling(true);
+    setBundlePath(null);
+    try {
+      const r = await createFeedbackBundle();
+      if (r?.ok && r.path) setBundlePath(r.path);
+    } finally {
+      setBundling(false);
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -986,6 +1001,28 @@ function AboutVersionRow() {
         )}
 
         {error && <p className="set-hint set-hint-error">{error}</p>}
+
+        <div className="set-trow">
+          <div>
+            <div className="tt">{t("settings.feedbackTitle")}</div>
+            <div className="td">
+              {bundlePath
+                ? t("settings.feedbackDone", { path: bundlePath })
+                : t("settings.feedbackHint")}
+            </div>
+          </div>
+          <button
+            type="button"
+            className="set-btn"
+            onClick={() => void makeBundle()}
+            disabled={bundling}
+          >
+            <LifeBuoy size={14} />
+            <span style={{ marginLeft: 6 }}>
+              {bundling ? t("settings.feedbackBuilding") : t("settings.feedbackButton")}
+            </span>
+          </button>
+        </div>
       </div>
     </>
   );
