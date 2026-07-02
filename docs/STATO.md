@@ -356,9 +356,18 @@ tutti i tool effettful**. Fatto:
   build + ui-contract verdi, bash wire-identico. `d4132247`.
 - **Cleanup review nits** (spawn_blocking sul re-run, test dir cleanup, doc drift) + docs (ADR 0023 + STATO).
 **MCP/Composio = limite onesto documentato** (asse sandbox non li recinta — processi esterni, come Codex; gate = asse
-approval). **PROSSIMO (coda notturna):** **#1 Settings UI** (`sandbox_mode`+`approval_policy`) + **flip default a
-`workspace-write`** (ora onesto perché il recinto copre bash+scritture); poi **`apply_patch`** (tool-firma Codex),
-poi **orchestrazione subagenti** (design ADR + slice; priorità utente). NON toccare `check-ui-contract.mjs` (sessione vault).
+approval).
+**ADR 0023 #1 (Settings UI asse sandbox + FLIP) COMPLETO:** (0) `set_runtime_settings` fa ora **merge dei partial**
+(un controllo non clobbera l'altro; `7cce9e8e`); (1) **flip del default `danger`→`workspace-write`** — fence ON di
+default, **validato eseguendo** su macOS (`workspace_write_allows_in_project_denies_outside`: write in-progetto riesce,
+fuori-root negata; `d4f78ae7`); (2) **selector "Sandbox" in Settings › Runtime** (3 livelli + warning su `danger`,
+`setRuntimeSettings` rilassato a `Partial`, i18n en+it; `6cefd413`). Comportamento nuovo: ogni bash `run_in_project`
+gira sotto il fence di default; scritture fuori project+cache → escalation card (Codex-like). **⚠️ Smoke Electron
+app-level non eseguito headless** — consigliato prima del merge (PR draft #103).
+**PROSSIMO (coda notturna):** **#1b** = asse **approval** in Settings + wiring 4-livelli (`resolved_approval_policy`);
+poi **`apply_patch`** (tool-firma Codex: edit multi-file `*** Begin Patch` + diff card, converge su chokepoint+gate);
+poi **orchestrazione subagenti** (design ADR + slice; priorità utente esplicita). Draft PR **#103** aperta (CI verde,
+incl. **Landlock fence Linux**). NON toccare `check-ui-contract.mjs` (sessione vault).
 
 **Sessione 2026-07-02 — gap analysis production-readiness vs Codex.app + P0 IMPLEMENTATO (branch `feat/p0-production-hygiene`):**
 Analizzato il bundle distribuito di Codex (`/Users/fabio/Projects/codex/Contents`: asar estratto,

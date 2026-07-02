@@ -116,9 +116,15 @@ Base già a norma: `contextIsolation:true`, `sandbox:true`, `nodeIntegration:fal
   `landlock-fence`). MCP/Composio non recintati (processi esterni) → gated dall'asse approval (limite documentato).
   Vedi [ADR 0023](../decisions/0023-sandbox-enforcement-and-unified-approval.md).
 
+**Hardening P1 — Pilastro 1 (#1: Settings UI asse sandbox + FLIP, fatto 2026-07-03):**
+- **Default = `workspace-write`** (fence ON di default; `default_sandbox_mode()`), esposto come selector
+  "Sandbox" a 3 livelli in **Settings › Runtime** (`SandboxModeBlock`); `set_runtime_settings` fa merge dei
+  partial update (un controllo non clobbera l'altro). Ogni bash gira sotto il fence di default; scritture fuori
+  project+cache → escalation card. Validato eseguendo (macOS). Smoke Electron app-level da fare prima del merge.
+
 **Residui P1/P2 (non fatti — vincoli espliciti):**
-- **Settings UI (asse approval + esporre il mode) + flip del default a `workspace-write`** — prossimo passo
-  (il recinto è ora onesto: copre bash + scritture, quindi il flip non maschera buchi).
+- **Asse approval in Settings + wiring 4-livelli (#1b)** — esporre `approval_policy` (untrusted/on-failure/
+  on-request/never) e risolverlo (`resolved_approval_policy`) al chokepoint, sostituendo la logica autonomous-based.
 - **Firma Windows/Linux + publish automatico** (Pilastro 2) — **bloccato su input utente**: la firma
   richiede certificati/segreti (Azure Trusted Signing per Windows); l'auto-publish della release
   ribalterebbe il gate di revisione *draft* deliberato in `build.yml` → decisione di processo, non

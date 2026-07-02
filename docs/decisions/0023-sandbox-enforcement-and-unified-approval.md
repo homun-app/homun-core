@@ -9,9 +9,11 @@ validato eseguendo (macOS Seatbelt + Linux Landlock via CI). Esiste UNA sorgente
 `resolved_sandbox_mode()` (precedenza env > `RuntimeSettings.sandbox_mode` persistito > default `danger`), onorata
 da **tutti i tool effettful**: `run_in_project` (bash) costruisce la policy dal resolver (`read-only` reale),
 e `write_file`/`edit_file` sono gated al chokepoint (`read-only` → escalation card che riesegue project-jailed su
-approvazione, con gate provenance anti-RCE). Default `danger` = behavior-preserving finché il flip non è deciso.
-**Pendenti:** Settings UI (asse **approval** + esporre il mode, poi flip del default a `workspace-write`), Windows
-(approval-only), skill confirmation policies (Step 5), network-off opzionale. Spec+piano:
+approvazione, con gate provenance anti-RCE). **Aggiornamento #1 (2026-07-03):** l'asse sandbox è ora **esposto in Settings** (selector 3-livelli in
+Settings › Runtime) e il **default è flippato a `workspace-write`** (fence ON di default — onesto perché copre
+bash + scritture; `default_sandbox_mode()`), con `set_runtime_settings` che fa merge dei partial update. Validato
+eseguendo (macOS: write in-progetto ok, fuori-root negata). **Pendenti:** asse **approval** in Settings + wiring
+4-livelli (#1b), Windows (approval-only), skill confirmation policies (Step 5), network-off opzionale. Spec+piano:
 [specs/2026-07-03-sandbox-policy-resolution-design.md](../superpowers/specs/2026-07-03-sandbox-policy-resolution-design.md).
 
 Definisce il **Pilastro 1 di P1** ([confronto-codex-produzione.md](../confronto-codex-produzione.md) §3):
