@@ -30,8 +30,10 @@ Concretamente il sottosistema:
 
 Punto chiave: la skill **non è una capability eseguibile** con uno schema di
 tool proprio. È **istruzioni iniettate** nel contesto + esecuzione opportunistica
-via il sandbox generico. (Il modello tipato di capability per le skill esiste nel
-crate `capabilities` ma **non è cablato** nel loop live — vedi Divergenze.)
+via il sandbox generico. (Il provider tipato `SkillCapabilityProvider` che modellava
+la skill come tool chiamabile è stato **rimosso** in F1.b — era un errore di categoria;
+nel crate `capabilities` resta solo il *modello di metadati* skill/plugin, non un
+percorso di esecuzione. Vedi Divergenze.)
 
 ## Come funziona OGGI
 
@@ -240,14 +242,20 @@ allowed-tools: [Read, Bash] # opzionale (parsato ma NON enforced nel gateway)
 
 ## Divergenze / debolezze
 
-- **Doppio modello di skill, non unificato.** Esiste un modello **tipato** nel
-  crate `capabilities` (`SkillManifest`, `SkillInstallRecord`,
-  `SkillCapabilityProvider`, store SQLite `skill_plugin.rs`) con tool, trust
-  level, scoping user/workspace, `manifest_hash`. **Non è cablato nel loop live**:
-  il gateway usa il percorso filesystem (`skills.rs` + `use_skill` +
-  `run_in_sandbox`). `SkillCapabilityProvider::call_tool` ritorna sempre
-  `skill_execution_unavailable` (`skill_plugin.rs:449`). Le due metà vanno
-  riconciliate (il registry tipato è la direzione, oggi è dormiente).
+- **~~Doppio modello di skill~~ → RISOLTO (F1.b, 2026-06-28).** C'era un secondo
+  percorso di **esecuzione** tipato: `SkillCapabilityProvider` (in `skill_plugin.rs`)
+  esponeva i tool del manifest come capability chiamabili, ma `call_tool` ritornava
+  **sempre** `skill_execution_unavailable` — un errore di categoria (una skill è prosa
+  che il modello *segue*, non un tool tipato; vedi *Perché è così*). Il provider e il suo
+  costruttore `enabled_skill_providers` sono stati **rimossi**: l'**unico** percorso di
+  esecuzione skill è quello filesystem del gateway (`skills.rs` + `use_skill` +
+  `run_in_sandbox`). Il modello **tipato di metadati** (`SkillManifest`,
+  `SkillInstallRecord`, trust/scoping, `manifest_hash`, plugin manifests) **resta** in
+  `skill_plugin.rs` come *store di soli metadati* — la fondazione futura per la
+  distribuzione firmata (plugins.md WS9), **non** un provider di esecuzione parallelo.
+  Caposaldo #5 ripristinato sul lato esecuzione. *(Nota: lo store metadati è ancora una
+  SQLite separata e non cablata; il suo eventuale wiring/convergenza è lavoro plugins/WS9,
+  fuori da F1.)*
 - **`allowed-tools` non enforced.** Il frontmatter è parsato ed esposto ma il
   gateway non lo usa per restringere i tool concessi alla skill.
 - **Hash di seeding non-crittografico.** `skill_tree_hash` usa `DefaultHasher`
@@ -296,8 +304,10 @@ allowed-tools: [Read, Bash] # opzionale (parsato ma NON enforced nel gateway)
 - `crates/desktop-gateway/src/sandbox.rs` — `container_skill_dir` (`:66`),
   `sync_skill` (`:671`), `run_command` (`:691`), contained computer.
 - `crates/desktop-gateway/src/process_skills.rs` — bridge addon (process-skill).
-- `crates/capabilities/src/skill_plugin.rs` — modello tipato + store SQLite
-  (`SkillManifest`, `SkillCapabilityProvider`) — **non cablato nel loop live**.
+- `crates/capabilities/src/skill_plugin.rs` — store SQLite di **soli metadati**
+  skill/plugin (`SkillManifest`, `SkillInstallRecord`, `PluginManifest`, trust/scoping).
+  Il provider di esecuzione `SkillCapabilityProvider` è stato rimosso (F1.b); lo store
+  metadati resta come fondazione futura (plugins.md WS9), non cablato nel loop live.
 - `crates/capabilities/src/types.rs` — `SkillManifest`, `SkillInstallRecord`,
   `manifest_hash` (`:567`).
 - `crates/process-skill/src/lib.rs` — addon (trigger/steps/approval + contratto),

@@ -4,7 +4,15 @@ Date: 2026-06-21
 
 ## Status
 
-Proposed. Estende e completa la [0008](0008-orchestrator-brain-single-planner.md)
+> **EMENDATA dalla [0021](0021-single-guarded-loop-planning-as-tool.md) (2026-06-29).** L'**obiettivo**
+> di questa ADR è confermato (l'harness possiede il control flow; deve reggere sul tier locale/debole).
+> Il **meccanismo** è corretto: niente motore plan-execute separato, e niente slot-filling JSON
+> sull'intero turno (l'evidenza — *"Let Me Speak Freely?"*, *"The Format Tax"* — mostra che forzare
+> l'output strutturato **danneggia il ragionamento** dei modelli deboli; il degrado entra dal *prompt*,
+> non dal decoder). Si realizza con **un loop unico guardato** + constrained decoding solo
+> sull'estrazione finale del tool. Vedi la 0021.
+
+Proposed (originale). Estende e completa la [0008](0008-orchestrator-brain-single-planner.md)
 (un solo orchestratore in produzione) aggiungendo il requisito mancante:
 **l'orchestrazione deve reggere anche con modelli deboli/locali**, non solo con i
 frontier (Claude/GPT/Gemini).

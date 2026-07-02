@@ -4,12 +4,13 @@ use local_first_capabilities::{
     WorkspaceId,
 };
 use local_first_orchestrator::{
-    ExecutionPlan, MemoryContextSnippet, OrchestratorBrain, OrchestratorBudgets,
+    DriveStepStatus, ExecutionPlan, MemoryContextSnippet, OrchestratorBrain, OrchestratorBudgets,
     OrchestratorRequest, OrchestratorRoute, PlanStep, PlanStepKind, StaticMemoryContextProvider,
-    StepExecutionPolicy, ToolSearchIndexStore,
+    StepExecutionPolicy,
 };
 use local_first_subagents::{
-    GenerateJsonRequest, GenerateJsonResponse, JsonRuntime, RuntimeClientError, TokenMetrics,
+    AgentId, GenerateJsonRequest, GenerateJsonResponse, JsonRuntime, RuntimeClientError,
+    TokenMetrics,
 };
 use local_first_task_runtime::TaskStore;
 
@@ -443,6 +444,255 @@ fn brain_queues_browser_actions_even_when_the_planner_marks_them_immediate() {
     assert_eq!(outcome.enqueued_tasks[0].tool_name, "browser.act");
 }
 
+#[test]
+fn drive_runs_capability_steps_in_turn_and_marks_done_after_verify() {
+    // The synchronous driver (ADR 0020) executes each step through the real
+    // facade in-turn and marks done only after verify — no planner roundtrip, no
+    // durable task enqueue. Contrast brain_runs_static_execution_plan_*, which
+    // ENQUEUES the same kind of step as a background task.
+    let runtime = StubRuntime::new(vec![]);
+    let mut brain = brain(
+        runtime,
+        vec![tool(
+            "calendar.search",
+            "Search calendar events",
+            ActionClass::Read,
+            CapabilityProviderKind::Native,
+        )],
+    );
+    let plan = ExecutionPlan {
+        route: OrchestratorRoute::CapabilityCall,
+        direct_answer: None,
+        plan_propose: None,
+        steps: vec![drive_step(
+            "find",
+            PlanStepKind::CapabilityCall,
+            &[],
+            Some(("calendar", "calendar.search")),
+        )],
+        needs_more_tools: None,
+    };
+
+    let out = brain.drive(&request("Cerca lo standup"), &plan).unwrap();
+
+    assert!(out.all_done());
+    assert_eq!(out.done_step_ids(), vec!["find"]);
+    // No planner call — the plan was supplied, the driver only executed it.
+    assert!(brain.runtime().requests().is_empty());
+    // The REAL provider ran: the configured calendar.search response flowed out.
+    let result = &out.results[0];
+    assert_eq!(result.status, DriveStepStatus::Done);
+    assert_eq!(
+        result.outcome.as_ref().unwrap().output,
+        serde_json::json!({"events": ["standup"]})
+    );
+    // In-turn driving does NOT enqueue durable tasks (it executed synchronously).
+    assert!(
+        brain
+            .task_store()
+            .list_tasks(&task_user(), &task_workspace())
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn drive_runs_subagent_step_via_agentic_loop_then_dependent() {
+    // A SubagentTask now runs the bounded agentic loop (read/gather). With a stub
+    // that finishes on the first turn, the subagent reaches Done and its dependent
+    // capability step then runs — the DAG flows through both step kinds.
+    let runtime = StubRuntime::new(vec![
+        // The harness forbids finishing empty-handed: gather once, then finish.
+        serde_json::json!({"action": "use_tool", "tool_name": "calendar.search"}),
+        serde_json::json!({"query": "standup"}), // arg-fill for calendar.search
+        serde_json::json!({"action": "finish", "summary": "found the standup window"}),
+    ]);
+    let mut brain = brain(
+        runtime,
+        vec![tool(
+            "calendar.search",
+            "Search calendar events",
+            ActionClass::Read,
+            CapabilityProviderKind::Native,
+        )],
+    );
+    let plan = ExecutionPlan {
+        route: OrchestratorRoute::MixedWorkflow,
+        direct_answer: None,
+        plan_propose: None,
+        steps: vec![
+            drive_step("gather", PlanStepKind::SubagentTask, &[], None),
+            drive_step(
+                "use",
+                PlanStepKind::CapabilityCall,
+                &["gather"],
+                Some(("calendar", "calendar.search")),
+            ),
+        ],
+        needs_more_tools: None,
+    };
+
+    let out = brain.drive(&request("Indaga e poi cerca"), &plan).unwrap();
+
+    assert!(out.all_done());
+    let gather = out.results.iter().find(|r| r.step_id == "gather").unwrap();
+    assert_eq!(gather.status, DriveStepStatus::Done);
+    assert_eq!(
+        gather.outcome.as_ref().unwrap().output["summary"],
+        "found the standup window"
+    );
+    let use_step = out.results.iter().find(|r| r.step_id == "use").unwrap();
+    assert_eq!(use_step.status, DriveStepStatus::Done);
+}
+
+#[test]
+fn drive_fills_empty_arguments_via_model_then_executes() {
+    // The planner produces the plan SHAPE with EMPTY arguments (ADR 0020 P1: it
+    // owns the plan, not the per-call args). The executor asks the model to fill
+    // them, CONSTRAINED to the tool's input schema, then executes — model fills
+    // the slot, harness owns the call (caposaldo #2/#6, ADR 0016 Pilastro 3).
+    let runtime = StubRuntime::new(vec![serde_json::json!({"query": "standup"})]);
+    let mut brain = brain(
+        runtime,
+        vec![tool(
+            "calendar.search",
+            "Search calendar events",
+            ActionClass::Read,
+            CapabilityProviderKind::Native,
+        )],
+    );
+    let mut empty = drive_step(
+        "find",
+        PlanStepKind::CapabilityCall,
+        &[],
+        Some(("calendar", "calendar.search")),
+    );
+    empty.arguments = serde_json::Value::Null; // planner-seed shape: no args
+    let plan = ExecutionPlan {
+        route: OrchestratorRoute::CapabilityCall,
+        direct_answer: None,
+        plan_propose: None,
+        steps: vec![empty],
+        needs_more_tools: None,
+    };
+
+    let out = brain.drive(&request("Cerca lo standup"), &plan).unwrap();
+
+    assert!(out.all_done());
+    // The model was asked exactly once to fill the args, constrained to the schema.
+    let requests = brain.runtime().requests();
+    assert_eq!(requests.len(), 1);
+    assert!(requests[0].json_schema.is_some());
+    // Execution happened with the filled args (the real provider's response flowed).
+    assert_eq!(
+        out.results[0].outcome.as_ref().unwrap().output,
+        serde_json::json!({"events": ["standup"]})
+    );
+}
+
+#[test]
+fn drive_skips_model_call_when_arguments_already_concrete() {
+    // Concrete args (static/declarative plans) must NOT trigger a model call: the
+    // executor uses them as-is. Proves the arg-fill is only for empty slots.
+    let runtime = StubRuntime::new(vec![]); // empty: any generate_json would panic
+    let mut brain = brain(
+        runtime,
+        vec![tool(
+            "calendar.search",
+            "Search calendar events",
+            ActionClass::Read,
+            CapabilityProviderKind::Native,
+        )],
+    );
+    let plan = ExecutionPlan {
+        route: OrchestratorRoute::CapabilityCall,
+        direct_answer: None,
+        plan_propose: None,
+        steps: vec![drive_step(
+            "find",
+            PlanStepKind::CapabilityCall,
+            &[],
+            Some(("calendar", "calendar.search")),
+        )],
+        needs_more_tools: None,
+    };
+
+    let out = brain.drive(&request("Cerca lo standup"), &plan).unwrap();
+
+    assert!(out.all_done());
+    // No model roundtrip — args were already present.
+    assert!(brain.runtime().requests().is_empty());
+}
+
+#[test]
+fn drive_resolves_crammed_tool_name_at_execution_like_validation() {
+    // A weak model crammed arguments into tool_name (the gemma4 failure mode,
+    // caposaldo #11). validate_plan tolerates it; execution must resolve the SAME
+    // way, not fail — otherwise a plan validates yet cannot run.
+    let runtime = StubRuntime::new(vec![]);
+    let mut brain = brain(
+        runtime,
+        vec![tool(
+            "calendar.search",
+            "Search calendar events",
+            ActionClass::Read,
+            CapabilityProviderKind::Native,
+        )],
+    );
+    let mut crammed = drive_step(
+        "find",
+        PlanStepKind::CapabilityCall,
+        &[],
+        Some(("calendar", "calendar.search")),
+    );
+    crammed.tool_name = Some("calendar.search query=standup".to_string());
+    let plan = ExecutionPlan {
+        route: OrchestratorRoute::CapabilityCall,
+        direct_answer: None,
+        plan_propose: None,
+        steps: vec![crammed],
+        needs_more_tools: None,
+    };
+
+    let out = brain.drive(&request("Cerca lo standup"), &plan).unwrap();
+
+    assert!(out.all_done());
+    assert_eq!(
+        out.results[0].outcome.as_ref().unwrap().output,
+        serde_json::json!({"events": ["standup"]})
+    );
+}
+
+/// Builds a [`PlanStep`] for the driver tests. For `CapabilityCall` pass the
+/// `(provider, tool)`; for `SubagentTask` the required agent/goal/contract are
+/// filled so `validate_plan` accepts the step.
+fn drive_step(
+    id: &str,
+    kind: PlanStepKind,
+    depends_on: &[&str],
+    capability: Option<(&str, &str)>,
+) -> PlanStep {
+    let is_subagent = kind == PlanStepKind::SubagentTask;
+    PlanStep {
+        step_id: id.to_string(),
+        kind,
+        depends_on: depends_on.iter().map(|d| d.to_string()).collect(),
+        provider_id: capability.map(|(provider, _)| provider.to_string()),
+        tool_name: capability.map(|(_, tool)| tool.to_string()),
+        arguments: serde_json::json!({"query": "standup"}),
+        execution_policy: StepExecutionPolicy::Immediate,
+        risk_level: "low".to_string(),
+        expected_duration_seconds: 2,
+        agent_id: is_subagent.then_some(AgentId::Tool),
+        goal: is_subagent.then(|| "gather context".to_string()),
+        contract: is_subagent.then(|| "return findings".to_string()),
+        allowed_actions: vec![],
+        requires_user_approval: None,
+        timeout_seconds: None,
+        max_tokens: None,
+    }
+}
+
 fn brain(
     runtime: StubRuntime,
     tools: Vec<CapabilityTool>,
@@ -492,7 +742,6 @@ fn brain_with_memory(
         runtime,
         StaticMemoryContextProvider::new(memory),
         facade,
-        ToolSearchIndexStore::open_in_memory().unwrap(),
         TaskStore::open_in_memory().unwrap(),
     )
 }

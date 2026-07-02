@@ -9,6 +9,7 @@ import {
 } from "./gatewayConfig";
 import {
   gatewayGetJson,
+  gatewayPatchJson,
   gatewayPostJson,
   gatewayPutJson,
   gatewayDeleteJson,
@@ -63,6 +64,7 @@ export interface CoreChatMessage {
   linked_task_id: string | null;
   linked_automation_ref: string | null;
   attachments: CoreChatAttachment[];
+  event_parts?: unknown[];
 }
 
 export interface CoreChatMessageMetrics {
@@ -263,6 +265,7 @@ export interface CorePromptMessage {
   metadata: string | null;
   metrics: CoreChatMessageMetrics | null;
   attachments?: CoreChatAttachment[];
+  event_parts?: unknown[];
 }
 
 export interface CorePromptSubmissionResult {
@@ -310,9 +313,88 @@ export interface FsFilePayload {
 }
 
 export interface CoreChatStreamDelta {
+  type: "delta";
   request_id: string;
   delta: string;
 }
+
+/** B2 (Piano UI) — payload tipizzati dei ChatEventPart. Definiti qui (lower layer)
+ *  e re-esportati da `types.ts` per evitare un import circolare. Le shape vengono
+ *  dai parser runtime in ChatView (un tempo `unknown`). */
+
+/** Prompt di una scelta singola/multipla che il modello pone all'utente. */
+export interface ChoicePromptPayload {
+  question: string;
+  multi: boolean;
+  options: string[];
+}
+
+/** Proposta di salvataggio di un segreto nel vault. */
+export interface VaultProposePayload {
+  category: string;
+  label: string;
+  redacted_preview: string;
+  pending_id?: string;
+}
+
+/** Rivelazione di un segreto già in vault. */
+export interface VaultRevealPayload {
+  record_id: string;
+  category: string;
+  label: string;
+  redacted_preview: string;
+}
+
+/** Richiesta di approvazione di un pagamento — snapshot immutabile. */
+export interface PaymentApprovalPayload {
+  snapshot: PaymentApprovalSnapshot;
+}
+
+/** Risultato di un tool eseguito dal modello. Contratto lasso (nessun consumer
+ *  tipizzato oggi); stringere quando recall/structured output lo richiederà. */
+export interface ToolResultPayload {
+  name?: string;
+  output?: unknown;
+}
+
+/** A1 (Piano UI): risultato di una recall RAG episodica. NON ancora renderizzato
+ *  (A2 fase recalling + A3 badge = tappe successive). `scope` rispetta l'invariant
+ *  Personale↔Progetto (recall sempre within-scope). */
+export interface RecallHitPayload {
+  ref: string;
+  text: string;
+  score: number;
+  type: string;
+}
+
+/** D3 (Piano UI): una modifica di codice proposta dal modello (diff inline). */
+export interface DiffEventPayload {
+  path: string;
+  label?: string;
+  old?: string;
+  new: string;
+  language?: string;
+}
+export interface RecallEventPayload {
+  query: string;
+  hits: RecallHitPayload[];
+  scope: "personal" | "project";
+}
+
+export type CoreChatStreamEvent =
+  | CoreChatStreamDelta
+  | { type: "reasoning"; request_id: string; text: string }
+  | { type: "activity"; request_id: string; text: string }
+  | { type: "plan_update"; request_id: string; markdown: string }
+  | { type: "choice_prompt"; request_id: string; payload: ChoicePromptPayload }
+  | { type: "vault_propose"; request_id: string; payload: VaultProposePayload }
+  | { type: "vault_reveal"; request_id: string; payload: VaultRevealPayload }
+  | { type: "payment_approval"; request_id: string; payload: PaymentApprovalPayload }
+  | { type: "tool_result"; request_id: string; payload: ToolResultPayload }
+  | { type: "recall"; request_id: string; payload: RecallEventPayload }
+  | { type: "diff"; request_id: string; payload: DiffEventPayload }
+  | { type: "done"; request_id: string }
+  | { type: "error"; request_id: string; message?: string };
 
 export interface CorePromptExecutionPlan {
   title: string;
@@ -1821,6 +1903,168 @@ async function electronFsAuthorize(
   });
 }
 
+/** ADR 0023 — on-failure sandbox escalation: re-run a shell command that failed under
+ *  the Seatbelt workspace sandbox with FULL access (unsandboxed). `ctx` lets the backend
+ *  rewrite the originating message to a done-note so the card can't reopen. */
+async function electronRunEscalate(
+  command: string,
+  cwd: string,
+  ctx?: { threadId?: string; messageId?: string },
+): Promise<{ ok: boolean; output?: string; summary?: string }> {
+  return gatewayPostJson("/api/capabilities/run/escalate", {
+    command,
+    cwd,
+    ...(ctx?.threadId ? { thread_id: ctx.threadId } : {}),
+    ...(ctx?.messageId ? { message_id: ctx.messageId } : {}),
+  });
+}
+
+export interface VaultProposalActionInput {
+  category: string;
+  label: string;
+  redacted_preview: string;
+  pending_id?: string;
+  secret_value?: string;
+  pin?: string;
+  thread_id?: string;
+  message_id?: string;
+}
+
+export interface VaultProposalAcceptResult {
+  ok: boolean;
+  record_id: string;
+  category: string;
+  label: string;
+  redacted_preview: string;
+}
+
+export interface VaultPinStatus {
+  configured: boolean;
+}
+
+export interface VaultPinVerifyResult {
+  ok: boolean;
+}
+
+export interface VaultRecordSummary {
+  id: string;
+  category: string;
+  label: string;
+  redacted_preview: string;
+}
+
+export interface VaultRecordsListResult {
+  records: VaultRecordSummary[];
+}
+
+export interface VaultRecordUpdateInput {
+  category: string;
+  label: string;
+  secret_value?: string;
+  pin?: string;
+}
+
+export interface VaultRecordUpdateResult {
+  ok: boolean;
+  record: VaultRecordSummary;
+}
+
+export interface VaultRecordRevealResult {
+  ok: boolean;
+  record: VaultRecordSummary;
+  secret_value: string;
+}
+
+export interface PaymentApprovalSnapshot {
+  approval_id: string;
+  merchant: string;
+  domain: string;
+  amount_minor: number;
+  currency: string;
+  product_summary: string;
+  payment_method_label: string;
+  checkout_fingerprint: string;
+}
+
+export interface PaymentApprovalResult {
+  ok: boolean;
+  payment_approval_id: string;
+  expires_in_seconds: number;
+}
+
+async function electronVaultProposalAccept(
+  input: VaultProposalActionInput,
+): Promise<VaultProposalAcceptResult> {
+  return gatewayPostJson<VaultProposalAcceptResult>("/api/vault/proposals/accept", input);
+}
+
+async function electronVaultProposalDismiss(
+  input: VaultProposalActionInput,
+): Promise<{ ok: boolean }> {
+  return gatewayPostJson<{ ok: boolean }>("/api/vault/proposals/dismiss", input);
+}
+
+async function electronVaultRecords(): Promise<VaultRecordsListResult> {
+  return gatewayGetJson<VaultRecordsListResult>("/api/vault/records");
+}
+
+async function electronVaultRecordDelete(id: string): Promise<{ ok: boolean }> {
+  return gatewayDeleteJson<{ ok: boolean }>(`/api/vault/records/${encodeURIComponent(id)}`);
+}
+
+async function electronVaultRecordUpdate(
+  id: string,
+  input: VaultRecordUpdateInput,
+): Promise<VaultRecordUpdateResult> {
+  return gatewayPatchJson<VaultRecordUpdateResult>(
+    `/api/vault/records/${encodeURIComponent(id)}`,
+    input,
+  );
+}
+
+async function electronVaultRecordReveal(
+  id: string,
+  pin: string,
+): Promise<VaultRecordRevealResult> {
+  return gatewayPostJson<VaultRecordRevealResult>(
+    `/api/vault/records/${encodeURIComponent(id)}/reveal`,
+    { pin },
+  );
+}
+
+async function electronVaultPinStatus(): Promise<VaultPinStatus> {
+  return gatewayGetJson<VaultPinStatus>("/api/vault/pin/status");
+}
+
+async function electronVaultPinSetup(
+  pin: string,
+  currentPin?: string,
+): Promise<VaultPinStatus> {
+  return gatewayPostJson<VaultPinStatus>("/api/vault/pin/setup", {
+    pin,
+    ...(currentPin ? { current_pin: currentPin } : {}),
+  });
+}
+
+async function electronVaultPinVerify(pin: string): Promise<VaultPinVerifyResult> {
+  return gatewayPostJson<VaultPinVerifyResult>("/api/vault/pin/verify", { pin });
+}
+
+async function electronVaultPaymentApprovalApprove(
+  snapshot: PaymentApprovalSnapshot,
+  pin: string,
+  cvv: string,
+  ctx?: { threadId?: string; messageId?: string },
+): Promise<PaymentApprovalResult> {
+  return gatewayPostJson<PaymentApprovalResult>("/api/vault/payment-approvals/approve", {
+    snapshot,
+    pin,
+    cvv,
+    ...(ctx?.threadId ? { thread_id: ctx.threadId } : {}),
+    ...(ctx?.messageId ? { message_id: ctx.messageId } : {}),
+  });
+}
+
 /** Persists that the user connected one suggestion from an in-chat connect-card,
  *  so the item shows "Collegato" on reload instead of re-offering the action. */
 async function electronConnectMark(input: {
@@ -2502,6 +2746,29 @@ export const coreBridge = {
     op: string,
     ctx?: { threadId?: string; messageId?: string },
   ) => electronFsAuthorize(path, op, ctx),
+  runEscalate: (
+    command: string,
+    cwd: string,
+    ctx?: { threadId?: string; messageId?: string },
+  ) => electronRunEscalate(command, cwd, ctx),
+  vaultProposalAccept: (input: VaultProposalActionInput) =>
+    electronVaultProposalAccept(input),
+  vaultProposalDismiss: (input: VaultProposalActionInput) =>
+    electronVaultProposalDismiss(input),
+  vaultRecords: () => electronVaultRecords(),
+  vaultRecordDelete: (id: string) => electronVaultRecordDelete(id),
+  vaultRecordUpdate: (id: string, input: VaultRecordUpdateInput) => electronVaultRecordUpdate(id, input),
+  vaultRecordReveal: (id: string, pin: string) => electronVaultRecordReveal(id, pin),
+  vaultPinStatus: () => electronVaultPinStatus(),
+  vaultPinSetup: (pin: string, currentPin?: string) =>
+    electronVaultPinSetup(pin, currentPin),
+  vaultPinVerify: (pin: string) => electronVaultPinVerify(pin),
+  vaultPaymentApprovalApprove: (
+    snapshot: PaymentApprovalSnapshot,
+    pin: string,
+    cvv: string,
+    ctx?: { threadId?: string; messageId?: string },
+  ) => electronVaultPaymentApprovalApprove(snapshot, pin, cvv, ctx),
   connectMark: (input: {
     kind: string;
     ref: string;
@@ -2546,8 +2813,8 @@ export const coreBridge = {
     chatApi.createAutomationFromChatMessage(threadId, messageId),
   selectChatThread: (threadId: string) => chatApi.selectChatThread(threadId),
   createChatThread: (workspace?: string) => chatApi.createChatThread(workspace),
-  seedAssistantMessage: (threadId: string, text: string) =>
-    chatApi.seedAssistantMessage(threadId, text),
+  seedAssistantMessage: (threadId: string, text: string, eventParts?: unknown[]) =>
+    chatApi.seedAssistantMessage(threadId, text, eventParts),
   automations: (workspaceId?: string | null) => electronAutomations(workspaceId),
   activeStreams: () => electronActiveStreams(),
   automationEventSources: () => electronAutomationEventSources(),
@@ -2582,6 +2849,7 @@ export const coreBridge = {
   exportLocalData: () => electronExportLocalData(),
   memoryItems: () => electronMemoryItems(),
   projectGoals: (threadId: string) => electronProjectGoals(threadId),
+  projectBriefing: (threadId: string) => electronProjectBriefing(threadId),
   suggestGoals: (threadId: string) => electronSuggestGoals(threadId),
   promoteGoals: (workspace: string, refs: string[]) => electronPromoteGoals(workspace, refs),
   addGoal: (workspace: string, text: string) => electronAddGoal(workspace, text),
@@ -2816,6 +3084,8 @@ export const coreBridge = {
     ),
   listenChatStreamDelta: (handler: (payload: CoreChatStreamDelta) => void) =>
     chatApi.listenChatStreamDelta(handler),
+  listenChatStreamEvent: (handler: (payload: CoreChatStreamEvent) => void) =>
+    chatApi.listenChatStreamEvent(handler),
   submitUserPrompt: (sessionId: string, prompt: string) =>
     submitBrowserRuntimeChatPromptStream(
       `electron_prompt_${Date.now()}`,
@@ -3098,6 +3368,23 @@ export type ProjectGoalsData = {
   decisions: { reference: string; text: string }[];
 };
 
+/** ADR 0022 (Piano UI A5): project briefing — ciò che l'agente SA stabilmente del
+ *  progetto (objective/brief/open-loops/decisions/goals) con provenance cross-chat. */
+export type ProjectBriefingItem = {
+  reference: string;
+  text: string;
+  thread_id: string | null;
+};
+export type ProjectBriefingData = {
+  workspace: string;
+  is_project: boolean;
+  objective: string | null;
+  brief: { body: string } | null;
+  open_loops: ProjectBriefingItem[];
+  decisions: ProjectBriefingItem[];
+  goals: ProjectBriefingItem[];
+};
+
 /// Goals + promotable decisions for the active chat's project (resolved from threadId).
 async function electronProjectGoals(threadId: string): Promise<ProjectGoalsData | null> {
   try {
@@ -3107,6 +3394,20 @@ async function electronProjectGoals(threadId: string): Promise<ProjectGoalsData 
     );
     if (!response.ok) return null;
     return (await response.json()) as ProjectGoalsData;
+  } catch {
+    return null;
+  }
+}
+
+/// ADR 0022 (Piano UI A5): project briefing for the active chat's project.
+async function electronProjectBriefing(threadId: string): Promise<ProjectBriefingData | null> {
+  try {
+    const response = await fetch(
+      `${DESKTOP_GATEWAY_URL}/api/memory/project-briefing?thread=${encodeURIComponent(threadId)}`,
+      { headers: gatewayHeaders() },
+    );
+    if (!response.ok) return null;
+    return (await response.json()) as ProjectBriefingData;
   } catch {
     return null;
   }
@@ -3635,6 +3936,7 @@ async function submitBrowserRuntimeChatPromptStream(
   const decoder = new TextDecoder();
   let buffer = "";
   let text = "";
+  let redactedUserText: string | undefined;
   let metrics: Partial<CoreChatMessageMetrics> = {};
   let firstTokenSeconds: number | undefined;
 
@@ -3655,15 +3957,31 @@ async function submitBrowserRuntimeChatPromptStream(
             firstTokenSeconds = roundedSeconds((performance.now() - startedAt) / 1000);
           }
           text += String(event.text ?? "");
-          chatApi.notifyChatStreamDelta({ request_id: requestId, delta: String(event.text ?? "") });
+          chatApi.notifyChatStreamDelta({
+            type: "delta",
+            request_id: requestId,
+            delta: String(event.text ?? ""),
+          });
         } else if (event.type === "done") {
+          chatApi.notifyChatStreamEvent({ type: "done", request_id: requestId });
           // Done carries the AUTHORITATIVE final text (gateway-sanitized, markers/cards
           // resolved). Use it to replace the raw live-streamed preview, so token
           // streaming stays a preview and the committed message is the clean version.
           if (event.text) text = String(event.text);
+          if (typeof event.redacted_user_text === "string") {
+            redactedUserText = event.redacted_user_text;
+          }
           metrics = event.metrics ?? {};
         } else if (event.type === "error") {
+          chatApi.notifyChatStreamEvent({
+            type: "error",
+            request_id: requestId,
+            message: String(event.message ?? "Local runtime error"),
+          });
           throw new Error(String(event.message ?? "Local runtime error"));
+        } else {
+          const payload = browserStreamEventToCoreEvent(event, requestId);
+          if (payload) chatApi.notifyChatStreamEvent(payload);
         }
       }
     }
@@ -3682,7 +4000,7 @@ async function submitBrowserRuntimeChatPromptStream(
     user_message: {
       id: `browser_user_${Date.now()}`,
       role: "user",
-      text: visiblePrompt ?? prompt,
+      text: redactedUserText ?? visiblePrompt ?? prompt,
       timestamp,
       metadata: null,
       metrics: null,
@@ -3772,6 +4090,7 @@ async function resumeBrowserRuntimeChatPromptStream(
   const decoder = new TextDecoder();
   let buffer = "";
   let text = "";
+  let redactedUserText: string | undefined;
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
@@ -3783,12 +4102,28 @@ async function resumeBrowserRuntimeChatPromptStream(
       if (!event) continue;
       if (event.type === "delta") {
         text += String(event.text ?? "");
-        chatApi.notifyChatStreamDelta({ request_id: requestId, delta: String(event.text ?? "") });
+        chatApi.notifyChatStreamDelta({
+          type: "delta",
+          request_id: requestId,
+          delta: String(event.text ?? ""),
+        });
       } else if (event.type === "done") {
+        chatApi.notifyChatStreamEvent({ type: "done", request_id: requestId });
         // Done is authoritative (sanitized final text) → replace the live preview.
         if (event.text) text = String(event.text);
+        if (typeof event.redacted_user_text === "string") {
+          redactedUserText = event.redacted_user_text;
+        }
       } else if (event.type === "error") {
+        chatApi.notifyChatStreamEvent({
+          type: "error",
+          request_id: requestId,
+          message: String(event.message ?? "Local runtime error"),
+        });
         throw new Error(String(event.message ?? "Local runtime error"));
+      } else {
+        const payload = browserStreamEventToCoreEvent(event, requestId);
+        if (payload) chatApi.notifyChatStreamEvent(payload);
       }
     }
   }
@@ -3798,7 +4133,7 @@ async function resumeBrowserRuntimeChatPromptStream(
     user_message: {
       id: `browser_user_${Date.now()}`,
       role: "user",
-      text: userText,
+      text: redactedUserText ?? userText,
       timestamp,
       metadata: null,
       metrics: null,
@@ -3971,11 +4306,56 @@ function parseBrowserStreamEvent(line: string) {
   const trimmed = line.trim();
   if (!trimmed) return null;
   return JSON.parse(trimmed) as {
-    type: "delta" | "done" | "error";
+    type:
+      | "delta"
+      | "reasoning"
+      | "activity"
+      | "plan_update"
+      | "choice_prompt"
+      | "vault_propose"
+      | "vault_reveal"
+      | "payment_approval"
+      | "tool_result"
+      | "done"
+      | "error";
     text?: string;
+    markdown?: string;
+    payload?: unknown;
+    redacted_user_text?: string;
     message?: string;
     metrics?: Partial<CoreChatMessageMetrics>;
   };
+}
+
+function browserStreamEventToCoreEvent(
+  event: ReturnType<typeof parseBrowserStreamEvent>,
+  requestId: string,
+): CoreChatStreamEvent | null {
+  if (!event) return null;
+  switch (event.type) {
+    case "reasoning":
+      return { type: "reasoning", request_id: requestId, text: String(event.text ?? "") };
+    case "activity":
+      return { type: "activity", request_id: requestId, text: String(event.text ?? "") };
+    case "plan_update":
+      return {
+        type: "plan_update",
+        request_id: requestId,
+        markdown: String(event.markdown ?? ""),
+      };
+    case "choice_prompt":
+    case "vault_propose":
+    case "vault_reveal":
+    case "payment_approval":
+    case "tool_result":
+      return {
+        type: event.type,
+        request_id: requestId,
+        payload: event.payload,
+      } as CoreChatStreamEvent;
+    default:
+      return null;
+  }
 }
 
 function browserComputerSession(

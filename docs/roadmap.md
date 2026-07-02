@@ -637,6 +637,17 @@ Nessun blocco tecnico attivo. Il rischio principale è costruire altri
 deliverable prima che il sistema sappia ricordarli, ritrovarli, cancellarli e
 collegarli al perché. Per questo WS7 non è più il prossimo step.
 
+## Backlog differito
+
+- **Memory enterprise profile**: valutare un profilo Docker locale/enterprise
+  con Postgres + pgvector e, in seguito, graph DB come read-model/proiezione
+  scalabile. Non sostituisce ora il profilo desktop embedded: SQLite resta lo
+  store canonico local-first e `usearch` la proiezione vettoriale in-process.
+  Quando ripreso, va disegnato come set di adapter (`MemoryStore`,
+  `VectorIndex`, `GraphStore`) con benchmark comparabile al profilo embedded,
+  migrazione/esportazione dati e opzione di deploy remoto senza cambiare il
+  contratto del `MemoryFacade`.
+
 ## Prossima azione
 
 WS1 core e' chiusa localmente: ha write-back piano→memoria, prima

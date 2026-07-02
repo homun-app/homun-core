@@ -592,7 +592,7 @@ impl ChatStore {
         let mut stmt = self.conn.prepare(
             "select id, role, text, timestamp, metadata, metrics_json, feedback,
                     saved_memory_ref, linked_task_id, linked_automation_ref, attachments_json,
-                    parent_id
+                    event_parts_json, parent_id
                from chat_messages
               where thread_id = ?1
               order by rowid asc",
@@ -601,7 +601,7 @@ impl ChatStore {
         let mut parents: HashMap<String, Option<String>> = HashMap::new();
         let mut by_id: HashMap<String, ChatMessage> = HashMap::new();
         let rows = stmt.query_map(params![thread_id], |row| {
-            let parent: Option<String> = row.get(11)?;
+            let parent: Option<String> = row.get(12)?;
             Ok((message_from_row(row)?, parent))
         })?;
         for row in rows {
@@ -727,7 +727,8 @@ impl ChatStore {
         self.conn
             .query_row(
                 "select id, role, text, timestamp, metadata, metrics_json, feedback,
-                        saved_memory_ref, linked_task_id, linked_automation_ref
+                        saved_memory_ref, linked_task_id, linked_automation_ref, attachments_json,
+                        event_parts_json
                    from chat_messages
                   where thread_id = ?1 and id = ?2",
                 params![thread_id, message_id],
@@ -1926,6 +1927,7 @@ impl ChatStore {
                 linked_task_id text,
                 linked_automation_ref text,
                 attachments_json text,
+                event_parts_json text,
                 foreign key(thread_id) references chat_threads(thread_id) on delete cascade
             );
 
@@ -2157,8 +2159,10 @@ impl ChatStore {
         // be mirrored. This is intentionally thread-scoped: a WhatsApp/Telegram
         // conversation in the app must continue on the originating channel.
         if !self.column_exists("chat_threads", "channel_recipient")? {
-            self.conn
-                .execute("alter table chat_threads add column channel_recipient text", [])?;
+            self.conn.execute(
+                "alter table chat_threads add column channel_recipient text",
+                [],
+            )?;
         }
         // Contacts P2: per-contact persona/tone + response mode. response_mode '' =
         // inherit the channel/global default (backward compatible: existing contacts
@@ -2229,6 +2233,12 @@ impl ChatStore {
         if !self.column_exists("chat_messages", "attachments_json")? {
             self.conn.execute(
                 "alter table chat_messages add column attachments_json text",
+                [],
+            )?;
+        }
+        if !self.column_exists("chat_messages", "event_parts_json")? {
+            self.conn.execute(
+                "alter table chat_messages add column event_parts_json text",
                 [],
             )?;
         }
@@ -2759,8 +2769,8 @@ impl ChatStore {
             "insert or ignore into chat_messages (
                 id, thread_id, role, text, timestamp, metadata, metrics_json, feedback,
                 saved_memory_ref, linked_task_id, linked_automation_ref, attachments_json,
-                parent_id
-            ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                parent_id, event_parts_json
+            ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
             params![
                 message.id,
                 thread_id,
@@ -2775,6 +2785,7 @@ impl ChatStore {
                 message.linked_automation_ref,
                 attachments_to_json(message)?,
                 parent_id,
+                event_parts_to_json(message)?,
             ],
         )?;
         // Advance the active leaf only when a row was actually inserted —
@@ -2799,8 +2810,8 @@ impl ChatStore {
             "update chat_messages
                 set role = ?1, text = ?2, timestamp = ?3, metadata = ?4, metrics_json = ?5,
                     feedback = ?6, saved_memory_ref = ?7, linked_task_id = ?8,
-                    linked_automation_ref = ?9, attachments_json = ?10
-              where id = ?11 and thread_id = ?12",
+                    linked_automation_ref = ?9, attachments_json = ?10, event_parts_json = ?11
+              where id = ?12 and thread_id = ?13",
             params![
                 message.role,
                 message.text,
@@ -2812,6 +2823,7 @@ impl ChatStore {
                 message.linked_task_id,
                 message.linked_automation_ref,
                 attachments_to_json(message)?,
+                event_parts_to_json(message)?,
                 message_id,
                 thread_id,
             ],
@@ -2961,6 +2973,7 @@ fn message_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChatMessage> {
         linked_task_id: row.get(8)?,
         linked_automation_ref: row.get(9)?,
         attachments: attachments_from_row(row, 10)?,
+        event_parts: event_parts_from_row(row, 11)?,
     })
 }
 
@@ -3000,6 +3013,123 @@ fn attachments_to_json(message: &ChatMessage) -> rusqlite::Result<Option<String>
     }
 }
 
+fn event_parts_to_json(message: &ChatMessage) -> rusqlite::Result<Option<String>> {
+    if !message.event_parts.is_empty() {
+        return serde_json::to_string(&message.event_parts)
+            .map(Some)
+            .map_err(json_error);
+    }
+    let text = &message.text;
+    let text_without_reasoning = strip_marker_blocks(text, "REASONING");
+    let mut parts = Vec::new();
+    push_text_marker_part(text, &mut parts, "REASONING", "reasoning", "text");
+    push_text_marker_part(
+        &text_without_reasoning,
+        &mut parts,
+        "ACT",
+        "activity",
+        "text",
+    );
+    push_text_marker_part(
+        &text_without_reasoning,
+        &mut parts,
+        "PLAN",
+        "plan_update",
+        "markdown",
+    );
+    push_json_marker_part(
+        &text_without_reasoning,
+        &mut parts,
+        "CHOICES",
+        "choice_prompt",
+    );
+    push_json_marker_part(
+        &text_without_reasoning,
+        &mut parts,
+        "VAULT_PROPOSE",
+        "vault_propose",
+    );
+    push_json_marker_part(
+        &text_without_reasoning,
+        &mut parts,
+        "VAULT_REVEAL",
+        "vault_reveal",
+    );
+    push_json_marker_part(
+        &text_without_reasoning,
+        &mut parts,
+        "PAYMENT_APPROVAL",
+        "payment_approval",
+    );
+    if parts.is_empty() {
+        Ok(None)
+    } else {
+        serde_json::to_string(&parts).map(Some).map_err(json_error)
+    }
+}
+
+fn push_text_marker_part(
+    text: &str,
+    parts: &mut Vec<serde_json::Value>,
+    marker: &str,
+    event_type: &str,
+    field: &str,
+) {
+    for body in marker_bodies(text, marker) {
+        parts.push(serde_json::json!({
+            "type": event_type,
+            field: body,
+        }));
+    }
+}
+
+fn push_json_marker_part(
+    text: &str,
+    parts: &mut Vec<serde_json::Value>,
+    marker: &str,
+    event_type: &str,
+) {
+    for body in marker_bodies(text, marker) {
+        if let Ok(payload) = serde_json::from_str::<serde_json::Value>(&body) {
+            parts.push(serde_json::json!({
+                "type": event_type,
+                "payload": payload,
+            }));
+        }
+    }
+}
+
+fn marker_bodies(text: &str, marker: &str) -> Vec<String> {
+    let open = format!("‹‹{marker}››");
+    let close = format!("‹‹/{marker}››");
+    let mut bodies = Vec::new();
+    let mut cursor = 0usize;
+    while let Some(open_rel) = text[cursor..].find(&open) {
+        let body_start = cursor + open_rel + open.len();
+        let Some(close_rel) = text[body_start..].find(&close) else {
+            break;
+        };
+        let body_end = body_start + close_rel;
+        bodies.push(text[body_start..body_end].to_string());
+        cursor = body_end + close.len();
+    }
+    bodies
+}
+
+fn strip_marker_blocks(text: &str, marker: &str) -> String {
+    let open = format!("‹‹{marker}››");
+    let close = format!("‹‹/{marker}››");
+    let mut out = text.to_string();
+    while let Some(start) = out.find(&open) {
+        let end = match out[start..].find(&close) {
+            Some(rel) => start + rel + close.len(),
+            None => out.len(),
+        };
+        out.replace_range(start..end, "");
+    }
+    out
+}
+
 fn attachments_from_row(
     row: &rusqlite::Row<'_>,
     index: usize,
@@ -3010,6 +3140,18 @@ fn attachments_from_row(
         .map(|json| serde_json::from_str(&json).map_err(json_error))
         .transpose()
         .map(|attachments| attachments.unwrap_or_default())
+}
+
+fn event_parts_from_row(
+    row: &rusqlite::Row<'_>,
+    index: usize,
+) -> rusqlite::Result<Vec<serde_json::Value>> {
+    let event_parts_json: Option<String> = row.get(index)?;
+    event_parts_json
+        .filter(|json| !json.trim().is_empty())
+        .map(|json| serde_json::from_str(&json).map_err(json_error))
+        .transpose()
+        .map(|event_parts| event_parts.unwrap_or_default())
 }
 
 fn json_error(error: serde_json::Error) -> rusqlite::Error {
@@ -3190,6 +3332,7 @@ mod tests {
             linked_task_id: None,
             linked_automation_ref: None,
             attachments: Vec::new(),
+            event_parts: Vec::new(),
         };
         let assistant = ChatMessage {
             id: "assistant_1".to_string(),
@@ -3203,6 +3346,7 @@ mod tests {
             linked_task_id: None,
             linked_automation_ref: None,
             attachments: Vec::new(),
+            event_parts: Vec::new(),
         };
 
         let messages = store
@@ -3221,6 +3365,132 @@ mod tests {
                 .iter()
                 .any(|item| item.title == "joke")
         );
+    }
+
+    #[test]
+    fn committed_chat_message_derives_event_parts_for_legacy_markers() {
+        let store = ChatStore::in_memory().unwrap();
+        let thread = store.create_thread("default").unwrap();
+        let assistant = ChatMessage {
+            id: "assistant_with_plan".to_string(),
+            role: "assistant".to_string(),
+            text: "‹‹PLAN››- [x] Done‹‹/PLAN››".to_string(),
+            timestamp: current_timestamp_seconds(),
+            metadata: None,
+            metrics: None,
+            feedback: None,
+            saved_memory_ref: None,
+            linked_task_id: None,
+            linked_automation_ref: None,
+            attachments: Vec::new(),
+            event_parts: Vec::new(),
+        };
+
+        store.insert_message(&thread.thread_id, &assistant).unwrap();
+        let event_parts_json: Option<String> = store
+            .conn
+            .query_row(
+                "select event_parts_json from chat_messages where id = ?1",
+                params![assistant.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let parts: serde_json::Value =
+            serde_json::from_str(&event_parts_json.expect("event parts stored")).unwrap();
+        assert_eq!(parts[0]["type"], "plan_update");
+        assert_eq!(parts[0]["markdown"], "- [x] Done");
+
+        let snapshot = store.messages(&thread.thread_id).unwrap();
+        let reloaded = snapshot
+            .messages
+            .iter()
+            .find(|message| message.id == assistant.id)
+            .expect("assistant message reloaded");
+        let public_json = serde_json::to_value(reloaded).unwrap();
+        assert_eq!(public_json["event_parts"][0]["type"], "plan_update");
+        assert_eq!(public_json["event_parts"][0]["markdown"], "- [x] Done");
+    }
+
+    #[test]
+    fn committed_chat_message_ignores_card_markers_inside_reasoning() {
+        let store = ChatStore::in_memory().unwrap();
+        let thread = store.create_thread("default").unwrap();
+        let assistant = ChatMessage {
+            id: "assistant_reasoning_quotes_choice".to_string(),
+            role: "assistant".to_string(),
+            text: "‹‹REASONING››I quoted a marker: ```\n‹‹CHOICES››{\"question\":\"Hidden?\",\"options\":[\"Yes\",\"No\"]}‹‹/CHOICES››\n```‹‹/REASONING››\nVisible answer.".to_string(),
+            timestamp: current_timestamp_seconds(),
+            metadata: None,
+            metrics: None,
+            feedback: None,
+            saved_memory_ref: None,
+            linked_task_id: None,
+            linked_automation_ref: None,
+            attachments: Vec::new(),
+            event_parts: Vec::new(),
+        };
+
+        store.insert_message(&thread.thread_id, &assistant).unwrap();
+        let snapshot = store.messages(&thread.thread_id).unwrap();
+        let reloaded = snapshot
+            .messages
+            .iter()
+            .find(|message| message.id == assistant.id)
+            .expect("assistant message reloaded");
+        assert!(
+            reloaded
+                .event_parts
+                .iter()
+                .all(|part| part["type"] != "choice_prompt"),
+            "quoted CHOICES inside reasoning must not render as a live choice card: {:?}",
+            reloaded.event_parts
+        );
+        assert!(
+            reloaded
+                .event_parts
+                .iter()
+                .any(|part| part["type"] == "reasoning")
+        );
+    }
+
+    #[test]
+    fn committed_chat_message_preserves_explicit_event_parts_without_markers() {
+        let store = ChatStore::in_memory().unwrap();
+        let thread = store.create_thread("default").unwrap();
+        let assistant = ChatMessage {
+            id: "assistant_with_choices".to_string(),
+            role: "assistant".to_string(),
+            text: "Choose one.".to_string(),
+            timestamp: current_timestamp_seconds(),
+            metadata: None,
+            metrics: None,
+            feedback: None,
+            saved_memory_ref: None,
+            linked_task_id: None,
+            linked_automation_ref: None,
+            attachments: Vec::new(),
+            event_parts: vec![serde_json::json!({
+                "type": "choice_prompt",
+                "payload": {
+                    "question": "",
+                    "multi": false,
+                    "options": ["Yes", "No"]
+                }
+            })],
+        };
+
+        store
+            .append_assistant_message(&thread.thread_id, &assistant)
+            .unwrap();
+        let snapshot = store.messages(&thread.thread_id).unwrap();
+        let reloaded = snapshot
+            .messages
+            .iter()
+            .find(|message| message.id == assistant.id)
+            .expect("assistant message reloaded");
+        assert_eq!(reloaded.text, "Choose one.");
+        assert_eq!(reloaded.event_parts[0]["type"], "choice_prompt");
+        assert_eq!(reloaded.event_parts[0]["payload"]["options"][0], "Yes");
     }
 
     #[test]
@@ -3247,6 +3517,7 @@ mod tests {
             linked_task_id: None,
             linked_automation_ref: None,
             attachments: vec![attachment.clone()],
+            event_parts: Vec::new(),
         };
         let assistant = mk_message("assistant_after_file", "assistant");
 
@@ -3340,7 +3611,8 @@ mod tests {
             .set_channel_thread_recipient(&scheduled.thread_id, "task")
             .unwrap();
         assert_eq!(
-            store.thread(&scheduled.thread_id)
+            store
+                .thread(&scheduled.thread_id)
                 .unwrap()
                 .unwrap()
                 .channel_recipient
@@ -3351,7 +3623,10 @@ mod tests {
 
     #[test]
     fn channel_thread_recipient_does_not_downgrade_whatsapp_pn_to_lid() {
-        assert!(super::should_replace_channel_recipient(None, "393@s.whatsapp.net"));
+        assert!(super::should_replace_channel_recipient(
+            None,
+            "393@s.whatsapp.net"
+        ));
         assert!(super::should_replace_channel_recipient(
             Some("393@lid"),
             "393@s.whatsapp.net"
@@ -3408,6 +3683,7 @@ mod tests {
             linked_task_id: None,
             linked_automation_ref: None,
             attachments: Vec::new(),
+            event_parts: Vec::new(),
         };
         store
             .append_assistant_message(&thread.thread_id, &assistant)
@@ -3438,7 +3714,26 @@ mod tests {
             linked_task_id: None,
             linked_automation_ref: None,
             attachments: Vec::new(),
+            event_parts: Vec::new(),
         }
+    }
+
+    #[test]
+    fn message_lookup_reads_attachment_column() {
+        let store = ChatStore::in_memory().unwrap();
+        let thread = store.create_thread("default").unwrap();
+        let message = mk_message("assistant_lookup", "assistant");
+        store
+            .append_assistant_message(&thread.thread_id, &message)
+            .unwrap();
+
+        let loaded = store
+            .message(&thread.thread_id, "assistant_lookup")
+            .unwrap()
+            .expect("message");
+
+        assert_eq!(loaded.id, "assistant_lookup");
+        assert!(loaded.attachments.is_empty());
     }
 
     #[test]

@@ -5,9 +5,7 @@ use local_first_capabilities::{
 };
 use local_first_orchestrator::{
     MemoryContextSnippet, OrchestratorAuditStore, OrchestratorBrain, OrchestratorBudgets,
-    OrchestratorRequest, OrchestratorUiReadModel, StaticMemoryContextProvider,
-    ToolSearchIndexStore,
-};
+    OrchestratorRequest, OrchestratorUiReadModel, StaticMemoryContextProvider,};
 use local_first_subagents::{
     GenerateJsonRequest, GenerateJsonResponse, JsonRuntime, RuntimeClientError, TokenMetrics,
 };
@@ -186,7 +184,6 @@ fn brain_with_memory(
         runtime,
         StaticMemoryContextProvider::new(memory),
         facade,
-        ToolSearchIndexStore::open_in_memory().unwrap(),
         TaskStore::open_in_memory().unwrap(),
     )
 }

@@ -253,7 +253,13 @@ async function executeActionUnchecked(
     case "fill_form": {
       const filledRefs: string[] = [];
       const failedRefs: Array<{ ref: string; error: string }> = [];
-      for (const field of action.fields) {
+      // The chat browser_act schema is FLAT ({kind, ref, text/value}) — one micro-action —
+      // while the sidecar fill contract is an array of {ref, value} fields. A flat fill used
+      // to dead-end here (action.fields undefined → "cannot iterate undefined" → silent
+      // BROWSER_ACTION_FAILED), so kind=fill never worked from the chat loop. Coerce the flat
+      // shape into a single field so both forms execute. `text` is the chat schema's value slot.
+      const fields = resolveFillFields(action as unknown as { fields?: BrowserFormField[] } & Record<string, unknown>);
+      for (const field of fields) {
         const ref = field.ref?.trim();
         if (!ref) {
           continue;
@@ -512,6 +518,30 @@ function countBatchActions(actions: BrowserActRequest[]): number {
     }
   }
   return count;
+}
+
+/// Resolve the fields to fill from either contract shape: the canonical array
+/// (`fields:[{ref,value}]`) OR the flat chat micro-action (`{ref, text|value, type}`).
+/// The flat form is what the chat browser_act schema produces; without this the flat
+/// fill silently failed. Throws a clear contract error when neither shape is present,
+/// instead of the opaque "cannot iterate undefined" the bare `for…of` raised before.
+function resolveFillFields(action: { fields?: BrowserFormField[] } & Record<string, unknown>): BrowserFormField[] {
+  if (Array.isArray(action.fields) && action.fields.length > 0) {
+    return action.fields;
+  }
+  const ref = typeof action.ref === "string" ? action.ref.trim() : "";
+  if (ref) {
+    const raw = action.value ?? action.text;
+    const value =
+      typeof raw === "string" || typeof raw === "number" || typeof raw === "boolean" ? raw : "";
+    const type = typeof action.type === "string" ? action.type : undefined;
+    return [{ ref, value, type }];
+  }
+  throw new BrowserAutomationError({
+    code: "BROWSER_INVALID_REQUEST",
+    message: "fill requires either 'fields' (array of {ref,value}) or a flat 'ref' with 'text'/'value'",
+    retryable: false,
+  });
 }
 
 async function fillFormField(locator: Locator, field: BrowserFormField, timeout: number): Promise<void> {

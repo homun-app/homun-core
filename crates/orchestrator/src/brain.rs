@@ -1,8 +1,9 @@
 use crate::{
-    EnqueuedSubagentTaskSummary, EnqueuedTaskSummary, ExecutionPlan, MemoryContextProvider,
-    OrchestratorAudit, OrchestratorAuditStore, OrchestratorError, OrchestratorOutcome,
-    OrchestratorRequest, OrchestratorResult, OrchestratorRoute, PlanStep, PlanStepKind, ToolCard,
-    ToolSearchIndexStore,
+    CapabilityStepExecutor, DriveOutcome, EnqueuedSubagentTaskSummary, EnqueuedTaskSummary,
+    ExecutionPlan, MemoryContextProvider, OrchestratorAudit, OrchestratorAuditStore,
+    OrchestratorError, OrchestratorOutcome, OrchestratorRequest, OrchestratorResult,
+    OrchestratorRoute, PassThroughVerifier, PlanStep, PlanStepKind, ToolCard, ToolCorpus,
+    driver::drive_plan,
     execution::{
         can_execute_immediately, provider_id_for_step, task_id_for_step, task_user_id,
         task_workspace_id, tool_for_step, tool_name_for_step,
@@ -24,7 +25,7 @@ pub struct OrchestratorBrain<R, M> {
     runtime: R,
     memory: M,
     capabilities: CapabilityFacade,
-    tool_index: ToolSearchIndexStore,
+    tool_corpus: ToolCorpus,
     task_store: TaskStore,
     task_bridge: local_first_capabilities::CapabilityTaskRuntimeBridge,
     subagent_bridge: local_first_subagents::SubagentTaskRuntimeBridge,
@@ -36,14 +37,16 @@ impl<R: JsonRuntime, M: MemoryContextProvider> OrchestratorBrain<R, M> {
         runtime: R,
         memory: M,
         capabilities: CapabilityFacade,
-        tool_index: ToolSearchIndexStore,
         task_store: TaskStore,
     ) -> Self {
         Self {
             runtime,
             memory,
             capabilities,
-            tool_index,
+            // Rebuilt from the policy-visible tools at every planning entry (F1.a): no
+            // index to inject, no persistence — just an in-memory corpus ranked by the
+            // shared BM25.
+            tool_corpus: ToolCorpus::default(),
             task_store,
             task_bridge: local_first_capabilities::CapabilityTaskRuntimeBridge::new(),
             subagent_bridge: local_first_subagents::SubagentTaskRuntimeBridge::new(),
@@ -91,7 +94,7 @@ impl<R: JsonRuntime, M: MemoryContextProvider> OrchestratorBrain<R, M> {
         request: &OrchestratorRequest,
     ) -> OrchestratorResult<ExecutionPlan> {
         let access = self.capabilities.list_tools(&request.policy_context)?;
-        self.tool_index.rebuild_from_tools(&access.visible_tools)?;
+        self.tool_corpus.rebuild_from_tools(&access.visible_tools);
         let memory = self.memory.load_context(request)?;
         let (initial_cards, initial_tools) = self.load_initial_tools(request, &access)?;
         let (plan, _metrics, _rounds, _cards, loaded_tools, _budget) =
@@ -110,7 +113,7 @@ impl<R: JsonRuntime, M: MemoryContextProvider> OrchestratorBrain<R, M> {
         plan: ExecutionPlan,
     ) -> OrchestratorResult<OrchestratorOutcome> {
         let access = self.capabilities.list_tools(&request.policy_context)?;
-        self.tool_index.rebuild_from_tools(&access.visible_tools)?;
+        self.tool_corpus.rebuild_from_tools(&access.visible_tools);
         let memory = self.memory.load_context(&request)?;
         self.validate_plan(&plan, &access.visible_tools, request.budgets.max_steps)?;
         let loaded_cards = access
@@ -139,12 +142,44 @@ impl<R: JsonRuntime, M: MemoryContextProvider> OrchestratorBrain<R, M> {
         )
     }
 
+    /// Drives a validated [`ExecutionPlan`] to completion IN-TURN: every step is
+    /// executed synchronously through the shared capability facade, and the
+    /// runtime marks a step `done` only after the verify gate passes. This is the
+    /// synchronous driver of ADR 0020 — the harness owning the control flow of a
+    /// turn — as opposed to [`Self::execute_plan`], which materializes durable
+    /// background tasks and returns without driving anything.
+    ///
+    /// The plan is validated first (unique ids, every dependency preceding its
+    /// dependent) so the driver's single forward pass is a valid topological
+    /// execution. Uses the capability-only executor: `SubagentTask` steps fail
+    /// here because they need the model + the chat loop's tool dispatch (the
+    /// gateway-side executor, F3.2b). The gateway composes a richer executor over
+    /// the same [`crate::drive_plan`] seam.
+    pub fn drive(
+        &mut self,
+        request: &OrchestratorRequest,
+        plan: &ExecutionPlan,
+    ) -> OrchestratorResult<DriveOutcome> {
+        let access = self.capabilities.list_tools(&request.policy_context)?;
+        self.validate_plan(plan, &access.visible_tools, request.budgets.max_steps)?;
+        // Disjoint field borrows: the executor reads the runtime (arg-fill) and
+        // mutates the facade (call_tool) — distinct fields, so both coexist.
+        let mut executor = CapabilityStepExecutor::new(
+            &self.runtime,
+            &mut self.capabilities,
+            &request.policy_context,
+            &access.visible_tools,
+        );
+        let mut verifier = PassThroughVerifier;
+        Ok(drive_plan(plan, &mut executor, &mut verifier))
+    }
+
     fn run_inner(
         &mut self,
         request: OrchestratorRequest,
     ) -> OrchestratorResult<OrchestratorOutcome> {
         let access = self.capabilities.list_tools(&request.policy_context)?;
-        self.tool_index.rebuild_from_tools(&access.visible_tools)?;
+        self.tool_corpus.rebuild_from_tools(&access.visible_tools);
         let memory = self.memory.load_context(&request)?;
         let (initial_cards, initial_tools) = self.load_initial_tools(&request, &access)?;
         let (plan, metrics, planner_rounds, loaded_cards, loaded_tools, context_budget) =
@@ -245,14 +280,11 @@ impl<R: JsonRuntime, M: MemoryContextProvider> OrchestratorBrain<R, M> {
         }
 
         let cards = self
-            .tool_index
-            .search(&request.user_message, request.budgets.max_loaded_tools)?;
+            .tool_corpus
+            .search(&request.user_message, request.budgets.max_loaded_tools);
         let mut tools = Vec::new();
         for card in &cards {
-            if let Some(tool) = self
-                .tool_index
-                .tool_detail(&card.provider_id, &card.tool_name)?
-            {
+            if let Some(tool) = self.tool_corpus.tool_detail(&card.provider_id, &card.tool_name) {
                 tools.push(tool);
             }
         }
@@ -303,14 +335,11 @@ impl<R: JsonRuntime, M: MemoryContextProvider> OrchestratorBrain<R, M> {
             .map(|request| request.query.as_str())
             .unwrap_or(&request.user_message);
         let cards = self
-            .tool_index
-            .search(query, request.budgets.max_loaded_tools)?;
+            .tool_corpus
+            .search(query, request.budgets.max_loaded_tools);
         let mut tools = Vec::new();
         for card in &cards {
-            if let Some(tool) = self
-                .tool_index
-                .tool_detail(&card.provider_id, &card.tool_name)?
-            {
+            if let Some(tool) = self.tool_corpus.tool_detail(&card.provider_id, &card.tool_name) {
                 tools.push(tool);
             }
         }
@@ -329,13 +358,16 @@ impl<R: JsonRuntime, M: MemoryContextProvider> OrchestratorBrain<R, M> {
         loaded_tools: &[CapabilityTool],
     ) -> OrchestratorResult<(ExecutionPlan, TokenMetrics, Vec<crate::ContextBudgetUsage>)> {
         let prompt = planner_prompt(request, memory, loaded_cards, loaded_tools)?;
+        // Constrain tool_name to the actually-loaded tools (caposaldo #6): the enum stops a
+        // weak model from cramming arguments into the name. Empty → free string (planner.rs).
+        let tool_names: Vec<&str> = loaded_tools.iter().map(|tool| tool.name.as_str()).collect();
         let planner_request = GenerateJsonRequest {
             prompt: prompt.prompt,
             max_tokens: request.budgets.max_planner_tokens,
             temperature: 0.0,
             wait_if_busy: true,
             request_timeout_seconds: Some(request.budgets.planner_timeout_seconds as f64),
-            json_schema: Some(planner_schema()),
+            json_schema: Some(planner_schema(&tool_names)),
             // Only "route" is mandatory. "steps" is optional (ExecutionPlan
             // defaults it to []): a direct_answer/ask_clarification plan
             // legitimately has no steps, and the model (esp. reasoning models)
@@ -351,7 +383,18 @@ impl<R: JsonRuntime, M: MemoryContextProvider> OrchestratorBrain<R, M> {
         if !response.valid {
             return Err(OrchestratorError::Planner(response.errors.join("; ")));
         }
-        let plan = serde_json::from_value(response.json)?;
+        // Tolerant where it can be (PlanStepWire coerces weak-model field shapes);
+        // when it still can't deserialize (e.g. a required enum emitted as a map),
+        // surface the RAW planner output in the error so the failing field is
+        // diagnosable instead of an opaque "invalid type: map".
+        let plan = serde_json::from_value(response.json.clone()).map_err(|error| {
+            let raw: String = serde_json::to_string(&response.json)
+                .unwrap_or_default()
+                .chars()
+                .take(800)
+                .collect();
+            OrchestratorError::Planner(format!("plan_deserialize: {error}; raw={raw}"))
+        })?;
         Ok((plan, response.metrics, prompt.context_budget))
     }
 

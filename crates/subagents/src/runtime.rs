@@ -196,7 +196,7 @@ where
             message: message.clone(),
         });
     }
-    if let GenerateStreamEvent::Done { text, metrics } = &event {
+    if let GenerateStreamEvent::Done { text, metrics, .. } = &event {
         *final_response = Some(GenerateResponse {
             text: text.clone(),
             metrics: metrics.clone(),

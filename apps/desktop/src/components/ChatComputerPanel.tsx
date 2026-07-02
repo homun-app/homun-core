@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
+  AlertTriangle,
   Check,
   ChevronDown,
   ChevronUp,
@@ -39,6 +40,12 @@ export function ChatComputerPanel({
   // "bar" (collapsed, default) | "expanded" (live inline) | "full" (overlay)
   const [view, setView] = useState<"bar" | "expanded" | "full">("bar");
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Liveness: track WHEN the activity last changed so the panel can show "Xs ago" and a
+  // soft "may be stuck" warning — otherwise the spinner looks identical whether the agent
+  // is advancing or frozen (the "I can't tell if it's stuck" report).
+  const lastActivityAtRef = useRef<number>(Date.now());
+  const prevActivitySigRef = useRef<string>("");
+  const [now, setNow] = useState<number>(() => Date.now());
 
   useEffect(() => {
     let cancelled = false;
@@ -65,6 +72,22 @@ export function ChatComputerPanel({
       cancelled = true;
       if (pollRef.current) clearTimeout(pollRef.current);
     };
+  }, []);
+
+  // Reset the "last activity" clock whenever the step list or activity label changes.
+  useEffect(() => {
+    const liveSteps = live?.steps ?? [];
+    const sig = `${liveSteps.length}:${liveSteps[liveSteps.length - 1]?.label ?? ""}:${live?.activity ?? ""}`;
+    if (sig !== prevActivitySigRef.current) {
+      prevActivitySigRef.current = sig;
+      lastActivityAtRef.current = Date.now();
+    }
+  }, [live]);
+
+  // 1s ticker so the "Xs ago" / stall state updates while a turn runs.
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
   }, []);
 
   useEffect(() => {
@@ -111,6 +134,11 @@ export function ChatComputerPanel({
   const fullscreen = view === "full";
   const showStage = view === "expanded" || fullscreen;
   const steps = live.steps ?? [];
+  // Seconds since the last visible activity change → liveness. A soft "may be stuck"
+  // warning after the threshold (a single slow action can legitimately take ~30s, so the
+  // threshold is generous to avoid false alarms).
+  const idleSec = Math.max(0, Math.floor((now - lastActivityAtRef.current) / 1000));
+  const stalled = idleSec >= 45;
 
   return (
     <>
@@ -145,11 +173,11 @@ export function ChatComputerPanel({
           <button
             className="cc-icon-btn"
             type="button"
-            onClick={() => setView(view === "bar" ? "expanded" : "bar")}
-            title={view === "bar" ? t("chat.showBrowser") : t("chat.collapse")}
-            aria-label={view === "bar" ? t("chat.showBrowser") : t("chat.collapse")}
+            onClick={() => setView(view === "bar" ? "full" : "bar")}
+            title={view === "bar" ? t("chat.fullscreen") : t("chat.collapse")}
+            aria-label={view === "bar" ? t("chat.fullscreen") : t("chat.collapse")}
           >
-            {view === "bar" ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+            {view === "bar" ? <Maximize2 size={15} /> : <ChevronDown size={15} />}
           </button>
         </header>
 
@@ -193,9 +221,24 @@ export function ChatComputerPanel({
                     <span>{step.label}</span>
                   </li>
                 ))}
-                <li className="cc-step running">
-                  <Loader2 size={13} className="spin" />
-                  <span>{steps.length === 0 ? t("chat.starting") : t("chat.inProgress")}</span>
+                <li className={`cc-step ${stalled ? "stalled" : "running"}`}>
+                  {stalled ? (
+                    <AlertTriangle size={13} />
+                  ) : (
+                    <Loader2 size={13} className="spin" />
+                  )}
+                  <span>
+                    {steps.length === 0 ? t("chat.starting") : t("chat.inProgress")}
+                    {idleSec >= 3 && (
+                      <span className="cc-step-elapsed"> · {idleSec}s</span>
+                    )}
+                    {stalled && (
+                      <span className="cc-step-stalled">
+                        {" "}
+                        — {t("chat.maybeStuck", { defaultValue: "no progress, may be stuck" })}
+                      </span>
+                    )}
+                  </span>
                 </li>
               </ul>
             </div>

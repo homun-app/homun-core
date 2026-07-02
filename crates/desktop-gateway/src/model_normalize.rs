@@ -68,15 +68,39 @@ pub fn assistant_response(
     // model put everything inside the think block (else: empty answer committed). An explicit
     // `reasoning` (e.g. OpenAI `reasoning_content`, Ollama `message.thinking`) still wins.
     let (content, inline_reasoning) = split_reasoning_from_content(&content);
-    let reasoning = if reasoning.trim().is_empty() {
-        inline_reasoning
+    let content = content.trim();
+    let explicit_reasoning = reasoning.trim();
+    let inline_reasoning = inline_reasoning.trim();
+
+    // Decide the answer BODY and the (collapsed) reasoning TRACE, distinguishing by source:
+    //   - An EXPLICIT reasoning channel (`reasoning_content` / Ollama `message.thinking`)
+    //     is always genuine reasoning → it becomes the collapsed trace; `content` is the
+    //     answer (possibly empty — an honest "reasoned, produced no answer").
+    //   - With NO explicit channel and EMPTY content, an inline `<think>` block is most
+    //     likely a WEAK model dumping the whole ANSWER inside think → recover it as the
+    //     BODY (preserves the F0 fallback), NOT collapsed (else the user sees no answer).
+    //   - Otherwise the inline `<think>` (alongside real content) is reasoning → collapse it.
+    // The trace travels in a ‹‹REASONING››…‹‹/REASONING›› marker (like ‹‹PLAN››): the app
+    // renders it COLLAPSED and channels strip it. This stops a thinking model's trace from
+    // masquerading as the answer (the "it says it'll write in Italian but doesn't" case).
+    let (body, trace): (String, String) = if !explicit_reasoning.is_empty() {
+        let trace = if inline_reasoning.is_empty() {
+            explicit_reasoning.to_string()
+        } else {
+            format!("{explicit_reasoning}\n{inline_reasoning}")
+        };
+        (content.to_string(), trace)
+    } else if content.is_empty() {
+        (inline_reasoning.to_string(), String::new())
     } else {
-        reasoning
+        (content.to_string(), inline_reasoning.to_string())
     };
-    let content = if content.trim().is_empty() && !reasoning.trim().is_empty() {
-        reasoning
+    let content = if trace.is_empty() {
+        body
+    } else if body.is_empty() {
+        format!("‹‹REASONING››{trace}‹‹/REASONING››")
     } else {
-        content
+        format!("‹‹REASONING››{trace}‹‹/REASONING››\n{body}")
     };
     let mut message = serde_json::json!({ "role": "assistant", "content": content });
     if !tool_calls.is_empty() {
@@ -110,6 +134,108 @@ pub fn ollama_tool_call(call: &serde_json::Value, index: usize) -> serde_json::V
         "type": "function",
         "function": { "name": name, "arguments": arguments }
     })
+}
+
+/// Read `attr="value"` from a tag/block. Shared by the tool-as-text parsers below.
+fn xml_attr_value(block: &str, attr: &str) -> Option<String> {
+    let needle = format!("{attr}=\"");
+    let start = block.find(&needle)? + needle.len();
+    let rest = &block[start..];
+    let end = rest.find('"')?;
+    Some(rest[..end].to_string())
+}
+
+/// Build a JSON args object from Claude/MiniMax-style
+/// `<parameter name="p">value</parameter>` pairs inside an `<invoke>` block.
+fn parse_xml_parameters(block: &str) -> String {
+    let mut map = serde_json::Map::new();
+    let mut rest = block;
+    while let Some(pos) = rest.find("<parameter") {
+        let after = &rest[pos..];
+        let Some(name) = xml_attr_value(after, "name") else {
+            break;
+        };
+        let Some(gt) = after.find('>') else { break };
+        let value_region = &after[gt + 1..];
+        let Some(close) = value_region.find("</parameter>") else {
+            break;
+        };
+        let value = value_region[..close].trim().to_string();
+        map.insert(name, serde_json::Value::String(value));
+        rest = &value_region[close + "</parameter>".len()..];
+    }
+    serde_json::Value::Object(map).to_string()
+}
+
+/// Parse tool calls a model emitted as TEXT instead of the structured `tool_calls`
+/// field. This is the cross-model floor: weak models (minimax, Hermes/Qwen via Ollama)
+/// leak their native chat-template syntax into `content` rather than returning structured
+/// calls, so the loop would otherwise see "no tool call" and stall. Normalizing it HERE —
+/// not in the loop — keeps every way a call can arrive (structured or leaked-as-text) on
+/// the one canonical boundary (ADR 0019). Handles the two common leaked formats:
+///   - Hermes/Qwen JSON:   `<tool_call>{"name":"X","arguments":{...}}</tool_call>`
+///   - Claude/MiniMax XML: `<invoke name="X"><parameter name="p">v</parameter></invoke>`
+/// Returns `(name, arguments_json)`, filtered to `known` tool names so prose that merely
+/// mentions a tag is not mistaken for a call.
+pub fn parse_text_tool_calls(text: &str, known: &[String]) -> Vec<(String, String)> {
+    let cleaned = text.replace("]<]minimax[>[", "");
+    let mut out: Vec<(String, String)> = Vec::new();
+    // 1) Claude/MiniMax XML invokes.
+    let mut rest = cleaned.as_str();
+    while let Some(pos) = rest.find("<invoke") {
+        let after = &rest[pos..];
+        let Some(close) = after.find("</invoke>") else {
+            break;
+        };
+        let block = &after[..close];
+        if let Some(name) = xml_attr_value(block, "name") {
+            if known.iter().any(|k| k == &name) {
+                out.push((name, parse_xml_parameters(block)));
+            }
+        }
+        rest = &after[close + "</invoke>".len()..];
+    }
+    // 2) Hermes/Qwen JSON tool_calls (only if no XML invokes were found).
+    if out.is_empty() {
+        let mut rest = cleaned.as_str();
+        while let Some(pos) = rest.find("<tool_call>") {
+            let after = &rest[pos + "<tool_call>".len()..];
+            let Some(close) = after.find("</tool_call>") else {
+                break;
+            };
+            let inner = after[..close].trim();
+            if let Ok(value) = serde_json::from_str::<serde_json::Value>(inner) {
+                if let Some(name) = value.get("name").and_then(|n| n.as_str()) {
+                    if known.iter().any(|k| k == name) {
+                        let args = value
+                            .get("arguments")
+                            .map(|a| a.to_string())
+                            .unwrap_or_else(|| "{}".to_string());
+                        out.push((name.to_string(), args));
+                    }
+                }
+            }
+            rest = &after[close + "</tool_call>".len()..];
+        }
+    }
+    out
+}
+
+/// Synthesize an OpenAI-style `tool_calls` array from text-parsed calls so the existing
+/// dispatch path handles them unchanged. The synthetic `id` is stable within a round via
+/// `round`+`index` (mirrors `ollama_tool_call`'s id strategy).
+pub fn synthesize_tool_calls(round: usize, parsed: Vec<(String, String)>) -> Vec<serde_json::Value> {
+    parsed
+        .into_iter()
+        .enumerate()
+        .map(|(index, (name, arguments))| {
+            serde_json::json!({
+                "id": format!("textcall_{round}_{index}"),
+                "type": "function",
+                "function": { "name": name, "arguments": arguments }
+            })
+        })
+        .collect()
 }
 
 /// Strip a balanced `<open>…<close>` block (all occurrences) from text. Used by
@@ -312,18 +438,28 @@ mod tests {
     }
 
     #[test]
-    fn assistant_response_keeps_content_when_present() {
+    fn assistant_response_collapses_reasoning_above_the_answer() {
+        // Explicit reasoning + a real answer: the trace is wrapped in a ‹‹REASONING›› marker
+        // (rendered COLLAPSED by the app, stripped for channels) and the answer body follows.
         let body = assistant_response("hello".into(), "thoughts".into(), vec![], "stop");
-        assert_eq!(body["choices"][0]["message"]["content"], "hello");
+        assert_eq!(
+            body["choices"][0]["message"]["content"],
+            "‹‹REASONING››thoughts‹‹/REASONING››\nhello"
+        );
         assert_eq!(body["choices"][0]["finish_reason"], "stop");
         assert!(body["choices"][0]["message"].get("tool_calls").is_none());
     }
 
     #[test]
-    fn assistant_response_falls_back_to_reasoning_when_content_empty() {
-        // The GLM/kimi dead-end: whole answer in reasoning, content blank.
+    fn assistant_response_collapses_explicit_reasoning_when_content_empty() {
+        // A thinking model that emitted reasoning but NO answer: the trace is collapsed in a
+        // ‹‹REASONING›› marker with an EMPTY body — an honest "reasoned, produced no answer",
+        // NOT the old behavior that showed the trace masquerading AS the answer.
         let body = assistant_response("   ".into(), "the real answer".into(), vec![], "stop");
-        assert_eq!(body["choices"][0]["message"]["content"], "the real answer");
+        assert_eq!(
+            body["choices"][0]["message"]["content"],
+            "‹‹REASONING››the real answer‹‹/REASONING››"
+        );
     }
 
     #[test]
@@ -357,6 +493,51 @@ mod tests {
         assert_eq!(ollama_tool_call(&with_str, 2)["id"], "ollama_call_2");
         let missing = serde_json::json!({"function":{"name":"x"}});
         assert_eq!(ollama_tool_call(&missing, 0)["function"]["arguments"], "{}");
+    }
+
+    #[test]
+    fn parse_text_tool_calls_extracts_claude_xml_invoke() {
+        // Claude/MiniMax leaked into content: <invoke name=...><parameter ...>.
+        let known = vec!["browse_web".to_string()];
+        let text = r#"sure ]<]minimax[>[<invoke name="browse_web"><parameter name="query">trains to Rome</parameter></invoke> done"#;
+        let calls = parse_text_tool_calls(text, &known);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, "browse_web");
+        let args: serde_json::Value = serde_json::from_str(&calls[0].1).unwrap();
+        assert_eq!(args["query"], "trains to Rome");
+    }
+
+    #[test]
+    fn parse_text_tool_calls_extracts_hermes_json() {
+        // Hermes/Qwen leaked JSON tool_call.
+        let known = vec!["get_weather".to_string()];
+        let text = r#"<tool_call>{"name":"get_weather","arguments":{"city":"London"}}</tool_call>"#;
+        let calls = parse_text_tool_calls(text, &known);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, "get_weather");
+        assert_eq!(serde_json::from_str::<serde_json::Value>(&calls[0].1).unwrap()["city"], "London");
+    }
+
+    #[test]
+    fn parse_text_tool_calls_ignores_unknown_and_prose() {
+        // A tag for a tool not in `known`, or mere prose mentioning a name, is NOT a call.
+        let known = vec!["browse_web".to_string()];
+        assert!(parse_text_tool_calls(
+            r#"<invoke name="rm_rf"><parameter name="p">x</parameter></invoke>"#,
+            &known,
+        )
+        .is_empty());
+        assert!(parse_text_tool_calls("I could browse_web for you", &known).is_empty());
+    }
+
+    #[test]
+    fn synthesize_tool_calls_builds_openai_shape_with_stable_ids() {
+        let calls = synthesize_tool_calls(3, vec![("a".into(), "{}".into()), ("b".into(), "{\"x\":1}".into())]);
+        assert_eq!(calls[0]["id"], "textcall_3_0");
+        assert_eq!(calls[0]["type"], "function");
+        assert_eq!(calls[0]["function"]["name"], "a");
+        assert_eq!(calls[1]["id"], "textcall_3_1");
+        assert_eq!(calls[1]["function"]["arguments"], "{\"x\":1}");
     }
 
     #[test]

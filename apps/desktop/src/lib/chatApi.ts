@@ -4,6 +4,7 @@ import type {
   CoreChatMessage,
   CoreChatMessagesSnapshot,
   CoreChatStreamDelta,
+  CoreChatStreamEvent,
   CoreChatThread,
   CoreChatThreadSnapshot,
   CorePromptSubmissionResult,
@@ -21,6 +22,23 @@ type StreamEvent =
       type: "delta";
       request_id: string;
       text: string;
+    }
+  | {
+      type:
+        | "reasoning"
+        | "activity"
+        | "plan_update"
+        | "choice_prompt"
+        | "vault_propose"
+        | "vault_reveal"
+        | "payment_approval"
+        | "tool_result"
+        | "recall"
+        | "diff";
+      request_id: string;
+      text?: string;
+      markdown?: string;
+      payload?: unknown;
     }
   | {
       type: "done";
@@ -50,7 +68,9 @@ export interface CoreBranchPoint {
   options: CoreBranchOption[];
 }
 
+const streamEventListeners = new Set<(payload: CoreChatStreamEvent) => void>();
 const streamListeners = new Set<(payload: CoreChatStreamDelta) => void>();
+const activeStreamSockets = new Map<string, WebSocket>();
 let activeThreadId = "thread_active_prompt";
 let localThreads: CoreChatThread[] = [
   {
@@ -146,11 +166,11 @@ export const chatApi = {
 
   /** Append a literal assistant message (e.g. a proactivity card's question) so a
    *  chat opens with Homun already asking, instead of a composer draft. */
-  async seedAssistantMessage(threadId: string, text: string) {
+  async seedAssistantMessage(threadId: string, text: string, eventParts?: unknown[]) {
     return hydrateMessagesSnapshot(
       await gatewayJson<CoreChatMessagesSnapshot>(
         `/api/chat/threads/${encodeURIComponent(threadId)}/assistant_message`,
-        { method: "POST", body: JSON.stringify({ text }) },
+        { method: "POST", body: JSON.stringify({ text, event_parts: eventParts ?? [] }) },
       ),
     );
   },
@@ -468,6 +488,13 @@ export const chatApi = {
     });
   },
 
+  listenChatStreamEvent(handler: (payload: CoreChatStreamEvent) => void) {
+    streamEventListeners.add(handler);
+    return Promise.resolve(() => {
+      streamEventListeners.delete(handler);
+    });
+  },
+
   async submitChatPromptStream(
     requestId: string,
     threadId: string,
@@ -499,7 +526,8 @@ export const chatApi = {
   },
 
   async cancelChatPromptStream(requestId: string) {
-    void requestId;
+    activeStreamSockets.get(requestId)?.close(4000, "cancelled by user");
+    activeStreamSockets.delete(requestId);
   },
 
   debugChatStream(
@@ -518,6 +546,7 @@ export const chatApi = {
   },
 
   notifyChatStreamDelta,
+  notifyChatStreamEvent,
 };
 
 function createLocalChatThread() {
@@ -636,11 +665,20 @@ async function consumeChatStreamResponse(
         const event = parseStreamEvent(line);
         if (!event || event.request_id !== requestId) continue;
         if (event.type === "delta") {
-          notifyChatStreamDelta({ request_id: requestId, delta: event.text });
+          notifyChatStreamDelta({ type: "delta", request_id: requestId, delta: event.text });
         } else if (event.type === "done") {
+          notifyChatStreamEvent({ type: "done", request_id: requestId });
           result = event.result;
         } else if (event.type === "error") {
+          notifyChatStreamEvent({
+            type: "error",
+            request_id: requestId,
+            message: event.message,
+          });
           throw new Error(event.message ?? "Local chat gateway error");
+        } else {
+          const payload = streamEventToCoreEvent(event, requestId);
+          if (payload) notifyChatStreamEvent(payload);
         }
       }
     }
@@ -664,6 +702,7 @@ async function consumeChatWebSocketStream(
     const startedAt = performance.now();
     let lastDebugChunks = 0;
     const socket = new WebSocket(url);
+    activeStreamSockets.set(requestId, socket);
 
     function debug(stage: string, detail?: string) {
       void chatApi.debugChatStream(requestId, {
@@ -681,6 +720,7 @@ async function consumeChatWebSocketStream(
     ) {
       if (settled) return;
       settled = true;
+      activeStreamSockets.delete(requestId);
       socket.close();
       action(value);
     }
@@ -688,6 +728,7 @@ async function consumeChatWebSocketStream(
     function fail(error: Error) {
       if (settled) return;
       settled = true;
+      activeStreamSockets.delete(requestId);
       socket.close();
       reject(error);
     }
@@ -707,13 +748,22 @@ async function consumeChatWebSocketStream(
           lastDebugChunks = chunks;
           debug("client_received_delta");
         }
-        notifyChatStreamDelta({ request_id: requestId, delta: event.text });
+        notifyChatStreamDelta({ type: "delta", request_id: requestId, delta: event.text });
       } else if (event.type === "done") {
         debug("client_received_done");
+        notifyChatStreamEvent({ type: "done", request_id: requestId });
         settle(resolve, event.result);
       } else if (event.type === "error") {
         debug("client_received_error", event.message);
+        notifyChatStreamEvent({
+          type: "error",
+          request_id: requestId,
+          message: event.message,
+        });
         fail(new Error(event.message ?? "Local chat gateway error"));
+      } else {
+        const payload = streamEventToCoreEvent(event, requestId);
+        if (payload) notifyChatStreamEvent(payload);
       }
     });
     socket.addEventListener("error", () => {
@@ -738,8 +788,51 @@ async function chatStreamWebSocketUrl(): Promise<string> {
 }
 
 function notifyChatStreamDelta(payload: CoreChatStreamDelta) {
+  notifyChatStreamEvent(payload);
+}
+
+function notifyChatStreamEvent(payload: CoreChatStreamEvent) {
+  for (const listener of streamEventListeners) {
+    listener(payload);
+  }
+  if (payload.type !== "delta") return;
   for (const listener of streamListeners) {
     listener(payload);
+  }
+}
+
+function streamEventToCoreEvent(
+  event: StreamEvent,
+  requestId: string,
+): CoreChatStreamEvent | null {
+  switch (event.type) {
+    case "reasoning":
+      return { type: "reasoning", request_id: requestId, text: String(event.text ?? "") };
+    case "activity":
+      return { type: "activity", request_id: requestId, text: String(event.text ?? "") };
+    case "plan_update":
+      return {
+        type: "plan_update",
+        request_id: requestId,
+        markdown: String(event.markdown ?? ""),
+      };
+    case "choice_prompt":
+    case "vault_propose":
+    case "vault_reveal":
+    case "payment_approval":
+    case "tool_result":
+    case "recall":
+    case "diff":
+      // Payload raw dallo stream (JSON.parse → unknown). La validazione runtime
+      // avviene nei parser downstream (parseVaultProposalPayload, ecc.); qui
+      // trasportiamo il payload nel tipo dichiarato dell'evento (B2/A1).
+      return {
+        type: event.type,
+        request_id: requestId,
+        payload: event.payload,
+      } as CoreChatStreamEvent;
+    default:
+      return null;
   }
 }
 

@@ -13,6 +13,8 @@ mod skills;
 mod skills_catalog;
 // Static security scan for installed skills, ported from Homun.
 mod skill_security;
+// Startup integrity sweep: quick_check + quarantine of corrupt SQLite stores (P0).
+mod store_integrity;
 // Skill execution sandbox (reuses the browser's contained-computer container).
 mod mcp_http;
 mod mcp_registry;
@@ -20,12 +22,30 @@ mod process_skills;
 // Reverse proxy for the contained computer's noVNC live view (HTTP assets + WS),
 // so a remote browser on the cloud build can watch the agent's computer.
 mod novnc_proxy;
+mod panic_log;
 mod pdf_render;
 mod plugin_packages;
+mod privacy_guard;
+// Linux Landlock filesystem fence for `run_in_project` (ADR 0023 Linux enforcement;
+// the counterpart to `seatbelt`). Linux-only — the whole module is cfg-gated so it
+// never compiles on macOS/Windows (the `landlock` dep is Linux-only too).
+#[cfg(target_os = "linux")]
+mod landlock_fence;
 mod sandbox;
+// macOS Seatbelt (`sandbox-exec`) profile generator from a SandboxPolicy (ADR 0023,
+// step 3; pure string generation — not wired yet).
+mod seatbelt;
 mod task_registry;
 mod temporal;
+mod tool_exec;
+// Codex-style tool-safety policy vocabulary + pure decision fn (ADR 0023, step 1;
+// not wired yet — seam types only).
+mod tool_safety;
+mod tool_trace_dump;
 
+// ADR 0023 tool-safety vocabulary + pure decision fn, used by the write-confirm
+// branches in `execute_chat_tool` behind `HOMUN_TOOL_SAFETY`.
+use crate::tool_safety::{AskForApproval, SafetyDecision, SandboxPolicy, assess_tool_safety};
 use axum::{
     Json, Router,
     body::Body,
@@ -53,22 +73,22 @@ use local_first_capabilities::{
     ActionClass, CachedCapabilityTool, CachedToolProvider, CapabilityCall,
     CapabilityConnectionConfig, CapabilityError, CapabilityFacade, CapabilityPolicy,
     CapabilityProvider, CapabilityProviderConfig, CapabilityProviderGrant, CapabilityProviderKind,
-    CapabilityRegistryStore, CapabilityResult, CapabilityTaskPayload, ComposioCapabilityProvider,
-    ComposioProviderConfig, ComposioTransport, InMemoryCapabilityAudit, McpCapabilityProvider,
-    McpStdioConfig, McpStdioTransport, McpToolPolicy, McpTransport, PluginRegistryEntry,
-    PluginRegistryIndex, PolicyContext, ProviderId as CapabilityProviderId,
-    UserId as CapabilityUserId, WorkspaceId as CapabilityWorkspaceId,
+    CapabilityRegistryStore, CapabilityResult, CapabilityTaskPayload, CapabilityTool,
+    InMemoryCapabilityAudit, McpCapabilityProvider, McpStdioConfig, McpStdioTransport,
+    McpToolPolicy, McpTransport, PluginRegistryEntry, PluginRegistryIndex, PolicyContext,
+    ProviderId as CapabilityProviderId, UserId as CapabilityUserId,
+    WorkspaceId as CapabilityWorkspaceId,
 };
 use local_first_desktop_gateway::{
     BuildPromptRequest, BuildPromptResponse, ChatContextMessage, ChatContextRole,
     ChatGenerateStreamRequest, ChatMessage, ChatMessagesSnapshot, ChatThread, ChatThreadSnapshot,
     CommitContinuationResultRequest, CommitPromptResultRequest, CommitRegeneratedResultRequest,
     SetActiveLeafRequest, SetBranchLabelRequest, SetThreadPinnedRequest, build_chat_runtime_prompt,
-    compact_thread_title,
+    compact_thread_title, strip_display_markers,
 };
 use local_first_inference::{
     AnthropicProvider, CapabilityDescriptor, Locality, ModelRouter, OpenAiCompatProvider,
-    PrivacyPolicy, Requirements,
+    PrivacyPolicy, Requirements, structured_response_format,
 };
 use local_first_local_computer_session::{
     ApprovalState, ArtifactRecord, ComputerEventRecord, ComputerSessionRecord,
@@ -76,17 +96,19 @@ use local_first_local_computer_session::{
 };
 use local_first_local_computer_session::{LocalComputerReadModel, LocalComputerSessionStore};
 use local_first_memory::{
-    DataSensitivity as MemoryDataSensitivity, ExtractedEntity, ExtractedMemory, ExtractedRelation,
-    MemoryAccessRequest, MemoryCreateRequest, MemoryDashboard, MemoryEntity, MemoryExtraction,
-    MemoryFacade, MemoryLifecycleRequest, MemoryRecord, MemoryRef, MemoryRefKind, MemoryRelation,
+    BriefingPack, CachedBriefing, DataSensitivity as MemoryDataSensitivity, Exchange,
+    ExtractedEntity, ExtractedMemory, ExtractedRelation, MemoryAccessRequest, MemoryCreateRequest,
+    MemoryDashboard, MemoryEntity, MemoryExtraction, MemoryFacade, MemoryLifecycleRequest,
+    MemoryRecord, MemoryRecallService, MemoryRef, MemoryRefKind, MemoryRelation, MemoryScope,
     MemorySearchRequest, MemoryStatus, MemoryUiReadModel, MemoryUpdatePatch, MemoryWikiProjection,
-    PERSONAL_WORKSPACE, PrivacyDomain, SQLiteMemoryStore, UserId as MemoryUserId, WikiFileStore,
-    WikiPage, WorkspaceId as MemoryWorkspaceId,
+    PERSONAL_WORKSPACE, PrivacyDomain, RecallPack, SQLiteMemoryStore, UserId as MemoryUserId,
+    WikiFileStore, WikiPage, WorkspaceId as MemoryWorkspaceId, briefing_cache, prompt_fingerprint,
 };
 use local_first_orchestrator::{
-    ExecutionPlan, MemoryContextProvider, MemoryContextSnippet, OrchestratorBrain,
-    OrchestratorBudgets, OrchestratorRequest, OrchestratorResult, OrchestratorRoute, PlanStep,
-    PlanStepKind, StepExecutionPolicy, ToolSearchIndexStore,
+    DriveOutcome, DriveStepStatus, ExecutionPlan, MemoryContextProvider, MemoryContextSnippet,
+    OrchestratorBrain, OrchestratorBudgets, OrchestratorError, OrchestratorRequest,
+    OrchestratorResult, OrchestratorRoute, PassThroughVerifier, PlanStep, PlanStepKind,
+    StepExecutionPolicy, StepExecutor, StepOutcome, drive_plan, fill_arguments, run_agentic_step,
 };
 use local_first_secrets::{
     DevelopmentSecretKeyProvider, EncryptedFileSecretStore, SecretMaterial, SecretRef, SecretStore,
@@ -100,6 +122,10 @@ use local_first_task_runtime::{
     TaskExecutor, TaskId, TaskQueueSnapshot, TaskRecord, TaskRuntimeError, TaskRuntimeResult,
     TaskScheduler, TaskStatus, TaskStore, TaskUiDetail, TaskUiItem, TaskUiReadModel, UserId,
     WorkspaceId,
+};
+use local_first_vault::{
+    LocalPinVerifier, PaymentApprovalSnapshot, SQLiteVaultStore, VaultCategory, VaultRecord,
+    VaultRecordId, VaultStore,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -139,6 +165,11 @@ pub(crate) struct AppState {
     computer_store: Arc<Mutex<LocalComputerSessionStore>>,
     browser_url_policies: Arc<Mutex<BrowserUrlPolicyStore>>,
     memory_facade: Arc<Mutex<MemoryFacade>>,
+    /// ADR 0022 (Tappa 1): service memoria che incapsula brief/recall/learn.
+    /// `Some` solo quando `HOMUN_MEMORY_SERVICE=on`; `None` → orchestrazione inline attuale.
+    memory_service: Option<Arc<dyn MemoryRecallService>>,
+    vault_store: Arc<Mutex<SQLiteVaultStore>>,
+    pending_vault_proposals: Arc<privacy_guard::PendingVaultProposalStore>,
     capability_registry: Arc<Mutex<CapabilityRegistryStore>>,
     task_executor_status: Arc<Mutex<TaskExecutorStatus>>,
     task_executor_registry: TaskExecutorRegistry,
@@ -148,6 +179,7 @@ pub(crate) struct AppState {
     /// tab) instead of spawning a fresh sidecar each time. Reaped on idle and on
     /// thread archive/close/delete.
     browser_thread_sessions: Arc<Mutex<std::collections::HashMap<String, ThreadBrowserSession>>>,
+    payment_approvals: Arc<Mutex<std::collections::HashMap<String, PaymentApprovalGrant>>>,
     secret_store: Arc<EncryptedFileSecretStore<DevelopmentSecretKeyProvider>>,
     auth_token: Arc<str>,
     /// Short-lived tickets authorizing the noVNC live-view proxy. The iframe and
@@ -157,6 +189,15 @@ pub(crate) struct AppState {
     /// The current STABLE live-view ticket, reused across status polls so the embed
     /// URL (and thus the iframe) doesn't change every poll. Re-minted when expired.
     pub(crate) novnc_view_ticket: Arc<Mutex<Option<String>>>,
+    /// Stores quarantined by the startup integrity sweep (empty = all healthy).
+    recovered_stores: std::sync::Arc<Vec<String>>,
+}
+
+#[derive(Debug, Clone)]
+struct PaymentApprovalGrant {
+    snapshot: PaymentApprovalSnapshot,
+    cvv_one_shot: Option<String>,
+    expires_at: std::time::Instant,
 }
 
 /// A live, reusable browser session bound to a chat thread.
@@ -213,6 +254,9 @@ struct HealthResponse {
     service: &'static str,
     local_first: bool,
     auth_required: bool,
+    /// Names of stores reset at startup after failing quick_check (backups kept
+    /// as *.corrupt-<epoch>.bak beside the store). Empty on a healthy boot.
+    recovered_stores: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -528,6 +572,10 @@ fn migrate_legacy_data_dir() {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // P0 observability: leave a trail for every panic, even when the shell
+    // isn't capturing stdio. Fall back to the OS temp dir if HOME is unusable.
+    panic_log::install(gateway_logs_dir().unwrap_or_else(|_| std::env::temp_dir()));
+
     // SECURITY (data at rest): make everything this process writes owner-only.
     // The personal stores (memory.sqlite, desktop-gateway.sqlite, the WhatsApp
     // session, …) are PLAINTEXT SQLite — 0644 would expose the user's memory,
@@ -543,6 +591,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // opens it (the SQLite stores are created immediately below).
     migrate_legacy_data_dir();
 
+    // P0 resilience: verify every personal store BEFORE anything opens it; a
+    // corrupt file is quarantined (never deleted) and the fresh open below
+    // succeeds. Surfaced to the UI via /api/health `recovered_stores`.
+    let recovered_stores: std::sync::Arc<Vec<String>> = std::sync::Arc::new(
+        store_integrity::ensure_store_integrity(&[
+            store_integrity::StoreCheck { name: "desktop-gateway", path: gateway_database_path()? },
+            store_integrity::StoreCheck { name: "task-runtime", path: gateway_task_database_path()? },
+            store_integrity::StoreCheck { name: "local-computer-session", path: gateway_local_computer_database_path()? },
+            store_integrity::StoreCheck { name: "browser-url-policy", path: gateway_browser_policy_database_path()? },
+            store_integrity::StoreCheck { name: "memory", path: gateway_memory_database_path()? },
+            store_integrity::StoreCheck { name: "vault", path: gateway_vault_database_path()? },
+            store_integrity::StoreCheck { name: "capability-registry", path: gateway_capability_database_path()? },
+        ]),
+    );
+
     let port = env::var("HOMUN_DESKTOP_GATEWAY_PORT")
         .ok()
         .or_else(|| env::var("PORT").ok()) // PaaS convention
@@ -554,7 +617,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .and_then(|value| value.trim().parse().ok())
         .unwrap_or(std::net::IpAddr::from([127, 0, 0, 1]));
     let addr = SocketAddr::from((host, port));
-    let state = AppState {
+    let mut state = AppState {
         http: reqwest::Client::new(),
         chat_store: Arc::new(Mutex::new(ChatStore::open(gateway_database_path()?)?)),
         task_store: Arc::new(Mutex::new(TaskStore::open(gateway_task_database_path()?)?)),
@@ -568,6 +631,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             SQLiteMemoryStore::open(gateway_memory_database_path()?)
                 .map_err(std::io::Error::other)?,
         ))),
+        // ADR 0022 (Tappa 1): costruisci il service solo se il flag è ON.
+        // L'impl delega interamente alla memoria_facade sopra (condivisa via Arc),
+        // quindi niente nuovi store, niente big-bang.
+        memory_service: None,
+        vault_store: Arc::new(Mutex::new(
+            SQLiteVaultStore::open(gateway_vault_database_path()?)
+                .map_err(std::io::Error::other)?,
+        )),
+        pending_vault_proposals: Arc::new(privacy_guard::PendingVaultProposalStore::default()),
         capability_registry: Arc::new(Mutex::new(open_seeded_capability_registry()?)),
         task_executor_status: Arc::new(Mutex::new(TaskExecutorStatus::new(
             task_executor_worker_enabled(),
@@ -575,11 +647,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         task_executor_registry: TaskExecutorRegistry::with_defaults(),
         browser_capability_client: Arc::new(Mutex::new(None)),
         browser_thread_sessions: Arc::new(Mutex::new(std::collections::HashMap::new())),
+        payment_approvals: Arc::new(Mutex::new(std::collections::HashMap::new())),
         secret_store: Arc::new(open_gateway_secret_store()?),
         auth_token: resolve_gateway_auth_token()?.into(),
         novnc_tickets: Arc::new(Mutex::new(std::collections::HashMap::new())),
         novnc_view_ticket: Arc::new(Mutex::new(None)),
+        recovered_stores: recovered_stores.clone(),
     };
+    // ADR 0022 — Tappa 1: se il flag è ON, costruisci il service memoria che
+    // incapsula brief/recall/learn. Costruito dopo il letterale perché
+    // `InProcessMemoryRecallService` prende in prestito lo stesso `AppState`.
+    if memory_service_enabled() {
+        let embedding: Arc<dyn local_first_memory::EmbeddingClient> =
+            Arc::new(GatewayEmbeddingClient { http: state.http.clone() });
+        let llm: Arc<dyn local_first_memory::LlmClient> =
+            Arc::new(GatewayLlmClient { http: state.http.clone() });
+        state.memory_service = Some(
+            Arc::new(InProcessMemoryRecallService::new(state.clone(), embedding, llm))
+                as Arc<dyn MemoryRecallService>,
+        );
+    }
     // Fix any pre-existing 0644 data files (created before the umask above was set):
     // the SQLite stores and the WhatsApp session are world-readable on old installs.
     if let Ok(dir) = gateway_data_dir() {
@@ -616,6 +703,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     start_task_executor_worker(state.clone());
     spawn_memory_consolidation_tick(state.clone());
     spawn_embedding_catchup(state.clone());
+    spawn_memory_hygiene_sweep(state.clone());
     spawn_thread_browser_session_reaper(state.clone());
     spawn_contained_computer_idle_reaper(state.clone());
     spawn_browser_handoff_reaper(state.clone());
@@ -885,12 +973,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             get(project_graph_subdirs),
         )
         .route("/api/memory/goals", get(memory_goals_list))
+        .route("/api/memory/project-briefing", get(memory_project_briefing))
         .route("/api/memory/goals/suggest", post(memory_goals_suggest))
         .route("/api/memory/goals/promote", post(memory_goals_promote))
         .route("/api/memory/goals/add", post(memory_goals_add))
         .route("/api/memory/wiki", get(memory_wiki).put(memory_wiki_save))
         .route("/api/memory/consolidate", post(memory_consolidate))
         .route("/api/memory/decide", post(memory_decide))
+        .route("/api/vault/records", get(vault_records_list))
+        .route("/api/vault/records/{id}/reveal", post(vault_record_reveal))
+        .route(
+            "/api/vault/records/{id}",
+            delete(vault_record_delete).patch(vault_record_update),
+        )
+        .route("/api/vault/proposals/accept", post(vault_proposal_accept))
+        .route("/api/vault/proposals/dismiss", post(vault_proposal_dismiss))
+        .route("/api/vault/pin/status", get(vault_pin_status))
+        .route("/api/vault/pin/setup", post(vault_pin_setup))
+        .route("/api/vault/pin/verify", post(vault_pin_verify))
+        .route(
+            "/api/vault/payment-approvals/approve",
+            post(vault_payment_approval_approve),
+        )
         .route("/api/memory/contacts", get(contacts_list))
         .route("/api/memory/contacts/memories", post(contact_memories))
         .route("/api/memory/contacts/profile", post(contact_profile))
@@ -996,6 +1100,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/capabilities/mcp/registry", get(mcp_registry_search))
         .route("/api/capabilities/mcp/connected", get(mcp_connected))
         .route("/api/capabilities/mcp/disconnect", post(mcp_disconnect))
+        .route("/api/capabilities/run/escalate", post(run_escalate))
         .route("/api/fs/authorize", post(fs_authorize))
         .route("/api/fs/list", get(fs_list))
         .route("/api/fs/file", get(fs_file))
@@ -1077,6 +1182,7 @@ async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
         service: "local-first-desktop-gateway",
         local_first: true,
         auth_required: !state.auth_token.is_empty(),
+        recovered_stores: state.recovered_stores.as_ref().clone(),
     })
 }
 
@@ -1636,6 +1742,43 @@ fn spawn_embedding_catchup(state: AppState) {
     });
 }
 
+/// Boot-time memory hygiene sweep (ADR 0022 follow-up). Esegue due pulizie
+/// one-shot per ogni scope, ritardate per non competere con l'avvio:
+/// 1. `sweep_gap_facts` — ritira i gap fact obsoleti contraddetti da fatti
+///    positivi già confirmed (bug "non ricorda che lavoro faccio").
+/// 2. `promote_aged_candidates` — conferma i candidate invecchiati (>10 min)
+///    che non sono mai stati rejectati dall'utente.
+fn spawn_memory_hygiene_sweep(state: AppState) {
+    tokio::spawn(async move {
+        // Delay so it never competes with the HTTP bind / first turn.
+        tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+        let user = gateway_memory_user_id();
+        let mut scopes = vec![PERSONAL_WORKSPACE.to_string()];
+        for ws in load_workspaces_file().workspaces {
+            if ws.id != base_workspace_id() && ws.id != PERSONAL_WORKSPACE {
+                scopes.push(ws.id);
+            }
+        }
+        let mut total_gaps = 0usize;
+        let mut total_promoted = 0usize;
+        for scope in scopes {
+            let Some(facade) = lock_memory_facade(&state).ok() else {
+                continue;
+            };
+            let ws = MemoryWorkspaceId::new(&scope);
+            total_gaps += local_first_memory::sweep_gap_facts(&facade, &user, &ws);
+            total_promoted +=
+                local_first_memory::promote_aged_candidates(&facade, &user, &ws);
+        }
+        if total_gaps > 0 {
+            eprintln!("memory hygiene: retired {total_gaps} obsolete gap facts");
+        }
+        if total_promoted > 0 {
+            eprintln!("memory hygiene: promoted {total_promoted} aged candidates");
+        }
+    });
+}
+
 async fn proactivity_auto_review_tick(state: &AppState) {
     // Addon detached → silent (UI and engine gated by the same flag).
     if !lock_store(state)
@@ -1953,7 +2096,11 @@ async fn mirror_app_reply_to_channel_thread(
     if assistant_message.role != "assistant" {
         return;
     }
-    let text = assistant_message.text.trim();
+    // Channels render PLAIN text: strip app-only control markers (‹‹PLAN››, ‹‹ACT››,
+    // ‹‹REASONING››, …) so Telegram/WhatsApp never see raw markers. A reasoning-only turn
+    // becomes empty here → skipped below (the trace is not the answer).
+    let stripped = strip_chat_markers(&assistant_message.text);
+    let text = stripped.trim();
     if text.is_empty() || text == "…" {
         return;
     }
@@ -2266,17 +2413,9 @@ fn persist_explicit_memory(
 }
 
 /// Short human title for a wiki note: first non-empty line, bounded length.
+/// ADR 0022 (Tappa 4, F2): corpo migrato nel crate; thin wrapper (test caller).
 fn wiki_title_from_text(text: &str) -> String {
-    let first = text
-        .lines()
-        .find(|line| !line.trim().is_empty())
-        .unwrap_or("Nota");
-    let trimmed = first.trim();
-    if trimmed.chars().count() <= 60 {
-        trimmed.to_string()
-    } else {
-        format!("{}…", trimmed.chars().take(57).collect::<String>())
-    }
+    local_first_memory::wiki_title_from_text(text)
 }
 
 /// Filesystem-safe wiki filename (refs can carry `:`/`/`).
@@ -2299,7 +2438,24 @@ const CHAT_MEMORY_BUDGET_CHARS: usize = 4000;
 /// (explicit user saves) — Confidential/Secret (e.g. a codice fiscale) are NEVER
 /// auto-injected here; they surface only via on-demand recall (M3). Returns
 /// `(personal, project)` summaries. Best-effort: any failure yields empties.
-fn gather_profile_memory(state: &AppState) -> (Vec<String>, Vec<String>) {
+fn gather_profile_memory_for_prompt(
+    state: &AppState,
+    user_message: &str,
+) -> (Vec<String>, Vec<String>) {
+    gather_profile_memory_with_options(
+        state,
+        profile_memory_personal_preferences_only_for_prompt(user_message),
+    )
+}
+
+fn profile_memory_personal_preferences_only_for_prompt(user_message: &str) -> bool {
+    !should_inject_cross_thread_memory_for_prompt(user_message)
+}
+
+fn gather_profile_memory_with_options(
+    state: &AppState,
+    personal_preferences_only_override: bool,
+) -> (Vec<String>, Vec<String>) {
     let Ok(facade) = lock_memory_facade(state) else {
         return (Vec::new(), Vec::new());
     };
@@ -2324,11 +2480,31 @@ fn gather_profile_memory(state: &AppState) -> (Vec<String>, Vec<String>) {
         facade
             .context_pack(&request)
             .map(|pack| {
-                pack.items
+                let mut items = pack.items;
+                // Sort by confidence DESC: high-confidence facts (e.g. "works as
+                // senior developer", conf 1.0) must survive the budget cut. Without
+                // this, the briefing is filled with low-confidence noise first and
+                // the key facts fall off the 4000-char tail.
+                items.sort_by(|a, b| {
+                    b.confidence
+                        .partial_cmp(&a.confidence)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
+                items
                     .into_iter()
                     // `preferences_only` keeps just the always-relevant tier (how the
                     // user likes to be treated), dropping episodic facts.
                     .filter(|item| !preferences_only || item.memory_type == "preference")
+                    // Anti-noise: scarta fact di tracking del runtime ("Runtime plan
+                    // step/state: …") che saturano il briefing budget e spingono fuori
+                    // i fatti reali. Prevenuti alla fonte in persist_learn_extraction,
+                    // ma i dati legacy vanno comunque filtrati qui.
+                    .filter(|item| {
+                        let low = item.summary.to_lowercase();
+                        !(low.starts_with("runtime plan step")
+                            || low.starts_with("runtime plan state")
+                            || low.starts_with("validation test:"))
+                    })
                     .map(|item| item.summary)
                     .collect()
             })
@@ -2340,7 +2516,10 @@ fn gather_profile_memory(state: &AppState) -> (Vec<String>, Vec<String>) {
     // facts are NOT dumped here, they reach the project on-demand via query-gated RAG
     // (relevant_memory_for_prompt) or explicit recall. Outside a project, the full
     // personal profile is the point, so inject it all.
-    let personal = read(MemoryWorkspaceId::new(PERSONAL_WORKSPACE), in_project);
+    let personal = read(
+        MemoryWorkspaceId::new(PERSONAL_WORKSPACE),
+        in_project || personal_preferences_only_override,
+    );
     let project = if in_project {
         read(active, false)
     } else {
@@ -2476,6 +2655,71 @@ fn is_confirmation_reply(user_message: &str) -> bool {
         "macché",
     ];
     CONFIRM_LEAD.contains(&lead)
+}
+
+fn should_inject_open_loops_for_prompt(user_message: &str) -> bool {
+    should_inject_cross_thread_memory_for_prompt(user_message)
+}
+
+fn should_inject_cross_thread_memory_for_prompt(user_message: &str) -> bool {
+    let low = user_message.trim().to_lowercase();
+    if low.is_empty() {
+        return false;
+    }
+    let compact = low.split_whitespace().collect::<Vec<_>>().join(" ");
+    if is_standalone_choice_card_request(&compact) {
+        return false;
+    }
+    if is_confirmation_reply(&compact) {
+        return false;
+    }
+    // Choice-card answers are often terse labels. They must be interpreted from
+    // the current thread history, not from global unfinished work.
+    const SHORT_CHOICE_REPLIES: [&str; 12] = [
+        "ok",
+        "okay",
+        "va bene",
+        "procedi",
+        "conferma",
+        "confermato",
+        "annulla",
+        "cancella",
+        "stop",
+        "cambio idea",
+        "non salvare",
+        "salva",
+    ];
+    if compact.split_whitespace().count() <= 3 && SHORT_CHOICE_REPLIES.contains(&compact.as_str()) {
+        return false;
+    }
+    true
+}
+
+fn is_standalone_choice_card_request(compact_lower_prompt: &str) -> bool {
+    let has_choice_card_language = compact_lower_prompt.contains("card di scelta")
+        || compact_lower_prompt.contains("choice card")
+        || compact_lower_prompt.contains("choices card")
+        || compact_lower_prompt.contains("card scelta");
+    let asks_to_choose = compact_lower_prompt.starts_with("fammi scegliere")
+        || compact_lower_prompt.starts_with("fai scegliere")
+        || compact_lower_prompt.starts_with("let me choose")
+        || compact_lower_prompt.starts_with("make me choose")
+        || (compact_lower_prompt.contains("scegliere tra")
+            && compact_lower_prompt.contains("non una lista"))
+        || (compact_lower_prompt.contains("choose between")
+            && compact_lower_prompt.contains("not a text"));
+    has_choice_card_language && asks_to_choose
+}
+
+fn should_inject_relevant_memory_for_prompt(user_message: &str) -> bool {
+    should_inject_cross_thread_memory_for_prompt(user_message)
+}
+
+fn should_force_synthesis_for_empty_visible_answer(accumulated: &str, content: &str) -> bool {
+    let mut combined = String::with_capacity(accumulated.len() + content.len());
+    combined.push_str(accumulated);
+    combined.push_str(content);
+    answer_body_is_empty(&combined)
 }
 
 /// Auto-confirm policy (M2): only durable, high-confidence knowledge enters memory
@@ -2871,82 +3115,36 @@ async fn backfill_embeddings(
     workspace: &MemoryWorkspaceId,
     limit: usize,
 ) {
-    // (pending = new memories needing an embedding; seen = (ref, type, vector) of
-    // memories that ALREADY have an embedding — the seed for semantic dedup below).
-    let (pending, mut seen): (
-        Vec<(MemoryRef, String, String)>,
-        Vec<(String, String, Vec<f32>)>,
-    ) = {
-        let Ok(facade) = lock_memory_facade(state) else {
-            return;
-        };
-        let Ok(refs) = facade.refs_without_embeddings(user, workspace, limit) else {
-            return;
-        };
-        if refs.is_empty() {
-            return;
-        }
-        let meta: std::collections::HashMap<String, (String, String)> = facade
-            .list_memories_for_ui(user, workspace)
-            .map(|mems| {
-                mems.into_iter()
-                    .map(|m| (m.reference.to_string(), (m.text, m.memory_type)))
-                    .collect()
-            })
-            .unwrap_or_default();
-        let mut seen: Vec<(String, String, Vec<f32>)> = Vec::new();
-        if let Ok(embeddings) = facade.list_embeddings(user, workspace) {
-            for (reference, vector) in embeddings {
-                let rs = reference.to_string();
-                if let Some((_text, mtype)) = meta.get(&rs) {
-                    seen.push((rs, mtype.clone(), vector));
-                }
-            }
-        }
-        let pending = refs
-            .into_iter()
-            .filter_map(|r| {
-                meta.get(&r.to_string())
-                    .map(|(text, mtype)| (r, text.clone(), mtype.clone()))
-            })
-            .collect();
-        (pending, seen)
-    };
+    // ADR 0022 (Tappa 4): backfill ORCHESTRATO nel crate via 3 fasi Send-safe
+    // (collect lock → embed off-lock → persist lock). Il guard non attraversa await.
+    let embedding: std::sync::Arc<dyn local_first_memory::EmbeddingClient> =
+        std::sync::Arc::new(GatewayEmbeddingClient { http: state.http.clone() });
     let model = embed_model();
+    // Fase 1 (lock): collect pending + seen.
+    let collected = {
+        let Ok(facade) = lock_memory_facade(state) else { return };
+        local_first_memory::backfill_collect_pending(&facade, user, workspace, limit)
+    };
+    let Some((pending, mut seen)) = collected else { return };
+    // Fase 2 + 3: embed off-lock, poi persist sotto lock per ciascuno.
     for (reference, text, mtype) in pending {
-        if let Some(vector) = embed_text(&state.http, &text).await {
-            // Semantic dedup on WRITE: if a near-identical memory of the SAME type
-            // already exists (a paraphrase the lexical Jaccard pre-filter missed),
-            // drop this one instead of letting duplicates pile up. Soft-delete →
-            // reversible. Same-type + high cosine keeps genuinely distinct facts safe.
-            // Artifact identity is not semantic: two deliverables can have similar
-            // descriptions but different thread/path/name lifecycle.
-            let is_dup = memory_type_participates_in_semantic_dedup(&mtype)
-                && seen.iter().any(|(rs, ty, v)| {
-                    ty == &mtype
-                        && rs != &reference.to_string()
-                        && cosine(&vector, v) >= DEDUP_COSINE
-                });
-            if let Ok(facade) = lock_memory_facade(state) {
-                if is_dup {
-                    let lifecycle = MemoryLifecycleRequest {
-                        actor_id: "memory-dedup".to_string(),
-                        user_id: user.clone(),
-                        workspace_id: workspace.clone(),
-                        purpose: "semantic_dedup".to_string(),
-                    };
-                    let _ = facade.delete_memory(&lifecycle, &reference, "duplicato semantico");
-                    continue;
-                }
-                let _ = facade.upsert_embedding(&reference, user, workspace, &model, &vector);
-            }
-            seen.push((reference.to_string(), mtype, vector));
+        let vector = embedding.embed(&text).await;
+        if vector.is_empty() {
+            continue;
+        }
+        if let Ok(facade) = lock_memory_facade(state) {
+            local_first_memory::backfill_persist_one(
+                &facade,
+                user,
+                workspace,
+                &reference,
+                &mtype,
+                &vector,
+                &model,
+                &mut seen,
+            );
         }
     }
-}
-
-fn memory_type_participates_in_semantic_dedup(memory_type: &str) -> bool {
-    !matches!(memory_type, "artifact")
 }
 
 /// Fills the required `privacy_domain`/`sensitivity` on an extracted item when the
@@ -4071,112 +4269,17 @@ fn wiki_is_edited(workspace: &MemoryWorkspaceId, path: &str) -> bool {
 /// rows stay canonical; this is the readable, human-editable projection (the hybrid
 /// model). Idempotent — one page per workspace, rebuilt in place. Skipped if the user
 /// edited the page by hand (their version wins until they regenerate).
+///
+/// ADR 0022 (Tappa 4, F2): corpo migrato nel crate (`local_first_memory`); qui
+/// resta un thin wrapper (firma identica — molti caller). Rimosso in F4.
 fn rebuild_decisions_wiki(
     facade: &MemoryFacade,
     user_id: &MemoryUserId,
     workspace: &MemoryWorkspaceId,
 ) {
-    if wiki_is_edited(workspace, "decisioni.md") {
-        return;
-    }
-    let Ok(memories) = facade.list_memories_for_ui(user_id, workspace) else {
-        return;
-    };
-    let mut decisions: Vec<_> = memories
-        .into_iter()
-        .filter(|m| {
-            m.memory_type == "decision"
-                && matches!(m.status, MemoryStatus::Confirmed | MemoryStatus::Candidate)
-        })
-        .collect();
-    if decisions.is_empty() {
-        return;
-    }
-    // Lexical dedup for the page too (richest first), so it reads cleanly.
-    decisions.sort_by_key(|m| std::cmp::Reverse(m.text.chars().count()));
-    let mut kept_tokens: Vec<std::collections::HashSet<String>> = Vec::new();
-    decisions.retain(|m| {
-        let tokens = dedup_tokens(&m.text);
-        if kept_tokens
-            .iter()
-            .any(|ex| jaccard(&tokens, ex) >= DEDUP_JACCARD)
-        {
-            false
-        } else {
-            kept_tokens.push(tokens);
-            true
-        }
+    local_first_memory::rebuild_decisions_wiki(facade, user_id, workspace, &|ws, path| {
+        wiki_is_edited(ws, path)
     });
-
-    let mut body = String::from(
-        "# Project decisions\n\n> Page generated from memory (editable by hand: corrections flow back into the structured store).\n\n",
-    );
-    let mut linked = Vec::new();
-    for memory in &decisions {
-        linked.push(memory.reference.clone());
-        let title = memory.text.lines().next().unwrap_or(&memory.text).trim();
-        body.push_str(&format!("## {title}\n\n"));
-        if let Some(decision) = memory.metadata.get("decision") {
-            if let Some(rationale) = decision.get("rationale").and_then(|r| r.as_str()) {
-                if !rationale.trim().is_empty() {
-                    body.push_str(&format!("{}\n\n", rationale.trim()));
-                }
-            }
-            if let Some(alts) = decision.get("alternatives").and_then(|a| a.as_array()) {
-                for alt in alts {
-                    let Some(option) = alt.get("option").and_then(|o| o.as_str()) else {
-                        continue;
-                    };
-                    if option.is_empty() {
-                        continue;
-                    }
-                    let why = alt
-                        .get("rejected_because")
-                        .and_then(|w| w.as_str())
-                        .unwrap_or("");
-                    body.push_str(&format!("- Scartata **{option}**: {why}\n"));
-                }
-            }
-        }
-        if let Some(affected) = memory
-            .metadata
-            .get("affects_labels")
-            .and_then(|a| a.as_array())
-        {
-            let files: Vec<&str> = affected.iter().filter_map(|v| v.as_str()).collect();
-            if !files.is_empty() {
-                body.push_str(&format!("\n_File: {}_\n", files.join(", ")));
-            }
-        }
-        body.push('\n');
-    }
-
-    // Reuse the existing page's ref (update in place) or mint a new one.
-    let path = "decisioni.md";
-    let reference = facade
-        .list_wiki_pages_for_ui(user_id, workspace)
-        .ok()
-        .and_then(|pages| {
-            pages
-                .into_iter()
-                .find(|p| p.path == path)
-                .map(|p| p.reference)
-        })
-        .unwrap_or_else(|| {
-            MemoryRef::generated(MemoryRefKind::Wiki, user_id.clone(), workspace.clone())
-        });
-    let page = WikiPage {
-        reference,
-        user_id: user_id.clone(),
-        workspace_id: workspace.clone(),
-        path: path.to_string(),
-        title: "Project decisions".to_string(),
-        body,
-        linked_refs: linked,
-        privacy_domain: PrivacyDomain::new("work"),
-        sensitivity: MemoryDataSensitivity::Internal,
-    };
-    let _ = facade.record_wiki_page_for_ui(&page);
 }
 
 /// F6 — the third leg: a human-readable VIEW of the personal memory, generated from
@@ -4296,80 +4399,9 @@ fn rebuild_project_brief(
     user_id: &MemoryUserId,
     workspace: &MemoryWorkspaceId,
 ) {
-    if workspace.as_str() == PERSONAL_WORKSPACE || workspace.as_str() == THREADS_WORKSPACE {
-        return;
-    }
-    if wiki_is_edited(workspace, "brief.md") {
-        return;
-    }
-    let Ok(memories) = facade.list_memories_for_ui(user_id, workspace) else {
-        return;
-    };
-    let goals: Vec<String> = memories
-        .iter()
-        .filter(|m| {
-            m.memory_type == "goal"
-                && matches!(m.status, MemoryStatus::Confirmed | MemoryStatus::Candidate)
-        })
-        .map(|m| m.text.trim().to_string())
-        .collect();
-    let decisions: Vec<String> = memories
-        .iter()
-        .filter(|m| {
-            m.memory_type == "decision"
-                && matches!(m.status, MemoryStatus::Confirmed | MemoryStatus::Candidate)
-        })
-        .map(|m| m.text.lines().next().unwrap_or(&m.text).trim().to_string())
-        .collect();
-    if goals.is_empty() && decisions.is_empty() {
-        return; // nothing to brief yet
-    }
-    let mut body = String::from(
-        "# Project brief\n\n> Generated view (editable by hand): objectives + status. \
-Your edits stick. It's what the assistant ALWAYS keeps in mind about the project.\n\n## Objectives\n\n",
-    );
-    if goals.is_empty() {
-        body.push_str(
-            "_No objective recorded — edit this page to define where the project is heading._\n\n",
-        );
-    } else {
-        for g in &goals {
-            body.push_str(&format!("- {g}\n"));
-        }
-        body.push('\n');
-    }
-    if !decisions.is_empty() {
-        body.push_str("## Recent status and decisions\n\n");
-        for d in decisions.iter().take(6) {
-            body.push_str(&format!("- {d}\n"));
-        }
-        body.push('\n');
-    }
-    let path = "brief.md";
-    let reference = facade
-        .list_wiki_pages_for_ui(user_id, workspace)
-        .ok()
-        .and_then(|pages| {
-            pages
-                .into_iter()
-                .find(|p| p.path == path)
-                .map(|p| p.reference)
-        })
-        .unwrap_or_else(|| {
-            MemoryRef::generated(MemoryRefKind::Wiki, user_id.clone(), workspace.clone())
-        });
-    let page = WikiPage {
-        reference,
-        user_id: user_id.clone(),
-        workspace_id: workspace.clone(),
-        path: path.to_string(),
-        title: "Project brief".to_string(),
-        body,
-        linked_refs: Vec::new(),
-        privacy_domain: PrivacyDomain::new("personal"),
-        sensitivity: MemoryDataSensitivity::Internal,
-    };
-    let _ = facade.record_wiki_page_for_ui(&page);
+    local_first_memory::rebuild_project_brief(facade, user_id, workspace, &|ws, path| {
+        wiki_is_edited(ws, path)
+    });
 }
 
 /// Project status (`stato-lavori.md`): the readable/editable face of open loops.
@@ -4381,48 +4413,9 @@ fn rebuild_status_wiki(
     user_id: &MemoryUserId,
     workspace: &MemoryWorkspaceId,
 ) {
-    let path = "stato-lavori.md";
-    if wiki_is_edited(workspace, path) {
-        return;
-    }
-    let Ok(memories) = facade.list_memories_for_ui(user_id, workspace) else {
-        return;
-    };
-    let open_loops: Vec<(MemoryRef, String)> = memories
-        .into_iter()
-        .filter(active_open_loop_record)
-        .map(|memory| (memory.reference, memory.text))
-        .collect();
-    let (body, linked_refs) = status_wiki_body_from_open_loops(&open_loops);
-    let reference = facade
-        .list_wiki_pages_for_ui(user_id, workspace)
-        .ok()
-        .and_then(|pages| {
-            pages
-                .into_iter()
-                .find(|p| p.path == path)
-                .map(|p| p.reference)
-        })
-        .unwrap_or_else(|| {
-            MemoryRef::generated(MemoryRefKind::Wiki, user_id.clone(), workspace.clone())
-        });
-    let privacy_domain = if workspace.as_str() == PERSONAL_WORKSPACE {
-        PrivacyDomain::new("personal")
-    } else {
-        PrivacyDomain::new("work")
-    };
-    let page = WikiPage {
-        reference,
-        user_id: user_id.clone(),
-        workspace_id: workspace.clone(),
-        path: path.to_string(),
-        title: "Stato lavori".to_string(),
-        body,
-        linked_refs,
-        privacy_domain,
-        sensitivity: MemoryDataSensitivity::Internal,
-    };
-    let _ = facade.record_wiki_page_for_ui(&page);
+    local_first_memory::rebuild_status_wiki(facade, user_id, workspace, &|ws, path| {
+        wiki_is_edited(ws, path)
+    });
 }
 
 fn active_open_loop_record(memory: &MemoryRecord) -> bool {
@@ -4433,6 +4426,10 @@ fn active_open_loop_record(memory: &MemoryRecord) -> bool {
         )
         && memory.superseded_by.is_none()
         && !memory.text.trim().is_empty()
+        // Runtime plans are harness-owned control-flow state. They are resumed
+        // only through the per-thread runtime-plan loader; injecting them as
+        // generic open loops lets unrelated threads contaminate a fresh prompt.
+        && memory.metadata.get("source").and_then(|v| v.as_str()) != Some("runtime_plan")
 }
 
 fn deduplicate_open_loops(
@@ -4440,48 +4437,7 @@ fn deduplicate_open_loops(
     user_id: &MemoryUserId,
     workspace: &MemoryWorkspaceId,
 ) -> usize {
-    let mut loops: Vec<MemoryRecord> = facade
-        .list_memories_for_ui(user_id, workspace)
-        .unwrap_or_default()
-        .into_iter()
-        .filter(active_open_loop_record)
-        .collect();
-    if loops.len() < 2 {
-        return 0;
-    }
-
-    loops.sort_by_key(|m| std::cmp::Reverse(m.text.chars().count()));
-    let lifecycle = MemoryLifecycleRequest {
-        actor_id: "open-loop-dedup".to_string(),
-        user_id: user_id.clone(),
-        workspace_id: workspace.clone(),
-        purpose: "deduplicate_open_loops".to_string(),
-    };
-    let mut kept: Vec<(MemoryRef, std::collections::HashSet<String>)> = Vec::new();
-    let mut merged = 0usize;
-    for memory in loops {
-        let tokens = dedup_tokens(&memory.text);
-        if let Some((canonical, _)) = kept.iter().find(|(_, existing)| {
-            jaccard(&tokens, existing) >= DEDUP_JACCARD
-                || (tokens.len() >= 2 && tokens.is_subset(existing))
-                || (existing.len() >= 2 && existing.is_subset(&tokens))
-        }) {
-            if facade
-                .merge_memories(
-                    &lifecycle,
-                    canonical,
-                    vec![memory.reference.clone()],
-                    "open_loop duplicate/superseded",
-                )
-                .is_ok()
-            {
-                merged += 1;
-            }
-        } else {
-            kept.push((memory.reference, tokens));
-        }
-    }
-    merged
+    local_first_memory::deduplicate_open_loops(facade, user_id, workspace)
 }
 
 fn open_loop_closure_targets(memory: &ExtractedMemory) -> Vec<String> {
@@ -4563,56 +4519,11 @@ fn close_matching_open_loops(
     closed
 }
 
+/// ADR 0022 (Tappa 4, F2): corpo migrato nel crate; thin wrapper (test caller).
 fn status_wiki_body_from_open_loops(
     open_loops: &[(MemoryRef, String)],
 ) -> (String, Vec<MemoryRef>) {
-    let mut loops: Vec<(MemoryRef, String)> = open_loops
-        .iter()
-        .filter_map(|(reference, text)| {
-            let trimmed = text.trim();
-            if trimmed.is_empty() {
-                None
-            } else {
-                Some((reference.clone(), trimmed.to_string()))
-            }
-        })
-        .collect();
-    loops.sort_by_key(|(_, text)| std::cmp::Reverse(text.chars().count()));
-    let mut kept_tokens: Vec<std::collections::HashSet<String>> = Vec::new();
-    loops.retain(|(_, text)| {
-        let tokens = dedup_tokens(text);
-        if kept_tokens
-            .iter()
-            .any(|existing| jaccard(&tokens, existing) >= DEDUP_JACCARD)
-        {
-            false
-        } else {
-            kept_tokens.push(tokens);
-            true
-        }
-    });
-
-    let mut body = String::from(
-        "# Stato lavori\n\n> Pagina generata dagli open loop della memoria. \
-Editabile a mano: le correzioni rientrano nello store strutturato tramite re-ingest.\n\n",
-    );
-    if loops.is_empty() {
-        body.push_str("## Loop aperti\n\n_Nessun loop aperto registrato._\n");
-        return (body, Vec::new());
-    }
-
-    body.push_str("## Loop aperti\n\n");
-    let mut linked_refs = Vec::new();
-    for (idx, (reference, text)) in loops.iter().enumerate() {
-        linked_refs.push(reference.clone());
-        let title = wiki_title_from_text(text);
-        body.push_str(&format!("### {}. {title}\n\n", idx + 1));
-        body.push_str("- Stato: aperto\n");
-        body.push_str(&format!("- Memoria: `{}`\n\n", reference));
-        body.push_str(text);
-        body.push_str("\n\n");
-    }
-    (body, linked_refs)
+    local_first_memory::status_wiki_body_from_open_loops(open_loops)
 }
 
 /// The project's OBJECTIVE (north star) — injected FIRST, with a focus directive, so every
@@ -4718,7 +4629,418 @@ fn recent_work_block(state: &AppState) -> Option<String> {
     ))
 }
 
-/// One-shot JSON call to the memory role model (same path as the extractor).
+/// Costruisce il `MemoryScope` corrispondente al workspace attivo del gateway.
+///
+/// L'assemblaggio canonico del briefing deriva lo scope dal workspace attivo
+/// (`gateway_memory_workspace_id`); questo helper lo proietta nel `MemoryScope`
+/// del crate memoria. Lo scope `Thread` (episodico) non compare nel briefing
+/// always-on canonico, quindi qui mappiamo solo Personal/Project.
+fn scope_from_active_workspace() -> MemoryScope {
+    let ws = gateway_memory_workspace_id();
+    if ws.as_str() == PERSONAL_WORKSPACE {
+        MemoryScope::Personal
+    } else {
+        MemoryScope::Project(ws)
+    }
+}
+
+/// Impl in-process di [`MemoryRecallService`] che **delega** alle funzioni
+/// esistenti del gateway senza cambiarne il behaviour (ADR 0022, Tappa 1).
+///
+/// L'estrazione vera (migrazione delle funzioni nel crate `memory`) è la Tappa
+/// 4: qui si incapsula *delegando*. Mantiene `AppState` (clone a basso costo,
+/// tutti i campi sono `Arc`) e condivide la stessa `Arc<Mutex<MemoryFacade>>`.
+///
+/// Parità: `brief` riproduce esattamente la sequenza di assemblaggio del
+/// system prompt (`main.rs:19476-19509`); `recall`/`learn` avvolgono
+/// `relevant_memory_for_prompt`/`learn_from_exchange`.
+struct InProcessMemoryRecallService {
+    state: AppState,
+    /// ADR 0022 (Tappa 4): embedding client astratto (capability trait). Il
+    /// recall orchestrato nel crate lo consuma; questa impl gateway wrappa la
+    /// cache LRU+TTL esistente (`embed_query_for_memory_recall`).
+    embedding: std::sync::Arc<dyn local_first_memory::EmbeddingClient>,
+    /// ADR 0022 (Tappa 4): LLM client per l'estrazione memoria (learn). Wrappa
+    /// `extractor_openai_config` + POST `/chat/completions`.
+    llm: std::sync::Arc<dyn local_first_memory::LlmClient>,
+}
+
+impl InProcessMemoryRecallService {
+    fn new(
+        state: AppState,
+        embedding: std::sync::Arc<dyn local_first_memory::EmbeddingClient>,
+        llm: std::sync::Arc<dyn local_first_memory::LlmClient>,
+    ) -> Self {
+        Self { state, embedding, llm }
+    }
+}
+
+/// ADR 0022 (Tappa 4) — impl gateway del capability `EmbeddingClient`. Wrappa
+/// `embed_query_for_memory_recall` (cache LRU+TTL + timeout + degradazione). Il
+/// recall orchestrato nel crate lo consuma senza conoscere HTTP.
+struct GatewayEmbeddingClient {
+    http: reqwest::Client,
+}
+
+impl local_first_memory::EmbeddingClient for GatewayEmbeddingClient {
+    fn embed<'a>(
+        &'a self,
+        text: &'a str,
+    ) -> local_first_memory::BoxFuture<'a, Vec<f32>> {
+        let http = self.http.clone();
+        Box::pin(async move {
+            // `embed_query_for_memory_recall` deriva workspace/timing internamente;
+            // per il recall orchestrato l'embedding è solo del testo della query.
+            // Usiamo embed_text direttamente (no cache globale qui, ma il gateway
+            // cache è per-workspace — vedremo se serve thread through lo scope).
+            // Per parità col path inline, riusiamo embed_query_for_memory_recall.
+            let active = gateway_memory_workspace_id();
+            let mut timing = MemoryRecallTiming::default();
+            embed_query_for_memory_recall(&http, text, &active, &mut timing)
+                .await
+                .unwrap_or_default()
+        })
+    }
+}
+
+/// ADR 0022 (Tappa 4) — impl gateway del capability `LlmClient` per l'estrazione
+/// memoria (learn). Risolve `extractor_openai_config` e POST `/chat/completions`.
+/// L'orchestrazione learn_on_facade nel crate lo consuma senza conoscere HTTP.
+struct GatewayLlmClient {
+    http: reqwest::Client,
+}
+
+impl local_first_memory::LlmClient for GatewayLlmClient {
+    fn chat<'a>(
+        &'a self,
+        system: &'a str,
+        user_content: &'a str,
+    ) -> local_first_memory::BoxFuture<'a, Option<String>> {
+        let http = self.http.clone();
+        Box::pin(async move {
+            let Some((base_url, model, api_key)) = extractor_openai_config() else {
+                return None;
+            };
+            let payload = serde_json::json!({
+                "model": model,
+                "temperature": 0.0,
+                "max_tokens": 2000,
+                "response_format": { "type": "json_object" },
+                "messages": [
+                    { "role": "system", "content": system },
+                    { "role": "user", "content": user_content },
+                ],
+            });
+            let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
+            let mut builder = http
+                .post(&endpoint)
+                .timeout(std::time::Duration::from_secs(120));
+            if let Some(key) = api_key.as_ref() {
+                builder = builder.bearer_auth(key);
+            }
+            let resp = builder.json(&payload).send().await.ok()?;
+            if !resp.status().is_success() {
+                return None;
+            }
+            let body = resp.json::<serde_json::Value>().await.ok()?;
+            body.get("choices")
+                .and_then(|c| c.get(0))
+                .and_then(|c| c.get("message"))
+                .and_then(|m| m.get("content"))
+                .and_then(|c| c.as_str())
+                .map(str::to_string)
+        })
+    }
+}
+
+impl MemoryRecallService for InProcessMemoryRecallService {
+    fn brief(&self, scope: &MemoryScope, user_message: &str) -> BriefingPack {
+        // `scope` è portato per il contratto (isolation by construction); l'impl delegante
+        // usa il workspace attivo del gateway, coerente con `relevant_memory_for_prompt`.
+        // Lo scope diventa realmente autoritativo in Tappa 4. Qui l'assert garantisce
+        // coerenza in debug (discrepanza = segnale di un bug nel wiring, non da zittire).
+        debug_assert!(scope.workspace_id() == gateway_memory_workspace_id());
+
+        // recent_work NON è cached: dipende da git log (non dalla memoria), va
+        // ricalcolato fresco ogni brief() come nel path inline.
+        let recent_work = recent_work_block(&self.state);
+
+        // ADR 0022 (Tappa 1.5) — cache del briefing per i 3 blocchi memory-backed.
+        // Hit solo se generation AND prompt_fingerprint combaciano.
+        let user = gateway_memory_user_id();
+        let workspace = gateway_memory_workspace_id();
+        let generation = {
+            let facade = lock_memory_facade(&self.state).ok();
+            facade
+                .map(|facade| facade.briefing_generation(&user, &workspace))
+                .unwrap_or(0)
+        };
+        let fingerprint = prompt_fingerprint(user_message);
+        let scope_key = format!("{}|{}", user.as_str(), workspace.as_str());
+
+        if let Some(cached) = briefing_cache().get(&scope_key, generation, fingerprint) {
+            // Cache hit: riutilizzo i 3 blocchi cached + recent_work fresco.
+            return BriefingPack {
+                profile_block: cached.profile_block,
+                objective: cached.objective,
+                brief: cached.brief,
+                recent_work,
+            };
+        }
+
+        // Cache miss: rebuild dei 3 blocchi memory-backed (parità con l'inline,
+        // main.rs:19476-19509). I predicati should_inject_* sono prompt-dipendenti:
+        // per questo il trait porta `user_message` e la cache key include la fingerprint.
+        let (memory_personal, memory_project) =
+            gather_profile_memory_for_prompt(&self.state, user_message);
+        let memory_open_loops = if should_inject_open_loops_for_prompt(user_message) {
+            gather_open_loops(&self.state, 6)
+        } else {
+            Vec::new()
+        };
+        let profile_block = format_memory_block(
+            &memory_open_loops,
+            &memory_personal,
+            &memory_project,
+            CHAT_MEMORY_BUDGET_CHARS,
+        );
+        // objective/brief ritornano già None per PERSONAL_WORKSPACE, quindi la shape
+        // è intrinsecamente snella per MemoryScope::Personal (invariant P1).
+        let objective = project_objective_block(&self.state);
+        let brief = project_brief_block(&self.state);
+
+        // Salva in cache per i turni successivi (stessa generation + fingerprint).
+        briefing_cache().put(
+            scope_key,
+            CachedBriefing {
+                generation,
+                prompt_fingerprint: fingerprint,
+                pack_sans_recent_work: BriefingPack {
+                    profile_block: profile_block.clone(),
+                    objective: objective.clone(),
+                    brief: brief.clone(),
+                    recent_work: None, // non cached
+                },
+            },
+        );
+
+        BriefingPack {
+            profile_block,
+            objective,
+            brief,
+            recent_work,
+        }
+    }
+
+    fn recall<'a>(
+        &'a self,
+        query: &'a str,
+        scope: &'a MemoryScope,
+    ) -> local_first_memory::BoxFuture<'a, RecallPack> {
+        // ADR 0022 (Tappa 4): recall ora ORCHESTRATO nel crate via
+        // `recall_on_facade`. Lo scope è argomento esplicito (isolation by
+        // construction — chiude il debito Tappa 1). Il graph-context è iniettato
+        // come callback dal gateway (pure-facade, sarà spostato in sub-tappa).
+        let user = gateway_memory_user_id();
+        // Lo scope del trait è autoritativo: lo usiamo, non più la globale.
+        let workspace = scope.workspace_id();
+        let embedding = self.embedding.clone();
+        let state = self.state.clone();
+        let scope_owned = scope.clone();
+        Box::pin(async move {
+            // Fase 1: embed OFF the lock (l'unico await prima del lock, come nel
+            // path gateway originale — così il MutexGuard non attraversa un await).
+            let query_vec = local_first_memory::embed_query(embedding.as_ref(), query).await;
+            // Fase 2: lock + search sync. Il guard vive solo in questo scope sync.
+            let block = {
+                let Ok(facade) = lock_memory_facade(&state) else {
+                    return RecallPack::from_block(query, scope_owned, None);
+                };
+                // Graph-context callback: inietta workflow_status / artifact_provenance.
+                // Le fn libere del gateway sono Sync; il closure è + Sync.
+                let graph_context: Option<
+                    &(dyn Fn(&local_first_memory::MemoryFacade, &MemoryUserId, &MemoryWorkspaceId, &str) -> Option<String> + Sync),
+                > = Some(&|facade, user, workspace, q| {
+                    if let Some(workflow) =
+                        workflow_status_context_for_query(facade, user, workspace, q)
+                    {
+                        return Some(workflow);
+                    }
+                    artifact_provenance_context_for_query(facade, user, workspace, q)
+                });
+                local_first_memory::recall_search_on_facade(
+                    &facade,
+                    &user,
+                    &workspace,
+                    query,
+                    &query_vec,
+                    graph_context,
+                )
+            };
+            RecallPack::from_block(query, scope_owned, block)
+        })
+    }
+
+    fn learn<'a>(
+        &'a self,
+        exchange: &'a Exchange,
+        scope: &'a MemoryScope,
+    ) -> local_first_memory::BoxFuture<'a, ()> {
+        // ADR 0022 (Tappa 4): learn ora ORCHESTRATO nel crate via
+        // `learn_on_facade`. Lo scope è argomento esplicito (isolation by
+        // construction). project_name + hooks (grafo/episode/backfill) sono
+        // gateway-side e iniettati (saranno migrati in sub-tappa).
+        let user = gateway_memory_user_id();
+        let workspace = scope.workspace_id();
+        let llm = self.llm.clone();
+        let state = self.state.clone();
+        let user_message = exchange.user_message.clone();
+        let assistant_message = exchange.assistant_message.clone();
+        let actions = exchange.actions.clone();
+        let thread_id = exchange.thread_id.clone();
+        let speaker = exchange.speaker.clone();
+        let prev_assistant = exchange.prev_assistant.clone();
+        Box::pin(async move {
+            let active = workspace.clone();
+            let project_name = if active.as_str() != PERSONAL_WORKSPACE {
+                load_workspaces_file()
+                    .workspaces
+                    .into_iter()
+                    .find(|w| w.id.as_str() == active.as_str())
+                    .map(|w| w.name)
+            } else {
+                None
+            };
+            // Fase 1 (sync, lock): prepara il prompt (gating + known loops).
+            let prompt = {
+                let Ok(facade) = lock_memory_facade(&state) else { return };
+                local_first_memory::prepare_learn_prompt(
+                    &facade,
+                    &user,
+                    &active,
+                    &user_message,
+                    &assistant_message,
+                    &actions,
+                    speaker.as_deref(),
+                    prev_assistant.as_deref(),
+                    project_name.as_deref(),
+                )
+            };
+            let Some((system, user_content)) = prompt else { return };
+            // Fase 2 (off-lock): LLM estrattore via capability trait (no guard attiva).
+            let Some(content) = llm.chat(&system, &user_content).await else { return };
+            // Fase 3 (sync, lock re-acquisito): parse + routing + persist + hooks.
+            let Ok(facade) = lock_memory_facade(&state) else { return };
+            let hooks = local_first_memory::LearnHooks {
+                persist_graph: Some(&|facade, user, workspace, entities, relations, project_ws| {
+                    persist_graph(facade, user, workspace, entities, relations, project_ws);
+                }),
+                store_episode: Some(&|facade, user, thread_id, episode, active| {
+                    store_episode(facade, user, thread_id, episode, active);
+                }),
+                backfill_embeddings: None, // backfill async: resta al tick periodico.
+            };
+            local_first_memory::persist_learn_extraction(
+                &facade,
+                &user,
+                &active,
+                &content,
+                thread_id.as_deref(),
+                hooks,
+            );
+        })
+    }
+}
+
+/// ADR 0022 — Tappa 1: apprendimento post-turno. Quando `HOMUN_MEMORY_SERVICE=on`
+/// ADR 0022 — Tappa 1/4: apprendimento post-turno. Quando il service è ON
+/// (`HOMUN_MEMORY_SERVICE`) instrada via `MemoryRecallService::learn`; anche nel
+/// path OFF usa le STESSE fn del crate (3 fasi: prepare_learn_prompt →
+/// LlmClient.chat → persist_learn_extraction) con capability client costruiti
+/// al volo — così `learn_from_exchange` non è più duplicata nel gateway.
+fn learn_via_service_or_inline(
+    state: &AppState,
+    user_message: &str,
+    assistant_message: &str,
+    actions: &str,
+    thread_id: Option<&str>,
+    speaker: Option<&str>,
+    prev_assistant: Option<&str>,
+) -> local_first_memory::BoxFuture<'static, ()> {
+    if let Some(service) = state.memory_service.clone() {
+        let scope = scope_from_active_workspace();
+        let exchange = Exchange {
+            user_message: user_message.to_string(),
+            assistant_message: assistant_message.to_string(),
+            actions: actions.to_string(),
+            thread_id: thread_id.map(str::to_string),
+            speaker: speaker.map(str::to_string),
+            prev_assistant: prev_assistant.map(str::to_string),
+        };
+        Box::pin(async move { service.learn(&exchange, &scope).await })
+    } else {
+        // Path OFF: stessa orchestrazione del crate, capability client al volo.
+        let state = state.clone();
+        let user_message = user_message.to_string();
+        let assistant_message = assistant_message.to_string();
+        let actions = actions.to_string();
+        let thread_id = thread_id.map(str::to_string);
+        let speaker = speaker.map(str::to_string);
+        let prev_assistant = prev_assistant.map(str::to_string);
+        Box::pin(async move {
+            let user = gateway_memory_user_id();
+            let active = gateway_memory_workspace_id();
+            let project_name = if active.as_str() != PERSONAL_WORKSPACE {
+                load_workspaces_file()
+                    .workspaces
+                    .into_iter()
+                    .find(|w| w.id.as_str() == active.as_str())
+                    .map(|w| w.name)
+            } else {
+                None
+            };
+            let llm: std::sync::Arc<dyn local_first_memory::LlmClient> =
+                std::sync::Arc::new(GatewayLlmClient { http: state.http.clone() });
+            // Fase 1 (lock): prompt.
+            let prompt = {
+                let Ok(facade) = lock_memory_facade(&state) else { return };
+                local_first_memory::prepare_learn_prompt(
+                    &facade,
+                    &user,
+                    &active,
+                    &user_message,
+                    &assistant_message,
+                    &actions,
+                    speaker.as_deref(),
+                    prev_assistant.as_deref(),
+                    project_name.as_deref(),
+                )
+            };
+            let Some((system, user_content)) = prompt else { return };
+            // Fase 2 (off-lock): LLM.
+            let Some(content) = llm.chat(&system, &user_content).await else { return };
+            // Fase 3 (lock): persist + hooks.
+            let Ok(facade) = lock_memory_facade(&state) else { return };
+            let hooks = local_first_memory::LearnHooks {
+                persist_graph: Some(&|facade, user, workspace, entities, relations, project_ws| {
+                    persist_graph(facade, user, workspace, entities, relations, project_ws);
+                }),
+                store_episode: Some(&|facade, user, thread_id, episode, active| {
+                    store_episode(facade, user, thread_id, episode, active);
+                }),
+                backfill_embeddings: None,
+            };
+            local_first_memory::persist_learn_extraction(
+                &facade,
+                &user,
+                &active,
+                &content,
+                thread_id.as_deref(),
+                hooks,
+            );
+        })
+    }
+}
 async fn call_memory_json(
     state: &AppState,
     system: &str,
@@ -4760,288 +5082,63 @@ async fn call_memory_json(
 /// Memory consolidation ("reflection"): review a scope's durable memories, MERGE the
 /// fragments that say the same thing, and PRUNE noise (transient/trivial/irrelevant or
 /// redundant). Conservative — when in doubt the model keeps. Returns (merged, dropped).
+///
+/// ADR 0022 (Tappa 4, F3): orchestrazione migrata nel crate via 3 fasi Send-safe
+/// (`consolidate_prepare` → LLM curatore off-lock → `consolidate_apply`). Il
+/// `MutexGuard` non attraversa l'await della LLM call. Corpo spostato fedelmente.
 async fn consolidate_scope(
     state: &AppState,
     user: &MemoryUserId,
     workspace: &MemoryWorkspaceId,
 ) -> (usize, usize) {
-    let open_loop_merged = {
+    // is_edited callback: il crate non legge il FS gateway (pattern = hooks).
+    let is_edited = |ws: &MemoryWorkspaceId, path: &str| wiki_is_edited(ws, path);
+    // Fase 1 (lock): dedup open-loop + pre-pass deterministico + listing.
+    let (merged, prepared) = {
         let Ok(facade) = lock_memory_facade(state) else {
             return (0, 0);
         };
-        let merged = deduplicate_open_loops(&facade, user, workspace);
-        if merged > 0 {
-            rebuild_status_wiki(&facade, user, workspace);
-        }
-        merged
+        local_first_memory::consolidate_prepare(&facade, user, workspace, &is_edited)
     };
-    // 1. Read the durable memories + their embeddings (off-lock thereafter).
-    let (mems, embeddings) = {
-        let Ok(facade) = lock_memory_facade(state) else {
-            return (0, 0);
-        };
-        let mems: Vec<(MemoryRef, String, String)> = facade
-            .list_memories_for_ui(user, workspace)
-            .map(|memories| {
-                memories
-                    .into_iter()
-                    .filter(|m| {
-                        matches!(m.status, MemoryStatus::Confirmed | MemoryStatus::Candidate)
-                            && matches!(
-                                m.memory_type.as_str(),
-                                "fact" | "preference" | "decision" | "goal"
-                            )
-                    })
-                    .map(|m| (m.reference, m.memory_type, m.text))
-                    .collect()
-            })
-            .unwrap_or_default();
-        let embeddings: std::collections::HashMap<String, Vec<f32>> = facade
-            .list_embeddings(user, workspace)
-            .map(|v| v.into_iter().map(|(r, vec)| (r.to_string(), vec)).collect())
-            .unwrap_or_default();
-        (mems, embeddings)
-    };
-    if mems.len() < 2 {
-        return (open_loop_merged, 0);
-    }
-
-    // 1a. STRUCTURAL signal: which entities each memory is linked to (mentions edges).
-    // Two facts of the same type that talk about the SAME set of entities are very
-    // likely paraphrases — a signal lexical/cosine thresholds miss (the "Sinner ×2"
-    // case). Built from the now-complete graph (F1).
-    let (entity_sets, entity_name_tokens): (
-        std::collections::HashMap<String, std::collections::BTreeSet<String>>,
-        std::collections::HashSet<String>,
-    ) = {
-        let mut map: std::collections::HashMap<String, std::collections::BTreeSet<String>> =
-            Default::default();
-        let mut name_tokens: std::collections::HashSet<String> = Default::default();
-        if let Ok(facade) = lock_memory_facade(state) {
-            for rel in facade
-                .list_relations_for_ui(user, workspace)
-                .unwrap_or_default()
-            {
-                if rel.relation_type == "mentions" {
-                    map.entry(rel.source_ref.to_string())
-                        .or_default()
-                        .insert(rel.target_ref.to_string());
-                }
-            }
-            // Entity-name tokens (e.g. "jannik","sinner") so the structural check can
-            // require shared content BEYOND the entity name itself.
-            for entity in facade
-                .list_entities_for_ui(user, workspace)
-                .unwrap_or_default()
-            {
-                for tok in dedup_tokens(&entity.name) {
-                    name_tokens.insert(tok);
-                }
-            }
-        }
-        (map, name_tokens)
-    };
-
-    // 1b. DETERMINISTIC pre-pass: collapse obvious paraphrase/subset duplicates
-    // (the LLM curator alone was too conservative — "Trenitalia ×4" survived). Same
-    // criterion as the read-time dedup: same type AND (lexical Jaccard ∨ token
-    // containment ∨ semantic cosine). Keep the RICHEST (longest) — no rephrasing, so
-    // no hallucination — and tombstone the rest.
-    let mut order: Vec<usize> = (0..mems.len()).collect();
-    order.sort_by_key(|&i| std::cmp::Reverse(mems[i].2.chars().count()));
-    let mut survivor_idx: Vec<usize> = Vec::new();
-    type KeptMeta = (
-        String,
-        std::collections::HashSet<String>,
-        Option<Vec<f32>>,
-        std::collections::BTreeSet<String>,
-    );
-    let mut kept_meta: Vec<KeptMeta> = Vec::new();
-    let mut redundant: Vec<MemoryRef> = Vec::new();
-    for &i in &order {
-        let (reference, mtype, text) = &mems[i];
-        let tokens = dedup_tokens(text);
-        let vector = embeddings.get(&reference.to_string()).cloned();
-        let entset = entity_sets
-            .get(&reference.to_string())
-            .cloned()
-            .unwrap_or_default();
-        let duplicate = kept_meta.iter().any(|(kt, ktok, kvec, kent)| {
-            kt == mtype
-                && (jaccard(&tokens, ktok) >= DEDUP_JACCARD
-                    || (tokens.len() >= 2 && tokens.is_subset(ktok))
-                    || matches!((vector.as_ref(), kvec.as_ref()),
-                        (Some(a), Some(b)) if cosine(a, b) >= DEDUP_COSINE)
-                    // STRUCTURAL: same entity set (non-empty) AND ≥2 shared content
-                    // tokens BEYOND the entity name. "interesse per le CONDIZIONI di
-                    // SALUTE di Sinner" ×2 share {condizioni,salute} beyond {jannik,
-                    // sinner} → merge; "AMA Sinner" vs "Sinner INFORTUNATO" share only
-                    // the name → kept distinct. Robust to length asymmetry (no jaccard).
-                    || (!entset.is_empty()
-                        && &entset == kent
-                        && tokens
-                            .intersection(ktok)
-                            .filter(|t| !entity_name_tokens.contains(*t))
-                            .count()
-                            >= 2))
-        });
-        if duplicate {
-            redundant.push(reference.clone());
-        } else {
-            survivor_idx.push(i);
-            kept_meta.push((mtype.clone(), tokens, vector, entset));
-        }
-    }
-    let mut merged = open_loop_merged;
-    if !redundant.is_empty() {
-        if let Ok(facade) = lock_memory_facade(state) {
-            let lifecycle = MemoryLifecycleRequest {
-                actor_id: "consolidation".to_string(),
-                user_id: user.clone(),
-                workspace_id: workspace.clone(),
-                purpose: "consolidate".to_string(),
-            };
-            for reference in &redundant {
-                if facade
-                    .delete_memory(&lifecycle, reference, "merged duplicate (consolidation)")
-                    .is_ok()
-                {
-                    merged += 1;
-                }
-            }
-        }
-    }
-    // Survivors (original order) feed the LLM curator for the nuanced merges/drops.
-    let mems: Vec<(MemoryRef, String, String)> =
-        survivor_idx.into_iter().map(|i| mems[i].clone()).collect();
-    if mems.len() < 3 {
-        if let Ok(facade) = lock_memory_facade(state) {
-            rebuild_decisions_wiki(&facade, user, workspace);
-            rebuild_project_brief(&facade, user, workspace);
-            rebuild_status_wiki(&facade, user, workspace);
-        }
+    let Some(input) = prepared else {
+        // <3 memorie sopravvissute (o early-exit): wiki già ricostruite nella prepare.
         return (merged, 0);
-    }
-    let listing = mems
-        .iter()
-        .enumerate()
-        .map(|(i, (_, t, txt))| format!("[{i}] ({t}) {txt}"))
-        .collect::<Vec<_>>()
-        .join("\n");
-    let system = "You are a memory CURATOR. You receive the durable memories of a project/user, each \
-with an index [N]. Tasks: (1) MERGE into ONE clear and complete sentence the fragments that say the \
-SAME thing or aspects of the same thing; (2) DROP NOISE: transient, trivial, irrelevant information, \
-with no future value, or left redundant after merging. Keep ONLY what is truly important and \
-reusable. When in doubt, KEEP (do not drop). Do NOT invent: the merged sentence must derive only \
-from the listed memories. Reply with JSON ONLY: \
-{\"merges\":[{\"into\":\"consolidated sentence\",\"memory_type\":\"fact|preference|decision|goal\",\"importance\":0.0-1.0,\"from\":[indices]}],\
-\"drops\":[{\"index\":N,\"reason\":\"why it is noise/irrelevant\"}]}. \
-Each \"from\" must have AT LEAST 2 indices (it is a merge). \"importance\": 1=crucial, 0=negligible. \
-If there is nothing to do: {\"merges\":[],\"drops\":[]}.";
-    let Some(root) = call_memory_json(state, system, &format!("MEMORIE ATTUALI:\n{listing}")).await
-    else {
-        // LLM curator unavailable: keep the deterministic merges already applied.
+    };
+    // Fase 2 (off-lock): LLM curatore. Usa GatewayLlmClient (throwaway), poi parse
+    // JSON resiliente (strip_json_fences è nel crate).
+    let llm: std::sync::Arc<dyn local_first_memory::LlmClient> =
+        std::sync::Arc::new(GatewayLlmClient { http: state.http.clone() });
+    let content = llm
+        .chat(
+            local_first_memory::CURATOR_SYSTEM,
+            &format!("MEMORIE ATTUALI:\n{}", input.listing),
+        )
+        .await;
+    let root = content.and_then(|c| {
+        serde_json::from_str::<serde_json::Value>(local_first_memory::strip_json_fences(&c)).ok()
+    });
+    let Some(root) = root else {
+        // LLM curator unavailable: keep the deterministic merges already applied,
+        // rebuild the wiki pages.
         if let Ok(facade) = lock_memory_facade(state) {
-            rebuild_decisions_wiki(&facade, user, workspace);
-            rebuild_project_brief(&facade, user, workspace);
-            rebuild_status_wiki(&facade, user, workspace);
+            local_first_memory::rebuild_all_wiki(&facade, user, workspace, &is_edited);
         }
         return (merged, 0);
     };
-    let merges = root
-        .get("merges")
-        .and_then(|v| v.as_array())
-        .cloned()
-        .unwrap_or_default();
-    let drops = root
-        .get("drops")
-        .and_then(|v| v.as_array())
-        .cloned()
-        .unwrap_or_default();
-
-    // 2. Apply the LLM curator's merges/drops under a single lock (no awaits here →
-    //    Send-safe). `merged` already counts the deterministic pre-pass — keep adding.
-    let mut dropped = 0usize;
+    // Fase 3 (lock re-acquisito): applica merge/drop + ricostruisce wiki.
     let Ok(facade) = lock_memory_facade(state) else {
         return (merged, 0);
     };
-    let lifecycle = MemoryLifecycleRequest {
-        actor_id: "consolidation".to_string(),
-        user_id: user.clone(),
-        workspace_id: workspace.clone(),
-        purpose: "consolidate".to_string(),
-    };
-    for merge in &merges {
-        let into = merge
-            .get("into")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .trim();
-        let from: Vec<usize> = merge
-            .get("from")
-            .and_then(|v| v.as_array())
-            .map(|a| {
-                a.iter()
-                    .filter_map(|x| x.as_u64().map(|n| n as usize))
-                    .collect()
-            })
-            .unwrap_or_default();
-        if into.is_empty() || from.len() < 2 {
-            continue;
-        }
-        let memory_type = merge
-            .get("memory_type")
-            .and_then(|v| v.as_str())
-            .unwrap_or("fact")
-            .to_string();
-        let importance = merge
-            .get("importance")
-            .and_then(|v| v.as_f64())
-            .unwrap_or(0.7);
-        let created = facade.create_memory_candidate(MemoryCreateRequest {
-            request: lifecycle.clone(),
-            memory_type,
-            text: redact_sensitive_text(into),
-            aliases: Vec::new(),
-            language_hints: Vec::new(),
-            confidence: 1.0,
-            privacy_domain: PrivacyDomain::new("work"),
-            sensitivity: MemoryDataSensitivity::Internal,
-            evidence_refs: Vec::new(),
-            metadata: serde_json::json!({ "source": "consolidation", "importance": importance }),
-        });
-        if let Ok(record) = created {
-            let _ = facade.confirm_memory(&lifecycle, &record.reference, "consolidated");
-            for idx in &from {
-                if let Some((reference, _, _)) = mems.get(*idx) {
-                    let _ = facade.delete_memory(&lifecycle, reference, "merged in consolidation");
-                }
-            }
-            merged += 1;
-        }
-    }
-    for drop in &drops {
-        let Some(idx) = drop
-            .get("index")
-            .and_then(|v| v.as_u64())
-            .map(|n| n as usize)
-        else {
-            continue;
-        };
-        let reason = drop
-            .get("reason")
-            .and_then(|v| v.as_str())
-            .unwrap_or("rumore/ininfluente");
-        if let Some((reference, _, _)) = mems.get(idx) {
-            if facade.delete_memory(&lifecycle, reference, reason).is_ok() {
-                dropped += 1;
-            }
-        }
-    }
-    rebuild_decisions_wiki(&facade, user, workspace);
-    rebuild_project_brief(&facade, user, workspace);
-    rebuild_status_wiki(&facade, user, workspace);
-    (merged, dropped)
+    local_first_memory::consolidate_apply(
+        &facade,
+        user,
+        workspace,
+        &root,
+        &input.mems,
+        merged,
+        &is_edited,
+        &|text| redact_sensitive_text(text),
+    )
 }
 
 fn persist_graph(
@@ -5585,459 +5682,6 @@ fn summarize_tool_action(name: &str, args_raw: &str) -> Option<String> {
     Some(line)
 }
 
-async fn learn_from_exchange(
-    state: &AppState,
-    user_message: &str,
-    assistant_message: &str,
-    // A compact, newline-joined trace of the consequential ACTIONS this turn
-    // performed (files edited, commands run, documents/artifacts changed, connector
-    // calls). Empty when the turn was pure conversation. Drives decision capture so
-    // the "why" of a mutation is remembered — for ANY domain, not just coding.
-    actions: &str,
-    thread_id: Option<&str>,
-    // When Some(name), the message comes from a channel CONTACT (not the user):
-    // facts are attributed to them, not to person:self.
-    speaker: Option<&str>,
-    // The assistant's PREVIOUS turn — the question/assertion that a short reply like
-    // "sì" or "no, è una V9" would be answering. Lets a bare confirmation be grounded
-    // into the fact it confirms. None when there's no prior turn.
-    prev_assistant: Option<&str>,
-) {
-    // A confirmation turn ("la tua moto è una Moto Guzzi V7?" → "sì") is not salient on
-    // its own, but it commits a durable fact — keep it (grounded by prev_assistant
-    // below) so the confirmation doesn't evaporate and get re-asked next time.
-    let is_confirmation =
-        prev_assistant.is_some_and(|p| !p.trim().is_empty()) && is_confirmation_reply(user_message);
-    // Learn when the exchange is salient OR a confirmation OR the turn DID something
-    // concrete — so a terse prompt ("sistemalo", "aggiorna il preventivo") that
-    // triggers real actions still records the decision + its rationale.
-    if actions.trim().is_empty() && !is_salient_exchange(user_message) && !is_confirmation {
-        return;
-    }
-    let Some((base_url, model, api_key)) = extractor_openai_config() else {
-        return;
-    };
-    let base_system = "You are a MEMORY extractor. From the last exchange extract DURABLE and REUSABLE \
-knowledge: (1) facts and preferences about the USER (who they are, people in their life, how they \
-prefer to work); (2) DECISIONS made during the work (technical or project choices) with the WHY \
-and the rejected alternatives; (3) OPEN LOOPS — work left INCOMPLETE: an \"open_loop\" must describe \
-the FULL situation (what is DONE, what is MISSING or does NOT exist yet, what BLOCKS it and WHY), so a \
-fresh chat reconstructs the REAL state, not a cleaned subset (memory_type \"open_loop\"; ONLY for \
-genuinely unfinished work, NEVER for done items); (4) SALIENT STATE & FINDINGS — INCLUDING NEGATIVES: \
-what does NOT exist yet, was NOT found, or is blocked/missing (e.g. \"the Rossi quote is only a verbal \
-draft, no file yet\"; \"the report file was not found\"). These ARE durable state — capture them (as a \
-\"fact\" or folded into the open_loop), capturing the CONCLUSION/state, NOT the assistant's search \
-process or its mistakes. Do NOT extract the transient chatter of the task, NOT general world facts, \
-NOT the assistant's pure conversational replies. \
-EPISTEMIC STATE — DISTINGUISH what is TRUE/HAPPENED/DECIDED from what is only ASKED, SEARCHED, \
-HYPOTHETICAL or UNDER EVALUATION. A question, a price/options search, an \"if/maybe/I'm \
-considering\" are NOT facts about the user's life: do NOT register them as accomplished (e.g. if the \
-user ASKS for ferry prices, do NOT write \"has a planned trip\"). Register a plan/event as a fact \
-ONLY if the user states it as real/confirmed (\"I booked\", \"I'm leaving\", \"my trip is\"). If an \
-evaluation is still useful, phrase it cautiously (\"searched/considered …\"), low confidence, and \
-set metadata.certainty: \"committed\" = confirmed/happened, \"considered\" = only searched/evaluated, \
-\"intended\" = declared intention but not confirmed. \
-CONFIRMATIONS/CORRECTIONS: if above there is an \"ASSISTANT (previous turn…)\" block, the user is \
-REPLYING to what the assistant had hypothesized or asked. If they CONFIRM (\"yes\", \"exactly\", \
-\"confirmed\") or CORRECT (\"no, it's a V9\"), that fact becomes REAL: register it as committed with \
-high confidence (>=0.85), using the CORRECTED version if the user corrected. Confirmation turns a \
-hypothesis into an acquired fact (e.g. assistant \"is your motorbike a Moto Guzzi V7 Stone?\" + user \
-\"yes\" → committed fact \"The user owns a Moto Guzzi V7 Stone\"). \
-FIDELITY (no hallucinations): register ONLY what is explicit in the exchange; do NOT deduce or \
-embellish undeclared roles, transactions or relations — e.g. from \"I looked at an ad for a \
-motorcycle accessory\" do NOT deduce \"is selling their motorbike\" nor \"X is interested in buying \
-it\". If a role/relation/transaction is not stated in clear terms, do not write it. \
-DO NOT REGISTER (it is noise, not durable memory): recurring tasks or reminders and schedules the \
-user sets (they live in the task system, not in memory); service connections/integrations (e.g. \
-\"Gmail connected\", \"connected X\"); operational or build details (installed libraries/dependencies, \
-commands, file names) unless they are a real project DECISION with a why; and NEVER register as a \
-memory a request to FORGET/delete something. Do not save as project memory facts that concern \
-ANOTHER project or tool unrelated to the current work. \
-Reply with valid JSON ONLY, \
-nothing else:\n\
-{\"memories\":[{\"memory_type\":\"fact|preference|decision|goal|open_loop\",\"text\":\"short sentence in 3rd person \
-in the user's language\",\"sensitivity\":\"internal|private|confidential|secret\",\"confidence\":0.0-1.0,\
-\"metadata\":{\"scope\":\"personal|project\",\"certainty\":\"committed|considered|intended\",\"decision\":{\"rationale\":\"the why\",\
-\"alternatives\":[{\"option\":\"alternative\",\"rejected_because\":\"reason\"}]}}}],\
-\"entities\":[{\"entity_type\":\"person|organization|place|event|project|tool|object|topic\",\"name\":\"Name\",\
-\"canonical_key\":\"person:normalized-name\",\"aliases\":[\"short form\"],\
-\"sensitivity\":\"internal|private\",\"privacy_domain\":\"personal\",\"metadata\":{\"scope\":\"personal|project\"}}],\
-\"relations\":[{\"source_ref\":\"person:fabio\",\"relation_type\":\"child_of|parent_of|partner_of|sibling_of|works_as|possiede|relates_to\",\
-\"target_ref\":\"person:sara\",\"sensitivity\":\"internal\",\"privacy_domain\":\"personal\"}],\
-\"episode\":\"one-sentence summary of what was discussed or decided in this exchange\"}\n\
-RULES: scope \"personal\" = applies everywhere (preferences, people, personal data); scope \"project\" \
-= specific to the current project/work (technical decisions, files, choices). For memory_type \
-\"decision\" metadata.decision is MANDATORY (rationale, and alternatives if cited) and the scope is \
-usually \"project\". memory_type \"goal\" = an OBJECTIVE or DIRECTION of the project. If the user \
-uses words like \"objective\", \"milestone\", \"we want it to\", \"it must stay/become\", \"the goal \
-is\" referring to the project as a whole, emit memory_type=\"goal\" (scope \"project\") and NOT \
-\"decision\". Clear difference: decision = a TECHNICAL choice already made with a why (e.g. \"chose \
-JSON for persistence because human-readable\"); goal = the DIRECTION to keep (e.g. \"taskline must \
-stay minimal, stdlib only, zero dependencies\" → goal, NOT decision). When in doubt between goal and \
-decision for an EXPLICIT declared objective, choose goal. ENTITIES = the things cited, WELL TYPED: \
-person = people; organization = companies, services, institutions (Trenitalia, Gmail, a bank); place \
-= locations (cities, towns, addresses); event = trips, purchases, appointments, deadlines (e.g. \
-\"Trip to Barcelona in September\"); project = work projects; tool = software, files, libraries \
-(ALWAYS metadata.scope \"project\" — never personal entities); object = a GOOD the user OWNS \
-(vehicle, device, house, personal instrument: e.g. \"Moto Guzzi V7 Stone 850 2021\") — metadata.scope \
-\"personal\"; topic = recurring interests/subjects (e.g. \"tennis\"). canonical_key STABLE \
-\"type:normalized-name\" (e.g. \"organization:trenitalia\", \"event:trip-barcelona-2026\"). entity \
-metadata.scope: \"personal\" for people/places/events/organizations in the user's life, \"project\" \
-for files/libraries/tools of the current work. For the USER themselves ALWAYS use canonical_key \
-\"person:self\" (both in entities and relations), e.g. for \"I have a daughter Sara\": relation \
-parent_of person:self → person:sara. \
-POSSESSIONS: when the user declares or CONFIRMS owning a good (\"my motorbike\", \"I own a Moto Guzzi \
-V7\", \"my car/house\"), emit THREE things together: (a) a committed fact \"The user owns <good>\"; \
-(b) the good entity (entity_type \"object\", scope \"personal\"); (c) the relation possiede \
-person:self → object:<good>. E.g. \"yes, it's my Moto Guzzi V7 Stone 850 2021\" → entity {object, \
-\"Moto Guzzi V7 Stone 850 2021\", canonical_key \"object:moto-guzzi-v7-stone-850-2021\"} + relation \
-{possiede, person:self → object:moto-guzzi-v7-stone-850-2021} + committed fact. \
-RELATIONS = use the SAME canonical_key in source_ref/target_ref. Insert entities and relations ONLY \
-if explicit, otherwise leave the arrays empty. sensitivity: PII (tax ID, address, health, documents) \
-= \"secret\"; personal facts (children, partner, city) = \"private\"; preferences and decisions = \
-\"internal\". confidence >=0.8 only if explicit and unambiguous. \"episode\" is ALWAYS a short \
-sentence about the exchange (even if memories/entities/relations are empty). If there is nothing to \
-remember: {\"memories\":[],\"entities\":[],\"relations\":[],\"episode\":\"…\"}. \
-OPEN LOOP CLOSURE: if the exchange or ACTIONS PERFORMED explicitly prove an existing open loop is \
-now complete, do NOT emit another open_loop. Emit the durable fact/decision/outcome and add \
-metadata.closes_open_loop with a short copy/paraphrase of the existing open loop. Use this only for \
-completion with evidence, never for partial progress.";
-    // Channel mode: clarify that the speaker is a contact so facts are attributed
-    // to them (e.g. person:marco), not mistakenly to the user (person:self).
-    let system = match speaker {
-        Some(name) => format!(
-            "{base_system}\n\nIMPORTANT: this message comes from the CONTACT «{name}» via a \
-messaging channel, NOT from the user. Attribute facts to «{name}» (canonical_key \
-person:<normalized-name>); use person:self ONLY if the message explicitly talks about the user. \
-ALSO capture plans, future events, trips, appointments, commitments and news (work, health, \
-family, life) of the contact, with the time frame if indicated — these are NOT 'transient content', \
-they should be remembered."
-        ),
-        None => base_system.to_string(),
-    };
-    // Generic decision capture: when the turn performed actions, tell the extractor
-    // to record the corresponding DECISIONS (what + why), in ANY domain — code,
-    // documents (e.g. a client's quote), data — not only technical ones.
-    let system = if actions.trim().is_empty() {
-        system
-    } else {
-        format!(
-            "{system}\n\nIf you find 'ACTIONS PERFORMED' below, extract the corresponding DECISIONS \
-(memory_type \"decision\", scope \"project\"): WHAT was done and WHY, including the why in the 'text' \
-sentence (e.g. «Modified the ACME quote because the client asked for a 10% discount»). Applies to \
-ANY domain — code, documents, data — not only technical. metadata.decision with rationale and \
-affects (the touched objects: file, document, contact…)."
-        )
-    };
-    // #5 scope discipline: NAME the current project so the extractor can tell THIS
-    // project's facts from another project/tool merely mentioned in passing (which must
-    // NOT be tagged scope=project — that's how dev facts leaked into a travel project).
-    let system = {
-        let active = gateway_memory_workspace_id();
-        if active.as_str() != PERSONAL_WORKSPACE {
-            let name = load_workspaces_file()
-                .workspaces
-                .into_iter()
-                .find(|w| w.id.as_str() == active.as_str())
-                .map(|w| w.name)
-                .unwrap_or_else(|| "(unnamed)".to_string());
-            format!(
-                "{system}\n\nCURRENT PROJECT: «{name}». Tag scope=\"project\" ONLY for facts or \
-decisions that concern THIS project. If the user talks about ANOTHER unrelated project/tool, do NOT \
-save it as memory of this project: use scope \"personal\" if it is a durable fact about the user, \
-otherwise do not save it."
-            )
-        } else {
-            system
-        }
-    };
-    // Source-suppression: tell the extractor which decisions are ALREADY stored so it
-    // doesn't re-emit them every turn (complements dedup — fewer near-duplicates born).
-    // Lock is scoped to this block and dropped before the async model call below.
-    let known_decisions = {
-        let active = gateway_memory_workspace_id();
-        if active.as_str() == PERSONAL_WORKSPACE {
-            String::new()
-        } else if let Ok(facade) = lock_memory_facade(state) {
-            facade
-                .list_memories_for_ui(&gateway_memory_user_id(), &active)
-                .map(|memories| {
-                    memories
-                        .into_iter()
-                        .filter(|m| {
-                            m.memory_type == "decision"
-                                && matches!(
-                                    m.status,
-                                    MemoryStatus::Confirmed | MemoryStatus::Candidate
-                                )
-                        })
-                        .take(40)
-                        .map(|m| {
-                            format!(
-                                "- {}",
-                                m.text
-                                    .lines()
-                                    .next()
-                                    .unwrap_or(&m.text)
-                                    .chars()
-                                    .take(110)
-                                    .collect::<String>()
-                            )
-                        })
-                        .collect::<Vec<_>>()
-                        .join("\n")
-                })
-                .unwrap_or_default()
-        } else {
-            String::new()
-        }
-    };
-    let system = if known_decisions.trim().is_empty() {
-        system
-    } else {
-        format!(
-            "{system}\n\nDECISIONS ALREADY IN MEMORY (do NOT re-register them: extract ONLY NEW or \
-substantially updated decisions relative to these):\n{known_decisions}"
-        )
-    };
-    let known_open_loops = {
-        let user = gateway_memory_user_id();
-        let active = gateway_memory_workspace_id();
-        let mut lines = Vec::new();
-        if let Ok(facade) = lock_memory_facade(state) {
-            for (label, workspace) in [
-                ("personal", MemoryWorkspaceId::new(PERSONAL_WORKSPACE)),
-                ("project", active.clone()),
-            ] {
-                if label == "project" && workspace.as_str() == PERSONAL_WORKSPACE {
-                    continue;
-                }
-                for memory in facade
-                    .list_memories_for_ui(&user, &workspace)
-                    .unwrap_or_default()
-                    .into_iter()
-                    .filter(active_open_loop_record)
-                    .take(8)
-                {
-                    lines.push(format!(
-                        "- ({label}) {}",
-                        memory.text.trim().replace('\n', " ")
-                    ));
-                }
-            }
-        }
-        lines.join("\n")
-    };
-    let system = if known_open_loops.trim().is_empty() {
-        system
-    } else {
-        format!(
-            "{system}\n\nOPEN LOOPS ALREADY IN MEMORY. If this exchange/ACTIONS explicitly complete \
-one of these, set metadata.scope to the matching scope and metadata.closes_open_loop to the matching \
-loop text/paraphrase:\n{known_open_loops}"
-        )
-    };
-    let exchange = match speaker {
-        Some(name) => {
-            format!("MESSAGE from {name} (channel):\n{user_message}\n\nREPLY: {assistant_message}")
-        }
-        None => {
-            // On a confirmation turn, prepend the assistant's PREVIOUS question so a
-            // bare "sì"/"no, …" can be grounded into the fact it confirms or corrects.
-            let preface = match prev_assistant {
-                Some(p) if is_confirmation && !p.trim().is_empty() => format!(
-                    "ASSISTANT (previous turn — what the user is replying to): {}\n\n",
-                    p.trim()
-                ),
-                _ => String::new(),
-            };
-            format!("{preface}USER: {user_message}\n\nASSISTANT: {assistant_message}")
-        }
-    };
-    let user_content = if actions.trim().is_empty() {
-        exchange
-    } else {
-        format!("{exchange}\n\nACTIONS PERFORMED this turn:\n{actions}")
-    };
-    let payload = serde_json::json!({
-        "model": model,
-        "temperature": 0.0,
-        // Generous budget: the active model may be a reasoning model that spends
-        // tokens "thinking" before emitting content — too small a cap leaves
-        // content empty (finish_reason=length). json_object steers it to emit the
-        // JSON directly into content.
-        "max_tokens": 2000,
-        "response_format": { "type": "json_object" },
-        "messages": [
-            { "role": "system", "content": system },
-            { "role": "user", "content": user_content },
-        ],
-    });
-    let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
-    // Generous timeout: the role model may be a slow cloud reasoning model
-    // (e.g. glm-4.6 via ollama). Extraction is background, so a long wait is fine.
-    let mut builder = state
-        .http
-        .post(&endpoint)
-        .timeout(std::time::Duration::from_secs(120));
-    if let Some(key) = api_key.as_ref() {
-        builder = builder.bearer_auth(key);
-    }
-    let Ok(resp) = builder.json(&payload).send().await else {
-        return;
-    };
-    if !resp.status().is_success() {
-        return;
-    }
-    let Ok(body) = resp.json::<serde_json::Value>().await else {
-        return;
-    };
-    let content = body
-        .get("choices")
-        .and_then(|c| c.get(0))
-        .and_then(|c| c.get("message"))
-        .and_then(|m| m.get("content"))
-        .and_then(|c| c.as_str())
-        .unwrap_or("");
-    // Resilient parse: deserialize memories / entities / relations INDEPENDENTLY
-    // and item-by-item, so a malformed entity never makes us lose the facts (they
-    // share one JSON blob from the model).
-    let Ok(root) = serde_json::from_str::<serde_json::Value>(strip_json_fences(content)) else {
-        return;
-    };
-    let memories: Vec<ExtractedMemory> = root
-        .get("memories")
-        .and_then(|v| v.as_array())
-        .map(|a| {
-            a.iter()
-                .filter_map(|i| serde_json::from_value(fill_extraction_defaults(i)).ok())
-                .collect()
-        })
-        .unwrap_or_default();
-    let entities: Vec<ExtractedEntity> = root
-        .get("entities")
-        .and_then(|v| v.as_array())
-        .map(|a| {
-            a.iter()
-                .filter_map(|i| serde_json::from_value(fill_extraction_defaults(i)).ok())
-                .collect()
-        })
-        .unwrap_or_default();
-    let relations: Vec<ExtractedRelation> = root
-        .get("relations")
-        .and_then(|v| v.as_array())
-        .map(|a| {
-            a.iter()
-                .filter_map(|i| serde_json::from_value(fill_extraction_defaults(i)).ok())
-                .collect()
-        })
-        .unwrap_or_default();
-    let mut extraction = MemoryExtraction {
-        memories,
-        entities,
-        relations,
-    };
-    // M4: one-line episodic summary of this turn (stored in the thread scope).
-    let episode = root
-        .get("episode")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .trim()
-        .to_string();
-    // Take the graph (entities/relations) out before we consume the memories;
-    // keep durable memory types only (facts, preferences, decisions).
-    let graph_entities = std::mem::take(&mut extraction.entities);
-    let graph_relations = std::mem::take(&mut extraction.relations);
-    extraction.memories.retain(|m| {
-        matches!(
-            m.memory_type.as_str(),
-            "fact" | "preference" | "decision" | "goal" | "open_loop"
-        )
-    });
-    if extraction.memories.is_empty()
-        && graph_entities.is_empty()
-        && graph_relations.is_empty()
-        && episode.is_empty()
-    {
-        return;
-    }
-    // The model is unreliable about the privacy DOMAIN; pin it to "personal" so the
-    // read queries (profile + recall) can find what we store. Sensitivity (gates
-    // auto-confirm + injection) and SCOPE (personal vs project) stay its call.
-    for memory in &mut extraction.memories {
-        memory.privacy_domain = PrivacyDomain::new("personal");
-    }
-
-    let user_id = gateway_memory_user_id();
-    let active = gateway_memory_workspace_id();
-    let has_project = active.as_str() != PERSONAL_WORKSPACE;
-
-    // Route each memory to its scope: explicit metadata.scope wins; otherwise
-    // decisions default to the project, everything else to personal.
-    let mut personal_mems: Vec<ExtractedMemory> = Vec::new();
-    let mut project_mems: Vec<ExtractedMemory> = Vec::new();
-    for memory in extraction.memories {
-        let scope = memory
-            .metadata
-            .get("scope")
-            .and_then(|s| s.as_str())
-            .unwrap_or("");
-        let to_project = has_project
-            && (scope == "project"
-                || (scope.is_empty() && memory.memory_type.as_str() == "decision"));
-        if to_project {
-            project_mems.push(memory);
-        } else {
-            personal_mems.push(memory);
-        }
-    }
-
-    // Scoped block: the (non-Send) memory lock MUST be dropped before the awaits below,
-    // since this future is spawned on the runtime (Send-required).
-    {
-        let Ok(facade) = lock_memory_facade(state) else {
-            return;
-        };
-        persist_scope_memories(
-            &facade,
-            &user_id,
-            &MemoryWorkspaceId::new(PERSONAL_WORKSPACE),
-            personal_mems,
-        );
-        if has_project {
-            persist_scope_memories(&facade, &user_id, &active, project_mems);
-            // Markdown face: regenerate the project's "Decisioni" wiki page.
-            rebuild_decisions_wiki(&facade, &user_id, &active);
-        }
-        // Graph: people/places/events/orgs → personal; tools/files (scope=project)
-        // → the active project's graph.
-        persist_graph(
-            &facade,
-            &user_id,
-            &MemoryWorkspaceId::new(PERSONAL_WORKSPACE),
-            graph_entities,
-            graph_relations,
-            has_project.then_some(&active),
-        );
-        // Episodic memory (M4): one line per turn, tagged with the conversation's scope.
-        if let Some(tid) = thread_id {
-            store_episode(&facade, &user_id, tid, &episode, active.as_str());
-        }
-    }
-    // Lock released — incrementally embed new memories (semantic layer) off the hot
-    // path: a bounded batch per turn so vectors accumulate in the background.
-    backfill_embeddings(
-        state,
-        &user_id,
-        &MemoryWorkspaceId::new(PERSONAL_WORKSPACE),
-        12,
-    )
-    .await;
-    if has_project {
-        backfill_embeddings(state, &user_id, &active, 12).await;
-    }
-}
-
 /// Tool schema for on-demand deep memory recall (M3). The always-on profile is a
 /// small slice; this lets the model fetch specific personal/project knowledge
 /// (names, data, past decisions + their why) when it needs more.
@@ -6051,7 +5695,8 @@ fn recall_memory_tool_schema() -> serde_json::Value {
     project detail you may have learned before and that is NOT already in the prompt profile, BEFORE \
     saying you don't know it — and ALSO BEFORE ASKING the user for a possession, a person or a context \
     they take as already known (e.g. «my motorbike», «my boss»): retrieve what you know and ask only for \
-    the details that remain missing.",
+    the details that remain missing. If normal memory has no match for a sensitive personal detail, the \
+    gateway also checks Vault metadata internally and returns only redacted record metadata, never the secret value.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -6531,6 +6176,26 @@ fn parse_plan_marker(text: &str) -> Vec<serde_json::Value> {
 /// it at the FIRST block's position, so the card stays where the user first saw it instead
 /// of jumping below the prose. All other blocks are removed; surrounding prose is intact.
 /// `parse_plan_marker`'s resume still works: it `rfind`s the single remaining block.
+/// Remove the app-only control markers (and their content) from a message before it
+/// leaves the app to a plain-text surface — chiefly a channel mirror (Telegram/WhatsApp).
+/// These markers (‹‹PLAN››, ‹‹ACT››, ‹‹ARTIFACT››, ‹‹REASONING››, ‹‹COMPOSIO_*››) are
+/// rendered by the app UI; a channel must never receive them raw.
+fn strip_chat_markers(text: &str) -> String {
+    // Canonical stripper lives in the lib (shared with the in-app context renderer, caposaldo
+    // #5). The channel mirror just wants the trimmed prose.
+    strip_display_markers(text).trim().to_string()
+}
+
+/// F3-deep: true when an assembled answer carries NO answer body — only control markers
+/// (chiefly a ‹‹REASONING›› trace) or nothing. This is the "non produce la risposta" failure:
+/// a reasoning model that spent its whole token budget thinking (`finish_reason:length` with
+/// empty content) leaves `‹‹REASONING››…‹‹/REASONING››` and no prose, so committing it would
+/// Done an empty / reasoning-only bubble. `strip_chat_markers` removes every marker block, so
+/// an empty remainder means there is no real answer to show.
+fn answer_body_is_empty(content: &str) -> bool {
+    strip_chat_markers(content).trim().is_empty()
+}
+
 fn collapse_plan_markers(text: &str) -> String {
     const OPEN: &str = "‹‹PLAN››";
     const CLOSE: &str = "‹‹/PLAN››";
@@ -6562,6 +6227,45 @@ fn collapse_plan_markers(text: &str) -> String {
     }
     out.push_str(&text[cursor..]);
     out
+}
+
+fn replace_latest_plan_marker(text: &str, steps: &[serde_json::Value]) -> String {
+    const OPEN: &str = "‹‹PLAN››";
+    const CLOSE: &str = "‹‹/PLAN››";
+    let (Some(start), Some(close_start)) = (text.rfind(OPEN), text.rfind(CLOSE)) else {
+        return text.to_string();
+    };
+    if close_start <= start {
+        return text.to_string();
+    }
+    let close_end = close_start + CLOSE.len();
+    let marker = format!("‹‹PLAN››{}‹‹/PLAN››", build_plan_markdown(steps));
+    let mut out = String::with_capacity(text.len() + marker.len());
+    out.push_str(&text[..start]);
+    out.push_str(&marker);
+    out.push_str(&text[close_end..]);
+    out
+}
+
+fn reconcile_final_plan_marker_on_delivery(plan: &ExecutionPlan, text: &str) -> String {
+    let mut plan_steps = execution_plan_steps(plan);
+    let open_left = plan_steps
+        .iter()
+        .filter(|step| plan_step_status(step) != "done")
+        .count();
+    if !plan_reconcile_on_delivery_enabled()
+        || !answer_concludes_plan(open_left, strip_chat_markers(text).trim().chars().count())
+    {
+        return text.to_string();
+    }
+    if let Some(open_index) = plan_steps
+        .iter()
+        .position(|step| plan_step_status(step) != "done")
+    {
+        plan_steps[open_index]["status"] = serde_json::json!("done");
+        return replace_latest_plan_marker(text, &plan_steps);
+    }
+    text.to_string()
 }
 
 fn plan_step_status(step: &serde_json::Value) -> &str {
@@ -6615,6 +6319,133 @@ fn plan_incomplete_reason(plan: &[serde_json::Value]) -> Option<String> {
     Some(format!(
         "plan is incomplete ({done}/{total}); next step: {next}"
     ))
+}
+
+// --- F4: cross-turn plan-stall guard -------------------------------------------------
+//
+// The per-turn recovery counters (nav-fail `nav_failures`, round budget
+// `rounds_since_progress`) are reset every turn. A plan RESUMED across turns
+// (`load_runtime_plan_from_state`, channel/resume) therefore restarts its current step with
+// the counters at zero — so a step that fails deterministically (dead URL, unfillable form)
+// retries forever, once per resume. The fix is a CROSS-turn signal: count consecutive resumes
+// that close NO new step; after the cap the harness blocks the stuck step (caposaldo #2 — the
+// harness owns recovery, the model won't pivot on its own). The pure pieces live here, tested.
+
+/// Max consecutive resumes of a plan with no new completed step before the harness blocks the
+/// stuck step. Generous on purpose: a plan legitimately advancing even one step per turn never
+/// trips (any `done`-count increase resets the counter); only genuine no-progress loops do.
+const MAX_PLAN_STALL_RESUMES: u32 = 3;
+
+/// New stall count from the prior count and the done-counts at the previous vs the current
+/// resume. ANY progress (more done steps than last resume) resets to 0; otherwise +1. Pure.
+fn next_plan_stall(prior_stall: u32, last_resume_done: usize, current_done: usize) -> u32 {
+    if current_done > last_resume_done {
+        0
+    } else {
+        prior_stall.saturating_add(1)
+    }
+}
+
+fn plan_stall_exhausted(stall: u32) -> bool {
+    stall >= MAX_PLAN_STALL_RESUMES
+}
+
+/// A plan is SETTLED when every step is terminal (`done` or `blocked`) — nothing runnable
+/// remains. Distinct from `plan_is_complete` (all `done`): a plan with a permanently-blocked
+/// step is finished, not in-progress, so it must STOP auto-resuming. This is what lets a
+/// blocked step actually terminate the plan instead of keeping it forever "active".
+fn plan_is_settled(plan: &[serde_json::Value]) -> bool {
+    !plan.is_empty()
+        && plan
+            .iter()
+            .all(|s| matches!(plan_step_status(s), "done" | "blocked"))
+}
+
+/// Block the first runnable (`todo`/`doing`) step — the F4 abort action once a plan has
+/// stalled across resumes. Records WHY in the step's `detail` (surfaced in the Plan panel).
+/// Returns the blocked step's title, or None if nothing was runnable. Pure (mutates `plan`).
+fn block_stalled_step(plan: &mut [serde_json::Value]) -> Option<String> {
+    for step in plan.iter_mut() {
+        if matches!(plan_step_status(step), "todo" | "doing") {
+            let title = plan_step_title(step).to_string();
+            step["status"] = serde_json::json!("blocked");
+            step["detail"] = serde_json::json!(format!(
+                "paused by the harness: no progress after {MAX_PLAN_STALL_RESUMES} resumed turns"
+            ));
+            return Some(title).filter(|t| !t.is_empty());
+        }
+    }
+    None
+}
+
+/// F4 abort is hot-path control-flow that can't be validated live in this environment, so it
+/// ships gated (same discipline as `HOMUN_PLAN_RECONCILE`). Flip on to validate. The pure
+/// stall math and the `settled`-termination it relies on are always active and tested.
+fn plan_stall_abort_enabled() -> bool {
+    std::env::var("HOMUN_PLAN_STALL_ABORT")
+        .map(|value| value == "1" || value.eq_ignore_ascii_case("on"))
+        .unwrap_or(false)
+}
+
+/// Minimum answer length (chars) we treat as a real delivered deliverable rather than an
+/// aside, for the over-running guard. Tuned conservatively: when in doubt (short answer) we
+/// keep nudging rather than stop early.
+const MIN_DELIVERED_CHARS_TO_CONCLUDE: usize = 600;
+
+/// F5 over-running guard (ADR 0018): once the model has written a SUBSTANTIAL answer and at
+/// most the LAST plan step is still open, it almost certainly FINISHED the work and merely
+/// forgot to mark that step done — so accept the answer instead of nudging it PAST a good
+/// result into a degraded/self-contradictory one (the long-horizon regression). With several
+/// steps still open it genuinely stopped early → keep nudging. Pure so the threshold lives in
+/// one tested place.
+fn answer_concludes_plan(open_steps: usize, delivered_chars: usize) -> bool {
+    open_steps <= 1 && delivered_chars >= MIN_DELIVERED_CHARS_TO_CONCLUDE
+}
+
+/// F2.2 (ADR 0018, Pavimento): when the over-running guard accepts the answer with the last
+/// step still open, reconcile that step to `done` so the PERSISTED runtime plan reflects the
+/// delivered work. Without it the plan stays "active" and the NEXT turn falsely resumes it
+/// (`thread_has_active_runtime_plan` only goes quiet when the plan is complete→Stale) — the
+/// "lo segue e non lo segue" symptom. Default-on after live evidence showed the Plan panel
+/// stuck at 1/2 while the delivered answer had already registered the last-step failure.
+/// `HOMUN_PLAN_RECONCILE=0`/`off` remains as a diagnostic opt-out.
+fn plan_reconcile_on_delivery_flag(value: Option<&str>) -> bool {
+    match value.map(str::trim).filter(|value| !value.is_empty()) {
+        Some(value) if value == "0" || value.eq_ignore_ascii_case("off") => false,
+        _ => true,
+    }
+}
+
+fn plan_reconcile_on_delivery_enabled() -> bool {
+    plan_reconcile_on_delivery_flag(std::env::var("HOMUN_PLAN_RECONCILE").ok().as_deref())
+}
+
+/// ADR 0022 — Tappa 1: instrada brief/recall/learn tramite `MemoryRecallService`
+/// invece dell'orchestrazione inline. Default OFF (parità conservativa); flip ON
+/// per validare l'incapsulamento. Stessa disciplina di `plan_stall_abort_enabled`.
+fn memory_service_enabled() -> bool {
+    std::env::var("HOMUN_MEMORY_SERVICE")
+        .map(|value| value == "1" || value.eq_ignore_ascii_case("on"))
+        .unwrap_or(false)
+}
+
+fn browser_open_research_discovery_instruction() -> &'static str {
+    "For open-ended current news or broad web research where the user did NOT name \
+a specific site/URL, start with search/discovery (for example a search results or \
+news discovery page), scan multiple recent candidates, then choose the best sources. \
+match the user's language and the browser locale when choosing discovery pages; when \
+using a search/news URL, include locale parameters such as hl=it and gl=IT when \
+appropriate instead of defaulting to an unrelated market. \
+Do not jump directly to one outlet unless the user explicitly named it."
+}
+
+fn booking_assumption_choice_instruction() -> &'static str {
+    "For bookings, purchases, or other real-world transactions, do NOT silently proceed \
+with an assumed critical parameter (departure city/station, destination, date/time, quantity, \
+budget, passenger count, etc.). If you have a likely default from context, STOP and emit a \
+CHOICES marker with one option that confirms the default and one option for free-text correction \
+(for example: Confirm Milan departure / Choose another departure). Continue only after the user \
+chooses or writes the missing value."
 }
 
 fn runtime_plan_thread_key(thread_id: Option<&str>) -> String {
@@ -7423,7 +7254,10 @@ fn percent_encode_query(value: &str) -> String {
 fn template_catalog_preview_response_ref(preview_ref: Option<String>) -> Option<String> {
     preview_ref.map(|preview| {
         if preview.starts_with("template-pack://") {
-            format!("/api/templates/preview?ref={}", percent_encode_query(&preview))
+            format!(
+                "/api/templates/preview?ref={}",
+                percent_encode_query(&preview)
+            )
         } else {
             preview
         }
@@ -7441,11 +7275,8 @@ fn parse_imported_template_pack(pack_root: &std::path::Path) -> Option<TemplateC
         .get("source_provider")
         .and_then(|value| value.as_str())
         .and_then(clean_template_catalog_id);
-    entry.source_ref = clean_template_catalog_ref(
-        value
-            .get("source_url")
-            .or_else(|| value.get("source_ref")),
-    );
+    entry.source_ref =
+        clean_template_catalog_ref(value.get("source_url").or_else(|| value.get("source_ref")));
     entry.license = clean_template_catalog_text(value.get("license"), 120);
     entry.attribution_required = value
         .get("attribution_required")
@@ -7659,7 +7490,11 @@ fn imported_template_pack_root() -> Option<PathBuf> {
     std::env::var("HOMUN_TEMPLATE_PACK_ROOT")
         .ok()
         .map(PathBuf::from)
-        .or_else(|| gateway_data_dir().ok().map(|dir| dir.join("template-packs")))
+        .or_else(|| {
+            gateway_data_dir()
+                .ok()
+                .map(|dir| dir.join("template-packs"))
+        })
 }
 
 fn delete_imported_template_pack(root: &std::path::Path, template_id: &str) -> Result<(), String> {
@@ -7705,23 +7540,13 @@ fn slugify_template_pack_name(name: &str) -> Option<String> {
         .trim()
         .to_ascii_lowercase()
         .chars()
-        .map(|ch| {
-            if ch.is_ascii_alphanumeric() {
-                ch
-            } else {
-                '-'
-            }
-        })
+        .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '-' })
         .collect::<String>()
         .split('-')
         .filter(|part| !part.is_empty())
         .collect::<Vec<_>>()
         .join("-");
-    if slug.is_empty() {
-        None
-    } else {
-        Some(slug)
-    }
+    if slug.is_empty() { None } else { Some(slug) }
 }
 
 fn next_template_pack_slug(root: &std::path::Path, base_slug: &str) -> Result<String, String> {
@@ -7789,10 +7614,11 @@ fn render_imported_template_thumbnails(
     .into_iter()
     .flatten()
     .collect::<Vec<_>>();
-    let soffice = find_executable(&soffice_candidates)
-    .ok_or_else(|| "PowerPoint thumbnail generation requires LibreOffice/soffice".to_string())?;
+    let soffice = find_executable(&soffice_candidates).ok_or_else(|| {
+        "PowerPoint thumbnail generation requires LibreOffice/soffice".to_string()
+    })?;
     let pdftoppm = find_executable(&pdftoppm_candidates)
-    .ok_or_else(|| "PowerPoint thumbnail generation requires pdftoppm".to_string())?;
+        .ok_or_else(|| "PowerPoint thumbnail generation requires pdftoppm".to_string())?;
 
     let temp_root = env::temp_dir().join(format!(
         "homun-template-preview-{}-{}",
@@ -7852,7 +7678,9 @@ fn render_imported_template_thumbnails(
     if !pdf_output.status.success() {
         let stderr = String::from_utf8_lossy(&pdf_output.stderr);
         cleanup(&temp_root);
-        return Err(format!("pdftoppm failed while rendering template preview: {stderr}"));
+        return Err(format!(
+            "pdftoppm failed while rendering template preview: {stderr}"
+        ));
     }
 
     let thumbnails_dir = pack_root.join("thumbnails");
@@ -7964,8 +7792,7 @@ fn import_pptx_template_pack(
         "tags": tags,
         "route_text": route_text,
     });
-    let manifest_bytes =
-        serde_json::to_vec_pretty(&manifest).map_err(|error| error.to_string())?;
+    let manifest_bytes = serde_json::to_vec_pretty(&manifest).map_err(|error| error.to_string())?;
     fs::write(pack_root.join("manifest.json"), manifest_bytes)
         .map_err(|error| format!("could not write template manifest: {error}"))?;
 
@@ -8207,7 +8034,6 @@ fn run_static_workflow_plan_through_brain(
             CapabilityPolicy::default(),
             InMemoryCapabilityAudit::default(),
         ),
-        ToolSearchIndexStore::open_in_memory().map_err(|error| error.to_string())?,
         TaskStore::open_in_memory().map_err(|error| error.to_string())?,
     );
     let user = gateway_capability_user_id();
@@ -8515,7 +8341,10 @@ fn thread_has_active_runtime_plan(state: &AppState, thread_id: Option<&str>) -> 
 /// before a turn ends), so a CONTINUATION turn can inherit `{done,doing,…}` even before the
 /// prior turn's ‹‹PLAN›› message has been persisted/streamed into the next turn's context.
 /// Returns the steps (with verified statuses) or empty if the thread has no open plan.
-fn load_runtime_plan_from_state(state: &AppState, thread_id: Option<&str>) -> Vec<serde_json::Value> {
+fn load_runtime_plan_from_state(
+    state: &AppState,
+    thread_id: Option<&str>,
+) -> Vec<serde_json::Value> {
     let thread_key = runtime_plan_thread_key(thread_id);
     let Ok(facade) = lock_memory_facade(state) else {
         return Vec::new();
@@ -8525,8 +8354,83 @@ fn load_runtime_plan_from_state(state: &AppState, thread_id: Option<&str>) -> Ve
         .unwrap_or_default()
         .iter()
         .find(|memory| runtime_plan_memory_matches(memory, &thread_key))
-        .and_then(|memory| memory.metadata.get("steps").and_then(|s| s.as_array()).cloned())
+        .and_then(|memory| {
+            memory
+                .metadata
+                .get("steps")
+                .and_then(|s| s.as_array())
+                .cloned()
+        })
         .unwrap_or_default()
+}
+
+/// F4 turn-start: update the cross-turn stall bookkeeping on the RESUMED plan's memory and
+/// report whether it has stalled past the cap. Reads `{stall_turns, last_resume_done}` from
+/// the plan-memory metadata, recomputes them against the current done-count, writes them back
+/// (so a mid-turn plan upsert preserves them — `upsert_runtime_plan_memory` carries these
+/// fields forward), and returns true when the harness should block the stuck step. A no-op
+/// returning false on any store miss (fail-open: never wedge a turn over bookkeeping).
+fn plan_stall_check_and_bump(
+    state: &AppState,
+    thread_id: Option<&str>,
+    resume_plan: &[serde_json::Value],
+) -> bool {
+    let thread_key = runtime_plan_thread_key(thread_id);
+    let Ok(facade) = lock_memory_facade(state) else {
+        return false;
+    };
+    let user = gateway_memory_user_id();
+    let workspace = gateway_memory_workspace_id();
+    let Some(memory) = facade
+        .list_memories_for_ui(&user, &workspace)
+        .unwrap_or_default()
+        .into_iter()
+        .find(|memory| runtime_plan_memory_matches(memory, &thread_key))
+    else {
+        return false;
+    };
+    let prior_stall = memory
+        .metadata
+        .get("stall_turns")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as u32;
+    let last_resume_done = memory
+        .metadata
+        .get("last_resume_done")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as usize;
+    let current_done = plan_done_count(resume_plan);
+    let new_stall = next_plan_stall(prior_stall, last_resume_done, current_done);
+
+    let mut metadata = memory.metadata.clone();
+    if let Some(obj) = metadata.as_object_mut() {
+        obj.insert("stall_turns".to_string(), serde_json::json!(new_stall));
+        obj.insert(
+            "last_resume_done".to_string(),
+            serde_json::json!(current_done),
+        );
+    }
+    let lifecycle = MemoryLifecycleRequest {
+        actor_id: "runtime-plan".to_string(),
+        user_id: user.clone(),
+        workspace_id: workspace.clone(),
+        purpose: "sync_runtime_plan".to_string(),
+    };
+    let _ = facade.update_memory(
+        &lifecycle,
+        &memory.reference,
+        MemoryUpdatePatch {
+            text: None,
+            aliases: None,
+            language_hints: None,
+            confidence: None,
+            privacy_domain: None,
+            sensitivity: None,
+            metadata: Some(metadata),
+            last_seen_at: None,
+        },
+    );
+    plan_stall_exhausted(new_stall)
 }
 
 /// A bare continuation/approval message ("1", a step/option number, "ok"/"procedi"/
@@ -8543,8 +8447,19 @@ fn is_plan_continuation_message(prompt: &str) -> bool {
     }
     matches!(
         t.as_str(),
-        "ok" | "okay" | "procedi" | "continua" | "prosegui" | "avanti" | "vai"
-            | "sì" | "si" | "yes" | "y" | "go" | "next" | "continue"
+        "ok" | "okay"
+            | "procedi"
+            | "continua"
+            | "prosegui"
+            | "avanti"
+            | "vai"
+            | "sì"
+            | "si"
+            | "yes"
+            | "y"
+            | "go"
+            | "next"
+            | "continue"
     )
 }
 
@@ -8944,8 +8859,12 @@ fn upsert_runtime_plan_memory(
         return Ok(None);
     };
     let thread_key = runtime_plan_thread_key(thread_id);
-    let complete = plan_is_complete(plan);
-    let metadata = runtime_plan_memory_metadata(thread_id, plan);
+    // Terminate (stop auto-resuming) when the plan is SETTLED — every step done OR blocked —
+    // not only when fully complete. A blocked step is terminal: keeping such a plan "active"
+    // is exactly the F4 infinite-resume loop. settled == complete when no step is blocked, so
+    // this is behaviour-preserving for ordinary plans.
+    let settled = plan_is_settled(plan);
+    let mut metadata = runtime_plan_memory_metadata(thread_id, plan);
     let existing = facade
         .list_memories_for_ui(user, workspace)
         .unwrap_or_default()
@@ -8954,6 +8873,16 @@ fn upsert_runtime_plan_memory(
 
     match existing {
         Some(existing) => {
+            // Carry the F4 cross-turn stall bookkeeping forward: it lives on the plan memory
+            // but `runtime_plan_memory_metadata` rebuilds metadata from the steps alone, so a
+            // mid-turn upsert would otherwise wipe the counter the turn-start guard wrote.
+            if let Some(obj) = metadata.as_object_mut() {
+                for key in ["stall_turns", "last_resume_done"] {
+                    if let Some(value) = existing.metadata.get(key) {
+                        obj.insert(key.to_string(), value.clone());
+                    }
+                }
+            }
             let record = facade
                 .update_memory(
                     lifecycle,
@@ -8970,9 +8899,9 @@ fn upsert_runtime_plan_memory(
                     },
                 )
                 .map_err(|error| error.to_string())?;
-            if complete {
+            if settled {
                 facade
-                    .mark_memory_stale(lifecycle, &record.reference, "runtime plan completed")
+                    .mark_memory_stale(lifecycle, &record.reference, "runtime plan settled")
                     .map_err(|error| error.to_string())?;
             } else {
                 facade
@@ -8990,7 +8919,7 @@ fn upsert_runtime_plan_memory(
             )?;
             Ok(Some(record.reference))
         }
-        None if complete => Ok(None),
+        None if settled => Ok(None),
         None => {
             let record = facade
                 .create_memory_candidate(MemoryCreateRequest {
@@ -9083,8 +9012,10 @@ fn merge_plan(plan: &mut Vec<serde_json::Value>, sent: &[serde_json::Value]) -> 
             });
         match pos {
             Some(i) => {
-                if plan_step_status(&plan[i]) == "done" {
-                    // sticky: ignore any attempt to re-open a done step
+                if matches!(plan_step_status(&plan[i]), "done" | "blocked") {
+                    // sticky: a `done` step never re-opens (stops the regenerate loop), and a
+                    // `blocked` step stays blocked — the harness blocks a stalled step (F4) and
+                    // the model must not re-open it, which would re-arm the cross-turn loop.
                 } else if new_status == "done" {
                     plan[i]["status"] = serde_json::json!("doing");
                     claims.push(i);
@@ -10222,7 +10153,12 @@ async fn connector_poll_tick(state: &AppState) {
 fn connector_poll_event_key(tool: &str, key_field: &str, item: &serde_json::Value) -> String {
     let key_value = item
         .get(key_field)
-        .and_then(|value| value.as_str().map(str::to_string).or_else(|| Some(value.to_string())))
+        .and_then(|value| {
+            value
+                .as_str()
+                .map(str::to_string)
+                .or_else(|| Some(value.to_string()))
+        })
         .unwrap_or_default();
     format!("connector:{tool}:{key_field}:{key_value}")
 }
@@ -10236,7 +10172,12 @@ fn connector_poll_event_envelope(
 ) -> serde_json::Value {
     let key_value = item
         .get(key_field)
-        .and_then(|value| value.as_str().map(str::to_string).or_else(|| Some(value.to_string())))
+        .and_then(|value| {
+            value
+                .as_str()
+                .map(str::to_string)
+                .or_else(|| Some(value.to_string()))
+        })
         .unwrap_or_default();
     let dedup_key = connector_poll_event_key(tool, key_field, item);
     serde_json::json!({
@@ -10283,10 +10224,9 @@ fn connector_fire_run(
         .collect();
     let (tool, key_field) = match &automation.trigger {
         AutomationTrigger::Event {
-            event:
-                EventTrigger::ConnectorPoll {
-                    tool, key_field, ..
-                },
+            event: EventTrigger::ConnectorPoll {
+                tool, key_field, ..
+            },
         } => (tool.as_str(), key_field.as_str()),
         _ => ("connector", "id"),
     };
@@ -10425,9 +10365,11 @@ fn channel_project_contact_policy(
 /// ONE-SHOT run (proactive_prompt) carrying the automation's prompt + the message as context.
 /// Independent of the auto-reply/draft policy — these are explicit user rules. Best-effort.
 fn fire_channel_event_automations(state: &AppState, channel: &str, message: &ChannelInbound) {
-    let automations = match lock_task_store(state)
-        .and_then(|store| store.list_enabled_event_automations(&gateway_user_id()).map_err(GatewayError::task))
-    {
+    let automations = match lock_task_store(state).and_then(|store| {
+        store
+            .list_enabled_event_automations(&gateway_user_id())
+            .map_err(GatewayError::task)
+    }) {
         Ok(list) => list,
         Err(_) => return,
     };
@@ -10460,7 +10402,12 @@ fn fire_channel_event_automations(state: &AppState, channel: &str, message: &Cha
                 continue;
             }
         }
-        let policy = channel_project_contact_policy(state, automation.workspace_id.as_str(), channel, message);
+        let policy = channel_project_contact_policy(
+            state,
+            automation.workspace_id.as_str(),
+            channel,
+            message,
+        );
         if !policy.authorized || !policy.can_trigger_automations {
             if let Ok(store) = lock_task_store(state) {
                 let detail = if policy.denied_reason.is_empty() {
@@ -10468,7 +10415,8 @@ fn fire_channel_event_automations(state: &AppState, channel: &str, message: &Cha
                 } else {
                     policy.denied_reason.as_str()
                 };
-                let _ = store.record_automation_run(&automation.id, now, false, false, Some(detail));
+                let _ =
+                    store.record_automation_run(&automation.id, now, false, false, Some(detail));
             }
             eprintln!(
                 "automation/{}: denied on {channel} message from {speaker}: {}",
@@ -12055,37 +12003,248 @@ fn list_project_files(state: &AppState, thread_id: Option<&str>) -> String {
 const PROJECT_CMD_TIMEOUT_SECS: u64 = 300;
 const PROJECT_CMD_MAX_OUTPUT_CHARS: usize = 16_000;
 
+/// The directories a `workspace-write` sandbox lets a project command write to:
+/// the project root, plus the standard tool-cache dirs under HOME (so npm/cargo/
+/// pip/etc. keep working). Everything else — `/`, `/etc`, `/usr`, `~/.ssh`,
+/// `~/.aws`, arbitrary HOME files — stays denied by the fence. `TMPDIR` is added
+/// by the profile generator itself. Deliberate, documented deviation from
+/// Codex-pure (project+tmp only): Codex relies on on-failure escalation to stay
+/// usable; until we have that, we widen writable roots to keep build tooling working.
+fn workspace_write_roots(project_root: &std::path::Path, home: Option<&str>) -> Vec<std::path::PathBuf> {
+    let mut roots = vec![project_root.to_path_buf()];
+    if let Some(home) = home {
+        for cache in [".cache", ".config", ".local", ".npm", ".cargo"] {
+            roots.push(std::path::Path::new(home).join(cache));
+        }
+    }
+    roots
+}
+
+/// Renders a finished process's combined stdout+stderr (capped) prefixed with its
+/// exit status, in the `[exit N]\n{body}` shape shared by every `run_in_project`
+/// path. Factored out so the sandboxed branch and the unsandboxed helper produce a
+/// byte-identical result string.
+fn render_project_output(output: &std::process::Output) -> String {
+    let mut combined = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if !stderr.trim().is_empty() {
+        combined.push_str("\n[stderr]\n");
+        combined.push_str(&stderr);
+    }
+    let code = output
+        .status
+        .code()
+        .map(|c| c.to_string())
+        .unwrap_or_else(|| "terminated by signal".to_string());
+    let body: String = combined.chars().take(PROJECT_CMD_MAX_OUTPUT_CHARS).collect();
+    let body = if body.trim().is_empty() {
+        "(no output)"
+    } else {
+        body.as_str()
+    };
+    format!("[exit {code}]\n{body}")
+}
+
+/// Run `command` as `bash -lc` in `root` (UNSANDBOXED), with the project timeout,
+/// returning the rendered `[exit N]\n{output}` string (or a timeout/spawn error).
+///
+/// This is the single raw-exec code path: `run_in_project`'s non-sandboxed branch
+/// AND the on-failure escalation endpoint (`run_escalate`) both call it, so the
+/// unfenced execution + output rendering live in exactly one place.
+async fn run_bash_unsandboxed(root: &std::path::Path, command: &str) -> String {
+    let mut cmd = tokio::process::Command::new("bash");
+    cmd.arg("-lc")
+        .arg(command)
+        .current_dir(root)
+        .kill_on_drop(true);
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(PROJECT_CMD_TIMEOUT_SECS),
+        cmd.output(),
+    )
+    .await
+    {
+        Ok(Ok(output)) => render_project_output(&output),
+        Ok(Err(error)) => format!("Could not run the command: {error}"),
+        Err(_) => format!(
+            "Command interrupted: exceeded the {PROJECT_CMD_TIMEOUT_SECS}s timeout (process terminated)."
+        ),
+    }
+}
+
+/// Result of a `run_in_project` invocation: either the finished, rendered output, or
+/// a signal that the sandboxed run hit a denial and the caller should offer an
+/// on-failure escalation card (ADR 0023) to re-run the same command unsandboxed.
+enum RunProjectOutcome {
+    /// Normal: the rendered `[exit N]\n{output}` result (or an error string).
+    Completed(String),
+    /// The sandboxed run failed with a sandbox-denial signature → offer to re-run
+    /// the exact command unsandboxed. `command`/`cwd` seed the escalation card.
+    NeedsEscalation { command: String, cwd: String },
+}
+
+/// Build the OS-fenced command that runs `command` (as `bash -lc <command>`) with
+/// writes confined to `writable_roots`. Returns the ready-to-run `tokio::process::
+/// Command` (cwd/kill_on_drop are set by the caller). `Err` means the fence could NOT
+/// be constructed and the caller must FAIL CLOSED (never run unsandboxed).
+///
+/// Only ever called on the enforced path (`tool_safety_enabled()` on macOS/Linux), so
+/// exactly one platform arm is compiled in per target — no `unused` warnings.
+#[cfg(target_os = "macos")]
+fn build_sandbox_command(
+    writable_roots: &[std::path::PathBuf],
+    command: &str,
+) -> Result<tokio::process::Command, String> {
+    // macOS: `sandbox-exec -p <seatbelt-profile> bash -lc <command>` — byte-identical
+    // to the pre-Linux wiring.
+    let policy = crate::tool_safety::SandboxPolicy::WorkspaceWrite {
+        writable_roots: writable_roots.to_vec(),
+        network_access: true,
+    };
+    match crate::seatbelt::seatbelt_profile(&policy) {
+        Some(profile) => {
+            let mut c = tokio::process::Command::new("sandbox-exec");
+            c.arg("-p").arg(profile).arg("bash").arg("-lc").arg(command);
+            Ok(c)
+        }
+        // DangerFullAccess → unreachable here (we build WorkspaceWrite). Fail closed
+        // rather than silently run unsandboxed.
+        None => Err("no seatbelt profile for the workspace policy".to_string()),
+    }
+}
+
+/// Linux fence: spawn the `homun-linux-sandbox` helper, which applies a Landlock
+/// filesystem fence to itself and then execs the command. Resolves the helper via
+/// `HOMUN_LINUX_SANDBOX_BIN` (explicit override), else a sibling of the running
+/// gateway executable (`current_exe()/../homun-linux-sandbox`). Fails CLOSED if the
+/// helper can't be located or doesn't exist — the caller then refuses to run.
+///
+/// Follow-up (out of scope): the packaged Linux app must bundle `homun-linux-sandbox`
+/// next to the gateway binary (electron-builder `package:prepare`) so the sibling-exe
+/// resolution finds it in production; the CI test uses `CARGO_BIN_EXE_...` instead.
+#[cfg(target_os = "linux")]
+fn build_sandbox_command(
+    writable_roots: &[std::path::PathBuf],
+    command: &str,
+) -> Result<tokio::process::Command, String> {
+    let helper = match std::env::var_os("HOMUN_LINUX_SANDBOX_BIN") {
+        Some(path) => std::path::PathBuf::from(path),
+        None => {
+            let exe = std::env::current_exe()
+                .map_err(|e| format!("cannot resolve current executable: {e}"))?;
+            let dir = exe
+                .parent()
+                .ok_or_else(|| "current executable has no parent directory".to_string())?;
+            dir.join("homun-linux-sandbox")
+        }
+    };
+    if !helper.is_file() {
+        return Err(format!(
+            "linux sandbox helper not found at {} (set HOMUN_LINUX_SANDBOX_BIN)",
+            helper.display()
+        ));
+    }
+    let mut c = tokio::process::Command::new(&helper);
+    for root in writable_roots {
+        c.arg("--allow-write").arg(root);
+    }
+    c.arg("--").arg("bash").arg("-lc").arg(command);
+    Ok(c)
+}
+
+/// Fallback for platforms without a fence backend (Windows/other). Never actually
+/// reached — `run_in_project` gates the sandboxed path on `cfg!(macos) || cfg!(linux)`
+/// at runtime, so `sandboxed` is always false here and the caller returns before
+/// calling this. It exists only so the call site compiles on every target. The
+/// `_` bindings keep it warning-free.
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn build_sandbox_command(
+    _writable_roots: &[std::path::PathBuf],
+    _command: &str,
+) -> Result<tokio::process::Command, String> {
+    Err("no sandbox backend on this platform".to_string())
+}
+
 /// Runs a shell command on the HOST with cwd = the project folder (build/test/lint
 /// on the user's real code — verify-by-execution, plus git). Gated by the same
 /// security scan as the sandbox + confined to a project that has a folder; killed
 /// on timeout via `kill_on_drop`. Returns combined stdout+stderr (capped) prefixed
 /// with the exit status. This is the host-execution counterpart to the isolated
 /// `run_in_sandbox` (which stays for throwaway/untrusted work).
-async fn run_in_project(state: &AppState, thread_id: Option<&str>, command: &str) -> String {
+///
+/// ADR 0023 step 3 — OS enforcement. When `HOMUN_TOOL_SAFETY=1` AND we are on a
+/// platform with a fence backend, the `bash` subprocess is fenced under a
+/// workspace-write policy: writes are physically confined to the project root +
+/// standard tool caches (see `workspace_write_roots`), everything else is read-only.
+/// The wrapper is `sandbox-exec` + Seatbelt on macOS, `homun-linux-sandbox` +
+/// Landlock on Linux (see `build_sandbox_command`). The flag is OFF by default, so
+/// the default path is byte-identical to the pre-ADR host exec (`Completed` wraps the
+/// same rendered string). Windows/other platforms never sandbox here yet.
+///
+/// ADR 0023 on-failure escalation: when a fenced run FAILS with a sandbox-denial
+/// signature, this returns `NeedsEscalation` (instead of the old inline note) so the
+/// caller can surface an approval card; approving re-runs the command unsandboxed via
+/// `run_escalate`. The non-sandboxed and flag-off paths always return `Completed`.
+///
+/// ADR 0023 step 3 — Linux enforcement. On Linux the fence is **Landlock** (kernel
+/// LSM) applied via the `homun-linux-sandbox` helper binary: instead of `sandbox-exec`
+/// we spawn `homun-linux-sandbox --allow-write <root>... -- bash -lc <command>`, which
+/// fences its own filesystem writes to the roots and then execs the command. Same
+/// writable roots as macOS (`workspace_write_roots`), same `NeedsEscalation` detection
+/// (a Landlock denial surfaces as `EACCES`/"Operation not permitted"). Helper-path
+/// resolution fails CLOSED (see `linux_sandbox_command`).
+/// TODO(ADR 0023): seccomp network-off (v1 fences filesystem writes only, allowing
+/// network, at parity with the macOS v1 profile).
+async fn run_in_project(
+    state: &AppState,
+    thread_id: Option<&str>,
+    command: &str,
+) -> RunProjectOutcome {
     let command = command.trim();
     if command.is_empty() {
-        return "Empty command.".to_string();
+        return RunProjectOutcome::Completed("Empty command.".to_string());
     }
     let Some(root) = project_root_for_thread(state, thread_id) else {
-        return no_project_folder_msg();
+        return RunProjectOutcome::Completed(no_project_folder_msg());
     };
     let scan = skill_security::scan_blobs(&[("command".to_string(), command.to_string())]);
     if scan.blocked {
-        return format!(
+        return RunProjectOutcome::Completed(format!(
             "Command NOT executed: blocked by the security scan (risk {}/100). \
 Reformulate it without destructive operations.",
             scan.risk_score
-        );
+        ));
     }
-    let future = tokio::process::Command::new("bash")
-        .arg("-lc")
-        .arg(command)
-        .current_dir(&root)
-        .kill_on_drop(true)
-        .output();
+    // Enforce the OS fence only when the flag is on AND we're on a platform with an
+    // enforcement backend (macOS Seatbelt or Linux Landlock). When either is false we
+    // take the plain `bash -lc` path via `run_bash_unsandboxed` exactly as before —
+    // the sandboxed branch below only runs on the enforced path.
+    let sandboxed =
+        tool_safety_enabled() && (cfg!(target_os = "macos") || cfg!(target_os = "linux"));
+    if !sandboxed {
+        return RunProjectOutcome::Completed(run_bash_unsandboxed(&root, command).await);
+    }
+    // Sandboxed path: build the OS fence command, run inline (we need the raw status +
+    // combined output to decide whether to escalate). The writable roots are computed
+    // the same way on every platform; only the command wrapper differs.
+    let writable_roots = workspace_write_roots(&root, std::env::var("HOME").ok().as_deref());
+    // v1: fence filesystem writes, allow network (npm/git need it). Stricter
+    // network-off is a follow-up on both platforms.
+    let mut cmd = match build_sandbox_command(&writable_roots, command) {
+        Ok(cmd) => cmd,
+        // Fail-closed: the fence could not be constructed (e.g. the Linux helper
+        // binary is missing). NEVER fall back to unsandboxed — surface the same
+        // "sandbox could not start" error the failed-spawn path uses.
+        Err(error) => {
+            return RunProjectOutcome::Completed(format!(
+                "Command NOT executed: the workspace sandbox could not start ({error}). \
+The command was not run unsandboxed."
+            ));
+        }
+    };
+    cmd.current_dir(&root).kill_on_drop(true);
     match tokio::time::timeout(
         std::time::Duration::from_secs(PROJECT_CMD_TIMEOUT_SECS),
-        future,
+        cmd.output(),
     )
     .await
     {
@@ -12096,26 +12255,31 @@ Reformulate it without destructive operations.",
                 combined.push_str("\n[stderr]\n");
                 combined.push_str(&stderr);
             }
-            let code = output
-                .status
-                .code()
-                .map(|c| c.to_string())
-                .unwrap_or_else(|| "terminated by signal".to_string());
-            let body: String = combined
-                .chars()
-                .take(PROJECT_CMD_MAX_OUTPUT_CHARS)
-                .collect();
-            let body = if body.trim().is_empty() {
-                "(no output)"
-            } else {
-                body.as_str()
-            };
-            format!("[exit {code}]\n{body}")
+            // On-failure escalation: if the fenced command failed and the output carries
+            // a sandbox-denial signature, the fence — not the command — is the likely
+            // culprit. Signal the caller to offer an "approve → re-run unsandboxed" card
+            // instead of just noting it (ADR 0023).
+            if !output.status.success()
+                && (combined.contains("Operation not permitted") || combined.contains("sandbox"))
+            {
+                return RunProjectOutcome::NeedsEscalation {
+                    command: command.to_string(),
+                    cwd: root.to_string_lossy().into_owned(),
+                };
+            }
+            RunProjectOutcome::Completed(render_project_output(&output))
         }
-        Ok(Err(error)) => format!("Could not run the command: {error}"),
-        Err(_) => format!(
+        Ok(Err(error)) => {
+            // Fail-closed: if the SANDBOXED spawn could not start (e.g. `sandbox-exec`
+            // missing), never silently fall back to unsandboxed — surface a clear error.
+            RunProjectOutcome::Completed(format!(
+                "Command NOT executed: the workspace sandbox could not start ({error}). \
+The command was not run unsandboxed."
+            ))
+        }
+        Err(_) => RunProjectOutcome::Completed(format!(
             "Command interrupted: exceeded the {PROJECT_CMD_TIMEOUT_SECS}s timeout (process terminated)."
-        ),
+        )),
     }
 }
 
@@ -12698,6 +12862,200 @@ struct MemoryCandidate {
     age_days: f32,
 }
 
+#[derive(Debug, Clone, Serialize, Default)]
+struct MemoryRecallTiming {
+    lock_wait_ms: u64,
+    profile_ms: u64,
+    open_loops_ms: u64,
+    fts_ms: u64,
+    query_embedding_ms: Option<u64>,
+    query_embedding_cache_hit: bool,
+    query_embedding_timed_out: bool,
+    vector_scan_ms: Option<u64>,
+    graph_context_ms: u64,
+    total_ms: u64,
+    vector_candidates: usize,
+    fts_candidates: usize,
+    degraded: bool,
+}
+
+fn elapsed_ms(start: std::time::Instant) -> u64 {
+    start.elapsed().as_millis().min(u128::from(u64::MAX)) as u64
+}
+
+fn memory_recall_timing_trace_line(timing: &MemoryRecallTiming) -> String {
+    format!(
+        "memory recall: total_ms={} lock_wait_ms={} profile_ms={} open_loops_ms={} \
+fts_ms={} query_embedding_ms={} query_embedding_cache_hit={} query_embedding_timed_out={} \
+vector_scan_ms={} graph_context_ms={} \
+fts_candidates={} vector_candidates={} degraded={}",
+        timing.total_ms,
+        timing.lock_wait_ms,
+        timing.profile_ms,
+        timing.open_loops_ms,
+        timing.fts_ms,
+        timing
+            .query_embedding_ms
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "none".to_string()),
+        timing.query_embedding_cache_hit,
+        timing.query_embedding_timed_out,
+        timing
+            .vector_scan_ms
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "none".to_string()),
+        timing.graph_context_ms,
+        timing.fts_candidates,
+        timing.vector_candidates,
+        timing.degraded
+    )
+}
+
+#[derive(Debug, Clone)]
+struct MemoryQueryEmbeddingCacheEntry {
+    vector: Vec<f32>,
+    inserted_at: std::time::Instant,
+    last_access: u64,
+}
+
+#[derive(Debug, Default)]
+struct MemoryQueryEmbeddingCache {
+    entries: std::collections::HashMap<String, MemoryQueryEmbeddingCacheEntry>,
+    tick: u64,
+}
+
+impl MemoryQueryEmbeddingCache {
+    fn get(&mut self, key: &str, ttl: std::time::Duration) -> Option<Vec<f32>> {
+        let now = std::time::Instant::now();
+        let expired = self
+            .entries
+            .get(key)
+            .is_some_and(|entry| now.duration_since(entry.inserted_at) > ttl);
+        if expired {
+            self.entries.remove(key);
+            return None;
+        }
+        let vector = self.entries.get(key).map(|entry| entry.vector.clone())?;
+        self.tick = self.tick.saturating_add(1);
+        if let Some(entry) = self.entries.get_mut(key) {
+            entry.last_access = self.tick;
+        }
+        Some(vector)
+    }
+
+    fn insert(&mut self, key: String, vector: Vec<f32>, max_entries: usize) {
+        if max_entries == 0 {
+            return;
+        }
+        self.tick = self.tick.saturating_add(1);
+        self.entries.insert(
+            key,
+            MemoryQueryEmbeddingCacheEntry {
+                vector,
+                inserted_at: std::time::Instant::now(),
+                last_access: self.tick,
+            },
+        );
+        while self.entries.len() > max_entries {
+            let Some(oldest_key) = self
+                .entries
+                .iter()
+                .min_by_key(|(_, entry)| entry.last_access)
+                .map(|(key, _)| key.clone())
+            else {
+                break;
+            };
+            self.entries.remove(&oldest_key);
+        }
+    }
+}
+
+fn memory_query_embedding_cache() -> &'static std::sync::Mutex<MemoryQueryEmbeddingCache> {
+    static CACHE: std::sync::OnceLock<std::sync::Mutex<MemoryQueryEmbeddingCache>> =
+        std::sync::OnceLock::new();
+    CACHE.get_or_init(|| std::sync::Mutex::new(MemoryQueryEmbeddingCache::default()))
+}
+
+fn memory_query_embedding_cache_max_entries() -> usize {
+    env::var("HOMUN_MEMORY_QUERY_EMBED_CACHE_MAX")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(512)
+}
+
+fn memory_query_embedding_cache_ttl() -> std::time::Duration {
+    let seconds = env::var("HOMUN_MEMORY_QUERY_EMBED_CACHE_TTL_SECS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(86_400);
+    std::time::Duration::from_secs(seconds)
+}
+
+fn memory_query_embedding_timeout() -> std::time::Duration {
+    let ms = env::var("HOMUN_MEMORY_QUERY_EMBED_TIMEOUT_MS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(700);
+    std::time::Duration::from_millis(ms.max(1))
+}
+
+fn normalize_memory_embedding_query(query: &str) -> String {
+    query
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
+}
+
+fn memory_query_embedding_cache_key(query: &str, workspace: &MemoryWorkspaceId) -> String {
+    format!(
+        "{}|{}|{}|{}",
+        embed_base(),
+        embed_model(),
+        workspace.as_str(),
+        normalize_memory_embedding_query(query)
+    )
+}
+
+async fn embed_query_for_memory_recall(
+    http: &reqwest::Client,
+    query: &str,
+    workspace: &MemoryWorkspaceId,
+    timing: &mut MemoryRecallTiming,
+) -> Option<Vec<f32>> {
+    let key = memory_query_embedding_cache_key(query, workspace);
+    if let Ok(mut cache) = memory_query_embedding_cache().lock() {
+        if let Some(vector) = cache.get(&key, memory_query_embedding_cache_ttl()) {
+            timing.query_embedding_cache_hit = true;
+            timing.query_embedding_ms = Some(0);
+            return Some(vector);
+        }
+    }
+
+    let embedding_start = std::time::Instant::now();
+    let result =
+        match tokio::time::timeout(memory_query_embedding_timeout(), embed_text(http, query)).await
+        {
+            Ok(vector) => vector,
+            Err(_) => {
+                timing.query_embedding_timed_out = true;
+                timing.query_embedding_ms = Some(elapsed_ms(embedding_start));
+                return None;
+            }
+        };
+    timing.query_embedding_ms = Some(elapsed_ms(embedding_start));
+    if let Some(vector) = result.as_ref() {
+        if let Ok(mut cache) = memory_query_embedding_cache().lock() {
+            cache.insert(
+                key,
+                vector.clone(),
+                memory_query_embedding_cache_max_entries(),
+            );
+        }
+    }
+    result
+}
+
 /// Combined relevance score: RRF-fuse the two retrieval ranks (a memory strong in BOTH
 /// lexical AND semantic is rewarded, unlike a plain concat), then add MILD boosts for
 /// importance and recency so relevance still leads but a crucial/fresh memory edges out
@@ -12723,151 +13081,27 @@ fn memory_age_days(created_at: &str, now_secs: i64) -> f32 {
     ((now_secs - secs).max(0) as f32) / 86_400.0
 }
 
-async fn relevant_memory_for_prompt(state: &AppState, prompt: &str) -> Option<String> {
-    let query = prompt.trim();
-    if query.chars().count() < 8 {
-        return None;
-    }
-    // Embed the query OFF the lock (the only await) for the semantic pass below.
-    let query_vec = embed_text(&state.http, query).await;
-    let facade = lock_memory_facade(state).ok()?;
-    let user = gateway_memory_user_id();
-    // PROJECT ISOLATION: recall is scoped to the ACTIVE workspace only. In a project we do
-    // NOT cross-search the personal scope — "di cosa abbiamo discusso?" must stay about THIS
-    // project, not personal facts/episodes. (Stable personal PREFERENCES still reach the
-    // model via the always-on briefing, gather_profile_memory — that's separate.)
-    let active = gateway_memory_workspace_id();
-    let now_secs = OffsetDateTime::now_utc().unix_timestamp();
-
-    // All memories in scope, keyed by ref — the source of text/metadata/created_at for
-    // whatever the two passes surface.
-    let records: std::collections::HashMap<String, local_first_memory::MemoryRecord> = facade
-        .list_memories_for_ui(&user, &active)
-        .map(|ms| {
-            ms.into_iter()
-                .map(|m| (m.reference.to_string(), m))
-                .collect()
-        })
-        .unwrap_or_default();
-
-    // Lexical pass (FTS/bm25, policy-filtered) → rank per reference.
-    let access = MemoryAccessRequest {
-        actor_id: "chat_rag".to_string(),
-        user_id: user.clone(),
-        workspace_id: active.clone(),
-        purpose: "chat_context".to_string(),
-        allowed_domains: vec![
-            PrivacyDomain::new("personal"),
-            PrivacyDomain::new("work"),
-            PrivacyDomain::new("general"),
-        ],
-        max_sensitivity: MemoryDataSensitivity::Private,
-        allow_raw_payload: false,
-        allow_export: true,
-        broad_query: false,
-    };
-    let mut fts_rank: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-    if let Ok(page) = facade.search_memories(MemorySearchRequest {
-        access,
-        query: query.to_string(),
-        statuses: vec![MemoryStatus::Confirmed, MemoryStatus::Candidate],
-        memory_types: vec![
-            "open_loop".to_string(),
-            "goal".to_string(),
-            "decision".to_string(),
-            "fact".to_string(),
-            "preference".to_string(),
-        ],
-        limit: 8,
-        offset: 0,
-    }) {
-        for item in page.items {
-            fts_rank
-                .entry(item.reference.to_string())
-                .or_insert(item.rank);
-        }
-    }
-
-    // Semantic pass (dense cosine) → rank per reference. Top-k fallback: take the best
-    // few above a relaxed floor (not a hard 0.6 cutoff) — RRF weights weak ones gently,
-    // so a strong-but-sub-threshold paraphrase still gets a chance instead of vanishing.
-    let mut dense_rank: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-    if let Some(query_vec) = query_vec.as_ref() {
-        let mut scored: Vec<(String, f32)> = Vec::new();
-        if let Ok(embeddings) = facade.list_embeddings(&user, &active) {
-            for (reference, vector) in embeddings {
-                let sim = cosine(query_vec, &vector);
-                if sim >= 0.5 {
-                    scored.push((reference.to_string(), sim));
-                }
-            }
-        }
-        scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        for (i, (reference, _)) in scored.into_iter().take(8).enumerate() {
-            dense_rank.entry(reference).or_insert(i + 1);
-        }
-    }
-
-    // Fuse: union of both passes, ranked by RRF + importance + recency.
-    let mut refs: std::collections::HashSet<String> = std::collections::HashSet::new();
-    refs.extend(fts_rank.keys().cloned());
-    refs.extend(dense_rank.keys().cloned());
-    let mut candidates: Vec<(MemoryCandidate, String)> = Vec::new();
-    for reference in refs {
-        let Some(record) = records.get(&reference) else {
-            continue;
-        };
-        let importance = record
-            .metadata
-            .get("importance")
-            .and_then(|v| v.as_f64())
-            .unwrap_or(0.5) as f32;
-        let candidate = MemoryCandidate {
-            fts_rank: fts_rank.get(&reference).copied(),
-            dense_rank: dense_rank.get(&reference).copied(),
-            importance,
-            age_days: memory_age_days(&record.created_at, now_secs),
-            reference: reference.clone(),
-        };
-        let line = format!("- {}", format_recall_entry(&record.text, &record.metadata));
-        candidates.push((candidate, line));
-    }
-    candidates.sort_by(|a, b| {
-        hybrid_memory_score(&b.0)
-            .partial_cmp(&hybrid_memory_score(&a.0))
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-    let mut lines: Vec<String> = Vec::new();
-    for (_, line) in candidates {
-        if !lines.contains(&line) {
-            lines.push(line);
-        }
-    }
-    if let Some(workflow) = workflow_status_context_for_query(&facade, &user, &active, query) {
-        lines.insert(0, workflow);
-    } else if let Some(provenance) =
-        artifact_provenance_context_for_query(&facade, &user, &active, query)
-    {
-        lines.insert(0, provenance);
-    }
-    lines.truncate(10);
-    if lines.is_empty() {
-        return None;
-    }
-    Some(format!(
-        "MEMORY RELEVANT TO THE REQUEST (this is what you/the user have ALREADY established — \
-treat it as established fact; do NOT say \"I have no decision in memory\" if it's below here):\n{}",
-        lines.join("\n")
-    ))
+/// Esito di `recall_memory`: la risposta testuale per il modello + i hits
+/// strutturati (per l'evento UI Recall) + lo scope. ADR 0022 (Piano UI A2/A3).
+struct RecallOutcome {
+    /// Risposta formattata per il modello (stringa tool result).
+    response: String,
+    /// Hits strutturati per la UI (kind, text). Pari ai `lines` non-vault.
+    hits: Vec<(String, String)>,
+    /// Scope della recall ("personal" | "project").
+    scope: String,
 }
 
-fn recall_memory(state: &AppState, query: &str) -> String {
+fn recall_memory(state: &AppState, query: &str) -> RecallOutcome {
     let query = query.trim();
+    let empty = |msg: &str| -> RecallOutcome {
+        RecallOutcome { response: msg.to_string(), hits: Vec::new(), scope: "personal".to_string() }
+    };
     if query.is_empty() {
-        return "No query provided.".to_string();
+        return empty("No query provided.");
     }
     let Ok(facade) = lock_memory_facade(state) else {
-        return "Memory unavailable.".to_string();
+        return empty("Memory unavailable.");
     };
     let user = gateway_memory_user_id();
     let active = gateway_memory_workspace_id();
@@ -12909,18 +13143,13 @@ fn recall_memory(state: &AppState, query: &str) -> String {
             })
             .unwrap_or_default()
     };
-    // Scope-aware ordering. In a PROJECT, the project's own memory is the primary scope
-    // the user is asking about → list it FIRST; personal memory follows as secondary
-    // context (capped, so it can't drown out the project facts). This is the fix for
-    // "project memory isn't isolated": asking "cosa c'è in memoria" inside a project
-    // used to surface personal info first (LLM primacy bias) and bury the project.
-    // PROJECT ISOLATION: in a project, recall ONLY the project's own memory — never the
-    // personal scope. "Di cosa abbiamo discusso?" inside a project must stay about THIS
-    // project. (Stable personal PREFERENCES still reach the model via the always-on briefing.)
     let in_project = active.as_str() != PERSONAL_WORKSPACE;
     let mut lines = Vec::new();
+    // Hits strutturati per la UI: raccolgo (kind, text) man mano che costruisco lines.
+    let mut ui_hits: Vec<(String, String)> = Vec::new();
     for (kind, text) in search(active.clone()) {
         lines.push(format!("- [{kind}] {text}"));
+        ui_hits.push((kind.clone(), text.clone()));
     }
     if let Some(workflow) = workflow_status_context_for_query(&facade, &user, &active, query) {
         lines.push(workflow);
@@ -12929,8 +13158,6 @@ fn recall_memory(state: &AppState, query: &str) -> String {
     {
         lines.push(provenance);
     }
-    // Episodic memory (M4): past conversations — SCOPED to the active workspace via the
-    // episode's origin tag, so a project recalls only its own conversations.
     if let Ok(episodes) =
         facade.list_memories_for_ui(&user, &MemoryWorkspaceId::new(THREADS_WORKSPACE))
     {
@@ -12949,10 +13176,14 @@ fn recall_memory(state: &AppState, query: &str) -> String {
             .map(|m| format!("- [conversation] {}", m.text))
             .collect();
         hits.truncate(8);
+        // Episodi come hits UI (kind "conversation").
+        for h in &hits {
+            if let Some(text) = h.strip_prefix("- [conversation] ") {
+                ui_hits.push(("conversation".to_string(), text.to_string()));
+            }
+        }
         lines.extend(hits);
     }
-    // Graph traversal: personal relationships ("chi è la nonna di…") — only OUTSIDE a
-    // project (it's personal-scope knowledge; a project must not surface it).
     let personal = MemoryWorkspaceId::new(PERSONAL_WORKSPACE);
     if !in_project {
         if let Ok(relations) = facade.list_relations_for_ui(&user, &personal) {
@@ -12974,13 +13205,137 @@ fn recall_memory(state: &AppState, query: &str) -> String {
             }
         }
     }
-    if lines.is_empty() {
+    let scope = if in_project { "project" } else { "personal" }.to_string();
+    let response = match lock_vault_store(state) {
+        Ok(vault_store) => {
+            recall_memory_response_with_vault_fallback(&vault_store, query, lines, in_project)
+        }
+        Err(_) if lines.is_empty() => format!("No memories relevant to «{query}»."),
+        Err(_) if in_project => format!("Memories relevant to THIS project:\n{}", lines.join("\n")),
+        Err(_) => format!("Relevant memories from memory:\n{}", lines.join("\n")),
+    };
+    RecallOutcome { response, hits: ui_hits, scope }
+}
+
+fn recall_memory_response_with_vault_fallback(
+    vault_store: &SQLiteVaultStore,
+    query: &str,
+    lines: Vec<String>,
+    in_project: bool,
+) -> String {
+    let memory_block = if lines.is_empty() {
         format!("No memories relevant to «{query}».")
     } else if in_project {
         format!("Memories relevant to THIS project:\n{}", lines.join("\n"))
     } else {
         format!("Relevant memories from memory:\n{}", lines.join("\n"))
+    };
+    let should_check_vault = lines.is_empty()
+        || query_should_offer_vault_reveal(query)
+        || (query_has_sensitive_vault_term(query) && memory_lines_mention_vault(&lines));
+    if !should_check_vault {
+        return memory_block;
     }
+    let vault_matches = match search_vault_records(vault_store, query, 5) {
+        Ok(records) => records,
+        Err(_) => return memory_block,
+    };
+    if vault_matches.is_empty() {
+        return memory_block;
+    }
+    let vault_lines = vault_matches
+        .into_iter()
+        .map(|record| {
+            let marker = vault_reveal_marker(&record);
+            format!(
+                "- [{}] {} — {} ({})\n  reveal_card: {}",
+                record.category, record.label, record.redacted_preview, record.id, marker
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!(
+        "{memory_block}\n\nVault records matching the request (redacted metadata only; do NOT reveal or guess the secret value). If the user asked to see the value, you MUST copy the reveal_card marker exactly on its own line in your final answer so the UI can ask for the local PIN and reveal it locally:\n{vault_lines}"
+    )
+}
+
+fn query_should_offer_vault_reveal(query: &str) -> bool {
+    let terms = vault_metadata_terms(query);
+    let has_sensitive_term = terms.iter().any(|term| vault_term_is_sensitive(term));
+    let asks_for_value = terms.iter().any(|term| {
+        matches!(
+            term.as_str(),
+            "qual" | "quale" | "mostra" | "vedere" | "visualizza" | "dimmi" | "dammi"
+        )
+    });
+    has_sensitive_term && asks_for_value
+}
+
+fn query_has_sensitive_vault_term(query: &str) -> bool {
+    vault_metadata_terms(query)
+        .iter()
+        .any(|term| vault_term_is_sensitive(term))
+}
+
+fn vault_term_is_sensitive(term: &str) -> bool {
+    matches!(
+        term,
+        "codice"
+            | "fiscale"
+            | "fiscal"
+            | "identity"
+            | "targa"
+            | "plate"
+            | "license"
+            | "vehicles"
+            | "passaporto"
+            | "passport"
+            | "documento"
+            | "carta"
+            | "card"
+            | "password"
+            | "token"
+            | "salute"
+            | "health"
+    )
+}
+
+fn memory_lines_mention_vault(lines: &[String]) -> bool {
+    lines
+        .iter()
+        .any(|line| line.to_ascii_lowercase().contains("vault"))
+}
+
+fn vault_reveal_marker(record: &VaultRecordSummary) -> String {
+    let payload = serde_json::json!({
+        "record_id": record.id,
+        "category": record.category,
+        "label": record.label,
+        "redacted_preview": record.redacted_preview,
+    });
+    format!("{VAULT_REVEAL_OPEN}{payload}{VAULT_REVEAL_CLOSE}")
+}
+
+fn extract_vault_reveal_marker(text: &str) -> Option<String> {
+    let open = text.find(VAULT_REVEAL_OPEN)?;
+    let after_open = open + VAULT_REVEAL_OPEN.len();
+    let close_rel = text[after_open..].find(VAULT_REVEAL_CLOSE)?;
+    let close = after_open + close_rel + VAULT_REVEAL_CLOSE.len();
+    Some(text[open..close].to_string())
+}
+
+fn append_vault_reveal_marker_if_missing(mut text: String, marker: Option<&str>) -> String {
+    let Some(marker) = marker.filter(|marker| !marker.trim().is_empty()) else {
+        return text;
+    };
+    if text.contains(VAULT_REVEAL_OPEN) {
+        return text;
+    }
+    if !text.trim().is_empty() {
+        text.push_str("\n\n");
+    }
+    text.push_str(marker);
+    text
 }
 
 async fn generate_stream(
@@ -13330,6 +13685,8 @@ fn is_placeholder_chat_title(title: &str) -> bool {
 #[derive(Debug, Deserialize)]
 struct SeedAssistantRequest {
     text: String,
+    #[serde(default)]
+    event_parts: Vec<serde_json::Value>,
 }
 
 /// Append a literal assistant message to a thread. Used to open a proactivity-card
@@ -13348,8 +13705,10 @@ async fn seed_assistant_message(
             message: "Empty message.".to_string(),
         });
     }
+    let mut message = channel_chat_message("assistant", text);
+    message.event_parts = request.event_parts;
     let snapshot = lock_store(&state)?
-        .append_assistant_message(&thread_id, &channel_chat_message("assistant", text))
+        .append_assistant_message(&thread_id, &message)
         .map_err(GatewayError::store)?;
     publish_app_event(serde_json::json!({
         "type": "thread.updated",
@@ -13553,7 +13912,7 @@ fn set_persisted_inference_api_key(key: &str) -> Result<(), String> {
 // ── Provider registry (Phase 1: multi-provider inference) ──────────────────
 
 use model_registry::{
-    ProviderEntry, ProviderKind, ProviderRegistry, ResolvedRole, RoleBinding,
+    ModelTier, ProviderEntry, ProviderKind, ProviderRegistry, ResolvedRole, RoleBinding,
     canonical_provider_base_url,
 };
 
@@ -13720,6 +14079,97 @@ fn role_openai_config(role: &str) -> Option<(String, String, Option<String>)> {
     chat_openai_stream_config()
 }
 
+fn privacy_guard_openai_config() -> Option<(String, String, Option<String>)> {
+    let registry = load_provider_registry();
+    if let Some(resolved) = registry.resolve_role("privacy_guard")
+        && provider_endpoint_is_local(&resolved.base_url)
+        && !model_id_is_cloud(&resolved.model)
+    {
+        let api_key = provider_api_key(&resolved.provider_id).or_else(env_inference_api_key);
+        return Some((resolved.base_url, resolved.model, api_key));
+    }
+
+    let mut candidates = registry
+        .providers
+        .iter()
+        .filter(|provider| provider.enabled && provider_endpoint_is_local(&provider.base_url))
+        .flat_map(|provider| {
+            provider
+                .models
+                .iter()
+                .filter(|model| model.modality == "text" && !model_id_is_cloud(&model.id))
+                .map(move |model| (provider, model))
+        })
+        .collect::<Vec<_>>();
+    candidates.sort_by(|(provider_a, model_a), (provider_b, model_b)| {
+        let tier_rank = |tier: ModelTier| match tier {
+            ModelTier::Fast => 0,
+            ModelTier::Balanced => 1,
+            ModelTier::Reasoning => 2,
+        };
+        let rank_a = model_a
+            .profile
+            .as_ref()
+            .map(|profile| tier_rank(profile.tier))
+            .unwrap_or(1);
+        let rank_b = model_b
+            .profile
+            .as_ref()
+            .map(|profile| tier_rank(profile.tier))
+            .unwrap_or(1);
+        rank_a
+            .cmp(&rank_b)
+            .then(model_a.reasoning.cmp(&model_b.reasoning))
+            .then(provider_a.id.cmp(&provider_b.id))
+            .then(model_a.id.cmp(&model_b.id))
+    });
+    let (provider, model) = candidates.first()?;
+    let api_key = provider_api_key(&provider.id).or_else(env_inference_api_key);
+    Some((provider.base_url.clone(), model.id.clone(), api_key))
+}
+
+fn provider_endpoint_is_local(base_url: &str) -> bool {
+    base_url.contains("127.0.0.1") || base_url.contains("localhost") || base_url.contains("[::1]")
+}
+
+fn model_id_is_cloud(model: &str) -> bool {
+    model.to_ascii_lowercase().contains(":cloud")
+}
+
+async fn classify_sensitive_input_with_privacy_guard_model(
+    http: &reqwest::Client,
+    text: &str,
+) -> Option<privacy_guard::PrivacyGuardDecision> {
+    let (base_url, model, api_key) = privacy_guard_openai_config()?;
+    let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
+    let system = "You are Homun Privacy Guard. Classify the user's message BEFORE the main assistant sees it. Detect sensitive personal data in any language, including payment cards, CVV, identity documents, tax IDs, license plates, health data, credentials, API keys, private addresses, and other secrets. Return STRICT JSON only: {\"has_sensitive_data\": boolean, \"items\": [{\"category\": \"payments|identity|health|vehicles|credentials|private_notes\", \"kind\": \"short_snake_case\", \"label\": \"short user-visible label\", \"secret_value\": \"exact substring from the user message\", \"confidence\": 0.0-1.0}]}. Use exact substrings only; do not infer or invent values.";
+    let payload = serde_json::json!({
+        "model": model,
+        "temperature": 0,
+        "max_tokens": 700,
+        "messages": [
+            { "role": "system", "content": system },
+            { "role": "user", "content": text },
+        ],
+    });
+    let mut builder = http
+        .post(&endpoint)
+        .timeout(std::time::Duration::from_secs(20));
+    if let Some(key) = api_key.as_ref() {
+        builder = builder.bearer_auth(key);
+    }
+    let resp = builder.json(&payload).send().await.ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let body = resp.json::<serde_json::Value>().await.ok()?;
+    let content = body
+        .pointer("/choices/0/message/content")
+        .and_then(|c| c.as_str())
+        .unwrap_or("");
+    privacy_guard::decision_from_model_output(text, content)
+}
+
 /// F2 step-verification gate toggle (default ON). `HOMUN_VERIFY_STEPS=0` disables it,
 /// reverting to plain F1 (a completed step is trusted without an independent check).
 fn step_verification_enabled() -> bool {
@@ -13765,14 +14215,8 @@ fn orchestration_completion_judge_schema() -> serde_json::Value {
 }
 
 fn orchestration_judge_response_format(name: &str) -> serde_json::Value {
-    serde_json::json!({
-        "type": "json_schema",
-        "json_schema": {
-            "name": name,
-            "strict": true,
-            "schema": orchestration_completion_judge_schema()
-        }
-    })
+    // Strict-schema floor from the single inference-crate definition (caposaldo #5).
+    structured_response_format(name, Some(&orchestration_completion_judge_schema()))
 }
 
 /// F2 verification gate: an independent LLM-judge deciding whether a plan step is
@@ -14410,7 +14854,8 @@ fn parse_ollama_capabilities(show_body: &serde_json::Value) -> OllamaCapabilitie
     };
     let context_length = show_body.get("model_info").and_then(|mi| {
         let arch = mi.get("general.architecture").and_then(|a| a.as_str())?;
-        mi.get(format!("{arch}.context_length")).and_then(|v| v.as_u64())
+        mi.get(format!("{arch}.context_length"))
+            .and_then(|v| v.as_u64())
     });
     OllamaCapabilities {
         thinking: has("thinking"),
@@ -14648,7 +15093,11 @@ async fn process_ollama_line(
         // content empty. Not streamed as content (it's the trace, not the answer). Accept
         // `reasoning`/`reasoning_content` too for compat shims.
         for key in ["thinking", "reasoning", "reasoning_content"] {
-            if let Some(t) = message.get(key).and_then(|c| c.as_str()).filter(|s| !s.is_empty()) {
+            if let Some(t) = message
+                .get(key)
+                .and_then(|c| c.as_str())
+                .filter(|s| !s.is_empty())
+            {
                 reasoning.push_str(t);
             }
         }
@@ -14714,7 +15163,15 @@ async fn collect_ollama_native_stream(
                         continue;
                     }
                     if let Ok(json) = serde_json::from_str::<serde_json::Value>(&line) {
-                        if process_ollama_line(&json, &mut content, &mut reasoning, &mut tool_calls, sink).await {
+                        if process_ollama_line(
+                            &json,
+                            &mut content,
+                            &mut reasoning,
+                            &mut tool_calls,
+                            sink,
+                        )
+                        .await
+                        {
                             done = true;
                         }
                     }
@@ -14735,10 +15192,7 @@ async fn collect_ollama_native_stream(
     // `message.thinking` trace accumulated by `process_ollama_line` (thinking models like
     // deepseek-r1), so the reasoning-fallback recovers an answer when content is empty.
     Ok(model_normalize::assistant_response(
-        content,
-        reasoning,
-        tool_calls,
-        "stop",
+        content, reasoning, tool_calls, "stop",
     ))
 }
 
@@ -14754,6 +15208,10 @@ fn build_chat_payload(
     temperature: f64,
     is_final_round: bool,
 ) -> serde_json::Value {
+    let max_tokens = chat_payload_max_tokens(
+        is_final_round,
+        env::var("HOMUN_DEBUG_MAIN_LOOP_MAX_TOKENS").ok().as_deref(),
+    );
     if is_ollama_base(base_url) {
         // Native /api/chat streams content + tool_calls together fine on current
         // Ollama (verified on 0.30.6: `/v1` AND native both return tool_calls while
@@ -14767,7 +15225,7 @@ fn build_chat_payload(
             "messages": to_ollama_messages(messages),
             "stream": true,
             "keep_alive": "10m",
-            "options": { "temperature": temperature, "num_predict": 6000 },
+            "options": { "temperature": temperature, "num_predict": max_tokens },
         });
         // Offer tools only when the model can use them. Strip ONLY when /api/show confidently
         // reports no `tools` capability; undetected/cloud (profile None) → keep tools, fail-safe.
@@ -14789,7 +15247,7 @@ fn build_chat_payload(
             "model": model,
             "messages": messages,
             "temperature": temperature,
-            "max_tokens": 6000,
+            "max_tokens": max_tokens,
             "stream": true,
         });
         // z.ai GLM defaults to "thinking" mode, which streams the answer as
@@ -14807,6 +15265,17 @@ fn build_chat_payload(
         }
         payload
     }
+}
+
+fn chat_payload_max_tokens(is_final_round: bool, debug_override: Option<&str>) -> u32 {
+    const DEFAULT_CHAT_MAX_TOKENS: u32 = 6000;
+    if is_final_round {
+        return DEFAULT_CHAT_MAX_TOKENS;
+    }
+    debug_override
+        .and_then(|raw| raw.trim().parse::<u32>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(DEFAULT_CHAT_MAX_TOKENS)
 }
 
 fn auth_fallback_config(failing_model: &str) -> Option<(String, String, Option<String>)> {
@@ -14947,18 +15416,34 @@ fn extractor_openai_config() -> Option<(String, String, Option<String>)> {
     chat_openai_stream_config()
 }
 
-/// Chat context-char budget for the capable backend, derived from the model's
-/// context window (`HOMUN_INFERENCE_CONTEXT_WINDOW`, default 32k tokens).
-/// ~3 chars/token leaves headroom for the system prompt and the model's reply;
-/// it is vastly larger than the earlier 3.6K small-model default so chat history is not
-/// clamped on a model that can read it.
-fn chat_context_budget_chars() -> usize {
-    let window = env::var("HOMUN_INFERENCE_CONTEXT_WINDOW")
-        .ok()
-        .and_then(|value| value.parse::<usize>().ok())
+/// Resolve the chat context-char budget from the available window signals (pure, so the
+/// precedence is unit-testable without touching the environment). Precedence:
+/// 1. `env_override` — an explicit `HOMUN_INFERENCE_CONTEXT_WINDOW` forces the window
+///    (debugging / capping a model that lies about its size).
+/// 2. `model_window` — the model's REAL context window from the user catalog
+///    (`ModelEntry.context_window`, auto-filled from `/api/show`'s `context_length`, F0.3d).
+///    This is the point: budget against what THIS model can actually read.
+/// 3. `32_768` tokens — a safe default when the model isn't in any catalog (e.g. a raw
+///    cloud endpoint) and no override is set.
+/// Chars = window_tokens × 3: 3 chars/token is conservative vs the real ~4, so the char
+/// budget maps to ~75% of the window in tokens, implicitly reserving headroom for the
+/// system prompt and the model's reply.
+fn resolve_context_budget_chars(env_override: Option<usize>, model_window: Option<usize>) -> usize {
+    let window = env_override
         .filter(|tokens| *tokens > 0)
+        .or(model_window.filter(|tokens| *tokens > 0))
         .unwrap_or(32_768);
     window.saturating_mul(3)
+}
+
+/// Chat context-char budget for the active turn. Reads the explicit env override, then
+/// defers to [`resolve_context_budget_chars`] for the policy. `model_window` is the model's
+/// real catalog window (`None` when the model isn't catalogued → falls back to the default).
+fn chat_context_budget_chars(model_window: Option<usize>) -> usize {
+    let env_override = env::var("HOMUN_INFERENCE_CONTEXT_WINDOW")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok());
+    resolve_context_budget_chars(env_override, model_window)
 }
 
 /// Streams a chat completion from an OpenAI-compatible endpoint, translating its
@@ -15120,7 +15605,7 @@ fn browser_act_tool_schema() -> serde_json::Value {
         "type": "function",
         "function": {
             "name": "browser_act",
-            "description": "Perform ONE single micro-action on the current page (a click, writing in a field, selecting, pressing a key, etc.) and return the UPDATED snapshot. One action at a time: after each action re-read the snapshot before the next. For fields with autocomplete use kind='type' (the suggestion selection is automatic). For a 'press and hold' / 'tieni premuto' human-verification challenge use kind='hold' on the button (it keeps the pointer pressed for a few seconds). Do not use for purchases, logins or payments: stop and propose to the user.",
+            "description": "Perform ONE single micro-action on the current page (a click, writing in a field, selecting, pressing a key, etc.) and return the UPDATED snapshot. One action at a time: after each action re-read the snapshot before the next. For fields with autocomplete use kind='type' (the suggestion selection is automatic). For a 'press and hold' / 'tieni premuto' human-verification challenge use kind='hold' on the button (it keeps the pointer pressed for a few seconds). Do not use for purchases, logins or payments unless the user approved a Payment Approval Card and you have its exact payment_approval_id.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -15139,6 +15624,8 @@ fn browser_act_tool_schema() -> serde_json::Value {
                     "submit": { "type": "boolean", "description": "If true, submit the form after writing (equivalent to pressing Enter)." },
                     "key": { "type": "string", "description": "Key to press (kind='press'/'press_key'), e.g. 'Enter', 'ArrowDown'." },
                     "durationMs": { "type": "number", "description": "How long to keep the pointer pressed for kind='hold' (ms). Default ~3000; raise if the challenge needs a longer hold." },
+                    "payment_approval_id": { "type": "string", "description": "Exact id returned by an approved Payment Approval Card. Use only for approved checkout actions and the final payment click; never invent it." },
+                    "vault_secret": { "type": "string", "enum": ["cvv_one_shot"], "description": "Use with payment_approval_id to fill the CVV/CV2 field without exposing the CVV to the model. Do not include a text value when using this." },
                     "target": { "type": "string", "description": "id of the tab to operate on; default: the current tab." }
                 },
                 "required": ["kind"]
@@ -15151,6 +15638,27 @@ fn browser_act_tool_schema() -> serde_json::Value {
 /// model that misused the tool self-corrects instead of looping on the same bad arguments
 /// (the observed action-error loop: no `kind`, an element ref passed as a tab `target`, or a
 /// blocked `evaluate`). Appended to the error the model sees. Empty when nothing to add.
+/// Recovery hint appended to a `browser_navigate` error. A weak model tends to retry the
+/// SAME dead URL forever (the observed "navigate the FIFA page 7× then loop" case). On the
+/// FIRST failure suggest a search; on a REPEAT failure of the same URL, firmly tell it to
+/// STOP and pivot to a web search — the harness owns recovery (caposaldo #2), since the
+/// model won't pivot on its own.
+fn browser_navigate_failure_hint(url: &str, fails: u32) -> String {
+    if fails >= 2 {
+        format!(
+            "\n\nSTOP — you have tried to open {url} {fails} times and it keeps failing. Do NOT \
+             request that URL again. Instead SEARCH the web: call browser_navigate with \
+             url=\"https://www.google.com/search?q=<your query>\" (or https://duckduckgo.com/?q=...), \
+             read the results snapshot, then open a working result link."
+        )
+    } else {
+        "\n\nIf that URL is wrong or unreachable, do NOT keep retrying it — SEARCH the web instead \
+         (browser_navigate to https://www.google.com/search?q=<your query>), then open a working \
+         result link."
+            .to_string()
+    }
+}
+
 fn browser_act_error_hint(error: &str) -> &'static str {
     let e = error.to_lowercase();
     if e.contains("unknown action kind") || e.contains("invalid_request") && e.contains("kind") {
@@ -15162,6 +15670,18 @@ fn browser_act_error_hint(error: &str) -> &'static str {
     } else {
         ""
     }
+}
+
+fn stale_ref_recovery_message(old_ref: Option<&str>, snapshot: &str) -> String {
+    let old = old_ref
+        .map(str::trim)
+        .filter(|r| !r.is_empty())
+        .unwrap_or("the old ref");
+    format!(
+        "⚠ The reference had expired (the page changed). I took a fresh snapshot. \
+Do NOT retry {old}; choose a NEW [ref=...] from this snapshot, or use browser_snapshot if the \
+data is already visible:\n{snapshot}"
+    )
 }
 
 /// Granular browser tool: capture a screenshot fed back to the vision model.
@@ -16382,7 +16902,10 @@ fn merge_object_metadata(target: &mut serde_json::Value, extra: Option<&serde_js
 /// Produce the deck CONTENT as schema-enforced JSON. Uses the orchestrator-role
 /// endpoint with `response_format: json_schema` (constrained decoding — the
 /// cross-model floor), degrading ONCE to `json_object` on a 400 (e.g.
-/// ollama.com/v1). Mirrors the inference-crate floor; converge later (ADR 0016).
+/// ollama.com/v1). The floor shapes come from the single inference-crate
+/// definition (`structured_response_format`, caposaldo #5 / ADR 0016); only the
+/// async transport + degrade control-flow live here (they differ from the
+/// blocking provider: system+user messages, richer empty/reasoning-only handling).
 async fn generate_deck_content(
     http: &reqwest::Client,
     base_url: &str,
@@ -16450,8 +16973,8 @@ any other key such as \"presentation\" or \"deck\", and add no extra top-level k
         { "role": "user", "content": brief },
     ]);
     let attempts = [
-        serde_json::json!({ "type": "json_schema", "json_schema": { "name": "deck", "strict": true, "schema": deck_content_schema() } }),
-        serde_json::json!({ "type": "json_object" }),
+        structured_response_format("deck", Some(&deck_content_schema())),
+        structured_response_format("deck", None),
     ];
     let mut content = String::new();
     let mut last_err = "deck content request failed".to_string();
@@ -17779,12 +18302,11 @@ fn connector_capability_entry(slug: String, schema: serde_json::Value) -> Option
     Some(entry)
 }
 
+/// Tokenizer for capability search and keyword-overlap prefilters. Delegates to the SHARED
+/// tokenizer (F1.a) so the chat loop and the orchestrator planner split text identically —
+/// the query and the indexed docs MUST tokenize the same way or they'd never match.
 fn cap_tokenize(s: &str) -> Vec<String> {
-    s.to_lowercase()
-        .split(|c: char| !c.is_alphanumeric())
-        .filter(|t| t.chars().count() >= 2)
-        .map(str::to_string)
-        .collect()
+    local_first_capabilities::search::tokenize(s)
 }
 
 /// Best-effort pre-retrieval of connected-service (Composio) tools for the user's
@@ -17881,55 +18403,25 @@ async fn auto_retrieve_composio(
         .collect()
 }
 
-/// Real BM25 ranking — IDF (rare terms weigh more), TF saturation (k1), and length
-/// normalization (b) — over the unified capability corpus. This is the lexical search the
-/// SOTA (Anthropic Tool Search) uses by default; no embeddings needed at this scale. An
-/// empty/no-match query yields a small sample so the model still sees what exists.
+/// BM25 ranking over the unified capability corpus. Thin wrapper over the SHARED ranker
+/// (`local_first_capabilities::search`, F1.a) — Okapi BM25 (IDF + TF saturation + length
+/// normalization), the lexical search the SOTA (Anthropic Tool Search) uses at this scale,
+/// no embeddings needed. This is the EXACT same ranker the orchestrator planner now calls,
+/// so "what chat finds" can't drift from "what the planner finds" (caposaldo #5). Tokenizes
+/// each entry's `text`, ranks, and maps the returned indices back to the entries. An empty
+/// query yields a small sample so the model still sees what exists.
 fn bm25_rank<'a>(
     corpus: &'a [CapabilityEntry],
     query: &str,
     limit: usize,
 ) -> Vec<&'a CapabilityEntry> {
-    let mut q_terms = cap_tokenize(query);
-    q_terms.sort();
-    q_terms.dedup();
-    if q_terms.is_empty() || corpus.is_empty() {
-        return corpus.iter().take(limit).collect();
-    }
-    let docs: Vec<Vec<String>> = corpus.iter().map(|e| cap_tokenize(&e.text)).collect();
-    let n = corpus.len() as f64;
-    let avgdl = (docs.iter().map(|d| d.len()).sum::<usize>() as f64 / n).max(1.0);
-    let (k1, b) = (1.5_f64, 0.75_f64);
-    let df: std::collections::HashMap<&str, f64> = q_terms
+    let docs: Vec<Vec<String>> = corpus
         .iter()
-        .map(|t| {
-            let c = docs.iter().filter(|d| d.iter().any(|w| w == t)).count() as f64;
-            (t.as_str(), c)
-        })
+        .map(|entry| local_first_capabilities::search::tokenize(&entry.text))
         .collect();
-    let mut scored: Vec<(f64, usize)> = docs
-        .iter()
-        .enumerate()
-        .filter_map(|(i, d)| {
-            let dl = d.len() as f64;
-            let mut score = 0.0;
-            for t in &q_terms {
-                let f = d.iter().filter(|w| *w == t).count() as f64;
-                if f == 0.0 {
-                    continue;
-                }
-                let nq = *df.get(t.as_str()).unwrap_or(&0.0);
-                let idf = (((n - nq + 0.5) / (nq + 0.5)) + 1.0).ln();
-                score += idf * (f * (k1 + 1.0)) / (f + k1 * (1.0 - b + b * dl / avgdl));
-            }
-            (score > 0.0).then_some((score, i))
-        })
-        .collect();
-    scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-    scored
+    local_first_capabilities::search::bm25_rank_indices(&docs, query, limit)
         .into_iter()
-        .take(limit)
-        .map(|(_, i)| &corpus[i])
+        .map(|index| &corpus[index])
         .collect()
 }
 
@@ -18063,6 +18555,3364 @@ const ATTACHMENT_TEXT_BUDGET_CHARS: usize = 120_000;
 /// most-recent files win.
 const ATTACHMENT_CONTEXT_IMAGES: usize = 12;
 
+/// Turn-level state that the per-tool-call dispatch loop reads and mutates. Bundled
+/// into one struct so the loop body can address it through `ctx.<field>` — the seam a
+/// LATER refactor extracts into a standalone `dispatch_one_tool_call` function. The
+/// struct is rebuilt once per `for round` iteration (so `round` is a plain `usize`),
+/// and its scope ends right after the dispatch loop so the borrows release before the
+/// post-loop reads (screenshot push, `if pending_confirm`) touch the raw locals.
+struct ChatToolCtx<'a> {
+    // `&mut` — mutated inside the dispatch loop.
+    messages: &'a mut Vec<serde_json::Value>,
+    accumulated: &'a mut String,
+    browser_session: &'a mut Option<BrowserAutomationClient<BrowserSidecarSession>>,
+    browser_used: &'a mut bool,
+    last_snapshot: &'a mut String,
+    pending_browser_image: &'a mut Option<String>,
+    browser_tool_call_ids: &'a mut std::collections::BTreeSet<String>,
+    current_target: &'a mut String,
+    opened_targets: &'a mut Vec<String>,
+    nav_failures: &'a mut std::collections::HashMap<String, u32>,
+    browse_sources: &'a mut Vec<String>,
+    plan: &'a mut ExecutionPlan,
+    step_evidence: &'a mut Vec<String>,
+    tool_trace: &'a mut Vec<String>,
+    loaded_tools: &'a mut std::collections::BTreeSet<String>,
+    tool_schemas: &'a mut Vec<serde_json::Value>,
+    last_round_sig: &'a mut String,
+    repeat_count: &'a mut u32,
+    progress_anchor_round: &'a mut usize,
+    pending_compaction: &'a mut bool,
+    pending_vault_reveal_marker: &'a mut Option<String>,
+    pending_confirm: &'a mut bool,
+    base_url: &'a mut String,
+    model: &'a mut String,
+    api_key: &'a mut Option<String>,
+    endpoint: &'a mut String,
+    // `&` / by-value — read-only inside the dispatch loop.
+    state: &'a AppState,
+    tx: &'a StreamSink,
+    thread_id: Option<&'a str>,
+    prompt: &'a str,
+    // The original per-turn request (read-only): the dispatch reads
+    // `request.model` to detect an EXPLICIT per-message model override before
+    // switching to the browser driver model. Turn-constant.
+    request: &'a ChatGenerateStreamRequest,
+    read_only: bool,
+    channel_owner: bool,
+    contact_only: bool,
+    can_see_contacts: bool,
+    can_see_calendar: bool,
+    autonomous: bool,
+    composio_writes: &'a std::collections::BTreeSet<String>,
+    catalog_index: &'a [(String, String, serde_json::Value)],
+    capability_corpus: &'a [CapabilityEntry],
+    automation_user_id: &'a UserId,
+    automation_workspace_id: &'a WorkspaceId,
+    turn_scaffold: &'a scaffold::ScaffoldProfile,
+    floor_acting: bool,
+    round: usize,
+}
+
+/// ADR 0023 (`docs/decisions/0023-sandbox-enforcement-and-unified-approval.md`)
+/// gate: when `HOMUN_TOOL_SAFETY=1`, the two write-confirm branches route their
+/// decision through `tool_safety::assess_tool_safety` instead of the ad-hoc
+/// boolean. Default OFF (unset / any other value) → the exact legacy boolean, so
+/// this is behavior-preserving until the flag is flipped. Kept as a fn (not a
+/// `LazyLock`) so tests can toggle the env var per case.
+fn tool_safety_enabled() -> bool {
+    std::env::var("HOMUN_TOOL_SAFETY").as_deref() == Ok("1")
+}
+
+/// Emit an approval confirmation card and return the model-facing "AWAITING" string.
+/// Verbatim unification of the MCP and Composio confirmation blocks — the only
+/// per-family differences are the marker delimiters and the human label. The `card`
+/// text is byte-identical to what both inline blocks produced before (same prefix,
+/// same marker JSON, trailing `\n`), so the resume flow that parses the marker is
+/// unaffected. Side-effects (push to `accumulated`, stream the delta, set
+/// `pending_confirm`) are preserved in the same order.
+async fn emit_approval_card(
+    ctx: &mut ChatToolCtx<'_>,
+    marker_open: &str,
+    marker_close: &str,
+    name: &str,
+    label: &str,
+    args_val: &serde_json::Value,
+) -> String {
+    let approval =
+        create_pending_approval(ctx.state, name, args_val, label, ctx.thread_id, true);
+    let marker = match approval.as_ref() {
+        Some(approval) => serde_json::json!({
+            "approval_id": approval.approval_id,
+            "tool": name,
+            "arguments": args_val,
+        }),
+        None => serde_json::json!({ "tool": name, "arguments": args_val }),
+    }
+    .to_string();
+    let card = format!(
+        "\n\nI need your confirmation for the action below.\n{marker_open}{marker}{marker_close}\n"
+    );
+    ctx.accumulated.push_str(&card);
+    let _ = emit_stream_event(ctx.tx, GenerateStreamEvent::Delta { text: card }).await;
+    *ctx.pending_confirm = true;
+    "AWAITING USER CONFIRMATION: the action was proposed via a \
+confirmation card in the interface. Do NOT say it was executed."
+        .to_string()
+}
+
+/// ADR 0023 sandbox axis, SHADOW mode: classify a tool call's filesystem footprint
+/// and log what a `workspace-write` fence WOULD do — WITHOUT enforcing anything.
+/// Observe-only; no dispatch behavior changes. Runs only when `tool_safety_enabled()`.
+fn shadow_log_sandbox(state: &AppState, thread_id: Option<&str>, name: &str, args_raw: &str) {
+    use crate::tool_safety::{
+        ShadowVerdict, ToolFootprint, sandbox_shadow_verdict, tool_footprint,
+    };
+    let args: serde_json::Value =
+        serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
+    let footprint = tool_footprint(name, &args);
+    // Only the write/exec footprints are interesting; skip the noisy Allow-always cases.
+    if matches!(
+        footprint,
+        ToolFootprint::ReadOnly | ToolFootprint::NonFilesystem | ToolFootprint::Contained
+    ) {
+        return;
+    }
+    // The INTENDED policy we're shadowing against: workspace-write jailed to the
+    // thread's project root (the realistic default for step 3). No root → read-only.
+    let root = project_root_for_thread(state, thread_id);
+    let policy = match &root {
+        Some(r) => SandboxPolicy::WorkspaceWrite {
+            writable_roots: vec![r.clone()],
+            network_access: false,
+        },
+        None => SandboxPolicy::ReadOnly,
+    };
+    // For a Write footprint, resolve whether the target lands under the root.
+    // `jail_in_root(&Path, &str) -> Result<PathBuf, String>` returns Ok iff the
+    // relative path stays inside the root (rejects abs / `..` / symlink escapes).
+    let is_under_writable_root = match (&footprint, &root) {
+        (ToolFootprint::Write { path }, Some(r)) => jail_in_root(r, path.as_str()).is_ok(),
+        _ => false,
+    };
+    let verdict = sandbox_shadow_verdict(&footprint, &policy, is_under_writable_root);
+    // Log to the gateway log (captured to ~/.homun/logs/gateway.log by the P0 stdio
+    // capture). `eprintln!` is the existing pattern. Log the classification + verdict
+    // for every write/exec call so the shadow data is visible.
+    let policy_label = match &policy {
+        SandboxPolicy::WorkspaceWrite { .. } => "workspace-write",
+        SandboxPolicy::ReadOnly => "read-only",
+        SandboxPolicy::DangerFullAccess => "danger-full-access",
+    };
+    match verdict {
+        ShadowVerdict::WouldFence { reason } => eprintln!(
+            "SANDBOX-SHADOW tool={name} footprint={footprint:?} policy={policy_label} verdict=WOULD_FENCE reason=\"{reason}\""
+        ),
+        ShadowVerdict::Allow => eprintln!(
+            "SANDBOX-SHADOW tool={name} footprint={footprint:?} policy={policy_label} verdict=allow"
+        ),
+    }
+}
+
+/// Pure per-tool-call dispatch for the chat loop: the single `if name == … else if …`
+/// chain, extracted verbatim from `stream_chat_via_openai`'s dispatch loop (fase 1b).
+/// Turn-state is read/mutated through `ctx.<field>` exactly as inline (disjoint field
+/// borrows preserved); `name`/`args_raw`/`call_id` are the per-call parse results. The
+/// caller keeps the harness snapshots, the blocked-guard, and the post-result push.
+async fn execute_chat_tool(
+    ctx: &mut ChatToolCtx<'_>,
+    name: &str,
+    args_raw: &str,
+    call_id: &str,
+) -> String {
+    // ADR 0023 step 2b, SHADOW: observe-only sandbox classification/log. Gated by
+    // `tool_safety_enabled()` (default off → one env read, no-op). NEVER blocks or
+    // alters `result`; it only reads state and logs.
+    if tool_safety_enabled() {
+        shadow_log_sandbox(ctx.state, ctx.thread_id, name, args_raw);
+    }
+    let result = if ctx.read_only
+        && matches!(
+            name,
+            "run_in_sandbox"
+                | "create_artifact"
+                | "generate_image"
+                | "save_artifact"
+                | "read_file"
+                | "write_file"
+                | "edit_file"
+                | "list_files"
+                | "run_in_project"
+                | "schedule_task"
+                | "cancel_scheduled_task"
+                | "customize_addon"
+                | "create_skill"
+        ) {
+        // Defensive: these aren't offered in read-only mode, but if the
+        // model calls one anyway, refuse instead of executing.
+        "Action not available from the channel: operations with effects \
+require your confirmation in the app. Propose it and stop."
+            .to_string()
+    } else if matches!(
+        name,
+        "browser_navigate"
+            | "browser_snapshot"
+            | "browser_act"
+            | "browser_screenshot"
+            | "browser_tabs"
+            | "browser_dialog"
+    ) {
+        // Granular browser tools (HOMUN_CHAT_BROWSER_GRANULAR):
+        // the main agent drives the browser one micro-action at a
+        // time against a per-turn session.
+        let args: serde_json::Value = serde_json::from_str(args_raw)
+            .unwrap_or_else(|_| serde_json::json!({}));
+        // First browser tool this turn: mark used (raises round
+        // budget), publish live activity, acquire the session
+        // (reuse the thread's warm one, else spawn a chat sidecar).
+        if !*ctx.browser_used {
+            *ctx.browser_used = true;
+            begin_browser_activity(
+                ctx.prompt.to_string(),
+                ctx.thread_id.map(|s| s.to_string()),
+            );
+            // Honor an EXPLICIT "browser" role: switch the driver
+            // model for the rest of this (browsing) turn. Skipped
+            // when the user forced a per-message model override.
+            let has_msg_override = ctx
+                .request
+                .model
+                .as_deref()
+                .map(|m| !m.trim().is_empty())
+                .unwrap_or(false);
+            if !has_msg_override {
+                if let Some((b_url, b_model, b_key)) =
+                    browser_openai_stream_config()
+                {
+                    if b_model != *ctx.model || b_url != *ctx.base_url {
+                        let _ = emit_stream_event(
+                            ctx.tx,
+                            GenerateStreamEvent::Delta {
+                                text: format!(
+                                    "‹‹ACT››🧠 Passo al modello browser: {b_model}‹‹/ACT››"
+                                ),
+                            },
+                        )
+                        .await;
+                        *ctx.base_url = b_url;
+                        *ctx.model = b_model;
+                        *ctx.api_key = b_key;
+                        // Provider-aware endpoint: an Ollama-based
+                        // browser role needs native /api/chat — the
+                        // old hardcoded "/chat/completions" sent
+                        // NATIVE-shaped payloads (object arguments)
+                        // to the strict /v1 endpoint → 400 on every
+                        // mid-turn model switch (task #105).
+                        *ctx.endpoint = chat_endpoint(ctx.base_url);
+                    }
+                }
+            }
+        }
+        if ctx.browser_session.is_none() {
+            let reused = match ctx.thread_id {
+                Some(t) => {
+                    let st = ctx.state.clone();
+                    let t = t.to_string();
+                    tokio::task::spawn_blocking(move || {
+                        take_thread_browser_session(&st, &t)
+                    })
+                    .await
+                    .ok()
+                    .flatten()
+                }
+                None => None,
+            };
+            // A reused session already has the "chat_0" tab open;
+            // mark it opened so navigate reuses it (Navigate, not
+            // Open). A fresh session has no tabs yet.
+            if reused.is_some() && !ctx.opened_targets.iter().any(|t| t == "chat_0") {
+                ctx.opened_targets.push("chat_0".to_string());
+            }
+            match reused {
+                Some(existing) => *ctx.browser_session = Some(existing),
+                None => {
+                    // Self-heal: a wedged contained-computer CDP makes the
+                    // sidecar's connectOverCDP time out. Health-check BEFORE
+                    // connecting; and if the spawn/connect fails anyway (a
+                    // race, or a container that wedged after the check),
+                    // recycle + recreate and retry once — resolve the block
+                    // automatically instead of reporting "non disponibile".
+                    if !browser_cdp_ok(ctx.state).await {
+                        let _ = emit_stream_event(
+                            ctx.tx,
+                            GenerateStreamEvent::Delta {
+                                text: "‹‹ACT››🔧 Browser stuck: restarting the contained computer…‹‹/ACT››".to_string(),
+                            },
+                        )
+                        .await;
+                        ensure_browser_cdp_healthy(ctx.state).await;
+                    }
+                    for attempt in 0u8..2 {
+                        let st = ctx.state.clone();
+                        let spawned = tokio::task::spawn_blocking(move || {
+                            spawn_browser_sidecar_for_chat(&st)
+                        })
+                        .await;
+                        match spawned {
+                            Ok(Ok(session)) => {
+                                *ctx.browser_session =
+                                    Some(BrowserAutomationClient::new(session));
+                                break;
+                            }
+                            // First failure → recycle the container + retry.
+                            _ if attempt == 0 => {
+                                let _ = emit_stream_event(
+                                    ctx.tx,
+                                    GenerateStreamEvent::Delta {
+                                        text: "‹‹ACT››🔧 Browser unreachable: restarting and retrying…‹‹/ACT››".to_string(),
+                                    },
+                                )
+                                .await;
+                                ensure_browser_cdp_healthy(ctx.state).await;
+                            }
+                            // Second failure → give up; reported below.
+                            _ => {}
+                        }
+                    }
+                }
+            }
+        }
+        // Mark this tool result as carrying a (potentially large)
+        // snapshot so the pruner stubs older ones.
+        ctx.browser_tool_call_ids.insert(call_id.to_string());
+        // We hold the session for the duration of this branch; the
+        // GLOBAL lock is acquired only around each single call.
+        let outcome: Result<String, String> = match ctx.browser_session.take() {
+            None => {
+                push_browser_step(
+                    "browser: session unavailable".to_string(),
+                    "error",
+                );
+                Err("Browser unavailable: the contained-computer browser (a headless \
+Chromium in a Docker container, driven over CDP — there is NO local browser binary) did not start. \
+Usually transient, or the contained computer isn't running yet. Do NOT look for a local \
+chromium/firefox install and do NOT conclude Chromium is missing or that it's a known bug. Retry, \
+or tell the user to start the contained computer (Settings → Local computer)."
+                    .to_string())
+            }
+            Some(client) => match name {
+                "browser_navigate" => {
+                    // Multi-tab: an explicit `target` switches the current
+                    // tab; `new_tab` allocates a fresh chat_N id (so the
+                    // logic below treats it as not-yet-opened → Open).
+                    if let Some(t) = args.get("target").and_then(|v| v.as_str()) {
+                        if !t.trim().is_empty() {
+                            *ctx.current_target = t.to_string();
+                        }
+                    }
+                    if args
+                        .get("new_tab")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false)
+                    {
+                        *ctx.current_target = format!("chat_{}", ctx.opened_targets.len());
+                    }
+                    let url = args
+                        .get("url")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    if url.trim().is_empty() {
+                        *ctx.browser_session = Some(client);
+                        Err("Missing URL for browser_navigate.".to_string())
+                    } else {
+                        let _ = emit_stream_event(
+                            ctx.tx,
+                            GenerateStreamEvent::Delta {
+                                text: format!("‹‹ACT››🌐 Opening {url}‹‹/ACT››"),
+                            },
+                        )
+                        .await;
+                        let guard = browse_web_lock().lock().await;
+                        // Open the current tab the first time, then Navigate.
+                        let already_open =
+                            ctx.opened_targets.iter().any(|t| t.as_str() == ctx.current_target.as_str());
+                        let (open_method, open_params) = if already_open {
+                            (
+                                BrowserMethod::Navigate,
+                                serde_json::json!({
+                                    "target_id": ctx.current_target.as_str(),
+                                    "url": url,
+                                }),
+                            )
+                        } else {
+                            (
+                                BrowserMethod::Open,
+                                serde_json::json!({
+                                    "url": url,
+                                    "label": ctx.current_target.as_str(),
+                                }),
+                            )
+                        };
+                        let (client_back, nav_res) =
+                            chat_browser_call(client, open_method, open_params)
+                                .await;
+                        let nav_err = nav_res.err();
+                        // Navigate/Open return no snapshot → snapshot now.
+                        let mut client_now = client_back;
+                        let snap_result = if nav_err.is_none() {
+                            if let Some(c) = client_now.take() {
+                                let (c2, snap) = chat_browser_call(
+                                    c,
+                                    BrowserMethod::Snapshot,
+                                    browser_chat_snapshot_params(
+                                        ctx.current_target.as_str(),
+                                    ),
+                                )
+                                .await;
+                                client_now = c2;
+                                snap
+                            } else {
+                                Err("session lost after navigation".to_string())
+                            }
+                        } else {
+                            Err(nav_err.clone().unwrap_or_default())
+                        };
+                        drop(guard);
+                        *ctx.browser_session = client_now;
+                        // Mark this tab opened once the Open/Navigate succeeds.
+                        if nav_err.is_none()
+                            && !ctx.opened_targets.iter().any(|t| t.as_str() == ctx.current_target.as_str())
+                        {
+                            ctx.opened_targets.push(ctx.current_target.clone());
+                        }
+                        match (nav_err, snap_result) {
+                            (Some(error), _) => {
+                                if verbose_debug() {
+                                    eprintln!(
+                                        "[browser] navigate {url} FAILED: {error}"
+                                    );
+                                }
+                                push_browser_step(
+                                    format!("navigate {url}"),
+                                    "error",
+                                );
+                                // CDP wedge (connectOverCDP timeout despite an
+                                // HTTP-OK /json/version): recycle the contained
+                                // computer once per window and DROP the session so
+                                // the next call respawns against fresh CDP. motore
+                                // #1's pre-spawn `browser_cdp_ok` can't see this
+                                // ws-level wedge, so heal it on the failure (same
+                                // self-heal the drive's shared path already has).
+                                if cdp_wedge_signature(&error) {
+                                    let _ = emit_stream_event(
+                                        ctx.tx,
+                                        GenerateStreamEvent::Delta {
+                                            text: "‹‹ACT››🔧 Browser bloccato: riavvio il computer…‹‹/ACT››".to_string(),
+                                        },
+                                    )
+                                    .await;
+                                    let healed = force_recycle_contained_computer(
+                                        ctx.state,
+                                    )
+                                    .await;
+                                    *ctx.browser_session = None;
+                                    ctx.opened_targets.clear();
+                                    if healed {
+                                        Err("The browser was wedged; I recycled the contained computer. Retry the SAME navigation now.".to_string())
+                                    } else {
+                                        Err("The browser is unavailable (the contained computer did not recover). Tell the user to check Settings → Local computer.".to_string())
+                                    }
+                                } else {
+                                    let fails = {
+                                        let entry = ctx.nav_failures
+                                            .entry(url.to_string())
+                                            .or_insert(0);
+                                        *entry += 1;
+                                        *entry
+                                    };
+                                    Err(format!(
+                                        "Navigation failed: {error}{}",
+                                        browser_navigate_failure_hint(&url, fails)
+                                    ))
+                                }
+                            }
+                            (None, Ok(value)) => {
+                                let snap = browser_snapshot_text(&value);
+                                if !snap.is_empty() {
+                                    *ctx.last_snapshot = snap.clone();
+                                }
+                                push_browser_step(
+                                    format!("navigate {url}"),
+                                    "done",
+                                );
+                                let page_url = value
+                                    .get("url")
+                                    .and_then(|u| u.as_str())
+                                    .unwrap_or(url.as_str());
+                                Ok(format!(
+                                    "Page opened ({page_url}). Snapshot:\n{snap}"
+                                ))
+                            }
+                            (None, Err(error)) => {
+                                push_browser_step(
+                                    format!("navigate {url}"),
+                                    "error",
+                                );
+                                Err(format!(
+                                    "Page opened but snapshot failed: {error}"
+                                ))
+                            }
+                        }
+                    }
+                }
+                "browser_snapshot" => {
+                    if let Some(t) = args.get("target").and_then(|v| v.as_str()) {
+                        if !t.trim().is_empty() {
+                            *ctx.current_target = t.to_string();
+                        }
+                    }
+                    let _ = emit_stream_event(
+                        ctx.tx,
+                        GenerateStreamEvent::Delta {
+                            text: "‹‹ACT››👁️ Re-reading the page‹‹/ACT››"
+                                .to_string(),
+                        },
+                    )
+                    .await;
+                    let guard = browse_web_lock().lock().await;
+                    let (client_back, snap) = chat_browser_call(
+                        client,
+                        BrowserMethod::Snapshot,
+                        browser_chat_snapshot_params(ctx.current_target.as_str()),
+                    )
+                    .await;
+                    drop(guard);
+                    *ctx.browser_session = client_back;
+                    match snap {
+                        Ok(value) => {
+                            let snap = browser_snapshot_text(&value);
+                            if !snap.is_empty() {
+                                *ctx.last_snapshot = snap.clone();
+                            }
+                            push_browser_step("snapshot".to_string(), "done");
+                            Ok(format!("Page snapshot:\n{snap}"))
+                        }
+                        Err(error) => {
+                            push_browser_step("snapshot".to_string(), "error");
+                            Err(format!("Snapshot failed: {error}"))
+                        }
+                    }
+                }
+                "browser_act" => {
+                    // Build the action the sidecar runs (and the safety gate
+                    // inspects), coercing a common model mistake that otherwise
+                    // dead-ends in a retry loop: an element ref (e83) passed as
+                    // `target` — which is a TAB id, so the sidecar errors "tab
+                    // not found: e83". Re-route a ref-shaped target into `ref`
+                    // (when none was given) instead of switching to a missing tab.
+                    let mut action = args.clone();
+                    let target_arg = args
+                        .get("target")
+                        .and_then(|v| v.as_str())
+                        .map(str::to_string);
+                    let has_ref = action
+                        .get("ref")
+                        .and_then(|v| v.as_str())
+                        .is_some_and(|r| !r.trim().is_empty());
+                    let target_is_ref = target_arg.as_deref().is_some_and(|t| {
+                        t.len() >= 2
+                            && t.starts_with('e')
+                            && t[1..].chars().all(|c| c.is_ascii_digit())
+                    });
+                    if let Some(obj) = action.as_object_mut() {
+                        if target_is_ref && !has_ref {
+                            if let Some(t) = target_arg.clone() {
+                                obj.insert(
+                                    "ref".to_string(),
+                                    serde_json::Value::String(t),
+                                );
+                            }
+                            obj.remove("target");
+                        } else if let Some(t) = target_arg.as_deref() {
+                            if !t.trim().is_empty() {
+                                *ctx.current_target = t.to_string();
+                            }
+                        }
+                        obj.insert(
+                            "target_id".to_string(),
+                            serde_json::Value::String(ctx.current_target.clone()),
+                        );
+                    }
+                    let mut preflight_error = None;
+                    let vault_secret_used =
+                        match apply_payment_approval_secret_for_action(
+                            ctx.state,
+                            &mut action,
+                        ) {
+                            Ok(used) => used,
+                            Err(error) => {
+                                push_browser_step(
+                                    "payment vault secret blocked".to_string(),
+                                    "error",
+                                );
+                                preflight_error = Some(format!(
+                                    "Payment vault secret unavailable: {error}. Ask the user to approve the Payment Approval Card again."
+                                ));
+                                false
+                            }
+                        };
+                    // SAFETY GATE: high-risk (buy/login/booking, or
+                    // evaluate) is refused for EVERYONE. In read-only
+                    // (channel) turns any committing action is also
+                    // refused — EXCEPT when the sender is the OWNER
+                    // (is_self card): that block protects the user from
+                    // other people, not from their own requests (e.g.
+                    // clicking "Cerca" on a train search they asked for).
+                    let approved_payment_id =
+                        approved_payment_id_for_action(ctx.state, &action);
+                    let blocked = browser_safety::high_risk_reason_with_payment_approval(
+                        &action,
+                        ctx.last_snapshot,
+                        approved_payment_id.as_deref(),
+                    )
+                    .or_else(|| {
+                        if ctx.read_only
+                            && !ctx.channel_owner
+                            && browser_safety::is_committing_action(&action)
+                        {
+                            Some(
+                                "action that confirms/submits is not allowed from the channel"
+                                    .to_string(),
+                            )
+                        } else {
+                            None
+                        }
+                    });
+                    if let Some(error) = preflight_error {
+                        *ctx.browser_session = Some(client);
+                        Err(error)
+                    } else if let Some(reason) = blocked {
+                        eprintln!("browser-gate: BLOCKED ({reason})");
+                        *ctx.browser_session = Some(client);
+                        push_browser_step(
+                            format!(
+                                "action blocked: {}",
+                                args.get("kind")
+                                    .and_then(|k| k.as_str())
+                                    .unwrap_or("?")
+                            ),
+                            "error",
+                        );
+                        Err(format!(
+                            "🚫 action blocked, user confirmation needed: {reason}.{} \
+I did nothing: propose to the user what to do and wait — do NOT retry the same action.",
+                            browser_act_error_hint(&reason)
+                        ))
+                    } else {
+                        let kind = args
+                            .get("kind")
+                            .and_then(|k| k.as_str())
+                            .unwrap_or("action")
+                            .to_string();
+                        let _ = emit_stream_event(
+                            ctx.tx,
+                            GenerateStreamEvent::Delta {
+                                text: format!(
+                                    "‹‹ACT››✋ {kind} on the page‹‹/ACT››"
+                                ),
+                            },
+                        )
+                        .await;
+                        let guard = browse_web_lock().lock().await;
+                        let (client_back, act_res) =
+                            chat_browser_call(client, BrowserMethod::Act, action)
+                                .await;
+                        drop(guard);
+                        *ctx.browser_session = client_back;
+                        match act_res {
+                            Ok(value) => {
+                                let snap = browser_snapshot_text(&value);
+                                // No-progress detection: if the action left
+                                // the page identical, nudge the model to try
+                                // a different element/approach instead of
+                                // repeating the same move.
+                                let no_change =
+                                    !snap.is_empty() && snap == *ctx.last_snapshot;
+                                if !snap.is_empty() {
+                                    *ctx.last_snapshot = snap.clone();
+                                }
+                                push_browser_step(format!("{kind}"), "done");
+                                let mut out = if snap.is_empty() {
+                                    "Action performed.".to_string()
+                                } else {
+                                    format!(
+                                        "Action performed. Updated snapshot:\n{snap}"
+                                    )
+                                };
+                                if no_change {
+                                    out.push_str(
+                                    "\n[note: the page did NOT change from before — \
+don't repeat the same action; try a different element, scroll, or wait (kind=wait).]",
+                                );
+                                }
+                                if let Some(committed) =
+                                    value.get("committedOption")
+                                {
+                                    out.push_str(&format!(
+                                        "\n[automatic selection: {committed}]"
+                                    ));
+                                }
+                                if let Some(sugg) = value.get("suggestions") {
+                                    out.push_str(&format!(
+                                        "\n[suggestions: {sugg}]"
+                                    ));
+                                }
+                                // Guardrail (advisory, Layer C.3): if the model just
+                                // typed/filled a date that is in the PAST, nudge it to
+                                // re-resolve via resolve_datetime instead of submitting.
+                                // Advisory (not a hard block) because some past dates are
+                                // legitimate (birthdays, historical lookups).
+                                if matches!(
+                                    args.get("kind").and_then(|k| k.as_str()),
+                                    Some("type") | Some("fill")
+                                ) {
+                                    if let Some(typed) =
+                                        args.get("text").and_then(|t| t.as_str())
+                                    {
+                                        if let Some(hint) = past_date_hint(typed) {
+                                            out.push_str(&hint);
+                                        }
+                                    }
+                                }
+                                Ok(out)
+                            }
+                            Err(error) => {
+                                push_browser_step(format!("{kind}"), "error");
+                                // DIAG (HOMUN_DEBUG): what the model tried + why it
+                                // failed, to root-cause the repeated browser_act loop.
+                                if verbose_debug() {
+                                    eprintln!(
+                                        "[browser_act] kind={kind} ref={:?} selector={:?} text={:?} → ERROR: {}",
+                                        args.get("ref").and_then(|v| v.as_str()),
+                                        args.get("selector")
+                                            .and_then(|v| v.as_str()),
+                                        if vault_secret_used {
+                                            Some("[vault-secret]")
+                                        } else {
+                                            args.get("text")
+                                                .and_then(|v| v.as_str())
+                                        },
+                                        error.chars().take(220).collect::<String>()
+                                    );
+                                }
+                                // Stale-ref auto-recovery: the page changed under us
+                                // so the [ref=eN] is gone. Instead of just erroring
+                                // (forcing the model to spend a round re-snapshotting),
+                                // take a fresh snapshot NOW and hand it back so it
+                                // retries with new refs in the same round.
+                                let stale = {
+                                    let e = error.to_lowercase();
+                                    e.contains("stale") || e.contains("detached")
+                                };
+                                match (stale, ctx.browser_session.take()) {
+                                    (true, Some(c)) => {
+                                        let guard = browse_web_lock().lock().await;
+                                        let (c_back, snap_res) = chat_browser_call(
+                                            c,
+                                            BrowserMethod::Snapshot,
+                                            browser_chat_snapshot_params(
+                                                ctx.current_target.as_str(),
+                                            ),
+                                        )
+                                        .await;
+                                        drop(guard);
+                                        *ctx.browser_session = c_back;
+                                        let snap = snap_res
+                                            .as_ref()
+                                            .map(browser_snapshot_text)
+                                            .unwrap_or_default();
+                                        if snap.is_empty() {
+                                            Err(format!(
+                                                "Action failed: {error}{}",
+                                                browser_act_error_hint(&error)
+                                            ))
+                                        } else {
+                                            *ctx.last_snapshot = snap.clone();
+                                            Ok(stale_ref_recovery_message(
+                                                args.get("ref")
+                                                    .and_then(|v| v.as_str()),
+                                                &snap,
+                                            ))
+                                        }
+                                    }
+                                    (_, restored) => {
+                                        *ctx.browser_session = restored;
+                                        Err(format!(
+                                            "Action failed: {error}{}",
+                                            browser_act_error_hint(&error)
+                                        ))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                "browser_screenshot" => {
+                    if let Some(t) = args.get("target").and_then(|v| v.as_str()) {
+                        if !t.trim().is_empty() {
+                            *ctx.current_target = t.to_string();
+                        }
+                    }
+                    let full_page = args
+                        .get("full_page")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+                    let marks = args
+                        .get("marks")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+                    let _ = emit_stream_event(
+                        ctx.tx,
+                        GenerateStreamEvent::Delta {
+                            text: "‹‹ACT››📸 Capturing a screenshot‹‹/ACT››"
+                                .to_string(),
+                        },
+                    )
+                    .await;
+                    let file_name =
+                        format!("chat_shot_{}.png", uuid::Uuid::new_v4().simple());
+                    let guard = browse_web_lock().lock().await;
+                    let (client_back, shot_res) = chat_browser_call(
+                        client,
+                        BrowserMethod::Screenshot,
+                        serde_json::json!({
+                            "target_id": ctx.current_target.as_str(),
+                            "file_name": file_name,
+                            "full_page": full_page,
+                            "labels": marks,
+                        }),
+                    )
+                    .await;
+                    drop(guard);
+                    *ctx.browser_session = client_back;
+                    match shot_res {
+                        Ok(value) => {
+                            let path = value
+                                .get("path")
+                                .and_then(|p| p.as_str())
+                                .unwrap_or("")
+                                .to_string();
+                            // Set-of-marks legend: map each numbered badge
+                            // in the image back to the element's ref so the
+                            // model can act precisely (browser_act ref=eN).
+                            let legend = value
+                            .get("marks")
+                            .and_then(|m| m.as_array())
+                            .map(|entries| {
+                                let mut text = String::from(
+                                    "\nNumbered elements in the screenshot \
+(number = element):",
+                                );
+                                for entry in entries {
+                                    let mark = entry
+                                        .get("mark")
+                                        .and_then(|v| v.as_i64())
+                                        .unwrap_or_default();
+                                    let role = entry
+                                        .get("role")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("");
+                                    let name = entry
+                                        .get("name")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("");
+                                    let ref_id = entry
+                                        .get("ref")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("");
+                                    text.push_str(&format!(
+                                        "\n{mark} = {role} \"{name}\" [ref={ref_id}]"
+                                    ));
+                                }
+                                text
+                            })
+                            .unwrap_or_default();
+                            // Read + base64 the PNG. Skip the image (text
+                            // note only) if missing or too large (~1.5MB
+                            // encoded ≈ 1.1MB raw).
+                            match std::fs::read(&path) {
+                                Ok(bytes) if bytes.len() <= 1_100_000 => {
+                                    let encoded =
+                                        base64::engine::general_purpose::STANDARD
+                                            .encode(&bytes);
+                                    let dataurl =
+                                        format!("data:image/png;base64,{encoded}");
+                                    *ctx.pending_browser_image = Some(dataurl);
+                                    push_browser_step(
+                                        "screenshot".to_string(),
+                                        "done",
+                                    );
+                                    Ok(format!(
+                                        "Screenshot captured (see the image attached \
+below).{legend}"
+                                    ))
+                                }
+                                Ok(bytes) => {
+                                    push_browser_step(
+                                        "screenshot".to_string(),
+                                        "done",
+                                    );
+                                    Ok(format!(
+                                        "Screenshot captured but too large for \
+the preview ({} bytes). Proceed with the text snapshot.",
+                                        bytes.len()
+                                    ))
+                                }
+                                Err(error) => {
+                                    push_browser_step(
+                                        "screenshot".to_string(),
+                                        "error",
+                                    );
+                                    Ok(format!(
+                                        "Screenshot not readable from disk: {error}. \
+Use the text snapshot."
+                                    ))
+                                }
+                            }
+                        }
+                        Err(error) => {
+                            push_browser_step("screenshot".to_string(), "error");
+                            Err(format!("Screenshot failed: {error}"))
+                        }
+                    }
+                }
+                "browser_tabs" => {
+                    let _ = emit_stream_event(
+                        ctx.tx,
+                        GenerateStreamEvent::Delta {
+                            text: "‹‹ACT››🗂️ Listing tabs‹‹/ACT››".to_string(),
+                        },
+                    )
+                    .await;
+                    let guard = browse_web_lock().lock().await;
+                    let (client_back, tabs_res) = chat_browser_call(
+                        client,
+                        BrowserMethod::Tabs,
+                        serde_json::json!({}),
+                    )
+                    .await;
+                    drop(guard);
+                    *ctx.browser_session = client_back;
+                    match tabs_res {
+                        Ok(value) => {
+                            // Sidecar shape: { tabs: [ { targetId, url,
+                            // label?, title? } ] }. Parse defensively in
+                            // case it's a bare array or uses target_id/id.
+                            let list = value
+                                .get("tabs")
+                                .and_then(|t| t.as_array())
+                                .or_else(|| value.as_array())
+                                .cloned()
+                                .unwrap_or_default();
+                            let mut lines: Vec<String> = Vec::new();
+                            for tab in &list {
+                                let id = tab
+                                    .get("targetId")
+                                    .or_else(|| tab.get("target_id"))
+                                    .or_else(|| tab.get("id"))
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("?");
+                                let url = tab
+                                    .get("url")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("");
+                                let title = tab
+                                    .get("title")
+                                    .or_else(|| tab.get("label"))
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("");
+                                let mut line = format!("- {id}");
+                                if !url.is_empty() {
+                                    line.push_str(&format!(" | {url}"));
+                                }
+                                if !title.is_empty() {
+                                    line.push_str(&format!(" | {title}"));
+                                }
+                                lines.push(line);
+                            }
+                            push_browser_step("tabs".to_string(), "done");
+                            if lines.is_empty() {
+                                Ok("No tabs open.".to_string())
+                            } else {
+                                Ok(format!("Open tabs:\n{}", lines.join("\n")))
+                            }
+                        }
+                        Err(error) => {
+                            push_browser_step("tabs".to_string(), "error");
+                            Err(format!("Listing tabs failed: {error}"))
+                        }
+                    }
+                }
+                "browser_dialog" => {
+                    // Native alert/confirm/prompt blocks the page until
+                    // answered. In read-only (channel) turns we only allow
+                    // DISMISS, never accept (an accept could confirm an
+                    // action). The dialog message is returned so the model
+                    // sees what it answered.
+                    let accept = !ctx.read_only
+                        && args
+                            .get("accept")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false);
+                    let prompt_text = args
+                        .get("prompt_text")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    let _ = emit_stream_event(
+                        ctx.tx,
+                        GenerateStreamEvent::Delta {
+                            text: format!(
+                                "‹‹ACT››💬 Dialog: {}‹‹/ACT››",
+                                if accept { "confirming" } else { "cancelling" }
+                            ),
+                        },
+                    )
+                    .await;
+                    let guard = browse_web_lock().lock().await;
+                    let (client_back, dialog_res) = chat_browser_call(
+                        client,
+                        BrowserMethod::RespondDialog,
+                        serde_json::json!({
+                            "target_id": ctx.current_target.as_str(),
+                            "accept": accept,
+                            "promptText": prompt_text,
+                            "timeoutMs": 5_000,
+                        }),
+                    )
+                    .await;
+                    drop(guard);
+                    *ctx.browser_session = client_back;
+                    match dialog_res {
+                        Ok(value) => {
+                            let msg = value
+                                .get("message")
+                                .and_then(|m| m.as_str())
+                                .unwrap_or("");
+                            push_browser_step("dialog".to_string(), "done");
+                            Ok(format!(
+                                "Dialog {} (message: \"{msg}\"). Re-read the page with browser_snapshot.",
+                                if accept { "confirmed" } else { "cancelled" }
+                            ))
+                        }
+                        Err(error) => {
+                            push_browser_step("dialog".to_string(), "error");
+                            Err(format!("No dialog to handle or error: {error}"))
+                        }
+                    }
+                }
+                _ => Err(format!("Unknown browser tool: {name}")),
+            },
+        };
+        match outcome {
+            Ok(text) => text,
+            Err(text) => text,
+        }
+    } else if name == "github_search" {
+        // Fast, structured GitHub repo search via the API (no browser).
+        let query = serde_json::from_str::<serde_json::Value>(args_raw)
+            .ok()
+            .and_then(|a| a.get("query").and_then(|v| v.as_str()).map(String::from))
+            .unwrap_or_default();
+        if query.trim().is_empty() {
+            "Empty query.".to_string()
+        } else {
+            let _ = emit_stream_event(
+                ctx.tx,
+                GenerateStreamEvent::Delta {
+                    text: format!("‹‹ACT››🔎 Searching GitHub: «{query}»‹‹/ACT››"),
+                },
+            )
+            .await;
+            github_search(ctx.state, &query).await
+        }
+    } else if name == "use_skill" {
+        // Progressive disclosure L2: load the full SKILL.md so the
+        // model can follow the skill's instructions.
+        let id = serde_json::from_str::<serde_json::Value>(args_raw)
+            .ok()
+            .and_then(|a| a.get("id").and_then(|v| v.as_str()).map(String::from))
+            .unwrap_or_default();
+        // Narrate the skill use with its READABLE name (id → Title Case),
+        // so the activity stream reads like reasoning: "Uso la skill Code
+        // Review Discipline" (as Claude Code / Codex do).
+        let readable = id
+            .split('-')
+            .filter(|w| !w.is_empty())
+            .map(|w| {
+                let mut chars = w.chars();
+                match chars.next() {
+                    Some(first) => {
+                        first.to_uppercase().collect::<String>() + chars.as_str()
+                    }
+                    None => String::new(),
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+        let _ = emit_stream_event(
+            ctx.tx,
+            GenerateStreamEvent::Delta {
+                text: format!("‹‹ACT››📖 Using the skill «{readable}»‹‹/ACT››"),
+            },
+        )
+        .await;
+        let id_for_load = id.clone();
+        match tokio::task::spawn_blocking(move || load_skill_body(&id_for_load))
+            .await
+        {
+            Ok(Some(body)) => format!(
+                "Instructions for the skill «{id}» (SKILL.md) — FOLLOW THEM with the \
+available tools (for data from the web use the browser: browser_navigate on the indicated URL):\n\n{}",
+                body.chars().take(8000).collect::<String>()
+            ),
+            _ => format!("Skill «{id}» not found or not readable."),
+        }
+    } else if name == "run_in_sandbox" {
+        // Execute a skill command in the contained computer (auto-start
+        // Docker + container). Blocked if the command trips the security scan.
+        let parsed = serde_json::from_str::<serde_json::Value>(args_raw)
+            .unwrap_or_else(|_| serde_json::json!({}));
+        let command = parsed
+            .get("command")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let skill_id = parsed
+            .get("skill_id")
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        if command.trim().is_empty() {
+            "Empty command.".to_string()
+        } else {
+            let scan = skill_security::scan_blobs(&[(
+                "command".to_string(),
+                command.clone(),
+            )]);
+            if scan.blocked {
+                format!(
+                    "Command NOT executed: blocked by the security scan \
+(risk {}/100). Reformulate it without dangerous operations.",
+                    scan.risk_score
+                )
+            } else {
+                let _ = emit_stream_event(
+                    ctx.tx,
+                    GenerateStreamEvent::Delta {
+                        text: format!(
+                            "‹‹ACT››🖥️ Running: {}‹‹/ACT››",
+                            command.chars().take(160).collect::<String>()
+                        ),
+                    },
+                )
+                .await;
+                // If Docker is down we auto-start Docker Desktop (cold
+                // start ~1 min) before running — tell the user so the
+                // wait doesn't look like a hang.
+                let docker_up =
+                    tokio::task::spawn_blocking(sandbox::docker_running)
+                        .await
+                        .unwrap_or(false);
+                if !docker_up {
+                    let _ = emit_stream_event(
+                        ctx.tx,
+                        GenerateStreamEvent::Delta {
+                            text: "‹‹ACT››🐳 Docker isn't running: starting Docker Desktop and waiting for it to be ready (~1 min)…‹‹/ACT››".to_string(),
+                        },
+                    )
+                    .await;
+                }
+                // Publish the command to the computer terminal panel.
+                sandbox_begin(command.clone(), ctx.thread_id.map(|s| s.to_string()));
+                // Per-conversation output dir: skills save generated
+                // files to $OUTPUT_DIR, bind-mounted to the host so
+                // they become downloadable artifacts.
+                let thread_slug = artifact_thread_slug(ctx.thread_id);
+                let container_out = sandbox::container_output_dir(&thread_slug);
+                let host_out = sandbox::artifacts_dir().join(&thread_slug);
+                let run_started = std::time::SystemTime::now();
+                let cmd = format!(
+                    "export OUTPUT_DIR='{container_out}'; mkdir -p \"$OUTPUT_DIR\"; {command}"
+                );
+                // The model may omit skill_id; derive it from the
+                // command's `/home/agent/skills/<id>/…` path so the
+                // skill's files are always synced before running.
+                let sid =
+                    skill_id.clone().or_else(|| skill_id_from_command(&command));
+                let outcome = tokio::task::spawn_blocking(move || {
+                    if let Some(id) = sid.as_deref() {
+                        if let Ok(dir) = skills_dir() {
+                            sandbox::sync_skill(&dir.join(id), id);
+                        }
+                    }
+                    sandbox::run_command(&cmd, sid.as_deref())
+                })
+                .await;
+                let (panel_output, mut model_output) = match outcome {
+                    Ok(Ok(out)) => {
+                        if out.trim().is_empty() {
+                            ("(no output)".to_string(), "(no output)".to_string())
+                        } else {
+                            (out.clone(), format!("Command output:\n{out}"))
+                        }
+                    }
+                    Ok(Err(error)) => {
+                        let msg = format!("Sandbox unavailable: {error}");
+                        (msg.clone(), msg)
+                    }
+                    Err(error) => {
+                        let msg = format!("Execution error: {error}");
+                        (msg.clone(), msg)
+                    }
+                };
+                sandbox_end(panel_output);
+                // Surface files the command produced as downloadable
+                // artifacts (marker → card). If a PROJECT folder is
+                // active, also copy them there — it's the project's
+                // default folder for generated files.
+                let project_folder = active_workspace_folder();
+                for (file_name, size) in
+                    detect_new_artifacts(&host_out, run_started)
+                {
+                    let mut delivered_to: Option<String> = None;
+                    if let Some(folder) = project_folder.as_ref() {
+                        let dest = std::path::Path::new(folder).join(&file_name);
+                        if std::fs::copy(host_out.join(&file_name), &dest).is_ok() {
+                            delivered_to = Some(dest.to_string_lossy().to_string());
+                        }
+                    }
+                    let marker = serde_json::json!({
+                        "name": file_name,
+                        "thread": thread_slug,
+                        "size": size,
+                    });
+                    let artifact_mark =
+                        format!("‹‹ARTIFACT››{marker}‹‹/ARTIFACT››");
+                    // Persist in the committed answer so the UI can
+                    // render the download card + Artefatti panel (the
+                    // Done payload is authoritative).
+                    ctx.accumulated.push_str(&artifact_mark);
+                    let _ = emit_stream_event(
+                        ctx.tx,
+                        GenerateStreamEvent::Delta {
+                            text: artifact_mark,
+                        },
+                    )
+                    .await;
+                    register_artifact_memory(
+                        ctx.state,
+                        ctx.thread_id,
+                        &thread_slug,
+                        &file_name,
+                        size,
+                        false,
+                        "run_in_sandbox",
+                        delivered_to.as_deref(),
+                    )
+                    .await;
+                    match delivered_to {
+                        Some(path) => model_output.push_str(&format!(
+                            "\n[file generated and saved to {path}]"
+                        )),
+                        None => model_output.push_str(&format!(
+                            "\n[file generated: {file_name} in $OUTPUT_DIR]"
+                        )),
+                    }
+                }
+                model_output
+            }
+        }
+    } else if name == "create_artifact" {
+        // Model-authored document/code → file artifact (host-side).
+        let parsed = serde_json::from_str::<serde_json::Value>(args_raw)
+            .unwrap_or_else(|_| serde_json::json!({}));
+        let fname = parsed
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let content = parsed
+            .get("content")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let thread_slug = artifact_thread_slug(ctx.thread_id);
+        let _ = emit_stream_event(
+            ctx.tx,
+            GenerateStreamEvent::Delta {
+                text: format!("‹‹ACT››📝 Creating the file {fname}‹‹/ACT››"),
+            },
+        )
+        .await;
+        let fname_w = fname.clone();
+        let slug_w = thread_slug.clone();
+        // A `.pdf` artifact: the `content` is Markdown → render it to a
+        // real paginated PDF (in-process, always works). Everything else
+        // is written verbatim as text.
+        let is_pdf = fname.to_ascii_lowercase().ends_with(".pdf");
+        let result = tokio::task::spawn_blocking(move || {
+            if is_pdf {
+                let title =
+                    fname_w.trim_end_matches(".pdf").trim_end_matches(".PDF");
+                let bytes = pdf_render::markdown_to_pdf(title, &content)
+                    .map_err(|e| format!("PDF render failed: {e}"))?;
+                write_artifact_bytes(&slug_w, &fname_w, &bytes)
+            } else {
+                write_text_artifact(&slug_w, &fname_w, &content)
+            }
+        })
+        .await
+        .unwrap_or_else(|e| Err(format!("Error: {e}")));
+        match result {
+            Ok((size, updated)) => {
+                let marker = serde_json::json!({
+                    "name": fname,
+                    "thread": thread_slug,
+                    "size": size,
+                    "updated": updated,
+                });
+                let artifact_mark = format!("‹‹ARTIFACT››{marker}‹‹/ARTIFACT››");
+                // Persist the marker in the committed answer (Done is
+                // authoritative): the UI parses ‹‹ARTIFACT›› from the
+                // saved message to render the download card + the
+                // Artefatti panel. Without this the artifact vanishes.
+                ctx.accumulated.push_str(&artifact_mark);
+                let _ = emit_stream_event(
+                    ctx.tx,
+                    GenerateStreamEvent::Delta {
+                        text: artifact_mark,
+                    },
+                )
+                .await;
+                register_artifact_memory(
+                    ctx.state,
+                    ctx.thread_id,
+                    &thread_slug,
+                    &fname,
+                    size,
+                    updated,
+                    "create_artifact",
+                    None,
+                )
+                .await;
+                if updated {
+                    format!("Artifact «{fname}» updated (new version).")
+                } else {
+                    format!("Artifact «{fname}» created.")
+                }
+            }
+            Err(error) => error,
+        }
+    } else if name == "generate_image" {
+        // Generate an image from a prompt (local Ollama or cloud provider)
+        // and surface it as a PNG artifact, like create_artifact.
+        let parsed = serde_json::from_str::<serde_json::Value>(args_raw)
+            .unwrap_or_else(|_| serde_json::json!({}));
+        let prompt = parsed
+            .get("prompt")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        let size = parsed
+            .get("size")
+            .and_then(|v| v.as_str())
+            .unwrap_or("1024x1024")
+            .to_string();
+        let base_name = parsed
+            .get("name")
+            .and_then(|v| v.as_str())
+            .map(slugify_skill_name)
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "image".to_string());
+        let fname = format!("{base_name}.png");
+        if prompt.is_empty() {
+            "generate_image needs a prompt.".to_string()
+        } else {
+            let _ = emit_stream_event(
+                ctx.tx,
+                GenerateStreamEvent::Delta {
+                    text: format!(
+                        "‹‹ACT››🎨 Generating image: {}‹‹/ACT››",
+                        prompt.chars().take(60).collect::<String>()
+                    ),
+                },
+            )
+            .await;
+            match generate_image_png(&ctx.state.http, &prompt, &size).await {
+                Ok(bytes) => {
+                    let thread_slug = artifact_thread_slug(ctx.thread_id);
+                    let slug_w = thread_slug.clone();
+                    let fname_w = fname.clone();
+                    let result = tokio::task::spawn_blocking(move || {
+                        write_artifact_bytes(&slug_w, &fname_w, &bytes)
+                    })
+                    .await
+                    .unwrap_or_else(|e| Err(format!("Error: {e}")));
+                    match result {
+                        Ok((size_b, updated)) => {
+                            let marker = serde_json::json!({
+                                "name": fname,
+                                "thread": thread_slug,
+                                "size": size_b,
+                                "updated": updated,
+                            });
+                            let artifact_mark =
+                                format!("‹‹ARTIFACT››{marker}‹‹/ARTIFACT››");
+                            ctx.accumulated.push_str(&artifact_mark);
+                            let _ = emit_stream_event(
+                                ctx.tx,
+                                GenerateStreamEvent::Delta {
+                                    text: artifact_mark,
+                                },
+                            )
+                            .await;
+                            register_artifact_memory(
+                                ctx.state,
+                                ctx.thread_id,
+                                &thread_slug,
+                                &fname,
+                                size_b,
+                                updated,
+                                "generate_image",
+                                None,
+                            )
+                            .await;
+                            format!(
+                                "Image «{fname}» generated and shown to the user \
+                                 inline. Do NOT embed it as a markdown image link \
+                                 (![]()); just refer to it in one short sentence."
+                            )
+                        }
+                        Err(error) => error,
+                    }
+                }
+                Err(error) => error,
+            }
+        }
+    } else if name == "get_brand_kit" {
+        // Materialize the brand into the thread's output dir (brand.json +
+        // logo.png) so the renderer applies it and the model needn't embed
+        // the logo data URL in deck.json. Return colours/fonts (for image
+        // prompts) but REPLACE the big logo data URL with a note, so the
+        // model can't paste a 13KB blob into a shell-written deck.json.
+        let slug = artifact_thread_slug(ctx.thread_id);
+        let slug2 = slug.clone();
+        let _ = tokio::task::spawn_blocking(move || materialize_brand_kit(&slug2))
+            .await;
+        let mut kit = serde_json::to_value(load_brand_kit())
+            .unwrap_or_else(|_| serde_json::json!({}));
+        if let Some(obj) = kit.as_object_mut() {
+            let has_logo = obj
+                .get("logo_data_url")
+                .and_then(|v| v.as_str())
+                .map(|s| !s.trim().is_empty())
+                .unwrap_or(false);
+            obj.insert(
+                "logo_data_url".into(),
+                serde_json::json!(if has_logo {
+                    "(applied automatically — written to logo.png in the output dir; do NOT embed in deck.json)"
+                } else {
+                    ""
+                }),
+            );
+            obj.insert("note".into(), serde_json::json!(
+                "Brand is applied automatically by deck-render via brand.json + logo.png already written to the output dir. In deck.json include ONLY slide content — OMIT `theme` and `logo` entirely."
+            ));
+        }
+        serde_json::to_string(&kit).unwrap_or_else(|_| "{}".to_string())
+    } else if name == "render_deck" {
+        // Deterministic deck render: the model passes ONLY content; the
+        // gateway writes deck.json + brand files and runs deck-render +
+        // chromium in the sandbox. Removes ALL model filesystem juggling
+        // (no shell, no find, no path/dir confusion → no regenerate loop).
+        let parsed = serde_json::from_str::<serde_json::Value>(args_raw)
+            .unwrap_or_else(|_| serde_json::json!({}));
+        let deck = parsed.get("deck").cloned().unwrap_or(parsed);
+        let has_slides = deck
+            .get("slides")
+            .and_then(|s| s.as_array())
+            .map(|a| !a.is_empty())
+            .unwrap_or(false);
+        if !has_slides {
+            "render_deck needs a non-empty 'slides' array (content only)."
+                .to_string()
+        } else {
+            let thread_slug = artifact_thread_slug(ctx.thread_id);
+            let _ = emit_stream_event(
+                ctx.tx,
+                GenerateStreamEvent::Delta {
+                    text: "‹‹ACT››🎬 Rendering the deck (PPTX + preview)‹‹/ACT››"
+                        .to_string(),
+                },
+            )
+            .await;
+            // 1) brand.json + logo.png + deck.json into the output dir
+            //    (host side = bind-mounted into the sandbox).
+            let slug_b = thread_slug.clone();
+            let _ =
+                tokio::task::spawn_blocking(move || materialize_brand_kit(&slug_b))
+                    .await;
+            let deck_bytes = serde_json::to_vec_pretty(&deck).unwrap_or_default();
+            let slug_w = thread_slug.clone();
+            let write_res = tokio::task::spawn_blocking(move || {
+                write_artifact_bytes(&slug_w, "deck.json", &deck_bytes)
+            })
+            .await
+            .unwrap_or_else(|e| Err(format!("join error: {e}")));
+            if let Err(e) = write_res {
+                format!("Could not write deck.json: {e}")
+            } else {
+                // 2) render in the sandbox (no model shell).
+                let container_out = sandbox::container_output_dir(&thread_slug);
+                let cmd = format!(
+                    "cd '{container_out}' && deck-render deck.json --prefix deck && \
+                     chromium --headless --no-sandbox --disable-gpu \
+                     --print-to-pdf=deck.pdf deck.html >/dev/null 2>&1 && \
+                     qa=$(deck-qa deck.html --json 2>&1); qa_code=$?; \
+                     echo \"DECK_QA_JSON:$qa\"; \
+                     if [ \"$qa_code\" -ne 0 ]; then exit \"$qa_code\"; fi; \
+                     ls -la deck.pptx deck.html deck.pdf 2>&1"
+                );
+                sandbox_begin(cmd.clone(), ctx.thread_id.map(|s| s.to_string()));
+                let render = tokio::task::spawn_blocking(move || {
+                    sandbox::run_command(&cmd, None)
+                })
+                .await
+                .unwrap_or_else(|e| Err(format!("join error: {e}")));
+                let render_out = match render {
+                    Ok(o) => o,
+                    Err(e) => e,
+                };
+                sandbox_end(render_out.clone());
+                // 3) emit an artifact marker for each file produced, even when
+                // QA flags issues: the files exist and the user needs access to
+                // inspect/fix them.
+                let qa_result = rendered_deck_qa_result(&render_out);
+                let quality_metadata =
+                    deck_quality_metadata_from_qa_result(qa_result.as_ref());
+                let produced = emit_rendered_deck_artifacts(
+                    ctx.state,
+                    ctx.tx,
+                    ctx.accumulated,
+                    ctx.thread_id,
+                    &thread_slug,
+                    "render_deck",
+                    quality_metadata.as_ref(),
+                )
+                .await;
+                if let Some(error) = rendered_deck_qa_failure(&render_out) {
+                    format!(
+                        "Deck rendered with visual QA issues: {error}. Files available: {}. Renderer output:\n{}",
+                        if produced.is_empty() {
+                            "none".to_string()
+                        } else {
+                            produced.join(", ")
+                        },
+                        render_out.chars().take(1200).collect::<String>(),
+                    )
+                } else {
+                    if produced.iter().any(|fname| fname == "deck.pptx") {
+                        format!(
+                            "Deck rendered: {}. The .pptx is editable; .html/.pdf are previews. The deck is DONE — mark the plan complete and give the user a one-line summary.",
+                            produced.join(", ")
+                        )
+                    } else {
+                        format!(
+                            "Deck render did NOT produce a .pptx. Renderer output:\n{}",
+                            render_out.chars().take(800).collect::<String>()
+                        )
+                    }
+                }
+            }
+        }
+    } else if name == "make_deck" {
+        // ONE-call deck (max-scaffolding tier, ADR 0016): the model
+        // passed only a brief; the ENGINE runs the entire pipeline
+        // (brand → schema-enforced content → images → render). No
+        // model-driven planning, file I/O or shell → nothing for a
+        // weak model to get wrong beyond filling the brief slot.
+        let parsed = serde_json::from_str::<serde_json::Value>(args_raw)
+            .unwrap_or_else(|_| serde_json::json!({}));
+        let brief = parsed
+            .get("brief")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        let language = parsed
+            .get("language")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let slides = parsed
+            .get("slides")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(6)
+            .clamp(3, 12) as usize;
+        let requested_template_ref = deliverable_template_ref(&parsed);
+        let catalog_template =
+            template_catalog_by_id(requested_template_ref.as_deref());
+        let template_ref = catalog_template.as_ref().map(|entry| entry.id.clone());
+        let design_template = deliverable_design_template(&parsed).or_else(|| {
+            catalog_template
+                .as_ref()
+                .map(|entry| entry.design_template.clone())
+        });
+        let design_theme = deliverable_design_theme(&parsed).or_else(|| {
+            catalog_template
+                .as_ref()
+                .and_then(|entry| entry.design_theme.clone())
+        });
+        let design_profile = deliverable_design_profile(&parsed)
+            .or_else(|| {
+                catalog_template
+                    .as_ref()
+                    .and_then(|entry| entry.design_profile.clone())
+            })
+            .or_else(|| {
+                let (profile, _) =
+                    deliverable_template_defaults(design_template.as_deref());
+                profile.map(String::from)
+            });
+        let design_components = resolved_deliverable_design_components_with_catalog(
+            &parsed,
+            design_template.as_deref(),
+            catalog_template
+                .as_ref()
+                .map(|entry| entry.design_components.as_slice())
+                .unwrap_or(&[]),
+        );
+        if brief.is_empty() {
+            "make_deck needs a 'brief' describing the presentation.".to_string()
+        } else {
+            let workflow_plan = workflow_execution_plan(
+                &make_deck_workflow_definition(),
+                serde_json::json!({
+                    "brief": brief.clone(),
+                    "language": language.clone(),
+                    "slides": slides,
+                    "template_ref": template_ref.clone(),
+                    "design_template": design_template.clone(),
+                    "design_theme": design_theme.clone(),
+                    "design_profile": design_profile.clone(),
+                    "design_components": design_components.clone(),
+                }),
+            );
+            let workflow_plan = match run_static_workflow_plan_through_brain_async(
+                brief.clone(),
+                workflow_plan,
+            )
+            .await
+            {
+                Ok(plan) => plan,
+                Err(error) => {
+                    eprintln!(
+                        "make_deck: static workflow plan validation failed: {error}"
+                    );
+                    workflow_execution_plan(
+                        &make_deck_workflow_definition(),
+                        serde_json::json!({
+                            "brief": brief.clone(),
+                            "language": language.clone(),
+                            "slides": slides,
+                            "template_ref": template_ref.clone(),
+                            "design_template": design_template.clone(),
+                            "design_theme": design_theme.clone(),
+                            "design_profile": design_profile.clone(),
+                            "design_components": design_components.clone(),
+                        }),
+                    )
+                }
+            };
+            let thread_slug = artifact_thread_slug(ctx.thread_id);
+            let _ = emit_stream_event(
+                ctx.tx,
+                GenerateStreamEvent::Delta {
+                    text: "‹‹ACT››🎬 Building the deck (brand · content · images · render)‹‹/ACT››".to_string(),
+                },
+            )
+            .await;
+            // 1) brand into the output dir + load colours for prompts.
+            let slug_b = thread_slug.clone();
+            let _ =
+                tokio::task::spawn_blocking(move || materialize_brand_kit(&slug_b))
+                    .await;
+            let brand = tokio::task::spawn_blocking(load_brand_kit)
+                .await
+                .unwrap_or_default();
+            // 2) slide content — schema-enforced model call (the floor).
+            match generate_deck_content(
+                &ctx.state.http,
+                ctx.base_url,
+                ctx.model,
+                ctx.api_key.as_deref(),
+                &brief,
+                &brand,
+                slides,
+                &language,
+                design_template.as_deref(),
+                design_theme.as_deref(),
+                design_profile.as_deref(),
+                &design_components,
+            )
+            .await
+            {
+                Err(e) => make_deck_content_failure_message(
+                    &e,
+                    requested_template_ref.as_deref(),
+                    template_ref.as_deref(),
+                    ctx.base_url,
+                    ctx.model,
+                ),
+                Ok(mut deck) => {
+                    apply_deck_design_components(&mut deck, &design_components);
+                    apply_deck_design_theme(
+                        &mut deck,
+                        design_theme.as_deref(),
+                        &brand,
+                    );
+                    let quality_issues = apply_deck_quality_guardrails(&mut deck);
+                    if !quality_issues.is_empty() {
+                        let _ = emit_stream_event(
+                            ctx.tx,
+                            GenerateStreamEvent::Delta {
+                                text: format!(
+                                    "‹‹ACT››🔎 Deck QA adjusted {} layout-risk items‹‹/ACT››",
+                                    quality_issues.len()
+                                ),
+                            },
+                        )
+                        .await;
+                    }
+                    // 3) images for want_image slides (cap 3, cover first).
+                    let accent = brand.accent_color.clone();
+                    let mut made = 0usize;
+                    if let Some(arr) =
+                        deck.get_mut("slides").and_then(|s| s.as_array_mut())
+                    {
+                        for (idx, slide) in arr.iter_mut().enumerate() {
+                            if made >= 3 {
+                                break;
+                            }
+                            if !slide
+                                .get("want_image")
+                                .and_then(|v| v.as_bool())
+                                .unwrap_or(false)
+                            {
+                                continue;
+                            }
+                            let title = slide
+                                .get("title")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("")
+                                .to_string();
+                            let layout = slide
+                                .get("layout")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("bullets")
+                                .to_string();
+                            let iname = if layout == "cover" {
+                                "cover".to_string()
+                            } else {
+                                format!("s{idx}")
+                            };
+                            let prompt = deck_slide_image_prompt(&title, &accent);
+                            let _ = emit_stream_event(
+                                ctx.tx,
+                                GenerateStreamEvent::Delta {
+                                    text: format!(
+                                        "‹‹ACT››🎨 Image: {}‹‹/ACT››",
+                                        title.chars().take(40).collect::<String>()
+                                    ),
+                                },
+                            )
+                            .await;
+                            if let Ok(bytes) = generate_image_png(
+                                &ctx.state.http,
+                                &prompt,
+                                "1280x720",
+                            )
+                            .await
+                            {
+                                let fname = format!("{iname}.png");
+                                let slug_w = thread_slug.clone();
+                                let fname_w = fname.clone();
+                                let w = tokio::task::spawn_blocking(move || {
+                                    write_artifact_bytes(&slug_w, &fname_w, &bytes)
+                                })
+                                .await
+                                .unwrap_or_else(|e| Err(format!("{e}")));
+                                if w.is_ok() {
+                                    slide["image"] = serde_json::json!(fname);
+                                    if layout == "bullets" {
+                                        slide["layout"] =
+                                            serde_json::json!("image_right");
+                                    }
+                                    made += 1;
+                                }
+                            }
+                        }
+                    }
+                    // 4) write deck.json.
+                    let slide_count = deck
+                        .get("slides")
+                        .and_then(|s| s.as_array())
+                        .map(|a| a.len())
+                        .unwrap_or(0);
+                    let deck_bytes =
+                        serde_json::to_vec_pretty(&deck).unwrap_or_default();
+                    let slug_w = thread_slug.clone();
+                    let write_res = tokio::task::spawn_blocking(move || {
+                        write_artifact_bytes(&slug_w, "deck.json", &deck_bytes)
+                    })
+                    .await
+                    .unwrap_or_else(|e| Err(format!("join error: {e}")));
+                    if let Err(e) = write_res {
+                        format!("Could not write deck.json: {e}")
+                    } else {
+                        let template_render_arg =
+                            match materialize_deck_template_source(
+                                &thread_slug,
+                                catalog_template.as_ref(),
+                            ) {
+                                Ok(Some(filename)) => {
+                                    let _ = emit_stream_event(
+                                        ctx.tx,
+                                        GenerateStreamEvent::Delta {
+                                            text: "‹‹ACT››📐 Using imported PPTX template‹‹/ACT››".to_string(),
+                                        },
+                                    )
+                                    .await;
+                                    format!(" --template-pptx {filename}")
+                                }
+                                Ok(None) => String::new(),
+                                Err(error) => {
+                                    let _ = emit_stream_event(
+                                        ctx.tx,
+                                        GenerateStreamEvent::Delta {
+                                            text: format!(
+                                                "‹‹ACT››⚠ Template source unavailable: {error}‹‹/ACT››"
+                                            ),
+                                        },
+                                    )
+                                    .await;
+                                    String::new()
+                                }
+                            };
+                        // 5) render in the sandbox (no model shell).
+                        let container_out =
+                            sandbox::container_output_dir(&thread_slug);
+                        let cmd = format!(
+                            "cd '{container_out}' && deck-render deck.json --prefix deck{template_render_arg} && \
+                             chromium --headless --no-sandbox --disable-gpu \
+                             --print-to-pdf=deck.pdf deck.html >/dev/null 2>&1 && \
+                             qa=$(deck-qa deck.html --json 2>&1); qa_code=$?; \
+                             echo \"DECK_QA_JSON:$qa\"; \
+                             if [ \"$qa_code\" -ne 0 ]; then exit \"$qa_code\"; fi; \
+                             ls -la deck.pptx deck.html deck.pdf 2>&1"
+                        );
+                        sandbox_begin(cmd.clone(), ctx.thread_id.map(|s| s.to_string()));
+                        let render = tokio::task::spawn_blocking(move || {
+                            sandbox::run_command(&cmd, None)
+                        })
+                        .await
+                        .unwrap_or_else(|e| Err(format!("join error: {e}")));
+                        let render_out = match render {
+                            Ok(o) => o,
+                            Err(e) => e,
+                        };
+                        sandbox_end(render_out.clone());
+                        // 6) emit an artifact marker per produced file, even
+                        // when QA flags issues: the generated files still need
+                        // to be visible for review and iteration.
+                        let qa_result = rendered_deck_qa_result(&render_out);
+                        let quality_metadata = deck_quality_metadata_from_qa_result(
+                            qa_result.as_ref(),
+                        );
+                        let mut artifact_metadata =
+                            deck_template_metadata(catalog_template.as_ref());
+                        merge_object_metadata(
+                            &mut artifact_metadata,
+                            quality_metadata.as_ref(),
+                        );
+                        let artifact_metadata_ref = artifact_metadata
+                            .as_object()
+                            .filter(|metadata| !metadata.is_empty())
+                            .map(|_| &artifact_metadata);
+                        let produced = emit_rendered_deck_artifacts(
+                            ctx.state,
+                            ctx.tx,
+                            ctx.accumulated,
+                            ctx.thread_id,
+                            &thread_slug,
+                            "make_deck",
+                            artifact_metadata_ref,
+                        )
+                        .await;
+                        if let Some(error) = rendered_deck_qa_failure(&render_out) {
+                            format!(
+                                "Deck created via workflow {} with visual QA issues: {error}. Files available: {}. The .pptx is editable; .html/.pdf are previews.",
+                                workflow_plan
+                                    .steps
+                                    .first()
+                                    .and_then(|step| step
+                                        .arguments
+                                        .get("workflow_id"))
+                                    .and_then(|value| value.as_str())
+                                    .unwrap_or("make_deck"),
+                                if produced.is_empty() {
+                                    "none".to_string()
+                                } else {
+                                    produced.join(", ")
+                                },
+                            )
+                        } else {
+                            if produced.iter().any(|fname| fname == "deck.pptx") {
+                                format!(
+                                    "Deck created via workflow {}: {} ({slide_count} slides, {made} images). The .pptx is editable; .html/.pdf are previews. The deck is DONE — give the user a one-line summary.",
+                                    workflow_plan
+                                        .steps
+                                        .first()
+                                        .and_then(|step| step
+                                            .arguments
+                                            .get("workflow_id"))
+                                        .and_then(|value| value.as_str())
+                                        .unwrap_or("make_deck"),
+                                    produced.join(", ")
+                                )
+                            } else {
+                                format!(
+                                    "Deck render did NOT produce a .pptx. Renderer output:\n{}",
+                                    render_out
+                                        .chars()
+                                        .take(800)
+                                        .collect::<String>()
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    } else if name == "make_document" {
+        let parsed = serde_json::from_str::<serde_json::Value>(args_raw)
+            .unwrap_or_else(|_| serde_json::json!({}));
+        let brief = parsed
+            .get("brief")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        let language = parsed
+            .get("language")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let fname = parsed
+            .get("name")
+            .and_then(|v| v.as_str())
+            .filter(|value| !value.trim().is_empty())
+            .map(|value| document_artifact_name(Some(value)))
+            .or_else(|| document_artifact_name_from_brief(&brief))
+            .unwrap_or_else(|| document_artifact_name(None));
+        let formats = document_output_formats(&parsed, &fname, &brief);
+        let document_options = document_generation_options(&parsed);
+        if brief.is_empty() {
+            "make_document needs a 'brief' describing the document.".to_string()
+        } else {
+            let workflow_args = serde_json::json!({
+                "brief": brief.clone(),
+                "language": language.clone(),
+                "name": fname.clone(),
+                "formats": formats.clone(),
+                "template_ref": document_options.template_ref.clone(),
+                "document_type": document_options.document_type.clone(),
+                "audience": document_options.audience.clone(),
+                "tone": document_options.tone.clone(),
+                "layout_profile": document_options.layout_profile.clone(),
+                "design_template": document_options.design_template.clone(),
+                "design_theme": document_options.design_theme.clone(),
+                "design_profile": document_options.design_profile.clone(),
+                "design_components": document_options.design_components.clone(),
+                "sections": document_options.sections.clone(),
+            });
+            let workflow_plan = workflow_execution_plan(
+                &make_document_workflow_definition(),
+                workflow_args.clone(),
+            );
+            let workflow_plan = match run_static_workflow_plan_through_brain_async(
+                brief.clone(),
+                workflow_plan,
+            )
+            .await
+            {
+                Ok(plan) => plan,
+                Err(error) => {
+                    eprintln!(
+                        "make_document: static workflow plan validation failed: {error}"
+                    );
+                    workflow_execution_plan(
+                        &make_document_workflow_definition(),
+                        workflow_args,
+                    )
+                }
+            };
+            let thread_slug = artifact_thread_slug(ctx.thread_id);
+            let _ = emit_stream_event(
+                ctx.tx,
+                GenerateStreamEvent::Delta {
+                    text: "‹‹ACT››📝 Building the document (brief · draft · artifact · memory)‹‹/ACT››".to_string(),
+                },
+            )
+            .await;
+            match generate_document_markdown(
+                &ctx.state.http,
+                ctx.base_url,
+                ctx.model,
+                ctx.api_key.as_deref(),
+                &brief,
+                &language,
+                &document_options,
+            )
+            .await
+            {
+                Err(error) => {
+                    format!("Could not generate document content: {error}")
+                }
+                Ok(markdown) => {
+                    let markdown = apply_document_design_components(
+                        &markdown,
+                        &document_options.design_components,
+                    );
+                    let (markdown, repaired_issues) =
+                        apply_document_quality_guardrails(&markdown);
+                    let quality_issues = document_quality_issues(&markdown);
+                    if !repaired_issues.is_empty() && quality_issues.is_empty() {
+                        let _ = emit_stream_event(
+                            ctx.tx,
+                            GenerateStreamEvent::Delta {
+                                text: format!(
+                                    "‹‹ACT››🔎 Document QA repaired {} table-layout items‹‹/ACT››",
+                                    repaired_issues.len()
+                                ),
+                            },
+                        )
+                        .await;
+                    }
+                    if !quality_issues.is_empty() {
+                        let summary = quality_issues
+                            .iter()
+                            .take(5)
+                            .cloned()
+                            .collect::<Vec<_>>()
+                            .join("; ");
+                        format!(
+                            "Could not generate document artifact: document QA failed: {summary}"
+                        )
+                    } else {
+                        let mut produced = Vec::new();
+                        let mut artifact_error: Option<String> = None;
+                        for format in formats {
+                            let artifact_name =
+                                document_artifact_name_with_extension(
+                                    Some(&fname),
+                                    &format,
+                                );
+                            let slug_w = thread_slug.clone();
+                            let fname_w = artifact_name.clone();
+                            let markdown_w = markdown.clone();
+                            let result = tokio::task::spawn_blocking(move || {
+                                if format == "pdf" {
+                                    let title = fname_w
+                                        .trim_end_matches(".pdf")
+                                        .trim_end_matches(".PDF");
+                                    let bytes = pdf_render::markdown_to_pdf(
+                                        title,
+                                        &markdown_w,
+                                    )
+                                    .map_err(|e| {
+                                        format!("PDF render failed: {e}")
+                                    })?;
+                                    write_artifact_bytes(&slug_w, &fname_w, &bytes)
+                                } else if format == "docx" {
+                                    let title = fname_w
+                                        .trim_end_matches(".docx")
+                                        .trim_end_matches(".DOCX");
+                                    let bytes =
+                                        markdown_to_docx(title, &markdown_w)
+                                            .map_err(|e| {
+                                                format!("DOCX render failed: {e}")
+                                            })?;
+                                    write_artifact_bytes(&slug_w, &fname_w, &bytes)
+                                } else {
+                                    write_text_artifact(
+                                        &slug_w,
+                                        &fname_w,
+                                        &markdown_w,
+                                    )
+                                }
+                            })
+                            .await
+                            .unwrap_or_else(|error| Err(format!("Error: {error}")));
+                            match result {
+                                Ok((size, updated)) => {
+                                    let marker = serde_json::json!({
+                                        "name": artifact_name,
+                                        "thread": thread_slug,
+                                        "size": size,
+                                        "updated": updated,
+                                        "source": "managed",
+                                        "managed_path": sandbox::artifacts_dir()
+                                            .join(&thread_slug)
+                                            .join(&artifact_name)
+                                            .to_string_lossy()
+                                            .to_string(),
+                                    });
+                                    let artifact_mark = format!(
+                                        "‹‹ARTIFACT››{marker}‹‹/ARTIFACT››"
+                                    );
+                                    ctx.accumulated.push_str(&artifact_mark);
+                                    let _ = emit_stream_event(
+                                        ctx.tx,
+                                        GenerateStreamEvent::Delta {
+                                            text: artifact_mark,
+                                        },
+                                    )
+                                    .await;
+                                    let artifact_name = marker
+                                        .get("name")
+                                        .and_then(|value| value.as_str())
+                                        .unwrap_or("document.md")
+                                        .to_string();
+                                    register_artifact_memory(
+                                        ctx.state,
+                                        ctx.thread_id,
+                                        &thread_slug,
+                                        &artifact_name,
+                                        size,
+                                        updated,
+                                        "make_document",
+                                        None,
+                                    )
+                                    .await;
+                                    produced.push(artifact_name);
+                                }
+                                Err(error) => {
+                                    artifact_error = Some(error);
+                                    break;
+                                }
+                            }
+                        }
+                        if let Some(error) = artifact_error {
+                            error
+                        } else {
+                            format!(
+                                "Document created via workflow {}: {}. The document is DONE — give the user a one-line summary.",
+                                workflow_plan
+                                    .steps
+                                    .first()
+                                    .and_then(|step| step
+                                        .arguments
+                                        .get("workflow_id"))
+                                    .and_then(|value| value.as_str())
+                                    .unwrap_or("make_document"),
+                                produced.join(", "),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    } else if name == "save_artifact" {
+        // Deliver a generated artifact to an authorized destination
+        // (gateway performs the copy host-side, scoped to grants).
+        let parsed = serde_json::from_str::<serde_json::Value>(args_raw)
+            .unwrap_or_else(|_| serde_json::json!({}));
+        let file = parsed
+            .get("file")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let dest_name = parsed
+            .get("destination")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let thread_slug = artifact_thread_slug(ctx.thread_id);
+        let _ = emit_stream_event(
+            ctx.tx,
+            GenerateStreamEvent::Delta {
+                text: format!("‹‹ACT››💾 Saving {file} to «{dest_name}»‹‹/ACT››"),
+            },
+        )
+        .await;
+        tokio::task::spawn_blocking(move || {
+            save_artifact_to_destination(&thread_slug, &file, &dest_name)
+        })
+        .await
+        .unwrap_or_else(|e| format!("Save error: {e}"))
+    } else if name == "recall_memory" {
+        // PERIMETER (anti-exfiltration): a `contact_only` turn (a non-self
+        // contact on a channel) must NOT reach personal/Secret memory or the
+        // relationship graph. recall_memory is perimeter-blind by design, so we
+        // refuse it here — the contact's own conversation is already in context.
+        // Also refused when can_see_contacts is off (even on a "personal"-scope
+        // contact): recall traverses the relationship graph, which IS the address
+        // book — perimeter-blind recall has no way to strip other people out, so
+        // fail-closed is to block it entirely.
+        if ctx.contact_only || !ctx.can_see_contacts {
+            "Personal memory not accessible in a conversation with this \
+contact: use only the messages from this chat. Do NOT reveal personal data of the user or third parties."
+                .to_string()
+        } else {
+            let query = serde_json::from_str::<serde_json::Value>(args_raw)
+                .ok()
+                .and_then(|a| {
+                    a.get("query").and_then(|q| q.as_str()).map(String::from)
+                })
+                .unwrap_or_default();
+            // ADR 0022 (Piano UI A2/A3): emetti l'evento strutturato
+            // `Recall` con i hits richiamati (visibile in UI: fase
+            // recalling + badge). Sostituisce il delta `‹‹ACT››🧠`.
+            let query_for_ui = if query.is_empty() { "(query)".to_string() } else { query.clone() };
+            let st = ctx.state.clone();
+            let outcome = tokio::task::spawn_blocking(move || recall_memory(&st, &query))
+                .await
+                .unwrap_or_else(|e| RecallOutcome {
+                    response: format!("Execution error: {e}"),
+                    hits: Vec::new(),
+                    scope: "personal".to_string(),
+                });
+            let _ = emit_stream_event(
+                ctx.tx,
+                GenerateStreamEvent::Recall {
+                    payload: local_first_subagents::RecallStreamPayload {
+                        query: query_for_ui,
+                        hits: outcome
+                            .hits
+                            .iter()
+                            .map(|(kind, text)| local_first_subagents::RecallStreamHit {
+                                r#ref: String::new(),
+                                text: text.clone(),
+                                score: 0.0,
+                                kind: kind.clone(),
+                            })
+                            .collect(),
+                        scope: outcome.scope.clone(),
+                    },
+                },
+            )
+            .await;
+            outcome.response
+        }
+    } else if name == "query_code_graph" {
+        let symbol = serde_json::from_str::<serde_json::Value>(args_raw)
+            .ok()
+            .and_then(|a| {
+                a.get("symbol").and_then(|s| s.as_str()).map(String::from)
+            })
+            .unwrap_or_default();
+        let _ = emit_stream_event(
+            ctx.tx,
+            GenerateStreamEvent::Delta {
+                text: format!("‹‹ACT››🗺️ Exploring the code map: {symbol}‹‹/ACT››"),
+            },
+        )
+        .await;
+        let st = ctx.state.clone();
+        tokio::task::spawn_blocking(move || query_code_graph(&st, &symbol))
+            .await
+            .unwrap_or_else(|e| format!("Execution error: {e}"))
+    } else if name == "query_git_history" {
+        let query = serde_json::from_str::<serde_json::Value>(args_raw)
+            .ok()
+            .and_then(|a| a.get("query").and_then(|s| s.as_str()).map(String::from))
+            .unwrap_or_default();
+        let _ = emit_stream_event(
+            ctx.tx,
+            GenerateStreamEvent::Delta {
+                text: format!("‹‹ACT››🕰️ Checking git history: {query}‹‹/ACT››"),
+            },
+        )
+        .await;
+        tokio::task::spawn_blocking(move || query_git_history(&query))
+            .await
+            .unwrap_or_else(|e| format!("Execution error: {e}"))
+    } else if name == "resolve_datetime" {
+        // Layer C: the orchestrator passes a STRUCTURED intent it
+        // distilled from the user's phrasing (any language); jiff
+        // does the arithmetic from the tz-aware "now" and validates
+        // future/range. Deterministic — no model date math.
+        let args_val = serde_json::from_str::<serde_json::Value>(args_raw)
+            .unwrap_or_else(|_| serde_json::json!({}));
+        let must_be_future = args_val
+            .get("must_be_future")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
+        let anchor = now_local();
+        match temporal::intent_from_json(&args_val).and_then(|intent| {
+            temporal::resolve(
+                &intent,
+                &anchor,
+                temporal::ResolveOpts { must_be_future },
+            )
+        }) {
+            Ok(res) => {
+                let _ = emit_stream_event(
+                    ctx.tx,
+                    GenerateStreamEvent::Delta {
+                        text: format!(
+                            "‹‹ACT››🗓 Date resolved: {}‹‹/ACT››",
+                            res.human
+                        ),
+                    },
+                )
+                .await;
+                let window = match &res.end {
+                    Some(end) => format!(
+                        " The time window runs until {:02}:{:02}.",
+                        end.hour(),
+                        end.minute()
+                    ),
+                    None => String::new(),
+                };
+                format!(
+                    "Date/time resolved: {human}. Use EXACTLY «{iso}» as the value \
+(e.g. to write in the form or pass to another tool): do NOT recompute it.{window} \
+(Now {now}.)",
+                    human = res.human,
+                    iso = res.iso,
+                    window = window,
+                    now = now_block(),
+                )
+            }
+            Err(e) => format!(
+                "⚠️ I couldn't resolve the date: {e}. (Now {now}.) \
+Fix the parameters (kind/offset_days/weekday/date/time) and try again; do not proceed with \
+an uncertain date.",
+                now = now_block(),
+            ),
+        }
+    } else if name == "record_decision" {
+        let args_val: serde_json::Value = serde_json::from_str(args_raw)
+            .unwrap_or_else(|_| serde_json::json!({}));
+        let _ = emit_stream_event(
+            ctx.tx,
+            GenerateStreamEvent::Delta {
+                text: "‹‹ACT››🧠 Recording the decision in memory‹‹/ACT››"
+                    .to_string(),
+            },
+        )
+        .await;
+        let st = ctx.state.clone();
+        tokio::task::spawn_blocking(move || record_decision(&st, &args_val))
+            .await
+            .unwrap_or_else(|e| format!("Execution error: {e}"))
+    } else if name == "forget_memory" {
+        let args_val: serde_json::Value = serde_json::from_str(args_raw)
+            .unwrap_or_else(|_| serde_json::json!({}));
+        let _ = emit_stream_event(
+            ctx.tx,
+            GenerateStreamEvent::Delta {
+                text: "‹‹ACT››🗑️ Forgetting from memory‹‹/ACT››".to_string(),
+            },
+        )
+        .await;
+        let st = ctx.state.clone();
+        tokio::task::spawn_blocking(move || forget_memory(&st, &args_val))
+            .await
+            .unwrap_or_else(|e| format!("Execution error: {e}"))
+    } else if name == "update_plan" || name == "step_advance" {
+        let args_val: serde_json::Value = serde_json::from_str(args_raw)
+            .unwrap_or_else(|_| serde_json::json!({}));
+        // `step_advance` reports progress on a SINGLE step by id (no need to
+        // re-send the whole plan → weak-model-proof, no ballooning). It maps to
+        // a one-element `sent` and rides the exact same merge + F2-verify path.
+        let sent = if name == "step_advance" {
+            vec![serde_json::json!({
+                "id": args_val.get("id").and_then(|v| v.as_str()).unwrap_or(""),
+                "status": args_val.get("status").and_then(|v| v.as_str()).unwrap_or("doing"),
+                "detail": args_val.get("detail").and_then(|v| v.as_str()).unwrap_or(""),
+            })]
+        } else {
+            args_val
+                .get("steps")
+                .and_then(|s| s.as_array())
+                .cloned()
+                .unwrap_or_default()
+        };
+        // MERGE the model's steps into the CANONICAL plan (never replace);
+        // returns the canonical indices newly claimed done (held `doing`
+        // until F2 verifies). See `merge_plan` for the anti-reset rule.
+        let claims = merge_execution_plan(ctx.plan, &sent);
+        let mut plan_steps = execution_plan_steps(ctx.plan);
+        // DIAG (HOMUN_DEBUG): the plan lifecycle, to see if the model
+        // re-proposes the whole plan (churn) or advances one step, and
+        // whether a re-proposal RESETS statuses (the "il piano riparta"
+        // symptom). One line per update_plan/step_advance call.
+        if verbose_debug() {
+            let sig = |s: &serde_json::Value| {
+                format!(
+                    "{}:{}",
+                    s.get("id").and_then(|v| v.as_str()).unwrap_or("?"),
+                    s.get("status").and_then(|v| v.as_str()).unwrap_or("?")
+                )
+            };
+            let sent_sig: Vec<String> = sent.iter().map(&sig).collect();
+            let plan_sig: Vec<String> = plan_steps.iter().map(&sig).collect();
+            eprintln!(
+                "[plan] {name}: sent[{}]=[{}] → canonical[{}]=[{}]",
+                sent.len(),
+                sent_sig.join(","),
+                plan_steps.len(),
+                plan_sig.join(",")
+            );
+        }
+        if plan_steps.is_empty() {
+            "Empty plan: provide at least one step with a title.".to_string()
+        } else {
+            // F2 gate: verify each newly-claimed-done step before it counts
+            // (using the evidence gathered since the last completed step).
+            // Adaptive floor (ADR 0018): when ON, the model tier modulates
+            // depth — capable models skip the extra verify round on steps
+            // with NO external action (nothing to verify against, low risk);
+            // weak models (Always) still verify everything. OFF → unchanged.
+            let verify = step_verification_enabled()
+                && if ctx.floor_acting {
+                    match ctx.turn_scaffold.verify_depth {
+                        scaffold::VerifyDepth::Always => true,
+                        scaffold::VerifyDepth::OnRisk => !ctx.step_evidence.is_empty(),
+                    }
+                } else {
+                    true
+                };
+            let mut rejection: Option<String> = None;
+            for i in claims {
+                let title = plan_step_title(&plan_steps[i]).to_string();
+                let criterion = plan_steps[i]
+                    .get("done_criterion")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let (ok, reason) = if verify {
+                    let evidence = if ctx.step_evidence.is_empty() {
+                        "(no tool activity recorded for this step)".to_string()
+                    } else {
+                        ctx.step_evidence.join("\n")
+                    };
+                    verify_step_complete(
+                        &ctx.state.http,
+                        &title,
+                        &criterion,
+                        &evidence,
+                    )
+                    .await
+                } else {
+                    (true, String::new())
+                };
+                if ok {
+                    plan_steps[i]["status"] = serde_json::json!("done");
+                    let verified_step = plan_steps[i].clone();
+                    let verified_evidence = ctx.step_evidence.clone();
+                    let st = ctx.state.clone();
+                    let thread_for_memory = ctx.thread_id.map(|s| s.to_string());
+                    let _ = tokio::task::spawn_blocking(move || {
+                        record_runtime_plan_step_outcome_from_state(
+                            &st,
+                            thread_for_memory.as_deref(),
+                            &verified_step,
+                            &verified_evidence,
+                        );
+                    })
+                    .await;
+                    *ctx.plan = runtime_execution_plan(&plan_steps);
+                    *ctx.progress_anchor_round = ctx.round; // F1: real progress
+                    ctx.step_evidence.clear();
+                    ctx.last_round_sig.clear();
+                    *ctx.repeat_count = 0;
+                    *ctx.pending_compaction = true; // F3
+                    if verify {
+                        let _ = emit_stream_event(
+                            ctx.tx,
+                            GenerateStreamEvent::Delta {
+                                text: format!(
+                                    "‹‹ACT››✓ Step verified: {}‹‹/ACT››",
+                                    title.chars().take(60).collect::<String>()
+                                ),
+                            },
+                        )
+                        .await;
+                    }
+                } else {
+                    rejection = Some(format!(
+                        "Step «{title}» is NOT verified complete: {}. Keep working on it — re-mark it done ONLY once its result actually exists.",
+                        if reason.is_empty() {
+                            "the evidence does not show it was finished"
+                        } else {
+                            &reason
+                        }
+                    ));
+                    break;
+                }
+            }
+            // Marker rendered from the CANONICAL plan — the single source of
+            // truth (verified state), not the model's raw claim. This is what
+            // the UI shows and what the next turn resumes from.
+            plan_steps = execution_plan_steps(ctx.plan);
+            let plan_mark =
+                format!("‹‹PLAN››{}‹‹/PLAN››", build_plan_markdown(&plan_steps));
+            ctx.accumulated.push_str(&plan_mark);
+            let _ = emit_stream_event(
+                ctx.tx,
+                GenerateStreamEvent::Delta { text: plan_mark },
+            )
+            .await;
+            upsert_runtime_plan_memory_from_state(
+                ctx.state,
+                ctx.thread_id,
+                &plan_steps,
+            );
+            let done = plan_done_count(&plan_steps);
+            match rejection {
+                Some(msg) => format!("⚠️ {msg} (done {done}/{})", plan_steps.len()),
+                None => {
+                    format!("Plan updated: {done}/{} steps done.", plan_steps.len())
+                }
+            }
+        }
+    } else if name == "create_automation" {
+        let _ = emit_stream_event(
+            ctx.tx,
+            GenerateStreamEvent::Delta {
+                text: "‹‹ACT››⚡ Creating an automation‹‹/ACT››".to_string(),
+            },
+        )
+        .await;
+        create_automation_from_chat(
+            ctx.state,
+            args_raw,
+            ctx.automation_user_id,
+            ctx.automation_workspace_id,
+        )
+    } else if name == "update_automation" {
+        let _ = emit_stream_event(
+            ctx.tx,
+            GenerateStreamEvent::Delta {
+                text: "‹‹ACT››⚡ Updating an automation‹‹/ACT››".to_string(),
+            },
+        )
+        .await;
+        update_automation_from_chat(
+            ctx.state,
+            args_raw,
+            ctx.automation_user_id,
+            ctx.automation_workspace_id,
+        )
+    } else if name == "find_capability" {
+        // Tool Search: discover DEFERRED native tools by intent and activate
+        // them (push into the live tool set) so the model calls them next
+        // round — same mechanism as find_connected_tools, for built-in tools.
+        let parsed = serde_json::from_str::<serde_json::Value>(args_raw).ok();
+        let intent = parsed
+            .as_ref()
+            .and_then(|a| {
+                a.get("intent")
+                    .or_else(|| a.get("query"))
+                    .and_then(|v| v.as_str())
+                    .map(String::from)
+            })
+            .unwrap_or_default();
+        let _ = emit_stream_event(
+            ctx.tx,
+            GenerateStreamEvent::Delta {
+                text: format!(
+                    "‹‹ACT››🧭 Searching for a capability: {}‹‹/ACT››",
+                    if intent.is_empty() {
+                        "(intent)"
+                    } else {
+                        intent.as_str()
+                    }
+                ),
+            },
+        )
+        .await;
+        let mut lines = Vec::new();
+        let mut discovered_entries: Vec<CapabilityEntry> = Vec::new();
+        // In-house tools + skills (BM25 over the unified corpus).
+        for entry in bm25_rank(ctx.capability_corpus, &intent, 6) {
+            if entry.is_skill {
+                lines.push(format!(
+                    "- skill «{}»: {} → load it with use_skill(\"{}\")",
+                    entry.key, entry.desc, entry.key
+                ));
+                discovered_entries.push(entry.clone());
+            } else if entry.source == CapabilitySource::TemplateCatalog {
+                lines.push(format!(
+                    "- template «{}»: {} → pass template_ref=\"{}\" to make_deck/make_document",
+                    entry.key, entry.desc, entry.key
+                ));
+                discovered_entries.push(entry.clone());
+            } else if let Some(schema) = &entry.schema {
+                if ctx.loaded_tools.insert(entry.key.clone()) {
+                    ctx.tool_schemas.push(schema.clone());
+                }
+                let label = capability_source_label(entry.source);
+                lines.push(format!("- {label} «{}»: {}", entry.key, entry.desc));
+                discovered_entries.push(entry.clone());
+            }
+        }
+        // Connected services (toolkit-aware): activate the matching toolkit's
+        // tools so the model sees its full CRUD together. Channels: READ only.
+        // contact_only turns: don't surface connected services at all (the
+        // dispatch refuses them anyway — this just avoids a wasted round).
+        if !ctx.catalog_index.is_empty() && !ctx.contact_only {
+            for entry in search_connector_capability_entries(
+                ctx.catalog_index,
+                &intent,
+                COMPOSIO_DISCOVERY_RESULTS,
+            ) {
+                if ctx.read_only && !composio_tool_is_read(&entry.key) {
+                    continue;
+                }
+                // PERIMETER: don't even surface calendar/contacts tools when the
+                // matching axis is off (the dispatch refuses them anyway).
+                if !ctx.can_see_calendar && tool_touches_calendar(&entry.key) {
+                    continue;
+                }
+                if !ctx.can_see_contacts && tool_touches_contacts(&entry.key) {
+                    continue;
+                }
+                if ctx.loaded_tools.insert(entry.key.clone()) {
+                    if let Some(schema) = &entry.schema {
+                        ctx.tool_schemas.push(schema.clone());
+                    }
+                }
+                lines.push(format!("- connector «{}»: {}", entry.key, entry.desc));
+                discovered_entries.push(entry);
+            }
+        }
+        if ctx.tool_trace.len() < 20 {
+            if let Some(trace_line) =
+                capability_discovery_trace_line(&intent, &discovered_entries)
+            {
+                ctx.tool_trace.push(trace_line);
+            }
+        }
+        if lines.is_empty() {
+            "No capability matches. Rephrase with what you want to do (e.g. \
+\"browse the web\", \"search GitHub\", \"read the user's files\", \"send an email\")."
+                .to_string()
+        } else {
+            format!(
+                "Capabilities found (the tools are now CALLABLE; skills are \
+loaded with use_skill):\n{}",
+                lines.join("\n")
+            )
+        }
+    } else if name == "schedule_task" {
+        let args_val: serde_json::Value = serde_json::from_str(args_raw)
+            .unwrap_or_else(|_| serde_json::json!({}));
+        let goal = args_val
+            .get("goal")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        let every = args_val
+            .get("every")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        let timezone = args_val
+            .get("timezone")
+            .and_then(|v| v.as_str())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+        if goal.is_empty() || every.is_empty() {
+            "Scheduling requires 'goal' (what to do) and 'every' (how often: \
+\"every 1d\", \"daily@08:00\", \"weekly@mon@09:30\")."
+                .to_string()
+        } else {
+            let _ = emit_stream_event(
+                ctx.tx,
+                GenerateStreamEvent::Delta {
+                    text: format!("‹‹ACT››⏰ Scheduling: {goal} ({every})‹‹/ACT››"),
+                },
+            )
+            .await;
+            // Route through the first-class Automation model so a chat-
+            // scheduled task shows up in the Automazioni view (not a hidden run).
+            let st = ctx.state.clone();
+            let user_id = ctx.automation_user_id.clone();
+            let workspace_id = ctx.automation_workspace_id.clone();
+            let title: String = goal.chars().take(48).collect();
+            let auto_args = serde_json::json!({
+                "title": title,
+                "prompt": goal,
+                "trigger_type": "schedule",
+                "recurrence": every,
+                "timezone": timezone,
+            })
+            .to_string();
+            tokio::task::spawn_blocking(move || {
+                create_automation_from_chat(
+                    &st,
+                    &auto_args,
+                    &user_id,
+                    &workspace_id,
+                )
+            })
+            .await
+            .unwrap_or_else(|e| format!("Scheduling error: {e}"))
+        }
+    } else if name == "read_file" {
+        let args_val: serde_json::Value = serde_json::from_str(args_raw)
+            .unwrap_or_else(|_| serde_json::json!({}));
+        let path = args_val
+            .get("path")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let _ = emit_stream_event(
+            ctx.tx,
+            GenerateStreamEvent::Delta {
+                text: format!("‹‹ACT››📄 Reading {path}‹‹/ACT››"),
+            },
+        )
+        .await;
+        let st = ctx.state.clone();
+        let tid = ctx.thread_id.map(|s| s.to_string());
+        let recall_path = path.clone();
+        let mut out = tokio::task::spawn_blocking(move || {
+            read_project_file(&st, tid.as_deref(), &path)
+        })
+        .await
+        .unwrap_or_else(|e| format!("Error: {e}"));
+        // Per-file recall: surface past DECISIONS about this file so the
+        // agent remembers WHY it's like this instead of re-deriving it.
+        let st2 = ctx.state.clone();
+        if let Some(note) = tokio::task::spawn_blocking(move || {
+            decisions_for_path(&st2, &recall_path)
+        })
+        .await
+        .ok()
+        .flatten()
+        {
+            out.push_str("\n\n");
+            out.push_str(&note);
+        }
+        out
+    } else if name == "write_file" {
+        let args_val: serde_json::Value = serde_json::from_str(args_raw)
+            .unwrap_or_else(|_| serde_json::json!({}));
+        let path = args_val
+            .get("path")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let content = args_val
+            .get("content")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let _ = emit_stream_event(
+            ctx.tx,
+            GenerateStreamEvent::Delta {
+                text: format!("‹‹ACT››✍️ Scrivo {path}‹‹/ACT››"),
+            },
+        )
+        .await;
+        let st = ctx.state.clone();
+        let tid = ctx.thread_id.map(|s| s.to_string());
+        let path_for_memory = path.clone();
+        let content_len = content.len() as u64;
+        let result = tokio::task::spawn_blocking(move || {
+            write_project_file(&st, tid.as_deref(), &path, &content)
+        })
+        .await
+        .unwrap_or_else(|e| format!("Error: {e}"));
+        if result.starts_with("✅ Wrote ") {
+            register_project_file_artifact_memory(
+                ctx.state,
+                ctx.thread_id,
+                &path_for_memory,
+                content_len,
+                "write_file",
+            )
+            .await;
+        }
+        result
+    } else if name == "edit_file" {
+        let args_val: serde_json::Value = serde_json::from_str(args_raw)
+            .unwrap_or_else(|_| serde_json::json!({}));
+        let path = args_val
+            .get("path")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let old = args_val
+            .get("old_string")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let new = args_val
+            .get("new_string")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let _ = emit_stream_event(
+            ctx.tx,
+            GenerateStreamEvent::Delta {
+                text: format!("‹‹ACT››✏️ Modifico {path}‹‹/ACT››"),
+            },
+        )
+        .await;
+        let st = ctx.state.clone();
+        let tid = ctx.thread_id.map(|s| s.to_string());
+        tokio::task::spawn_blocking(move || {
+            edit_project_file(&st, tid.as_deref(), &path, &old, &new)
+        })
+        .await
+        .unwrap_or_else(|e| format!("Error: {e}"))
+    } else if name == "list_files" {
+        let _ = emit_stream_event(
+            ctx.tx,
+            GenerateStreamEvent::Delta {
+                text: "‹‹ACT››📂 Exploring the project‹‹/ACT››".to_string(),
+            },
+        )
+        .await;
+        let st = ctx.state.clone();
+        let tid = ctx.thread_id.map(|s| s.to_string());
+        tokio::task::spawn_blocking(move || list_project_files(&st, tid.as_deref()))
+            .await
+            .unwrap_or_else(|e| format!("Error: {e}"))
+    } else if name == "list_directory" || name == "read_text_file" {
+        let is_read = name == "read_text_file";
+        let args_val: serde_json::Value = serde_json::from_str(args_raw)
+            .unwrap_or_else(|_| serde_json::json!({}));
+        let p = args_val
+            .get("path")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let st = ctx.state.clone();
+        let tid = ctx.thread_id.map(|s| s.to_string());
+        let pr = p.clone();
+        let resolved = tokio::task::spawn_blocking(move || {
+            fs_resolve_authorized(&st, tid.as_deref(), &pr)
+        })
+        .await
+        .unwrap_or_else(|_| {
+            Err(FsAuthIssue::Invalid("internal error".to_string()))
+        });
+        match resolved {
+            Ok(path) => {
+                let icon = if is_read {
+                    "📄 Reading"
+                } else {
+                    "📂 Listing"
+                };
+                let _ = emit_stream_event(
+                    ctx.tx,
+                    GenerateStreamEvent::Delta {
+                        text: format!("‹‹ACT››{icon} {p}‹‹/ACT››"),
+                    },
+                )
+                .await;
+                tokio::task::spawn_blocking(move || {
+                    if is_read {
+                        fs_read_text(&path)
+                    } else {
+                        fs_list_dir_contents(&path)
+                    }
+                })
+                .await
+                .unwrap_or_else(|e| format!("Error: {e}"))
+            }
+            Err(FsAuthIssue::Invalid(msg)) => msg,
+            Err(FsAuthIssue::NeedsAuth(path)) => {
+                // In-chat authorize card: grant access WITHOUT going to Settings.
+                let marker = serde_json::json!({
+                    "path": path.display().to_string(),
+                    "op": if is_read { "read" } else { "list" }
+                })
+                .to_string();
+                let card = format!(
+                    "\n\nTo access this folder I need your authorization.\n\
+‹‹FS_AUTHORIZE››{marker}‹‹/FS_AUTHORIZE››\n"
+                );
+                ctx.accumulated.push_str(&card);
+                let _ = emit_stream_event(
+                    ctx.tx,
+                    GenerateStreamEvent::Delta { text: card },
+                )
+                .await;
+                *ctx.pending_confirm = true;
+                "AWAITING AUTHORIZATION: I showed the user a card with the \
+button to authorize access to the folder. Do NOT say you have read/listed it."
+                    .to_string()
+            }
+        }
+    } else if name == "run_in_project" {
+        let args_val: serde_json::Value = serde_json::from_str(args_raw)
+            .unwrap_or_else(|_| serde_json::json!({}));
+        let command = args_val
+            .get("command")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let _ = emit_stream_event(
+            ctx.tx,
+            GenerateStreamEvent::Delta {
+                text: format!(
+                    "‹‹ACT››🛠️ Running in the project: {}‹‹/ACT››",
+                    command.chars().take(120).collect::<String>()
+                ),
+            },
+        )
+        .await;
+        match run_in_project(ctx.state, ctx.thread_id, &command).await {
+            RunProjectOutcome::Completed(s) => s,
+            RunProjectOutcome::NeedsEscalation { command, cwd } => {
+                // ADR 0023 on-failure escalation: the fenced run hit a sandbox denial.
+                // Surface an approval card; approving re-runs the exact command
+                // unsandboxed via /api/capabilities/run/escalate.
+                emit_approval_card(
+                    ctx,
+                    SANDBOX_ESCALATE_OPEN,
+                    SANDBOX_ESCALATE_CLOSE,
+                    "run_in_project",
+                    &command,
+                    &serde_json::json!({ "command": command, "cwd": cwd }),
+                )
+                .await
+            }
+        }
+    } else if name == "list_addons" {
+        tokio::task::spawn_blocking(process_skills::addons_list_text)
+            .await
+            .unwrap_or_else(|e| format!("Error: {e}"))
+    } else if name == "show_addon" {
+        let args_val: serde_json::Value = serde_json::from_str(args_raw)
+            .unwrap_or_else(|_| serde_json::json!({}));
+        let addon_id = args_val
+            .get("addon_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        tokio::task::spawn_blocking(move || {
+            process_skills::addon_show_text(&addon_id)
+        })
+        .await
+        .unwrap_or_else(|e| format!("Error: {e}"))
+    } else if name == "customize_addon" {
+        let args_val: serde_json::Value = serde_json::from_str(args_raw)
+            .unwrap_or_else(|_| serde_json::json!({}));
+        let addon_id = args_val
+            .get("addon_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let changes = args_val
+            .get("changes")
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!({}));
+        let _ = emit_stream_event(
+            ctx.tx,
+            GenerateStreamEvent::Delta {
+                text: format!("‹‹ACT››🧩 Customizing addon {addon_id}‹‹/ACT››"),
+            },
+        )
+        .await;
+        tokio::task::spawn_blocking(move || {
+            process_skills::addon_customize_text(&addon_id, &changes)
+        })
+        .await
+        .unwrap_or_else(|e| format!("Error: {e}"))
+    } else if name == "create_skill" {
+        let args_val: serde_json::Value = serde_json::from_str(args_raw)
+            .unwrap_or_else(|_| serde_json::json!({}));
+        let skill_name = args_val
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let skill_desc = args_val
+            .get("description")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let skill_instr = args_val
+            .get("instructions")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let _ = emit_stream_event(
+            ctx.tx,
+            GenerateStreamEvent::Delta {
+                text: format!("‹‹ACT››🧩 Creating the skill {skill_name}‹‹/ACT››"),
+            },
+        )
+        .await;
+        tokio::task::spawn_blocking(move || {
+            create_skill(&skill_name, &skill_desc, &skill_instr)
+        })
+        .await
+        .unwrap_or_else(|e| format!("Error: {e}"))
+    } else if name == "suggest_capabilities" {
+        let args_val: serde_json::Value = serde_json::from_str(args_raw)
+            .unwrap_or_else(|_| serde_json::json!({}));
+        let need = args_val
+            .get("need")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let _ = emit_stream_event(
+            ctx.tx,
+            GenerateStreamEvent::Delta {
+                text: format!("‹‹ACT››🧭 Searching connectors for: {need}‹‹/ACT››"),
+            },
+        )
+        .await;
+        let suggestions = suggest_capabilities(ctx.state, &need).await;
+        match suggestions.card {
+            Some(card) => {
+                // In-chat connect-cards: render the suggestions as
+                // clickable connect buttons (skill/MCP/Composio) so the
+                // user acts from chat, no Settings trip. End the turn
+                // here — the user must connect, then re-ask.
+                let marker = card.to_string();
+                let card_text = format!(
+                    "\n\nHere's what I can connect for this. Choose below.\n\
+‹‹CONNECT_SUGGEST››{marker}‹‹/CONNECT_SUGGEST››\n"
+                );
+                ctx.accumulated.push_str(&card_text);
+                let _ = emit_stream_event(
+                    ctx.tx,
+                    GenerateStreamEvent::Delta { text: card_text },
+                )
+                .await;
+                *ctx.pending_confirm = true;
+                "AWAITING: I showed the user clickable cards to \
+connect the suggested connectors (skill/MCP/Composio). Do NOT say you have already connected anything."
+                    .to_string()
+            }
+            None => suggestions.model_text,
+        }
+    } else if name == "list_scheduled_tasks" {
+        let st = ctx.state.clone();
+        tokio::task::spawn_blocking(move || list_scheduled_tasks(&st))
+            .await
+            .unwrap_or_else(|e| format!("Error: {e}"))
+    } else if name == "cancel_scheduled_task" {
+        let args_val: serde_json::Value = serde_json::from_str(args_raw)
+            .unwrap_or_else(|_| serde_json::json!({}));
+        let task_id = args_val
+            .get("task_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        let _ = emit_stream_event(
+            ctx.tx,
+            GenerateStreamEvent::Delta {
+                text: "‹‹ACT››🗑️ Cancelling scheduled task‹‹/ACT››".to_string(),
+            },
+        )
+        .await;
+        let st = ctx.state.clone();
+        tokio::task::spawn_blocking(move || cancel_scheduled_task(&st, &task_id))
+            .await
+            .unwrap_or_else(|e| format!("Error: {e}"))
+    } else if !ctx.can_see_calendar && !name.is_empty() && tool_touches_calendar(name) {
+        // PERIMETER (anti-exfiltration): the can_see_calendar axis is enforced
+        // HARD here, independent of memory_scope — a "personal"-scope contact that
+        // is NOT contact_only still can't pull the user's calendar. All builtins
+        // are matched in earlier arms, so this only catches calendar connectors.
+        "The user's calendar is not accessible in this conversation. \
+Do not reveal commitments, appointments or events."
+            .to_string()
+    } else if !ctx.can_see_contacts && !name.is_empty() && tool_touches_contacts(name) {
+        // PERIMETER (anti-exfiltration): the can_see_contacts axis, enforced HARD
+        // here too — block the user's address book (Google Contacts / People etc.)
+        // even on a non-contact_only turn.
+        "The user's address book is not accessible in this conversation. \
+Do not reveal other contacts, people or relationships of the user."
+            .to_string()
+    } else if ctx.contact_only && !name.is_empty() {
+        // PERIMETER (anti-exfiltration): a `contact_only` turn must not reach the
+        // user's connected services. All builtins are matched in earlier arms, so
+        // any tool reaching here is a connected Composio/MCP tool — refuse it so a
+        // contact can't make the assistant read Gmail/Calendar/etc. and leak them.
+        "Connected-service tools not available in a conversation with \
+this contact. Answer only with what's in this chat; do not reveal personal data \
+of the user or third parties."
+            .to_string()
+    } else if ctx.read_only && !name.is_empty() && ctx.composio_writes.contains(name) {
+        // Channel (read-only) turn: never run a write tool, never even
+        // surface a confirm card (no UI on the channel). Phase 2 routes
+        // these to the in-app approval center.
+        "Action not available from the channel: operations with effects \
+require your confirmation in the app. Propose it and stop."
+            .to_string()
+    } else if let Some((mcp_provider, mcp_tool)) = parse_mcp_chat_name(name) {
+        // Connected MCP server tool. Writes (per the cached ActionClass,
+        // derived from the MCP readOnlyHint) need confirmation; reads run
+        // with a timeout so a hung server can't freeze the turn. A
+        // read_only channel + write was already rejected just above
+        // (composio_writes now includes MCP writes). `autonomous` runs skip
+        // the card and execute (explicit per-automation opt-in).
+        let args_val: serde_json::Value = serde_json::from_str(args_raw)
+            .unwrap_or_else(|_| serde_json::json!({}));
+        let workspace_scoped = workspace_scoped_mcp_write(
+            ctx.state,
+            ctx.thread_id,
+            &mcp_provider,
+            &mcp_tool,
+            &args_val,
+        );
+        let is_write = ctx.composio_writes.contains(name);
+        let needs_confirm = if tool_safety_enabled() {
+            // ADR 0023: route the decision through the pure policy fn. `Never`
+            // (autonomous) → AutoApprove; `OnRequest` + unauthorized write →
+            // AskUser. Sandbox is DangerFullAccess for now (no OS fence wired
+            // yet), so this yields the same verdict as the legacy boolean.
+            let approval = if ctx.autonomous {
+                AskForApproval::Never
+            } else {
+                AskForApproval::OnRequest
+            };
+            matches!(
+                assess_tool_safety(
+                    approval,
+                    &SandboxPolicy::DangerFullAccess,
+                    is_write,
+                    workspace_scoped,
+                ),
+                SafetyDecision::AskUser
+            )
+        } else {
+            is_write && !ctx.autonomous && !workspace_scoped
+        };
+        if needs_confirm {
+            emit_approval_card(
+                ctx,
+                MCP_CONFIRM_OPEN,
+                MCP_CONFIRM_CLOSE,
+                name,
+                &mcp_tool,
+                &args_val,
+            )
+            .await
+        } else {
+            let _ = emit_stream_event(
+                ctx.tx,
+                GenerateStreamEvent::Delta {
+                    text: format!("‹‹ACT››🔌 Using {mcp_tool}‹‹/ACT››"),
+                },
+            )
+            .await;
+            let st = ctx.state.clone();
+            let prov = mcp_provider.clone();
+            let tool = mcp_tool.clone();
+            let args_for_artifact = args_val.clone();
+            let args = args_val;
+            let mcp_started = std::time::Instant::now();
+            let exec = tokio::task::spawn_blocking(move || {
+                run_mcp_chat_tool(&st, &prov, &tool, args)
+            });
+            let mut run_ok = false;
+            let mut run_err: Option<&'static str> = None;
+            let mcp_result = match tokio::time::timeout(mcp_call_timeout(), exec)
+                .await
+            {
+                Ok(Ok(Ok(value))) => {
+                    run_ok = true;
+                    value
+                        .to_string()
+                        .chars()
+                        .take(COMPOSIO_RESULT_CHARS)
+                        .collect()
+                }
+                Ok(Ok(Err(error))) => {
+                    // Classify the failure so a broken MCP server tells the user
+                    // what to do (reconnect / wait) instead of a raw error.
+                    run_err = classify_connector_error(&error.to_string())
+                        .map(connector_error_kind_str)
+                        .or(Some("other"));
+                    let hint = mcp_error_hint(&error.to_string())
+                        .map(|h| format!(" {h}"))
+                        .unwrap_or_default();
+                    format!("MCP tool error: {error}.{hint}")
+                }
+                Ok(Err(_join)) => {
+                    run_err = Some("other");
+                    "Error: MCP execution interrupted.".to_string()
+                }
+                Err(_elapsed) => {
+                    run_err = Some("unavailable");
+                    format!(
+                        "The MCP tool didn't respond within {}s (timeout): the server \
+may be stuck or offline. Tell the user to check/reconnect it from Settings → \
+Connectors → MCP; do NOT claim it's done.",
+                        mcp_call_timeout().as_secs()
+                    )
+                }
+            };
+            record_connector_run(
+                ctx.state,
+                ctx.thread_id,
+                name,
+                "mcp",
+                run_ok,
+                run_err,
+                mcp_started.elapsed(),
+            );
+            if run_ok {
+                register_mcp_filesystem_artifact_memory(
+                    ctx.state,
+                    ctx.thread_id,
+                    mcp_provider.as_str(),
+                    &mcp_tool,
+                    &args_for_artifact,
+                )
+                .await;
+            }
+            mcp_result
+        }
+    } else if !name.is_empty() {
+        // A connected-service (Composio) tool. Writes need explicit
+        // confirmation unless the user marked this tool "always allow" OR the
+        // run is an autonomous automation (explicit per-automation opt-in).
+        let is_write = ctx.composio_writes.contains(name);
+        let pre_authorized = composio_tool_allowed(name);
+        let needs_confirm = if tool_safety_enabled() {
+            // ADR 0023: same routing as the MCP branch. `pre_authorized` is the
+            // user's always-allow list; `Never` (autonomous) short-circuits to
+            // AutoApprove. Equals the legacy boolean below under DangerFullAccess.
+            let approval = if ctx.autonomous {
+                AskForApproval::Never
+            } else {
+                AskForApproval::OnRequest
+            };
+            matches!(
+                assess_tool_safety(
+                    approval,
+                    &SandboxPolicy::DangerFullAccess,
+                    is_write,
+                    pre_authorized,
+                ),
+                SafetyDecision::AskUser
+            )
+        } else {
+            is_write && !pre_authorized && !ctx.autonomous
+        };
+        if needs_confirm {
+            // Do NOT execute. Emit a confirmation card carrying the exact
+            // action; the user runs it (once/always) via the card. The model
+            // must never claim it's done — the real outcome comes from the card.
+            let args_val: serde_json::Value = serde_json::from_str(args_raw)
+                .unwrap_or_else(|_| serde_json::json!({}));
+            emit_approval_card(
+                ctx,
+                COMPOSIO_CONFIRM_OPEN,
+                COMPOSIO_CONFIRM_CLOSE,
+                name,
+                &humanize_composio_tool(name),
+                &args_val,
+            )
+            .await
+        } else {
+            let _ = emit_stream_event(
+                ctx.tx,
+                GenerateStreamEvent::Delta {
+                    text: format!(
+                        "‹‹ACT››🔧 Using {}‹‹/ACT››",
+                        humanize_composio_tool(name)
+                    ),
+                },
+            )
+            .await;
+            let st = ctx.state.clone();
+            let tool = name.to_string();
+            let args: serde_json::Value = serde_json::from_str(args_raw)
+                .unwrap_or_else(|_| serde_json::json!({}));
+            let composio_started = std::time::Instant::now();
+            let outcome = tokio::task::spawn_blocking(move || {
+                composio_execute_tool(&st, &tool, &args)
+            })
+            .await;
+            let mut run_ok = false;
+            let mut run_err: Option<&'static str> = None;
+            let composio_result = match outcome {
+                Ok(Ok(value)) => match composio_execution_error(&value) {
+                    // Composio returned 200 but the tool failed: tell the
+                    // model so it reports the failure, not a false success.
+                    Some(error) => {
+                        run_err = classify_connector_error(&error)
+                            .map(connector_error_kind_str)
+                            .or(Some("other"));
+                        let hint = connector_error_hint(&error)
+                            .map(|h| format!(" {h}"))
+                            .unwrap_or_default();
+                        format!(
+                            "The tool {name} did NOT perform the action: {error}.{hint} \
+Tell the user clearly; do NOT claim it's done."
+                        )
+                    }
+                    None => {
+                        run_ok = true;
+                        value
+                            .to_string()
+                            .chars()
+                            .take(COMPOSIO_RESULT_CHARS)
+                            .collect()
+                    }
+                },
+                Ok(Err(error)) => {
+                    run_err = classify_connector_error(&error.message)
+                        .map(connector_error_kind_str)
+                        .or(Some("other"));
+                    let hint = connector_error_hint(&error.message)
+                        .map(|h| format!(" {h}"))
+                        .unwrap_or_default();
+                    format!("Error from the tool {name}: {}.{hint}", error.message)
+                }
+                Err(error) => {
+                    run_err = Some("other");
+                    format!("Tool execution error: {error}")
+                }
+            };
+            record_connector_run(
+                ctx.state,
+                ctx.thread_id,
+                name,
+                "composio",
+                run_ok,
+                run_err,
+                composio_started.elapsed(),
+            );
+            composio_result
+        }
+    } else {
+        format!("Tool not available: {name}")
+    };
+    result
+}
+
 async fn stream_chat_via_openai(
     state: &AppState,
     request: ChatGenerateStreamRequest,
@@ -18082,15 +21932,12 @@ async fn stream_chat_via_openai(
     let floor_mode = adaptive_floor_mode();
     let floor_acting = floor_mode == "on";
     let floor_observing = floor_mode != "off";
-    if floor_observing {
-        eprintln!(
-            "adaptive-floor: model={model} tier={} verify={:?} workflow_bias={:?} slot={:?} format={:?} acting={floor_acting}",
-            turn_tier.as_str(),
-            turn_scaffold.verify_depth,
-            turn_scaffold.workflow_bias,
-            turn_scaffold.slot,
-            turn_scaffold.format,
-        );
+    // The floor telemetry line for this turn (`None` when `off`). Computed once and used by
+    // both sinks: the dev-time stderr echo here, and the durable `tool_trace` push below
+    // (the Fase-1 telemetry that reaches the memory/learning substrate).
+    let floor_trace = scaffold::floor_trace_for_mode(turn_tier, &turn_scaffold, floor_mode);
+    if let Some(line) = &floor_trace {
+        eprintln!("model={model} {line}");
     }
     // Scope MEMORY to THIS conversation's project (profile injection, recall, per-file
     // recall, extractor). Uses a dedicated memory scope — NOT the global active
@@ -18134,12 +21981,20 @@ async fn stream_chat_via_openai(
             note_user_activity();
         }
     }
+    // Budget the prompt against the model's REAL context window (catalog `context_window`,
+    // auto-filled from `/api/show`, F0.3d) instead of a flat 32k default — so a 128k model
+    // keeps its long history and a small local model is clamped to what it can actually read.
+    let model_context_window = registry_model_capabilities(&base_url, &model)
+        .and_then(|caps| caps.context_length)
+        .map(|tokens| usize::try_from(tokens).unwrap_or(usize::MAX));
     let prompt = build_chat_runtime_prompt(&BuildPromptRequest {
         prompt: request.prompt.clone(),
         context: request.context.clone(),
-        max_context_chars: Some(chat_context_budget_chars()),
+        max_context_chars: Some(chat_context_budget_chars(model_context_window)),
     })
     .runtime_prompt;
+    let browser_discovery = browser_open_research_discovery_instruction();
+    let booking_choices = booking_assumption_choice_instruction();
 
     let system = format!(
         "You are the local assistant acting as ORCHESTRATOR. Right now {now}: ALWAYS \
@@ -18166,6 +22021,7 @@ blocked/has no data, move to the next. Do not repeat the same search. For FACTUA
 statistical data (sports standings/results/schedules, reference figures, public \
 timetables) PREFER a login-free, text-rich source (e.g. Wikipedia, an official \
 schedule page) over login-walled, store, or marketing pages that return no data. \
+{browser_discovery} \
 EXTRACT AS YOU GO: the moment a page shows the data you need, COPY the concrete values \
 (the actual table rows, names, numbers, dates) into your message text — do NOT defer \
 extraction to \"later\" or across another tool call, because the page content is NOT \
@@ -18508,6 +22364,7 @@ automatically become artifacts downloadable by the user.{methodology}\n{lines}"
 (valid JSON; \"multi\":true if more than one can be chosen). The user will see clickable buttons and their \
 choice will come back as a message. Use it ONLY for closed choices, not for open questions."
     );
+    let system = format!("{system}\n{booking_choices}");
     // Authorized write destinations: when present, the model can deliver
     // generated files to user-granted folders via `save_artifact`.
     let artifact_destinations = load_artifact_destinations();
@@ -18570,34 +22427,58 @@ save/export a file to a folder, call save_artifact(file, destination)."
         // Always-on memory profile (M1): inject what we durably know about the user
         // (personal scope) and the active project, so the chat is continuous instead
         // of starting cold every turn. Sensitive items are excluded here by design.
-        let (memory_personal, memory_project) = gather_profile_memory(state);
-        let memory_open_loops = gather_open_loops(state, 6);
-        let system = match format_memory_block(
-            &memory_open_loops,
-            &memory_personal,
-            &memory_project,
-            CHAT_MEMORY_BUDGET_CHARS,
-        ) {
-            Some(block) => format!("{system}\n\n{block}"),
-            None => system,
-        };
-        // Project OBJECTIVE (always-on, FIRST): the north star + focus directive, so the
-        // assistant keeps every implementation aligned and flags drift.
-        let system = match project_objective_block(state) {
-            Some(block) => format!("{system}\n\n{block}"),
-            None => system,
-        };
-        // Project BRIEF (always-on): recent state, so "where this project is" is present
-        // every turn — not just when the prompt happens to match.
-        let system = match project_brief_block(state) {
-            Some(block) => format!("{system}\n\n{block}"),
-            None => system,
-        };
-        // Recent work (always-on): the last commits, so a new conversation resumes the
-        // thread of what was just being done instead of starting cold.
-        let system = match recent_work_block(state) {
-            Some(block) => format!("{system}\n\n{block}"),
-            None => system,
+        //
+        // ADR 0022 — Tappa 1: quando `HOMUN_MEMORY_SERVICE=on`, l'assemblaggio del
+        // briefing è incapsulato in `MemoryRecallService::brief` (che delega alle
+        // stesse funzioni, nello stesso ordine). Flag OFF → path inline attuale.
+        let system = if let Some(service) = state.memory_service.as_ref() {
+            let scope = scope_from_active_workspace();
+            let pack = service.brief(&scope, &request.prompt);
+            // ordered_blocks() = [profile, objective, brief, recent_work] — stesso
+            // ordine dell'assemblaggio inline qui sotto. Mantiene la parità.
+            let mut system = system;
+            for block in pack.ordered_blocks() {
+                if let Some(block) = block {
+                    system = format!("{system}\n\n{block}");
+                }
+            }
+            system
+        } else {
+            let (memory_personal, memory_project) =
+                gather_profile_memory_for_prompt(state, &request.prompt);
+            let memory_open_loops = if should_inject_open_loops_for_prompt(&request.prompt) {
+                gather_open_loops(state, 6)
+            } else {
+                Vec::new()
+            };
+            let system = match format_memory_block(
+                &memory_open_loops,
+                &memory_personal,
+                &memory_project,
+                CHAT_MEMORY_BUDGET_CHARS,
+            ) {
+                Some(block) => format!("{system}\n\n{block}"),
+                None => system,
+            };
+            // Project OBJECTIVE (always-on, FIRST): the north star + focus directive, so the
+            // assistant keeps every implementation aligned and flags drift.
+            let system = match project_objective_block(state) {
+                Some(block) => format!("{system}\n\n{block}"),
+                None => system,
+            };
+            // Project BRIEF (always-on): recent state, so "where this project is" is present
+            // every turn — not just when the prompt happens to match.
+            let system = match project_brief_block(state) {
+                Some(block) => format!("{system}\n\n{block}"),
+                None => system,
+            };
+            // Recent work (always-on): the last commits, so a new conversation resumes the
+            // thread of what was just being done instead of starting cold.
+            let system = match recent_work_block(state) {
+                Some(block) => format!("{system}\n\n{block}"),
+                None => system,
+            };
+            system
         };
         // Goal-propose affordance (projects only): when the model articulates the project's
         // objective, it emits a marker → the UI shows a "Salva come obiettivo" card. This is
@@ -18620,9 +22501,55 @@ normal answers."
         };
         // RAG: inject memory relevant to THIS prompt (decisions/facts), so the model
         // answers from what was already decided instead of saying it has nothing.
-        let system = match relevant_memory_for_prompt(state, &request.prompt).await {
-            Some(block) => format!("{system}\n\n{block}"),
-            None => system,
+        // ADR 0022 — Tappa 1/4: via service quando il flag è ON; anche nel path OFF
+        // usa le fn del crate (embed_query + recall_search_on_facade) con capability
+        // client al volo — così `relevant_memory_for_prompt` non è più duplicata.
+        let system = if should_inject_relevant_memory_for_prompt(&request.prompt) {
+            if let Some(service) = state.memory_service.as_ref() {
+                let scope = scope_from_active_workspace();
+                let pack = service.recall(&request.prompt, &scope).await;
+                match pack.block {
+                    Some(block) => format!("{system}\n\n{block}"),
+                    None => system,
+                }
+            } else {
+                // Path OFF: stessa orchestrazione del crate, capability client al volo.
+                let user = gateway_memory_user_id();
+                let workspace = gateway_memory_workspace_id();
+                let embedding: std::sync::Arc<dyn local_first_memory::EmbeddingClient> =
+                    std::sync::Arc::new(GatewayEmbeddingClient { http: state.http.clone() });
+                let query_vec =
+                    local_first_memory::embed_query(embedding.as_ref(), &request.prompt).await;
+                let block = match lock_memory_facade(state) {
+                    Ok(facade) => {
+                        let graph_context: Option<
+                            &(dyn Fn(&local_first_memory::MemoryFacade, &MemoryUserId, &MemoryWorkspaceId, &str) -> Option<String> + Sync),
+                        > = Some(&|facade, user, workspace, q| {
+                            if let Some(workflow) =
+                                workflow_status_context_for_query(facade, user, workspace, q)
+                            {
+                                return Some(workflow);
+                            }
+                            artifact_provenance_context_for_query(facade, user, workspace, q)
+                        });
+                        local_first_memory::recall_search_on_facade(
+                            &facade,
+                            &user,
+                            &workspace,
+                            &request.prompt,
+                            &query_vec,
+                            graph_context,
+                        )
+                    }
+                    Err(_) => None,
+                };
+                match block {
+                    Some(block) => format!("{system}\n\n{block}"),
+                    None => system,
+                }
+            }
+        } else {
+            system
         };
         // Anti-rewrite anchor: existing code components matching the request, so the
         // model extends/reuses instead of re-implementing (no-regression by default).
@@ -18651,11 +22578,25 @@ why things are the way they are (do NOT re-scan everything from scratch). AFTER 
 ANY domain: code, a document (e.g. a customer quote), data, configurations — call \
 record_decision with what you decided, the WHY, the rejected alternatives and the objects touched, so \
 the rationale stays and doesn't have to be reconstructed. \
+SENSITIVE VAULT: sensitive values are NOT in ordinary memory. If the user asks for a sensitive personal \
+value (identity document, fiscal/tax code, vehicle plate, health note, credentials, payment data, private \
+note), call recall_memory before saying you don't know it: if normal memory has no match, the gateway \
+checks Vault metadata internally and returns only redacted metadata. Never reveal, infer, or guess the \
+secret value from metadata. If a matching record exists, say it is saved in the Vault and local PIN unlock \
+is required to reveal or edit it. If recall_memory returns a `reveal_card:` line, COPY the marker after \
+`reveal_card:` EXACTLY into your final answer on its own line; do not paraphrase it. The UI hides that \
+marker and renders the PIN unlock card. Do NOT send or forward raw Vault secret values through \
+generic external channels/tools such as send_message. The configured Telegram authorization channel may \
+receive Vault/payment summaries or approval prompts, but raw-value reveal stays behind the local PIN \
+unlock card unless a dedicated approved reveal flow exists. \
 PLAN (plan-mode): for a non-trivial MULTI-STEP task (development, refactor, involved research, \
 actions with effects) FIRST propose the plan and STOP — do NOT start executing in this turn. Emit \
 on its own line `‹‹PLAN_PROPOSE››{{\"summary\":\"objective in brief\",\"steps\":[\"step 1\",\"step 2\"]}}‹‹/PLAN_PROPOSE››` \
 (valid JSON). The user will see the Accept/Edit buttons. EXECUTE the plan ONLY in the NEXT turn, \
 after the user has approved it (e.g. «I approve the plan…»); if they ask for changes, revise and re-propose. \
+If the user explicitly asks to create, show, update, verify, or test a plan, use the plan machinery: \
+call update_plan for an operational plan or emit PLAN_PROPOSE for approval-gated plan-mode; do NOT \
+write a free-form numbered plan only in prose. \
 Once executing, use update_plan to update the step status (doing→done), shown in the \
 \"Plan\" panel. To move a step's status (e.g. doing→done) call step_advance with its id (shown in \
 parentheses after the title in the plan card) and the new status — this updates that ONE step \
@@ -18758,8 +22699,10 @@ through the results; don't discard the range.\n\
 duration, changes, price). Do NOT say \"no results\" if there are visible rows.\n\
 - SCREENSHOT: use browser_screenshot ONLY if the snapshot text isn't enough (layout/map/\
 image).\n\
-- SECURITY: NEVER purchases, logins, bookings or payments. If they're needed, STOP and propose \
-to the user what to do (don't click \"Buy\"/\"Sign in\"/\"Book\").\n\
+- SECURITY: NEVER logins/bookings/payments unattended. At final checkout, STOP and show \
+a Payment Approval Card with marker `‹‹PAYMENT_APPROVAL››{{\"snapshot\":{{\"approval_id\":\"pay_<uuid>\",\"merchant\":\"...\",\"domain\":\"...\",\"amount_minor\":5900,\"currency\":\"EUR\",\"product_summary\":\"...\",\"payment_method_label\":\"Visa 1111\",\"checkout_fingerprint\":\"stable hash or screenshot id\"}}}}‹‹/PAYMENT_APPROVAL››`. \
+After local approval, if a CVV/CV2 field must be filled, call browser_act with `payment_approval_id` and `vault_secret:\"cvv_one_shot\"` instead of writing the CVV yourself. \
+Do not click the final payment button until the user approves the card locally and gives you the exact returned `payment_approval_id`; never invent that id.\n\
 - STOP: as soon as you have enough data, STOP using the browser and write the final reply \
 to the user (one table per row + an optional Sources footer)."
     );
@@ -19103,6 +23046,40 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
         mpsc: mpsc_tx,
         entry: stream_entry,
     };
+    let privacy_decision =
+        classify_sensitive_input_with_privacy_guard_model(&state.http, &request.prompt)
+            .await
+            .unwrap_or_else(|| {
+                privacy_guard::classify_sensitive_input_deterministic(&request.prompt)
+            });
+    if let Some(intercept) = privacy_guard::build_privacy_guard_intercept(
+        &state.pending_vault_proposals,
+        &request.request_id,
+        &privacy_decision,
+    ) {
+        // Privacy Guard runs before the agent loop: the raw secret must not reach
+        // the main chat model or the committed user transcript. The actual value
+        // lives only in the pending sidecar until the user accepts with the PIN.
+        let _ = emit_stream_event(
+            &tx,
+            GenerateStreamEvent::Done {
+                text: intercept.assistant_text,
+                metrics: TokenMetrics::zero(),
+                redacted_user_text: Some(intercept.user_text),
+            },
+        )
+        .await;
+        schedule_stream_registry_cleanup(resume_id.clone());
+        let body = Body::from_stream(futures_util::stream::unfold(rx, |mut rx| async move {
+            rx.recv().await.map(|item| (item, rx))
+        }));
+        return Ok(Response::builder()
+            .status(StatusCode::OK)
+            .header("content-type", "application/x-ndjson")
+            .header("x-effective-model", "privacy_guard")
+            .body(body)
+            .expect("valid streaming response"));
+    }
     // Dedicated STREAMING client: HTTP/1.1 (avoids HTTP/2 RST_STREAM that CDNs in
     // front of cloud model hosts can throw on long streams) + no idle connection
     // reuse (a stale pooled keep-alive connection is a classic cause of the
@@ -19174,7 +23151,10 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
         {
             Ok(Ok(steps)) if !steps.is_empty() => {
                 if verbose_debug() {
-                    eprintln!("[plan] ADR0020-P1 orchestrator-seeded {} steps", steps.len());
+                    eprintln!(
+                        "[plan] ADR0020-P1 orchestrator-seeded {} steps",
+                        steps.len()
+                    );
                 }
                 resume_plan = steps;
             }
@@ -19197,9 +23177,28 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
             }
         }
     }
+    // F4: a RESUMED plan that closes no new step across turns is stuck (the per-turn recovery
+    // counters reset each turn, so the same failing step retries forever). After the cap the
+    // harness BLOCKS the stuck step (caposaldo #2) — `block_stalled_step` makes the plan
+    // `settled`, so `upsert_runtime_plan_memory` stops it auto-resuming. Gated until validated
+    // live; the bookkeeping is a no-op when off.
+    if !resume_plan.is_empty() && plan_stall_abort_enabled() {
+        let stalled = plan_stall_check_and_bump(state, thread_id.as_deref(), &resume_plan);
+        if stalled {
+            if let Some(title) = block_stalled_step(&mut resume_plan) {
+                upsert_runtime_plan_memory_from_state(state, thread_id.as_deref(), &resume_plan);
+                if verbose_debug() {
+                    eprintln!(
+                        "[plan] F4: blocked stalled step after {MAX_PLAN_STALL_RESUMES} no-progress resumes: «{title}»"
+                    );
+                }
+            }
+        }
+    }
     let capability_route_for_runtime = capability_route.clone();
     tokio::spawn(async move {
         let mut accumulated = String::new();
+        let mut pending_vault_reveal_marker: Option<String> = None;
         // Last upstream model error this turn (e.g. a 410 "model retired"), already
         // human-readable. Surfaced as the final answer if the turn produces no text,
         // so a dead/blocked model is obvious instead of a generic "no answer".
@@ -19209,6 +23208,14 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
         // Consequential actions performed this turn (any domain) → fed to the
         // memory extractor so the "why" of each mutation is remembered.
         let mut tool_trace: Vec<String> = Vec::new();
+        // Adaptive-floor telemetry (ADR 0018 Fase 1): persist the tier+profile decision into
+        // the turn trace so it reaches the memory/learning substrate — not just stderr — and
+        // the floor can later be VALIDATED against outcomes before it is switched on. Present
+        // only in the observation modes (`shadow`|`on`); `off` keeps the trace clean. Shared
+        // by chat and channel/automation turns (this is the one shared loop).
+        if let Some(line) = &floor_trace {
+            tool_trace.push(line.clone());
+        }
         if let Some(route_line) = capability_route_trace_line(&capability_route_for_runtime) {
             tool_trace.push(route_line.clone());
             let _ = emit_stream_event(
@@ -19248,6 +23255,184 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
                 "[plan] turn-start: resumed {} steps ({done} done) from prior ‹‹PLAN›› marker",
                 resume_plan.len()
             );
+        }
+
+        // F3.3 (ADR 0020): when there is no plan to resume and the DRIVER flag is on,
+        // PLAN+DRIVE the turn through the OrchestratorBrain (the harness owns the control
+        // flow) instead of the model loop. Fails OPEN to the model loop on any miss, so it
+        // never degrades the live turn. First cut: browser read/gather plans.
+        if resume_plan.is_empty() && drive_orchestrated_chat_enabled() {
+            let _ = emit_stream_event(
+                &tx,
+                GenerateStreamEvent::Delta {
+                    text: "‹‹ACT››🧭 Planning and executing‹‹/ACT››".to_string(),
+                },
+            )
+            .await;
+            // Live per-step progress: the sync drive pushes a label per step; this
+            // async task drains them and streams ‹‹ACT›› deltas so the user sees what
+            // the driver is doing (navigate / read / interact), not just a spinner.
+            let (activity_tx, mut activity_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+            let tx_activity = StreamSink {
+                mpsc: tx.mpsc.clone(),
+                entry: tx.entry.clone(),
+            };
+            let drain = tokio::spawn(async move {
+                while let Some(label) = activity_rx.recv().await {
+                    let _ = emit_stream_event(
+                        &tx_activity,
+                        GenerateStreamEvent::Delta {
+                            text: format!("‹‹ACT››{label}‹‹/ACT››"),
+                        },
+                    )
+                    .await;
+                }
+            });
+            let drive_state = state_owned.clone();
+            let drive_goal = memory_user_message.clone();
+            let drive_lang = effective_user_language();
+            let drive_thread = thread_id.clone();
+            let driven = tokio::task::spawn_blocking(move || {
+                orchestrator_drive_for_chat(
+                    &drive_state,
+                    &drive_goal,
+                    &drive_lang,
+                    drive_thread,
+                    &activity_tx,
+                )
+            })
+            .await;
+            // The drive dropped its sender(s) → the channel closes → drain finishes,
+            // flushing all activity deltas before the synthesis streams below.
+            let _ = drain.await;
+            match driven {
+                Ok(Ok(Some((gathered, plan_steps)))) => {
+                    // Synthesize the final answer with the user's CHAT model (capable at
+                    // prose), streamed LIVE via the same provider-aware path the model
+                    // loop's forced-synthesis uses. The driver gathered the evidence; the
+                    // chat model turns it into the answer.
+                    let synth_messages = vec![serde_json::json!({
+                        "role": "user",
+                        "content": format!(
+                            "You executed a plan to help the user.\nUser request: {}\n\n\
+                             Gathered results from the steps:\n{}\n\n\
+                             Write the FINAL ANSWER now, synthesizing the results above with \
+                             concrete details. If something failed, say so clearly and propose \
+                             next steps.",
+                            memory_user_message, gathered
+                        )
+                    })];
+                    // Streamed synthesis (the provider-aware path the model loop uses):
+                    // robust across OpenAI-compat and Ollama-native. A reasoning chat
+                    // model briefly streams its <think> tokens (a small cosmetic flicker
+                    // that's then sanitized) — acceptable; a non-streaming parse turned
+                    // out to return empty for this provider, so streaming stays.
+                    let synth_payload = build_chat_payload(
+                        &model,
+                        &base_url,
+                        &synth_messages,
+                        &[],
+                        temperature,
+                        true,
+                    );
+                    let first_token =
+                        std::time::Duration::from_secs(model_first_token_timeout_secs());
+                    let idle = std::time::Duration::from_secs(model_idle_timeout_secs());
+                    let request_timeout =
+                        std::time::Duration::from_secs(model_request_timeout_secs());
+                    let ollama = is_ollama_base(&base_url);
+                    let mut builder = http.post(&endpoint).timeout(request_timeout);
+                    if let Some(key) = api_key.as_ref() {
+                        builder = builder.bearer_auth(key);
+                    }
+                    let body = match builder.json(&synth_payload).send().await {
+                        Ok(resp) if resp.status().is_success() => {
+                            let collected = if ollama {
+                                collect_ollama_native_stream(resp, first_token, idle, &tx).await
+                            } else {
+                                collect_openai_stream(resp, first_token, idle, &tx).await
+                            };
+                            collected.ok()
+                        }
+                        _ => None,
+                    };
+                    let synth_text = model_normalize::sanitize_model_text(
+                        body.as_ref()
+                            .and_then(|b| b.get("choices"))
+                            .and_then(|c| c.get(0))
+                            .and_then(|c| c.get("message"))
+                            .and_then(|m| m.get("content"))
+                            .and_then(|c| c.as_str())
+                            .unwrap_or(""),
+                    );
+                    if synth_text.trim().is_empty() {
+                        // Synthesis failed → fall through to the model loop (nothing was
+                        // streamed, so no double answer).
+                        if verbose_debug() {
+                            eprintln!("[drive] ADR0020 chat synthesis empty → model-loop fallback");
+                        }
+                    } else {
+                        // Prepend the canonical plan marker so the chat UI shows the
+                        // steps and their per-step status (what the driver did) and the
+                        // committed message persists it (collapse keeps one block).
+                        let final_text = collapse_plan_markers(&format!(
+                            "‹‹PLAN››{}‹‹/PLAN››\n{}",
+                            build_plan_markdown(&plan_steps),
+                            synth_text
+                        ));
+                        let _ = emit_stream_event(
+                            &tx,
+                            GenerateStreamEvent::Done {
+                                text: final_text.clone(),
+                                metrics: TokenMetrics::zero(),
+                                redacted_user_text: None,
+                            },
+                        )
+                        .await;
+                        // Post-turn memory + resume cleanup (mirror the model loop's tail),
+                        // since this branch returns early and skips the loop.
+                        if !read_only {
+                            let learn_state = state_owned.clone();
+                            let learn_user = memory_user_message.clone();
+                            let learn_answer = final_text.clone();
+                            let learn_thread = thread_id.clone();
+                            let learn_prev = memory_prev_assistant.clone();
+                            tokio::spawn(async move {
+                                learn_via_service_or_inline(
+                                    &learn_state,
+                                    &learn_user,
+                                    &learn_answer,
+                                    "",
+                                    learn_thread.as_deref(),
+                                    None,
+                                    learn_prev.as_deref(),
+                                )
+                                .await;
+                            });
+                        }
+                        tx.entry
+                            .finished
+                            .store(true, std::sync::atomic::Ordering::Relaxed);
+                        schedule_stream_registry_cleanup(resume_id.clone());
+                        return;
+                    }
+                }
+                Ok(Ok(None)) => {
+                    if verbose_debug() {
+                        eprintln!("[drive] ADR0020 no answer → model-loop fallback");
+                    }
+                }
+                Ok(Err(error)) => {
+                    if verbose_debug() {
+                        eprintln!("[drive] ADR0020 failed → model-loop fallback: {error}");
+                    }
+                }
+                Err(join) => {
+                    if verbose_debug() {
+                        eprintln!("[drive] ADR0020 task panicked → model loop: {join}");
+                    }
+                }
+            }
         }
         // F2 verification gate: the running evidence (tool name → result snippet) for the
         // CURRENT plan step, fed to the verifier when the model marks the step done, then
@@ -19321,6 +23506,12 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
         // first navigate on a not-yet-opened id Opens it, later ones Navigate.
         let mut current_target: String = "chat_0".to_string();
         let mut opened_targets: Vec<String> = Vec::new();
+        // Per-URL navigation failure counter for THIS turn: when the model keeps hitting
+        // the same dead URL (the observed "navigate FIFA page 7× then loop" case), the
+        // harness nudges it to STOP retrying and pivot to a web search (caposaldo #2 —
+        // the harness owns recovery, the weak model won't pivot on its own).
+        let mut nav_failures: std::collections::HashMap<String, u32> =
+            std::collections::HashMap::new();
         // Fresh terminal buffer for this request; the computer panel shows the
         // CLI commands + output run during THIS response.
         sandbox_clear(thread_id.clone());
@@ -19398,7 +23589,14 @@ gathered‹‹/ACT››"
             // tool_choice:"none" — minimax-via-Ollama ignores it and keeps calling
             // tools, so the loop never synthesizes and ends with "limite di passi").
             // Omitting the tools field forces a text answer.
-            let is_final_round = round + 1 >= max_rounds;
+            // Measure the "final round" from the LAST PROGRESS (per-step budget), NOT the
+            // total round count — same basis as the `break` above. Using total `round` here
+            // was a bug: a long but STEADILY PROGRESSING plan (e.g. a 5-step browse) hit
+            // is_final_round at round 32 and got force-synthesized MID-PLAN, ending the turn
+            // incomplete so the user had to keep typing "continua". Now the turn only forces a
+            // final answer when a SINGLE step stalls for the whole budget (or the 600-round
+            // hard ceiling) — so the harness drives the task end-to-end on its own.
+            let is_final_round = rounds_since_progress + 1 >= max_rounds;
             // Final round: tools are omitted so the model MUST answer in text. Without an
             // explicit directive a model that was mid-browse writes a TRANSITION note
             // ("now I'll compose the briefing", "I'll update the plan") instead of the
@@ -19613,7 +23811,9 @@ check/update the key in Settings → Model & Runtime."
                                             })
                                         })
                                         .or_else(|| {
-                                            v.get("message").and_then(|m| m.as_str()).map(str::to_string)
+                                            v.get("message")
+                                                .and_then(|m| m.as_str())
+                                                .map(str::to_string)
                                         })
                                 })
                                 .map(|s| s.trim().to_string())
@@ -19756,11 +23956,11 @@ check/update the key in Settings → Model & Runtime."
                                 .map(String::from)
                         })
                         .collect();
-                    let parsed = parse_text_tool_calls(&raw_content, &known);
+                    let parsed = model_normalize::parse_text_tool_calls(&raw_content, &known);
                     if parsed.is_empty() {
                         None
                     } else {
-                        Some(synthesize_tool_calls(round, parsed))
+                        Some(model_normalize::synthesize_tool_calls(round, parsed))
                     }
                 });
 
@@ -19810,7 +24010,69 @@ check/update the key in Settings → Model & Runtime."
                 // Set when a write tool needs confirmation: we stop the loop and let
                 // the user run it from the card instead of looping/hallucinating.
                 let mut pending_confirm = false;
-                for call in &calls {
+                // Bundle the turn-level state the dispatch loop touches into `ctx` so
+                // the loop body addresses it via `ctx.<field>` (the seam a later refactor
+                // extracts into a function). Built once per round; its block ends right
+                // after the dispatch loop so the borrows release before the post-loop
+                // reads (screenshot push, `if pending_confirm`) touch the raw locals.
+                {
+                    let mut ctx = ChatToolCtx {
+                        messages: &mut messages,
+                        accumulated: &mut accumulated,
+                        browser_session: &mut browser_session,
+                        browser_used: &mut browser_used,
+                        last_snapshot: &mut last_snapshot,
+                        pending_browser_image: &mut pending_browser_image,
+                        browser_tool_call_ids: &mut browser_tool_call_ids,
+                        current_target: &mut current_target,
+                        opened_targets: &mut opened_targets,
+                        nav_failures: &mut nav_failures,
+                        browse_sources: &mut browse_sources,
+                        plan: &mut plan,
+                        step_evidence: &mut step_evidence,
+                        tool_trace: &mut tool_trace,
+                        loaded_tools: &mut loaded_tools,
+                        tool_schemas: &mut tool_schemas,
+                        last_round_sig: &mut last_round_sig,
+                        repeat_count: &mut repeat_count,
+                        progress_anchor_round: &mut progress_anchor_round,
+                        pending_compaction: &mut pending_compaction,
+                        pending_vault_reveal_marker: &mut pending_vault_reveal_marker,
+                        pending_confirm: &mut pending_confirm,
+                        base_url: &mut base_url,
+                        model: &mut model,
+                        api_key: &mut api_key,
+                        endpoint: &mut endpoint,
+                        state: &state_owned,
+                        tx: &tx,
+                        thread_id: thread_id.as_deref(),
+                        prompt: &prompt,
+                        request: &request,
+                        read_only,
+                        channel_owner,
+                        contact_only,
+                        can_see_contacts,
+                        can_see_calendar,
+                        autonomous,
+                        composio_writes: &composio_writes,
+                        catalog_index: &catalog_index,
+                        capability_corpus: &capability_corpus,
+                        automation_user_id: &automation_user_id,
+                        automation_workspace_id: &automation_workspace_id,
+                        turn_scaffold: &turn_scaffold,
+                        floor_acting,
+                        round,
+                    };
+                for (idx, call) in calls.iter().enumerate() {
+                    // Parity-harness snapshots (see `tool_trace_dump`): capture the
+                    // pre-dispatch state so the record built after the tool push can
+                    // measure the deltas. Zero cost beyond three cheap reads when the
+                    // dump is disarmed; the record itself is fully gated below.
+                    // `pc_before` lets us attribute `pending_confirm` to the call that
+                    // RAISED it (the flag lives outside the loop and is never reset).
+                    let acc_before = ctx.accumulated.len();
+                    let msgs_before = ctx.messages.len();
+                    let pc_before = *ctx.pending_confirm;
                     let name = call
                         .get("function")
                         .and_then(|f| f.get("name"))
@@ -19826,3086 +24088,87 @@ check/update the key in Settings → Model & Runtime."
                         .and_then(|i| i.as_str())
                         .unwrap_or("")
                         .to_string();
+                    // Recover a typo'd native browser tool name (e.g. "browser_tavigate")
+                    // BEFORE dispatch, so it matches the native browser arm instead of
+                    // falling through to the Composio catch-all (404 → model loops). The
+                    // `browser_` namespace is reserved for native tools. No-op for any
+                    // non-browser tool name.
+                    let name = match resolve_browser_chat_tool_name(name) {
+                        Some(canonical) => canonical,
+                        None => name,
+                    };
 
                     if let Some(blocked) =
                         workflow_route_blocked_tool_message(&capability_route_for_runtime, name)
                     {
-                        messages.push(serde_json::json!({
+                        // Parity harness: the blocked arm pushes a tool message then
+                        // `continue`s, jumping over the normal record block below. The
+                        // upcoming extraction handles this arm specially, so it MUST be
+                        // visible to the oracle — emit a record here with `blocked:true`.
+                        // Compute the `blocked`-derived fingerprint fields BEFORE the
+                        // push moves `blocked` into the message. Fully gated → no cost
+                        // when disarmed.
+                        let blocked_trace = if crate::tool_trace_dump::dump_enabled() {
+                            let normalized = crate::tool_trace_dump::normalize(&blocked);
+                            Some((
+                                crate::tool_trace_dump::hash_hex(
+                                    &crate::tool_trace_dump::normalize(args_raw),
+                                ),
+                                crate::tool_trace_dump::hash_hex(&normalized),
+                                blocked.chars().count(),
+                                normalized.chars().take(120).collect::<String>(),
+                            ))
+                        } else {
+                            None
+                        };
+                        ctx.messages.push(serde_json::json!({
                             "role": "tool",
                             "tool_call_id": call_id,
                             "content": blocked,
                         }));
+                        if let Some((args_hash, result_hash, result_len, result_head)) =
+                            blocked_trace
+                        {
+                            let rec = crate::tool_trace_dump::ToolTraceRecord {
+                                round: ctx.round,
+                                idx,
+                                name: name.to_string(),
+                                args_hash,
+                                result_hash,
+                                result_len,
+                                result_head,
+                                acc_delta_len: ctx.accumulated.len().saturating_sub(acc_before),
+                                acc_markers: crate::tool_trace_dump::extract_markers(
+                                    acc_before,
+                                    ctx.accumulated,
+                                ),
+                                pending_confirm_raised: *ctx.pending_confirm && !pc_before,
+                                msgs_pushed: ctx.messages.len().saturating_sub(msgs_before),
+                                blocked: true,
+                                browser_image_set: ctx.pending_browser_image.is_some(),
+                            };
+                            if let Ok(dir) = gateway_logs_dir() {
+                                crate::tool_trace_dump::append(&dir, &rec);
+                            }
+                        }
                         continue;
                     }
 
                     // Record consequential actions (any domain) for decision memory.
-                    if tool_trace.len() < 20 {
+                    if ctx.tool_trace.len() < 20 {
                         if let Some(line) = summarize_tool_action(name, args_raw) {
-                            tool_trace.push(line);
+                            ctx.tool_trace.push(line);
                         } else if let Some(line) =
-                            connected_capability_execution_trace_line(name, &catalog_index)
+                            connected_capability_execution_trace_line(name, ctx.catalog_index)
                         {
-                            tool_trace.push(line);
-                        } else if composio_writes.contains(name) {
+                            ctx.tool_trace.push(line);
+                        } else if ctx.composio_writes.contains(name) {
                             // A write on a connected service (Composio/MCP).
-                            tool_trace.push(format!("capability execution connector:{name}"));
+                            ctx.tool_trace.push(format!("capability execution connector:{name}"));
                         }
                     }
 
-                    let result = if read_only
-                        && matches!(
-                            name,
-                            "run_in_sandbox"
-                                | "create_artifact"
-                                | "generate_image"
-                                | "save_artifact"
-                                | "read_file"
-                                | "write_file"
-                                | "edit_file"
-                                | "list_files"
-                                | "run_in_project"
-                                | "schedule_task"
-                                | "cancel_scheduled_task"
-                                | "customize_addon"
-                                | "create_skill"
-                        ) {
-                        // Defensive: these aren't offered in read-only mode, but if the
-                        // model calls one anyway, refuse instead of executing.
-                        "Action not available from the channel: operations with effects \
-require your confirmation in the app. Propose it and stop."
-                            .to_string()
-                    } else if matches!(
-                        name,
-                        "browser_navigate"
-                            | "browser_snapshot"
-                            | "browser_act"
-                            | "browser_screenshot"
-                            | "browser_tabs"
-                            | "browser_dialog"
-                    ) {
-                        // Granular browser tools (HOMUN_CHAT_BROWSER_GRANULAR):
-                        // the main agent drives the browser one micro-action at a
-                        // time against a per-turn session.
-                        let args: serde_json::Value = serde_json::from_str(args_raw)
-                            .unwrap_or_else(|_| serde_json::json!({}));
-                        // First browser tool this turn: mark used (raises round
-                        // budget), publish live activity, acquire the session
-                        // (reuse the thread's warm one, else spawn a chat sidecar).
-                        if !browser_used {
-                            browser_used = true;
-                            begin_browser_activity(prompt.clone(), thread_id.clone());
-                            // Honor an EXPLICIT "browser" role: switch the driver
-                            // model for the rest of this (browsing) turn. Skipped
-                            // when the user forced a per-message model override.
-                            let has_msg_override = request
-                                .model
-                                .as_deref()
-                                .map(|m| !m.trim().is_empty())
-                                .unwrap_or(false);
-                            if !has_msg_override {
-                                if let Some((b_url, b_model, b_key)) =
-                                    browser_openai_stream_config()
-                                {
-                                    if b_model != model || b_url != base_url {
-                                        let _ = emit_stream_event(
-                                            &tx,
-                                            GenerateStreamEvent::Delta {
-                                                text: format!(
-                                                    "‹‹ACT››🧠 Passo al modello browser: {b_model}‹‹/ACT››"
-                                                ),
-                                            },
-                                        )
-                                        .await;
-                                        base_url = b_url;
-                                        model = b_model;
-                                        api_key = b_key;
-                                        // Provider-aware endpoint: an Ollama-based
-                                        // browser role needs native /api/chat — the
-                                        // old hardcoded "/chat/completions" sent
-                                        // NATIVE-shaped payloads (object arguments)
-                                        // to the strict /v1 endpoint → 400 on every
-                                        // mid-turn model switch (task #105).
-                                        endpoint = chat_endpoint(&base_url);
-                                    }
-                                }
-                            }
-                        }
-                        if browser_session.is_none() {
-                            let reused = match thread_id.as_deref() {
-                                Some(t) => {
-                                    let st = state_owned.clone();
-                                    let t = t.to_string();
-                                    tokio::task::spawn_blocking(move || {
-                                        take_thread_browser_session(&st, &t)
-                                    })
-                                    .await
-                                    .ok()
-                                    .flatten()
-                                }
-                                None => None,
-                            };
-                            // A reused session already has the "chat_0" tab open;
-                            // mark it opened so navigate reuses it (Navigate, not
-                            // Open). A fresh session has no tabs yet.
-                            if reused.is_some() && !opened_targets.iter().any(|t| t == "chat_0") {
-                                opened_targets.push("chat_0".to_string());
-                            }
-                            match reused {
-                                Some(existing) => browser_session = Some(existing),
-                                None => {
-                                    // Self-heal: a wedged contained-computer CDP makes the
-                                    // sidecar's connectOverCDP time out. Health-check BEFORE
-                                    // connecting; and if the spawn/connect fails anyway (a
-                                    // race, or a container that wedged after the check),
-                                    // recycle + recreate and retry once — resolve the block
-                                    // automatically instead of reporting "non disponibile".
-                                    if !browser_cdp_ok(&state_owned).await {
-                                        let _ = emit_stream_event(
-                                            &tx,
-                                            GenerateStreamEvent::Delta {
-                                                text: "‹‹ACT››🔧 Browser stuck: restarting the contained computer…‹‹/ACT››".to_string(),
-                                            },
-                                        )
-                                        .await;
-                                        ensure_browser_cdp_healthy(&state_owned).await;
-                                    }
-                                    for attempt in 0u8..2 {
-                                        let st = state_owned.clone();
-                                        let spawned = tokio::task::spawn_blocking(move || {
-                                            spawn_browser_sidecar_for_chat(&st)
-                                        })
-                                        .await;
-                                        match spawned {
-                                            Ok(Ok(session)) => {
-                                                browser_session =
-                                                    Some(BrowserAutomationClient::new(session));
-                                                break;
-                                            }
-                                            // First failure → recycle the container + retry.
-                                            _ if attempt == 0 => {
-                                                let _ = emit_stream_event(
-                                                    &tx,
-                                                    GenerateStreamEvent::Delta {
-                                                        text: "‹‹ACT››🔧 Browser unreachable: restarting and retrying…‹‹/ACT››".to_string(),
-                                                    },
-                                                )
-                                                .await;
-                                                ensure_browser_cdp_healthy(&state_owned).await;
-                                            }
-                                            // Second failure → give up; reported below.
-                                            _ => {}
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        // Mark this tool result as carrying a (potentially large)
-                        // snapshot so the pruner stubs older ones.
-                        browser_tool_call_ids.insert(call_id.clone());
-                        // We hold the session for the duration of this branch; the
-                        // GLOBAL lock is acquired only around each single call.
-                        let outcome: Result<String, String> = match browser_session.take() {
-                            None => {
-                                push_browser_step(
-                                    "browser: session unavailable".to_string(),
-                                    "error",
-                                );
-                                Err("Browser unavailable: the contained-computer browser (a headless \
-Chromium in a Docker container, driven over CDP — there is NO local browser binary) did not start. \
-Usually transient, or the contained computer isn't running yet. Do NOT look for a local \
-chromium/firefox install and do NOT conclude Chromium is missing or that it's a known bug. Retry, \
-or tell the user to start the contained computer (Settings → Local computer)."
-                                    .to_string())
-                            }
-                            Some(client) => match name {
-                                "browser_navigate" => {
-                                    // Multi-tab: an explicit `target` switches the current
-                                    // tab; `new_tab` allocates a fresh chat_N id (so the
-                                    // logic below treats it as not-yet-opened → Open).
-                                    if let Some(t) = args.get("target").and_then(|v| v.as_str()) {
-                                        if !t.trim().is_empty() {
-                                            current_target = t.to_string();
-                                        }
-                                    }
-                                    if args
-                                        .get("new_tab")
-                                        .and_then(|v| v.as_bool())
-                                        .unwrap_or(false)
-                                    {
-                                        current_target = format!("chat_{}", opened_targets.len());
-                                    }
-                                    let url = args
-                                        .get("url")
-                                        .and_then(|v| v.as_str())
-                                        .unwrap_or("")
-                                        .to_string();
-                                    if url.trim().is_empty() {
-                                        browser_session = Some(client);
-                                        Err("Missing URL for browser_navigate.".to_string())
-                                    } else {
-                                        let _ = emit_stream_event(
-                                            &tx,
-                                            GenerateStreamEvent::Delta {
-                                                text: format!("‹‹ACT››🌐 Opening {url}‹‹/ACT››"),
-                                            },
-                                        )
-                                        .await;
-                                        let guard = browse_web_lock().lock().await;
-                                        // Open the current tab the first time, then Navigate.
-                                        let already_open =
-                                            opened_targets.iter().any(|t| t == &current_target);
-                                        let (open_method, open_params) = if already_open {
-                                            (
-                                                BrowserMethod::Navigate,
-                                                serde_json::json!({
-                                                    "target_id": current_target.as_str(),
-                                                    "url": url,
-                                                }),
-                                            )
-                                        } else {
-                                            (
-                                                BrowserMethod::Open,
-                                                serde_json::json!({
-                                                    "url": url,
-                                                    "label": current_target.as_str(),
-                                                }),
-                                            )
-                                        };
-                                        let (client_back, nav_res) =
-                                            chat_browser_call(client, open_method, open_params)
-                                                .await;
-                                        let nav_err = nav_res.err();
-                                        // Navigate/Open return no snapshot → snapshot now.
-                                        let mut client_now = client_back;
-                                        let snap_result = if nav_err.is_none() {
-                                            if let Some(c) = client_now.take() {
-                                                let (c2, snap) = chat_browser_call(
-                                                    c,
-                                                    BrowserMethod::Snapshot,
-                                                    browser_chat_snapshot_params(
-                                                        current_target.as_str(),
-                                                    ),
-                                                )
-                                                .await;
-                                                client_now = c2;
-                                                snap
-                                            } else {
-                                                Err("session lost after navigation".to_string())
-                                            }
-                                        } else {
-                                            Err(nav_err.clone().unwrap_or_default())
-                                        };
-                                        drop(guard);
-                                        browser_session = client_now;
-                                        // Mark this tab opened once the Open/Navigate succeeds.
-                                        if nav_err.is_none()
-                                            && !opened_targets.iter().any(|t| t == &current_target)
-                                        {
-                                            opened_targets.push(current_target.clone());
-                                        }
-                                        match (nav_err, snap_result) {
-                                            (Some(error), _) => {
-                                                push_browser_step(
-                                                    format!("navigate {url}"),
-                                                    "error",
-                                                );
-                                                Err(format!("Navigation failed: {error}"))
-                                            }
-                                            (None, Ok(value)) => {
-                                                let snap = browser_snapshot_text(&value);
-                                                if !snap.is_empty() {
-                                                    last_snapshot = snap.clone();
-                                                }
-                                                push_browser_step(
-                                                    format!("navigate {url}"),
-                                                    "done",
-                                                );
-                                                let page_url = value
-                                                    .get("url")
-                                                    .and_then(|u| u.as_str())
-                                                    .unwrap_or(url.as_str());
-                                                Ok(format!(
-                                                    "Page opened ({page_url}). Snapshot:\n{snap}"
-                                                ))
-                                            }
-                                            (None, Err(error)) => {
-                                                push_browser_step(
-                                                    format!("navigate {url}"),
-                                                    "error",
-                                                );
-                                                Err(format!(
-                                                    "Page opened but snapshot failed: {error}"
-                                                ))
-                                            }
-                                        }
-                                    }
-                                }
-                                "browser_snapshot" => {
-                                    if let Some(t) = args.get("target").and_then(|v| v.as_str()) {
-                                        if !t.trim().is_empty() {
-                                            current_target = t.to_string();
-                                        }
-                                    }
-                                    let _ = emit_stream_event(
-                                        &tx,
-                                        GenerateStreamEvent::Delta {
-                                            text: "‹‹ACT››👁️ Re-reading the page‹‹/ACT››"
-                                                .to_string(),
-                                        },
-                                    )
-                                    .await;
-                                    let guard = browse_web_lock().lock().await;
-                                    let (client_back, snap) = chat_browser_call(
-                                        client,
-                                        BrowserMethod::Snapshot,
-                                        browser_chat_snapshot_params(current_target.as_str()),
-                                    )
-                                    .await;
-                                    drop(guard);
-                                    browser_session = client_back;
-                                    match snap {
-                                        Ok(value) => {
-                                            let snap = browser_snapshot_text(&value);
-                                            if !snap.is_empty() {
-                                                last_snapshot = snap.clone();
-                                            }
-                                            push_browser_step("snapshot".to_string(), "done");
-                                            Ok(format!("Page snapshot:\n{snap}"))
-                                        }
-                                        Err(error) => {
-                                            push_browser_step("snapshot".to_string(), "error");
-                                            Err(format!("Snapshot failed: {error}"))
-                                        }
-                                    }
-                                }
-                                "browser_act" => {
-                                    // Build the action the sidecar runs (and the safety gate
-                                    // inspects), coercing a common model mistake that otherwise
-                                    // dead-ends in a retry loop: an element ref (e83) passed as
-                                    // `target` — which is a TAB id, so the sidecar errors "tab
-                                    // not found: e83". Re-route a ref-shaped target into `ref`
-                                    // (when none was given) instead of switching to a missing tab.
-                                    let mut action = args.clone();
-                                    let target_arg =
-                                        args.get("target").and_then(|v| v.as_str()).map(str::to_string);
-                                    let has_ref = action
-                                        .get("ref")
-                                        .and_then(|v| v.as_str())
-                                        .is_some_and(|r| !r.trim().is_empty());
-                                    let target_is_ref = target_arg.as_deref().is_some_and(|t| {
-                                        t.len() >= 2
-                                            && t.starts_with('e')
-                                            && t[1..].chars().all(|c| c.is_ascii_digit())
-                                    });
-                                    if let Some(obj) = action.as_object_mut() {
-                                        if target_is_ref && !has_ref {
-                                            if let Some(t) = target_arg.clone() {
-                                                obj.insert("ref".to_string(), serde_json::Value::String(t));
-                                            }
-                                            obj.remove("target");
-                                        } else if let Some(t) = target_arg.as_deref() {
-                                            if !t.trim().is_empty() {
-                                                current_target = t.to_string();
-                                            }
-                                        }
-                                        obj.insert(
-                                            "target_id".to_string(),
-                                            serde_json::Value::String(current_target.clone()),
-                                        );
-                                    }
-                                    // SAFETY GATE: high-risk (buy/login/booking, or
-                                    // evaluate) is refused for EVERYONE. In read-only
-                                    // (channel) turns any committing action is also
-                                    // refused — EXCEPT when the sender is the OWNER
-                                    // (is_self card): that block protects the user from
-                                    // other people, not from their own requests (e.g.
-                                    // clicking "Cerca" on a train search they asked for).
-                                    let blocked = browser_safety::high_risk_reason(&action, &last_snapshot)
-                                    .or_else(|| {
-                                        if read_only
-                                            && !channel_owner
-                                            && browser_safety::is_committing_action(&action)
-                                        {
-                                            Some(
-                                                "action that confirms/submits is not allowed from the channel"
-                                                    .to_string(),
-                                            )
-                                        } else {
-                                            None
-                                        }
-                                    });
-                                    if let Some(reason) = blocked {
-                                        eprintln!("browser-gate: BLOCKED ({reason})");
-                                        browser_session = Some(client);
-                                        push_browser_step(
-                                            format!(
-                                                "action blocked: {}",
-                                                args.get("kind")
-                                                    .and_then(|k| k.as_str())
-                                                    .unwrap_or("?")
-                                            ),
-                                            "error",
-                                        );
-                                        Err(format!(
-                                            "🚫 action blocked, user confirmation needed: {reason}.{} \
-I did nothing: propose to the user what to do and wait — do NOT retry the same action.",
-                                            browser_act_error_hint(&reason)
-                                        ))
-                                    } else {
-                                        let kind = args
-                                            .get("kind")
-                                            .and_then(|k| k.as_str())
-                                            .unwrap_or("action")
-                                            .to_string();
-                                        let _ = emit_stream_event(
-                                            &tx,
-                                            GenerateStreamEvent::Delta {
-                                                text: format!(
-                                                    "‹‹ACT››✋ {kind} on the page‹‹/ACT››"
-                                                ),
-                                            },
-                                        )
-                                        .await;
-                                        let guard = browse_web_lock().lock().await;
-                                        let (client_back, act_res) =
-                                            chat_browser_call(client, BrowserMethod::Act, action)
-                                                .await;
-                                        drop(guard);
-                                        browser_session = client_back;
-                                        match act_res {
-                                            Ok(value) => {
-                                                let snap = browser_snapshot_text(&value);
-                                                // No-progress detection: if the action left
-                                                // the page identical, nudge the model to try
-                                                // a different element/approach instead of
-                                                // repeating the same move.
-                                                let no_change =
-                                                    !snap.is_empty() && snap == last_snapshot;
-                                                if !snap.is_empty() {
-                                                    last_snapshot = snap.clone();
-                                                }
-                                                push_browser_step(format!("{kind}"), "done");
-                                                let mut out = if snap.is_empty() {
-                                                    "Action performed.".to_string()
-                                                } else {
-                                                    format!(
-                                                        "Action performed. Updated snapshot:\n{snap}"
-                                                    )
-                                                };
-                                                if no_change {
-                                                    out.push_str(
-                                                    "\n[note: the page did NOT change from before — \
-don't repeat the same action; try a different element, scroll, or wait (kind=wait).]",
-                                                );
-                                                }
-                                                if let Some(committed) =
-                                                    value.get("committedOption")
-                                                {
-                                                    out.push_str(&format!(
-                                                        "\n[automatic selection: {committed}]"
-                                                    ));
-                                                }
-                                                if let Some(sugg) = value.get("suggestions") {
-                                                    out.push_str(&format!(
-                                                        "\n[suggestions: {sugg}]"
-                                                    ));
-                                                }
-                                                // Guardrail (advisory, Layer C.3): if the model just
-                                                // typed/filled a date that is in the PAST, nudge it to
-                                                // re-resolve via resolve_datetime instead of submitting.
-                                                // Advisory (not a hard block) because some past dates are
-                                                // legitimate (birthdays, historical lookups).
-                                                if matches!(
-                                                    args.get("kind").and_then(|k| k.as_str()),
-                                                    Some("type") | Some("fill")
-                                                ) {
-                                                    if let Some(typed) =
-                                                        args.get("text").and_then(|t| t.as_str())
-                                                    {
-                                                        if let Some(hint) = past_date_hint(typed) {
-                                                            out.push_str(&hint);
-                                                        }
-                                                    }
-                                                }
-                                                Ok(out)
-                                            }
-                                            Err(error) => {
-                                                push_browser_step(format!("{kind}"), "error");
-                                                // DIAG (HOMUN_DEBUG): what the model tried + why it
-                                                // failed, to root-cause the repeated browser_act loop.
-                                                if verbose_debug() {
-                                                    eprintln!(
-                                                        "[browser_act] kind={kind} ref={:?} selector={:?} text={:?} → ERROR: {}",
-                                                        args.get("ref").and_then(|v| v.as_str()),
-                                                        args.get("selector").and_then(|v| v.as_str()),
-                                                        args.get("text").and_then(|v| v.as_str()),
-                                                        error.chars().take(220).collect::<String>()
-                                                    );
-                                                }
-                                                // Stale-ref auto-recovery: the page changed under us
-                                                // so the [ref=eN] is gone. Instead of just erroring
-                                                // (forcing the model to spend a round re-snapshotting),
-                                                // take a fresh snapshot NOW and hand it back so it
-                                                // retries with new refs in the same round.
-                                                let stale = {
-                                                    let e = error.to_lowercase();
-                                                    e.contains("stale") || e.contains("detached")
-                                                };
-                                                match (stale, browser_session.take()) {
-                                                    (true, Some(c)) => {
-                                                        let guard = browse_web_lock().lock().await;
-                                                        let (c_back, snap_res) = chat_browser_call(
-                                                            c,
-                                                            BrowserMethod::Snapshot,
-                                                            browser_chat_snapshot_params(
-                                                                current_target.as_str(),
-                                                            ),
-                                                        )
-                                                        .await;
-                                                        drop(guard);
-                                                        browser_session = c_back;
-                                                        let snap = snap_res
-                                                            .as_ref()
-                                                            .map(browser_snapshot_text)
-                                                            .unwrap_or_default();
-                                                        if snap.is_empty() {
-                                                            Err(format!("Action failed: {error}{}", browser_act_error_hint(&error)))
-                                                        } else {
-                                                            last_snapshot = snap.clone();
-                                                            Ok(format!(
-                                                                "⚠ The reference had expired (the page \
-changed). I took a fresh snapshot — retry the action with the NEW [ref=...]:\n{snap}"
-                                                            ))
-                                                        }
-                                                    }
-                                                    (_, restored) => {
-                                                        browser_session = restored;
-                                                        Err(format!("Action failed: {error}{}", browser_act_error_hint(&error)))
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                                "browser_screenshot" => {
-                                    if let Some(t) = args.get("target").and_then(|v| v.as_str()) {
-                                        if !t.trim().is_empty() {
-                                            current_target = t.to_string();
-                                        }
-                                    }
-                                    let full_page = args
-                                        .get("full_page")
-                                        .and_then(|v| v.as_bool())
-                                        .unwrap_or(false);
-                                    let marks = args
-                                        .get("marks")
-                                        .and_then(|v| v.as_bool())
-                                        .unwrap_or(false);
-                                    let _ = emit_stream_event(
-                                        &tx,
-                                        GenerateStreamEvent::Delta {
-                                            text: "‹‹ACT››📸 Capturing a screenshot‹‹/ACT››"
-                                                .to_string(),
-                                        },
-                                    )
-                                    .await;
-                                    let file_name =
-                                        format!("chat_shot_{}.png", uuid::Uuid::new_v4().simple());
-                                    let guard = browse_web_lock().lock().await;
-                                    let (client_back, shot_res) = chat_browser_call(
-                                        client,
-                                        BrowserMethod::Screenshot,
-                                        serde_json::json!({
-                                            "target_id": current_target.as_str(),
-                                            "file_name": file_name,
-                                            "full_page": full_page,
-                                            "labels": marks,
-                                        }),
-                                    )
-                                    .await;
-                                    drop(guard);
-                                    browser_session = client_back;
-                                    match shot_res {
-                                        Ok(value) => {
-                                            let path = value
-                                                .get("path")
-                                                .and_then(|p| p.as_str())
-                                                .unwrap_or("")
-                                                .to_string();
-                                            // Set-of-marks legend: map each numbered badge
-                                            // in the image back to the element's ref so the
-                                            // model can act precisely (browser_act ref=eN).
-                                            let legend = value
-                                            .get("marks")
-                                            .and_then(|m| m.as_array())
-                                            .map(|entries| {
-                                                let mut text = String::from(
-                                                    "\nNumbered elements in the screenshot \
-(number = element):",
-                                                );
-                                                for entry in entries {
-                                                    let mark = entry
-                                                        .get("mark")
-                                                        .and_then(|v| v.as_i64())
-                                                        .unwrap_or_default();
-                                                    let role = entry
-                                                        .get("role")
-                                                        .and_then(|v| v.as_str())
-                                                        .unwrap_or("");
-                                                    let name = entry
-                                                        .get("name")
-                                                        .and_then(|v| v.as_str())
-                                                        .unwrap_or("");
-                                                    let ref_id = entry
-                                                        .get("ref")
-                                                        .and_then(|v| v.as_str())
-                                                        .unwrap_or("");
-                                                    text.push_str(&format!(
-                                                        "\n{mark} = {role} \"{name}\" [ref={ref_id}]"
-                                                    ));
-                                                }
-                                                text
-                                            })
-                                            .unwrap_or_default();
-                                            // Read + base64 the PNG. Skip the image (text
-                                            // note only) if missing or too large (~1.5MB
-                                            // encoded ≈ 1.1MB raw).
-                                            match std::fs::read(&path) {
-                                                Ok(bytes) if bytes.len() <= 1_100_000 => {
-                                                    let encoded =
-                                                        base64::engine::general_purpose::STANDARD
-                                                            .encode(&bytes);
-                                                    let dataurl =
-                                                        format!("data:image/png;base64,{encoded}");
-                                                    pending_browser_image = Some(dataurl);
-                                                    push_browser_step(
-                                                        "screenshot".to_string(),
-                                                        "done",
-                                                    );
-                                                    Ok(format!(
-                                                        "Screenshot captured (see the image attached \
-below).{legend}"
-                                                    ))
-                                                }
-                                                Ok(bytes) => {
-                                                    push_browser_step(
-                                                        "screenshot".to_string(),
-                                                        "done",
-                                                    );
-                                                    Ok(format!(
-                                                        "Screenshot captured but too large for \
-the preview ({} bytes). Proceed with the text snapshot.",
-                                                        bytes.len()
-                                                    ))
-                                                }
-                                                Err(error) => {
-                                                    push_browser_step(
-                                                        "screenshot".to_string(),
-                                                        "error",
-                                                    );
-                                                    Ok(format!(
-                                                        "Screenshot not readable from disk: {error}. \
-Use the text snapshot."
-                                                    ))
-                                                }
-                                            }
-                                        }
-                                        Err(error) => {
-                                            push_browser_step("screenshot".to_string(), "error");
-                                            Err(format!("Screenshot failed: {error}"))
-                                        }
-                                    }
-                                }
-                                "browser_tabs" => {
-                                    let _ = emit_stream_event(
-                                        &tx,
-                                        GenerateStreamEvent::Delta {
-                                            text: "‹‹ACT››🗂️ Listing tabs‹‹/ACT››".to_string(),
-                                        },
-                                    )
-                                    .await;
-                                    let guard = browse_web_lock().lock().await;
-                                    let (client_back, tabs_res) = chat_browser_call(
-                                        client,
-                                        BrowserMethod::Tabs,
-                                        serde_json::json!({}),
-                                    )
-                                    .await;
-                                    drop(guard);
-                                    browser_session = client_back;
-                                    match tabs_res {
-                                        Ok(value) => {
-                                            // Sidecar shape: { tabs: [ { targetId, url,
-                                            // label?, title? } ] }. Parse defensively in
-                                            // case it's a bare array or uses target_id/id.
-                                            let list = value
-                                                .get("tabs")
-                                                .and_then(|t| t.as_array())
-                                                .or_else(|| value.as_array())
-                                                .cloned()
-                                                .unwrap_or_default();
-                                            let mut lines: Vec<String> = Vec::new();
-                                            for tab in &list {
-                                                let id = tab
-                                                    .get("targetId")
-                                                    .or_else(|| tab.get("target_id"))
-                                                    .or_else(|| tab.get("id"))
-                                                    .and_then(|v| v.as_str())
-                                                    .unwrap_or("?");
-                                                let url = tab
-                                                    .get("url")
-                                                    .and_then(|v| v.as_str())
-                                                    .unwrap_or("");
-                                                let title = tab
-                                                    .get("title")
-                                                    .or_else(|| tab.get("label"))
-                                                    .and_then(|v| v.as_str())
-                                                    .unwrap_or("");
-                                                let mut line = format!("- {id}");
-                                                if !url.is_empty() {
-                                                    line.push_str(&format!(" | {url}"));
-                                                }
-                                                if !title.is_empty() {
-                                                    line.push_str(&format!(" | {title}"));
-                                                }
-                                                lines.push(line);
-                                            }
-                                            push_browser_step("tabs".to_string(), "done");
-                                            if lines.is_empty() {
-                                                Ok("No tabs open.".to_string())
-                                            } else {
-                                                Ok(format!("Open tabs:\n{}", lines.join("\n")))
-                                            }
-                                        }
-                                        Err(error) => {
-                                            push_browser_step("tabs".to_string(), "error");
-                                            Err(format!("Listing tabs failed: {error}"))
-                                        }
-                                    }
-                                }
-                                "browser_dialog" => {
-                                    // Native alert/confirm/prompt blocks the page until
-                                    // answered. In read-only (channel) turns we only allow
-                                    // DISMISS, never accept (an accept could confirm an
-                                    // action). The dialog message is returned so the model
-                                    // sees what it answered.
-                                    let accept = !read_only
-                                        && args
-                                            .get("accept")
-                                            .and_then(|v| v.as_bool())
-                                            .unwrap_or(false);
-                                    let prompt_text = args
-                                        .get("prompt_text")
-                                        .and_then(|v| v.as_str())
-                                        .unwrap_or("");
-                                    let _ = emit_stream_event(
-                                        &tx,
-                                        GenerateStreamEvent::Delta {
-                                            text: format!(
-                                                "‹‹ACT››💬 Dialog: {}‹‹/ACT››",
-                                                if accept { "confirming" } else { "cancelling" }
-                                            ),
-                                        },
-                                    )
-                                    .await;
-                                    let guard = browse_web_lock().lock().await;
-                                    let (client_back, dialog_res) = chat_browser_call(
-                                        client,
-                                        BrowserMethod::RespondDialog,
-                                        serde_json::json!({
-                                            "target_id": current_target.as_str(),
-                                            "accept": accept,
-                                            "promptText": prompt_text,
-                                            "timeoutMs": 5_000,
-                                        }),
-                                    )
-                                    .await;
-                                    drop(guard);
-                                    browser_session = client_back;
-                                    match dialog_res {
-                                        Ok(value) => {
-                                            let msg = value
-                                                .get("message")
-                                                .and_then(|m| m.as_str())
-                                                .unwrap_or("");
-                                            push_browser_step("dialog".to_string(), "done");
-                                            Ok(format!(
-                                                "Dialog {} (message: \"{msg}\"). Re-read the page with browser_snapshot.",
-                                                if accept { "confirmed" } else { "cancelled" }
-                                            ))
-                                        }
-                                        Err(error) => {
-                                            push_browser_step("dialog".to_string(), "error");
-                                            Err(format!("No dialog to handle or error: {error}"))
-                                        }
-                                    }
-                                }
-                                _ => Err(format!("Unknown browser tool: {name}")),
-                            },
-                        };
-                        match outcome {
-                            Ok(text) => text,
-                            Err(text) => text,
-                        }
-                    } else if name == "github_search" {
-                        // Fast, structured GitHub repo search via the API (no browser).
-                        let query = serde_json::from_str::<serde_json::Value>(args_raw)
-                            .ok()
-                            .and_then(|a| a.get("query").and_then(|v| v.as_str()).map(String::from))
-                            .unwrap_or_default();
-                        if query.trim().is_empty() {
-                            "Empty query.".to_string()
-                        } else {
-                            let _ = emit_stream_event(
-                                &tx,
-                                GenerateStreamEvent::Delta {
-                                    text: format!("‹‹ACT››🔎 Searching GitHub: «{query}»‹‹/ACT››"),
-                                },
-                            )
-                            .await;
-                            github_search(&state_owned, &query).await
-                        }
-                    } else if name == "use_skill" {
-                        // Progressive disclosure L2: load the full SKILL.md so the
-                        // model can follow the skill's instructions.
-                        let id = serde_json::from_str::<serde_json::Value>(args_raw)
-                            .ok()
-                            .and_then(|a| a.get("id").and_then(|v| v.as_str()).map(String::from))
-                            .unwrap_or_default();
-                        // Narrate the skill use with its READABLE name (id → Title Case),
-                        // so the activity stream reads like reasoning: "Uso la skill Code
-                        // Review Discipline" (as Claude Code / Codex do).
-                        let readable = id
-                            .split('-')
-                            .filter(|w| !w.is_empty())
-                            .map(|w| {
-                                let mut chars = w.chars();
-                                match chars.next() {
-                                    Some(first) => {
-                                        first.to_uppercase().collect::<String>() + chars.as_str()
-                                    }
-                                    None => String::new(),
-                                }
-                            })
-                            .collect::<Vec<_>>()
-                            .join(" ");
-                        let _ = emit_stream_event(
-                            &tx,
-                            GenerateStreamEvent::Delta {
-                                text: format!("‹‹ACT››📖 Using the skill «{readable}»‹‹/ACT››"),
-                            },
-                        )
-                        .await;
-                        let id_for_load = id.clone();
-                        match tokio::task::spawn_blocking(move || load_skill_body(&id_for_load))
-                            .await
-                        {
-                            Ok(Some(body)) => format!(
-                                "Instructions for the skill «{id}» (SKILL.md) — FOLLOW THEM with the \
-available tools (for data from the web use the browser: browser_navigate on the indicated URL):\n\n{}",
-                                body.chars().take(8000).collect::<String>()
-                            ),
-                            _ => format!("Skill «{id}» not found or not readable."),
-                        }
-                    } else if name == "run_in_sandbox" {
-                        // Execute a skill command in the contained computer (auto-start
-                        // Docker + container). Blocked if the command trips the security scan.
-                        let parsed = serde_json::from_str::<serde_json::Value>(args_raw)
-                            .unwrap_or_else(|_| serde_json::json!({}));
-                        let command = parsed
-                            .get("command")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string();
-                        let skill_id = parsed
-                            .get("skill_id")
-                            .and_then(|v| v.as_str())
-                            .map(String::from);
-                        if command.trim().is_empty() {
-                            "Empty command.".to_string()
-                        } else {
-                            let scan = skill_security::scan_blobs(&[(
-                                "command".to_string(),
-                                command.clone(),
-                            )]);
-                            if scan.blocked {
-                                format!(
-                                    "Command NOT executed: blocked by the security scan \
-(risk {}/100). Reformulate it without dangerous operations.",
-                                    scan.risk_score
-                                )
-                            } else {
-                                let _ = emit_stream_event(
-                                    &tx,
-                                    GenerateStreamEvent::Delta {
-                                        text: format!(
-                                            "‹‹ACT››🖥️ Running: {}‹‹/ACT››",
-                                            command.chars().take(160).collect::<String>()
-                                        ),
-                                    },
-                                )
-                                .await;
-                                // If Docker is down we auto-start Docker Desktop (cold
-                                // start ~1 min) before running — tell the user so the
-                                // wait doesn't look like a hang.
-                                let docker_up =
-                                    tokio::task::spawn_blocking(sandbox::docker_running)
-                                        .await
-                                        .unwrap_or(false);
-                                if !docker_up {
-                                    let _ = emit_stream_event(
-                                        &tx,
-                                        GenerateStreamEvent::Delta {
-                                            text: "‹‹ACT››🐳 Docker isn't running: starting Docker Desktop and waiting for it to be ready (~1 min)…‹‹/ACT››".to_string(),
-                                        },
-                                    )
-                                    .await;
-                                }
-                                // Publish the command to the computer terminal panel.
-                                sandbox_begin(command.clone(), thread_id.clone());
-                                // Per-conversation output dir: skills save generated
-                                // files to $OUTPUT_DIR, bind-mounted to the host so
-                                // they become downloadable artifacts.
-                                let thread_slug = artifact_thread_slug(thread_id.as_deref());
-                                let container_out = sandbox::container_output_dir(&thread_slug);
-                                let host_out = sandbox::artifacts_dir().join(&thread_slug);
-                                let run_started = std::time::SystemTime::now();
-                                let cmd = format!(
-                                    "export OUTPUT_DIR='{container_out}'; mkdir -p \"$OUTPUT_DIR\"; {command}"
-                                );
-                                // The model may omit skill_id; derive it from the
-                                // command's `/home/agent/skills/<id>/…` path so the
-                                // skill's files are always synced before running.
-                                let sid =
-                                    skill_id.clone().or_else(|| skill_id_from_command(&command));
-                                let outcome = tokio::task::spawn_blocking(move || {
-                                    if let Some(id) = sid.as_deref() {
-                                        if let Ok(dir) = skills_dir() {
-                                            sandbox::sync_skill(&dir.join(id), id);
-                                        }
-                                    }
-                                    sandbox::run_command(&cmd, sid.as_deref())
-                                })
-                                .await;
-                                let (panel_output, mut model_output) = match outcome {
-                                    Ok(Ok(out)) => {
-                                        if out.trim().is_empty() {
-                                            ("(no output)".to_string(), "(no output)".to_string())
-                                        } else {
-                                            (out.clone(), format!("Command output:\n{out}"))
-                                        }
-                                    }
-                                    Ok(Err(error)) => {
-                                        let msg = format!("Sandbox unavailable: {error}");
-                                        (msg.clone(), msg)
-                                    }
-                                    Err(error) => {
-                                        let msg = format!("Execution error: {error}");
-                                        (msg.clone(), msg)
-                                    }
-                                };
-                                sandbox_end(panel_output);
-                                // Surface files the command produced as downloadable
-                                // artifacts (marker → card). If a PROJECT folder is
-                                // active, also copy them there — it's the project's
-                                // default folder for generated files.
-                                let project_folder = active_workspace_folder();
-                                for (file_name, size) in
-                                    detect_new_artifacts(&host_out, run_started)
-                                {
-                                    let mut delivered_to: Option<String> = None;
-                                    if let Some(folder) = project_folder.as_ref() {
-                                        let dest = std::path::Path::new(folder).join(&file_name);
-                                        if std::fs::copy(host_out.join(&file_name), &dest).is_ok() {
-                                            delivered_to = Some(dest.to_string_lossy().to_string());
-                                        }
-                                    }
-                                    let marker = serde_json::json!({
-                                        "name": file_name,
-                                        "thread": thread_slug,
-                                        "size": size,
-                                    });
-                                    let artifact_mark =
-                                        format!("‹‹ARTIFACT››{marker}‹‹/ARTIFACT››");
-                                    // Persist in the committed answer so the UI can
-                                    // render the download card + Artefatti panel (the
-                                    // Done payload is authoritative).
-                                    accumulated.push_str(&artifact_mark);
-                                    let _ = emit_stream_event(
-                                        &tx,
-                                        GenerateStreamEvent::Delta {
-                                            text: artifact_mark,
-                                        },
-                                    )
-                                    .await;
-                                    register_artifact_memory(
-                                        &state_owned,
-                                        thread_id.as_deref(),
-                                        &thread_slug,
-                                        &file_name,
-                                        size,
-                                        false,
-                                        "run_in_sandbox",
-                                        delivered_to.as_deref(),
-                                    )
-                                    .await;
-                                    match delivered_to {
-                                        Some(path) => model_output.push_str(&format!(
-                                            "\n[file generated and saved to {path}]"
-                                        )),
-                                        None => model_output.push_str(&format!(
-                                            "\n[file generated: {file_name} in $OUTPUT_DIR]"
-                                        )),
-                                    }
-                                }
-                                model_output
-                            }
-                        }
-                    } else if name == "create_artifact" {
-                        // Model-authored document/code → file artifact (host-side).
-                        let parsed = serde_json::from_str::<serde_json::Value>(args_raw)
-                            .unwrap_or_else(|_| serde_json::json!({}));
-                        let fname = parsed
-                            .get("name")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string();
-                        let content = parsed
-                            .get("content")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string();
-                        let thread_slug = artifact_thread_slug(thread_id.as_deref());
-                        let _ = emit_stream_event(
-                            &tx,
-                            GenerateStreamEvent::Delta {
-                                text: format!("‹‹ACT››📝 Creating the file {fname}‹‹/ACT››"),
-                            },
-                        )
-                        .await;
-                        let fname_w = fname.clone();
-                        let slug_w = thread_slug.clone();
-                        // A `.pdf` artifact: the `content` is Markdown → render it to a
-                        // real paginated PDF (in-process, always works). Everything else
-                        // is written verbatim as text.
-                        let is_pdf = fname.to_ascii_lowercase().ends_with(".pdf");
-                        let result = tokio::task::spawn_blocking(move || {
-                            if is_pdf {
-                                let title =
-                                    fname_w.trim_end_matches(".pdf").trim_end_matches(".PDF");
-                                let bytes = pdf_render::markdown_to_pdf(title, &content)
-                                    .map_err(|e| format!("PDF render failed: {e}"))?;
-                                write_artifact_bytes(&slug_w, &fname_w, &bytes)
-                            } else {
-                                write_text_artifact(&slug_w, &fname_w, &content)
-                            }
-                        })
-                        .await
-                        .unwrap_or_else(|e| Err(format!("Error: {e}")));
-                        match result {
-                            Ok((size, updated)) => {
-                                let marker = serde_json::json!({
-                                    "name": fname,
-                                    "thread": thread_slug,
-                                    "size": size,
-                                    "updated": updated,
-                                });
-                                let artifact_mark = format!("‹‹ARTIFACT››{marker}‹‹/ARTIFACT››");
-                                // Persist the marker in the committed answer (Done is
-                                // authoritative): the UI parses ‹‹ARTIFACT›› from the
-                                // saved message to render the download card + the
-                                // Artefatti panel. Without this the artifact vanishes.
-                                accumulated.push_str(&artifact_mark);
-                                let _ = emit_stream_event(
-                                    &tx,
-                                    GenerateStreamEvent::Delta {
-                                        text: artifact_mark,
-                                    },
-                                )
-                                .await;
-                                register_artifact_memory(
-                                    &state_owned,
-                                    thread_id.as_deref(),
-                                    &thread_slug,
-                                    &fname,
-                                    size,
-                                    updated,
-                                    "create_artifact",
-                                    None,
-                                )
-                                .await;
-                                if updated {
-                                    format!("Artifact «{fname}» updated (new version).")
-                                } else {
-                                    format!("Artifact «{fname}» created.")
-                                }
-                            }
-                            Err(error) => error,
-                        }
-                    } else if name == "generate_image" {
-                        // Generate an image from a prompt (local Ollama or cloud provider)
-                        // and surface it as a PNG artifact, like create_artifact.
-                        let parsed = serde_json::from_str::<serde_json::Value>(args_raw)
-                            .unwrap_or_else(|_| serde_json::json!({}));
-                        let prompt = parsed
-                            .get("prompt")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .trim()
-                            .to_string();
-                        let size = parsed
-                            .get("size")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("1024x1024")
-                            .to_string();
-                        let base_name = parsed
-                            .get("name")
-                            .and_then(|v| v.as_str())
-                            .map(slugify_skill_name)
-                            .filter(|s| !s.is_empty())
-                            .unwrap_or_else(|| "image".to_string());
-                        let fname = format!("{base_name}.png");
-                        if prompt.is_empty() {
-                            "generate_image needs a prompt.".to_string()
-                        } else {
-                            let _ = emit_stream_event(
-                                &tx,
-                                GenerateStreamEvent::Delta {
-                                    text: format!(
-                                        "‹‹ACT››🎨 Generating image: {}‹‹/ACT››",
-                                        prompt.chars().take(60).collect::<String>()
-                                    ),
-                                },
-                            )
-                            .await;
-                            match generate_image_png(&state_owned.http, &prompt, &size).await {
-                                Ok(bytes) => {
-                                    let thread_slug = artifact_thread_slug(thread_id.as_deref());
-                                    let slug_w = thread_slug.clone();
-                                    let fname_w = fname.clone();
-                                    let result = tokio::task::spawn_blocking(move || {
-                                        write_artifact_bytes(&slug_w, &fname_w, &bytes)
-                                    })
-                                    .await
-                                    .unwrap_or_else(|e| Err(format!("Error: {e}")));
-                                    match result {
-                                        Ok((size_b, updated)) => {
-                                            let marker = serde_json::json!({
-                                                "name": fname,
-                                                "thread": thread_slug,
-                                                "size": size_b,
-                                                "updated": updated,
-                                            });
-                                            let artifact_mark =
-                                                format!("‹‹ARTIFACT››{marker}‹‹/ARTIFACT››");
-                                            accumulated.push_str(&artifact_mark);
-                                            let _ = emit_stream_event(
-                                                &tx,
-                                                GenerateStreamEvent::Delta {
-                                                    text: artifact_mark,
-                                                },
-                                            )
-                                            .await;
-                                            register_artifact_memory(
-                                                &state_owned,
-                                                thread_id.as_deref(),
-                                                &thread_slug,
-                                                &fname,
-                                                size_b,
-                                                updated,
-                                                "generate_image",
-                                                None,
-                                            )
-                                            .await;
-                                            format!(
-                                                "Image «{fname}» generated and shown to the user \
-                                                 inline. Do NOT embed it as a markdown image link \
-                                                 (![]()); just refer to it in one short sentence."
-                                            )
-                                        }
-                                        Err(error) => error,
-                                    }
-                                }
-                                Err(error) => error,
-                            }
-                        }
-                    } else if name == "get_brand_kit" {
-                        // Materialize the brand into the thread's output dir (brand.json +
-                        // logo.png) so the renderer applies it and the model needn't embed
-                        // the logo data URL in deck.json. Return colours/fonts (for image
-                        // prompts) but REPLACE the big logo data URL with a note, so the
-                        // model can't paste a 13KB blob into a shell-written deck.json.
-                        let slug = artifact_thread_slug(thread_id.as_deref());
-                        let slug2 = slug.clone();
-                        let _ = tokio::task::spawn_blocking(move || materialize_brand_kit(&slug2))
-                            .await;
-                        let mut kit = serde_json::to_value(load_brand_kit())
-                            .unwrap_or_else(|_| serde_json::json!({}));
-                        if let Some(obj) = kit.as_object_mut() {
-                            let has_logo = obj
-                                .get("logo_data_url")
-                                .and_then(|v| v.as_str())
-                                .map(|s| !s.trim().is_empty())
-                                .unwrap_or(false);
-                            obj.insert(
-                                "logo_data_url".into(),
-                                serde_json::json!(if has_logo {
-                                    "(applied automatically — written to logo.png in the output dir; do NOT embed in deck.json)"
-                                } else {
-                                    ""
-                                }),
-                            );
-                            obj.insert("note".into(), serde_json::json!(
-                                "Brand is applied automatically by deck-render via brand.json + logo.png already written to the output dir. In deck.json include ONLY slide content — OMIT `theme` and `logo` entirely."
-                            ));
-                        }
-                        serde_json::to_string(&kit).unwrap_or_else(|_| "{}".to_string())
-                    } else if name == "render_deck" {
-                        // Deterministic deck render: the model passes ONLY content; the
-                        // gateway writes deck.json + brand files and runs deck-render +
-                        // chromium in the sandbox. Removes ALL model filesystem juggling
-                        // (no shell, no find, no path/dir confusion → no regenerate loop).
-                        let parsed = serde_json::from_str::<serde_json::Value>(args_raw)
-                            .unwrap_or_else(|_| serde_json::json!({}));
-                        let deck = parsed.get("deck").cloned().unwrap_or(parsed);
-                        let has_slides = deck
-                            .get("slides")
-                            .and_then(|s| s.as_array())
-                            .map(|a| !a.is_empty())
-                            .unwrap_or(false);
-                        if !has_slides {
-                            "render_deck needs a non-empty 'slides' array (content only)."
-                                .to_string()
-                        } else {
-                            let thread_slug = artifact_thread_slug(thread_id.as_deref());
-                            let _ = emit_stream_event(
-                                &tx,
-                                GenerateStreamEvent::Delta {
-                                    text: "‹‹ACT››🎬 Rendering the deck (PPTX + preview)‹‹/ACT››"
-                                        .to_string(),
-                                },
-                            )
-                            .await;
-                            // 1) brand.json + logo.png + deck.json into the output dir
-                            //    (host side = bind-mounted into the sandbox).
-                            let slug_b = thread_slug.clone();
-                            let _ =
-                                tokio::task::spawn_blocking(move || materialize_brand_kit(&slug_b))
-                                    .await;
-                            let deck_bytes = serde_json::to_vec_pretty(&deck).unwrap_or_default();
-                            let slug_w = thread_slug.clone();
-                            let write_res = tokio::task::spawn_blocking(move || {
-                                write_artifact_bytes(&slug_w, "deck.json", &deck_bytes)
-                            })
-                            .await
-                            .unwrap_or_else(|e| Err(format!("join error: {e}")));
-                            if let Err(e) = write_res {
-                                format!("Could not write deck.json: {e}")
-                            } else {
-                                // 2) render in the sandbox (no model shell).
-                                let container_out = sandbox::container_output_dir(&thread_slug);
-                                let cmd = format!(
-                                    "cd '{container_out}' && deck-render deck.json --prefix deck && \
-                                     chromium --headless --no-sandbox --disable-gpu \
-                                     --print-to-pdf=deck.pdf deck.html >/dev/null 2>&1 && \
-                                     qa=$(deck-qa deck.html --json 2>&1); qa_code=$?; \
-                                     echo \"DECK_QA_JSON:$qa\"; \
-                                     if [ \"$qa_code\" -ne 0 ]; then exit \"$qa_code\"; fi; \
-                                     ls -la deck.pptx deck.html deck.pdf 2>&1"
-                                );
-                                sandbox_begin(cmd.clone(), thread_id.clone());
-                                let render = tokio::task::spawn_blocking(move || {
-                                    sandbox::run_command(&cmd, None)
-                                })
-                                .await
-                                .unwrap_or_else(|e| Err(format!("join error: {e}")));
-                                let render_out = match render {
-                                    Ok(o) => o,
-                                    Err(e) => e,
-                                };
-                                sandbox_end(render_out.clone());
-                                // 3) emit an artifact marker for each file produced, even when
-                                // QA flags issues: the files exist and the user needs access to
-                                // inspect/fix them.
-                                let qa_result = rendered_deck_qa_result(&render_out);
-                                let quality_metadata =
-                                    deck_quality_metadata_from_qa_result(qa_result.as_ref());
-                                let produced = emit_rendered_deck_artifacts(
-                                    &state_owned,
-                                    &tx,
-                                    &mut accumulated,
-                                    thread_id.as_deref(),
-                                    &thread_slug,
-                                    "render_deck",
-                                    quality_metadata.as_ref(),
-                                )
-                                .await;
-                                if let Some(error) = rendered_deck_qa_failure(&render_out) {
-                                    format!(
-                                        "Deck rendered with visual QA issues: {error}. Files available: {}. Renderer output:\n{}",
-                                        if produced.is_empty() {
-                                            "none".to_string()
-                                        } else {
-                                            produced.join(", ")
-                                        },
-                                        render_out.chars().take(1200).collect::<String>(),
-                                    )
-                                } else {
-                                    if produced.iter().any(|fname| fname == "deck.pptx") {
-                                        format!(
-                                            "Deck rendered: {}. The .pptx is editable; .html/.pdf are previews. The deck is DONE — mark the plan complete and give the user a one-line summary.",
-                                            produced.join(", ")
-                                        )
-                                    } else {
-                                        format!(
-                                            "Deck render did NOT produce a .pptx. Renderer output:\n{}",
-                                            render_out.chars().take(800).collect::<String>()
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    } else if name == "make_deck" {
-                        // ONE-call deck (max-scaffolding tier, ADR 0016): the model
-                        // passed only a brief; the ENGINE runs the entire pipeline
-                        // (brand → schema-enforced content → images → render). No
-                        // model-driven planning, file I/O or shell → nothing for a
-                        // weak model to get wrong beyond filling the brief slot.
-                        let parsed = serde_json::from_str::<serde_json::Value>(args_raw)
-                            .unwrap_or_else(|_| serde_json::json!({}));
-                        let brief = parsed
-                            .get("brief")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .trim()
-                            .to_string();
-                        let language = parsed
-                            .get("language")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string();
-                        let slides = parsed
-                            .get("slides")
-                            .and_then(|v| v.as_u64())
-                            .unwrap_or(6)
-                            .clamp(3, 12) as usize;
-                        let requested_template_ref = deliverable_template_ref(&parsed);
-                        let catalog_template =
-                            template_catalog_by_id(requested_template_ref.as_deref());
-                        let template_ref = catalog_template.as_ref().map(|entry| entry.id.clone());
-                        let design_template = deliverable_design_template(&parsed).or_else(|| {
-                            catalog_template
-                                .as_ref()
-                                .map(|entry| entry.design_template.clone())
-                        });
-                        let design_theme = deliverable_design_theme(&parsed).or_else(|| {
-                            catalog_template
-                                .as_ref()
-                                .and_then(|entry| entry.design_theme.clone())
-                        });
-                        let design_profile = deliverable_design_profile(&parsed)
-                            .or_else(|| {
-                                catalog_template
-                                    .as_ref()
-                                    .and_then(|entry| entry.design_profile.clone())
-                            })
-                            .or_else(|| {
-                                let (profile, _) =
-                                    deliverable_template_defaults(design_template.as_deref());
-                                profile.map(String::from)
-                            });
-                        let design_components = resolved_deliverable_design_components_with_catalog(
-                            &parsed,
-                            design_template.as_deref(),
-                            catalog_template
-                                .as_ref()
-                                .map(|entry| entry.design_components.as_slice())
-                                .unwrap_or(&[]),
-                        );
-                        if brief.is_empty() {
-                            "make_deck needs a 'brief' describing the presentation.".to_string()
-                        } else {
-                            let workflow_plan = workflow_execution_plan(
-                                &make_deck_workflow_definition(),
-                                serde_json::json!({
-                                    "brief": brief.clone(),
-                                    "language": language.clone(),
-                                    "slides": slides,
-                                    "template_ref": template_ref.clone(),
-                                    "design_template": design_template.clone(),
-                                    "design_theme": design_theme.clone(),
-                                    "design_profile": design_profile.clone(),
-                                    "design_components": design_components.clone(),
-                                }),
-                            );
-                            let workflow_plan = match run_static_workflow_plan_through_brain_async(
-                                brief.clone(),
-                                workflow_plan,
-                            )
-                            .await
-                            {
-                                Ok(plan) => plan,
-                                Err(error) => {
-                                    eprintln!(
-                                        "make_deck: static workflow plan validation failed: {error}"
-                                    );
-                                    workflow_execution_plan(
-                                        &make_deck_workflow_definition(),
-                                        serde_json::json!({
-                                            "brief": brief.clone(),
-                                            "language": language.clone(),
-                                            "slides": slides,
-                                            "template_ref": template_ref.clone(),
-                                            "design_template": design_template.clone(),
-                                            "design_theme": design_theme.clone(),
-                                            "design_profile": design_profile.clone(),
-                                            "design_components": design_components.clone(),
-                                        }),
-                                    )
-                                }
-                            };
-                            let thread_slug = artifact_thread_slug(thread_id.as_deref());
-                            let _ = emit_stream_event(
-                                &tx,
-                                GenerateStreamEvent::Delta {
-                                    text: "‹‹ACT››🎬 Building the deck (brand · content · images · render)‹‹/ACT››".to_string(),
-                                },
-                            )
-                            .await;
-                            // 1) brand into the output dir + load colours for prompts.
-                            let slug_b = thread_slug.clone();
-                            let _ =
-                                tokio::task::spawn_blocking(move || materialize_brand_kit(&slug_b))
-                                    .await;
-                            let brand = tokio::task::spawn_blocking(load_brand_kit)
-                                .await
-                                .unwrap_or_default();
-                            // 2) slide content — schema-enforced model call (the floor).
-                            match generate_deck_content(
-                                &state_owned.http,
-                                &base_url,
-                                &model,
-                                api_key.as_deref(),
-                                &brief,
-                                &brand,
-                                slides,
-                                &language,
-                                design_template.as_deref(),
-                                design_theme.as_deref(),
-                                design_profile.as_deref(),
-                                &design_components,
-                            )
-                            .await
-                            {
-                                Err(e) => make_deck_content_failure_message(
-                                    &e,
-                                    requested_template_ref.as_deref(),
-                                    template_ref.as_deref(),
-                                    &base_url,
-                                    &model,
-                                ),
-                                Ok(mut deck) => {
-                                    apply_deck_design_components(&mut deck, &design_components);
-                                    apply_deck_design_theme(
-                                        &mut deck,
-                                        design_theme.as_deref(),
-                                        &brand,
-                                    );
-                                    let quality_issues = apply_deck_quality_guardrails(&mut deck);
-                                    if !quality_issues.is_empty() {
-                                        let _ = emit_stream_event(
-                                            &tx,
-                                            GenerateStreamEvent::Delta {
-                                                text: format!(
-                                                    "‹‹ACT››🔎 Deck QA adjusted {} layout-risk items‹‹/ACT››",
-                                                    quality_issues.len()
-                                                ),
-                                            },
-                                        )
-                                        .await;
-                                    }
-                                    // 3) images for want_image slides (cap 3, cover first).
-                                    let accent = brand.accent_color.clone();
-                                    let mut made = 0usize;
-                                    if let Some(arr) =
-                                        deck.get_mut("slides").and_then(|s| s.as_array_mut())
-                                    {
-                                        for (idx, slide) in arr.iter_mut().enumerate() {
-                                            if made >= 3 {
-                                                break;
-                                            }
-                                            if !slide
-                                                .get("want_image")
-                                                .and_then(|v| v.as_bool())
-                                                .unwrap_or(false)
-                                            {
-                                                continue;
-                                            }
-                                            let title = slide
-                                                .get("title")
-                                                .and_then(|v| v.as_str())
-                                                .unwrap_or("")
-                                                .to_string();
-                                            let layout = slide
-                                                .get("layout")
-                                                .and_then(|v| v.as_str())
-                                                .unwrap_or("bullets")
-                                                .to_string();
-                                            let iname = if layout == "cover" {
-                                                "cover".to_string()
-                                            } else {
-                                                format!("s{idx}")
-                                            };
-                                            let prompt = deck_slide_image_prompt(&title, &accent);
-                                            let _ = emit_stream_event(
-                                                &tx,
-                                                GenerateStreamEvent::Delta {
-                                                    text: format!(
-                                                        "‹‹ACT››🎨 Image: {}‹‹/ACT››",
-                                                        title.chars().take(40).collect::<String>()
-                                                    ),
-                                                },
-                                            )
-                                            .await;
-                                            if let Ok(bytes) = generate_image_png(
-                                                &state_owned.http,
-                                                &prompt,
-                                                "1280x720",
-                                            )
-                                            .await
-                                            {
-                                                let fname = format!("{iname}.png");
-                                                let slug_w = thread_slug.clone();
-                                                let fname_w = fname.clone();
-                                                let w = tokio::task::spawn_blocking(move || {
-                                                    write_artifact_bytes(&slug_w, &fname_w, &bytes)
-                                                })
-                                                .await
-                                                .unwrap_or_else(|e| Err(format!("{e}")));
-                                                if w.is_ok() {
-                                                    slide["image"] = serde_json::json!(fname);
-                                                    if layout == "bullets" {
-                                                        slide["layout"] =
-                                                            serde_json::json!("image_right");
-                                                    }
-                                                    made += 1;
-                                                }
-                                            }
-                                        }
-                                    }
-                                    // 4) write deck.json.
-                                    let slide_count = deck
-                                        .get("slides")
-                                        .and_then(|s| s.as_array())
-                                        .map(|a| a.len())
-                                        .unwrap_or(0);
-                                    let deck_bytes =
-                                        serde_json::to_vec_pretty(&deck).unwrap_or_default();
-                                    let slug_w = thread_slug.clone();
-                                    let write_res = tokio::task::spawn_blocking(move || {
-                                        write_artifact_bytes(&slug_w, "deck.json", &deck_bytes)
-                                    })
-                                    .await
-                                    .unwrap_or_else(|e| Err(format!("join error: {e}")));
-                                    if let Err(e) = write_res {
-                                        format!("Could not write deck.json: {e}")
-                                    } else {
-                                        let template_render_arg =
-                                            match materialize_deck_template_source(
-                                                &thread_slug,
-                                                catalog_template.as_ref(),
-                                            ) {
-                                                Ok(Some(filename)) => {
-                                                    let _ = emit_stream_event(
-                                                        &tx,
-                                                        GenerateStreamEvent::Delta {
-                                                            text: "‹‹ACT››📐 Using imported PPTX template‹‹/ACT››".to_string(),
-                                                        },
-                                                    )
-                                                    .await;
-                                                    format!(" --template-pptx {filename}")
-                                                }
-                                                Ok(None) => String::new(),
-                                                Err(error) => {
-                                                    let _ = emit_stream_event(
-                                                        &tx,
-                                                        GenerateStreamEvent::Delta {
-                                                            text: format!(
-                                                                "‹‹ACT››⚠ Template source unavailable: {error}‹‹/ACT››"
-                                                            ),
-                                                        },
-                                                    )
-                                                    .await;
-                                                    String::new()
-                                                }
-                                            };
-                                        // 5) render in the sandbox (no model shell).
-                                        let container_out =
-                                            sandbox::container_output_dir(&thread_slug);
-                                        let cmd = format!(
-                                            "cd '{container_out}' && deck-render deck.json --prefix deck{template_render_arg} && \
-                                             chromium --headless --no-sandbox --disable-gpu \
-                                             --print-to-pdf=deck.pdf deck.html >/dev/null 2>&1 && \
-                                             qa=$(deck-qa deck.html --json 2>&1); qa_code=$?; \
-                                             echo \"DECK_QA_JSON:$qa\"; \
-                                             if [ \"$qa_code\" -ne 0 ]; then exit \"$qa_code\"; fi; \
-                                             ls -la deck.pptx deck.html deck.pdf 2>&1"
-                                        );
-                                        sandbox_begin(cmd.clone(), thread_id.clone());
-                                        let render = tokio::task::spawn_blocking(move || {
-                                            sandbox::run_command(&cmd, None)
-                                        })
-                                        .await
-                                        .unwrap_or_else(|e| Err(format!("join error: {e}")));
-                                        let render_out = match render {
-                                            Ok(o) => o,
-                                            Err(e) => e,
-                                        };
-                                        sandbox_end(render_out.clone());
-                                        // 6) emit an artifact marker per produced file, even
-                                        // when QA flags issues: the generated files still need
-                                        // to be visible for review and iteration.
-                                        let qa_result = rendered_deck_qa_result(&render_out);
-                                        let quality_metadata = deck_quality_metadata_from_qa_result(
-                                            qa_result.as_ref(),
-                                        );
-                                        let mut artifact_metadata =
-                                            deck_template_metadata(catalog_template.as_ref());
-                                        merge_object_metadata(
-                                            &mut artifact_metadata,
-                                            quality_metadata.as_ref(),
-                                        );
-                                        let artifact_metadata_ref = artifact_metadata
-                                            .as_object()
-                                            .filter(|metadata| !metadata.is_empty())
-                                            .map(|_| &artifact_metadata);
-                                        let produced = emit_rendered_deck_artifacts(
-                                            &state_owned,
-                                            &tx,
-                                            &mut accumulated,
-                                            thread_id.as_deref(),
-                                            &thread_slug,
-                                            "make_deck",
-                                            artifact_metadata_ref,
-                                        )
-                                        .await;
-                                        if let Some(error) = rendered_deck_qa_failure(&render_out) {
-                                            format!(
-                                                "Deck created via workflow {} with visual QA issues: {error}. Files available: {}. The .pptx is editable; .html/.pdf are previews.",
-                                                workflow_plan
-                                                    .steps
-                                                    .first()
-                                                    .and_then(|step| step
-                                                        .arguments
-                                                        .get("workflow_id"))
-                                                    .and_then(|value| value.as_str())
-                                                    .unwrap_or("make_deck"),
-                                                if produced.is_empty() {
-                                                    "none".to_string()
-                                                } else {
-                                                    produced.join(", ")
-                                                },
-                                            )
-                                        } else {
-                                            if produced.iter().any(|fname| fname == "deck.pptx") {
-                                                format!(
-                                                    "Deck created via workflow {}: {} ({slide_count} slides, {made} images). The .pptx is editable; .html/.pdf are previews. The deck is DONE — give the user a one-line summary.",
-                                                    workflow_plan
-                                                        .steps
-                                                        .first()
-                                                        .and_then(|step| step
-                                                            .arguments
-                                                            .get("workflow_id"))
-                                                        .and_then(|value| value.as_str())
-                                                        .unwrap_or("make_deck"),
-                                                    produced.join(", ")
-                                                )
-                                            } else {
-                                                format!(
-                                                    "Deck render did NOT produce a .pptx. Renderer output:\n{}",
-                                                    render_out
-                                                        .chars()
-                                                        .take(800)
-                                                        .collect::<String>()
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    } else if name == "make_document" {
-                        let parsed = serde_json::from_str::<serde_json::Value>(args_raw)
-                            .unwrap_or_else(|_| serde_json::json!({}));
-                        let brief = parsed
-                            .get("brief")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .trim()
-                            .to_string();
-                        let language = parsed
-                            .get("language")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string();
-                        let fname = parsed
-                            .get("name")
-                            .and_then(|v| v.as_str())
-                            .filter(|value| !value.trim().is_empty())
-                            .map(|value| document_artifact_name(Some(value)))
-                            .or_else(|| document_artifact_name_from_brief(&brief))
-                            .unwrap_or_else(|| document_artifact_name(None));
-                        let formats = document_output_formats(&parsed, &fname, &brief);
-                        let document_options = document_generation_options(&parsed);
-                        if brief.is_empty() {
-                            "make_document needs a 'brief' describing the document.".to_string()
-                        } else {
-                            let workflow_args = serde_json::json!({
-                                "brief": brief.clone(),
-                                "language": language.clone(),
-                                "name": fname.clone(),
-                                "formats": formats.clone(),
-                                "template_ref": document_options.template_ref.clone(),
-                                "document_type": document_options.document_type.clone(),
-                                "audience": document_options.audience.clone(),
-                                "tone": document_options.tone.clone(),
-                                "layout_profile": document_options.layout_profile.clone(),
-                                "design_template": document_options.design_template.clone(),
-                                "design_theme": document_options.design_theme.clone(),
-                                "design_profile": document_options.design_profile.clone(),
-                                "design_components": document_options.design_components.clone(),
-                                "sections": document_options.sections.clone(),
-                            });
-                            let workflow_plan = workflow_execution_plan(
-                                &make_document_workflow_definition(),
-                                workflow_args.clone(),
-                            );
-                            let workflow_plan = match run_static_workflow_plan_through_brain_async(
-                                brief.clone(),
-                                workflow_plan,
-                            )
-                            .await
-                            {
-                                Ok(plan) => plan,
-                                Err(error) => {
-                                    eprintln!(
-                                        "make_document: static workflow plan validation failed: {error}"
-                                    );
-                                    workflow_execution_plan(
-                                        &make_document_workflow_definition(),
-                                        workflow_args,
-                                    )
-                                }
-                            };
-                            let thread_slug = artifact_thread_slug(thread_id.as_deref());
-                            let _ = emit_stream_event(
-                                &tx,
-                                GenerateStreamEvent::Delta {
-                                    text: "‹‹ACT››📝 Building the document (brief · draft · artifact · memory)‹‹/ACT››".to_string(),
-                                },
-                            )
-                            .await;
-                            match generate_document_markdown(
-                                &state_owned.http,
-                                &base_url,
-                                &model,
-                                api_key.as_deref(),
-                                &brief,
-                                &language,
-                                &document_options,
-                            )
-                            .await
-                            {
-                                Err(error) => {
-                                    format!("Could not generate document content: {error}")
-                                }
-                                Ok(markdown) => {
-                                    let markdown = apply_document_design_components(
-                                        &markdown,
-                                        &document_options.design_components,
-                                    );
-                                    let (markdown, repaired_issues) =
-                                        apply_document_quality_guardrails(&markdown);
-                                    let quality_issues = document_quality_issues(&markdown);
-                                    if !repaired_issues.is_empty() && quality_issues.is_empty() {
-                                        let _ = emit_stream_event(
-                                            &tx,
-                                            GenerateStreamEvent::Delta {
-                                                text: format!(
-                                                    "‹‹ACT››🔎 Document QA repaired {} table-layout items‹‹/ACT››",
-                                                    repaired_issues.len()
-                                                ),
-                                            },
-                                        )
-                                        .await;
-                                    }
-                                    if !quality_issues.is_empty() {
-                                        let summary = quality_issues
-                                            .iter()
-                                            .take(5)
-                                            .cloned()
-                                            .collect::<Vec<_>>()
-                                            .join("; ");
-                                        format!(
-                                            "Could not generate document artifact: document QA failed: {summary}"
-                                        )
-                                    } else {
-                                        let mut produced = Vec::new();
-                                        let mut artifact_error: Option<String> = None;
-                                        for format in formats {
-                                            let artifact_name =
-                                                document_artifact_name_with_extension(
-                                                    Some(&fname),
-                                                    &format,
-                                                );
-                                            let slug_w = thread_slug.clone();
-                                            let fname_w = artifact_name.clone();
-                                            let markdown_w = markdown.clone();
-                                            let result = tokio::task::spawn_blocking(move || {
-                                                if format == "pdf" {
-                                                    let title = fname_w
-                                                        .trim_end_matches(".pdf")
-                                                        .trim_end_matches(".PDF");
-                                                    let bytes = pdf_render::markdown_to_pdf(
-                                                        title,
-                                                        &markdown_w,
-                                                    )
-                                                    .map_err(|e| {
-                                                        format!("PDF render failed: {e}")
-                                                    })?;
-                                                    write_artifact_bytes(&slug_w, &fname_w, &bytes)
-                                                } else if format == "docx" {
-                                                    let title = fname_w
-                                                        .trim_end_matches(".docx")
-                                                        .trim_end_matches(".DOCX");
-                                                    let bytes =
-                                                        markdown_to_docx(title, &markdown_w)
-                                                            .map_err(|e| {
-                                                                format!("DOCX render failed: {e}")
-                                                            })?;
-                                                    write_artifact_bytes(&slug_w, &fname_w, &bytes)
-                                                } else {
-                                                    write_text_artifact(
-                                                        &slug_w,
-                                                        &fname_w,
-                                                        &markdown_w,
-                                                    )
-                                                }
-                                            })
-                                            .await
-                                            .unwrap_or_else(|error| Err(format!("Error: {error}")));
-                                            match result {
-                                                Ok((size, updated)) => {
-                                                    let marker = serde_json::json!({
-                                                        "name": artifact_name,
-                                                        "thread": thread_slug,
-                                                        "size": size,
-                                                        "updated": updated,
-                                                        "source": "managed",
-                                                        "managed_path": sandbox::artifacts_dir()
-                                                            .join(&thread_slug)
-                                                            .join(&artifact_name)
-                                                            .to_string_lossy()
-                                                            .to_string(),
-                                                    });
-                                                    let artifact_mark = format!(
-                                                        "‹‹ARTIFACT››{marker}‹‹/ARTIFACT››"
-                                                    );
-                                                    accumulated.push_str(&artifact_mark);
-                                                    let _ = emit_stream_event(
-                                                        &tx,
-                                                        GenerateStreamEvent::Delta {
-                                                            text: artifact_mark,
-                                                        },
-                                                    )
-                                                    .await;
-                                                    let artifact_name = marker
-                                                        .get("name")
-                                                        .and_then(|value| value.as_str())
-                                                        .unwrap_or("document.md")
-                                                        .to_string();
-                                                    register_artifact_memory(
-                                                        &state_owned,
-                                                        thread_id.as_deref(),
-                                                        &thread_slug,
-                                                        &artifact_name,
-                                                        size,
-                                                        updated,
-                                                        "make_document",
-                                                        None,
-                                                    )
-                                                    .await;
-                                                    produced.push(artifact_name);
-                                                }
-                                                Err(error) => {
-                                                    artifact_error = Some(error);
-                                                    break;
-                                                }
-                                            }
-                                        }
-                                        if let Some(error) = artifact_error {
-                                            error
-                                        } else {
-                                            format!(
-                                                "Document created via workflow {}: {}. The document is DONE — give the user a one-line summary.",
-                                                workflow_plan
-                                                    .steps
-                                                    .first()
-                                                    .and_then(|step| step
-                                                        .arguments
-                                                        .get("workflow_id"))
-                                                    .and_then(|value| value.as_str())
-                                                    .unwrap_or("make_document"),
-                                                produced.join(", "),
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    } else if name == "save_artifact" {
-                        // Deliver a generated artifact to an authorized destination
-                        // (gateway performs the copy host-side, scoped to grants).
-                        let parsed = serde_json::from_str::<serde_json::Value>(args_raw)
-                            .unwrap_or_else(|_| serde_json::json!({}));
-                        let file = parsed
-                            .get("file")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string();
-                        let dest_name = parsed
-                            .get("destination")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string();
-                        let thread_slug = artifact_thread_slug(thread_id.as_deref());
-                        let _ = emit_stream_event(
-                            &tx,
-                            GenerateStreamEvent::Delta {
-                                text: format!("‹‹ACT››💾 Saving {file} to «{dest_name}»‹‹/ACT››"),
-                            },
-                        )
-                        .await;
-                        tokio::task::spawn_blocking(move || {
-                            save_artifact_to_destination(&thread_slug, &file, &dest_name)
-                        })
-                        .await
-                        .unwrap_or_else(|e| format!("Save error: {e}"))
-                    } else if name == "recall_memory" {
-                        // PERIMETER (anti-exfiltration): a `contact_only` turn (a non-self
-                        // contact on a channel) must NOT reach personal/Secret memory or the
-                        // relationship graph. recall_memory is perimeter-blind by design, so we
-                        // refuse it here — the contact's own conversation is already in context.
-                        // Also refused when can_see_contacts is off (even on a "personal"-scope
-                        // contact): recall traverses the relationship graph, which IS the address
-                        // book — perimeter-blind recall has no way to strip other people out, so
-                        // fail-closed is to block it entirely.
-                        if contact_only || !can_see_contacts {
-                            "Personal memory not accessible in a conversation with this \
-contact: use only the messages from this chat. Do NOT reveal personal data of the user or third parties."
-                                .to_string()
-                        } else {
-                            let query = serde_json::from_str::<serde_json::Value>(args_raw)
-                                .ok()
-                                .and_then(|a| {
-                                    a.get("query").and_then(|q| q.as_str()).map(String::from)
-                                })
-                                .unwrap_or_default();
-                            let _ = emit_stream_event(
-                                &tx,
-                                GenerateStreamEvent::Delta {
-                                    text: format!(
-                                        "‹‹ACT››🧠 Searching memory: {}‹‹/ACT››",
-                                        if query.is_empty() {
-                                            "(query)"
-                                        } else {
-                                            query.as_str()
-                                        }
-                                    ),
-                                },
-                            )
-                            .await;
-                            let st = state_owned.clone();
-                            tokio::task::spawn_blocking(move || recall_memory(&st, &query))
-                                .await
-                                .unwrap_or_else(|e| format!("Execution error: {e}"))
-                        }
-                    } else if name == "query_code_graph" {
-                        let symbol = serde_json::from_str::<serde_json::Value>(args_raw)
-                            .ok()
-                            .and_then(|a| {
-                                a.get("symbol").and_then(|s| s.as_str()).map(String::from)
-                            })
-                            .unwrap_or_default();
-                        let _ = emit_stream_event(
-                            &tx,
-                            GenerateStreamEvent::Delta {
-                                text: format!("‹‹ACT››🗺️ Exploring the code map: {symbol}‹‹/ACT››"),
-                            },
-                        )
-                        .await;
-                        let st = state_owned.clone();
-                        tokio::task::spawn_blocking(move || query_code_graph(&st, &symbol))
-                            .await
-                            .unwrap_or_else(|e| format!("Execution error: {e}"))
-                    } else if name == "query_git_history" {
-                        let query = serde_json::from_str::<serde_json::Value>(args_raw)
-                            .ok()
-                            .and_then(|a| a.get("query").and_then(|s| s.as_str()).map(String::from))
-                            .unwrap_or_default();
-                        let _ = emit_stream_event(
-                            &tx,
-                            GenerateStreamEvent::Delta {
-                                text: format!("‹‹ACT››🕰️ Checking git history: {query}‹‹/ACT››"),
-                            },
-                        )
-                        .await;
-                        tokio::task::spawn_blocking(move || query_git_history(&query))
-                            .await
-                            .unwrap_or_else(|e| format!("Execution error: {e}"))
-                    } else if name == "resolve_datetime" {
-                        // Layer C: the orchestrator passes a STRUCTURED intent it
-                        // distilled from the user's phrasing (any language); jiff
-                        // does the arithmetic from the tz-aware "now" and validates
-                        // future/range. Deterministic — no model date math.
-                        let args_val = serde_json::from_str::<serde_json::Value>(args_raw)
-                            .unwrap_or_else(|_| serde_json::json!({}));
-                        let must_be_future = args_val
-                            .get("must_be_future")
-                            .and_then(|v| v.as_bool())
-                            .unwrap_or(true);
-                        let anchor = now_local();
-                        match temporal::intent_from_json(&args_val).and_then(|intent| {
-                            temporal::resolve(
-                                &intent,
-                                &anchor,
-                                temporal::ResolveOpts { must_be_future },
-                            )
-                        }) {
-                            Ok(res) => {
-                                let _ = emit_stream_event(
-                                    &tx,
-                                    GenerateStreamEvent::Delta {
-                                        text: format!(
-                                            "‹‹ACT››🗓 Date resolved: {}‹‹/ACT››",
-                                            res.human
-                                        ),
-                                    },
-                                )
-                                .await;
-                                let window = match &res.end {
-                                    Some(end) => format!(
-                                        " The time window runs until {:02}:{:02}.",
-                                        end.hour(),
-                                        end.minute()
-                                    ),
-                                    None => String::new(),
-                                };
-                                format!(
-                                    "Date/time resolved: {human}. Use EXACTLY «{iso}» as the value \
-(e.g. to write in the form or pass to another tool): do NOT recompute it.{window} \
-(Now {now}.)",
-                                    human = res.human,
-                                    iso = res.iso,
-                                    window = window,
-                                    now = now_block(),
-                                )
-                            }
-                            Err(e) => format!(
-                                "⚠️ I couldn't resolve the date: {e}. (Now {now}.) \
-Fix the parameters (kind/offset_days/weekday/date/time) and try again; do not proceed with \
-an uncertain date.",
-                                now = now_block(),
-                            ),
-                        }
-                    } else if name == "record_decision" {
-                        let args_val: serde_json::Value = serde_json::from_str(args_raw)
-                            .unwrap_or_else(|_| serde_json::json!({}));
-                        let _ = emit_stream_event(
-                            &tx,
-                            GenerateStreamEvent::Delta {
-                                text: "‹‹ACT››🧠 Recording the decision in memory‹‹/ACT››"
-                                    .to_string(),
-                            },
-                        )
-                        .await;
-                        let st = state_owned.clone();
-                        tokio::task::spawn_blocking(move || record_decision(&st, &args_val))
-                            .await
-                            .unwrap_or_else(|e| format!("Execution error: {e}"))
-                    } else if name == "forget_memory" {
-                        let args_val: serde_json::Value = serde_json::from_str(args_raw)
-                            .unwrap_or_else(|_| serde_json::json!({}));
-                        let _ = emit_stream_event(
-                            &tx,
-                            GenerateStreamEvent::Delta {
-                                text: "‹‹ACT››🗑️ Forgetting from memory‹‹/ACT››".to_string(),
-                            },
-                        )
-                        .await;
-                        let st = state_owned.clone();
-                        tokio::task::spawn_blocking(move || forget_memory(&st, &args_val))
-                            .await
-                            .unwrap_or_else(|e| format!("Execution error: {e}"))
-                    } else if name == "update_plan" || name == "step_advance" {
-                        let args_val: serde_json::Value = serde_json::from_str(args_raw)
-                            .unwrap_or_else(|_| serde_json::json!({}));
-                        // `step_advance` reports progress on a SINGLE step by id (no need to
-                        // re-send the whole plan → weak-model-proof, no ballooning). It maps to
-                        // a one-element `sent` and rides the exact same merge + F2-verify path.
-                        let sent = if name == "step_advance" {
-                            vec![serde_json::json!({
-                                "id": args_val.get("id").and_then(|v| v.as_str()).unwrap_or(""),
-                                "status": args_val.get("status").and_then(|v| v.as_str()).unwrap_or("doing"),
-                                "detail": args_val.get("detail").and_then(|v| v.as_str()).unwrap_or(""),
-                            })]
-                        } else {
-                            args_val
-                                .get("steps")
-                                .and_then(|s| s.as_array())
-                                .cloned()
-                                .unwrap_or_default()
-                        };
-                        // MERGE the model's steps into the CANONICAL plan (never replace);
-                        // returns the canonical indices newly claimed done (held `doing`
-                        // until F2 verifies). See `merge_plan` for the anti-reset rule.
-                        let claims = merge_execution_plan(&mut plan, &sent);
-                        let mut plan_steps = execution_plan_steps(&plan);
-                        // DIAG (HOMUN_DEBUG): the plan lifecycle, to see if the model
-                        // re-proposes the whole plan (churn) or advances one step, and
-                        // whether a re-proposal RESETS statuses (the "il piano riparta"
-                        // symptom). One line per update_plan/step_advance call.
-                        if verbose_debug() {
-                            let sig = |s: &serde_json::Value| {
-                                format!(
-                                    "{}:{}",
-                                    s.get("id").and_then(|v| v.as_str()).unwrap_or("?"),
-                                    s.get("status").and_then(|v| v.as_str()).unwrap_or("?")
-                                )
-                            };
-                            let sent_sig: Vec<String> = sent.iter().map(&sig).collect();
-                            let plan_sig: Vec<String> = plan_steps.iter().map(&sig).collect();
-                            eprintln!(
-                                "[plan] {name}: sent[{}]=[{}] → canonical[{}]=[{}]",
-                                sent.len(),
-                                sent_sig.join(","),
-                                plan_steps.len(),
-                                plan_sig.join(",")
-                            );
-                        }
-                        if plan_steps.is_empty() {
-                            "Empty plan: provide at least one step with a title.".to_string()
-                        } else {
-                            // F2 gate: verify each newly-claimed-done step before it counts
-                            // (using the evidence gathered since the last completed step).
-                            // Adaptive floor (ADR 0018): when ON, the model tier modulates
-                            // depth — capable models skip the extra verify round on steps
-                            // with NO external action (nothing to verify against, low risk);
-                            // weak models (Always) still verify everything. OFF → unchanged.
-                            let verify = step_verification_enabled()
-                                && if floor_acting {
-                                    match turn_scaffold.verify_depth {
-                                        scaffold::VerifyDepth::Always => true,
-                                        scaffold::VerifyDepth::OnRisk => !step_evidence.is_empty(),
-                                        scaffold::VerifyDepth::Off => false,
-                                    }
-                                } else {
-                                    true
-                                };
-                            let mut rejection: Option<String> = None;
-                            for i in claims {
-                                let title = plan_step_title(&plan_steps[i]).to_string();
-                                let criterion = plan_steps[i]
-                                    .get("done_criterion")
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or("")
-                                    .to_string();
-                                let (ok, reason) = if verify {
-                                    let evidence = if step_evidence.is_empty() {
-                                        "(no tool activity recorded for this step)".to_string()
-                                    } else {
-                                        step_evidence.join("\n")
-                                    };
-                                    verify_step_complete(
-                                        &state_owned.http,
-                                        &title,
-                                        &criterion,
-                                        &evidence,
-                                    )
-                                    .await
-                                } else {
-                                    (true, String::new())
-                                };
-                                if ok {
-                                    plan_steps[i]["status"] = serde_json::json!("done");
-                                    let verified_step = plan_steps[i].clone();
-                                    let verified_evidence = step_evidence.clone();
-                                    let st = state_owned.clone();
-                                    let thread_for_memory = thread_id.clone();
-                                    let _ = tokio::task::spawn_blocking(move || {
-                                        record_runtime_plan_step_outcome_from_state(
-                                            &st,
-                                            thread_for_memory.as_deref(),
-                                            &verified_step,
-                                            &verified_evidence,
-                                        );
-                                    })
-                                    .await;
-                                    plan = runtime_execution_plan(&plan_steps);
-                                    progress_anchor_round = round; // F1: real progress
-                                    step_evidence.clear();
-                                    last_round_sig.clear();
-                                    repeat_count = 0;
-                                    pending_compaction = true; // F3
-                                    if verify {
-                                        let _ = emit_stream_event(
-                                            &tx,
-                                            GenerateStreamEvent::Delta {
-                                                text: format!(
-                                                    "‹‹ACT››✓ Step verified: {}‹‹/ACT››",
-                                                    title.chars().take(60).collect::<String>()
-                                                ),
-                                            },
-                                        )
-                                        .await;
-                                    }
-                                } else {
-                                    rejection = Some(format!(
-                                        "Step «{title}» is NOT verified complete: {}. Keep working on it — re-mark it done ONLY once its result actually exists.",
-                                        if reason.is_empty() {
-                                            "the evidence does not show it was finished"
-                                        } else {
-                                            &reason
-                                        }
-                                    ));
-                                    break;
-                                }
-                            }
-                            // Marker rendered from the CANONICAL plan — the single source of
-                            // truth (verified state), not the model's raw claim. This is what
-                            // the UI shows and what the next turn resumes from.
-                            plan_steps = execution_plan_steps(&plan);
-                            let plan_mark =
-                                format!("‹‹PLAN››{}‹‹/PLAN››", build_plan_markdown(&plan_steps));
-                            accumulated.push_str(&plan_mark);
-                            let _ = emit_stream_event(
-                                &tx,
-                                GenerateStreamEvent::Delta { text: plan_mark },
-                            )
-                            .await;
-                            upsert_runtime_plan_memory_from_state(
-                                &state_owned,
-                                thread_id.as_deref(),
-                                &plan_steps,
-                            );
-                            let done = plan_done_count(&plan_steps);
-                            match rejection {
-                                Some(msg) => format!("⚠️ {msg} (done {done}/{})", plan_steps.len()),
-                                None => {
-                                    format!("Plan updated: {done}/{} steps done.", plan_steps.len())
-                                }
-                            }
-                        }
-                    } else if name == "create_automation" {
-                        let _ = emit_stream_event(
-                            &tx,
-                            GenerateStreamEvent::Delta {
-                                text: "‹‹ACT››⚡ Creating an automation‹‹/ACT››".to_string(),
-                            },
-                        )
-                        .await;
-                        create_automation_from_chat(
-                            &state_owned,
-                            args_raw,
-                            &automation_user_id,
-                            &automation_workspace_id,
-                        )
-                    } else if name == "update_automation" {
-                        let _ = emit_stream_event(
-                            &tx,
-                            GenerateStreamEvent::Delta {
-                                text: "‹‹ACT››⚡ Updating an automation‹‹/ACT››".to_string(),
-                            },
-                        )
-                        .await;
-                        update_automation_from_chat(
-                            &state_owned,
-                            args_raw,
-                            &automation_user_id,
-                            &automation_workspace_id,
-                        )
-                    } else if name == "find_capability" {
-                        // Tool Search: discover DEFERRED native tools by intent and activate
-                        // them (push into the live tool set) so the model calls them next
-                        // round — same mechanism as find_connected_tools, for built-in tools.
-                        let parsed = serde_json::from_str::<serde_json::Value>(args_raw).ok();
-                        let intent = parsed
-                            .as_ref()
-                            .and_then(|a| {
-                                a.get("intent")
-                                    .or_else(|| a.get("query"))
-                                    .and_then(|v| v.as_str())
-                                    .map(String::from)
-                            })
-                            .unwrap_or_default();
-                        let _ = emit_stream_event(
-                            &tx,
-                            GenerateStreamEvent::Delta {
-                                text: format!(
-                                    "‹‹ACT››🧭 Searching for a capability: {}‹‹/ACT››",
-                                    if intent.is_empty() {
-                                        "(intent)"
-                                    } else {
-                                        intent.as_str()
-                                    }
-                                ),
-                            },
-                        )
-                        .await;
-                        let mut lines = Vec::new();
-                        let mut discovered_entries: Vec<CapabilityEntry> = Vec::new();
-                        // In-house tools + skills (BM25 over the unified corpus).
-                        for entry in bm25_rank(&capability_corpus, &intent, 6) {
-                            if entry.is_skill {
-                                lines.push(format!(
-                                    "- skill «{}»: {} → load it with use_skill(\"{}\")",
-                                    entry.key, entry.desc, entry.key
-                                ));
-                                discovered_entries.push(entry.clone());
-                            } else if entry.source == CapabilitySource::TemplateCatalog {
-                                lines.push(format!(
-                                    "- template «{}»: {} → pass template_ref=\"{}\" to make_deck/make_document",
-                                    entry.key, entry.desc, entry.key
-                                ));
-                                discovered_entries.push(entry.clone());
-                            } else if let Some(schema) = &entry.schema {
-                                if loaded_tools.insert(entry.key.clone()) {
-                                    tool_schemas.push(schema.clone());
-                                }
-                                let label = capability_source_label(entry.source);
-                                lines.push(format!("- {label} «{}»: {}", entry.key, entry.desc));
-                                discovered_entries.push(entry.clone());
-                            }
-                        }
-                        // Connected services (toolkit-aware): activate the matching toolkit's
-                        // tools so the model sees its full CRUD together. Channels: READ only.
-                        // contact_only turns: don't surface connected services at all (the
-                        // dispatch refuses them anyway — this just avoids a wasted round).
-                        if !catalog_index.is_empty() && !contact_only {
-                            for entry in search_connector_capability_entries(
-                                &catalog_index,
-                                &intent,
-                                COMPOSIO_DISCOVERY_RESULTS,
-                            ) {
-                                if read_only && !composio_tool_is_read(&entry.key) {
-                                    continue;
-                                }
-                                // PERIMETER: don't even surface calendar/contacts tools when the
-                                // matching axis is off (the dispatch refuses them anyway).
-                                if !can_see_calendar && tool_touches_calendar(&entry.key) {
-                                    continue;
-                                }
-                                if !can_see_contacts && tool_touches_contacts(&entry.key) {
-                                    continue;
-                                }
-                                if loaded_tools.insert(entry.key.clone()) {
-                                    if let Some(schema) = &entry.schema {
-                                        tool_schemas.push(schema.clone());
-                                    }
-                                }
-                                lines.push(format!("- connector «{}»: {}", entry.key, entry.desc));
-                                discovered_entries.push(entry);
-                            }
-                        }
-                        if tool_trace.len() < 20 {
-                            if let Some(trace_line) =
-                                capability_discovery_trace_line(&intent, &discovered_entries)
-                            {
-                                tool_trace.push(trace_line);
-                            }
-                        }
-                        if lines.is_empty() {
-                            "No capability matches. Rephrase with what you want to do (e.g. \
-\"browse the web\", \"search GitHub\", \"read the user's files\", \"send an email\")."
-                                .to_string()
-                        } else {
-                            format!(
-                                "Capabilities found (the tools are now CALLABLE; skills are \
-loaded with use_skill):\n{}",
-                                lines.join("\n")
-                            )
-                        }
-                    } else if name == "schedule_task" {
-                        let args_val: serde_json::Value = serde_json::from_str(args_raw)
-                            .unwrap_or_else(|_| serde_json::json!({}));
-                        let goal = args_val
-                            .get("goal")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .trim()
-                            .to_string();
-                        let every = args_val
-                            .get("every")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .trim()
-                            .to_string();
-                        let timezone = args_val
-                            .get("timezone")
-                            .and_then(|v| v.as_str())
-                            .map(|s| s.trim().to_string())
-                            .filter(|s| !s.is_empty());
-                        if goal.is_empty() || every.is_empty() {
-                            "Scheduling requires 'goal' (what to do) and 'every' (how often: \
-\"every 1d\", \"daily@08:00\", \"weekly@mon@09:30\")."
-                                .to_string()
-                        } else {
-                            let _ = emit_stream_event(
-                                &tx,
-                                GenerateStreamEvent::Delta {
-                                    text: format!("‹‹ACT››⏰ Scheduling: {goal} ({every})‹‹/ACT››"),
-                                },
-                            )
-                            .await;
-                            // Route through the first-class Automation model so a chat-
-                            // scheduled task shows up in the Automazioni view (not a hidden run).
-                            let st = state_owned.clone();
-                            let user_id = automation_user_id.clone();
-                            let workspace_id = automation_workspace_id.clone();
-                            let title: String = goal.chars().take(48).collect();
-                            let auto_args = serde_json::json!({
-                                "title": title,
-                                "prompt": goal,
-                                "trigger_type": "schedule",
-                                "recurrence": every,
-                                "timezone": timezone,
-                            })
-                            .to_string();
-                            tokio::task::spawn_blocking(move || {
-                                create_automation_from_chat(
-                                    &st,
-                                    &auto_args,
-                                    &user_id,
-                                    &workspace_id,
-                                )
-                            })
-                            .await
-                            .unwrap_or_else(|e| format!("Scheduling error: {e}"))
-                        }
-                    } else if name == "read_file" {
-                        let args_val: serde_json::Value = serde_json::from_str(args_raw)
-                            .unwrap_or_else(|_| serde_json::json!({}));
-                        let path = args_val
-                            .get("path")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string();
-                        let _ = emit_stream_event(
-                            &tx,
-                            GenerateStreamEvent::Delta {
-                                text: format!("‹‹ACT››📄 Reading {path}‹‹/ACT››"),
-                            },
-                        )
-                        .await;
-                        let st = state_owned.clone();
-                        let tid = thread_id.clone();
-                        let recall_path = path.clone();
-                        let mut out = tokio::task::spawn_blocking(move || {
-                            read_project_file(&st, tid.as_deref(), &path)
-                        })
-                        .await
-                        .unwrap_or_else(|e| format!("Error: {e}"));
-                        // Per-file recall: surface past DECISIONS about this file so the
-                        // agent remembers WHY it's like this instead of re-deriving it.
-                        let st2 = state_owned.clone();
-                        if let Some(note) = tokio::task::spawn_blocking(move || {
-                            decisions_for_path(&st2, &recall_path)
-                        })
-                        .await
-                        .ok()
-                        .flatten()
-                        {
-                            out.push_str("\n\n");
-                            out.push_str(&note);
-                        }
-                        out
-                    } else if name == "write_file" {
-                        let args_val: serde_json::Value = serde_json::from_str(args_raw)
-                            .unwrap_or_else(|_| serde_json::json!({}));
-                        let path = args_val
-                            .get("path")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string();
-                        let content = args_val
-                            .get("content")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string();
-                        let _ = emit_stream_event(
-                            &tx,
-                            GenerateStreamEvent::Delta {
-                                text: format!("‹‹ACT››✍️ Scrivo {path}‹‹/ACT››"),
-                            },
-                        )
-                        .await;
-                        let st = state_owned.clone();
-                        let tid = thread_id.clone();
-                        let path_for_memory = path.clone();
-                        let content_len = content.len() as u64;
-                        let result = tokio::task::spawn_blocking(move || {
-                            write_project_file(&st, tid.as_deref(), &path, &content)
-                        })
-                        .await
-                        .unwrap_or_else(|e| format!("Error: {e}"));
-                        if result.starts_with("✅ Wrote ") {
-                            register_project_file_artifact_memory(
-                                &state_owned,
-                                thread_id.as_deref(),
-                                &path_for_memory,
-                                content_len,
-                                "write_file",
-                            )
-                            .await;
-                        }
-                        result
-                    } else if name == "edit_file" {
-                        let args_val: serde_json::Value = serde_json::from_str(args_raw)
-                            .unwrap_or_else(|_| serde_json::json!({}));
-                        let path = args_val
-                            .get("path")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string();
-                        let old = args_val
-                            .get("old_string")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string();
-                        let new = args_val
-                            .get("new_string")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string();
-                        let _ = emit_stream_event(
-                            &tx,
-                            GenerateStreamEvent::Delta {
-                                text: format!("‹‹ACT››✏️ Modifico {path}‹‹/ACT››"),
-                            },
-                        )
-                        .await;
-                        let st = state_owned.clone();
-                        let tid = thread_id.clone();
-                        tokio::task::spawn_blocking(move || {
-                            edit_project_file(&st, tid.as_deref(), &path, &old, &new)
-                        })
-                        .await
-                        .unwrap_or_else(|e| format!("Error: {e}"))
-                    } else if name == "list_files" {
-                        let _ = emit_stream_event(
-                            &tx,
-                            GenerateStreamEvent::Delta {
-                                text: "‹‹ACT››📂 Exploring the project‹‹/ACT››".to_string(),
-                            },
-                        )
-                        .await;
-                        let st = state_owned.clone();
-                        let tid = thread_id.clone();
-                        tokio::task::spawn_blocking(move || list_project_files(&st, tid.as_deref()))
-                            .await
-                            .unwrap_or_else(|e| format!("Error: {e}"))
-                    } else if name == "list_directory" || name == "read_text_file" {
-                        let is_read = name == "read_text_file";
-                        let args_val: serde_json::Value = serde_json::from_str(args_raw)
-                            .unwrap_or_else(|_| serde_json::json!({}));
-                        let p = args_val
-                            .get("path")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string();
-                        let st = state_owned.clone();
-                        let tid = thread_id.clone();
-                        let pr = p.clone();
-                        let resolved = tokio::task::spawn_blocking(move || {
-                            fs_resolve_authorized(&st, tid.as_deref(), &pr)
-                        })
-                        .await
-                        .unwrap_or_else(|_| {
-                            Err(FsAuthIssue::Invalid("internal error".to_string()))
-                        });
-                        match resolved {
-                            Ok(path) => {
-                                let icon = if is_read {
-                                    "📄 Reading"
-                                } else {
-                                    "📂 Listing"
-                                };
-                                let _ = emit_stream_event(
-                                    &tx,
-                                    GenerateStreamEvent::Delta {
-                                        text: format!("‹‹ACT››{icon} {p}‹‹/ACT››"),
-                                    },
-                                )
-                                .await;
-                                tokio::task::spawn_blocking(move || {
-                                    if is_read {
-                                        fs_read_text(&path)
-                                    } else {
-                                        fs_list_dir_contents(&path)
-                                    }
-                                })
-                                .await
-                                .unwrap_or_else(|e| format!("Error: {e}"))
-                            }
-                            Err(FsAuthIssue::Invalid(msg)) => msg,
-                            Err(FsAuthIssue::NeedsAuth(path)) => {
-                                // In-chat authorize card: grant access WITHOUT going to Settings.
-                                let marker = serde_json::json!({
-                                    "path": path.display().to_string(),
-                                    "op": if is_read { "read" } else { "list" }
-                                })
-                                .to_string();
-                                let card = format!(
-                                    "\n\nTo access this folder I need your authorization.\n\
-‹‹FS_AUTHORIZE››{marker}‹‹/FS_AUTHORIZE››\n"
-                                );
-                                accumulated.push_str(&card);
-                                let _ = emit_stream_event(
-                                    &tx,
-                                    GenerateStreamEvent::Delta { text: card },
-                                )
-                                .await;
-                                pending_confirm = true;
-                                "AWAITING AUTHORIZATION: I showed the user a card with the \
-button to authorize access to the folder. Do NOT say you have read/listed it."
-                                    .to_string()
-                            }
-                        }
-                    } else if name == "run_in_project" {
-                        let args_val: serde_json::Value = serde_json::from_str(args_raw)
-                            .unwrap_or_else(|_| serde_json::json!({}));
-                        let command = args_val
-                            .get("command")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string();
-                        let _ = emit_stream_event(
-                            &tx,
-                            GenerateStreamEvent::Delta {
-                                text: format!(
-                                    "‹‹ACT››🛠️ Running in the project: {}‹‹/ACT››",
-                                    command.chars().take(120).collect::<String>()
-                                ),
-                            },
-                        )
-                        .await;
-                        run_in_project(&state_owned, thread_id.as_deref(), &command).await
-                    } else if name == "list_addons" {
-                        tokio::task::spawn_blocking(process_skills::addons_list_text)
-                            .await
-                            .unwrap_or_else(|e| format!("Error: {e}"))
-                    } else if name == "show_addon" {
-                        let args_val: serde_json::Value = serde_json::from_str(args_raw)
-                            .unwrap_or_else(|_| serde_json::json!({}));
-                        let addon_id = args_val
-                            .get("addon_id")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string();
-                        tokio::task::spawn_blocking(move || {
-                            process_skills::addon_show_text(&addon_id)
-                        })
-                        .await
-                        .unwrap_or_else(|e| format!("Error: {e}"))
-                    } else if name == "customize_addon" {
-                        let args_val: serde_json::Value = serde_json::from_str(args_raw)
-                            .unwrap_or_else(|_| serde_json::json!({}));
-                        let addon_id = args_val
-                            .get("addon_id")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string();
-                        let changes = args_val
-                            .get("changes")
-                            .cloned()
-                            .unwrap_or_else(|| serde_json::json!({}));
-                        let _ = emit_stream_event(
-                            &tx,
-                            GenerateStreamEvent::Delta {
-                                text: format!("‹‹ACT››🧩 Customizing addon {addon_id}‹‹/ACT››"),
-                            },
-                        )
-                        .await;
-                        tokio::task::spawn_blocking(move || {
-                            process_skills::addon_customize_text(&addon_id, &changes)
-                        })
-                        .await
-                        .unwrap_or_else(|e| format!("Error: {e}"))
-                    } else if name == "create_skill" {
-                        let args_val: serde_json::Value = serde_json::from_str(args_raw)
-                            .unwrap_or_else(|_| serde_json::json!({}));
-                        let skill_name = args_val
-                            .get("name")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string();
-                        let skill_desc = args_val
-                            .get("description")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string();
-                        let skill_instr = args_val
-                            .get("instructions")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string();
-                        let _ = emit_stream_event(
-                            &tx,
-                            GenerateStreamEvent::Delta {
-                                text: format!("‹‹ACT››🧩 Creating the skill {skill_name}‹‹/ACT››"),
-                            },
-                        )
-                        .await;
-                        tokio::task::spawn_blocking(move || {
-                            create_skill(&skill_name, &skill_desc, &skill_instr)
-                        })
-                        .await
-                        .unwrap_or_else(|e| format!("Error: {e}"))
-                    } else if name == "suggest_capabilities" {
-                        let args_val: serde_json::Value = serde_json::from_str(args_raw)
-                            .unwrap_or_else(|_| serde_json::json!({}));
-                        let need = args_val
-                            .get("need")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string();
-                        let _ = emit_stream_event(
-                            &tx,
-                            GenerateStreamEvent::Delta {
-                                text: format!("‹‹ACT››🧭 Searching connectors for: {need}‹‹/ACT››"),
-                            },
-                        )
-                        .await;
-                        let suggestions = suggest_capabilities(&state_owned, &need).await;
-                        match suggestions.card {
-                            Some(card) => {
-                                // In-chat connect-cards: render the suggestions as
-                                // clickable connect buttons (skill/MCP/Composio) so the
-                                // user acts from chat, no Settings trip. End the turn
-                                // here — the user must connect, then re-ask.
-                                let marker = card.to_string();
-                                let card_text = format!(
-                                    "\n\nHere's what I can connect for this. Choose below.\n\
-‹‹CONNECT_SUGGEST››{marker}‹‹/CONNECT_SUGGEST››\n"
-                                );
-                                accumulated.push_str(&card_text);
-                                let _ = emit_stream_event(
-                                    &tx,
-                                    GenerateStreamEvent::Delta { text: card_text },
-                                )
-                                .await;
-                                pending_confirm = true;
-                                "AWAITING: I showed the user clickable cards to \
-connect the suggested connectors (skill/MCP/Composio). Do NOT say you have already connected anything."
-                                    .to_string()
-                            }
-                            None => suggestions.model_text,
-                        }
-                    } else if name == "list_scheduled_tasks" {
-                        let st = state_owned.clone();
-                        tokio::task::spawn_blocking(move || list_scheduled_tasks(&st))
-                            .await
-                            .unwrap_or_else(|e| format!("Error: {e}"))
-                    } else if name == "cancel_scheduled_task" {
-                        let args_val: serde_json::Value = serde_json::from_str(args_raw)
-                            .unwrap_or_else(|_| serde_json::json!({}));
-                        let task_id = args_val
-                            .get("task_id")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .trim()
-                            .to_string();
-                        let _ = emit_stream_event(
-                            &tx,
-                            GenerateStreamEvent::Delta {
-                                text: "‹‹ACT››🗑️ Cancelling scheduled task‹‹/ACT››".to_string(),
-                            },
-                        )
-                        .await;
-                        let st = state_owned.clone();
-                        tokio::task::spawn_blocking(move || cancel_scheduled_task(&st, &task_id))
-                            .await
-                            .unwrap_or_else(|e| format!("Error: {e}"))
-                    } else if !can_see_calendar && !name.is_empty() && tool_touches_calendar(name) {
-                        // PERIMETER (anti-exfiltration): the can_see_calendar axis is enforced
-                        // HARD here, independent of memory_scope — a "personal"-scope contact that
-                        // is NOT contact_only still can't pull the user's calendar. All builtins
-                        // are matched in earlier arms, so this only catches calendar connectors.
-                        "The user's calendar is not accessible in this conversation. \
-Do not reveal commitments, appointments or events."
-                            .to_string()
-                    } else if !can_see_contacts && !name.is_empty() && tool_touches_contacts(name) {
-                        // PERIMETER (anti-exfiltration): the can_see_contacts axis, enforced HARD
-                        // here too — block the user's address book (Google Contacts / People etc.)
-                        // even on a non-contact_only turn.
-                        "The user's address book is not accessible in this conversation. \
-Do not reveal other contacts, people or relationships of the user."
-                            .to_string()
-                    } else if contact_only && !name.is_empty() {
-                        // PERIMETER (anti-exfiltration): a `contact_only` turn must not reach the
-                        // user's connected services. All builtins are matched in earlier arms, so
-                        // any tool reaching here is a connected Composio/MCP tool — refuse it so a
-                        // contact can't make the assistant read Gmail/Calendar/etc. and leak them.
-                        "Connected-service tools not available in a conversation with \
-this contact. Answer only with what's in this chat; do not reveal personal data \
-of the user or third parties."
-                            .to_string()
-                    } else if read_only && !name.is_empty() && composio_writes.contains(name) {
-                        // Channel (read-only) turn: never run a write tool, never even
-                        // surface a confirm card (no UI on the channel). Phase 2 routes
-                        // these to the in-app approval center.
-                        "Action not available from the channel: operations with effects \
-require your confirmation in the app. Propose it and stop."
-                            .to_string()
-                    } else if let Some((mcp_provider, mcp_tool)) = parse_mcp_chat_name(name) {
-                        // Connected MCP server tool. Writes (per the cached ActionClass,
-                        // derived from the MCP readOnlyHint) need confirmation; reads run
-                        // with a timeout so a hung server can't freeze the turn. A
-                        // read_only channel + write was already rejected just above
-                        // (composio_writes now includes MCP writes). `autonomous` runs skip
-                        // the card and execute (explicit per-automation opt-in).
-                        let args_val: serde_json::Value = serde_json::from_str(args_raw)
-                            .unwrap_or_else(|_| serde_json::json!({}));
-                        let workspace_scoped = workspace_scoped_mcp_write(
-                            &state_owned,
-                            thread_id.as_deref(),
-                            &mcp_provider,
-                            &mcp_tool,
-                            &args_val,
-                        );
-                        if composio_writes.contains(name) && !autonomous && !workspace_scoped {
-                            let approval = create_pending_approval(
-                                &state_owned,
-                                name,
-                                &args_val,
-                                &mcp_tool,
-                                thread_id.as_deref(),
-                                true,
-                            );
-                            let marker = match approval.as_ref() {
-                                Some(approval) => serde_json::json!({
-                                    "approval_id": approval.approval_id,
-                                    "tool": name,
-                                    "arguments": args_val,
-                                }),
-                                None => serde_json::json!({ "tool": name, "arguments": args_val }),
-                            }
-                            .to_string();
-                            let card = format!(
-                                "\n\nI need your confirmation for the action below.\n\
-‹‹MCP_CONFIRM››{marker}‹‹/MCP_CONFIRM››\n"
-                            );
-                            accumulated.push_str(&card);
-                            let _ =
-                                emit_stream_event(&tx, GenerateStreamEvent::Delta { text: card })
-                                    .await;
-                            pending_confirm = true;
-                            "AWAITING USER CONFIRMATION: the action was proposed via a \
-confirmation card in the interface. Do NOT say it was executed."
-                                .to_string()
-                        } else {
-                            let _ = emit_stream_event(
-                                &tx,
-                                GenerateStreamEvent::Delta {
-                                    text: format!("‹‹ACT››🔌 Using {mcp_tool}‹‹/ACT››"),
-                                },
-                            )
-                            .await;
-                            let st = state_owned.clone();
-                            let prov = mcp_provider.clone();
-                            let tool = mcp_tool.clone();
-                            let args_for_artifact = args_val.clone();
-                            let args = args_val;
-                            let mcp_started = std::time::Instant::now();
-                            let exec = tokio::task::spawn_blocking(move || {
-                                run_mcp_chat_tool(&st, &prov, &tool, args)
-                            });
-                            let mut run_ok = false;
-                            let mut run_err: Option<&'static str> = None;
-                            let mcp_result = match tokio::time::timeout(mcp_call_timeout(), exec)
-                                .await
-                            {
-                                Ok(Ok(Ok(value))) => {
-                                    run_ok = true;
-                                    value
-                                        .to_string()
-                                        .chars()
-                                        .take(COMPOSIO_RESULT_CHARS)
-                                        .collect()
-                                }
-                                Ok(Ok(Err(error))) => {
-                                    // Classify the failure so a broken MCP server tells the user
-                                    // what to do (reconnect / wait) instead of a raw error.
-                                    run_err = classify_connector_error(&error.to_string())
-                                        .map(connector_error_kind_str)
-                                        .or(Some("other"));
-                                    let hint = mcp_error_hint(&error.to_string())
-                                        .map(|h| format!(" {h}"))
-                                        .unwrap_or_default();
-                                    format!("MCP tool error: {error}.{hint}")
-                                }
-                                Ok(Err(_join)) => {
-                                    run_err = Some("other");
-                                    "Error: MCP execution interrupted.".to_string()
-                                }
-                                Err(_elapsed) => {
-                                    run_err = Some("unavailable");
-                                    format!(
-                                        "The MCP tool didn't respond within {}s (timeout): the server \
-may be stuck or offline. Tell the user to check/reconnect it from Settings → \
-Connectors → MCP; do NOT claim it's done.",
-                                        mcp_call_timeout().as_secs()
-                                    )
-                                }
-                            };
-                            record_connector_run(
-                                &state_owned,
-                                thread_id.as_deref(),
-                                name,
-                                "mcp",
-                                run_ok,
-                                run_err,
-                                mcp_started.elapsed(),
-                            );
-                            if run_ok {
-                                register_mcp_filesystem_artifact_memory(
-                                    &state_owned,
-                                    thread_id.as_deref(),
-                                    mcp_provider.as_str(),
-                                    &mcp_tool,
-                                    &args_for_artifact,
-                                )
-                                .await;
-                            }
-                            mcp_result
-                        }
-                    } else if !name.is_empty() {
-                        // A connected-service (Composio) tool. Writes need explicit
-                        // confirmation unless the user marked this tool "always allow" OR the
-                        // run is an autonomous automation (explicit per-automation opt-in).
-                        let needs_confirm = composio_writes.contains(name)
-                            && !composio_tool_allowed(name)
-                            && !autonomous;
-                        if needs_confirm {
-                            // Do NOT execute. Emit a confirmation card carrying the exact
-                            // action; the user runs it (once/always) via the card. The model
-                            // must never claim it's done — the real outcome comes from the card.
-                            let args_val: serde_json::Value = serde_json::from_str(args_raw)
-                                .unwrap_or_else(|_| serde_json::json!({}));
-                            let approval = create_pending_approval(
-                                &state_owned,
-                                name,
-                                &args_val,
-                                &humanize_composio_tool(name),
-                                thread_id.as_deref(),
-                                true,
-                            );
-                            let marker = match approval.as_ref() {
-                                Some(approval) => serde_json::json!({
-                                    "approval_id": approval.approval_id,
-                                    "tool": name,
-                                    "arguments": args_val,
-                                }),
-                                None => serde_json::json!({ "tool": name, "arguments": args_val }),
-                            }
-                            .to_string();
-                            let card = format!(
-                                "\n\nI need your confirmation for the action below.\n\
-‹‹COMPOSIO_CONFIRM››{marker}‹‹/COMPOSIO_CONFIRM››\n"
-                            );
-                            accumulated.push_str(&card);
-                            let _ =
-                                emit_stream_event(&tx, GenerateStreamEvent::Delta { text: card })
-                                    .await;
-                            pending_confirm = true;
-                            "AWAITING USER CONFIRMATION: the action was proposed via a \
-confirmation card in the interface. Do NOT say it was executed."
-                                .to_string()
-                        } else {
-                            let _ = emit_stream_event(
-                                &tx,
-                                GenerateStreamEvent::Delta {
-                                    text: format!(
-                                        "‹‹ACT››🔧 Using {}‹‹/ACT››",
-                                        humanize_composio_tool(name)
-                                    ),
-                                },
-                            )
-                            .await;
-                            let st = state_owned.clone();
-                            let tool = name.to_string();
-                            let args: serde_json::Value = serde_json::from_str(args_raw)
-                                .unwrap_or_else(|_| serde_json::json!({}));
-                            let composio_started = std::time::Instant::now();
-                            let outcome = tokio::task::spawn_blocking(move || {
-                                composio_execute_tool(&st, &tool, &args)
-                            })
-                            .await;
-                            let mut run_ok = false;
-                            let mut run_err: Option<&'static str> = None;
-                            let composio_result = match outcome {
-                                Ok(Ok(value)) => match composio_execution_error(&value) {
-                                    // Composio returned 200 but the tool failed: tell the
-                                    // model so it reports the failure, not a false success.
-                                    Some(error) => {
-                                        run_err = classify_connector_error(&error)
-                                            .map(connector_error_kind_str)
-                                            .or(Some("other"));
-                                        let hint = connector_error_hint(&error)
-                                            .map(|h| format!(" {h}"))
-                                            .unwrap_or_default();
-                                        format!(
-                                            "The tool {name} did NOT perform the action: {error}.{hint} \
-Tell the user clearly; do NOT claim it's done."
-                                        )
-                                    }
-                                    None => {
-                                        run_ok = true;
-                                        value
-                                            .to_string()
-                                            .chars()
-                                            .take(COMPOSIO_RESULT_CHARS)
-                                            .collect()
-                                    }
-                                },
-                                Ok(Err(error)) => {
-                                    run_err = classify_connector_error(&error.message)
-                                        .map(connector_error_kind_str)
-                                        .or(Some("other"));
-                                    let hint = connector_error_hint(&error.message)
-                                        .map(|h| format!(" {h}"))
-                                        .unwrap_or_default();
-                                    format!("Error from the tool {name}: {}.{hint}", error.message)
-                                }
-                                Err(error) => {
-                                    run_err = Some("other");
-                                    format!("Tool execution error: {error}")
-                                }
-                            };
-                            record_connector_run(
-                                &state_owned,
-                                thread_id.as_deref(),
-                                name,
-                                "composio",
-                                run_ok,
-                                run_err,
-                                composio_started.elapsed(),
-                            );
-                            composio_result
-                        }
-                    } else {
-                        format!("Tool not available: {name}")
-                    };
+                    let result = execute_chat_tool(&mut ctx, name, args_raw, &call_id).await;
 
                     // Collect source URLs from browser results so the final
                     // answer can carry a deterministic "Fonti" section. The
@@ -22918,27 +24181,79 @@ Tell the user clearly; do NOT claim it's done."
                         // links) lands in the "Sources" footer. The page visited IS the
                         // source. `is_low_value_source_url` stays as a defensive net.
                         if let Some(url) = extract_source_urls(&result).into_iter().next() {
-                            if !is_low_value_source_url(&url) && !browse_sources.contains(&url) {
-                                browse_sources.push(url);
+                            if !is_low_value_source_url(&url) && !ctx.browse_sources.contains(&url) {
+                                ctx.browse_sources.push(url);
                             }
                         }
+                    }
+                    if name == "recall_memory" {
+                        *ctx.pending_vault_reveal_marker =
+                            extract_vault_reveal_marker(&result).or(ctx.pending_vault_reveal_marker.take());
                     }
                     // F2: record this tool's outcome as evidence for the current plan
                     // step (the verifier's input). Skip the plan tool itself so the
                     // evidence reflects the actual WORK, not the bookkeeping. Bounded.
                     if name != "update_plan" {
                         let snippet: String = result.chars().take(400).collect();
-                        step_evidence.push(format!("{name} → {snippet}"));
-                        if step_evidence.len() > 60 {
-                            step_evidence.remove(0);
+                        ctx.step_evidence.push(format!("{name} → {snippet}"));
+                        if ctx.step_evidence.len() > 60 {
+                            ctx.step_evidence.remove(0);
                         }
                     }
-                    messages.push(serde_json::json!({
+                    // Parity harness: compute the result-derived fingerprint fields
+                    // from `&result` BEFORE the push moves `result` into the message.
+                    // Gated on `dump_enabled()` so there is no cost when disarmed.
+                    let trace_fields = if crate::tool_trace_dump::dump_enabled() {
+                        let normalized = crate::tool_trace_dump::normalize(&result);
+                        Some((
+                            crate::tool_trace_dump::hash_hex(
+                                &crate::tool_trace_dump::normalize(args_raw),
+                            ),
+                            crate::tool_trace_dump::hash_hex(&normalized),
+                            result.chars().count(),
+                            normalized.chars().take(120).collect::<String>(),
+                        ))
+                    } else {
+                        None
+                    };
+                    ctx.messages.push(serde_json::json!({
                         "role": "tool",
                         "tool_call_id": call_id,
                         "content": result,
                     }));
+                    // Build + append the record AFTER the tool push so `msgs_pushed`
+                    // counts this push. A browser screenshot pushes a SECOND message
+                    // later (outside this loop), which `msgs_pushed` cannot see; that
+                    // side effect is instead fingerprinted by `browser_image_set`
+                    // below.
+                    if let Some((args_hash, result_hash, result_len, result_head)) = trace_fields {
+                        let rec = crate::tool_trace_dump::ToolTraceRecord {
+                            round: ctx.round,
+                            idx,
+                            name: name.to_string(),
+                            args_hash,
+                            result_hash,
+                            result_len,
+                            result_head,
+                            acc_delta_len: ctx.accumulated.len().saturating_sub(acc_before),
+                            acc_markers: crate::tool_trace_dump::extract_markers(
+                                acc_before,
+                                ctx.accumulated,
+                            ),
+                            pending_confirm_raised: *ctx.pending_confirm && !pc_before,
+                            msgs_pushed: ctx.messages.len().saturating_sub(msgs_before),
+                            blocked: false,
+                            // Set by the browser_screenshot arm (if it ran) to queue a
+                            // SECOND message pushed AFTER this loop — invisible to
+                            // `msgs_pushed`, so we fingerprint the side effect here.
+                            browser_image_set: ctx.pending_browser_image.is_some(),
+                        };
+                        if let Ok(dir) = gateway_logs_dir() {
+                            crate::tool_trace_dump::append(&dir, &rec);
+                        }
+                    }
                 }
+                } // end ctx scope → borrows freed before the post-loop reads below
                 // A browser screenshot this round → feed the image to the (vision)
                 // model as a SEPARATE user message. It MUST come AFTER every tool
                 // result of this round (OpenAI-compat requires each assistant
@@ -22970,14 +24285,20 @@ Tell the user clearly; do NOT claim it's done."
                 if pending_confirm {
                     // A write is awaiting the user's confirmation card — end the turn
                     // here (no synthesis, no further tool rounds).
+                    let final_text = append_vault_reveal_marker_if_missing(
+                        collapse_plan_markers(&accumulated),
+                        pending_vault_reveal_marker.as_deref(),
+                    );
                     let _ = emit_stream_event(
                         &tx,
                         GenerateStreamEvent::Done {
-                            text: collapse_plan_markers(&accumulated),
+                            text: final_text.clone(),
                             metrics: TokenMetrics::zero(),
+                            redacted_user_text: None,
                         },
                     )
                     .await;
+                    memory_answer = final_text;
                     final_done = true;
                     break;
                 }
@@ -22987,7 +24308,7 @@ Tell the user clearly; do NOT claim it's done."
             // No tool call → normally the final answer. Sanitize any leaked model
             // control tokens (e.g. minimax `]<]minimax[>[` / `<tool_call>` text) so
             // the user never sees raw template markup.
-            let content = model_normalize::sanitize_model_text(
+            let mut content = model_normalize::sanitize_model_text(
                 message
                     .get("content")
                     .and_then(|c| c.as_str())
@@ -22998,7 +24319,7 @@ Tell the user clearly; do NOT claim it's done."
             // have budget, nudge the model to keep going instead of ending the turn.
             // Bounded by MAX_PLAN_NUDGES (reset on progress) AND the per-step round budget.
             if !is_final_round && plan_nudges < MAX_PLAN_NUDGES {
-                let plan_steps = execution_plan_steps(&plan);
+                let mut plan_steps = execution_plan_steps(&plan);
                 if let Some(step) = plan_next_open(&plan_steps) {
                     // F5 over-running guard: when only the LAST step is still open AND the
                     // model already wrote a substantial answer, it almost certainly FINISHED
@@ -23012,8 +24333,7 @@ Tell the user clearly; do NOT claim it's done."
                         .iter()
                         .filter(|s| plan_step_status(s) != "done")
                         .count();
-                    let model_delivered = content.trim().chars().count() >= 600;
-                    if !(open_left <= 1 && model_delivered) {
+                    if !answer_concludes_plan(open_left, content.trim().chars().count()) {
                         plan_nudges += 1;
                         if !content.trim().is_empty() {
                             messages.push(
@@ -23045,8 +24365,30 @@ Tell the user clearly; do NOT claim it's done."
                         .await;
                         continue;
                     }
-                    // else: the answer is substantial and the plan is all-but-closed →
-                    // fall through to finalize with `content` instead of nudging.
+                    // The answer is substantial and the plan is all-but-closed → finalize with
+                    // `content` instead of nudging. F2.2 (default-on): reconcile the one still-open
+                    // step to `done` + persist, so the runtime plan matches the delivered work
+                    // and the NEXT turn doesn't falsely resume it. Reuses the canonical
+                    // mark-done→persist path.
+                    if plan_reconcile_on_delivery_enabled() {
+                        if let Some(open_index) = plan_steps
+                            .iter()
+                            .position(|s| plan_step_status(s) != "done")
+                        {
+                            plan_steps[open_index]["status"] = serde_json::json!("done");
+                            content = replace_latest_plan_marker(&content, &plan_steps);
+                            upsert_runtime_plan_memory_from_state(
+                                &state_owned,
+                                thread_id.as_deref(),
+                                &plan_steps,
+                            );
+                            if std::env::var("HOMUN_DEBUG").is_ok() {
+                                eprintln!(
+                                    "[plan] reconciled last open step to done on delivery: «{step}»"
+                                );
+                            }
+                        }
+                    }
                 } else if plan_steps.is_empty()
                     && turn_used_tools
                     && task_appears_incomplete(&state_owned.http, &memory_user_message, &content)
@@ -23080,6 +24422,31 @@ Tell the user clearly; do NOT claim it's done."
                     continue;
                 }
             }
+            // F3-deep: the model is about to finalize but produced NO answer body this round
+            // — typically a reasoning model that burned its whole token budget thinking
+            // (`finish_reason:length`, empty content) so only a ‹‹REASONING›› trace remains.
+            // Committing it would Done an empty / reasoning-only bubble (the "non produce la
+            // risposta" report). Recover by breaking WITHOUT `final_done`: the guaranteed
+            // forced-synthesis (`!final_done` below) then writes a real answer with a FRESH
+            // token budget and an explicit "write the FINAL ANSWER now" directive. `break`
+            // leaves the round loop, so the synthesis runs exactly once — no spin, no counter;
+            // if it too comes back empty, its own fallback chain ends the turn cleanly.
+            if should_force_synthesis_for_empty_visible_answer(&accumulated, &content) {
+                if verbose_debug() {
+                    let fr = body
+                        .get("choices")
+                        .and_then(|c| c.get(0))
+                        .and_then(|c| c.get("finish_reason"))
+                        .and_then(|f| f.as_str())
+                        .unwrap_or("");
+                    eprintln!("[answer] empty answer body (finish_reason={fr}) → forced synthesis");
+                }
+                // Keep the reasoning trace in context so the synthesis builds on it.
+                if !content.trim().is_empty() {
+                    messages.push(serde_json::json!({ "role": "assistant", "content": content }));
+                }
+                break;
+            }
             // The content already streamed LIVE (raw) via collect_openai_stream; here we
             // only accumulate the SANITIZED version, which becomes the authoritative
             // `Done` payload that the frontend uses as the final text (replacing the
@@ -23091,13 +24458,20 @@ Tell the user clearly; do NOT claim it's done."
             }
             // Anti-churn: the live stream carried one ‹‹PLAN›› block per plan tool call;
             // the PERSISTED answer keeps the plan card exactly once (latest state).
-            let final_answer = collapse_plan_markers(&accumulated);
+            let final_answer = append_vault_reveal_marker_if_missing(
+                reconcile_final_plan_marker_on_delivery(
+                    &plan,
+                    &collapse_plan_markers(&accumulated),
+                ),
+                pending_vault_reveal_marker.as_deref(),
+            );
             memory_answer = final_answer.clone();
             let _ = emit_stream_event(
                 &tx,
                 GenerateStreamEvent::Done {
                     text: final_answer,
                     metrics: TokenMetrics::zero(),
+                    redacted_user_text: None,
                 },
             )
             .await;
@@ -23199,13 +24573,17 @@ Tell me if you want me to retry or rephrase."
             }
             // Anti-churn safety net for the `accumulated` fallback (synth_text never
             // carries plan blocks, so this is a no-op when synthesis succeeded).
-            let final_text = collapse_plan_markers(&final_text);
+            let final_text = append_vault_reveal_marker_if_missing(
+                reconcile_final_plan_marker_on_delivery(&plan, &collapse_plan_markers(&final_text)),
+                pending_vault_reveal_marker.as_deref(),
+            );
             memory_answer = final_text.clone();
             let _ = emit_stream_event(
                 &tx,
                 GenerateStreamEvent::Done {
                     text: final_text,
                     metrics: TokenMetrics::zero(),
+                    redacted_user_text: None,
                 },
             )
             .await;
@@ -23223,7 +24601,7 @@ Tell me if you want me to retry or rephrase."
             let learn_actions = tool_trace.join("\n");
             let learn_prev = memory_prev_assistant.clone();
             tokio::spawn(async move {
-                learn_from_exchange(
+                learn_via_service_or_inline(
                     &learn_state,
                     &learn_user,
                     &learn_answer,
@@ -23259,13 +24637,7 @@ Tell me if you want me to retry or rephrase."
         tx.entry
             .finished
             .store(true, std::sync::atomic::Ordering::Relaxed);
-        let cleanup_id = resume_id.clone();
-        tokio::spawn(async move {
-            tokio::time::sleep(std::time::Duration::from_secs(300)).await;
-            if let Ok(mut map) = stream_registry().lock() {
-                map.remove(&cleanup_id);
-            }
-        });
+        schedule_stream_registry_cleanup(resume_id.clone());
     });
 
     let body = Body::from_stream(futures_util::stream::unfold(rx, |mut rx| async move {
@@ -23822,7 +25194,10 @@ async fn get_ollama_setup() -> Json<OllamaSetupStatus> {
                     .filter_map(|m| {
                         Some(OllamaSetupModel {
                             name: m.get("name")?.as_str()?.to_string(),
-                            size: m.get("size").and_then(serde_json::Value::as_u64).unwrap_or(0),
+                            size: m
+                                .get("size")
+                                .and_then(serde_json::Value::as_u64)
+                                .unwrap_or(0),
                         })
                     })
                     .collect::<Vec<_>>()
@@ -25003,106 +26378,6 @@ const PRUNED_SNAPSHOT_STUB: &str =
 /// user message carrying an `image_url`, stubbing all older ones. It never touches
 /// the system message, the original first user message, or non-browser tool
 /// results.
-/// Removes every `open..close` block (inclusive). `open` may be a tag prefix
-/// (e.g. "<invoke", to match attributed tags); `close` is the full closing tag.
-/// If a block is unterminated, everything from `open` to end is dropped.
-/// Reads `attr="value"` from a tag/block.
-fn xml_attr_value(block: &str, attr: &str) -> Option<String> {
-    let needle = format!("{attr}=\"");
-    let start = block.find(&needle)? + needle.len();
-    let rest = &block[start..];
-    let end = rest.find('"')?;
-    Some(rest[..end].to_string())
-}
-
-/// Builds a JSON args object from Claude-style
-/// `<parameter name="p">value</parameter>` pairs.
-fn parse_xml_parameters(block: &str) -> String {
-    let mut map = serde_json::Map::new();
-    let mut rest = block;
-    while let Some(pos) = rest.find("<parameter") {
-        let after = &rest[pos..];
-        let Some(name) = xml_attr_value(after, "name") else {
-            break;
-        };
-        let Some(gt) = after.find('>') else { break };
-        let value_region = &after[gt + 1..];
-        let Some(close) = value_region.find("</parameter>") else {
-            break;
-        };
-        let value = value_region[..close].trim().to_string();
-        map.insert(name, serde_json::Value::String(value));
-        rest = &value_region[close + "</parameter>".len()..];
-    }
-    serde_json::Value::Object(map).to_string()
-}
-
-/// Parses tool calls a model emitted as TEXT (when it should have used the
-/// structured `tool_calls` field). Handles the two common leaked formats:
-///   - Hermes/Qwen JSON:   `<tool_call>{"name":"X","arguments":{...}}</tool_call>`
-///   - Claude/MiniMax XML: `<invoke name="X"><parameter name="p">v</parameter></invoke>`
-/// Returns `(name, arguments_json)`, filtered to `known` tool names so prose that
-/// merely mentions a tag is not mistaken for a call.
-fn parse_text_tool_calls(text: &str, known: &[String]) -> Vec<(String, String)> {
-    let cleaned = text.replace("]<]minimax[>[", "");
-    let mut out: Vec<(String, String)> = Vec::new();
-    // 1) Claude/MiniMax XML invokes.
-    let mut rest = cleaned.as_str();
-    while let Some(pos) = rest.find("<invoke") {
-        let after = &rest[pos..];
-        let Some(close) = after.find("</invoke>") else {
-            break;
-        };
-        let block = &after[..close];
-        if let Some(name) = xml_attr_value(block, "name") {
-            if known.iter().any(|k| k == &name) {
-                out.push((name, parse_xml_parameters(block)));
-            }
-        }
-        rest = &after[close + "</invoke>".len()..];
-    }
-    // 2) Hermes/Qwen JSON tool_calls (only if no XML invokes were found).
-    if out.is_empty() {
-        let mut rest = cleaned.as_str();
-        while let Some(pos) = rest.find("<tool_call>") {
-            let after = &rest[pos + "<tool_call>".len()..];
-            let Some(close) = after.find("</tool_call>") else {
-                break;
-            };
-            let inner = after[..close].trim();
-            if let Ok(value) = serde_json::from_str::<serde_json::Value>(inner) {
-                if let Some(name) = value.get("name").and_then(|n| n.as_str()) {
-                    if known.iter().any(|k| k == name) {
-                        let args = value
-                            .get("arguments")
-                            .map(|a| a.to_string())
-                            .unwrap_or_else(|| "{}".to_string());
-                        out.push((name.to_string(), args));
-                    }
-                }
-            }
-            rest = &after[close + "</tool_call>".len()..];
-        }
-    }
-    out
-}
-
-/// Synthesizes an OpenAI-style `tool_calls` array from text-parsed calls so the
-/// existing dispatch path handles them unchanged.
-fn synthesize_tool_calls(round: usize, parsed: Vec<(String, String)>) -> Vec<serde_json::Value> {
-    parsed
-        .into_iter()
-        .enumerate()
-        .map(|(index, (name, arguments))| {
-            serde_json::json!({
-                "id": format!("textcall_{round}_{index}"),
-                "type": "function",
-                "function": { "name": name, "arguments": arguments }
-            })
-        })
-        .collect()
-}
-
 fn prune_browser_history(
     messages: &mut [serde_json::Value],
     browser_tool_call_ids: &std::collections::BTreeSet<String>,
@@ -27048,7 +28323,7 @@ async fn handle_channel_inbound(
         let content = message.content.clone();
         tokio::spawn(async move {
             // thread_id=None: record_channel_message already stored the episode.
-            learn_from_exchange(&st, &content, "", "", None, speaker.as_deref(), None).await;
+            learn_via_service_or_inline(&st, &content, "", "", None, speaker.as_deref(), None).await;
         });
     }
     match action {
@@ -27090,8 +28365,8 @@ async fn handle_channel_inbound(
                         &format!("{label} · {name}"),
                     ) {
                         Ok(thread) => {
-                            let _ = store
-                                .set_channel_thread_recipient(&thread.thread_id, &reply_to);
+                            let _ =
+                                store.set_channel_thread_recipient(&thread.thread_id, &reply_to);
                             Some(thread.thread_id)
                         }
                         Err(_) => None,
@@ -27795,6 +29070,7 @@ fn channel_chat_message(role: &str, text: &str) -> ChatMessage {
         linked_task_id: None,
         linked_automation_ref: None,
         attachments: Vec::new(),
+        event_parts: Vec::new(),
     }
 }
 
@@ -28443,7 +29719,12 @@ fn artifact_thread_metadata(
 }
 
 fn artifact_bundle_title(dir: &std::path::Path) -> Option<String> {
-    for name in ["deck.json", "document.json", "manifest.json", "artifact.json"] {
+    for name in [
+        "deck.json",
+        "document.json",
+        "manifest.json",
+        "artifact.json",
+    ] {
         let path = dir.join(name);
         let Ok(raw) = fs::read_to_string(path) else {
             continue;
@@ -29421,6 +30702,81 @@ fn stream_event_is_terminal(line: &str) -> bool {
     line.contains("\"type\":\"done\"") || line.contains("\"type\":\"error\"")
 }
 
+fn legacy_marker_body<'a>(text: &'a str, open: &str, close: &str) -> Option<&'a str> {
+    let trimmed = text.trim();
+    if trimmed.starts_with(open) && trimmed.ends_with(close) {
+        Some(&trimmed[open.len()..trimmed.len() - close.len()])
+    } else {
+        None
+    }
+}
+
+fn legacy_marker_json(text: &str, open: &str, close: &str) -> Option<serde_json::Value> {
+    legacy_marker_body(text, open, close).and_then(|body| serde_json::from_str(body).ok())
+}
+
+fn expand_legacy_delta_to_chat_events_with_mode(
+    text: &str,
+    include_legacy_delta: bool,
+) -> Vec<GenerateStreamEvent> {
+    let mut events = Vec::new();
+    if let Some(body) = legacy_marker_body(text, "‹‹ACT››", "‹‹/ACT››") {
+        events.push(GenerateStreamEvent::Activity {
+            text: body.to_string(),
+        });
+    } else if let Some(body) = legacy_marker_body(text, "‹‹PLAN››", "‹‹/PLAN››") {
+        events.push(GenerateStreamEvent::PlanUpdate {
+            markdown: body.to_string(),
+        });
+    } else if let Some(body) = legacy_marker_body(text, "‹‹REASONING››", "‹‹/REASONING››")
+    {
+        events.push(GenerateStreamEvent::Reasoning {
+            text: body.to_string(),
+        });
+    } else if let Some(payload) = legacy_marker_json(text, "‹‹CHOICES››", "‹‹/CHOICES››")
+    {
+        events.push(GenerateStreamEvent::ChoicePrompt { payload });
+    } else if let Some(payload) =
+        legacy_marker_json(text, "‹‹VAULT_PROPOSE››", "‹‹/VAULT_PROPOSE››")
+    {
+        events.push(GenerateStreamEvent::VaultPropose { payload });
+    } else if let Some(payload) = legacy_marker_json(text, "‹‹VAULT_REVEAL››", "‹‹/VAULT_REVEAL››")
+    {
+        events.push(GenerateStreamEvent::VaultReveal { payload });
+    } else if let Some(payload) =
+        legacy_marker_json(text, "‹‹PAYMENT_APPROVAL››", "‹‹/PAYMENT_APPROVAL››")
+    {
+        events.push(GenerateStreamEvent::PaymentApproval { payload });
+    } else if let Some(payload) =
+        legacy_marker_json(text, "‹‹DIFF››", "‹‹/DIFF››")
+    {
+        // Piano UI D3: marker diff → evento strutturato Diff.
+        if let Ok(diff) = serde_json::from_value::<local_first_subagents::DiffStreamPayload>(payload)
+        {
+            events.push(GenerateStreamEvent::Diff { payload: diff });
+        }
+    }
+    if !events.is_empty() && !include_legacy_delta {
+        return events;
+    }
+    events.push(GenerateStreamEvent::Delta {
+        text: text.to_string(),
+    });
+    events
+}
+
+fn stream_legacy_marker_deltas_enabled() -> bool {
+    std::env::var("HOMUN_STREAM_LEGACY_MARKER_DELTAS")
+        .ok()
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "on"
+            )
+        })
+        .unwrap_or(false)
+}
+
 fn stream_entry_has_terminal_event(entry: &StreamEntry) -> bool {
     entry
         .lines
@@ -29429,13 +30785,36 @@ fn stream_entry_has_terminal_event(entry: &StreamEntry) -> bool {
         .unwrap_or(false)
 }
 
+fn schedule_stream_registry_cleanup(resume_id: String) {
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(300)).await;
+        if let Ok(mut map) = stream_registry().lock() {
+            map.remove(&resume_id);
+        }
+    });
+}
+
 const STREAM_ACTIVITY_IDLE_STALE_SECS: u64 = 180;
+const STREAM_SILENT_IDLE_STALE_SECS: u64 = 30;
 
 fn stream_entry_is_activity_stale(entry: &StreamEntry, now: u64) -> bool {
     let last = entry
         .last_event_at
         .load(std::sync::atomic::Ordering::Relaxed);
-    last > 0 && now.saturating_sub(last) > STREAM_ACTIVITY_IDLE_STALE_SECS
+    if last == 0 {
+        return false;
+    }
+    let has_events = entry
+        .lines
+        .lock()
+        .map(|lines| !lines.is_empty())
+        .unwrap_or(false);
+    let stale_after = if has_events {
+        STREAM_ACTIVITY_IDLE_STALE_SECS
+    } else {
+        STREAM_SILENT_IDLE_STALE_SECS
+    };
+    now.saturating_sub(last) > stale_after
 }
 
 /// Thread ids that currently have a live (not-yet-finished) in-flight generation.
@@ -29584,7 +30963,7 @@ async fn app_events() -> Response {
         .expect("valid streaming response")
 }
 
-async fn emit_stream_event(sink: &StreamSink, event: GenerateStreamEvent) -> Result<(), ()> {
+async fn emit_single_stream_event(sink: &StreamSink, event: GenerateStreamEvent) -> Result<(), ()> {
     let line = serde_json::to_string(&event).map_err(|_| ())?;
     let terminal = stream_event_is_terminal(&line);
     sink.entry
@@ -29605,6 +30984,21 @@ async fn emit_stream_event(sink: &StreamSink, event: GenerateStreamEvent) -> Res
     // generation keeps running and recording into the registry).
     let _ = sink.mpsc.send(Ok(Bytes::from(format!("{line}\n")))).await;
     Ok(())
+}
+
+async fn emit_stream_event(sink: &StreamSink, event: GenerateStreamEvent) -> Result<(), ()> {
+    match event {
+        GenerateStreamEvent::Delta { text } => {
+            for expanded in expand_legacy_delta_to_chat_events_with_mode(
+                &text,
+                stream_legacy_marker_deltas_enabled(),
+            ) {
+                emit_single_stream_event(sink, expanded).await?;
+            }
+            Ok(())
+        }
+        other => emit_single_stream_event(sink, other).await,
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -30942,6 +32336,7 @@ fn append_task_result_to_chat(
         linked_task_id: Some(task_id.to_string()),
         linked_automation_ref: None,
         attachments: Vec::new(),
+        event_parts: Vec::new(),
     };
     lock_store(state)?
         .append_assistant_message(&thread.thread_id, &message)
@@ -31464,6 +32859,47 @@ enum SharedSidecarCall {
     SidecarLost(String),
 }
 
+/// A CDP "wedge": the sidecar IPC is healthy but its inner `connectOverCDP` to the
+/// contained-computer Chromium times out. Happens when a long-lived container
+/// accumulates stale CDP targets — `/json/version` still answers (so `browser_cdp_ok`
+/// can't see it), yet the ws handshake hangs. The cure is recycling the container.
+/// Matched conservatively on Playwright's English message (its only producer). This
+/// is the gap that turned a transient wedge into the drive's hard browse failure:
+/// motore #1's HTTP-only self-heal misses it too, but its warm per-thread session
+/// usually predates the wedge — the drive spawns cold into it.
+/// The textual signature of a CDP wedge in an error string: a `connectOverCDP` timeout.
+fn cdp_wedge_signature(message: &str) -> bool {
+    let message = message.to_ascii_lowercase();
+    message.contains("connectovercdp") && message.contains("timeout")
+}
+
+fn browser_response_indicates_cdp_wedge(response: &BrowserResponse) -> bool {
+    match response {
+        BrowserResponse::Error { error, .. } => cdp_wedge_signature(&error.message),
+        BrowserResponse::Success { .. } => false,
+    }
+}
+
+/// Throttle container recycles so a burst of wedge responses (an agentic loop
+/// retrying every round) recycles AT MOST once per window — never thrashing
+/// `docker rm -f`. Returns true and arms the window when a recycle is allowed.
+fn browser_recycle_throttle_ok() -> bool {
+    static LAST: std::sync::OnceLock<std::sync::Mutex<Option<std::time::Instant>>> =
+        std::sync::OnceLock::new();
+    let cell = LAST.get_or_init(|| std::sync::Mutex::new(None));
+    let Ok(mut guard) = cell.lock() else {
+        return false;
+    };
+    let now = std::time::Instant::now();
+    let allowed = guard
+        .map(|last| now.duration_since(last) >= std::time::Duration::from_secs(90))
+        .unwrap_or(true);
+    if allowed {
+        *guard = Some(now);
+    }
+    allowed
+}
+
 /// THE single browser execution surface (A1.3). All durable browser capability
 /// execution flows through here so there is exactly one owner of the persistent
 /// sidecar: this function holds `state.browser_capability_client`, lazily spawns
@@ -31501,6 +32937,23 @@ fn call_shared_browser_sidecar(
         client.call_response(method, params)
     };
     match call_result {
+        // Self-heal a CDP wedge (connectOverCDP timeout despite a live sidecar):
+        // recycle the contained computer once per window, drop the sidecar so the next
+        // call respawns against the fresh CDP, and report SidecarLost so the caller
+        // retries (the drive's agentic loop retries next round; the durable runtime
+        // re-enqueues). Closes the gap `browser_cdp_ok`'s HTTP probe can't catch.
+        Ok(response)
+            if browser_response_indicates_cdp_wedge(&response) && browser_recycle_throttle_ok() =>
+        {
+            crate::sandbox::recycle_container();
+            let _ = crate::sandbox::ensure_contained_computer();
+            *client_guard = None;
+            Ok(SharedSidecarCall::SidecarLost(
+                "browser CDP wedged (connectOverCDP timeout); recycled contained computer, \
+                 respawning on retry"
+                    .to_string(),
+            ))
+        }
         Ok(response) => Ok(SharedSidecarCall::Response(response)),
         // Self-heal: a broken IPC pipe (Sidecar) or a garbled/empty reply
         // (InvalidResponse, e.g. the child closed stdout) means the single
@@ -31693,55 +33146,31 @@ fn execute_capability_generic(
             facade.call_tool(&policy_context, call)
         }
         CapabilityProviderKind::Managed => {
-            let connection = connection.ok_or_else(|| LocalTaskExecutionError {
-                message: format!("no connection for provider {}", provider_id.as_str()),
-            })?;
-            let base_url = connection
-                .metadata
-                .get("base_url")
-                .and_then(Value::as_str)
-                .map(str::to_string)
-                .unwrap_or_else(|| composio_base_url(None));
-            let secret_ref =
-                SecretRef::new(user.as_str(), workspace.as_str(), "composio", "default").map_err(
-                    |error| LocalTaskExecutionError {
-                        message: format!("secret ref: {error}"),
-                    },
-                )?;
-            let api_key = state
-                .secret_store
-                .get(&secret_ref)
-                .map_err(|error| LocalTaskExecutionError {
-                    message: format!("secret get: {error}"),
-                })?
-                .ok_or_else(|| LocalTaskExecutionError {
-                    message: "segreto Composio mancante".to_string(),
-                })?
-                .expose_utf8()
-                .map_err(|error| LocalTaskExecutionError {
-                    message: format!("secret decode: {error}"),
-                })?;
-            let mut facade = CapabilityFacade::new(
-                CapabilityPolicy::default(),
-                InMemoryCapabilityAudit::default(),
-            );
-            facade.register_provider(ComposioCapabilityProvider::new(
-                ComposioProviderConfig {
+            // Composio: converged onto the SINGLE v3 execution path (F1.c, caposaldo #5).
+            // The task-runtime used to wrap the pre-v3 `ComposioCapabilityProvider` in a
+            // throwaway facade, but the facade locates the tool via `provider.list_tools()`,
+            // which does `GET /tools` and parses the pre-v3 `{tools}` shape — that FAILS
+            // against Composio v3 (`{items}`), so the call errored before ever executing
+            // (autonomous Composio runs were broken). We now re-check the SAME deny-by-default
+            // policy (`CapabilityPolicy::tool_access`, no gate duplication) against the
+            // v3-sourced cached tool metadata, then execute through `composio_execute_tool` —
+            // the one v3 path the chat loop already uses. `connection` is unused here now:
+            // the v3 transport is resolved by `composio_transport_for` (single source).
+            if let Err(reason) = authorize_managed_capability_tool(
+                &tool_policies,
+                &policy_context,
+                &provider_id,
+                call.tool_name.as_str(),
+            ) {
+                return Ok(capability_call_failed_outcome(task, &reason));
+            }
+            composio_execute_tool(state, call.tool_name.as_str(), &call.arguments)
+                .map(|output| local_first_capabilities::CapabilityCallResult {
                     provider_id: provider_id.clone(),
-                    // MUST match the Composio entity used at link time
-                    // (`composio_entity_id()` = active workspace), otherwise
-                    // Composio can't resolve the connected account for the tool
-                    // call. `gateway_capability_user_id()` ("local-user") is a
-                    // different namespace and would yield "no connected account".
-                    user_id: CapabilityUserId::new(composio_entity_id()),
-                    workspace_id: gateway_capability_workspace_id(),
-                    enabled: true,
-                    privacy_domains: vec!["managed-cloud".to_string()],
-                    tool_policies: Vec::new(),
-                },
-                GatewayComposioTransport::new(base_url, api_key),
-            ));
-            facade.call_tool(&policy_context, call)
+                    tool_name: call.tool_name.clone(),
+                    output,
+                })
+                .map_err(|error| CapabilityError::ToolExecutionFailed(error.message))
         }
         other => return Ok(capability_kind_not_wired_outcome(task, other)),
     };
@@ -31750,6 +33179,44 @@ fn execute_capability_generic(
         Ok(call_result) => capability_call_completed_outcome(task, &call_result),
         Err(error) => capability_call_failed_outcome(task, &error.to_string()),
     })
+}
+
+/// Re-check the deny-by-default policy for a Managed (Composio) tool before AUTONOMOUS
+/// execution by the task-runtime. Returns `Ok(())` if authorized, else a human-readable
+/// denial reason. Pure (so the security gate is unit-testable without app state), and it
+/// reuses the ONE canonical `CapabilityPolicy::tool_access` — no gate logic is duplicated
+/// here. Fail-closed: a tool absent from the v3 catalog cache (`cached_tools`) cannot be
+/// authorized, so a stale/uncached slug is denied rather than executed blindly. This is the
+/// gate the old facade path enforced; it is preserved here while execution moves to the v3
+/// `composio_execute_tool` (F1.c).
+fn authorize_managed_capability_tool(
+    tool_policies: &[McpToolPolicy],
+    policy_context: &PolicyContext,
+    provider_id: &CapabilityProviderId,
+    tool_name: &str,
+) -> Result<(), String> {
+    let Some(policy) = tool_policies.iter().find(|p| p.tool_name == tool_name) else {
+        return Err(format!(
+            "Composio tool «{tool_name}» is not in the catalog cache — cannot authorize it \
+             for autonomous execution; open the chat once to refresh the connected toolkit."
+        ));
+    };
+    let tool = CapabilityTool {
+        name: policy.tool_name.clone(),
+        provider_id: provider_id.clone(),
+        provider_kind: CapabilityProviderKind::Managed,
+        action: policy.action,
+        description: String::new(),
+        privacy_domains: policy.privacy_domains.clone(),
+        sensitivity: policy.sensitivity.clone(),
+        input_schema: serde_json::json!({ "type": "object" }),
+    };
+    let decision = CapabilityPolicy::default().tool_access(policy_context, &tool);
+    if decision.executable {
+        Ok(())
+    } else {
+        Err(format!("denied: {}", decision.reasons.join("; ")))
+    }
 }
 
 /// Parses an MCP stdio launch config (command/args/env) from a connection's
@@ -32218,10 +33685,9 @@ fn connect_composio_blocking(
 
     // Verify the key against the v3 API FIRST and count available toolkits (apps),
     // before persisting anything. A bad key must not leave a phantom "active"
-    // connection behind. We go transport-direct here: the crate's
-    // ComposioCapabilityProvider targets a pre-v3 shape (expects `{tools}`), but
-    // v3 returns `{items}`. We cache TOOLKITS (apps) for the connectors UI, not
-    // the 1000s of individual tools — those are fetched per toolkit on demand.
+    // connection behind. We go transport-direct here (v3 `{items}` shape). We cache
+    // TOOLKITS (apps) for the connectors UI, not the 1000s of individual tools —
+    // those are fetched per toolkit on demand.
     let transport = GatewayComposioTransport::new(base_url.clone(), api_key.clone());
     let toolkits = transport
         .request("GET", "/toolkits", None)
@@ -34260,6 +35726,882 @@ struct ComposioExecuteRequest {
 
 const COMPOSIO_CONFIRM_OPEN: &str = "‹‹COMPOSIO_CONFIRM››";
 const COMPOSIO_CONFIRM_CLOSE: &str = "‹‹/COMPOSIO_CONFIRM››";
+const PAYMENT_APPROVAL_OPEN: &str = "‹‹PAYMENT_APPROVAL››";
+const PAYMENT_APPROVAL_CLOSE: &str = "‹‹/PAYMENT_APPROVAL››";
+const PAYMENT_APPROVAL_TTL_SECONDS: u64 = 300;
+const VAULT_REVEAL_OPEN: &str = "‹‹VAULT_REVEAL››";
+const VAULT_REVEAL_CLOSE: &str = "‹‹/VAULT_REVEAL››";
+
+fn payment_approval_marker(snapshot: &PaymentApprovalSnapshot) -> String {
+    let marker = serde_json::json!({ "snapshot": snapshot });
+    format!("{PAYMENT_APPROVAL_OPEN}{marker}{PAYMENT_APPROVAL_CLOSE}")
+}
+
+#[derive(Debug, Deserialize)]
+struct VaultProposalActionRequest {
+    category: String,
+    label: String,
+    redacted_preview: String,
+    #[serde(default)]
+    secret_value: Option<String>,
+    #[serde(default)]
+    pending_id: Option<String>,
+    #[serde(default)]
+    pin: Option<String>,
+    #[serde(default)]
+    thread_id: Option<String>,
+    #[serde(default)]
+    message_id: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct VaultProposalAcceptResponse {
+    ok: bool,
+    record_id: String,
+    category: String,
+    label: String,
+    redacted_preview: String,
+}
+
+#[derive(Debug, Serialize)]
+struct VaultProposalDismissResponse {
+    ok: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct VaultRecordSummary {
+    id: String,
+    category: String,
+    label: String,
+    redacted_preview: String,
+}
+
+#[derive(Debug, Serialize)]
+struct VaultRecordsListResponse {
+    records: Vec<VaultRecordSummary>,
+}
+
+#[derive(Debug, Deserialize)]
+struct VaultRecordUpdateRequest {
+    category: String,
+    label: String,
+    #[serde(default)]
+    secret_value: Option<String>,
+    #[serde(default)]
+    pin: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct VaultRecordUpdateResponse {
+    ok: bool,
+    record: VaultRecordSummary,
+}
+
+#[derive(Debug, Deserialize)]
+struct VaultRecordRevealRequest {
+    pin: String,
+}
+
+#[derive(Debug, Serialize)]
+struct VaultRecordRevealResponse {
+    ok: bool,
+    record: VaultRecordSummary,
+    secret_value: String,
+}
+
+#[derive(Debug, Serialize)]
+struct VaultRecordDeleteResponse {
+    ok: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct VaultPinStatusResponse {
+    configured: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct VaultPinSetupRequest {
+    pin: String,
+    #[serde(default)]
+    current_pin: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct VaultPinSetupResponse {
+    configured: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct VaultPinVerifyRequest {
+    pin: String,
+}
+
+#[derive(Debug, Serialize)]
+struct VaultPinVerifyResponse {
+    ok: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct VaultPaymentApprovalRequest {
+    snapshot: PaymentApprovalSnapshot,
+    pin: String,
+    cvv: String,
+    #[serde(default)]
+    thread_id: Option<String>,
+    #[serde(default)]
+    message_id: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct VaultPaymentApprovalResponse {
+    ok: bool,
+    payment_approval_id: String,
+    expires_in_seconds: u64,
+}
+
+async fn vault_proposal_accept(
+    State(state): State<AppState>,
+    Json(request): Json<VaultProposalActionRequest>,
+) -> Result<Json<VaultProposalAcceptResponse>, GatewayError> {
+    let vault_store = lock_vault_store(&state)?;
+    accept_vault_proposal_with_pending(&vault_store, Some(&state.pending_vault_proposals), &request)
+        .map(Json)
+}
+
+async fn vault_proposal_dismiss(
+    Json(_request): Json<VaultProposalActionRequest>,
+) -> Result<Json<VaultProposalDismissResponse>, GatewayError> {
+    Ok(Json(VaultProposalDismissResponse { ok: true }))
+}
+
+async fn vault_records_list(
+    State(state): State<AppState>,
+) -> Result<Json<VaultRecordsListResponse>, GatewayError> {
+    let vault_store = lock_vault_store(&state)?;
+    let records = vault_store
+        .list()
+        .map_err(vault_store_error)?
+        .into_iter()
+        .map(vault_record_summary)
+        .collect();
+    Ok(Json(VaultRecordsListResponse { records }))
+}
+
+async fn vault_record_delete(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<VaultRecordDeleteResponse>, GatewayError> {
+    let record_id = VaultRecordId::new(id).map_err(invalid_vault_proposal)?;
+    let vault_store = lock_vault_store(&state)?;
+    vault_store.delete(&record_id).map_err(vault_store_error)?;
+    Ok(Json(VaultRecordDeleteResponse { ok: true }))
+}
+
+async fn vault_record_update(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(request): Json<VaultRecordUpdateRequest>,
+) -> Result<Json<VaultRecordUpdateResponse>, GatewayError> {
+    let record_id = VaultRecordId::new(id).map_err(invalid_vault_proposal)?;
+    let vault_store = lock_vault_store(&state)?;
+    update_vault_record(&vault_store, &record_id, &request).map(Json)
+}
+
+async fn vault_record_reveal(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(request): Json<VaultRecordRevealRequest>,
+) -> Result<Json<VaultRecordRevealResponse>, GatewayError> {
+    let record_id = VaultRecordId::new(id).map_err(invalid_vault_proposal)?;
+    let vault_store = lock_vault_store(&state)?;
+    reveal_vault_record_secret(
+        &vault_store,
+        Some(&state.pending_vault_proposals),
+        &record_id,
+        &request,
+    )
+    .map(Json)
+}
+
+async fn vault_pin_status(
+    State(state): State<AppState>,
+) -> Result<Json<VaultPinStatusResponse>, GatewayError> {
+    let configured = lock_vault_store(&state)?
+        .local_pin_verifier()
+        .map_err(vault_store_error)?
+        .is_some();
+    Ok(Json(VaultPinStatusResponse { configured }))
+}
+
+async fn vault_pin_setup(
+    State(state): State<AppState>,
+    Json(request): Json<VaultPinSetupRequest>,
+) -> Result<Json<VaultPinSetupResponse>, GatewayError> {
+    let vault_store = lock_vault_store(&state)?;
+    apply_vault_pin_setup(&vault_store, &request)?;
+    Ok(Json(VaultPinSetupResponse { configured: true }))
+}
+
+fn apply_vault_pin_setup(
+    vault_store: &SQLiteVaultStore,
+    request: &VaultPinSetupRequest,
+) -> Result<(), GatewayError> {
+    let existing = vault_store
+        .local_pin_verifier()
+        .map_err(vault_store_error)?;
+    let new_verifier =
+        local_pin_setup_verifier(existing.as_ref(), &request).map_err(invalid_vault_pin)?;
+    if let Some(existing) = existing.as_ref() {
+        let current_pin = request.current_pin.as_deref().ok_or_else(|| {
+            invalid_vault_pin("Current Vault PIN is required to change the PIN".to_string())
+        })?;
+        match vault_store.rewrap_local_master_key(
+            existing,
+            current_pin,
+            &new_verifier,
+            &request.pin,
+        ) {
+            Ok(()) => {}
+            Err(error) if error == "Vault master key is not configured" => {
+                vault_store
+                    .ensure_local_master_key(existing, current_pin)
+                    .map_err(vault_store_error)?;
+                vault_store
+                    .rewrap_local_master_key(existing, current_pin, &new_verifier, &request.pin)
+                    .map_err(vault_store_error)?;
+            }
+            Err(error) => return Err(vault_store_error(error)),
+        }
+    } else {
+        vault_store
+            .ensure_local_master_key(&new_verifier, &request.pin)
+            .map_err(vault_store_error)?;
+    }
+    vault_store
+        .set_local_pin_verifier(new_verifier)
+        .map_err(vault_store_error)?;
+    Ok(())
+}
+
+async fn vault_pin_verify(
+    State(state): State<AppState>,
+    Json(request): Json<VaultPinVerifyRequest>,
+) -> Result<Json<VaultPinVerifyResponse>, GatewayError> {
+    let verifier = lock_vault_store(&state)?
+        .local_pin_verifier()
+        .map_err(vault_store_error)?;
+    Ok(Json(VaultPinVerifyResponse {
+        ok: local_pin_verify_result(verifier.as_ref(), &request.pin),
+    }))
+}
+
+async fn vault_payment_approval_approve(
+    State(state): State<AppState>,
+    Json(request): Json<VaultPaymentApprovalRequest>,
+) -> Result<Json<VaultPaymentApprovalResponse>, GatewayError> {
+    let vault_store = lock_vault_store(&state)?;
+    let chat_store = lock_store(&state)?;
+    let mut approvals = lock_payment_approvals(&state)?;
+    approve_payment_checkout_request(&vault_store, &chat_store, &mut approvals, request).map(Json)
+}
+
+fn vault_record_from_proposal(request: &VaultProposalActionRequest) -> Result<VaultRecord, String> {
+    let category = vault_category_from_marker(&request.category)?;
+    let record_id = VaultRecordId::new(format!("vault_{}", uuid::Uuid::new_v4().simple()))?;
+    let user = gateway_user_id();
+    let workspace = active_workspace_id();
+    let secret_ref = SecretRef::new(
+        user.as_str(),
+        workspace.as_str(),
+        "vault",
+        record_id.as_str(),
+    )
+    .map_err(|error| error.to_string())?;
+    let metadata = serde_json::json!({
+        "redacted_preview": request.redacted_preview,
+        "pending_id": request.pending_id,
+        "source": "vault_propose",
+        "thread_id": request.thread_id,
+        "message_id": request.message_id,
+    });
+    VaultRecord::new(
+        record_id,
+        category,
+        request.label.trim(),
+        secret_ref,
+        metadata,
+    )
+}
+
+fn vault_record_summary(record: VaultRecord) -> VaultRecordSummary {
+    let redacted_preview = record
+        .metadata
+        .get("redacted_preview")
+        .and_then(|value| value.as_str())
+        .unwrap_or("[VAULT:redacted]")
+        .to_string();
+    VaultRecordSummary {
+        id: record.id.to_string(),
+        category: vault_category_key(record.category).to_string(),
+        label: record.label,
+        redacted_preview,
+    }
+}
+
+fn search_vault_records(
+    vault_store: &SQLiteVaultStore,
+    query: &str,
+    limit: usize,
+) -> Result<Vec<VaultRecordSummary>, GatewayError> {
+    let terms = vault_metadata_terms(query);
+    if terms.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut scored = vault_store
+        .list()
+        .map_err(vault_store_error)?
+        .into_iter()
+        .filter_map(|record| {
+            let summary = vault_record_summary(record);
+            let haystack = vault_metadata_haystack(&summary);
+            let score = terms
+                .iter()
+                .filter(|term| {
+                    haystack
+                        .iter()
+                        .any(|candidate| candidate.contains(term.as_str()))
+                })
+                .count();
+            (score > 0).then_some((score, summary))
+        })
+        .collect::<Vec<_>>();
+    scored.sort_by(|(left_score, left), (right_score, right)| {
+        right_score
+            .cmp(left_score)
+            .then_with(|| left.label.cmp(&right.label))
+            .then_with(|| left.id.cmp(&right.id))
+    });
+    Ok(scored
+        .into_iter()
+        .take(limit.max(1))
+        .map(|(_, summary)| summary)
+        .collect())
+}
+
+fn vault_metadata_haystack(summary: &VaultRecordSummary) -> Vec<String> {
+    [
+        summary.id.as_str(),
+        summary.category.as_str(),
+        summary.label.as_str(),
+        summary.redacted_preview.as_str(),
+    ]
+    .iter()
+    .flat_map(|value| vault_metadata_terms(value))
+    .collect()
+}
+
+fn vault_metadata_terms(text: &str) -> Vec<String> {
+    let mut terms = text
+        .split(|c: char| !c.is_alphanumeric())
+        .map(|part| part.trim().to_ascii_lowercase())
+        .filter(|part| part.len() >= 3)
+        .collect::<Vec<_>>();
+    if terms
+        .iter()
+        .any(|term| term == "codice" || term == "fiscale")
+    {
+        terms.push("fiscal".to_string());
+        terms.push("identity".to_string());
+    }
+    if terms
+        .iter()
+        .any(|term| term == "targa" || term == "plate" || term == "auto")
+    {
+        terms.push("vehicles".to_string());
+        terms.push("license".to_string());
+    }
+    terms.sort();
+    terms.dedup();
+    terms
+}
+
+fn load_vault_record(
+    vault_store: &SQLiteVaultStore,
+    record_id: &VaultRecordId,
+) -> Result<VaultRecord, GatewayError> {
+    vault_store
+        .get(record_id)
+        .map_err(vault_store_error)?
+        .ok_or_else(|| GatewayError {
+            status: StatusCode::NOT_FOUND,
+            code: "vault_record_not_found",
+            message: "Vault record not found".to_string(),
+        })
+}
+
+fn unlock_vault_master_key(
+    vault_store: &SQLiteVaultStore,
+    pin: &str,
+) -> Result<[u8; 32], GatewayError> {
+    let verifier = vault_store
+        .local_pin_verifier()
+        .map_err(vault_store_error)?
+        .ok_or_else(|| invalid_vault_pin("Vault PIN is not configured".to_string()))?;
+    if !verifier.verify(pin) {
+        return Err(invalid_vault_pin("Invalid Vault PIN".to_string()));
+    }
+    vault_store
+        .unlock_local_master_key(&verifier, pin)
+        .map_err(vault_store_error)
+}
+
+fn reveal_vault_record_secret(
+    vault_store: &SQLiteVaultStore,
+    pending_store: Option<&privacy_guard::PendingVaultProposalStore>,
+    record_id: &VaultRecordId,
+    request: &VaultRecordRevealRequest,
+) -> Result<VaultRecordRevealResponse, GatewayError> {
+    let record = load_vault_record(vault_store, record_id)?;
+    let master_key = unlock_vault_master_key(vault_store, &request.pin)?;
+    let secret = match vault_store
+        .get_secret_material(record_id, &master_key)
+        .map_err(vault_store_error)?
+    {
+        Some(secret) => secret,
+        None => materialize_pending_vault_secret(vault_store, pending_store, &record, &master_key)?,
+    };
+    let secret_value = secret
+        .expose_utf8()
+        .map_err(|error| vault_store_error(error.to_string()))?;
+    Ok(VaultRecordRevealResponse {
+        ok: true,
+        record: vault_record_summary(record),
+        secret_value,
+    })
+}
+
+fn materialize_pending_vault_secret(
+    vault_store: &SQLiteVaultStore,
+    pending_store: Option<&privacy_guard::PendingVaultProposalStore>,
+    record: &VaultRecord,
+    master_key: &[u8; 32],
+) -> Result<SecretMaterial, GatewayError> {
+    let pending_id = record
+        .metadata
+        .get("pending_id")
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| GatewayError {
+            status: StatusCode::NOT_FOUND,
+            code: "vault_secret_not_found",
+            message: "Vault secret material not found".to_string(),
+        })?;
+    let pending_store = pending_store.ok_or_else(|| GatewayError {
+        status: StatusCode::NOT_FOUND,
+        code: "vault_pending_unavailable",
+        message: "Pending Vault secret is no longer available".to_string(),
+    })?;
+    let pending = pending_store.get(pending_id).ok_or_else(|| GatewayError {
+        status: StatusCode::NOT_FOUND,
+        code: "vault_pending_expired",
+        message: "Pending Vault secret expired".to_string(),
+    })?;
+    let redacted_preview = record
+        .metadata
+        .get("redacted_preview")
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    if pending.category != vault_category_key(record.category)
+        || pending.label != record.label
+        || pending.redacted_preview != redacted_preview
+    {
+        return Err(invalid_vault_proposal(
+            "Pending Vault proposal does not match this record".to_string(),
+        ));
+    }
+    let material = SecretMaterial::from_string(pending.secret_value.clone());
+    vault_store
+        .put_secret_material(&record.id, master_key, material.clone())
+        .map_err(vault_store_error)?;
+    let _ = pending_store.take(pending_id);
+    Ok(material)
+}
+
+fn update_vault_record(
+    vault_store: &SQLiteVaultStore,
+    record_id: &VaultRecordId,
+    request: &VaultRecordUpdateRequest,
+) -> Result<VaultRecordUpdateResponse, GatewayError> {
+    let existing = load_vault_record(vault_store, record_id)?;
+    let label = request.label.trim();
+    if label.is_empty() {
+        return Err(invalid_vault_proposal(
+            "Vault record label is required".to_string(),
+        ));
+    }
+    let category = vault_category_from_marker(&request.category).map_err(invalid_vault_proposal)?;
+    let updated = VaultRecord::new(
+        existing.id,
+        category,
+        label,
+        existing.secret_ref,
+        existing.metadata,
+    )
+    .map_err(invalid_vault_proposal)?;
+    let summary = vault_record_summary(updated.clone());
+    vault_store.put(updated).map_err(vault_store_error)?;
+    if let Some(secret_value) = request
+        .secret_value
+        .as_ref()
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+    {
+        let pin = request.pin.as_deref().ok_or_else(|| {
+            invalid_vault_pin("Vault PIN is required to update secret material".to_string())
+        })?;
+        let master_key = unlock_vault_master_key(vault_store, pin)?;
+        vault_store
+            .put_secret_material(
+                record_id,
+                &master_key,
+                SecretMaterial::from_string(secret_value.to_string()),
+            )
+            .map_err(vault_store_error)?;
+    }
+    Ok(VaultRecordUpdateResponse {
+        ok: true,
+        record: summary,
+    })
+}
+
+fn accept_vault_proposal(
+    vault_store: &SQLiteVaultStore,
+    request: &VaultProposalActionRequest,
+) -> Result<VaultProposalAcceptResponse, GatewayError> {
+    let record = vault_record_from_proposal(request).map_err(invalid_vault_proposal)?;
+    if let Some(secret_value) = request
+        .secret_value
+        .as_ref()
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+    {
+        let pin = request.pin.as_deref().ok_or_else(|| {
+            invalid_vault_pin("Vault PIN is required to save secret material".to_string())
+        })?;
+        let verifier = vault_store
+            .local_pin_verifier()
+            .map_err(vault_store_error)?
+            .ok_or_else(|| invalid_vault_pin("Vault PIN is not configured".to_string()))?;
+        let master_key = vault_store
+            .ensure_local_master_key(&verifier, pin)
+            .map_err(vault_store_error)?;
+        vault_store
+            .put_secret_material(
+                &record.id,
+                &master_key,
+                SecretMaterial::from_string(secret_value.to_string()),
+            )
+            .map_err(vault_store_error)?;
+    }
+    let response = VaultProposalAcceptResponse {
+        ok: true,
+        record_id: record.id.to_string(),
+        category: request.category.clone(),
+        label: request.label.clone(),
+        redacted_preview: request.redacted_preview.clone(),
+    };
+    vault_store.put(record).map_err(vault_store_error)?;
+    Ok(response)
+}
+
+fn accept_vault_proposal_with_pending(
+    vault_store: &SQLiteVaultStore,
+    pending_store: Option<&privacy_guard::PendingVaultProposalStore>,
+    request: &VaultProposalActionRequest,
+) -> Result<VaultProposalAcceptResponse, GatewayError> {
+    let Some(pending_id) = request.pending_id.as_deref().filter(|id| !id.is_empty()) else {
+        return accept_vault_proposal(vault_store, request);
+    };
+    let pending_store = pending_store.ok_or_else(|| {
+        invalid_vault_proposal("Pending Vault proposal store is unavailable".to_string())
+    })?;
+    let pending = pending_store.get(pending_id).ok_or_else(|| {
+        invalid_vault_proposal("Pending Vault proposal expired or was already used".to_string())
+    })?;
+    if pending.category != request.category
+        || pending.label != request.label
+        || pending.redacted_preview != request.redacted_preview
+    {
+        return Err(invalid_vault_proposal(
+            "Pending Vault proposal does not match this card".to_string(),
+        ));
+    }
+    if request
+        .pin
+        .as_deref()
+        .map(str::trim)
+        .filter(|pin| !pin.is_empty())
+        .is_none()
+    {
+        return accept_vault_proposal(vault_store, request);
+    }
+    let resolved = VaultProposalActionRequest {
+        category: request.category.clone(),
+        label: request.label.clone(),
+        redacted_preview: request.redacted_preview.clone(),
+        secret_value: Some(pending.secret_value),
+        pending_id: None,
+        pin: request.pin.clone(),
+        thread_id: request.thread_id.clone(),
+        message_id: request.message_id.clone(),
+    };
+    let response = accept_vault_proposal(vault_store, &resolved)?;
+    let _ = pending_store.take(pending_id);
+    Ok(response)
+}
+
+fn local_pin_verifier_from_request(
+    request: &VaultPinSetupRequest,
+) -> Result<LocalPinVerifier, String> {
+    LocalPinVerifier::create(&request.pin)
+}
+
+fn local_pin_setup_verifier(
+    existing: Option<&LocalPinVerifier>,
+    request: &VaultPinSetupRequest,
+) -> Result<LocalPinVerifier, String> {
+    if let Some(existing) = existing {
+        let Some(current_pin) = request.current_pin.as_deref() else {
+            return Err("Current Vault PIN is required to change the PIN".to_string());
+        };
+        if !existing.verify(current_pin) {
+            return Err("Invalid current Vault PIN".to_string());
+        }
+    }
+    local_pin_verifier_from_request(request)
+}
+
+fn local_pin_verify_result(verifier: Option<&LocalPinVerifier>, pin: &str) -> bool {
+    verifier.is_some_and(|verifier| verifier.verify(pin))
+}
+
+fn payment_approval_grant_from_request(
+    request: &VaultPaymentApprovalRequest,
+    verifier: &LocalPinVerifier,
+) -> Result<PaymentApprovalGrant, GatewayError> {
+    if !verifier.verify(&request.pin) {
+        return Err(invalid_vault_pin("Invalid Vault PIN".to_string()));
+    }
+    validate_one_shot_cvv(&request.cvv).map_err(invalid_vault_pin)?;
+    Ok(PaymentApprovalGrant {
+        snapshot: request.snapshot.clone(),
+        cvv_one_shot: Some(request.cvv.trim().to_string()),
+        expires_at: std::time::Instant::now()
+            + std::time::Duration::from_secs(PAYMENT_APPROVAL_TTL_SECONDS),
+    })
+}
+
+fn approve_payment_checkout_request(
+    vault_store: &SQLiteVaultStore,
+    chat_store: &ChatStore,
+    approvals: &mut std::collections::HashMap<String, PaymentApprovalGrant>,
+    request: VaultPaymentApprovalRequest,
+) -> Result<VaultPaymentApprovalResponse, GatewayError> {
+    let verifier = vault_store
+        .local_pin_verifier()
+        .map_err(vault_store_error)?
+        .ok_or_else(|| invalid_vault_pin("Vault PIN is not configured".to_string()))?;
+    let grant = payment_approval_grant_from_request(&request, &verifier)?;
+    let approval_id = grant.snapshot.approval_id.clone();
+    approvals.insert(approval_id.clone(), grant);
+    if let (Some(thread_id), Some(message_id)) = (&request.thread_id, &request.message_id) {
+        if let Ok(Some(message)) = chat_store.message(thread_id, message_id) {
+            if payment_approval_marker_matches(&message.text, &request.snapshot) {
+                let rewritten = rewrite_payment_approval_to_done(
+                    &message.text,
+                    &approval_id,
+                    PAYMENT_APPROVAL_TTL_SECONDS,
+                );
+                let _ = chat_store.set_message_text(thread_id, message_id, &rewritten);
+            }
+        }
+    }
+    Ok(VaultPaymentApprovalResponse {
+        ok: true,
+        payment_approval_id: approval_id,
+        expires_in_seconds: PAYMENT_APPROVAL_TTL_SECONDS,
+    })
+}
+
+fn validate_one_shot_cvv(cvv: &str) -> Result<(), String> {
+    let cvv = cvv.trim();
+    if (3..=4).contains(&cvv.len()) && cvv.chars().all(|char| char.is_ascii_digit()) {
+        Ok(())
+    } else {
+        Err("CVV/CV2 must be 3-4 digits and is one-shot only".to_string())
+    }
+}
+
+fn payment_approval_marker_matches(text: &str, snapshot: &PaymentApprovalSnapshot) -> bool {
+    let Some(marker) = confirm_marker_value(text, PAYMENT_APPROVAL_OPEN, PAYMENT_APPROVAL_CLOSE)
+    else {
+        return false;
+    };
+    marker
+        .get("snapshot")
+        .and_then(|value| serde_json::from_value::<PaymentApprovalSnapshot>(value.clone()).ok())
+        .is_some_and(|stored| stored == *snapshot)
+}
+
+fn apply_payment_approval_secret_for_action(
+    state: &AppState,
+    action: &mut serde_json::Value,
+) -> Result<bool, String> {
+    let secret = action
+        .get("vault_secret")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("");
+    if secret.is_empty() {
+        return Ok(false);
+    }
+    if secret != "cvv_one_shot" {
+        return Err(format!("unsupported vault_secret: {secret}"));
+    }
+    let mut approvals = lock_payment_approvals(state).map_err(|error| error.message)?;
+    apply_payment_approval_secret_from_map(&mut approvals, action)
+}
+
+fn apply_payment_approval_secret_from_map(
+    approvals: &mut std::collections::HashMap<String, PaymentApprovalGrant>,
+    action: &mut serde_json::Value,
+) -> Result<bool, String> {
+    let kind = action
+        .get("kind")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("");
+    if !matches!(kind, "type" | "fill") {
+        return Err("vault_secret can only be used with type/fill actions".to_string());
+    }
+    let approval_id = action
+        .get("payment_approval_id")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .ok_or_else(|| "vault_secret requires a payment_approval_id".to_string())?
+        .to_string();
+    prune_expired_payment_approvals(approvals);
+    let grant = approvals
+        .get_mut(&approval_id)
+        .ok_or_else(|| "payment approval is missing or expired".to_string())?;
+    let cvv = grant
+        .cvv_one_shot
+        .take()
+        .ok_or_else(|| "CVV/CV2 one-shot was already used".to_string())?;
+    let Some(obj) = action.as_object_mut() else {
+        return Err("browser action must be an object".to_string());
+    };
+    obj.insert("text".to_string(), serde_json::Value::String(cvv));
+    obj.remove("vault_secret");
+    Ok(true)
+}
+
+fn rewrite_payment_approval_to_done(
+    text: &str,
+    payment_approval_id: &str,
+    ttl_seconds: u64,
+) -> String {
+    let Some(open) = text.find(PAYMENT_APPROVAL_OPEN) else {
+        return text.to_string();
+    };
+    let Some(close_rel) = text[open..].find(PAYMENT_APPROVAL_CLOSE) else {
+        return text.to_string();
+    };
+    let close = open + close_rel + PAYMENT_APPROVAL_CLOSE.len();
+    let mut out = text[..open].trim_end().to_string();
+    let tail = text[close..].trim();
+    if !tail.is_empty() {
+        if !out.is_empty() {
+            out.push_str("\n\n");
+        }
+        out.push_str(tail);
+    }
+    if !out.is_empty() {
+        out.push_str("\n\n");
+    }
+    out.push_str(&format!(
+        "Pagamento autorizzato localmente. Per il click finale di pagamento usa payment_approval_id: {payment_approval_id}. L'autorizzazione scade tra {ttl_seconds}s. Il CVV e' one-shot e non e' stato salvato nel transcript."
+    ));
+    out
+}
+
+fn approved_payment_id_for_action(state: &AppState, action: &serde_json::Value) -> Option<String> {
+    let approval_id = action.get("payment_approval_id")?.as_str()?.to_string();
+    let mut approvals = lock_payment_approvals(state).ok()?;
+    prune_expired_payment_approvals(&mut approvals);
+    approvals
+        .get(&approval_id)
+        .map(|grant| grant.snapshot.approval_id.clone())
+}
+
+fn prune_expired_payment_approvals(
+    approvals: &mut std::collections::HashMap<String, PaymentApprovalGrant>,
+) {
+    let expired: Vec<String> = approvals
+        .iter()
+        .filter(|(_, grant)| std::time::Instant::now() > grant.expires_at)
+        .map(|(id, _)| id.clone())
+        .collect();
+    for id in expired {
+        approvals.remove(&id);
+    }
+}
+
+fn vault_category_from_marker(category: &str) -> Result<VaultCategory, String> {
+    match category.trim().to_ascii_lowercase().as_str() {
+        "payments" | "payment" => Ok(VaultCategory::Payments),
+        "identity" => Ok(VaultCategory::Identity),
+        "health" => Ok(VaultCategory::Health),
+        "vehicles" | "vehicle" => Ok(VaultCategory::Vehicles),
+        "credentials" | "credential" => Ok(VaultCategory::Credentials),
+        "private_notes" | "private-notes" | "private notes" => Ok(VaultCategory::PrivateNotes),
+        other => Err(format!("unknown vault category: {other}")),
+    }
+}
+
+fn vault_category_key(category: VaultCategory) -> &'static str {
+    match category {
+        VaultCategory::Payments => "payments",
+        VaultCategory::Identity => "identity",
+        VaultCategory::Health => "health",
+        VaultCategory::Vehicles => "vehicles",
+        VaultCategory::Credentials => "credentials",
+        VaultCategory::PrivateNotes => "private_notes",
+    }
+}
+
+fn invalid_vault_proposal(message: String) -> GatewayError {
+    GatewayError {
+        status: StatusCode::BAD_REQUEST,
+        code: "invalid_vault_proposal",
+        message,
+    }
+}
+
+fn invalid_vault_pin(message: String) -> GatewayError {
+    GatewayError {
+        status: StatusCode::BAD_REQUEST,
+        code: "invalid_vault_pin",
+        message,
+    }
+}
+
+fn vault_store_error(message: String) -> GatewayError {
+    GatewayError {
+        status: StatusCode::BAD_GATEWAY,
+        code: "vault_store_error",
+        message,
+    }
+}
 
 fn confirm_marker_value(text: &str, open_tag: &str, close_tag: &str) -> Option<serde_json::Value> {
     let open = text.find(open_tag)?;
@@ -34576,6 +36918,11 @@ async fn mcp_disconnect(
 const FS_AUTHORIZE_OPEN: &str = "‹‹FS_AUTHORIZE››";
 const FS_AUTHORIZE_CLOSE: &str = "‹‹/FS_AUTHORIZE››";
 
+// ADR 0023 on-failure sandbox escalation card markers. Same guillemet framing as the
+// other confirm/authorize markers so the frontend renders it as an actionable card.
+const SANDBOX_ESCALATE_OPEN: &str = "‹‹SANDBOX_ESCALATE››";
+const SANDBOX_ESCALATE_CLOSE: &str = "‹‹/SANDBOX_ESCALATE››";
+
 /// Rewrites the authorize-card marker into a plain "granted" note so reopening
 /// the chat doesn't re-show the actionable card (mirrors the Composio/MCP path).
 fn rewrite_fs_authorize_to_done(text: &str, path: &str) -> String {
@@ -34665,6 +37012,115 @@ async fn fs_authorize(
         }
         Err(message) => Ok(Json(serde_json::json!({ "ok": false, "summary": message }))),
     }
+}
+
+/// Provenance gate for the on-failure escalation endpoint: true iff the stored
+/// message carries a SANDBOX_ESCALATE card whose `arguments.command` equals the
+/// requested `command`. Mirrors `mcp_confirm_matches`: the endpoint must only ever
+/// re-run the exact command that was proposed — never an arbitrary one.
+fn sandbox_escalate_matches(text: &str, command: &str) -> bool {
+    let Some(marker) = confirm_marker_value(text, SANDBOX_ESCALATE_OPEN, SANDBOX_ESCALATE_CLOSE)
+    else {
+        return false;
+    };
+    marker
+        .get("arguments")
+        .and_then(|a| a.get("command"))
+        .and_then(serde_json::Value::as_str)
+        == Some(command)
+}
+
+/// Rewrites the escalation-card marker into a plain "ran unsandboxed" note so
+/// reopening the chat doesn't re-show the actionable card (mirrors
+/// `rewrite_fs_authorize_to_done` / `rewrite_mcp_confirm_to_done`).
+fn rewrite_sandbox_escalate_to_done(text: &str, command: &str) -> String {
+    let Some(open) = text.find(SANDBOX_ESCALATE_OPEN) else {
+        return text.to_string();
+    };
+    let Some(close_rel) = text[open..].find(SANDBOX_ESCALATE_CLOSE) else {
+        return text.to_string();
+    };
+    let close = open + close_rel + SANDBOX_ESCALATE_CLOSE.len();
+    let head_end = text[..open]
+        .rfind("I need your confirmation")
+        .unwrap_or(open);
+    let mut out = text[..head_end].trim_end().to_string();
+    let tail = text[close..].trim();
+    if !tail.is_empty() {
+        if !out.is_empty() {
+            out.push_str("\n\n");
+        }
+        out.push_str(tail);
+    }
+    if !out.is_empty() {
+        out.push_str("\n\n");
+    }
+    out.push_str(&format!("✓ Ran unsandboxed: {command}"));
+    out
+}
+
+#[derive(Debug, Deserialize)]
+struct RunEscalateRequest {
+    command: String,
+    #[serde(default)]
+    cwd: Option<String>,
+    #[serde(default)]
+    thread_id: Option<String>,
+    #[serde(default)]
+    message_id: Option<String>,
+}
+
+/// ADR 0023 on-failure sandbox escalation: re-runs a `run_in_project` command
+/// UNSANDBOXED after explicit user approval (the SANDBOX_ESCALATE card calls this).
+/// Endpoint-based like `fs_authorize` — there is no `run_in_project` MCP tool, this
+/// is a local shell exec. Security gate: the stored message must carry a matching
+/// SANDBOX_ESCALATE card, so only the exact proposed command can run. On success
+/// rewrites the originating message so the card can't reopen.
+async fn run_escalate(
+    State(state): State<AppState>,
+    Json(request): Json<RunEscalateRequest>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    // Provenance gate (REQUIRED): the command must match the card in the stored
+    // message. Without a matching marker, refuse — never run an arbitrary command.
+    let confirmed = match (&request.thread_id, &request.message_id) {
+        (Some(thread_id), Some(message_id)) => lock_store(&state)
+            .ok()
+            .and_then(|store| store.message(thread_id, message_id).ok().flatten())
+            .is_some_and(|message| sandbox_escalate_matches(&message.text, &request.command)),
+        _ => false,
+    };
+    if !confirmed {
+        return Err(GatewayError {
+            status: StatusCode::FORBIDDEN,
+            code: "sandbox_escalate_required",
+            message: "Re-run unsandboxed only from its matching escalation card.".to_string(),
+        });
+    }
+    // Resolve the cwd: the card's cwd, else the thread's project root.
+    let root = request
+        .cwd
+        .as_ref()
+        .map(PathBuf::from)
+        .or_else(|| project_root_for_thread(&state, request.thread_id.as_deref()));
+    let Some(root) = root else {
+        return Err(GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "sandbox_escalate_no_root",
+            message: "No project folder to run in.".to_string(),
+        });
+    };
+    // Execute UNSANDBOXED via the shared raw-exec helper.
+    let output = run_bash_unsandboxed(&root, &request.command).await;
+    // Persist: rewrite the card marker to a "ran unsandboxed" note (no reopen on reload).
+    if let (Some(thread_id), Some(message_id)) = (&request.thread_id, &request.message_id) {
+        if let Ok(store) = lock_store(&state) {
+            if let Ok(Some(message)) = store.message(thread_id, message_id) {
+                let rewritten = rewrite_sandbox_escalate_to_done(&message.text, &request.command);
+                let _ = store.set_message_text(thread_id, message_id, &rewritten);
+            }
+        }
+    }
+    Ok(Json(serde_json::json!({ "ok": true, "output": output })))
 }
 
 const CONNECT_SUGGEST_OPEN: &str = "‹‹CONNECT_SUGGEST››";
@@ -35794,8 +38250,10 @@ fn orchestrator_plan_for_chat(
     // Read/Draft only at planning time — the planner never needs destructive classes.
     policy_context.allowed_actions = vec![ActionClass::Read, ActionClass::Draft];
 
-    let mut facade =
-        CapabilityFacade::new(CapabilityPolicy::default(), InMemoryCapabilityAudit::default());
+    let mut facade = CapabilityFacade::new(
+        CapabilityPolicy::default(),
+        InMemoryCapabilityAudit::default(),
+    );
     for (provider_id, tools) in provider_tools {
         let kind = tools
             .first()
@@ -35809,13 +38267,7 @@ fn orchestrator_plan_for_chat(
     let router = build_browser_inference_router();
     let budgets =
         brain_budgets_for_context_window(router.active_context_window(&Requirements::default()));
-    let mut brain = OrchestratorBrain::new(
-        router,
-        open_brain_memory(),
-        facade,
-        ToolSearchIndexStore::open_in_memory().map_err(|e| format!("tool index: {e}"))?,
-        task_store,
-    );
+    let mut brain = OrchestratorBrain::new(router, open_brain_memory(), facade, task_store);
     let request = OrchestratorRequest {
         request_id: format!("chatplan_{}", uuid::Uuid::new_v4().simple()),
         policy_context,
@@ -35825,12 +38277,495 @@ fn orchestrator_plan_for_chat(
         budgets,
         language: language.to_string(),
     };
-    let plan = brain.plan_only(&request).map_err(|e| format!("plan_only: {e}"))?;
+    let plan = brain
+        .plan_only(&request)
+        .map_err(|e| format!("plan_only: {e}"))?;
     // A direct-answer route is a single-step request → no canonical plan to seed.
     if matches!(plan.route, OrchestratorRoute::DirectAnswer) {
         return Ok(Vec::new());
     }
     Ok(execution_plan_to_canonical_steps(&plan))
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// F3.3 — route the chat turn through the OrchestratorBrain DRIVER (ADR 0020).
+//
+// Unlike `orchestrator_plan_for_chat` (which only SEEDS the model loop), this
+// PLANS then DRIVES the plan in-turn: the harness owns the control flow, the model
+// fills the per-step argument slots, and the runtime marks done after verify. It
+// is behind its own flag (`HOMUN_DRIVE_CHAT`) and FAILS OPEN to the model loop on
+// any miss, so it never degrades the live turn.
+//
+// First cut scope: browser read/gather plans. Browser steps execute through the
+// EXISTING durable sidecar executor (`call_shared_browser_sidecar`) — reuse, not a
+// third dispatch. The driver owns the turn, so the shared sidecar is used (no
+// collision with the chat loop's per-thread session, which doesn't run this turn).
+// Non-browser / subagent steps are unsupported here yet → that step fails and, if
+// nothing was gathered, the whole turn falls back to the model loop. The remaining
+// convergence (retiring the chat loop's inline browser dispatch) is F3.3-pre.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Flag gating the DRIVER routing (separate from `HOMUN_ORCHESTRATED_CHAT`, which
+/// only seeds). Default off.
+fn drive_orchestrated_chat_enabled() -> bool {
+    matches!(
+        env::var("HOMUN_DRIVE_CHAT")
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase()
+            .as_str(),
+        "1" | "true" | "on"
+    )
+}
+
+/// Maps a chat browser tool name (underscore, the schema the planner sees, F1.d)
+/// to the sidecar `BrowserMethod`. `normalize_browser_call` (inside
+/// `call_shared_browser_sidecar`) handles the managed-tab labeling, so we pass the
+/// planner-level method + the model-filled args as-is.
+fn browser_method_for_chat_tool(tool_name: &str) -> Option<BrowserMethod> {
+    match tool_name {
+        "browser_navigate" => Some(BrowserMethod::Navigate),
+        "browser_snapshot" => Some(BrowserMethod::Snapshot),
+        "browser_act" => Some(BrowserMethod::Act),
+        "browser_screenshot" => Some(BrowserMethod::Screenshot),
+        "browser_tabs" => Some(BrowserMethod::Tabs),
+        "browser_dialog" => Some(BrowserMethod::RespondDialog),
+        _ => None,
+    }
+}
+
+/// The six native browser tools the chat loop dispatches inline.
+const NATIVE_BROWSER_TOOLS: [&str; 6] = [
+    "browser_navigate",
+    "browser_snapshot",
+    "browser_act",
+    "browser_screenshot",
+    "browser_tabs",
+    "browser_dialog",
+];
+
+/// Plain Levenshtein edit distance (small inputs: tool names). Used only to recover a
+/// near-miss browser tool name; no external crate needed.
+fn levenshtein(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    let mut cur = vec![0usize; b.len() + 1];
+    for (i, ca) in a.iter().enumerate() {
+        cur[0] = i + 1;
+        for (j, cb) in b.iter().enumerate() {
+            let cost = if ca == cb { 0 } else { 1 };
+            cur[j + 1] = (prev[j + 1] + 1).min(cur[j] + 1).min(prev[j] + cost);
+        }
+        std::mem::swap(&mut prev, &mut cur);
+    }
+    prev[b.len()]
+}
+
+/// Canonicalize a possibly-typo'd native browser tool name. The model occasionally
+/// hallucinates a near-miss (observed: `browser_tavigate` for `browser_navigate`);
+/// the arguments are usually right, so recovering the NAME lets the call dispatch
+/// natively. WHY this matters: `browser_` is a RESERVED native namespace, but the chat
+/// dispatch ends in a Composio catch-all — a misspelled `browser_*` name matches no
+/// native arm and falls through to Composio, which 404s, and the model then loops on
+/// it. Conservative: exact match first; otherwise the UNIQUE closest of the six native
+/// names within edit distance ≤ 2. Returns `None` for anything not clearly a browser
+/// tool, so non-browser tool names are left untouched.
+fn resolve_browser_chat_tool_name(name: &str) -> Option<&'static str> {
+    if let Some(exact) = NATIVE_BROWSER_TOOLS
+        .iter()
+        .copied()
+        .find(|candidate| *candidate == name)
+    {
+        return Some(exact);
+    }
+    if !name.starts_with("browser_") {
+        return None;
+    }
+    let mut best: Option<(&'static str, usize)> = None;
+    let mut tied = false;
+    for candidate in NATIVE_BROWSER_TOOLS {
+        let distance = levenshtein(name, candidate);
+        match best {
+            None => best = Some((candidate, distance)),
+            Some((_, current)) if distance < current => {
+                best = Some((candidate, distance));
+                tied = false;
+            }
+            Some((_, current)) if distance == current => tied = true,
+            _ => {}
+        }
+    }
+    match best {
+        Some((candidate, distance)) if distance <= 2 && !tied => Some(candidate),
+        _ => None,
+    }
+}
+
+/// A synthetic `TaskRecord` so `call_shared_browser_sidecar` (built for the durable
+/// runtime) can be reused from a chat turn. The sidecar only reads it for the spawn
+/// env (workspace/profile), so a lightweight record scoped to the owner is enough.
+fn synthetic_drive_task(goal: &str) -> TaskRecord {
+    TaskRecord::new(
+        format!("chatdrive_{}", uuid::Uuid::new_v4().simple()),
+        local_first_task_runtime::UserId::new(gateway_capability_user_id().as_str()),
+        local_first_task_runtime::WorkspaceId::new(gateway_capability_workspace_id().as_str()),
+        "chat_drive_browser",
+        goal,
+        serde_json::json!({}),
+    )
+}
+
+/// The gateway-side [`StepExecutor`] injected into `drive_plan`: it reuses the
+/// orchestrator's schema-constrained arg-fill, then executes browser steps through
+/// the existing shared-sidecar executor. Because the executor is passed to
+/// `drive_plan` BY REFERENCE (not boxed in a facade), it can borrow `&AppState`.
+struct ChatDriveStepExecutor<'a> {
+    state: &'a AppState,
+    router: &'a ModelRouter,
+    loaded_tools: &'a [CapabilityTool],
+    task: TaskRecord,
+    /// Live per-step progress sink. The executor is sync (runs in spawn_blocking);
+    /// `UnboundedSender::send` is sync (no await), so it can push a label per step
+    /// that the async closure drains and streams as an ‹‹ACT›› delta.
+    activity: tokio::sync::mpsc::UnboundedSender<String>,
+}
+
+impl ChatDriveStepExecutor<'_> {
+    /// Executes ONE browser tool call through the shared sidecar, emitting a live
+    /// ‹‹ACT›› activity label. Shared by the CapabilityCall path and the agentic
+    /// browse loop. A SNAPSHOT always uses the chat loop's CONTENT-PRESERVING params
+    /// (F0 fix) regardless of the model-filled args, so the sidecar returns the page
+    /// text, not an interactive-only tree.
+    fn run_browser_tool(
+        &self,
+        tool_name: &str,
+        args: serde_json::Value,
+    ) -> OrchestratorResult<serde_json::Value> {
+        let method = browser_method_for_chat_tool(tool_name).ok_or_else(|| {
+            OrchestratorError::Planner(format!("drive_unsupported_tool:{tool_name}"))
+        })?;
+        let call_args = if method == BrowserMethod::Snapshot {
+            browser_chat_snapshot_params(BROWSER_MANAGED_TARGET)
+        } else {
+            args
+        };
+        let label = match method {
+            BrowserMethod::Navigate => format!(
+                "🌐 Apro {}",
+                call_args
+                    .get("url")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("la pagina")
+            ),
+            BrowserMethod::Snapshot => "👁️ Leggo la pagina".to_string(),
+            BrowserMethod::Act => "🖱️ Interagisco con la pagina".to_string(),
+            BrowserMethod::Screenshot => "📸 Catturo uno screenshot".to_string(),
+            _ => format!("🔧 {tool_name}"),
+        };
+        // Concise panel step label (mirrors motore #1's `push_browser_step` style),
+        // computed before `call_args` is moved into the sidecar call.
+        let step_label = match method {
+            BrowserMethod::Navigate => format!(
+                "navigate {}",
+                call_args.get("url").and_then(|v| v.as_str()).unwrap_or("")
+            ),
+            BrowserMethod::Snapshot => "snapshot".to_string(),
+            BrowserMethod::Act => "interact".to_string(),
+            BrowserMethod::Screenshot => "screenshot".to_string(),
+            _ => tool_name.to_string(),
+        };
+        let _ = self.activity.send(label);
+        let result = match call_shared_browser_sidecar(self.state, &self.task, method, call_args)
+            .map_err(|error| OrchestratorError::Capability(error.message))
+        {
+            Err(error) => Err(error),
+            Ok(SharedSidecarCall::SidecarLost(reason)) => {
+                Err(OrchestratorError::Capability(reason))
+            }
+            Ok(SharedSidecarCall::Response(BrowserResponse::Success {
+                ok: true, result, ..
+            })) => Ok(result),
+            Ok(SharedSidecarCall::Response(BrowserResponse::Success { .. })) => Err(
+                OrchestratorError::Capability("browser returned invalid success envelope".into()),
+            ),
+            Ok(SharedSidecarCall::Response(BrowserResponse::Error { error, .. })) => Err(
+                OrchestratorError::Capability(format!("{}:{}", error.code, error.message)),
+            ),
+        };
+        // Feed the panel's step checklist (the polled `contained_computer_live` read-model),
+        // so the drive shows progress like the chat loop — not just inline ‹‹ACT›› text.
+        push_browser_step(step_label, if result.is_ok() { "done" } else { "error" });
+        result
+    }
+}
+
+impl StepExecutor for ChatDriveStepExecutor<'_> {
+    fn execute_step(
+        &mut self,
+        step: &PlanStep,
+        completed: &std::collections::BTreeMap<String, StepOutcome>,
+    ) -> OrchestratorResult<StepOutcome> {
+        match step.kind {
+            // Agentic BROWSE (form-filling): the model steers a bounded loop,
+            // choosing browser tools (navigate / act / snapshot) round by round —
+            // this is what fills a search form (e.g. trains). The SAME agentic loop
+            // as the orchestrator (caposaldo #5), but executing through the browser
+            // sidecar instead of the facade. Offer the browse tools regardless of
+            // their registry action class (navigate/act are WriteWithConfirmation
+            // but are read/gather for browsing).
+            PlanStepKind::SubagentTask => {
+                // Offer the INTERACTIVE browse tools. Exclude screenshot (a text
+                // model can't use an image, and it errors without a file_name) and
+                // tabs (single managed tab) — they only waste agentic rounds.
+                let browse_tools: Vec<CapabilityTool> = self
+                    .loaded_tools
+                    .iter()
+                    .filter(|tool| {
+                        browser_method_for_chat_tool(&tool.name).is_some()
+                            && tool.name != "browser_screenshot"
+                            && tool.name != "browser_tabs"
+                    })
+                    .cloned()
+                    .collect();
+                let this = &*self;
+                run_agentic_step(self.router, &browse_tools, step, completed, |tool, args| {
+                    this.run_browser_tool(&tool.name, args)
+                })
+            }
+            // Browser CapabilityCall step: model fills args (except snapshot), the
+            // sidecar executes.
+            _ => {
+                let tool_name = step.tool_name.as_deref().unwrap_or("");
+                let Some(method) = browser_method_for_chat_tool(tool_name) else {
+                    return Err(OrchestratorError::Planner(format!(
+                        "drive_unsupported_tool:{tool_name}"
+                    )));
+                };
+                let args = if method == BrowserMethod::Snapshot {
+                    serde_json::Value::Null // run_browser_tool overrides with content params
+                } else {
+                    let tool = self
+                        .loaded_tools
+                        .iter()
+                        .find(|candidate| candidate.name == tool_name)
+                        .ok_or_else(|| {
+                            OrchestratorError::Planner(format!("drive_tool_not_loaded:{tool_name}"))
+                        })?;
+                    fill_arguments(self.router, step, tool, completed, "")?
+                };
+                let output = self.run_browser_tool(tool_name, args)?;
+                Ok(StepOutcome {
+                    succeeded: true,
+                    output,
+                    evidence: vec![format!("browser:{tool_name}")],
+                })
+            }
+        }
+    }
+}
+
+/// Canonical plan steps ({id,title,status,detail}) with live status overlaid from
+/// the drive outcome, so the chat UI's plan panel can show what the driver did
+/// (reuses `execution_plan_to_canonical_steps`; `None` outcome → all "todo").
+fn drive_canonical_steps(
+    plan: &ExecutionPlan,
+    outcome: Option<&DriveOutcome>,
+) -> Vec<serde_json::Value> {
+    let mut steps = execution_plan_to_canonical_steps(plan);
+    if let Some(outcome) = outcome {
+        for step in &mut steps {
+            let id = step
+                .get("id")
+                .and_then(|value| value.as_str())
+                .unwrap_or("")
+                .to_string();
+            if let Some(result) = outcome.results.iter().find(|r| r.step_id == id) {
+                let status = match result.status {
+                    DriveStepStatus::Done => "done",
+                    DriveStepStatus::Failed | DriveStepStatus::Unverified => "error",
+                    DriveStepStatus::Skipped => "todo",
+                };
+                step["status"] = serde_json::json!(status);
+            }
+        }
+    }
+    steps
+}
+
+/// True when EVERY step of the plan is browser work — a browse `SubagentTask` (in the
+/// drive a SubagentTask is always the browse agent) or a `browser_*` CapabilityCall.
+/// Such plans are DELEGATED to motore #1's inline loop (caller returns `Ok(None)`,
+/// reusing the existing fail-open path). Empirically motore #1's single native-tool-
+/// calling loop browses far better than the drive's agentic `generate_json` loop
+/// (which wanders and returns empty), and the field consensus (single guarded loop +
+/// planning-as-a-tool, not a separate plan-execute engine) backs that. The drive still
+/// owns genuine multi-capability plans.
+fn plan_is_browse_only(plan: &ExecutionPlan) -> bool {
+    !plan.steps.is_empty()
+        && plan.steps.iter().all(|step| {
+            matches!(step.kind, PlanStepKind::SubagentTask)
+                || step
+                    .tool_name
+                    .as_deref()
+                    .map(|name| browser_method_for_chat_tool(name).is_some())
+                    .unwrap_or(false)
+        })
+}
+
+/// Plans then DRIVES the turn. Returns `Ok(Some((gathered, plan_steps)))` when the
+/// driver gathered evidence (the caller synthesizes the answer and shows the
+/// plan), `Ok(None)` to fall back to the model loop (conversational, empty plan, or
+/// nothing gathered), or `Err` on a hard failure (caller also falls back).
+/// Synchronous — run via `spawn_blocking` (the sidecar + model calls block).
+fn orchestrator_drive_for_chat(
+    state: &AppState,
+    goal: &str,
+    language: &str,
+    thread_id: Option<String>,
+    activity: &tokio::sync::mpsc::UnboundedSender<String>,
+) -> Result<Option<(String, Vec<serde_json::Value>)>, String> {
+    let user = gateway_capability_user_id();
+    let workspace = gateway_capability_workspace_id();
+    let (mut policy_context, provider_tools) = {
+        let registry = lock_capability_registry(state).map_err(|e| format!("{e:?}"))?;
+        let policy = registry
+            .policy_context(&user, &workspace)
+            .map_err(|e| format!("policy context: {e}"))?;
+        let mut provider_tools = Vec::new();
+        for provider in &policy.enabled_providers {
+            let tools = registry
+                .cached_tools(provider)
+                .map_err(|e| format!("cached tools: {e}"))?
+                .into_iter()
+                .map(|cached| cached.tool)
+                .collect::<Vec<_>>();
+            provider_tools.push((provider.clone(), tools));
+        }
+        (policy, provider_tools)
+    };
+    policy_context.allowed_actions = vec![ActionClass::Read, ActionClass::Draft];
+    // Flattened tool list for the executor's arg-fill (the input schemas).
+    let loaded_tools: Vec<CapabilityTool> = provider_tools
+        .iter()
+        .flat_map(|(_, tools)| tools.clone())
+        .collect();
+
+    // 1. Plan (planning-only facade — the planner never executes).
+    let mut facade = CapabilityFacade::new(
+        CapabilityPolicy::default(),
+        InMemoryCapabilityAudit::default(),
+    );
+    for (provider_id, tools) in provider_tools {
+        let kind = tools
+            .first()
+            .map(|tool| tool.provider_kind)
+            .unwrap_or(CapabilityProviderKind::Native);
+        facade.register_provider(CachedToolProvider::new(provider_id, kind, tools));
+    }
+    let task_store = TaskStore::open(gateway_task_database_path().map_err(|e| e.to_string())?)
+        .map_err(|e| format!("task store: {e}"))?;
+    let plan_router = build_drive_inference_router();
+    let budgets = brain_budgets_for_context_window(
+        plan_router.active_context_window(&Requirements::default()),
+    );
+    let mut brain = OrchestratorBrain::new(plan_router, open_brain_memory(), facade, task_store);
+    let request = OrchestratorRequest {
+        request_id: format!("chatdrive_{}", uuid::Uuid::new_v4().simple()),
+        policy_context,
+        user_message: goal.to_string(),
+        conversation_summary: None,
+        attachments: Vec::new(),
+        budgets,
+        language: language.to_string(),
+    };
+    let plan = brain
+        .plan_only(&request)
+        .map_err(|e| format!("plan_only: {e}"))?;
+    if matches!(plan.route, OrchestratorRoute::DirectAnswer) || plan.steps.is_empty() {
+        return Ok(None); // conversational / nothing to drive → model loop
+    }
+    // BROWSE → motore #1 (evidence-based, 2026-06-29). Empirically the drive's agentic
+    // browse loop is WORSE than motore #1's inline loop: slow (16 rounds × 2 model calls),
+    // it wanders (scroll/scroll, action=None) and often returns an EMPTY answer. Motore #1
+    // is the mature, OpenClaw-faithful single ReAct loop (native tool-calling, visible
+    // session, no-progress detection, wander-cap, Computer panel) — and the field's
+    // consensus (single guarded loop, not a separate plan-execute engine) backs it. So a
+    // browse-only plan falls back to motore #1 via the existing fail-open path. The drive
+    // still EXECUTES genuine multi-capability plans. See docs/decisions on the single-loop
+    // verdict + STATO.
+    if plan_is_browse_only(&plan) {
+        if verbose_debug() {
+            eprintln!(
+                "[drive] browse-only plan → motore #1 (the drive's agentic browse regresses)"
+            );
+        }
+        return Ok(None);
+    }
+
+    // 2. Drive the plan in-turn: model fills args, sidecar executes, runtime verifies.
+    // Surface the SAME "Computer LIVE" panel as motore #1 (the chat loop): the panel is
+    // a polled read-model (`contained_computer_live`) keyed off this in-process activity
+    // cell — without `begin_browser_activity` the contained browser drives :9222 but the
+    // user never sees the live noVNC frame or the step checklist (the regression).
+    // `thread_id` binds the panel to the owning chat thread. `push_browser_step` per tool
+    // is emitted inside `ChatDriveStepExecutor::run_browser_tool`.
+    begin_browser_activity(goal.to_string(), thread_id);
+    let exec_router = build_drive_inference_router();
+    let mut executor = ChatDriveStepExecutor {
+        state,
+        router: &exec_router,
+        loaded_tools: &loaded_tools,
+        task: synthetic_drive_task(goal),
+        activity: activity.clone(),
+    };
+    let mut verifier = PassThroughVerifier;
+    let outcome = drive_plan(&plan, &mut executor, &mut verifier);
+    end_browser_activity();
+
+    // 3. Gather verified step outputs (snapshots/results) for synthesis.
+    let mut gathered = String::new();
+    for result in &outcome.results {
+        if result.status != DriveStepStatus::Done {
+            continue;
+        }
+        if let Some(step_outcome) = &result.outcome {
+            let text = browser_snapshot_text(&step_outcome.output);
+            let snippet = if text.is_empty() {
+                step_outcome.output.to_string()
+            } else {
+                text
+            };
+            // Pass the WHOLE page snapshot (its own cap is max_chars=20000) so the
+            // CONTENT — an infobox/table that sits AFTER a large nav/menu chrome in
+            // the aria tree (Wikipedia's chrome alone is ~12k chars) — reaches the
+            // synthesis. Truncating shorter left the model reading only the masthead.
+            gathered.push_str(&format!(
+                "[{}] {}\n",
+                result.step_id,
+                truncate_chars(&snippet, 20_000)
+            ));
+        }
+    }
+    if gathered.trim().is_empty() {
+        return Ok(None); // nothing executed → fall back to the model loop
+    }
+    if verbose_debug() {
+        let preview: String = gathered.chars().take(400).collect();
+        eprintln!(
+            "[drive] ADR0020 drove {} steps, {} done ({} chars). preview: {}",
+            outcome.results.len(),
+            outcome.done_step_ids().len(),
+            gathered.len(),
+            preview.replace('\n', " ")
+        );
+    }
+    // Return the GATHERED evidence + the plan with per-step status; the caller
+    // synthesizes the final answer with the user's CHAT model (capable at prose)
+    // and surfaces the plan. The browser-role router is tuned for action JSON, not
+    // synthesis — it returned an empty answer in the first live run.
+    let plan_steps = drive_canonical_steps(&plan, Some(&outcome));
+    Ok(Some((gathered, plan_steps)))
 }
 
 /// A1.1: runs the OrchestratorBrain so it MATERIALIZES durable tasks into the
@@ -35898,10 +38833,10 @@ fn brain_budgets_for_context_window(context_window: Option<u32>) -> Orchestrator
     budgets
 }
 
-/// Real HTTP transport for Composio (the crate ships only an in-memory double).
-/// It is deliberately API-agnostic: it passes the method/path/body the
-/// `ComposioCapabilityProvider` chooses, with `x-api-key` auth, so the protocol
-/// shape stays owned by the crate and the base URL is configurable.
+/// Real HTTP transport for Composio. It is deliberately API-agnostic: callers pass the
+/// method/path/body (the v3 shapes), and it adds `x-api-key` auth over a configurable base
+/// URL. Implements the `ComposioTransport` trait (the only piece kept from the `capabilities`
+/// crate's composio module after the pre-v3 provider was retired, F1.c).
 struct GatewayComposioTransport {
     base_url: String,
     api_key: String,
@@ -35918,7 +38853,9 @@ impl GatewayComposioTransport {
     }
 }
 
-impl ComposioTransport for GatewayComposioTransport {
+impl GatewayComposioTransport {
+    /// Inherent (no longer a trait method): the `capabilities` crate's `ComposioTransport`
+    /// trait was retired with the pre-v3 provider (F1.c). All callers use the concrete type.
     fn request(
         &self,
         method: &str,
@@ -36056,15 +38993,7 @@ fn brain_materialize_tasks(
     let router = build_browser_inference_router();
     let budgets =
         brain_budgets_for_context_window(router.active_context_window(&Requirements::default()));
-    let mut brain = OrchestratorBrain::new(
-        router,
-        open_brain_memory(),
-        facade,
-        ToolSearchIndexStore::open_in_memory().map_err(|error| LocalTaskExecutionError {
-            message: format!("tool index: {error}"),
-        })?,
-        task_store,
-    );
+    let mut brain = OrchestratorBrain::new(router, open_brain_memory(), facade, task_store);
     let request = OrchestratorRequest {
         request_id: format!("brain_{}", uuid::Uuid::new_v4().simple()),
         policy_context,
@@ -37503,6 +40432,15 @@ fn resolve_role_for_task(goal: &str, role: &str) -> Option<ResolvedRole> {
 /// Browser-loop router (Phase 2): the "browser" role.
 fn build_browser_inference_router() -> ModelRouter {
     router_for_role("browser")
+}
+
+/// Router for the DRIVER (ADR 0020): planning, per-step argument-fill and the
+/// agentic browse loop. Uses the "orchestrator" role — a capable model — because
+/// these steer multi-step browsing and must emit consistent, schema-valid tool
+/// arguments (the "browser" role is a cheaper model tuned for single actions and,
+/// observed live, produced inconsistent args in the agentic loop).
+fn build_drive_inference_router() -> ModelRouter {
+    router_for_role("orchestrator")
 }
 
 /// Legacy env-only router, used when the registry has no providers yet.
@@ -39543,6 +42481,86 @@ async fn memory_goals_list(
     })))
 }
 
+/// ADR 0022 (Piano UI A5): project context panel — ciò che l'agente SA stabilmente
+/// del progetto (objective/brief/open-loops/decisions), per la UI. Risolve lo
+/// scope dal threadId (None per Personal/Threads — invariant P1). Incl. provenance
+/// `thread_id`/`origin_thread_title` per i record che lo registrano (cross-chat).
+async fn memory_project_briefing(
+    State(state): State<AppState>,
+    Query(q): Query<GoalsListQuery>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let user = gateway_memory_user_id();
+    let (ws, is_project) = if let Some(tid) = q.thread.as_deref().filter(|t| !t.trim().is_empty()) {
+        let resolved = lock_store(&state)
+            .ok()
+            .and_then(|s| s.workspace_for_thread(tid).ok())
+            .filter(|w| !w.trim().is_empty())
+            .map(MemoryWorkspaceId::new)
+            .unwrap_or_else(gateway_memory_workspace_id);
+        let is_proj =
+            resolved.as_str() != PERSONAL_WORKSPACE && resolved.as_str() != THREADS_WORKSPACE;
+        (resolved, is_proj)
+    } else if let Some(w) = q.workspace.filter(|w| !w.trim().is_empty()) {
+        let resolved = MemoryWorkspaceId::new(w);
+        let is_proj =
+            resolved.as_str() != PERSONAL_WORKSPACE && resolved.as_str() != THREADS_WORKSPACE;
+        (resolved, is_proj)
+    } else {
+        let resolved = gateway_memory_workspace_id();
+        let is_proj =
+            resolved.as_str() != PERSONAL_WORKSPACE && resolved.as_str() != THREADS_WORKSPACE;
+        (resolved, is_proj)
+    };
+    if !is_project {
+        // Personal/Threads: shape snella (invariant P1 — no project briefing).
+        return Ok(Json(serde_json::json!({
+            "workspace": ws.as_str(),
+            "is_project": false,
+            "objective": null,
+            "brief": null,
+            "open_loops": [],
+            "decisions": [],
+        })));
+    }
+    let facade = lock_memory_facade(&state)?;
+    let items = facade.list_memories_for_ui(&user, &ws).unwrap_or_default();
+    // Objective (goals) + decisions + open-loops, con provenance thread_id.
+    let pick_with_provenance = |t: &str| -> Vec<serde_json::Value> {
+        items
+            .iter()
+            .filter(|m| {
+                m.memory_type == t
+                    && matches!(m.status, MemoryStatus::Confirmed | MemoryStatus::Candidate)
+            })
+            .map(|m| {
+                let origin_thread = m.metadata.get("thread_id").and_then(|v| v.as_str());
+                serde_json::json!({
+                    "reference": m.reference.to_string(),
+                    "text": m.text,
+                    "thread_id": origin_thread,
+                })
+            })
+            .collect()
+    };
+    // Brief: la wiki page `brief.md`.
+    let brief = facade
+        .list_wiki_pages_for_ui(&user, &ws)
+        .ok()
+        .and_then(|pages| pages.into_iter().find(|p| p.path == "brief.md"))
+        .map(|p| serde_json::json!({ "body": p.body }));
+    // Objective block testuale (formato come nel system prompt).
+    let objective_text = project_objective_block(&state);
+    Ok(Json(serde_json::json!({
+        "workspace": ws.as_str(),
+        "is_project": true,
+        "objective": objective_text,
+        "brief": brief,
+        "open_loops": pick_with_provenance("open_loop"),
+        "decisions": pick_with_provenance("decision"),
+        "goals": pick_with_provenance("goal"),
+    })))
+}
+
 #[derive(Deserialize)]
 struct PromoteGoalsRequest {
     #[serde(default)]
@@ -40267,7 +43285,7 @@ async fn memory_wiki_save(
     let body = req.body.clone();
     let reconcile_ws = ws.clone();
     tokio::spawn(async move {
-        learn_from_exchange(
+        learn_via_service_or_inline(
             &st,
             "Manual correction of the project memory wiki",
             &body,
@@ -42905,6 +45923,29 @@ async fn ensure_browser_cdp_healthy(state: &AppState) -> bool {
     false
 }
 
+/// UNCONDITIONAL recycle of the contained computer, for the CDP WEDGE: Chrome's HTTP
+/// `/json/version` still answers (so `browser_cdp_ok` returns true and
+/// `ensure_browser_cdp_healthy` is a no-op) yet `connectOverCDP` hangs on stale targets.
+/// Throttled (once per window) so a retry loop can't thrash `docker rm -f`. Returns true
+/// if CDP came back. Mirrors the drive's shared-path self-heal for motore #1's chat path.
+async fn force_recycle_contained_computer(state: &AppState) -> bool {
+    if !browser_recycle_throttle_ok() {
+        return false;
+    }
+    let _ = tokio::task::spawn_blocking(|| {
+        crate::sandbox::recycle_container();
+        let _ = crate::sandbox::ensure_contained_computer();
+    })
+    .await;
+    for _ in 0..40 {
+        tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+        if browser_cdp_ok(state).await {
+            return true;
+        }
+    }
+    false
+}
+
 /// System/Computer status for Settings: Docker (installed/running + the contained
 /// computer container), tool memory usage, live browser-session count.
 async fn system_status(State(state): State<AppState>) -> Json<SystemStatusResponse> {
@@ -43457,35 +46498,60 @@ fn seed_default_capabilities(
         })),
     )?;
 
-    for (name, action, description) in [
-        ("browser.health", ActionClass::Read, "Local browser status"),
+    // (F1.d / ADR 0020) Seed the browser provider with the SAME six tools the chat loop
+    // offers the model — `browser_navigate`/`_snapshot`/`_act`/`_tabs`/`_screenshot`/
+    // `_dialog`, with their REAL schemas — NOT the low-level dot-named sidecar methods with
+    // placeholder `{"type":"object"}` schemas it used to carry. The orchestrator planner
+    // indexes the registry's cached tools (`cached_tools`); seeding the executable model
+    // tools is what makes the planner finally SEE the browser as a routable capability whose
+    // names match what the chat loop actually runs, instead of a shadow set it can't use.
+    // Clear first so an existing DB sheds the renamed `browser.*` rows (caposaldo #5/#7).
+    registry.clear_cached_tools(&browser_provider)?;
+    for tool in browser_registry_cached_tools() {
+        registry.upsert_cached_tool(&tool)?;
+    }
+    Ok(())
+}
+
+/// The browser capability AS THE MODEL SEES IT: the six chat browser tools with their real
+/// names + schemas, built from the SAME `browser_*_tool_schema()` functions the live tool
+/// set uses, so the registry never becomes a second source of truth for the browser surface
+/// (caposaldo #5). Read vs WriteWithConfirmation mirrors the chat safety posture: reading
+/// the page (snapshot/tabs/screenshot) is Read; navigating, acting and answering dialogs can
+/// have side effects → WriteWithConfirmation.
+fn browser_registry_cached_tools() -> Vec<CachedCapabilityTool> {
+    let browser_provider = CapabilityProviderId::new("browser");
+    [
         (
-            "browser.tabs",
-            ActionClass::Read,
-            "List of local browser tabs",
-        ),
-        (
-            "browser.snapshot",
-            ActionClass::Read,
-            "Redacted snapshot of the current page",
-        ),
-        (
-            "browser.navigate",
+            browser_navigate_tool_schema(),
             ActionClass::WriteWithConfirmation,
-            "Browser navigation with confirmation",
         ),
+        (browser_snapshot_tool_schema(), ActionClass::Read),
         (
-            "browser.act",
+            browser_act_tool_schema(),
             ActionClass::WriteWithConfirmation,
-            "Controlled action on a web page",
         ),
+        (browser_tabs_tool_schema(), ActionClass::Read),
+        (browser_screenshot_tool_schema(), ActionClass::Read),
         (
-            "browser.screenshot",
+            browser_dialog_tool_schema(),
             ActionClass::WriteWithConfirmation,
-            "Redacted local screenshot",
         ),
-    ] {
-        registry.upsert_cached_tool(&CachedCapabilityTool::new(
+    ]
+    .into_iter()
+    .filter_map(|(schema, action)| {
+        let function = schema.get("function")?;
+        let name = function.get("name")?.as_str()?.to_string();
+        let description = function
+            .get("description")
+            .and_then(|value| value.as_str())
+            .unwrap_or("")
+            .to_string();
+        let input_schema = function
+            .get("parameters")
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!({"type": "object"}));
+        Some(CachedCapabilityTool::new(
             browser_provider.clone(),
             name,
             CapabilityProviderKind::Browser,
@@ -43493,10 +46559,10 @@ fn seed_default_capabilities(
             description,
             vec!["browser".to_string()],
             "private",
-            serde_json::json!({"type": "object"}),
-        ))?;
-    }
-    Ok(())
+            input_schema,
+        ))
+    })
+    .collect()
 }
 
 fn enum_label(value: &impl Serialize) -> Result<String, GatewayError> {
@@ -43658,6 +46724,27 @@ fn lock_memory_facade(state: &AppState) -> Result<MutexGuard<'_, MemoryFacade>, 
     })
 }
 
+fn lock_vault_store(state: &AppState) -> Result<MutexGuard<'_, SQLiteVaultStore>, GatewayError> {
+    state.vault_store.lock().map_err(|error| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "vault_store_lock_error",
+        message: error.to_string(),
+    })
+}
+
+fn lock_payment_approvals(
+    state: &AppState,
+) -> Result<MutexGuard<'_, std::collections::HashMap<String, PaymentApprovalGrant>>, GatewayError> {
+    state
+        .payment_approvals
+        .lock()
+        .map_err(|error| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "payment_approval_lock_error",
+            message: error.to_string(),
+        })
+}
+
 fn lock_capability_registry(
     state: &AppState,
 ) -> Result<MutexGuard<'_, CapabilityRegistryStore>, GatewayError> {
@@ -43695,6 +46782,14 @@ fn gateway_database_path() -> Result<PathBuf, std::io::Error> {
 
     let base = gateway_data_dir()?;
     Ok(base.join("desktop-gateway.sqlite"))
+}
+
+/// Diagnostic logs directory (panic trail, crash marker). Lives beside the
+/// SQLite stores so the desktop shell bundles diagnostics from one root.
+fn gateway_logs_dir() -> Result<PathBuf, std::io::Error> {
+    let base = gateway_data_dir()?.join("logs");
+    fs::create_dir_all(&base)?;
+    Ok(base)
 }
 
 fn gateway_task_database_path() -> Result<PathBuf, std::io::Error> {
@@ -43747,6 +46842,19 @@ fn gateway_memory_database_path() -> Result<PathBuf, std::io::Error> {
 
     let base = gateway_data_dir()?;
     Ok(base.join("memory.sqlite"))
+}
+
+fn gateway_vault_database_path() -> Result<PathBuf, std::io::Error> {
+    if let Ok(path) = env::var("HOMUN_VAULT_DB") {
+        let path = PathBuf::from(path);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        return Ok(path);
+    }
+
+    let base = gateway_data_dir()?;
+    Ok(base.join("vault.sqlite"))
 }
 
 /// Directory for human-readable/editable memory wiki markdown pages.
@@ -44129,8 +47237,7 @@ fn load_project_access_file() -> ProjectAccessFile {
 
 fn save_project_access_file(file: &ProjectAccessFile) -> Result<(), std::io::Error> {
     let path = gateway_project_access_path()?;
-    let body =
-        serde_json::to_string_pretty(file).unwrap_or_else(|_| "{\"grants\":[]}".to_string());
+    let body = serde_json::to_string_pretty(file).unwrap_or_else(|_| "{\"grants\":[]}".to_string());
     fs::write(path, body)
 }
 
@@ -44200,9 +47307,9 @@ fn resolve_project_contact_policy(
 
     let contact_reference = contact_reference.trim();
     let channel = channel.trim().to_ascii_lowercase();
-    let grant = list_project_access(workspace_id).into_iter().find(|grant| {
-        grant.contact_reference == contact_reference && grant.channel == channel
-    });
+    let grant = list_project_access(workspace_id)
+        .into_iter()
+        .find(|grant| grant.contact_reference == contact_reference && grant.channel == channel);
     let Some(grant) = grant else {
         return EffectiveProjectContactPolicy {
             authorized: false,
@@ -44788,7 +47895,13 @@ fn cors_layer() -> CorsLayer {
 
     CorsLayer::new()
         .allow_origin(AllowOrigin::list(origins))
-        .allow_methods([Method::GET, Method::POST, Method::DELETE, Method::OPTIONS])
+        .allow_methods([
+            Method::GET,
+            Method::POST,
+            Method::PATCH,
+            Method::DELETE,
+            Method::OPTIONS,
+        ])
         .allow_headers([CONTENT_TYPE, AUTHORIZATION])
         // Custom response headers are hidden from browser `fetch` unless exposed —
         // without this the UI reads `x-effective-model` as null (curl sees it fine).
@@ -44814,32 +47927,33 @@ impl IntoResponse for GatewayError {
 mod tests {
     use super::{
         ActiveModelInputs, ChannelSettings, ConnectorErrorKind, InboundAction, LegacyDirAction,
-        MemoryCandidate, MemoryDataSensitivity, TASK_EXECUTOR_DEFAULT_WORKER_COUNT,
-        active_llm_concurrency, adapt_skill_body, aggregate_session_state_from_counts,
-        brain_budgets_for_context_window, browser_error_indicates_dead_sidecar,
-        browser_method_for_capability_tool, browser_snapshot_text, browser_targets_for_goal,
-        browser_url_for_goal, build_plan_markdown, capability_call_completed_outcome,
-        classify_connector_error, collapse_plan_markers, collect_member_counts,
-        composio_tool_is_read,
-        connector_error_hint, default_browser_headless_value, evaluate_simple_arithmetic,
-        extract_source_urls, fonti_section, format_memory_block, humanize_task_kind,
-        is_low_value_source_url,
-        hybrid_memory_score, inbound_action, is_auto_confirmable, is_confirmation_reply,
-        is_internal_task_kind, is_salient_exchange, is_semantic_duplicate, jail_in_root,
+        MAX_PLAN_STALL_RESUMES, MemoryCandidate, MemoryDataSensitivity,
+        TASK_EXECUTOR_DEFAULT_WORKER_COUNT, active_llm_concurrency, adapt_skill_body,
+        aggregate_session_state_from_counts, answer_body_is_empty,
+        authorize_managed_capability_tool, block_stalled_step, brain_budgets_for_context_window,
+        browser_error_indicates_dead_sidecar, browser_method_for_capability_tool,
+        browser_snapshot_text, browser_targets_for_goal, browser_url_for_goal, build_plan_markdown,
+        capability_call_completed_outcome, classify_connector_error, collapse_plan_markers,
+        collect_member_counts, composio_tool_is_read, connector_error_hint,
+        default_browser_headless_value, evaluate_simple_arithmetic, extract_source_urls,
+        fonti_section, format_memory_block, humanize_task_kind, hybrid_memory_score,
+        inbound_action, is_auto_confirmable, is_confirmation_reply, is_internal_task_kind,
+        is_low_value_source_url, is_salient_exchange, is_semantic_duplicate, jail_in_root,
         legacy_dir_action, llm_concurrency_view, mcp_error_hint, mcp_provider_slug,
         mcp_stdio_config_from_metadata, mcp_stdio_config_to_metadata, memory_age_days, merge_plan,
-        message_has_image_url, normalize_for_dedup, parse_plan_marker, parse_review_suggestion,
-        plan_done_count, plan_incomplete_reason, plan_is_complete, plan_next_open,
-        plan_step_status, proactive_memory_request_for_suggestion_action,
-        project_filesystem_mcp_instruction, prune_browser_history, redact_sensitive_text,
-        requeue_waiting_resource_tasks, resolve_active_model, resolve_contained_computer_cdp,
-        resolve_contained_computer_novnc, rewrite_confirm_to_done, sanitize_dedup_key,
+        message_has_image_url, next_plan_stall, normalize_for_dedup, parse_plan_marker,
+        parse_review_suggestion, plan_done_count, plan_incomplete_reason, plan_is_complete,
+        plan_is_settled, plan_next_open, plan_stall_exhausted, plan_step_status,
+        proactive_memory_request_for_suggestion_action, project_filesystem_mcp_instruction,
+        prune_browser_history, redact_sensitive_text, requeue_waiting_resource_tasks,
+        resolve_active_model, resolve_contained_computer_cdp, resolve_contained_computer_novnc,
+        response_language_instruction, rewrite_confirm_to_done, sanitize_dedup_key,
         sanitize_wiki_filename, scheduled_thread_sender_for_task_id, scheduled_thread_title,
         search_composio_catalog, should_try_tool_compatibility_fallback, skill_id_from_command,
         strip_json_fences, suggestion_choices_json, task_effective_goal,
         task_execution_outcome_from_executor_result, task_executor_worker_count,
         task_executor_worker_id, task_goal_summary, task_queue_response, tool_touches_calendar,
-        tool_touches_contacts, response_language_instruction, wiki_title_from_text,
+        tool_touches_contacts, wiki_title_from_text, workspace_write_roots,
     };
     use crate::browser_safety;
     use crate::chat_store::{self, ChatStore};
@@ -44853,6 +47967,7 @@ mod tests {
         TaskId, TaskPriority, TaskQueueSnapshot, TaskRecord, TaskStatus, TaskStore, TaskUiItem,
         UserId, WorkspaceId,
     };
+    use local_first_vault::VaultStore;
     use std::collections::HashMap;
     use std::sync::{Mutex, MutexGuard};
 
@@ -44865,7 +47980,9 @@ mod tests {
 
     impl TestGatewayDataDir {
         fn new(path: &std::path::Path) -> Self {
-            let lock = GATEWAY_DATA_DIR_TEST_LOCK.lock().expect("gateway data dir test lock");
+            let lock = GATEWAY_DATA_DIR_TEST_LOCK
+                .lock()
+                .expect("gateway data dir test lock");
             let restore = std::env::var("HOMUN_DATA_DIR").ok();
             // SAFETY: gateway tests already mutate process env for focused
             // configuration checks. This guard restores the previous value.
@@ -44892,10 +48009,129 @@ mod tests {
     }
 
     fn isolated_gateway_test_dir(prefix: &str) -> std::path::PathBuf {
-        std::env::temp_dir().join(format!(
-            "homun-{prefix}-{}",
-            uuid::Uuid::new_v4().simple()
-        ))
+        std::env::temp_dir().join(format!("homun-{prefix}-{}", uuid::Uuid::new_v4().simple()))
+    }
+
+    #[test]
+    fn workspace_write_roots_include_project_and_home_caches() {
+        // ADR 0023: the workspace-write fence's writable roots = the project root
+        // plus the standard HOME tool-cache dirs, so build tooling (npm/cargo/…)
+        // keeps working while everything else stays denied.
+        let project = std::path::Path::new("/Users/x/proj");
+        let roots = workspace_write_roots(project, Some("/Users/x"));
+
+        // The project root is always first.
+        assert_eq!(roots.first(), Some(&project.to_path_buf()));
+
+        // Each standard cache dir under HOME is present.
+        for cache in [".cache", ".config", ".local", ".npm", ".cargo"] {
+            let expected = std::path::Path::new("/Users/x").join(cache);
+            assert!(
+                roots.contains(&expected),
+                "missing writable cache root {expected:?} in {roots:?}"
+            );
+        }
+        // Exactly the project root + the five caches, nothing more.
+        assert_eq!(roots.len(), 6, "unexpected extra writable roots: {roots:?}");
+
+        // With no HOME, only the project root is writable.
+        let no_home = workspace_write_roots(project, None);
+        assert_eq!(no_home, vec![project.to_path_buf()]);
+    }
+
+    #[test]
+    fn navigate_failure_hint_escalates_to_search_pivot_on_repeat() {
+        // First failure: a gentle suggestion to search.
+        let first = super::browser_navigate_failure_hint("https://x.test/page", 1);
+        assert!(first.to_lowercase().contains("search"));
+        assert!(!first.contains("STOP"));
+        // Repeat failure of the SAME url: a firm STOP + pivot to a search engine.
+        let repeat = super::browser_navigate_failure_hint("https://x.test/page", 3);
+        assert!(repeat.contains("STOP"));
+        assert!(repeat.contains("google.com/search") || repeat.contains("duckduckgo"));
+        assert!(repeat.contains("3 times"));
+    }
+
+    #[test]
+    fn strip_chat_markers_removes_app_only_markers_for_channels() {
+        // Reasoning + plan markers are app-only; a channel (Telegram/WhatsApp) must get
+        // clean text. The answer survives; the markers and their content are removed.
+        let text = "‹‹REASONING››thinking hard‹‹/REASONING››\n‹‹PLAN››1/3‹‹/PLAN››\nThe answer.";
+        assert_eq!(super::strip_chat_markers(text), "The answer.");
+        // A reasoning-only message becomes empty (→ the channel mirror skips it).
+        assert_eq!(
+            super::strip_chat_markers("‹‹REASONING››only thinking‹‹/REASONING››"),
+            ""
+        );
+        // Plain text is untouched.
+        assert_eq!(super::strip_chat_markers("just text"), "just text");
+    }
+
+    #[test]
+    fn browser_tool_name_recovers_typos_and_leaves_others_untouched() {
+        // Exact native names pass through.
+        assert_eq!(
+            super::resolve_browser_chat_tool_name("browser_navigate"),
+            Some("browser_navigate")
+        );
+        // The observed hallucination recovers to the right native tool.
+        assert_eq!(
+            super::resolve_browser_chat_tool_name("browser_tavigate"),
+            Some("browser_navigate")
+        );
+        assert_eq!(
+            super::resolve_browser_chat_tool_name("browser_snapshot"),
+            Some("browser_snapshot")
+        );
+        // Non-browser tool names are left untouched (NOT pulled into the browser namespace).
+        assert_eq!(super::resolve_browser_chat_tool_name("web_search"), None);
+        assert_eq!(
+            super::resolve_browser_chat_tool_name("GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID"),
+            None
+        );
+        // A `browser_`-prefixed name too far from any native tool does NOT mis-map.
+        assert_eq!(
+            super::resolve_browser_chat_tool_name("browser_make_me_a_sandwich"),
+            None
+        );
+    }
+
+    #[test]
+    fn cdp_wedge_matched_only_for_connect_over_cdp_timeout() {
+        use local_first_browser_automation::{BrowserResponse, BrowserSidecarError};
+        let err = |code: &str, message: &str| BrowserResponse::Error {
+            id: "1".to_string(),
+            ok: false,
+            error: BrowserSidecarError {
+                code: code.to_string(),
+                message: message.to_string(),
+                retryable: false,
+                manual_action_required: false,
+            },
+        };
+        // The wedge signature (Playwright English) → recover by recycling.
+        assert!(super::browser_response_indicates_cdp_wedge(&err(
+            "BROWSER_INTERNAL_ERROR",
+            "browserType.connectOverCDP: Timeout 30000ms exceeded.",
+        )));
+        // An ordinary browser error (stale ref, action timeout) must NOT recycle the
+        // whole container — only the connectOverCDP handshake wedge does.
+        assert!(!super::browser_response_indicates_cdp_wedge(&err(
+            "BROWSER_ACTION_TIMEOUT",
+            "click timed out after 5000ms",
+        )));
+        assert!(!super::browser_response_indicates_cdp_wedge(&err(
+            "BROWSER_STALE_REF",
+            "stale ref e5; take a fresh snapshot",
+        )));
+        // Success is never a wedge.
+        assert!(!super::browser_response_indicates_cdp_wedge(
+            &BrowserResponse::Success {
+                id: "2".to_string(),
+                ok: true,
+                result: serde_json::json!({}),
+            }
+        ));
     }
 
     #[test]
@@ -45042,8 +48278,7 @@ mod tests {
     }
 
     fn bundled_python_with_pptx() -> Option<&'static str> {
-        let python =
-            "/Users/fabio/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3";
+        let python = "/Users/fabio/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3";
         if !std::path::Path::new(python).is_file() {
             eprintln!("skipping PPTX import test: bundled python unavailable");
             return None;
@@ -45069,10 +48304,7 @@ mod tests {
             "{instruction}"
         );
         assert!(instruction.contains("Italiano"), "{instruction}");
-        assert!(
-            !instruction.contains("Reply in Italiano"),
-            "{instruction}"
-        );
+        assert!(!instruction.contains("Reply in Italiano"), "{instruction}");
     }
 
     fn write_test_pptx(path: &std::path::Path, title: &str) -> bool {
@@ -45665,7 +48897,9 @@ prs.save(Path({path:?}))
         assert!(!is_low_value_source_url(
             "https://en.wikipedia.org/wiki/2026_FIFA_World_Cup_knockout_stage"
         ));
-        assert!(!is_low_value_source_url("https://www.gazzetta.it/calcio/mondiali/"));
+        assert!(!is_low_value_source_url(
+            "https://www.gazzetta.it/calcio/mondiali/"
+        ));
     }
 
     #[test]
@@ -45686,6 +48920,946 @@ prs.save(Path({path:?}))
     // ── Canonical plan (the loop fix) ───────────────────────────────────────
     fn sent_step(title: &str, status: &str) -> serde_json::Value {
         serde_json::json!({ "title": title, "status": status })
+    }
+
+    #[test]
+    fn answer_concludes_plan_only_when_substantial_and_last_step_open() {
+        // Substantial answer + at most the last step open → stop nudging (the model finished
+        // and forgot to mark done).
+        assert!(super::answer_concludes_plan(1, 600));
+        assert!(super::answer_concludes_plan(0, 1200));
+        // Short answer → keep nudging even with one step open (could be an aside).
+        assert!(!super::answer_concludes_plan(1, 599));
+        // Several steps still open → it genuinely stopped early, keep nudging.
+        assert!(!super::answer_concludes_plan(2, 5000));
+    }
+
+    #[test]
+    fn plan_reconcile_on_delivery_is_default_on_with_explicit_opt_out() {
+        assert!(super::plan_reconcile_on_delivery_flag(None));
+        assert!(super::plan_reconcile_on_delivery_flag(Some("1")));
+        assert!(super::plan_reconcile_on_delivery_flag(Some("on")));
+        assert!(!super::plan_reconcile_on_delivery_flag(Some("0")));
+        assert!(!super::plan_reconcile_on_delivery_flag(Some("off")));
+    }
+
+    #[test]
+    fn browser_method_guides_open_ended_news_through_discovery_first() {
+        let guidance = super::browser_open_research_discovery_instruction();
+        assert!(guidance.contains("open-ended current news"));
+        assert!(guidance.contains("start with search/discovery"));
+        assert!(guidance.contains("match the user's language"));
+        assert!(guidance.contains("browser locale"));
+        assert!(guidance.contains("hl="));
+        assert!(guidance.contains("gl="));
+        assert!(guidance.contains("Do not jump directly to one outlet"));
+    }
+
+    #[test]
+    fn booking_assumption_instruction_requires_choice_card_before_proceeding() {
+        let guidance = super::booking_assumption_choice_instruction();
+        assert!(guidance.contains("do NOT silently proceed"));
+        assert!(guidance.contains("assumed critical parameter"));
+        assert!(guidance.contains("CHOICES marker"));
+        assert!(guidance.contains("Continue only after the user"));
+    }
+
+    #[test]
+    fn vault_record_from_proposal_creates_metadata_only_record() {
+        let request = super::VaultProposalActionRequest {
+            category: "payments".to_string(),
+            label: "Carta personale".to_string(),
+            redacted_preview: "[VAULT:payments:card:last4=1111]".to_string(),
+            secret_value: None,
+            pending_id: None,
+            pin: None,
+            thread_id: Some("thread_1".to_string()),
+            message_id: Some("msg_1".to_string()),
+        };
+        let record = super::vault_record_from_proposal(&request).expect("record");
+        assert_eq!(record.category, local_first_vault::VaultCategory::Payments);
+        assert_eq!(record.label, "Carta personale");
+        assert_eq!(
+            record.metadata["redacted_preview"],
+            "[VAULT:payments:card:last4=1111]"
+        );
+        assert_eq!(record.metadata["source"], "vault_propose");
+        assert_eq!(record.metadata["thread_id"], "thread_1");
+        assert_eq!(record.metadata["message_id"], "msg_1");
+        assert_eq!(record.secret_ref.provider_id(), "vault");
+        assert_eq!(record.secret_ref.connection_id(), record.id.as_str());
+    }
+
+    #[test]
+    fn vault_proposal_accept_encrypts_secret_value_when_pin_is_provided() {
+        let vault = local_first_vault::SQLiteVaultStore::open_in_memory().unwrap();
+        let setup = super::VaultPinSetupRequest {
+            pin: "123456".to_string(),
+            current_pin: None,
+        };
+        super::apply_vault_pin_setup(&vault, &setup).expect("setup pin");
+        let request = super::VaultProposalActionRequest {
+            category: "payments".to_string(),
+            label: "Carta personale".to_string(),
+            redacted_preview: "[VAULT:payments:card:last4=1111]".to_string(),
+            secret_value: Some("4111111111111111".to_string()),
+            pending_id: None,
+            pin: Some("123456".to_string()),
+            thread_id: Some("thread_1".to_string()),
+            message_id: Some("msg_1".to_string()),
+        };
+
+        let response = super::accept_vault_proposal(&vault, &request).expect("accept");
+        let record_id = response.record_id.parse().unwrap();
+        let verifier = vault.local_pin_verifier().unwrap().unwrap();
+        let key = vault
+            .unlock_local_master_key(&verifier, "123456")
+            .expect("master key");
+        let secret = vault
+            .get_secret_material(&record_id, &key)
+            .expect("encrypted secret")
+            .expect("saved secret");
+
+        assert_eq!(secret.expose_utf8().unwrap(), "4111111111111111");
+        let saved = local_first_vault::VaultStore::get(&vault, &record_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            saved.metadata["redacted_preview"],
+            "[VAULT:payments:card:last4=1111]"
+        );
+        assert!(!saved.metadata.to_string().contains("4111111111111111"));
+    }
+
+    #[test]
+    fn vault_proposal_accept_migrates_legacy_pin_without_master_key() {
+        let vault = local_first_vault::SQLiteVaultStore::open_in_memory().unwrap();
+        let verifier = local_first_vault::LocalPinVerifier::create("123456").unwrap();
+        vault.set_local_pin_verifier(verifier).unwrap();
+        let request = super::VaultProposalActionRequest {
+            category: "identity".to_string(),
+            label: "Codice Fiscale".to_string(),
+            redacted_preview: "[VAULT:identity:fiscal_code]".to_string(),
+            secret_value: Some("CNTFBA76L16F839Y".to_string()),
+            pending_id: None,
+            pin: Some("123456".to_string()),
+            thread_id: None,
+            message_id: None,
+        };
+
+        let response = super::accept_vault_proposal(&vault, &request).expect("accept");
+
+        let record_id = response.record_id.parse().unwrap();
+        let verifier = vault.local_pin_verifier().unwrap().unwrap();
+        let key = vault
+            .unlock_local_master_key(&verifier, "123456")
+            .expect("master key");
+        let secret = vault
+            .get_secret_material(&record_id, &key)
+            .expect("encrypted secret")
+            .expect("saved secret");
+        assert_eq!(secret.expose_utf8().unwrap(), "CNTFBA76L16F839Y");
+    }
+
+    #[test]
+    fn vault_record_summary_lists_redacted_metadata_and_delete_removes_record() {
+        let vault = local_first_vault::SQLiteVaultStore::open_in_memory().unwrap();
+        let request = super::VaultProposalActionRequest {
+            category: "payments".to_string(),
+            label: "Carta personale".to_string(),
+            redacted_preview: "[VAULT:payments:card:last4=1111]".to_string(),
+            secret_value: None,
+            pending_id: None,
+            pin: None,
+            thread_id: Some("thread_1".to_string()),
+            message_id: Some("msg_1".to_string()),
+        };
+        let response = super::accept_vault_proposal(&vault, &request).expect("accept");
+        let summaries = vault
+            .list()
+            .expect("list")
+            .into_iter()
+            .map(super::vault_record_summary)
+            .collect::<Vec<_>>();
+
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries[0].id, response.record_id);
+        assert_eq!(summaries[0].category, "payments");
+        assert_eq!(summaries[0].label, "Carta personale");
+        assert_eq!(
+            summaries[0].redacted_preview,
+            "[VAULT:payments:card:last4=1111]"
+        );
+        assert!(
+            !serde_json::to_string(&summaries)
+                .unwrap()
+                .contains("secret_ref")
+        );
+
+        let record_id = response.record_id.parse().unwrap();
+        vault.delete(&record_id).expect("delete");
+        assert!(vault.list().expect("list after delete").is_empty());
+    }
+
+    #[test]
+    fn vault_metadata_matches_saved_record_without_secret_material() {
+        let vault = local_first_vault::SQLiteVaultStore::open_in_memory().unwrap();
+        let request = super::VaultProposalActionRequest {
+            category: "identity".to_string(),
+            label: "Codice Fiscale".to_string(),
+            redacted_preview: "[VAULT:identity:fiscal_code]".to_string(),
+            secret_value: Some("CNTFBA76L16F839Y".to_string()),
+            pending_id: None,
+            pin: Some("123456".to_string()),
+            thread_id: None,
+            message_id: None,
+        };
+        super::apply_vault_pin_setup(
+            &vault,
+            &super::VaultPinSetupRequest {
+                pin: "123456".to_string(),
+                current_pin: None,
+            },
+        )
+        .expect("pin");
+        super::accept_vault_proposal(&vault, &request).expect("accept");
+
+        let found =
+            super::search_vault_records(&vault, "qual è il mio codice fiscale", 5).expect("search");
+        let json = serde_json::to_string(&found).unwrap();
+
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].label, "Codice Fiscale");
+        assert_eq!(found[0].category, "identity");
+        assert!(json.contains("[VAULT:identity:fiscal_code]"));
+        assert!(!json.contains("CNTFBA76L16F839Y"));
+    }
+
+    #[test]
+    fn recall_memory_falls_back_to_vault_metadata_without_exposing_tool_or_secret() {
+        let vault = local_first_vault::SQLiteVaultStore::open_in_memory().unwrap();
+        super::apply_vault_pin_setup(
+            &vault,
+            &super::VaultPinSetupRequest {
+                pin: "123456".to_string(),
+                current_pin: None,
+            },
+        )
+        .expect("pin");
+        let request = super::VaultProposalActionRequest {
+            category: "identity".to_string(),
+            label: "Codice Fiscale".to_string(),
+            redacted_preview: "[VAULT:identity:fiscal_code]".to_string(),
+            secret_value: Some("CNTFBA76L16F839Y".to_string()),
+            pending_id: None,
+            pin: Some("123456".to_string()),
+            thread_id: None,
+            message_id: None,
+        };
+        super::accept_vault_proposal(&vault, &request).expect("accept");
+
+        let answer = super::recall_memory_response_with_vault_fallback(
+            &vault,
+            "qual è il mio codice fiscale",
+            Vec::new(),
+            false,
+        );
+
+        assert!(answer.contains("No memories relevant"));
+        assert!(answer.contains("Vault records matching"));
+        assert!(answer.contains(super::VAULT_REVEAL_OPEN));
+        assert!(answer.contains("Codice Fiscale"));
+        assert!(answer.contains("[VAULT:identity:fiscal_code]"));
+        assert!(!answer.contains("CNTFBA76L16F839Y"));
+    }
+
+    #[test]
+    fn vault_reveal_marker_is_appended_when_model_omits_it() {
+        let marker = "‹‹VAULT_REVEAL››{\"record_id\":\"vault_1\",\"category\":\"identity\",\"label\":\"Codice Fiscale\",\"redacted_preview\":\"[VAULT:identity:fiscal_code]\"}‹‹/VAULT_REVEAL››";
+
+        let added = super::append_vault_reveal_marker_if_missing(
+            "Il dato è nel Vault.".to_string(),
+            Some(marker),
+        );
+        assert!(added.contains(marker));
+
+        let unchanged = super::append_vault_reveal_marker_if_missing(added.clone(), Some(marker));
+        assert_eq!(unchanged.matches(super::VAULT_REVEAL_OPEN).count(), 1);
+        assert_eq!(
+            super::extract_vault_reveal_marker(&added).as_deref(),
+            Some(marker)
+        );
+    }
+
+    #[test]
+    fn recall_memory_still_offers_vault_reveal_when_memory_mentions_record() {
+        let vault = local_first_vault::SQLiteVaultStore::open_in_memory().unwrap();
+        super::apply_vault_pin_setup(
+            &vault,
+            &super::VaultPinSetupRequest {
+                pin: "123456".to_string(),
+                current_pin: None,
+            },
+        )
+        .expect("pin");
+        let request = super::VaultProposalActionRequest {
+            category: "identity".to_string(),
+            label: "Codice Fiscale".to_string(),
+            redacted_preview: "[VAULT:identity:fiscal_code]".to_string(),
+            secret_value: Some("CNTFBA76L16F839Y".to_string()),
+            pending_id: None,
+            pin: Some("123456".to_string()),
+            thread_id: None,
+            message_id: None,
+        };
+        super::accept_vault_proposal(&vault, &request).expect("accept");
+
+        let answer = super::recall_memory_response_with_vault_fallback(
+            &vault,
+            "codice fiscale",
+            vec!["- [episode] Il codice fiscale è nel Vault.".to_string()],
+            false,
+        );
+
+        assert!(answer.contains("Relevant memories from memory"));
+        assert!(answer.contains(super::VAULT_REVEAL_OPEN));
+        assert!(!answer.contains("CNTFBA76L16F839Y"));
+    }
+
+    #[test]
+    fn memory_recall_timing_trace_is_stable_and_redacted() {
+        let timing = super::MemoryRecallTiming {
+            lock_wait_ms: 3,
+            profile_ms: 5,
+            open_loops_ms: 7,
+            fts_ms: 11,
+            query_embedding_ms: Some(13),
+            query_embedding_cache_hit: true,
+            query_embedding_timed_out: false,
+            vector_scan_ms: Some(17),
+            graph_context_ms: 19,
+            total_ms: 23,
+            vector_candidates: 29,
+            fts_candidates: 31,
+            degraded: true,
+        };
+
+        let line = super::memory_recall_timing_trace_line(&timing);
+
+        assert!(line.starts_with("memory recall:"));
+        assert!(line.contains("total_ms=23"));
+        assert!(line.contains("lock_wait_ms=3"));
+        assert!(line.contains("query_embedding_ms=13"));
+        assert!(line.contains("query_embedding_cache_hit=true"));
+        assert!(line.contains("query_embedding_timed_out=false"));
+        assert!(line.contains("vector_candidates=29"));
+        assert!(line.contains("fts_candidates=31"));
+        assert!(line.contains("degraded=true"));
+        assert!(!line.contains("codice"));
+        assert!(!line.contains("fiscale"));
+    }
+
+    #[test]
+    fn memory_query_embedding_cache_key_normalizes_workspace_query() {
+        let workspace = super::MemoryWorkspaceId::new("personal");
+
+        let first = super::memory_query_embedding_cache_key("  Codice   Fiscale ", &workspace);
+        let second = super::memory_query_embedding_cache_key("codice fiscale", &workspace);
+        let other_workspace = super::memory_query_embedding_cache_key(
+            "codice fiscale",
+            &super::MemoryWorkspaceId::new("project"),
+        );
+
+        assert_eq!(first, second);
+        assert_ne!(second, other_workspace);
+        assert!(second.ends_with("|personal|codice fiscale"));
+    }
+
+    #[test]
+    fn memory_query_embedding_cache_reuses_and_evicts_lru() {
+        let mut cache = super::MemoryQueryEmbeddingCache::default();
+        let ttl = std::time::Duration::from_secs(60);
+
+        cache.insert("a".to_string(), vec![1.0], 2);
+        cache.insert("b".to_string(), vec![2.0], 2);
+        assert_eq!(cache.get("a", ttl), Some(vec![1.0]));
+
+        cache.insert("c".to_string(), vec![3.0], 2);
+
+        assert_eq!(cache.get("a", ttl), Some(vec![1.0]));
+        assert_eq!(cache.get("b", ttl), None);
+        assert_eq!(cache.get("c", ttl), Some(vec![3.0]));
+    }
+
+    #[test]
+    fn vault_record_update_changes_metadata_without_touching_secret_material() {
+        let vault = local_first_vault::SQLiteVaultStore::open_in_memory().unwrap();
+        let setup = super::VaultPinSetupRequest {
+            pin: "123456".to_string(),
+            current_pin: None,
+        };
+        super::apply_vault_pin_setup(&vault, &setup).expect("setup pin");
+        let request = super::VaultProposalActionRequest {
+            category: "payments".to_string(),
+            label: "Carta personale".to_string(),
+            redacted_preview: "[VAULT:payments:card:last4=1111]".to_string(),
+            secret_value: Some("4111111111111111".to_string()),
+            pending_id: None,
+            pin: Some("123456".to_string()),
+            thread_id: Some("thread_1".to_string()),
+            message_id: Some("msg_1".to_string()),
+        };
+        let response = super::accept_vault_proposal(&vault, &request).expect("accept");
+        let record_id = response.record_id.parse().unwrap();
+        let update = super::VaultRecordUpdateRequest {
+            category: "private_notes".to_string(),
+            label: "Carta backup".to_string(),
+            secret_value: None,
+            pin: None,
+        };
+
+        let updated =
+            super::update_vault_record(&vault, &record_id, &update).expect("update metadata");
+
+        assert!(updated.ok);
+        assert_eq!(updated.record.id, response.record_id);
+        assert_eq!(updated.record.category, "private_notes");
+        assert_eq!(updated.record.label, "Carta backup");
+        assert_eq!(
+            updated.record.redacted_preview,
+            "[VAULT:payments:card:last4=1111]"
+        );
+        let verifier = vault.local_pin_verifier().unwrap().unwrap();
+        let key = vault
+            .unlock_local_master_key(&verifier, "123456")
+            .expect("master key");
+        let secret = vault
+            .get_secret_material(&record_id, &key)
+            .expect("encrypted secret")
+            .expect("saved secret");
+        assert_eq!(secret.expose_utf8().unwrap(), "4111111111111111");
+        let saved = local_first_vault::VaultStore::get(&vault, &record_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            saved.category,
+            local_first_vault::VaultCategory::PrivateNotes
+        );
+        assert_eq!(saved.label, "Carta backup");
+        assert!(!saved.metadata.to_string().contains("4111111111111111"));
+    }
+
+    #[test]
+    fn vault_record_reveal_and_update_secret_require_pin() {
+        let vault = local_first_vault::SQLiteVaultStore::open_in_memory().unwrap();
+        let setup = super::VaultPinSetupRequest {
+            pin: "123456".to_string(),
+            current_pin: None,
+        };
+        super::apply_vault_pin_setup(&vault, &setup).expect("setup pin");
+        let request = super::VaultProposalActionRequest {
+            category: "identity".to_string(),
+            label: "Codice Fiscale".to_string(),
+            redacted_preview: "[VAULT:identity:Codice Fiscale]".to_string(),
+            secret_value: Some("CNTFBA76L16F839Y".to_string()),
+            pending_id: None,
+            pin: Some("123456".to_string()),
+            thread_id: None,
+            message_id: None,
+        };
+        let response = super::accept_vault_proposal(&vault, &request).expect("accept");
+        let record_id = response.record_id.parse().unwrap();
+
+        let revealed = super::reveal_vault_record_secret(
+            &vault,
+            None,
+            &record_id,
+            &super::VaultRecordRevealRequest {
+                pin: "123456".to_string(),
+            },
+        )
+        .expect("reveal");
+
+        assert_eq!(revealed.record.label, "Codice Fiscale");
+        assert_eq!(revealed.secret_value, "CNTFBA76L16F839Y");
+        let wrong_pin = super::reveal_vault_record_secret(
+            &vault,
+            None,
+            &record_id,
+            &super::VaultRecordRevealRequest {
+                pin: "000000".to_string(),
+            },
+        )
+        .expect_err("wrong pin rejected");
+        assert_eq!(wrong_pin.code, "invalid_vault_pin");
+        let update = super::VaultRecordUpdateRequest {
+            category: "identity".to_string(),
+            label: "Codice Fiscale corretto".to_string(),
+            secret_value: Some("CNTFBA76L16F839Z".to_string()),
+            pin: Some("123456".to_string()),
+        };
+        let updated = super::update_vault_record(&vault, &record_id, &update).expect("update");
+
+        assert_eq!(updated.record.label, "Codice Fiscale corretto");
+        let revealed = super::reveal_vault_record_secret(
+            &vault,
+            None,
+            &record_id,
+            &super::VaultRecordRevealRequest {
+                pin: "123456".to_string(),
+            },
+        )
+        .expect("reveal updated");
+        assert_eq!(revealed.secret_value, "CNTFBA76L16F839Z");
+    }
+
+    #[test]
+    fn vault_proposal_accept_saves_pending_without_pin_then_reveal_materializes_secret() {
+        let vault = local_first_vault::SQLiteVaultStore::open_in_memory().unwrap();
+        super::apply_vault_pin_setup(
+            &vault,
+            &super::VaultPinSetupRequest {
+                pin: "123456".to_string(),
+                current_pin: None,
+            },
+        )
+        .expect("pin");
+        let pending = super::privacy_guard::PendingVaultProposalStore::default();
+        let pending_id = pending.insert(super::privacy_guard::PendingVaultProposal {
+            category: "vehicles".to_string(),
+            label: "Targa auto".to_string(),
+            redacted_preview: "[VAULT:vehicles:plate]".to_string(),
+            secret_value: "FM470BN".to_string(),
+        });
+        let request = super::VaultProposalActionRequest {
+            category: "vehicles".to_string(),
+            label: "Targa auto".to_string(),
+            redacted_preview: "[VAULT:vehicles:plate]".to_string(),
+            secret_value: None,
+            pending_id: Some(pending_id.clone()),
+            pin: None,
+            thread_id: None,
+            message_id: None,
+        };
+
+        let response = super::accept_vault_proposal_with_pending(&vault, Some(&pending), &request)
+            .expect("accept");
+        assert!(pending.get(&pending_id).is_some());
+
+        let record_id = response.record_id.parse().unwrap();
+        let revealed = super::reveal_vault_record_secret(
+            &vault,
+            Some(&pending),
+            &record_id,
+            &super::VaultRecordRevealRequest {
+                pin: "123456".to_string(),
+            },
+        )
+        .expect("reveal");
+        assert_eq!(revealed.secret_value, "FM470BN");
+        assert!(pending.take(&pending_id).is_none());
+    }
+
+    #[tokio::test]
+    async fn cors_preflight_allows_patch_for_browser_gateway_writes() {
+        use axum::{
+            Router,
+            body::Body,
+            http::{
+                Request, StatusCode,
+                header::{
+                    ACCESS_CONTROL_ALLOW_METHODS, ACCESS_CONTROL_REQUEST_HEADERS,
+                    ACCESS_CONTROL_REQUEST_METHOD, ORIGIN,
+                },
+            },
+            routing::get,
+        };
+        use tower::ServiceExt;
+
+        async fn ok() -> &'static str {
+            "ok"
+        }
+
+        let app = Router::new()
+            .route("/api/vault/records/record_1", get(ok).patch(ok))
+            .layer(super::cors_layer());
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("OPTIONS")
+                    .uri("/api/vault/records/record_1")
+                    .header(ORIGIN, "http://localhost:1420")
+                    .header(ACCESS_CONTROL_REQUEST_METHOD, "PATCH")
+                    .header(ACCESS_CONTROL_REQUEST_HEADERS, "authorization,content-type")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let methods = response
+            .headers()
+            .get(ACCESS_CONTROL_ALLOW_METHODS)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or("");
+        assert!(
+            methods.split(',').any(|method| method.trim() == "PATCH"),
+            "allowed methods should include PATCH, got {methods:?}"
+        );
+    }
+
+    #[test]
+    fn vault_category_from_marker_rejects_unknown_category() {
+        let error = super::vault_category_from_marker("banking").expect_err("unknown category");
+        assert!(error.contains("unknown vault category"));
+    }
+
+    #[test]
+    fn vault_pin_setup_rejects_invalid_pin_values() {
+        let request = super::VaultPinSetupRequest {
+            pin: "12345".to_string(),
+            current_pin: None,
+        };
+
+        let error = super::local_pin_verifier_from_request(&request).expect_err("short pin");
+        assert!(error.contains("PIN"));
+    }
+
+    #[test]
+    fn vault_pin_verify_requires_configured_matching_pin() {
+        let request = super::VaultPinSetupRequest {
+            pin: "123456".to_string(),
+            current_pin: None,
+        };
+        let verifier = super::local_pin_verifier_from_request(&request).expect("verifier");
+
+        assert!(super::local_pin_verify_result(Some(&verifier), "123456"));
+        assert!(!super::local_pin_verify_result(Some(&verifier), "654321"));
+        assert!(!super::local_pin_verify_result(None, "123456"));
+    }
+
+    #[test]
+    fn vault_pin_change_requires_current_pin_when_already_configured() {
+        let existing = local_first_vault::LocalPinVerifier::create("123456").unwrap();
+        let replacement_without_current = super::VaultPinSetupRequest {
+            pin: "654321".to_string(),
+            current_pin: None,
+        };
+        let error = super::local_pin_setup_verifier(Some(&existing), &replacement_without_current)
+            .expect_err("current pin required");
+        assert!(error.contains("Current Vault PIN"));
+
+        let replacement_with_wrong_current = super::VaultPinSetupRequest {
+            pin: "654321".to_string(),
+            current_pin: Some("111111".to_string()),
+        };
+        let error =
+            super::local_pin_setup_verifier(Some(&existing), &replacement_with_wrong_current)
+                .expect_err("current pin must match");
+        assert!(error.contains("Invalid current Vault PIN"));
+
+        let replacement_with_current = super::VaultPinSetupRequest {
+            pin: "654321".to_string(),
+            current_pin: Some("123456".to_string()),
+        };
+        let updated = super::local_pin_setup_verifier(Some(&existing), &replacement_with_current)
+            .expect("valid pin change");
+        assert!(updated.verify("654321"));
+        assert!(!updated.verify("123456"));
+    }
+
+    #[test]
+    fn vault_pin_setup_creates_and_rewraps_local_master_key() {
+        let vault = local_first_vault::SQLiteVaultStore::open_in_memory().unwrap();
+        let first_setup = super::VaultPinSetupRequest {
+            pin: "123456".to_string(),
+            current_pin: None,
+        };
+
+        super::apply_vault_pin_setup(&vault, &first_setup).expect("first setup");
+        let first_verifier = vault.local_pin_verifier().unwrap().unwrap();
+        let master_key = vault
+            .unlock_local_master_key(&first_verifier, "123456")
+            .expect("master key");
+
+        let change = super::VaultPinSetupRequest {
+            pin: "654321".to_string(),
+            current_pin: Some("123456".to_string()),
+        };
+        super::apply_vault_pin_setup(&vault, &change).expect("pin change");
+        let new_verifier = vault.local_pin_verifier().unwrap().unwrap();
+
+        assert_eq!(
+            vault
+                .unlock_local_master_key(&new_verifier, "654321")
+                .expect("rewrapped master key"),
+            master_key
+        );
+        assert!(
+            vault
+                .unlock_local_master_key(&new_verifier, "123456")
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn vault_pin_change_migrates_legacy_pin_without_master_key() {
+        let vault = local_first_vault::SQLiteVaultStore::open_in_memory().unwrap();
+        vault
+            .set_local_pin_verifier(local_first_vault::LocalPinVerifier::create("123456").unwrap())
+            .unwrap();
+        let change = super::VaultPinSetupRequest {
+            pin: "654321".to_string(),
+            current_pin: Some("123456".to_string()),
+        };
+
+        super::apply_vault_pin_setup(&vault, &change).expect("legacy pin change");
+        let verifier = vault.local_pin_verifier().unwrap().unwrap();
+
+        assert!(vault.unlock_local_master_key(&verifier, "654321").is_ok());
+    }
+
+    fn payment_snapshot() -> local_first_vault::PaymentApprovalSnapshot {
+        local_first_vault::PaymentApprovalSnapshot {
+            approval_id: "pay_test".to_string(),
+            merchant: "Trainline".to_string(),
+            domain: "www.thetrainline.com".to_string(),
+            amount_minor: 5900,
+            currency: "EUR".to_string(),
+            product_summary: "Napoli -> Roma 2026-07-10 09:50".to_string(),
+            payment_method_label: "Visa 1111".to_string(),
+            checkout_fingerprint: "checkout_hash_a".to_string(),
+        }
+    }
+
+    #[test]
+    fn payment_approval_marker_wraps_snapshot_payload() {
+        let marker = super::payment_approval_marker(&payment_snapshot());
+
+        assert!(marker.starts_with(super::PAYMENT_APPROVAL_OPEN));
+        assert!(marker.ends_with(super::PAYMENT_APPROVAL_CLOSE));
+        let parsed = super::confirm_marker_value(
+            &marker,
+            super::PAYMENT_APPROVAL_OPEN,
+            super::PAYMENT_APPROVAL_CLOSE,
+        )
+        .expect("valid payment marker");
+        assert_eq!(parsed["snapshot"]["approval_id"], "pay_test");
+        assert_eq!(parsed["snapshot"]["amount_minor"], 5900);
+        assert_eq!(parsed["snapshot"]["payment_method_label"], "Visa 1111");
+    }
+
+    #[test]
+    fn payment_approval_grant_requires_pin_and_one_shot_cvv() {
+        let verifier = local_first_vault::LocalPinVerifier::create("123456").unwrap();
+        let request = super::VaultPaymentApprovalRequest {
+            snapshot: payment_snapshot(),
+            pin: "123456".to_string(),
+            cvv: "123".to_string(),
+            thread_id: None,
+            message_id: None,
+        };
+
+        let grant =
+            super::payment_approval_grant_from_request(&request, &verifier).expect("payment grant");
+        assert_eq!(grant.snapshot.approval_id, "pay_test");
+        assert_eq!(grant.cvv_one_shot.as_deref(), Some("123"));
+
+        let bad_pin = super::VaultPaymentApprovalRequest {
+            pin: "654321".to_string(),
+            ..request
+        };
+        assert!(super::payment_approval_grant_from_request(&bad_pin, &verifier).is_err());
+
+        let bad_cvv = super::VaultPaymentApprovalRequest {
+            snapshot: payment_snapshot(),
+            pin: "123456".to_string(),
+            cvv: "12x".to_string(),
+            thread_id: None,
+            message_id: None,
+        };
+        assert!(super::payment_approval_grant_from_request(&bad_cvv, &verifier).is_err());
+    }
+
+    #[test]
+    fn rewrite_payment_approval_removes_card_and_leaves_approved_id() {
+        let marker = super::payment_approval_marker(&payment_snapshot());
+        let text = format!("Riepilogo checkout.\n\n{marker}\n\nNon procedo senza conferma.");
+
+        let rewritten = super::rewrite_payment_approval_to_done(&text, "pay_test", 300);
+
+        assert!(rewritten.contains("Riepilogo checkout."));
+        assert!(rewritten.contains("Pagamento autorizzato localmente"));
+        assert!(rewritten.contains("payment_approval_id: pay_test"));
+        assert!(!rewritten.contains(super::PAYMENT_APPROVAL_OPEN));
+        assert!(!rewritten.contains("123"));
+    }
+
+    #[test]
+    fn payment_approval_secret_injects_cvv_once() {
+        let mut approvals = std::collections::HashMap::from([(
+            "pay_test".to_string(),
+            super::PaymentApprovalGrant {
+                snapshot: payment_snapshot(),
+                cvv_one_shot: Some("123".to_string()),
+                expires_at: std::time::Instant::now() + std::time::Duration::from_secs(300),
+            },
+        )]);
+        let mut action = serde_json::json!({
+            "kind": "fill",
+            "ref": "e12",
+            "payment_approval_id": "pay_test",
+            "vault_secret": "cvv_one_shot"
+        });
+
+        assert!(
+            super::apply_payment_approval_secret_from_map(&mut approvals, &mut action).unwrap()
+        );
+        assert_eq!(action["text"], "123");
+        assert!(action.get("vault_secret").is_none());
+
+        let mut second = serde_json::json!({
+            "kind": "fill",
+            "ref": "e12",
+            "payment_approval_id": "pay_test",
+            "vault_secret": "cvv_one_shot"
+        });
+        assert!(
+            super::apply_payment_approval_secret_from_map(&mut approvals, &mut second).is_err()
+        );
+
+        let mut click = serde_json::json!({
+            "kind": "click",
+            "ref": "e20",
+            "payment_approval_id": "pay_test",
+            "vault_secret": "cvv_one_shot"
+        });
+        assert!(super::apply_payment_approval_secret_from_map(&mut approvals, &mut click).is_err());
+    }
+
+    #[test]
+    fn controlled_checkout_approval_flow_rewrites_transcript_and_consumes_cvv() {
+        let chat = ChatStore::in_memory().expect("chat store");
+        let thread = chat.create_thread("default").expect("thread");
+        let snapshot = payment_snapshot();
+        let marker = super::payment_approval_marker(&snapshot);
+        let assistant = super::channel_chat_message_with_id(
+            "assistant",
+            &format!("Riepilogo checkout.\n\n{marker}\n\nAttendo approvazione."),
+            "assistant_checkout",
+        );
+        chat.append_assistant_message(&thread.thread_id, &assistant)
+            .expect("assistant message");
+
+        let vault = local_first_vault::SQLiteVaultStore::open_in_memory().expect("vault");
+        vault
+            .set_local_pin_verifier(local_first_vault::LocalPinVerifier::create("123456").unwrap())
+            .expect("pin verifier");
+        let mut approvals = std::collections::HashMap::new();
+        let request = super::VaultPaymentApprovalRequest {
+            snapshot,
+            pin: "123456".to_string(),
+            cvv: "123".to_string(),
+            thread_id: Some(thread.thread_id.clone()),
+            message_id: Some("assistant_checkout".to_string()),
+        };
+
+        let response =
+            super::approve_payment_checkout_request(&vault, &chat, &mut approvals, request)
+                .expect("approval response");
+
+        assert_eq!(response.payment_approval_id, "pay_test");
+        assert_eq!(
+            response.expires_in_seconds,
+            super::PAYMENT_APPROVAL_TTL_SECONDS
+        );
+        let rewritten = chat
+            .message(&thread.thread_id, "assistant_checkout")
+            .expect("message query")
+            .expect("message")
+            .text;
+        assert!(rewritten.contains("payment_approval_id: pay_test"));
+        assert!(!rewritten.contains(super::PAYMENT_APPROVAL_OPEN));
+        assert!(!rewritten.contains("123456"));
+        assert!(!rewritten.contains("CVV: 123"));
+
+        let page_snapshot = "- textbox \"CVV\" [ref=e12]\n- button \"Paga ora\" [ref=e20]";
+        let blocked_click = serde_json::json!({"kind":"click","ref":"e20"});
+        assert!(browser_safety::high_risk_reason(&blocked_click, page_snapshot).is_some());
+        let approved_click =
+            serde_json::json!({"kind":"click","ref":"e20","payment_approval_id":"pay_test"});
+        assert!(
+            browser_safety::high_risk_reason_with_payment_approval(
+                &approved_click,
+                page_snapshot,
+                Some("pay_test")
+            )
+            .is_none()
+        );
+
+        let mut fill_cvv = serde_json::json!({
+            "kind": "fill",
+            "ref": "e12",
+            "payment_approval_id": "pay_test",
+            "vault_secret": "cvv_one_shot"
+        });
+        assert!(
+            super::apply_payment_approval_secret_from_map(&mut approvals, &mut fill_cvv).unwrap()
+        );
+        assert_eq!(fill_cvv["text"], "123");
+        assert!(fill_cvv.get("vault_secret").is_none());
+
+        let mut second_fill = serde_json::json!({
+            "kind": "fill",
+            "ref": "e12",
+            "payment_approval_id": "pay_test",
+            "vault_secret": "cvv_one_shot"
+        });
+        assert!(
+            super::apply_payment_approval_secret_from_map(&mut approvals, &mut second_fill)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn stale_ref_recovery_message_forbids_reusing_the_old_ref() {
+        let msg = super::stale_ref_recovery_message(Some("e145"), "[ref=e200] Article");
+        assert!(msg.contains("Do NOT retry e145"));
+        assert!(msg.contains("NEW [ref=...]"));
+        assert!(msg.contains("[ref=e200] Article"));
+    }
+
+    #[test]
+    fn replace_latest_plan_marker_updates_delivered_plan_status() {
+        let steps = vec![
+            serde_json::json!({"id":"s1","title":"Open page","status":"done","detail":"ok"}),
+            serde_json::json!({"id":"s2","title":"Deliver answer","status":"done","detail":"sent"}),
+        ];
+        let answer = "‹‹PLAN››- [x] **Open page** (`s1`): ok\n\
+- [ ] **Deliver answer** (`s2`): pending‹‹/PLAN››\nDone.";
+        let updated = super::replace_latest_plan_marker(answer, &steps);
+        assert!(updated.contains("- [x] **Deliver answer** (`s2`): sent"));
+        assert!(!updated.contains("- [ ] **Deliver answer**"));
+        assert!(updated.ends_with("\nDone."));
+    }
+
+    #[test]
+    fn reconcile_final_plan_marker_closes_last_open_step_on_delivery() {
+        let plan = super::runtime_execution_plan(&[
+            serde_json::json!({"id":"s1","title":"Emit card","status":"done","detail":"ok"}),
+            serde_json::json!({"id":"s2","title":"Deliver result","status":"doing","detail":"pending"}),
+        ]);
+        let answer = format!(
+            "‹‹PLAN››{}‹‹/PLAN››\n{}",
+            super::build_plan_markdown(&super::execution_plan_steps(&plan)),
+            "Risultato finale: completato. ".repeat(40)
+        );
+
+        let updated = super::reconcile_final_plan_marker_on_delivery(&plan, &answer);
+
+        assert!(updated.contains("- [x] **Deliver result** (`s2`)"));
+        assert!(!updated.contains("- [-] **Deliver result**"));
     }
 
     #[test]
@@ -45911,6 +50085,22 @@ prs.save(Path({path:?}))
     }
 
     #[test]
+    fn chat_payload_max_tokens_override_skips_forced_synthesis() {
+        assert_eq!(
+            super::chat_payload_max_tokens(false, Some("24")),
+            24,
+            "debug cutoff should apply to the main loop"
+        );
+        assert_eq!(
+            super::chat_payload_max_tokens(true, Some("24")),
+            6000,
+            "forced synthesis must keep the normal fresh budget"
+        );
+        assert_eq!(super::chat_payload_max_tokens(false, Some("0")), 6000);
+        assert_eq!(super::chat_payload_max_tokens(false, Some("nope")), 6000);
+    }
+
+    #[test]
     fn orchestration_plan_tools_expose_strict_schemas() {
         let update_plan = super::update_plan_tool_schema();
         assert_eq!(
@@ -45977,6 +50167,86 @@ prs.save(Path({path:?}))
             response_format.pointer("/json_schema/schema/additionalProperties"),
             Some(&serde_json::Value::Bool(false))
         );
+    }
+
+    #[test]
+    fn managed_tool_authorization_is_fail_closed_and_policy_gated() {
+        // F1.c: the deny-by-default gate that the retired facade path enforced must survive
+        // the move to the v3 execution path. This is the security-relevant seam.
+        use local_first_capabilities::{
+            ActionClass, McpToolPolicy, PolicyContext, UserId, WorkspaceId,
+        };
+        let provider_id = CapProviderId::new("composio");
+        let policies = vec![McpToolPolicy {
+            tool_name: "GMAIL_FETCH_EMAILS".to_string(),
+            action: ActionClass::Read,
+            privacy_domains: vec!["managed-cloud".to_string()],
+            sensitivity: "private".to_string(),
+        }];
+        let ctx = |allow_cloud: bool| PolicyContext {
+            user_id: UserId::new("u"),
+            workspace_id: WorkspaceId::new("w"),
+            enabled_providers: vec![provider_id.clone()],
+            privacy_domains: vec!["managed-cloud".to_string()],
+            allowed_actions: vec![ActionClass::Read],
+            max_autonomy_level: 4,
+            allow_managed_cloud: allow_cloud,
+        };
+        // Authorized: cached tool, Managed allowed, domain + action granted.
+        assert!(
+            authorize_managed_capability_tool(
+                &policies,
+                &ctx(true),
+                &provider_id,
+                "GMAIL_FETCH_EMAILS"
+            )
+            .is_ok()
+        );
+        // Fail-closed: a tool absent from the v3 catalog cache cannot be authorized.
+        assert!(
+            authorize_managed_capability_tool(
+                &policies,
+                &ctx(true),
+                &provider_id,
+                "GMAIL_SEND_EMAIL"
+            )
+            .is_err()
+        );
+        // Policy-gated: revoke managed-cloud → denied even for a cached tool.
+        assert!(
+            authorize_managed_capability_tool(
+                &policies,
+                &ctx(false),
+                &provider_id,
+                "GMAIL_FETCH_EMAILS"
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn context_budget_follows_real_window_with_env_override() {
+        use super::resolve_context_budget_chars;
+        // The model's REAL catalog window drives the budget (×3 chars/token) when no override.
+        assert_eq!(resolve_context_budget_chars(None, Some(8_192)), 8_192 * 3);
+        // A 128k model keeps a far larger budget than a small one — the whole point of F0.7.
+        assert!(
+            resolve_context_budget_chars(None, Some(131_072))
+                > resolve_context_budget_chars(None, Some(8_192))
+        );
+        // No catalog window (uncatalogued endpoint) → safe 32k default.
+        assert_eq!(resolve_context_budget_chars(None, None), 32_768 * 3);
+        // Explicit env override wins over the model window (debugging / capping a liar).
+        assert_eq!(
+            resolve_context_budget_chars(Some(4_096), Some(131_072)),
+            4_096 * 3
+        );
+        // A zero/garbage override or window is ignored, not treated as a real size.
+        assert_eq!(
+            resolve_context_budget_chars(Some(0), Some(8_192)),
+            8_192 * 3
+        );
+        assert_eq!(resolve_context_budget_chars(None, Some(0)), 32_768 * 3);
     }
 
     #[test]
@@ -46304,6 +50574,587 @@ prs.save(Path({path:?}))
         assert!(entry.text.contains("template catalog"));
     }
 
+    /// (F1.d) The browser tools seeded into the registry must BE the chat tools — same
+    /// names, same real schemas — not the old dot-named placeholders. Otherwise the planner
+    /// plans a `browser.navigate` step the chat loop can't run.
+    #[test]
+    fn browser_registry_tools_mirror_the_chat_tools_with_real_schemas() {
+        let tools = super::browser_registry_cached_tools();
+        let names: Vec<&str> = tools.iter().map(|tool| tool.tool.name.as_str()).collect();
+        assert_eq!(
+            names,
+            vec![
+                "browser_navigate",
+                "browser_snapshot",
+                "browser_act",
+                "browser_tabs",
+                "browser_screenshot",
+                "browser_dialog",
+            ]
+        );
+
+        let navigate = tools
+            .iter()
+            .find(|tool| tool.tool.name == "browser_navigate")
+            .expect("browser_navigate seeded");
+        // The real schema, not the `{"type":"object"}` placeholder the seed used to carry.
+        assert!(
+            navigate
+                .tool
+                .input_schema
+                .pointer("/properties/url")
+                .is_some(),
+            "browser_navigate must carry its real `url` parameter schema"
+        );
+        assert_ne!(
+            navigate.tool.input_schema,
+            serde_json::json!({"type": "object"})
+        );
+
+        // Read vs WriteWithConfirmation mirrors the chat safety posture.
+        let snapshot = tools
+            .iter()
+            .find(|tool| tool.tool.name == "browser_snapshot")
+            .expect("browser_snapshot seeded");
+        assert_eq!(snapshot.tool.action, super::ActionClass::Read);
+        assert_eq!(
+            navigate.tool.action,
+            super::ActionClass::WriteWithConfirmation
+        );
+    }
+
+    /// (F1.a + F1.d) The end-to-end point of this convergence: feed the SEEDED browser tools
+    /// into the SAME ranker the orchestrator planner uses (`ToolCorpus`, now backed by the
+    /// shared BM25) and confirm a plain browse intent surfaces `browser_navigate`. Before the
+    /// fix the planner indexed dot-named placeholders and saw a shadow set → 0 browse steps.
+    #[test]
+    fn seeded_browser_tools_are_retrievable_by_the_planner_ranker() {
+        use local_first_orchestrator::ToolCorpus;
+        let tools: Vec<_> = super::browser_registry_cached_tools()
+            .into_iter()
+            .map(|cached| cached.tool)
+            .collect();
+        let mut corpus = ToolCorpus::default();
+        corpus.rebuild_from_tools(&tools);
+        let cards = corpus.search("open and read a web page in the browser", 3);
+        assert!(
+            cards
+                .iter()
+                .any(|card| card.tool_name == "browser_navigate"),
+            "planner ranker must surface browser_navigate, got {:?}",
+            cards.iter().map(|card| &card.tool_name).collect::<Vec<_>>()
+        );
+    }
+
+    /// (F1.d migration) The seed must be idempotent AND shed the old dot-named placeholders:
+    /// `upsert_cached_tool` keys on `(provider, name)`, so without `clear_cached_tools` a
+    /// renamed tool set would leave `browser.navigate` rows shadowing the planner forever.
+    #[test]
+    fn seed_browser_provider_is_idempotent_and_drops_stale_dot_named_tools() {
+        let registry = super::CapabilityRegistryStore::open_in_memory().unwrap();
+        let browser = super::CapabilityProviderId::new("browser");
+
+        // First seed creates the provider + the six real tools.
+        super::seed_default_capabilities(&registry).unwrap();
+        // Simulate an older build's stale dot-named row left in the cache.
+        registry
+            .upsert_cached_tool(&super::CachedCapabilityTool::new(
+                browser.clone(),
+                "browser.navigate",
+                super::CapabilityProviderKind::Browser,
+                super::ActionClass::WriteWithConfirmation,
+                "old placeholder",
+                vec!["browser".to_string()],
+                "private",
+                serde_json::json!({"type": "object"}),
+            ))
+            .unwrap();
+        // Re-seed: clear_cached_tools must drop the stale row, and re-seeding must not dup.
+        super::seed_default_capabilities(&registry).unwrap();
+
+        let names: Vec<String> = registry
+            .cached_tools(&browser)
+            .unwrap()
+            .into_iter()
+            .map(|cached| cached.tool.name)
+            .collect();
+        assert_eq!(
+            names.len(),
+            6,
+            "exactly the six chat browser tools, no dup, no stale: {names:?}"
+        );
+        assert!(
+            names.iter().all(|name| name.starts_with("browser_")),
+            "no dot-named shadow survives re-seed: {names:?}"
+        );
+        assert!(names.iter().any(|name| name == "browser_navigate"));
+        assert!(!names.iter().any(|name| name == "browser.navigate"));
+    }
+
+    /// (F1.d contract) The seeded browser tools must be real, typed contracts when driven
+    /// through the actual `CapabilityFacade` — the same path the orchestrator uses: policy
+    /// gates visibility/executability, and `validate_arguments` rejects bad args with a
+    /// TYPED error BEFORE any execution. Proves the schemas aren't placeholders.
+    #[test]
+    fn seeded_browser_tools_enforce_their_arg_contracts_through_the_facade() {
+        let registry = super::CapabilityRegistryStore::open_in_memory().unwrap();
+        super::seed_default_capabilities(&registry).unwrap();
+        let user = super::gateway_capability_user_id();
+        let workspace = super::gateway_capability_workspace_id();
+        let policy = registry.policy_context(&user, &workspace).unwrap();
+        let browser = super::CapabilityProviderId::new("browser");
+        let tools: Vec<_> = registry
+            .cached_tools(&browser)
+            .unwrap()
+            .into_iter()
+            .map(|cached| cached.tool)
+            .collect();
+
+        let mut facade = super::CapabilityFacade::new(
+            super::CapabilityPolicy::default(),
+            super::InMemoryCapabilityAudit::default(),
+        );
+        facade.register_provider(super::CachedToolProvider::new(
+            browser.clone(),
+            super::CapabilityProviderKind::Browser,
+            tools,
+        ));
+
+        // The browser grant (Read + WriteWithConfirmation, autonomy 3) makes all six visible
+        // and executable, so calls reach argument validation.
+        let plan = facade.list_tools(&policy).unwrap();
+        assert_eq!(plan.visible_tools.len(), 6, "all six browser tools visible");
+        assert_eq!(
+            plan.executable_tools.len(),
+            6,
+            "and executable under the grant"
+        );
+
+        let call = |tool: &str, args: serde_json::Value| super::CapabilityCall {
+            provider_id: browser.clone(),
+            tool_name: tool.to_string(),
+            arguments: args,
+        };
+
+        // Missing required arg → typed SchemaValidationFailed (navigate needs `url`).
+        let missing_url = facade
+            .call_tool(&policy, call("browser_navigate", serde_json::json!({})))
+            .unwrap_err();
+        assert!(
+            matches!(
+                missing_url,
+                super::CapabilityError::SchemaValidationFailed(_)
+            ),
+            "navigate without url must be a typed validation error, got {missing_url:?}"
+        );
+        // browser_act needs `kind`.
+        let missing_kind = facade
+            .call_tool(&policy, call("browser_act", serde_json::json!({})))
+            .unwrap_err();
+        assert!(
+            matches!(
+                missing_kind,
+                super::CapabilityError::SchemaValidationFailed(_)
+            ),
+            "act without kind must be a typed validation error, got {missing_kind:?}"
+        );
+
+        // Valid args PASS validation — proven because execution is reached and the
+        // planning-only cached provider refuses with ProviderUnavailable (not a validation
+        // error). I.e. the schema accepted the good call.
+        let valid = facade
+            .call_tool(
+                &policy,
+                call(
+                    "browser_navigate",
+                    serde_json::json!({"url": "https://example.com"}),
+                ),
+            )
+            .unwrap_err();
+        assert!(
+            matches!(valid, super::CapabilityError::ProviderUnavailable(_)),
+            "a well-formed navigate must clear validation and reach the executor, got {valid:?}"
+        );
+    }
+
+    /// F3 on-ramp validation (ADR 0020): the orchestrator planner used to return 0 steps for a
+    /// browse task because it indexed the registry's dot-named placeholder browser tools — a
+    /// shadow set. F1.d seeded the REAL chat browser tools into the registry, so the planner
+    /// should now SEE the browser and be able to plan with it. This drives the SAME brain
+    /// construction `orchestrator_plan_for_chat` uses, but over an in-memory seeded registry and
+    /// against the local gemma4 (the weak tier — caposaldo #2). Ignored by default: it hits the
+    /// live Ollama endpoint. Run with:
+    ///   cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway \
+    ///     orchestrated_planner_sees_browser -- --ignored --nocapture
+    #[test]
+    #[ignore = "hits the live Ollama gemma4 endpoint; run manually"]
+    fn orchestrated_planner_sees_browser_on_gemma4() {
+        use local_first_capabilities::PolicyContext;
+
+        // 1. Seed an in-memory registry exactly as the gateway does (real browser tools, F1.d).
+        let registry = super::CapabilityRegistryStore::open_in_memory().unwrap();
+        super::seed_default_capabilities(&registry).unwrap();
+        let user = super::gateway_capability_user_id();
+        let workspace = super::gateway_capability_workspace_id();
+        let mut policy: PolicyContext = registry.policy_context(&user, &workspace).unwrap();
+
+        // 2. Build the facade the brain plans over (planning is Read/Draft only).
+        let mut provider_tools = Vec::new();
+        for provider in &policy.enabled_providers {
+            let tools: Vec<_> = registry
+                .cached_tools(provider)
+                .unwrap()
+                .into_iter()
+                .map(|cached| cached.tool)
+                .collect();
+            provider_tools.push((provider.clone(), tools));
+        }
+        policy.allowed_actions = vec![super::ActionClass::Read, super::ActionClass::Draft];
+        let mut facade = super::CapabilityFacade::new(
+            super::CapabilityPolicy::default(),
+            super::InMemoryCapabilityAudit::default(),
+        );
+        for (provider_id, tools) in provider_tools {
+            let kind = tools
+                .first()
+                .map(|tool| tool.provider_kind)
+                .unwrap_or(super::CapabilityProviderKind::Native);
+            facade.register_provider(super::CachedToolProvider::new(provider_id, kind, tools));
+        }
+
+        // Deterministic half: the planner's tool view now CONTAINS the real browser tool.
+        let visible = facade.list_tools(&policy).unwrap();
+        assert!(
+            visible
+                .visible_tools
+                .iter()
+                .any(|tool| tool.name == "browser_navigate"),
+            "F1.d regressed: the planner can't see browser_navigate; visible = {:?}",
+            visible.visible_tool_names()
+        );
+
+        // 3. Live half: run the planner on gemma4 for a browse task and print the plan.
+        let router = super::build_router_from(
+            super::ProviderKind::OpenaiCompat,
+            "http://127.0.0.1:11434/v1",
+            "gemma4:latest",
+            None,
+            32_768,
+        );
+        let mut brain = super::OrchestratorBrain::new(
+            router,
+            super::GatewayBrainMemory(None),
+            facade,
+            local_first_task_runtime::TaskStore::open_in_memory().unwrap(),
+        );
+        let request = super::OrchestratorRequest {
+            request_id: "f3_onramp_validation".to_string(),
+            policy_context: policy,
+            user_message: "Cerca sul web i treni da Milano a Roma per domani mattina e \
+                           riportami orari e prezzi."
+                .to_string(),
+            conversation_summary: None,
+            attachments: Vec::new(),
+            budgets: super::brain_budgets_for_context_window(Some(32_768)),
+            language: "it".to_string(),
+        };
+        let plan = brain
+            .plan_only(&request)
+            .expect("plan_only must succeed end-to-end on gemma4 (the on-ramp mechanism)");
+
+        eprintln!("\n=== F3 on-ramp: gemma4 plan ===");
+        eprintln!("route: {:?}", plan.route);
+        for (i, step) in plan.steps.iter().enumerate() {
+            eprintln!(
+                "  step {i}: kind={:?} tool={:?} args={} goal={:?}",
+                step.kind, step.tool_name, step.arguments, step.goal
+            );
+        }
+        let mentions_browser = plan.steps.iter().any(|step| {
+            step.tool_name
+                .as_deref()
+                .is_some_and(|t| t.contains("browser"))
+        });
+        eprintln!(
+            "steps={} mentions_browser={mentions_browser}",
+            plan.steps.len()
+        );
+        eprintln!("=== end plan ===\n");
+    }
+
+    /// F3 engine-#2 VERTICAL on the weak tier (ADR 0020 Fase 1 b+d): gemma4 plans, then the
+    /// in-turn `drive` executes that REAL plan to `done` through the canonical CapabilityFacade.
+    /// The browser provider here is an EXECUTABLE fake seeded with the real browser tool schemas
+    /// (visible to the planner AND runnable by the driver) — no live sidecar needed.
+    ///
+    /// Validates the full chain on the weak tier: planner (gemma4) → driver → per-step
+    /// argument-fill (gemma4 again, CONSTRAINED to the tool schema — the planner leaves args empty
+    /// by design, ADR 0020 P1) → execute via the facade → runtime marks `done` only after verify.
+    /// The three invariants hold: boundedness (one result per step), monotonicity (a Done never
+    /// reopens), identity = step_id. Ignored: hits the live Ollama endpoint. Run with:
+    ///   cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway \
+    ///     orchestrated_brain_drives_plan_on_gemma4 -- --ignored --nocapture
+    #[test]
+    #[ignore = "hits the live Ollama gemma4 endpoint; run manually"]
+    fn orchestrated_brain_drives_plan_on_gemma4() {
+        use local_first_capabilities::{FakeCapabilityProvider, PolicyContext, ProviderId};
+
+        // 1. Seed the registry exactly as the gateway does (real browser tools, F1.d).
+        let registry = super::CapabilityRegistryStore::open_in_memory().unwrap();
+        super::seed_default_capabilities(&registry).unwrap();
+        let user = super::gateway_capability_user_id();
+        let workspace = super::gateway_capability_workspace_id();
+        let mut policy: PolicyContext = registry.policy_context(&user, &workspace).unwrap();
+        // Allow confirmation-gated writes so browser_act can execute through the fake provider.
+        policy.allowed_actions = vec![
+            super::ActionClass::Read,
+            super::ActionClass::Draft,
+            super::ActionClass::WriteWithConfirmation,
+        ];
+
+        // 2. Build the facade: the browser provider is an EXECUTABLE fake carrying the real
+        //    browser tool schemas (visible to the planner AND runnable by the driver); every
+        //    other seeded provider stays planning-only (CachedToolProvider).
+        let mut facade = super::CapabilityFacade::new(
+            super::CapabilityPolicy::default(),
+            super::InMemoryCapabilityAudit::default(),
+        );
+        let browser_provider_id = ProviderId::new("browser");
+        for provider in &policy.enabled_providers {
+            let tools: Vec<_> = registry
+                .cached_tools(provider)
+                .unwrap()
+                .into_iter()
+                .map(|cached| cached.tool)
+                .collect();
+            if *provider == browser_provider_id {
+                let mut fake = FakeCapabilityProvider::new(
+                    provider.clone(),
+                    super::CapabilityProviderKind::Browser,
+                    true,
+                    None,
+                    tools.clone(),
+                );
+                // Canned per-tool responses so each browser step succeeds deterministically.
+                for tool in &tools {
+                    fake.set_tool_response(
+                        &tool.name,
+                        serde_json::json!({"ok": true, "tool": tool.name}),
+                    );
+                }
+                facade.register_provider(fake);
+            } else {
+                let kind = tools
+                    .first()
+                    .map(|tool| tool.provider_kind)
+                    .unwrap_or(super::CapabilityProviderKind::Native);
+                facade.register_provider(super::CachedToolProvider::new(
+                    provider.clone(),
+                    kind,
+                    tools,
+                ));
+            }
+        }
+
+        // 3. Plan on gemma4, then DRIVE the plan to completion.
+        let router = super::build_router_from(
+            super::ProviderKind::OpenaiCompat,
+            "http://127.0.0.1:11434/v1",
+            "gemma4:latest",
+            None,
+            32_768,
+        );
+        let mut brain = super::OrchestratorBrain::new(
+            router,
+            super::GatewayBrainMemory(None),
+            facade,
+            local_first_task_runtime::TaskStore::open_in_memory().unwrap(),
+        );
+        let request = super::OrchestratorRequest {
+            request_id: "f3_drive_validation".to_string(),
+            policy_context: policy,
+            user_message: "Cerca sul web i treni da Milano a Roma per domani mattina e \
+                           riportami orari e prezzi."
+                .to_string(),
+            conversation_summary: None,
+            attachments: Vec::new(),
+            budgets: super::brain_budgets_for_context_window(Some(32_768)),
+            language: "it".to_string(),
+        };
+        let plan = brain
+            .plan_only(&request)
+            .expect("plan_only must succeed on gemma4");
+        let outcome = brain
+            .drive(&request, &plan)
+            .expect("drive must execute the gemma4 plan end-to-end");
+
+        eprintln!("\n=== F3 drive: gemma4 plan executed ===");
+        for result in &outcome.results {
+            eprintln!(
+                "  {} -> {:?} {:?}",
+                result.step_id, result.status, result.error
+            );
+        }
+        let done = outcome
+            .results
+            .iter()
+            .filter(|r| r.status == local_first_orchestrator::DriveStepStatus::Done)
+            .count();
+        eprintln!("done {}/{} steps", done, outcome.results.len());
+        eprintln!("=== end drive ===\n");
+
+        // Boundedness: exactly one result per planned step — driving never grows the plan.
+        assert_eq!(
+            outcome.results.len(),
+            plan.steps.len(),
+            "driver must return one result per step (boundedness invariant)"
+        );
+        // At least one step reached Done: gemma4 planned, gemma4 filled the args constrained to
+        // the tool schema, the facade executed, and the runtime verified — the engine-#2 vertical
+        // works end-to-end on the weak tier (caposaldo #2).
+        assert!(
+            done >= 1,
+            "no step reached Done; the gemma4 plan did not drive to completion through the facade"
+        );
+    }
+
+    /// F3.2c agentic-mode validation on the weak tier (ADR 0016 Pilastro 2 / ADR 0020 Fase 2):
+    /// a `SubagentTask` step is driven by the bounded inner loop where gemma4 STEERS — it chooses
+    /// a read/gather tool from the constrained enum, runs it through the facade, and finishes with
+    /// a summary, all under the harness's round budget. A hand-built single-subagent plan + an
+    /// executable fake `web_search` (Read) tool. Proves a weak model can drive the agentic loop.
+    /// Ignored: hits the live Ollama endpoint. Run with:
+    ///   cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway \
+    ///     orchestrated_subagent_gathers_on_gemma4 -- --ignored --nocapture
+    #[test]
+    #[ignore = "hits the live Ollama gemma4 endpoint; run manually"]
+    fn orchestrated_subagent_gathers_on_gemma4() {
+        use local_first_capabilities::{
+            FakeCapabilityProvider, PolicyContext, ProviderId, UserId, WorkspaceId,
+        };
+        use local_first_orchestrator::{ExecutionPlan, OrchestratorRoute, PlanStep, PlanStepKind};
+        use local_first_subagents::{AgentId, AllowedAction};
+
+        // Executable fake gather provider: one Read tool the sub-agent may use.
+        let search_tool = super::CapabilityTool {
+            name: "web_search".to_string(),
+            provider_id: ProviderId::new("research"),
+            provider_kind: super::CapabilityProviderKind::Native,
+            action: super::ActionClass::Read,
+            description: "Search the web for a query and return result snippets".to_string(),
+            privacy_domains: vec!["web".to_string()],
+            sensitivity: "public".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+                "required": ["query"],
+                "additionalProperties": false
+            }),
+        };
+        let mut provider = FakeCapabilityProvider::new(
+            ProviderId::new("research"),
+            super::CapabilityProviderKind::Native,
+            true,
+            None,
+            vec![search_tool],
+        );
+        provider.set_tool_response(
+            "web_search",
+            serde_json::json!({"results": ["Frecciarossa 08:00 €29", "Italo 09:10 €25"]}),
+        );
+        let mut facade = super::CapabilityFacade::new(
+            super::CapabilityPolicy::default(),
+            super::InMemoryCapabilityAudit::default(),
+        );
+        facade.register_provider(provider);
+
+        let policy = PolicyContext {
+            user_id: UserId::new("u"),
+            workspace_id: WorkspaceId::new("w"),
+            enabled_providers: vec![ProviderId::new("research")],
+            privacy_domains: vec!["web".to_string()],
+            allowed_actions: vec![super::ActionClass::Read, super::ActionClass::Draft],
+            max_autonomy_level: 2,
+            allow_managed_cloud: false,
+        };
+
+        let router = super::build_router_from(
+            super::ProviderKind::OpenaiCompat,
+            "http://127.0.0.1:11434/v1",
+            "gemma4:latest",
+            None,
+            32_768,
+        );
+        let mut brain = super::OrchestratorBrain::new(
+            router,
+            super::GatewayBrainMemory(None),
+            facade,
+            local_first_task_runtime::TaskStore::open_in_memory().unwrap(),
+        );
+
+        // Hand-built plan: one read/gather sub-agent (no planner roundtrip needed).
+        let plan = ExecutionPlan {
+            route: OrchestratorRoute::SubagentWorkflow,
+            direct_answer: None,
+            plan_propose: None,
+            steps: vec![PlanStep {
+                step_id: "gather_trains".to_string(),
+                kind: PlanStepKind::SubagentTask,
+                depends_on: vec![],
+                provider_id: None,
+                tool_name: None,
+                arguments: serde_json::Value::Null,
+                execution_policy: super::StepExecutionPolicy::DurableTask,
+                risk_level: "low".to_string(),
+                expected_duration_seconds: 30,
+                agent_id: Some(AgentId::Tool),
+                goal: Some("Find morning train times from Milan to Rome".to_string()),
+                contract: Some("A short summary listing the train times".to_string()),
+                allowed_actions: vec![AllowedAction::Read],
+                requires_user_approval: None,
+                timeout_seconds: None,
+                max_tokens: None,
+            }],
+            needs_more_tools: None,
+        };
+        let request = super::OrchestratorRequest {
+            request_id: "f3_2c_validation".to_string(),
+            policy_context: policy,
+            user_message: "treni del mattino Milano-Roma".to_string(),
+            conversation_summary: None,
+            attachments: Vec::new(),
+            budgets: super::brain_budgets_for_context_window(Some(32_768)),
+            language: "it".to_string(),
+        };
+
+        let outcome = brain
+            .drive(&request, &plan)
+            .expect("agentic subagent step must drive on gemma4");
+
+        let step = &outcome.results[0];
+        eprintln!("\n=== F3.2c agentic: gemma4 sub-agent ===");
+        eprintln!("status: {:?}", step.status);
+        eprintln!("evidence: {:?}", step.outcome.as_ref().map(|o| &o.evidence));
+        eprintln!("output: {:?}", step.outcome.as_ref().map(|o| &o.output));
+        eprintln!("=== end ===\n");
+
+        // The sub-agent finished within budget → Done with a summary.
+        assert_eq!(
+            step.status,
+            local_first_orchestrator::DriveStepStatus::Done,
+            "gemma4 sub-agent did not reach Done"
+        );
+        assert!(
+            step.outcome
+                .as_ref()
+                .unwrap()
+                .output
+                .get("summary")
+                .is_some(),
+            "agentic step must return a summary"
+        );
+    }
+
     #[test]
     fn local_template_catalog_provider_exposes_seed_templates() {
         let provider = super::LocalTemplateCatalogProvider;
@@ -46410,10 +51261,9 @@ prs.save(Path({path:?}))
         );
         assert!(entry.attribution_required);
         assert!(
-            entry
-                .preview_ref
-                .as_deref()
-                .is_some_and(|value| value.starts_with("template-pack://slidescarnival/pitch-clean/"))
+            entry.preview_ref.as_deref().is_some_and(
+                |value| value.starts_with("template-pack://slidescarnival/pitch-clean/")
+            )
         );
 
         let _ = std::fs::remove_dir_all(root);
@@ -46564,10 +51414,7 @@ prs.save(Path({path:?}))
                 attribution_required: Some(true),
                 attribution_text: Some("Template by SlidesCarnival".to_string()),
                 redistribution_policy: Some("generated_decks_only".to_string()),
-                tags: Some(vec![
-                    "pitch".to_string(),
-                    "slidescarnival".to_string(),
-                ]),
+                tags: Some(vec!["pitch".to_string(), "slidescarnival".to_string()]),
             },
         )
         .expect("imported");
@@ -46695,7 +51542,9 @@ prs.save(Path({path:?}))
             .expect("delete imported pack");
 
         assert!(!pack.exists(), "pack directory should be removed");
-        assert!(super::delete_imported_template_pack(&root, "monet/startup-pitch-clean-01").is_err());
+        assert!(
+            super::delete_imported_template_pack(&root, "monet/startup-pitch-clean-01").is_err()
+        );
 
         let _ = std::fs::remove_dir_all(root);
     }
@@ -46748,8 +51597,12 @@ prs.save(Path({path:?}))
 
         assert_eq!(filename, ".internal/template-source.pptx");
         assert_eq!(
-            std::fs::read(super::sandbox::artifacts_dir().join(&thread_slug).join(&filename))
-                .expect("copied"),
+            std::fs::read(
+                super::sandbox::artifacts_dir()
+                    .join(&thread_slug)
+                    .join(&filename)
+            )
+            .expect("copied"),
             b"real pptx bytes"
         );
 
@@ -48323,20 +53176,31 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
 
     #[test]
     fn artifact_memories_do_not_participate_in_semantic_dedup() {
-        assert!(!super::memory_type_participates_in_semantic_dedup(
+        assert!(!local_first_memory::memory_type_participates_in_semantic_dedup(
             "artifact"
         ));
-        assert!(super::memory_type_participates_in_semantic_dedup(
+        assert!(local_first_memory::memory_type_participates_in_semantic_dedup(
             "decision"
         ));
-        assert!(super::memory_type_participates_in_semantic_dedup(
+        assert!(local_first_memory::memory_type_participates_in_semantic_dedup(
             "open_loop"
         ));
     }
 
     #[test]
     fn plan_continuation_messages_are_recognized() {
-        for cont in ["1", "42", "ok", "Procedi", "  continua ", "sì", "si", "next", "vai", "YES"] {
+        for cont in [
+            "1",
+            "42",
+            "ok",
+            "Procedi",
+            "  continua ",
+            "sì",
+            "si",
+            "next",
+            "vai",
+            "YES",
+        ] {
             assert!(
                 super::is_plan_continuation_message(cont),
                 "{cont:?} should be a plan continuation"
@@ -48388,8 +53252,7 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         );
 
         // Capable + floor ON → relaxed to the agent loop.
-        let relaxed =
-            super::relax_route_for_tier(deck.clone(), WorkflowBias::AllowAgentic, true);
+        let relaxed = super::relax_route_for_tier(deck.clone(), WorkflowBias::AllowAgentic, true);
         assert!(matches!(
             relaxed,
             super::CapabilityRouteDecision::AgentLoop { .. }
@@ -48464,6 +53327,91 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
     }
 
     #[test]
+    fn legacy_marker_deltas_expand_to_structured_stream_events() {
+        let activity = super::expand_legacy_delta_to_chat_events_with_mode(
+            "‹‹ACT››🧭 Planning‹‹/ACT››",
+            false,
+        );
+        assert_eq!(
+            activity,
+            vec![super::GenerateStreamEvent::Activity {
+                text: "🧭 Planning".to_string()
+            }]
+        );
+
+        let plan = super::expand_legacy_delta_to_chat_events_with_mode(
+            "‹‹PLAN››- [x] Done‹‹/PLAN››",
+            false,
+        );
+        assert_eq!(
+            plan,
+            vec![super::GenerateStreamEvent::PlanUpdate {
+                markdown: "- [x] Done".to_string()
+            }]
+        );
+
+        let plain = super::expand_legacy_delta_to_chat_events_with_mode("hello", false);
+        assert_eq!(
+            plain,
+            vec![super::GenerateStreamEvent::Delta {
+                text: "hello".to_string()
+            }]
+        );
+    }
+
+    #[test]
+    fn legacy_card_marker_deltas_expand_to_structured_stream_events() {
+        let choices = super::expand_legacy_delta_to_chat_events_with_mode(
+            "‹‹CHOICES››{\"question\":\"Confermi?\",\"options\":[\"Si\",\"No\"]}‹‹/CHOICES››",
+            false,
+        );
+        assert!(matches!(
+            &choices[0],
+            super::GenerateStreamEvent::ChoicePrompt { payload }
+                if payload["question"] == "Confermi?"
+        ));
+
+        let vault = super::expand_legacy_delta_to_chat_events_with_mode(
+            "‹‹VAULT_REVEAL››{\"record_id\":\"vault_1\",\"label\":\"Codice Fiscale\"}‹‹/VAULT_REVEAL››",
+            false,
+        );
+        assert!(matches!(
+            &vault[0],
+            super::GenerateStreamEvent::VaultReveal { payload }
+                if payload["record_id"] == "vault_1"
+        ));
+
+        let payment = super::expand_legacy_delta_to_chat_events_with_mode(
+            "‹‹PAYMENT_APPROVAL››{\"snapshot\":{\"approval_id\":\"pay_1\"}}‹‹/PAYMENT_APPROVAL››",
+            false,
+        );
+        assert!(matches!(
+            &payment[0],
+            super::GenerateStreamEvent::PaymentApproval { payload }
+                if payload["snapshot"]["approval_id"] == "pay_1"
+        ));
+        assert!(matches!(
+            payment.as_slice(),
+            [super::GenerateStreamEvent::PaymentApproval { .. }]
+        ));
+    }
+
+    #[test]
+    fn legacy_marker_delta_expansion_can_keep_delta_for_compat_clients() {
+        let activity =
+            super::expand_legacy_delta_to_chat_events_with_mode("‹‹ACT››🧭 Planning‹‹/ACT››", true);
+        assert_eq!(activity.len(), 2);
+        assert!(matches!(
+            activity[0],
+            super::GenerateStreamEvent::Activity { .. }
+        ));
+        assert!(matches!(
+            activity[1],
+            super::GenerateStreamEvent::Delta { .. }
+        ));
+    }
+
+    #[test]
     fn idle_stream_entry_counts_as_stale_for_activity() {
         let (tx, _) = tokio::sync::broadcast::channel::<String>(4);
         let now = super::now_epoch_secs();
@@ -48473,6 +53421,23 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             finished: std::sync::atomic::AtomicBool::new(false),
             last_event_at: std::sync::atomic::AtomicU64::new(
                 now.saturating_sub(super::STREAM_ACTIVITY_IDLE_STALE_SECS + 1),
+            ),
+            thread_id: Some("thread-a".to_string()),
+        };
+
+        assert!(super::stream_entry_is_activity_stale(&entry, now));
+    }
+
+    #[test]
+    fn silent_stream_entry_counts_as_stale_for_activity() {
+        let (tx, _) = tokio::sync::broadcast::channel::<String>(4);
+        let now = super::now_epoch_secs();
+        let entry = super::StreamEntry {
+            lines: std::sync::Mutex::new(Vec::new()),
+            tx,
+            finished: std::sync::atomic::AtomicBool::new(false),
+            last_event_at: std::sync::atomic::AtomicU64::new(
+                now.saturating_sub(super::STREAM_SILENT_IDLE_STALE_SECS + 1),
             ),
             thread_id: Some("thread-a".to_string()),
         };
@@ -48502,6 +53467,7 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             super::GenerateStreamEvent::Done {
                 text: "ok".to_string(),
                 metrics: super::TokenMetrics::zero(),
+                redacted_user_text: None,
             },
         )
         .await
@@ -48509,6 +53475,40 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         let _ = rx.recv().await;
 
         assert!(entry.finished.load(std::sync::atomic::Ordering::Relaxed));
+    }
+
+    #[tokio::test]
+    async fn emit_stream_event_publishes_structured_event_without_legacy_marker_delta_by_default() {
+        let (mpsc, mut rx) =
+            tokio::sync::mpsc::channel::<Result<axum::body::Bytes, std::io::Error>>(4);
+        let (tx, _) = tokio::sync::broadcast::channel::<String>(4);
+        let entry = std::sync::Arc::new(super::StreamEntry {
+            lines: std::sync::Mutex::new(Vec::new()),
+            tx,
+            finished: std::sync::atomic::AtomicBool::new(false),
+            last_event_at: std::sync::atomic::AtomicU64::new(super::now_epoch_secs()),
+            thread_id: Some("thread-a".to_string()),
+        });
+        let sink = super::StreamSink {
+            mpsc,
+            entry: entry.clone(),
+        };
+
+        super::emit_stream_event(
+            &sink,
+            super::GenerateStreamEvent::Delta {
+                text: "‹‹ACT››🧭 Planning‹‹/ACT››".to_string(),
+            },
+        )
+        .await
+        .expect("event emits");
+
+        let first = rx.recv().await.expect("first event").expect("bytes");
+        assert!(String::from_utf8_lossy(&first).contains(r#""type":"activity""#));
+        assert!(rx.try_recv().is_err());
+        let lines = entry.lines.lock().expect("stream lines");
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].contains(r#""type":"activity""#));
     }
 
     #[test]
@@ -48595,7 +53595,10 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         let out = collapse_plan_markers(churn);
         // Exactly one plan block survives, and it's the LAST (freshest) one.
         assert_eq!(out.matches("‹‹PLAN››").count(), 1);
-        assert!(out.contains("**B** (`s2`)"), "kept the latest canonical plan");
+        assert!(
+            out.contains("**B** (`s2`)"),
+            "kept the latest canonical plan"
+        );
         assert!(out.ends_with("Briefing finale qui."), "prose preserved");
         // Resume still parses the surviving block.
         assert_eq!(parse_plan_marker(&out).len(), 2);
@@ -48676,8 +53679,14 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
 
     #[test]
     fn ollama_native_root_strips_v1() {
-        assert_eq!(super::ollama_native_root("http://127.0.0.1:11434/v1"), "http://127.0.0.1:11434");
-        assert_eq!(super::ollama_native_root("http://127.0.0.1:11434/"), "http://127.0.0.1:11434");
+        assert_eq!(
+            super::ollama_native_root("http://127.0.0.1:11434/v1"),
+            "http://127.0.0.1:11434"
+        );
+        assert_eq!(
+            super::ollama_native_root("http://127.0.0.1:11434/"),
+            "http://127.0.0.1:11434"
+        );
     }
 
     #[test]
@@ -48713,6 +53722,115 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         ];
         assert!(plan_is_complete(&complete));
         assert!(plan_incomplete_reason(&complete).is_none());
+    }
+
+    #[test]
+    fn plan_stall_counts_no_progress_resumes_and_resets_on_progress() {
+        // No progress (done-count unchanged across resumes) accumulates; the cap trips.
+        let mut stall = 0;
+        for _ in 0..MAX_PLAN_STALL_RESUMES {
+            assert!(!plan_stall_exhausted(stall));
+            stall = next_plan_stall(stall, 1, 1); // last_resume_done == current_done → no progress
+        }
+        assert!(plan_stall_exhausted(stall), "stall should trip at the cap");
+        // Any progress (current_done > last_resume_done) resets the counter to 0.
+        let reset = next_plan_stall(stall, 1, 2);
+        assert_eq!(reset, 0);
+        assert!(!plan_stall_exhausted(reset));
+    }
+
+    #[test]
+    fn plan_is_settled_when_every_step_done_or_blocked() {
+        let running = vec![
+            serde_json::json!({"id":"s1","title":"A","status":"done"}),
+            serde_json::json!({"id":"s2","title":"B","status":"doing"}),
+        ];
+        assert!(
+            !plan_is_settled(&running),
+            "a runnable step keeps the plan unsettled"
+        );
+
+        let settled = vec![
+            serde_json::json!({"id":"s1","title":"A","status":"done"}),
+            serde_json::json!({"id":"s2","title":"B","status":"blocked"}),
+        ];
+        assert!(
+            plan_is_settled(&settled),
+            "done+blocked is terminal → settled"
+        );
+        // Distinct from complete: a settled-with-blocked plan is NOT complete.
+        assert!(!plan_is_complete(&settled));
+
+        assert!(!plan_is_settled(&[]), "an empty plan is not settled");
+    }
+
+    #[test]
+    fn block_stalled_step_blocks_the_first_runnable_and_records_why() {
+        let mut plan = vec![
+            serde_json::json!({"id":"s1","title":"Done","status":"done"}),
+            serde_json::json!({"id":"s2","title":"Stuck","status":"doing"}),
+            serde_json::json!({"id":"s3","title":"Later","status":"todo"}),
+        ];
+        let title = block_stalled_step(&mut plan).expect("a runnable step exists");
+        assert_eq!(title, "Stuck");
+        assert_eq!(plan_step_status(&plan[1]), "blocked");
+        assert!(
+            plan[1]["detail"]
+                .as_str()
+                .unwrap_or("")
+                .contains("no progress")
+        );
+        // The done step and the later todo step are untouched (only the FIRST runnable blocks).
+        assert_eq!(plan_step_status(&plan[0]), "done");
+        assert_eq!(plan_step_status(&plan[2]), "todo");
+
+        // Nothing runnable → None (already settled, nothing to block).
+        let mut settled = vec![serde_json::json!({"id":"s1","title":"A","status":"done"})];
+        assert!(block_stalled_step(&mut settled).is_none());
+    }
+
+    #[test]
+    fn answer_body_is_empty_detects_reasoning_only_completions() {
+        // The "non produce la risposta" failure: a reasoning model spends its whole token
+        // budget thinking, leaving only a ‹‹REASONING›› trace and no prose.
+        assert!(answer_body_is_empty(""));
+        assert!(answer_body_is_empty("   \n  "));
+        assert!(answer_body_is_empty(
+            "‹‹REASONING››long chain of thought‹‹/REASONING››"
+        ));
+        assert!(answer_body_is_empty("‹‹PLAN››- [x] step‹‹/PLAN››"));
+        assert!(super::should_force_synthesis_for_empty_visible_answer(
+            "‹‹PLAN››- [x] **Step** (`s1`): done‹‹/PLAN››‹‹ARTIFACT››{\"name\":\"x.md\",\"size\":1,\"thread\":\"t\"}‹‹/ARTIFACT››",
+            "‹‹REASONING››The final answer is hidden in reasoning.‹‹/REASONING››"
+        ));
+        // A real answer — with or without a reasoning trace above it — is NOT empty.
+        assert!(!answer_body_is_empty("Here is the answer."));
+        assert!(!answer_body_is_empty(
+            "‹‹REASONING››thought‹‹/REASONING››\nHere is the answer."
+        ));
+        assert!(!super::should_force_synthesis_for_empty_visible_answer(
+            "‹‹PLAN››- [x] **Step** (`s1`): done‹‹/PLAN››",
+            "\nHere is the answer."
+        ));
+    }
+
+    #[test]
+    fn merge_plan_keeps_blocked_steps_sticky() {
+        // The harness blocked a stalled step (F4); the model must not re-open it by re-sending
+        // it as todo/doing — that would re-arm the cross-turn loop.
+        let mut plan = vec![
+            serde_json::json!({"id":"s1","title":"Stuck","status":"blocked","detail":"paused"}),
+        ];
+        let claims = merge_plan(
+            &mut plan,
+            &[serde_json::json!({"id":"s1","title":"Stuck","status":"doing"})],
+        );
+        assert!(claims.is_empty());
+        assert_eq!(
+            plan_step_status(&plan[0]),
+            "blocked",
+            "blocked stays blocked"
+        );
     }
 
     #[test]
@@ -48856,6 +53974,15 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         let memory = plan_memories[0];
         assert_eq!(memory.memory_type, "open_loop");
         assert_eq!(memory.status, local_first_memory::MemoryStatus::Confirmed);
+        assert!(
+            !super::active_open_loop_record(memory),
+            "runtime plans must not leak through the generic open-loop briefing"
+        );
+        assert!(
+            super::runtime_plan_memory_matches(memory, "thread-1"),
+            "thread-scoped runtime-plan loader must still see the plan"
+        );
+        assert!(!super::runtime_plan_memory_matches(memory, "thread-2"));
         assert!(memory.text.contains("2/3 steps done"), "{}", memory.text);
         assert!(
             memory.text.contains("Next step: Run tests"),
@@ -49321,6 +54448,291 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             block.find("OPEN LOOPS").unwrap() < block.find("Personal:").unwrap(),
             "open loops must come before personal"
         );
+    }
+
+    /// ADR 0022 — Tappa 1: parità strutturale del briefing.
+    ///
+    /// Verifica il wiring dell'invariant P1 (cross-chat = solo progetti):
+    /// `scope_from_active_workspace()` deve proiettare il workspace personale in
+    /// `MemoryScope::Personal`, e un workspace nominato in `Project(_)`. È il
+    /// punto in cui il gating del gateway (env/active workspace) incontra il
+    /// contratto del crate memoria. L'invariant che i blocchi `project_*` siano
+    /// `None` per Personal è codificato nei loro guard `PERSONAL_WORKSPACE`
+    /// (`main.rs:4755/4791/4817`) e validato dal test del crate memoria
+    /// `briefing_pack_personal_shape_is_well_formed_with_profile_only`.
+    #[test]
+    fn scope_from_active_workspace_projects_personal_and_project() {
+        // Salvaguarda e ripristina lo scope memory globale (test condiviso).
+        let prev = std::env::var("HOMUN_USER_ID").ok();
+        // SAFETY: test isolato; ripristinato sotto.
+        unsafe { std::env::set_var("HOMUN_USER_ID", "local-user"); }
+
+        super::set_memory_workspace(super::PERSONAL_WORKSPACE);
+        let personal = super::scope_from_active_workspace();
+        assert!(
+            matches!(personal, super::MemoryScope::Personal),
+            "workspace personale deve proiettarsi in MemoryScope::Personal"
+        );
+
+        super::set_memory_workspace("proj-acme");
+        let project = super::scope_from_active_workspace();
+        match project {
+            super::MemoryScope::Project(ws) => {
+                assert_eq!(ws.as_str(), "proj-acme");
+            }
+            other => panic!("workspace nominato deve proiettarsi in Project(_), got {other:?}"),
+        }
+
+        // Ripristino.
+        super::set_memory_workspace(super::PERSONAL_WORKSPACE);
+        match prev {
+            Some(value) => {
+                unsafe { std::env::set_var("HOMUN_USER_ID", value); }
+            }
+            None => {
+                unsafe { std::env::remove_var("HOMUN_USER_ID"); }
+            }
+        }
+    }
+
+    /// Embedding client mock per i test del service: ritorna vettore vuoto (recall
+    /// cade sul solo passaggio FTS — deterministico, no HTTP).
+    struct NoopEmbeddingClient;
+    impl local_first_memory::EmbeddingClient for NoopEmbeddingClient {
+        fn embed<'a>(&'a self, _text: &'a str) -> local_first_memory::BoxFuture<'a, Vec<f32>> {
+            Box::pin(async move { Vec::new() })
+        }
+    }
+
+    /// LLM client mock per i test del service: ritorna None (learn skippa — no HTTP).
+    struct NoopLlmClient;
+    impl local_first_memory::LlmClient for NoopLlmClient {
+        fn chat<'a>(
+            &'a self,
+            _system: &'a str,
+            _user: &'a str,
+        ) -> local_first_memory::BoxFuture<'a, Option<String>> {
+            Box::pin(async move { None })
+        }
+    }
+
+    /// AppState di test con una `MemoryFacade` in-memory passata in input e tutti
+    /// gli altri store in-memory/empty. `brief()` tocca SOLO `memory_facade` +
+    /// globali (workspace/user id), quindi i campi non-memoria sono popolati con
+    /// valori cheap/default. Rende possibile il test di parità runtime
+    /// service-vs-inline (DoD Tappa 1) senza costruire store reali su disco.
+    fn test_app_state_for_brief(memory_facade: super::MemoryFacade) -> super::AppState {
+        let secret_dir = isolated_gateway_test_dir("brief-parity-secrets");
+        let secret_store = local_first_secrets::EncryptedFileSecretStore::open(
+            secret_dir.join("secrets.json"),
+            local_first_secrets::DevelopmentSecretKeyProvider::new([0u8; 32]),
+        )
+        .expect("secret store");
+        super::AppState {
+            http: reqwest::Client::new(),
+            chat_store: std::sync::Arc::new(std::sync::Mutex::new(
+                super::ChatStore::in_memory().expect("chat store"),
+            )),
+            task_store: std::sync::Arc::new(std::sync::Mutex::new(
+                local_first_task_runtime::TaskStore::open_in_memory().expect("task store"),
+            )),
+            computer_store: std::sync::Arc::new(std::sync::Mutex::new(
+                super::LocalComputerSessionStore::open_in_memory().expect("computer store"),
+            )),
+            browser_url_policies: std::sync::Arc::new(std::sync::Mutex::new(
+                super::BrowserUrlPolicyStore::open_in_memory().expect("browser url policy store"),
+            )),
+            memory_facade: std::sync::Arc::new(std::sync::Mutex::new(memory_facade)),
+            memory_service: None,
+            vault_store: std::sync::Arc::new(std::sync::Mutex::new(
+                local_first_vault::SQLiteVaultStore::open_in_memory().expect("vault store"),
+            )),
+            pending_vault_proposals: std::sync::Arc::new(
+                crate::privacy_guard::PendingVaultProposalStore::default(),
+            ),
+            capability_registry: std::sync::Arc::new(std::sync::Mutex::new(
+                super::CapabilityRegistryStore::open_in_memory().expect("capability registry"),
+            )),
+            task_executor_status: std::sync::Arc::new(std::sync::Mutex::new(
+                super::TaskExecutorStatus::new(false),
+            )),
+            task_executor_registry: super::TaskExecutorRegistry::with_defaults(),
+            browser_capability_client: std::sync::Arc::new(std::sync::Mutex::new(None)),
+            browser_thread_sessions: std::sync::Arc::new(std::sync::Mutex::new(
+                std::collections::HashMap::new(),
+            )),
+            payment_approvals: std::sync::Arc::new(std::sync::Mutex::new(
+                std::collections::HashMap::new(),
+            )),
+            secret_store: std::sync::Arc::new(secret_store),
+            auth_token: "test-token".into(),
+            novnc_tickets: std::sync::Arc::new(std::sync::Mutex::new(
+                std::collections::HashMap::new(),
+            )),
+            novnc_view_ticket: std::sync::Arc::new(std::sync::Mutex::new(None)),
+            recovered_stores: std::sync::Arc::new(Vec::new()),
+        }
+    }
+
+    /// Ricostruisce l'assemblaggio inline del briefing (la sequenza che vive in
+    /// `stream_chat_via_openai`, `main.rs:19610+`) chiamando le stesse funzioni del
+    /// gateway. Serve da riferimento per il test di parità: l'impl delegante di
+    /// `brief()` DEVE produrre gli stessi blocchi, nello stesso ordine.
+    fn inline_briefing_blocks(
+        state: &super::AppState,
+        user_message: &str,
+    ) -> Vec<Option<String>> {
+        let (memory_personal, memory_project) =
+            super::gather_profile_memory_for_prompt(state, user_message);
+        let memory_open_loops = if super::should_inject_open_loops_for_prompt(user_message) {
+            super::gather_open_loops(state, 6)
+        } else {
+            Vec::new()
+        };
+        let profile_block = super::format_memory_block(
+            &memory_open_loops,
+            &memory_personal,
+            &memory_project,
+            super::CHAT_MEMORY_BUDGET_CHARS,
+        );
+        vec![
+            profile_block,
+            super::project_objective_block(state),
+            super::project_brief_block(state),
+            super::recent_work_block(state),
+        ]
+    }
+
+    /// ADR 0022 — Tappa 1: TEST DI PARITÀ RUNTIME (DoD).
+    ///
+    /// Per entrambi gli scope (Personal e Project), il briefing prodotto dal
+    /// service (`InProcessMemoryRecallService::brief`) DEVE essere identico —
+    /// blocco per blocco, nello stesso ordine — all'assemblaggio inline del
+    /// gateway. Se questo fallisce, l'incapsulamento ha cambiato semantics: NON
+    /// si aggiusta il service, si investiga (kickoff, stop-and-ask).
+    #[test]
+    fn brief_via_service_matches_inline_assembly_personal_and_project() {
+        // Il metodo brief() viene dal trait MemoryRecallService: portiamolo in scope.
+        use super::MemoryRecallService;
+        // User id stabile per entrambi gli scope (le funzioni leggono la globale).
+        let prev_user = std::env::var("HOMUN_USER_ID").ok();
+        unsafe { std::env::set_var("HOMUN_USER_ID", "parity-user"); }
+
+        // Messaggio "normale" (non-breve): attiva sia il profile-memory completo
+        // sia gli open-loops. È il caso in cui i due gating prompt-dipendenti
+        // hanno effetto, quindi la parità è significativa.
+        let message = "Qual è lo stato del preventivo Rossi e cosa resta da fare?";
+
+        // --- Scope PERSONAL ---
+        {
+            let facade = super::MemoryFacade::new(
+                local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
+            );
+            let state = test_app_state_for_brief(facade);
+            super::set_memory_workspace(super::PERSONAL_WORKSPACE);
+            let scope = super::scope_from_active_workspace();
+            let service = super::InProcessMemoryRecallService::new(state.clone(), std::sync::Arc::new(NoopEmbeddingClient), std::sync::Arc::new(NoopLlmClient));
+            let service_blocks = service.brief(&scope, message).ordered_blocks();
+            let inline_blocks = inline_briefing_blocks(&state, message);
+            assert_eq!(
+                service_blocks, inline_blocks,
+                "PARITÀ PERSONAL: service.brief() deve produrre gli stessi blocchi dell'inline"
+            );
+            // Invariant P1: per Personal, i blocchi project_* sono None.
+            assert!(
+                service_blocks[1].is_none() && service_blocks[2].is_none()
+                    && service_blocks[3].is_none(),
+                "Personal briefing deve avere shape snella (objective/brief/recent_work = None)"
+            );
+        }
+
+        // --- Scope PROJECT ---
+        {
+            let facade = super::MemoryFacade::new(
+                local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
+            );
+            let state = test_app_state_for_brief(facade);
+            super::set_memory_workspace("proj-parity");
+            let scope = super::scope_from_active_workspace();
+            let service = super::InProcessMemoryRecallService::new(state.clone(), std::sync::Arc::new(NoopEmbeddingClient), std::sync::Arc::new(NoopLlmClient));
+            let service_blocks = service.brief(&scope, message).ordered_blocks();
+            let inline_blocks = inline_briefing_blocks(&state, message);
+            assert_eq!(
+                service_blocks, inline_blocks,
+                "PARITÀ PROJECT: service.brief() deve produrre gli stessi blocchi dell'inline"
+            );
+        }
+
+        // Ripristino.
+        super::set_memory_workspace(super::PERSONAL_WORKSPACE);
+        match prev_user {
+            Some(value) => unsafe { std::env::set_var("HOMUN_USER_ID", value); },
+            None => unsafe { std::env::remove_var("HOMUN_USER_ID"); },
+        }
+    }
+
+    /// ADR 0022 (Tappa 1.5) — la cache del briefing si invalida a ogni scrittura
+    /// memoria via generation counter. Test end-to-end: dopo una scrittura nello
+    /// scope, la generation del facade incrementa → il `brief()` successivo NON
+    /// serve la cache stale (cache miss → rebuild che riflette la nuova memoria).
+    #[test]
+    fn briefing_cache_invalidates_after_memory_write() {
+        use super::MemoryRecallService;
+        let prev_user = std::env::var("HOMUN_USER_ID").ok();
+        unsafe { std::env::set_var("HOMUN_USER_ID", "invalidate-user"); }
+
+        let facade = super::MemoryFacade::new(
+            local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
+        );
+        let user = local_first_memory::UserId::new("invalidate-user");
+        let workspace = local_first_memory::WorkspaceId::new(super::PERSONAL_WORKSPACE);
+
+        // Generation 0 (store vuoto, nessuna scrittura).
+        let gen_before = facade.briefing_generation(&user, &workspace);
+        assert_eq!(gen_before, 0, "generation parte da 0");
+
+        // Una scrittura invalidante: upsert di un record (come fa learn).
+        // `created_at`/`updated_at` sono ISO strings; il valore esatto non conta
+        // per questo test (verifica solo la generation counter).
+        let now = "2026-07-01T00:00:00Z".to_string();
+        let record = local_first_memory::MemoryRecord {
+            reference: local_first_memory::MemoryRef::generated(
+                local_first_memory::MemoryRefKind::Memory,
+                user.clone(),
+                workspace.clone(),
+            ),
+            user_id: user.clone(),
+            workspace_id: workspace.clone(),
+            memory_type: "fact".to_string(),
+            text: "L'utente usa una Moto Guzzi V7".to_string(),
+            aliases: vec![],
+            language_hints: vec![],
+            confidence: 0.9,
+            status: local_first_memory::MemoryStatus::Confirmed,
+            privacy_domain: local_first_memory::PrivacyDomain::new("personal"),
+            sensitivity: local_first_memory::DataSensitivity::Private,
+            metadata: serde_json::json!({}),
+            created_at: now.clone(),
+            updated_at: now,
+            last_seen_at: None,
+            supersedes: vec![],
+            superseded_by: None,
+            correction_of: None,
+        };
+        facade.upsert_memory(&record).unwrap();
+
+        // La generation DEVE essere incrementata dalla scrittura.
+        let gen_after = facade.briefing_generation(&user, &workspace);
+        assert!(
+            gen_after > gen_before,
+            "una scrittura deve incrementare la generation (invalida la cache)"
+        );
+
+        // Ripristino.
+        match prev_user {
+            Some(value) => unsafe { std::env::set_var("HOMUN_USER_ID", value); },
+            None => unsafe { std::env::remove_var("HOMUN_USER_ID"); },
+        }
     }
 
     #[test]
@@ -49929,6 +55341,51 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             "cercami un tappo serbatoio per la mia moto guzzi"
         ));
         assert!(!is_confirmation_reply(""));
+    }
+
+    #[test]
+    fn short_choice_replies_do_not_inject_global_open_loops() {
+        assert!(!super::should_inject_open_loops_for_prompt("Confermo"));
+        assert!(!super::should_inject_relevant_memory_for_prompt("Confermo"));
+        assert!(super::profile_memory_personal_preferences_only_for_prompt(
+            "Confermo"
+        ));
+        assert!(!super::should_inject_open_loops_for_prompt("cambio idea"));
+        assert!(!super::should_inject_relevant_memory_for_prompt(
+            "cambio idea"
+        ));
+        assert!(super::profile_memory_personal_preferences_only_for_prompt(
+            "cambio idea"
+        ));
+        assert!(!super::should_inject_open_loops_for_prompt("ok"));
+        assert!(!super::should_inject_relevant_memory_for_prompt("ok"));
+        assert!(!super::should_inject_open_loops_for_prompt("procedi"));
+        assert!(!super::should_inject_relevant_memory_for_prompt("procedi"));
+        assert!(!super::should_inject_open_loops_for_prompt(
+            "Fammi scegliere tra Confermo e Cambio idea usando una card di scelta, non una lista testuale."
+        ));
+        assert!(super::should_inject_open_loops_for_prompt(
+            "riprendi la ricerca del treno per Roma"
+        ));
+    }
+
+    #[test]
+    fn standalone_choice_card_requests_do_not_inject_cross_thread_memory() {
+        assert!(!super::should_inject_relevant_memory_for_prompt(
+            "Fammi scegliere tra Confermo e Cambio idea usando una card di scelta, non una lista testuale."
+        ));
+        assert!(super::profile_memory_personal_preferences_only_for_prompt(
+            "Fammi scegliere tra Confermo e Cambio idea usando una card di scelta, non una lista testuale."
+        ));
+        assert!(!super::should_inject_relevant_memory_for_prompt(
+            "Let me choose between Confirm and Change idea with a choice card."
+        ));
+        assert!(super::should_inject_relevant_memory_for_prompt(
+            "Cerca i treni da Milano a Roma e usa una card di scelta per farmi scegliere"
+        ));
+        assert!(!super::profile_memory_personal_preferences_only_for_prompt(
+            "Cerca i treni da Milano a Roma e usa una card di scelta per farmi scegliere"
+        ));
     }
 
     #[test]
@@ -51800,6 +57257,35 @@ data: [DONE]\n";
     }
 
     #[test]
+    fn sandbox_escalate_matches_only_the_proposed_command() {
+        let text = "I need your confirmation for the action below.\n\
+‹‹SANDBOX_ESCALATE››{\"approval_id\":\"abc\",\"tool\":\"run_in_project\",\
+\"arguments\":{\"command\":\"npm ci\",\"cwd\":\"/proj\"}}‹‹/SANDBOX_ESCALATE››\n";
+        // Matches the exact command carried by the card.
+        assert!(crate::sandbox_escalate_matches(text, "npm ci"));
+        // Rejects any other command (the provenance gate).
+        assert!(!crate::sandbox_escalate_matches(text, "rm -rf /"));
+        // Rejects when the marker is missing entirely.
+        assert!(!crate::sandbox_escalate_matches("no card here", "npm ci"));
+    }
+
+    #[test]
+    fn sandbox_escalate_rewrite_drops_card_marker() {
+        let text = "I need your confirmation for the action below.\n\
+‹‹SANDBOX_ESCALATE››{\"tool\":\"run_in_project\",\
+\"arguments\":{\"command\":\"npm ci\",\"cwd\":\"/proj\"}}‹‹/SANDBOX_ESCALATE››\n";
+        let out = crate::rewrite_sandbox_escalate_to_done(text, "npm ci");
+        assert!(!out.contains("SANDBOX_ESCALATE"), "marker removed");
+        assert!(
+            !out.contains("I need your confirmation"),
+            "prompt line removed"
+        );
+        assert!(out.contains("✓ Ran unsandboxed: npm ci"));
+        // No-op when the marker is absent (idempotent on already-rewritten text).
+        assert_eq!(crate::rewrite_sandbox_escalate_to_done("hi", "npm ci"), "hi");
+    }
+
+    #[test]
     fn connect_suggest_mark_flags_only_the_matching_item() {
         let text = "Ecco cosa posso collegare.\n\
 ‹‹CONNECT_SUGGEST››{\"need\":\"browser\",\"items\":[\
@@ -52425,7 +57911,8 @@ data: [DONE]\n";
         assert!(project_automation.last_fired_at.is_some());
         assert!(gateway_automation.last_fired_at.is_none());
         assert_eq!(
-            store.recent_automation_runs("auto_channel", 10)
+            store
+                .recent_automation_runs("auto_channel", 10)
                 .unwrap()
                 .len(),
             1
@@ -52517,7 +58004,10 @@ data: [DONE]\n";
         assert_eq!(envelope["workspace_id"], "workspace_project");
         assert_eq!(envelope["actor"]["display_name"], "Elena");
         assert_eq!(envelope["actor"]["identifier"], "393331234567@lid");
-        assert_eq!(envelope["visibility"]["thread_id"], "channel_whatsapp_elena");
+        assert_eq!(
+            envelope["visibility"]["thread_id"],
+            "channel_whatsapp_elena"
+        );
         assert_eq!(envelope["visibility"]["title"], "WhatsApp · Elena");
         assert_eq!(envelope["payload"]["message_id"], "wamid.42");
         assert_eq!(envelope["payload"]["has_content"], true);
@@ -52561,8 +58051,14 @@ data: [DONE]\n";
             &item,
         );
 
-        assert_eq!(envelope["event_id"], "connector:GMAIL_FETCH_EMAILS:messageId:msg_42");
-        assert_eq!(envelope["dedup_key"], "connector:GMAIL_FETCH_EMAILS:messageId:msg_42");
+        assert_eq!(
+            envelope["event_id"],
+            "connector:GMAIL_FETCH_EMAILS:messageId:msg_42"
+        );
+        assert_eq!(
+            envelope["dedup_key"],
+            "connector:GMAIL_FETCH_EMAILS:messageId:msg_42"
+        );
         assert_eq!(envelope["source_kind"], "connector");
         assert_eq!(envelope["provider_id"], "GMAIL_FETCH_EMAILS");
         assert_eq!(envelope["event_type"], "item.detected");

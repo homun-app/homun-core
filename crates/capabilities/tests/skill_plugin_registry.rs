@@ -1,9 +1,11 @@
+// F1.b: this exercises the skill/plugin METADATA store (manifests, installs, trust,
+// scoping) — the future signed-distribution foundation. The dormant
+// `SkillCapabilityProvider` execution path was retired (skills execute via the gateway
+// filesystem path, not as typed callable tools), so its provider tests went with it.
 use local_first_capabilities::{
-    ActionClass, CapabilityCall, CapabilityFacade, CapabilityPolicy, CapabilityProvider,
-    CapabilityProviderGrant, CapabilityProviderKind, InMemoryCapabilityAudit, PluginInstallRecord,
-    PluginManifest, ProviderId, SkillCapabilityProvider, SkillInstallRecord, SkillManifest,
-    SkillPermissions, SkillPluginRegistryStore, SkillToolManifest, SkillTrustLevel, UserId,
-    WorkspaceId,
+    ActionClass, PluginInstallRecord, PluginManifest, ProviderId, SkillInstallRecord,
+    SkillManifest, SkillPermissions, SkillPluginRegistryStore, SkillToolManifest, SkillTrustLevel,
+    UserId, WorkspaceId,
 };
 
 #[test]
@@ -135,113 +137,6 @@ fn registry_registers_plugin_manifest_and_bundled_skills() {
     assert_eq!(loaded_plugin.skills.len(), 2);
     assert_eq!(loaded_calendar.id, calendar.id);
     assert_eq!(plugin_installs, vec![install]);
-}
-
-#[test]
-fn skill_provider_exposes_only_enabled_install_tools_for_scope() {
-    let store = SkillPluginRegistryStore::open_in_memory().unwrap();
-    let user = UserId::new("user_1");
-    let workspace = WorkspaceId::new("workspace_1");
-    let calendar = sample_skill_manifest("calendar-local", "0.1.0");
-    let files = sample_skill_manifest("files-local", "0.1.0");
-    store.upsert_skill_manifest(&calendar).unwrap();
-    store.upsert_skill_manifest(&files).unwrap();
-    store
-        .upsert_skill_install(&SkillInstallRecord::new(
-            user.clone(),
-            workspace.clone(),
-            calendar.id.clone(),
-            calendar.version.clone(),
-            "/plugins/calendar",
-            SkillTrustLevel::Reviewed,
-        ))
-        .unwrap();
-    store
-        .upsert_skill_install(
-            &SkillInstallRecord::new(
-                user.clone(),
-                workspace.clone(),
-                files.id.clone(),
-                files.version.clone(),
-                "/plugins/files",
-                SkillTrustLevel::Reviewed,
-            )
-            .disabled(),
-        )
-        .unwrap();
-
-    let providers = store.enabled_skill_providers(&user, &workspace).unwrap();
-
-    assert_eq!(providers.len(), 1);
-    assert_eq!(providers[0].id(), &ProviderId::new("skill:calendar-local"));
-    assert_eq!(providers[0].kind(), CapabilityProviderKind::Skill);
-    assert_eq!(
-        providers[0].list_tools().unwrap()[0].name,
-        "calendar.search"
-    );
-}
-
-#[test]
-fn skill_provider_tools_are_filtered_by_capability_policy() {
-    let store = SkillPluginRegistryStore::open_in_memory().unwrap();
-    let user = UserId::new("user_1");
-    let workspace = WorkspaceId::new("workspace_1");
-    let manifest = sample_skill_manifest("calendar-local", "0.1.0");
-    store.upsert_skill_manifest(&manifest).unwrap();
-    store
-        .upsert_skill_install(&SkillInstallRecord::new(
-            user.clone(),
-            workspace.clone(),
-            manifest.id.clone(),
-            manifest.version.clone(),
-            "/plugins/calendar",
-            SkillTrustLevel::TrustedLocal,
-        ))
-        .unwrap();
-
-    let mut facade = CapabilityFacade::new(CapabilityPolicy::new(), InMemoryCapabilityAudit::new());
-    for provider in store.enabled_skill_providers(&user, &workspace).unwrap() {
-        facade.register_provider(provider);
-    }
-    let context = CapabilityProviderGrant::new(
-        ProviderId::new("skill:calendar-local"),
-        user.clone(),
-        workspace.clone(),
-    )
-    .with_privacy_domains(vec!["work".to_string()])
-    .with_allowed_actions(vec![ActionClass::Read])
-    .with_max_autonomy_level(0);
-    let policy_context = local_first_capabilities::PolicyContext {
-        user_id: user,
-        workspace_id: workspace,
-        enabled_providers: vec![context.provider_id],
-        privacy_domains: context.privacy_domains,
-        allowed_actions: context.allowed_actions,
-        max_autonomy_level: context.max_autonomy_level,
-        allow_managed_cloud: false,
-    };
-
-    let access = facade.list_tools(&policy_context).unwrap();
-
-    assert_eq!(access.visible_tool_names(), vec!["calendar.search"]);
-    assert_eq!(access.executable_tool_names(), vec!["calendar.search"]);
-}
-
-#[test]
-fn skill_provider_refuses_direct_execution_until_sandbox_runtime_exists() {
-    let provider = SkillCapabilityProvider::new(sample_skill_manifest("calendar-local", "0.1.0"));
-    let error = provider
-        .call_tool(&CapabilityCall {
-            provider_id: ProviderId::new("skill:calendar-local"),
-            tool_name: "calendar.search".to_string(),
-            arguments: serde_json::json!({"query": "standup"}),
-        })
-        .unwrap_err();
-
-    assert_eq!(
-        error.as_str(),
-        "skill_execution_unavailable:calendar.search"
-    );
 }
 
 fn sample_skill_manifest(id: &str, version: &str) -> SkillManifest {

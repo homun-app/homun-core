@@ -48,6 +48,10 @@ jobs:
         working-directory: apps/desktop
         run: npm run build
 
+      - name: Electron shell unit tests
+        working-directory: apps/desktop
+        run: npm run test:electron
+
   backend:
     name: Backend (build + gateway tests)
     runs-on: ubuntu-22.04
@@ -68,3 +72,32 @@ jobs:
 
       - name: Test gateway
         run: cargo test -p local-first-desktop-gateway --locked
+
+  landlock-fence:
+    # Runtime validation of the ADR 0023 Linux Landlock fence. ubuntu-24.04 has
+    # Landlock in the active LSM stack (22.04 ships the kernel but not always the
+    # enabled LSM), so the integration test's assertions actually run here: an
+    # out-of-workspace write MUST be denied. `--nocapture` makes the enforce/skip
+    # outcome visible in the log, and a broken fence (compiles but doesn't deny)
+    # turns this job RED instead of silently passing.
+    name: Landlock fence validation (ubuntu-24.04)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build deps
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev
+
+      - name: Kernel + active LSMs
+        run: |
+          echo "kernel: $(uname -r)"
+          echo "active LSMs: $(cat /sys/kernel/security/lsm 2>/dev/null || echo unknown)"
+
+      - name: Landlock fence integration test (visible)
+        run: cargo test -p local-first-desktop-gateway --locked --test linux_sandbox -- --nocapture

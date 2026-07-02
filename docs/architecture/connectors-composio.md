@@ -32,14 +32,12 @@ sorgente di eventi per le automazioni (caposaldo #10).
 
 ### Layer e file
 
-- **Provider di crate** `ComposioCapabilityProvider` — `crates/capabilities/src/composio.rs:98`.
-  Implementa il trait `CapabilityProvider` (`list_tools`/`list_connections`/`call_tool`/
-  `list_triggers`/`enable_trigger`). È il modello canonico e attende lo shape **pre-v3**
-  Composio (`{tools}`). Viene registrato nel facade per il **task-runtime**
-  (`crates/desktop-gateway/src/main.rs:31605`).
-- **Path di chat "vivo"** — quasi tutto il flusso interattivo NON passa dal provider di
-  crate ma da funzioni dirette in `crates/desktop-gateway/src/main.rs`, che parlano la
-  **v3 API** (`{items}`). Questa è la divergenza principale (vedi sotto).
+- **Un'unica implementazione v3** in `crates/desktop-gateway/src/main.rs` (F1.c): tutto il
+  flusso — chat **e** task-runtime — parla la **v3 API** (`{items}`) via funzioni dirette
+  (`composio_execute_tool`, `composio_chat_tools`, …) sul `GatewayComposioTransport`. Il
+  vecchio provider di crate pre-v3 (`composio.rs`) è stato cancellato (vedi *Divergenze →
+  risolto*). Per l'esecuzione autonoma il task-runtime ri-verifica il gate deny-by-default
+  (`authorize_managed_capability_tool`, `main.rs`) prima di chiamare `composio_execute_tool`.
 
 ### 1) Auth / connessione (schema-driven, ADR 0013)
 
@@ -231,12 +229,21 @@ audit/UI; `None` quando non classificabile ⇒ `"other"`.
 
 ## Divergenze / debolezze
 
-- **Due implementazioni Composio parallele.** Il provider di crate
-  (`composio.rs`, shape pre-v3 `{tools}`/`/tools/execute/{name}` con `user_id`+`arguments`)
-  serve solo il task-runtime; il path di chat in `main.rs` parla **v3** (`{items}`,
-  `?toolkit_slug=`, `?user_ids=`). Sono codebase distinte da tenere allineate a mano: il
-  provider di crate userebbe lo shape sbagliato se messo sul path di chat (commento
-  esplicito a `main.rs:32098`).
+- **~~Due implementazioni Composio parallele~~ → RISOLTO (F1.c, 2026-06-28).** C'erano due
+  codebase: il provider di crate (`composio.rs`, shape **pre-v3** `{tools}`) usato dal
+  task-runtime, e il path di chat **v3** in `main.rs`. La divergenza era anche un **bug
+  latente**: il task-runtime eseguiva via `facade.call_tool`, che localizza il tool con
+  `provider.list_tools()` → `GET /tools` shape pre-v3 → **fallisce contro l'API v3**
+  (`{items}`) prima di eseguire, quindi le run Composio autonome erano rotte. Convergiuto:
+  il task-runtime ora ri-verifica lo **stesso** gate deny-by-default
+  (`authorize_managed_capability_tool` → `CapabilityPolicy::tool_access`, nessuna
+  duplicazione del gate) sui metadati v3 del catalogo cache, poi esegue via il **v3**
+  `composio_execute_tool` — l'unico path. Il provider di crate (`ComposioCapabilityProvider`,
+  `ComposioProviderConfig`, `InMemoryComposioTransport`, trait `ComposioTransport`) e tutto
+  `crates/capabilities/src/composio.rs` sono stati **cancellati**; `GatewayComposioTransport`
+  usa ora un `request` inerente. Una sola implementazione v3 (caposaldo #5). *(Esecuzione
+  non validabile live in questa sessione — nessun account Composio; gate coperto da unit-test
+  `managed_tool_authorization_is_fail_closed_and_policy_gated`.)*
 - **Read/write dal solo slug.** `composio_tool_is_read` è euristico: uno slug ambiguo o
   con verbo non in lista cade in write (sicuro ma rumoroso); un eventuale tool di scrittura
   che nello slug porta solo un verbo "read" verrebbe eseguito senza conferma.
@@ -265,9 +272,10 @@ audit/UI; `None` quando non classificabile ⇒ `"other"`.
 
 ## File chiave
 
-- `crates/capabilities/src/composio.rs` — provider di crate `CapabilityProvider` (shape
-  pre-v3); usato dal task-runtime.
-- `crates/desktop-gateway/src/main.rs` — tutto il path di chat v3:
+- `crates/desktop-gateway/src/main.rs` — tutto il path Composio v3 (chat + task-runtime):
+  - esecuzione task-runtime gated: `execute_capability_generic` arm `Managed`,
+    `authorize_managed_capability_tool` (gate deny-by-default, riusa
+    `CapabilityPolicy::tool_access`), `composio_execute_tool` (v3).
   - auth/connessione: `connect_composio_blocking:32075`, `parse_composio_fields:34811`,
     `composio_auth_config_resolve:34940`, `composio_link_blocking:35036`,
     `composio_transport_for:32197`, `composio_entity_id:32373`.
@@ -283,7 +291,6 @@ audit/UI; `None` quando non classificabile ⇒ `"other"`.
     `mcp_error_hint:33732`, `connector_error_kind_str:33697`, `record_connector_run:33708`.
   - polling: `spawn_connector_event_poller:10118`, `connector_poll_tick:10127`,
     `extract_poll_items:10081`, `connector_fire_run:10269`.
-  - registrazione provider (task-runtime): `:31605`.
 - `crates/task-runtime/src/types.rs` — `EventTrigger::ConnectorPoll:341`.
 - `docs/CAPISALDI.md` — caposaldi #7 (registry) e #10 (automazioni).
 - `docs/decisions/0013-connector-auth-and-capability-routing.md` — auth schema-driven +

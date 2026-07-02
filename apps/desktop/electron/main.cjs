@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, shell, ipcMain, dialog, nativeImage, powerSaveBlocker } = require("electron");
+const { app, BrowserWindow, Menu, shell, ipcMain, dialog, nativeImage, powerSaveBlocker, session } = require("electron");
 const { autoUpdater } = require("electron-updater");
 const { spawn, spawnSync, execFileSync } = require("node:child_process");
 const { randomBytes } = require("node:crypto");
@@ -6,6 +6,13 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
+const { createLogWriter, resolveLogsDir, pipeChildStream } = require("./lib/logging.cjs");
+const { nextRestartDelay } = require("./lib/watchdog.cjs");
+
+// Shell-side diagnostics (~/.homun/logs/desktop.log). Created eagerly so even
+// a failure during startup leaves a trail.
+const LOGS_DIR = resolveLogsDir();
+const desktopLog = createLogWriter(LOGS_DIR, "desktop.log");
 
 const DEV_SERVER_URL = process.env.HOMUN_DESKTOP_URL ?? "http://127.0.0.1:1420/";
 const GATEWAY_PORT = process.env.HOMUN_DESKTOP_GATEWAY_PORT ?? "18765";
@@ -18,7 +25,9 @@ const RESOURCES_ROOT =
   process.env.HOMUN_DESKTOP_RESOURCES_DIR ??
   (app.isPackaged ? process.resourcesPath : REPO_ROOT);
 let gatewayProcess = null;
+let gatewayRestarts = []; // timestamps of watchdog respawns (see lib/watchdog.cjs)
 let isQuitting = false;
+const mainWindows = new Set();
 
 // Brand icon (Homun pictogram on a white rounded square). Used as the window
 // icon on Windows/Linux and as the macOS dock icon in dev. macOS ignores the
@@ -40,6 +49,25 @@ process.env.HOMUN_DESKTOP_GATEWAY_TOKEN = GATEWAY_TOKEN;
 // before the app is ready, so the menu reflects it. Technical identifiers
 // (crate/binary "local-first-desktop-gateway", HOMUN_* env) are unchanged.
 app.setName("Homun");
+
+// Two app instances would spawn two gateways racing on the same port and the
+// same ~/.homun SQLite files — nondeterministic contention. First instance
+// wins; a second launch just focuses the existing window. The lock file lives
+// in userData, which derives from the app name, so requestSingleInstanceLock()
+// must stay AFTER app.setName("Homun") — moving it changes the lock identity.
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+if (!hasSingleInstanceLock) {
+  app.quit();
+}
+app.on("second-instance", () => {
+  desktopLog.log("second instance blocked — focusing existing window");
+  const win = BrowserWindow.getAllWindows()[0] ?? null;
+  if (win) {
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+  } else if (app.isReady()) createWindow(); // macOS: app alive with all windows closed
+});
 
 // Public page where each release's notes live (also where electron-updater pulls
 // installers from). Surfaced from the "About" menu and the Settings version card.
@@ -299,12 +327,27 @@ function spawnGateway() {
   }
 
   if (gatewayBin) {
+    // Packaged: capture the gateway's stdout/stderr into a rotating file —
+    // "ignore" made every field bug unreproducible (no trail at all). Dev
+    // keeps "inherit" so cargo/terminal output stays visible.
+    const captureToFile = app.isPackaged || process.env.HOMUN_DESKTOP_RESOURCES_DIR;
     gatewayProcess = spawn(gatewayBin, [], {
       cwd: REPO_ROOT,
       env,
-      stdio: app.isPackaged ? "ignore" : "inherit",
+      stdio: captureToFile ? ["ignore", "pipe", "pipe"] : "inherit",
       windowsHide: true,
     });
+    if (captureToFile) {
+      const gatewayLog = createLogWriter(LOGS_DIR, "gateway.log");
+      pipeChildStream(gatewayProcess.stdout, gatewayLog);
+      pipeChildStream(gatewayProcess.stderr, gatewayLog, "err");
+      // Session delimiter: the log appends across restarts, so mark where each
+      // gateway lifetime starts (and record the pid for cross-referencing).
+      gatewayLog.log(`gateway spawned (pid=${gatewayProcess.pid ?? "?"})`);
+      // "close" (not "exit"): exit can fire before stdio drains, and the last
+      // lines (a panic message!) are the most valuable ones.
+      gatewayProcess.once("close", () => gatewayLog.stream.end());
+    }
   } else {
     gatewayProcess = spawn("cargo", ["run", "-p", "local-first-desktop-gateway"], {
       cwd: REPO_ROOT,
@@ -314,11 +357,58 @@ function spawnGateway() {
     });
   }
 
-  gatewayProcess.on("exit", () => {
+  // Capture the child so both handlers can tell a stale event from the live
+  // process: once the watchdog respawns the gateway, a late "exit"/"error"
+  // from a replaced child must not null the NEW reference — that would orphan
+  // the fresh gateway on quit and log a spurious exit.
+  const child = gatewayProcess;
+
+  child.on("error", (err) => {
+    // spawn(2) failures (EACCES, Gatekeeper quarantine, ENOENT on the cargo
+    // fallback) surface as "error", not a throw at the call site — without
+    // this handler they crash the main process and leave no trail at all.
+    const line = `gateway spawn failed: ${err.code ?? err.message}`;
+    console.error(line);
+    desktopLog.log(line);
+    if (gatewayProcess === child) gatewayProcess = null;
+  });
+
+  child.on("exit", (code, signal) => {
+    if (gatewayProcess !== child) return; // stale exit from a replaced child
     gatewayProcess = null;
-    if (!isQuitting) {
-      console.error("Desktop gateway exited unexpectedly");
+    if (isQuitting) return;
+    const line = `gateway exited unexpectedly (code=${code} signal=${signal})`;
+    console.error(line);
+    desktopLog.log(line);
+
+    // The token and port don't change across respawns (they're constants of
+    // this shell process), so the renderer recovers by itself as soon as
+    // /api/health is back — no extra coordination needed beyond restarting
+    // the child process.
+    const delay = nextRestartDelay(gatewayRestarts, Date.now());
+    if (delay === null) {
+      // By design (P0 scope): we stop respawning and tell the USER via a
+      // dialog, but the renderer keeps polling /api/health with no in-app
+      // signal — surfacing give-up inside the UI is deferred, not an oversight.
+      desktopLog.log("gateway crash-loop: auto-restart budget exhausted, giving up");
+      void dialog
+        .showMessageBox({
+          type: "error",
+          title: "Homun",
+          message: "Il motore di Homun continua ad arrestarsi.",
+          detail: `I log diagnostici sono in ${LOGS_DIR}. Riavvia l'app; se il problema persiste, usa "Segnala un problema" nelle Impostazioni.`,
+          buttons: ["Apri i log", "Chiudi"],
+        })
+        .then((r) => {
+          if (r.response === 0) void shell.openPath(LOGS_DIR);
+        });
+      return;
     }
+    gatewayRestarts.push(Date.now());
+    desktopLog.log(`watchdog: respawning gateway in ${delay}ms`);
+    setTimeout(() => {
+      if (!isQuitting && !gatewayProcess) spawnGateway();
+    }, delay);
   });
 }
 
@@ -358,7 +448,15 @@ function createWindow() {
       nodeIntegration: false,
       sandbox: true,
       webSecurity: true,
+      // No DevTools in the shipped app (they're a remote-debugging / arbitrary
+      // in-page eval surface). Kept on in dev and behind the explicit
+      // HOMUN_ELECTRON_DEVTOOLS flag so the openDevTools call below still works.
+      devTools: !app.isPackaged || process.env.HOMUN_ELECTRON_DEVTOOLS === "1",
     },
+  });
+  mainWindows.add(window);
+  window.on("closed", () => {
+    mainWindows.delete(window);
   });
 
   window.webContents.setWindowOpenHandler(({ url }) => {
@@ -507,6 +605,73 @@ ipcMain.handle("lfpa:capture-page", async () => {
   }
 });
 
+// "Report a problem": builds a LOCAL archive of the diagnostics the user can
+// attach to a bug report. Privacy by design (caposaldo #3): ONLY ~/.homun/logs
+// + a small report.json (versions/specs) — NEVER the SQLite stores (memory,
+// chats, vault). Works with the gateway down — that's exactly when it's needed.
+ipcMain.handle("lfpa:feedback-bundle", async () => {
+  // Sync fs/tar is deliberate: the payload is bounded by log rotation (~25MB
+  // ceiling), the button is disabled during the sub-second freeze, and the flow
+  // must work with the gateway down. Do NOT extend this to unbounded inputs.
+  try {
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+    const staging = fs.mkdtempSync(path.join(os.tmpdir(), "homun-feedback-"));
+    const payload = path.join(staging, `homun-feedback-${stamp}`);
+    fs.mkdirSync(payload, { recursive: true });
+    if (fs.existsSync(LOGS_DIR)) {
+      // Copy only regular files and directories — skip symlinks/special files.
+      // Defense-in-depth for the privacy invariant (caposaldo #3): a planted
+      // symlink in logs/ must never let the bundle reach outside the logs dir.
+      fs.cpSync(LOGS_DIR, path.join(payload, "logs"), {
+        recursive: true,
+        filter: (src) => {
+          try {
+            const s = fs.lstatSync(src);
+            return s.isDirectory() || s.isFile();
+          } catch {
+            return false;
+          }
+        },
+      });
+    }
+    const report = {
+      generatedAt: new Date().toISOString(),
+      appVersion: app.getVersion(),
+      packaged: app.isPackaged,
+      platform: process.platform,
+      arch: process.arch,
+      electron: process.versions.electron,
+      node: process.versions.node,
+      totalMemGb: Math.round(os.totalmem() / 1e9),
+      cpuCount: os.cpus().length,
+    };
+    fs.writeFileSync(path.join(payload, "report.json"), JSON.stringify(report, null, 2));
+
+    const outDir = path.join(os.homedir(), ".homun", "feedback");
+    fs.mkdirSync(outDir, { recursive: true });
+    const archive = path.join(outDir, `homun-feedback-${stamp}.tar.gz`);
+    // System tar: bsdtar on macOS/Windows 10+, GNU tar on Linux — no new dep.
+    const tar = spawnSync("tar", ["-czf", archive, "-C", staging, path.basename(payload)], {
+      encoding: "utf8",
+    });
+    let result;
+    if (tar.status === 0) {
+      result = { ok: true, path: archive };
+    } else {
+      // No tar on PATH (rare): ship the uncompressed folder instead.
+      const fallback = path.join(outDir, path.basename(payload));
+      fs.cpSync(payload, fallback, { recursive: true });
+      result = { ok: true, path: fallback, uncompressed: true };
+    }
+    fs.rmSync(staging, { recursive: true, force: true });
+    desktopLog.log(`feedback bundle created at ${result.path}`);
+    shell.showItemInFolder(result.path);
+    return result;
+  } catch (error) {
+    return { ok: false, error: String(error?.message ?? error) };
+  }
+});
+
 // Bring the window to the front when the user clicks a system notification.
 ipcMain.handle("lfpa:focus-window", () => {
   const win = BrowserWindow.getAllWindows()[0] ?? null;
@@ -623,7 +788,48 @@ ipcMain.handle("lfpa:update-install", async (event) => {
   }
 });
 
+// Content-Security-Policy for the packaged renderer (P1 hardening). Applied via
+// response headers so it covers the loaded document and every subresource. Only
+// in packaged/staged builds: the Vite dev server needs a looser policy (inline
+// HMR client + its own websocket), so dev is left to Vite's defaults.
+//
+// Scoped to what the renderer actually uses (verified in the source):
+//   script-src 'self'      — Vite emits an external module bundle, no inline JS.
+//   style-src  'unsafe-inline' — mermaid + highlight.js inject <style>, React uses
+//                                 inline style attributes.
+//   img/font   data:/blob: — screenshots, generated logos, bundled fonts.
+//   connect-src 127.0.0.1  — the local gateway (fetch + NDJSON streams).
+//   frame-src  127.0.0.1   — the embedded noVNC "contained computer" iframe.
+function applyContentSecurityPolicy() {
+  const shouldApply = app.isPackaged || process.env.HOMUN_DESKTOP_RESOURCES_DIR;
+  if (!shouldApply) return;
+  const policy = [
+    "default-src 'self'",
+    "script-src 'self'",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: blob:",
+    "font-src 'self' data:",
+    "media-src 'self' blob:",
+    "connect-src 'self' http://127.0.0.1:* ws://127.0.0.1:* http://localhost:* ws://localhost:*",
+    "frame-src 'self' http://127.0.0.1:* http://localhost:*",
+    "worker-src 'self' blob:",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+  ].join("; ");
+  session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+    callback({
+      responseHeaders: {
+        ...details.responseHeaders,
+        "Content-Security-Policy": [policy],
+      },
+    });
+  });
+}
+
 app.whenReady().then(async () => {
+  if (!hasSingleInstanceLock) return; // quitting — don't spawn the gateway
+  applyContentSecurityPolicy();
   applyAppMenu();
   if (process.platform === "darwin" && app.dock) {
     const iconPath = brandIconPath();

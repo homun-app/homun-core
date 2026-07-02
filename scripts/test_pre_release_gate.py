@@ -27,6 +27,7 @@ class PreReleaseGateTests(unittest.TestCase):
             "HOMUN_EVAL_RUNS": "2",
             "HOMUN_EVAL_GATEWAY_BASE": "http://127.0.0.1:18765",
             "HOMUN_EVAL_GATEWAY_TOKEN": "secret-token",
+            "HOMUN_RUN_PRODUCTION_SMOKE": "1",
         }
 
         plan = gate.build_plan(env)
@@ -41,6 +42,11 @@ class PreReleaseGateTests(unittest.TestCase):
             [gate.PYTHON, "-c", gate.GATEWAY_EVAL_SNIPPET],
         )
         self.assertEqual(by_label["gateway eval"].env["HOMUN_EVAL_GATEWAY_TOKEN"], "secret-token")
+        self.assertEqual(
+            by_label["production smoke"].command,
+            [gate.PYTHON, "scripts/production_smoke.py", "--gateway-base", "http://127.0.0.1:18765"],
+        )
+        self.assertEqual(by_label["production smoke"].env["HOMUN_EVAL_GATEWAY_TOKEN"], "secret-token")
 
     def test_gate_stops_at_first_failed_step(self):
         calls = []

@@ -28,6 +28,9 @@ contextBridge.exposeInMainWorld("localFirstDesktop", {
   appVersion: () => ipcRenderer.invoke("lfpa:app-version"),
   // Machine specs (RAM/cores) for the onboarding system-requirements step.
   systemSpecs: () => ipcRenderer.invoke("lfpa:system-specs"),
+  // "Report a problem": builds a local tar.gz of ~/.homun/logs + a report.json
+  // (versions/specs) and reveals it. Logs only — never memory/chat stores.
+  createFeedbackBundle: () => ipcRenderer.invoke("lfpa:feedback-bundle"),
   // Auto-update (desktop only). Check returns {available, version, current,
   // releaseNotes}; install downloads the new version and restarts.
   checkForUpdate: () => ipcRenderer.invoke("lfpa:update-check"),

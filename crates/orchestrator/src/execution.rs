@@ -40,6 +40,16 @@ pub(crate) fn tool_for_step<'a>(
     tools
         .iter()
         .find(|tool| tool.provider_id == provider_id && tool.name == tool_name)
+        // Weak-tier tolerance (caposaldo #11): only when an EXACT match fails, accept a loaded
+        // tool whose name is the leading token of the requested one. A small model sometimes
+        // crams the arguments into the tool_name field (observed on gemma4:
+        // `tool_name = "browser_navigate.url: https://…"`); the harness must resolve that, not
+        // reject a step it can clearly identify. Exact matches always win (checked first).
+        .or_else(|| {
+            tools.iter().find(|tool| {
+                tool.provider_id == provider_id && tool_name_resolves(tool_name, &tool.name)
+            })
+        })
         .ok_or_else(|| {
             OrchestratorError::Planner(format!(
                 "tool_not_loaded:{}:{}",
@@ -47,6 +57,21 @@ pub(crate) fn tool_for_step<'a>(
                 tool_name
             ))
         })
+}
+
+/// Whether a planner-`requested` tool name resolves to a `loaded` tool name. Exact match, or
+/// `requested` is `loaded` followed by a non-identifier boundary — so `browser_navigate.url: …`
+/// resolves to `browser_navigate`, but `browser_navigatex` / `browser_navi` do NOT match (no
+/// accidental cross-tool resolution).
+fn tool_name_resolves(requested: &str, loaded: &str) -> bool {
+    if requested == loaded {
+        return true;
+    }
+    requested.strip_prefix(loaded).is_some_and(|rest| {
+        rest.chars()
+            .next()
+            .is_some_and(|next| !next.is_ascii_alphanumeric() && next != '_')
+    })
 }
 
 pub(crate) fn provider_id_for_step(step: &PlanStep) -> OrchestratorResult<ProviderId> {
@@ -106,4 +131,25 @@ fn sanitize_id(value: &str) -> String {
             }
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::tool_name_resolves;
+
+    #[test]
+    fn tool_name_resolves_exact_and_tolerates_crammed_args() {
+        assert!(tool_name_resolves("browser_navigate", "browser_navigate"));
+        // Weak model crammed the argument into the tool-name field (observed on gemma4).
+        assert!(tool_name_resolves(
+            "browser_navigate.url: https://www.trenitalia.com",
+            "browser_navigate"
+        ));
+        assert!(tool_name_resolves("browser_navigate url=x", "browser_navigate"));
+        // No accidental cross-tool resolution: a different tool sharing a prefix, or a
+        // truncation, must NOT match.
+        assert!(!tool_name_resolves("browser_navigatex", "browser_navigate"));
+        assert!(!tool_name_resolves("browser_navi", "browser_navigate"));
+        assert!(!tool_name_resolves("send_message", "browser_navigate"));
+    }
 }

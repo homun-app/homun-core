@@ -1,6 +1,6 @@
 # Sottosistema Browser
 
-> Stato: **2026-06-27 — reverse-engineered dal codice, punto fermo.** Documenta il
+> Stato: **2026-06-30 — reverse-engineered dal codice, punto fermo.** Documenta il
 > comportamento reale OGGI, non il design desiderato. Ogni riferimento è `file:line`
 > verificato sul sorgente del repo `app`. Quando il codice e questa nota divergono,
 > vince il codice (e questa nota va corretta).
@@ -25,6 +25,11 @@ Due metà:
   granulari `browser_navigate` / `browser_snapshot` / `browser_act` / `browser_tabs` /
   `browser_screenshot` / `browser_dialog`, gestisce il loop a round, l'igiene di
   contesto, il **gate di sicurezza** e il **lock globale** sul singolo browser.
+- **Renderer live panel** (`apps/desktop/src/components/ChatComputerPanel.tsx` +
+  `apps/desktop/src/styles.css`): mostra la sessione noVNC del thread mentre il browser
+  lavora. Il compact card usa icona di espansione (`Maximize2`) e la modalità full è
+  `position: fixed` ancorata dentro l'area chat, a destra della sidebar, così non cresce
+  sotto il drawer e lascia una preview browser ampia.
 
 ---
 
@@ -54,6 +59,11 @@ Flusso di un turno con browsing (lato gateway, `main.rs`):
    restituisce lo snapshot aggiornato. C'è anche no-progress detection (snapshot identico
    → nudge, `main.rs:20105`) e `browser_act_error_hint` (`main.rs:14985`) che insegna la
    chiamata corretta.
+   Dal 2026-06-29 il gate ha anche una variante approval-aware per il futuro flusso
+   pagamenti: `high_risk_reason_with_payment_approval` sblocca solo controlli finali di
+   pagamento con `payment_approval_id` combaciante. Il path chat corrente continua a
+   chiamare il gate conservativo senza approval, quindi acquisti/login/pagamenti restano
+   bloccati finché non esiste la Payment Approval Card completa. Vedi [vault.md](vault.md).
 
 Lato sidecar (`session_manager.ts`), una `snapshot` (`:216`) fa:
 `waitForLoadState("networkidle", 2500ms)` → `dismissCommonOverlays` → `createSnapshot`,
@@ -112,6 +122,14 @@ flowchart TD
 - **Lock globale = un solo browser** (`browse_web_lock`, `main.rs:24797`): c'è una sola
   istanza Chromium condivisa (warm context con cookie/consenso), quindi va serializzato
   l'accesso per non avere due turni che si pestano i tab/lo stato.
+- **Discovery-first per ricerche aperte** (`browser_open_research_discovery_instruction`):
+  quando l'utente chiede news o ricerca web corrente senza nominare un sito/URL, il loop
+  deve partire da una pagina di search/discovery (risultati o news discovery), leggere più
+  candidati recenti e solo dopo scegliere le fonti. Saltare direttamente a una singola
+  testata è ammesso solo se l'utente l'ha nominata o se il contesto la impone. La pagina
+  di discovery deve seguire lingua del prompt e locale del browser; se usa URL di search/news
+  con parametri di mercato deve preferire parametri coerenti (`hl=it`, `gl=IT` per richieste
+  italiane) invece di defaultare a un mercato casuale.
 
 ---
 
@@ -182,6 +200,14 @@ response `{id, ok:true, result}` o `{id, ok:false, error:{code, message, retryab
   suggerimento (combobox, typeahead, keyboard-only) — il modello non deve saperlo
   (`actions.ts:806`, `confirmAutocomplete`). `hold` per le challenge "tieni premuto"
   (`actions.ts:336`).
+- **`kind:"fill"` accetta DUE forme** (`resolveFillFields`, `actions.ts`): la canonica
+  `fields:[{ref,value}]` (multi-campo, usata da `fill_form`/batch) **e** la forma PIATTA
+  del micro-tool chat `{ref, text|value}`. Lo schema `browser_act` esposto al modello è
+  piatto (una micro-azione per volta), quindi `kind:"fill"` dal chat-loop arriva senza
+  `fields`: prima della coercizione il `for…of action.fields` falliva silenziosamente
+  (`action.fields` undefined → `BROWSER_ACTION_FAILED`), così **fill non funzionava** dalla
+  chat mentre `type` sì. Ora le due forme convergono in un solo path (caposaldo #5); manca
+  ancora `ref`+nessun valore → `BROWSER_INVALID_REQUEST` esplicito (non più TypeError opaco).
 - **Resilienza tab**: `resolvePage` (`session_manager.ts:537`) ri-materializza un tab
   morto al suo ultimo URL invece di fallire a metà loop; fallback headless→visibile su
   errori di rete tipici (`gotoWithHeadlessFallback`, `:496`; `isHeadlessNavigationFailure`,
@@ -217,6 +243,32 @@ Problemi reali individuati nel codice attuale:
    (`browser_safety.rs:71`), quindi non c'è via di estrazione dati via JS: tutto deve
    passare dal testo dello snapshot o da click/scroll. Limita pagine in cui il dato è
    raggiungibile solo via script.
+6. **Due sorgenti per "i tool browser" (convergenti, F1.d).** Restano: (a)
+   gli **schemi di chat** (`browser_*_tool_schema()` in `main.rs`, la superficie reale che il
+   modello chiama, cablati in `base_tools`); (b) il **seed del registry**
+   (`browser_registry_cached_tools`) che deriva gli stessi sei tool dagli schemi (a) — è
+   ciò che il **planner** dell'orchestratore indicizza, quindi il browser è visibile al piano
+   coi nomi giusti. F1.d ha reso (a)≡(b); resta da far sorgentare (a) dal registry (lavoro di
+   F3). Il **terzo** sorgente storico — il provider tipato `BrowserCapabilityProvider`,
+   dot-named a livello di metodo sidecar (`browser.navigate`), **mai istanziato** — è stato
+   **cancellato** (sessione 2026-06-28, F1.d cleanup): era un gemello dormiente in violazione del
+   caposaldo #5. L'esecutore durable reale (`execute_capability_browser_task` →
+   `execute_persistent_browser_capability`, `main.rs`) pilota il sidecar condiviso
+   **direttamente** via `BrowserAutomationClient`/`BrowserMethod`, mappando il tool con
+   `browser_method_for_capability_tool` (`main.rs:~35473`, gemello vivo di quello che era
+   `method_for_tool` nel provider): non serviva né serve un `CapabilityProvider` tipato per il
+   worker path. NB: l'**enum** `CapabilityProviderKind::Browser` resta (lo usano registry,
+   orchestratore e resource-bridge per la classe risorsa `BrowserSession`); è solo la **struct**
+   provider a essere stata rimossa.
+7. **CDP-wedge invisibile a `browser_cdp_ok` (2026-06-29).** Un container `homun-cc` long-lived può
+   andare in *wedge*: `/json/version` (HTTP) risponde ancora, ma `connectOverCDP` (ws handshake) si
+   impianta su targets stantii → ogni sidecar nuovo va in `Timeout 30000ms exceeded`. `browser_cdp_ok`
+   (`main.rs:43383`) sonda SOLO l'HTTP, quindi `ensure_browser_cdp_healthy` lo manca → **gap di entrambi i
+   motori**. Mitigazione (path condiviso `call_shared_browser_sidecar`): `browser_response_indicates_cdp_wedge`
+   riconosce la firma e `recycle_container()` una volta per finestra (`browser_recycle_throttle_ok`, 90s) →
+   `SidecarLost` → respawn fresco. Resta debole: la firma è testuale (EN Playwright) e il recycle è un
+   `docker rm -f` (disruptivo se un altro turno sta usando il browser). Fix migliore a regime: un probe
+   ws-level (non solo HTTP) in `browser_cdp_ok`.
 
 ---
 
@@ -230,6 +282,11 @@ Problemi reali individuati nel codice attuale:
   CODICE (harness), non nel modello: il browsing deve funzionare anche su modelli deboli.
 - **Caposaldo 9 — workspace agentico operativo.** Il loop osserva→agisci con evidenza
   (snapshot, screenshot, browser-step) è una superficie di computer activity verificabile.
+- **Caposaldo 5 — un solo motore / niente duplicati.** Il browser ha UN solo esecutore
+  (l'esecutore durable sul sidecar condiviso) e UNA sola superficie verso il planner (il seed
+  del registry). Il provider tipato dormiente `BrowserCapabilityProvider` è stato cancellato
+  (F1.d cleanup) per non lasciare un secondo path di esecuzione mai cablato — stesso ritiro già
+  fatto per `SkillCapabilityProvider` (F1.b) e `ComposioCapabilityProvider` (F1.c).
 - **ADR 0010 — contained computer**: l'attach via CDP (`connectOverCDP`,
   `BROWSER_AUTOMATION_USER_CDP_ENDPOINT`) è il modo in cui il browser reale del contained
   computer diventa il backend del sidecar. Riferimento esterno: `openclaw` (la snapshot

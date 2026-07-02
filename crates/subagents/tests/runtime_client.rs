@@ -123,6 +123,105 @@ fn generate_stream_event_deserializes_delta_and_done_payloads() {
                 peak_memory_gb: 5.4,
                 elapsed_seconds: 0.8,
             },
+            redacted_user_text: None,
+        }
+    );
+}
+
+#[test]
+fn generate_stream_event_deserializes_structured_chat_events() {
+    let reasoning: GenerateStreamEvent = serde_json::from_value(serde_json::json!({
+        "type": "reasoning",
+        "text": "Sto verificando il piano."
+    }))
+    .unwrap();
+    let activity: GenerateStreamEvent = serde_json::from_value(serde_json::json!({
+        "type": "activity",
+        "text": "Apro il browser"
+    }))
+    .unwrap();
+    let plan_update: GenerateStreamEvent = serde_json::from_value(serde_json::json!({
+        "type": "plan_update",
+        "markdown": "- [x] Aprire la pagina"
+    }))
+    .unwrap();
+
+    assert_eq!(
+        reasoning,
+        GenerateStreamEvent::Reasoning {
+            text: "Sto verificando il piano.".to_string()
+        }
+    );
+    assert_eq!(
+        activity,
+        GenerateStreamEvent::Activity {
+            text: "Apro il browser".to_string()
+        }
+    );
+    assert_eq!(
+        plan_update,
+        GenerateStreamEvent::PlanUpdate {
+            markdown: "- [x] Aprire la pagina".to_string()
+        }
+    );
+}
+
+#[test]
+fn generate_stream_event_deserializes_structured_card_events() {
+    let choice_prompt: GenerateStreamEvent = serde_json::from_value(serde_json::json!({
+        "type": "choice_prompt",
+        "payload": {"question": "Confermi?", "options": ["Si", "No"]}
+    }))
+    .unwrap();
+    let vault_propose: GenerateStreamEvent = serde_json::from_value(serde_json::json!({
+        "type": "vault_propose",
+        "payload": {"category": "identity", "label": "Codice Fiscale"}
+    }))
+    .unwrap();
+    let vault_reveal: GenerateStreamEvent = serde_json::from_value(serde_json::json!({
+        "type": "vault_reveal",
+        "payload": {"record_id": "vault_1", "label": "Codice Fiscale"}
+    }))
+    .unwrap();
+    let payment_approval: GenerateStreamEvent = serde_json::from_value(serde_json::json!({
+        "type": "payment_approval",
+        "payload": {"snapshot": {"approval_id": "pay_1"}}
+    }))
+    .unwrap();
+    let tool_result: GenerateStreamEvent = serde_json::from_value(serde_json::json!({
+        "type": "tool_result",
+        "payload": {"tool": "browser_snapshot", "ok": true}
+    }))
+    .unwrap();
+
+    assert_eq!(
+        choice_prompt,
+        GenerateStreamEvent::ChoicePrompt {
+            payload: serde_json::json!({"question": "Confermi?", "options": ["Si", "No"]})
+        }
+    );
+    assert_eq!(
+        vault_propose,
+        GenerateStreamEvent::VaultPropose {
+            payload: serde_json::json!({"category": "identity", "label": "Codice Fiscale"})
+        }
+    );
+    assert_eq!(
+        vault_reveal,
+        GenerateStreamEvent::VaultReveal {
+            payload: serde_json::json!({"record_id": "vault_1", "label": "Codice Fiscale"})
+        }
+    );
+    assert_eq!(
+        payment_approval,
+        GenerateStreamEvent::PaymentApproval {
+            payload: serde_json::json!({"snapshot": {"approval_id": "pay_1"}})
+        }
+    );
+    assert_eq!(
+        tool_result,
+        GenerateStreamEvent::ToolResult {
+            payload: serde_json::json!({"tool": "browser_snapshot", "ok": true})
         }
     );
 }

@@ -74,12 +74,27 @@ flowchart TD
    - **lessicale** FTS5/bm25 via `facade.search_memories(...)` filtrato per policy, su
      `open_loop | goal | decision | fact | preference`, statuses `Confirmed + Candidate`
      (`main.rs:12770`);
-   - **semantico** denso: embedding della query (off-lock) → coseno su `list_embeddings`
-     con floor rilassato `sim >= 0.5` e top-k (`main.rs:12794`).
+   - **semantico** denso: embedding della query (off-lock) → `MemoryFacade::search_embeddings`
+     (contratto `MemoryVectorIndex`) con floor rilassato `sim >= 0.5` e top-k. La prima
+     implementazione runtime è `MemoryVectorIndexCache`, costruita dagli embedding SQLite
+     esistenti e cacheata per scope dentro `MemoryFacade`; con le feature default usa
+     `UsearchMemoryVectorIndex` (coseno F32), mentre `ExactMemoryVectorIndex` resta il
+     fallback compilabile con `--no-default-features`. `upsert_embedding` aggiorna la cache
+     se già calda. È una proiezione derivata e sostituibile, non una seconda memoria.
    I due rank si fondono con **RRF (K = 60)** + boost di **importanza** (`0.012 *
    importance`) + **recency** (decay esponenziale ~30 giorni, `0.008 * exp(-age/30)`) in
    `hybrid_memory_score` (`main.rs:12706`). In testa, se pertinente, vengono inserite righe
    di stato workflow / provenienza artefatto (`main.rs:12846`). Cap 10 righe.
+   La query embedding e' bounded: prima passa da una cache in memoria LRU/TTL keyed su
+   endpoint, modello, workspace e query normalizzata; poi viene calcolata con timeout
+   (`HOMUN_MEMORY_QUERY_EMBED_TIMEOUT_MS`, default 700 ms). Se l'embed fallisce o supera
+   il budget, il turno degrada a FTS + briefing sempre-attivo invece di bloccarsi.
+   In debug (`HOMUN_DEBUG=1`) la recall emette una riga redatta `memory recall:` con
+   tempi e cardinalita' del percorso caldo (`lock_wait_ms`, `fts_ms`,
+   `query_embedding_ms`, `query_embedding_cache_hit`, `query_embedding_timed_out`,
+   `vector_scan_ms`, `graph_context_ms`, candidate count e `degraded`). La riga non
+   contiene il prompt ne' testo di memoria: serve a misurare il costo reale e a guidare
+   l'introduzione dell'indice vettoriale.
 2. **Briefing sempre-attivo** — separato dal RAG per-prompt, raggiunge il modello **ogni
    turno**:
    - `gather_profile_memory` (`main.rs:2302`) via `context_pack`: identità + preferenze
@@ -145,6 +160,13 @@ parallelo che diventi una seconda verità semantica. Ogni output/cache esterna (
 wiki markdown, read-model operativi) resta **derivata** e deve **convergere** sullo store
 canonico (`entities` / `relations` / `memories`).
 
+**Confine Vault (2026-06-29).** Il Vault è separato dalla memoria: dati critici come
+carte, CVV/CV2, codice fiscale, targhe, salute e credenziali non devono entrare in
+memoria in chiaro. `crates/memory/src/redaction.rs` chiama il classifier di
+`local-first-vault` prima di persistere/esporre testo, sostituendo i valori con
+placeholder `VAULT:*`. Il valore reale vive dietro `SecretRef`/Vault e deve essere
+richiesto con tool minimizzati e auditati. Vedi [vault.md](vault.md).
+
 ## Divergenze / debolezze
 
 - **`contact_relationships` / `contacts` / `contact_identities`** vivono nel DB della chat
@@ -159,6 +181,11 @@ canonico (`entities` / `relations` / `memories`).
 - **Embedding parziali storici**: i vettori venivano scritti lazy → recall semantico
   copriva una frazione. `spawn_embedding_catchup` colma il gap a regime, ma resta dipendente
   dall'endpoint di embed.
+- **Vettoriale default `usearch`, dietro contratto**: la recall non legge più direttamente
+  `list_embeddings` dal gateway; passa da `MemoryFacade::search_embeddings` e dal trait
+  `MemoryVectorIndex`. Oggi il backend default è `UsearchMemoryVectorIndex` via feature
+  default `usearch-index`, cacheato per workspace come proiezione derivata dagli embedding
+  canonici SQLite. `ExactMemoryVectorIndex` resta fallback con `--no-default-features`.
 - **Consolidamento off di default** (`HOMUN_AUTO_CONSOLIDATE_HOURS=0`): senza tick attivo la
   promozione `Candidate→Confirmed` e il dedup avvengono solo lungo le altre operazioni.
 - **Provenienza / catena causale decisione→artefatto→codice→esito**: prevista, oggi parziale.
@@ -178,7 +205,9 @@ canonico (`entities` / `relations` / `memories`).
 - `crates/memory/src/types.rs` — `MemoryRecord` (`:95`), `MemoryStatus` (`:73`),
   `MemoryEntity` (`:117`).
 - `crates/memory/src/store.rs` — schema SQLite (tutte le tabelle), `search_memory_refs`,
-  `search_code_entities`.
+  `search_code_entities`, `search_embeddings`.
+- `crates/memory/src/vector_index.rs` — contratto `MemoryVectorIndex`, `VectorHit`, backend
+  exact derivato dagli embedding SQLite e backend opzionale `usearch-index`.
 - `crates/memory/src/{graph,graphify,wiki,wiki_sync,search,policy,lifecycle}.rs` — grafo,
   adapter Graphify, proiezione/sync markdown, recall, policy, ciclo di vita.
 - `crates/desktop-gateway/src/main.rs` — orchestrazione del ciclo per-turno:

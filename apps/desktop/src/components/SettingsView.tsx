@@ -14,7 +14,9 @@ import {
   EyeOff,
   FileText,
   Folder,
+  LifeBuoy,
   MonitorPlay,
+  Pencil,
   Play,
   Plus,
   RefreshCw,
@@ -58,6 +60,7 @@ import {
   type InstalledPluginPackagesView,
   type PluginPackageUpdatesView,
   type TrustedPluginPublicKeysView,
+  type VaultRecordSummary,
   type LanguageInfo,
   type LlmConcurrencyView,
   type ProviderModelView,
@@ -103,6 +106,7 @@ import {
   IS_DESKTOP,
   getAppVersion,
   checkDesktopUpdate,
+  createFeedbackBundle,
   installDesktopUpdate,
   onDesktopUpdateProgress,
   openDesktopUpdateDownload,
@@ -141,6 +145,7 @@ const SECTION_TITLES: Record<SettingsSectionId, string> = {
   appearance: "settings.appearance",
   runtime: "settings.runtime",
   privacy: "settings.privacy",
+  vault: "settings.vault",
   memory: "nav.memory",
   artifacts: "settings.artifacts",
   contacts: "nav.contacts",
@@ -215,6 +220,7 @@ export function SettingsView({ section, sub, onPluginsChanged }: SettingsViewPro
           />
         )}
         {section === "privacy" && <PrivacyPane />}
+        {section === "vault" && <VaultPane />}
         {section === "memory" && <MemoryView embedded />}
         {section === "artifacts" && <ArtifactsPane />}
         {section === "contacts" && <ContactsView />}
@@ -853,6 +859,25 @@ function AboutVersionRow() {
   const [progress, setProgress] = useState(0);
   // mac (signed) auto-installs; Windows/Linux (unsigned) only get a download link.
   const [canAutoInstall, setCanAutoInstall] = useState(true);
+  const [bundling, setBundling] = useState(false);
+  const [bundlePath, setBundlePath] = useState<string | null>(null);
+  const [bundleError, setBundleError] = useState<string | null>(null);
+
+  const makeBundle = async () => {
+    setBundling(true);
+    setBundlePath(null);
+    setBundleError(null);
+    try {
+      const r = await createFeedbackBundle();
+      // This is the one action used precisely when things are already broken
+      // (down gateway, disk error), so it must never fail silently: a null
+      // (IPC threw) or {ok:false} result surfaces a localized error to the user.
+      if (r?.ok && r.path) setBundlePath(r.path);
+      else setBundleError(t("settings.feedbackError"));
+    } finally {
+      setBundling(false);
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -982,6 +1007,35 @@ function AboutVersionRow() {
         )}
 
         {error && <p className="set-hint set-hint-error">{error}</p>}
+
+        <div className="set-trow">
+          <div>
+            <div className="tt">{t("settings.feedbackTitle")}</div>
+            {/* Always show an outcome (priority: error > done > hint) so this
+                action — used when things are already broken — never leaves the
+                user without feedback. Mirrors the set-hint-error style above. */}
+            {bundleError ? (
+              <div className="td set-hint-error">{bundleError}</div>
+            ) : (
+              <div className="td">
+                {bundlePath
+                  ? t("settings.feedbackDone", { path: bundlePath })
+                  : t("settings.feedbackHint")}
+              </div>
+            )}
+          </div>
+          <button
+            type="button"
+            className="set-btn"
+            onClick={() => void makeBundle()}
+            disabled={bundling}
+          >
+            <LifeBuoy size={14} />
+            <span style={{ marginLeft: 6 }}>
+              {bundling ? t("settings.feedbackBuilding") : t("settings.feedbackButton")}
+            </span>
+          </button>
+        </div>
       </div>
     </>
   );
@@ -2227,6 +2281,638 @@ function PrivacyPane() {
         The browser still stops before logins, personal data, payments or purchases.
       </p>
     </>
+  );
+}
+
+/* --------------------------------------------------------------------- vault */
+
+function VaultPane() {
+  const { t } = useTranslation();
+  const vaultCategories = [
+    { value: "payments", label: t("settings.vaultCategoryPayments") },
+    { value: "identity", label: t("settings.vaultCategoryIdentity") },
+    { value: "health", label: t("settings.vaultCategoryHealth") },
+    { value: "vehicles", label: t("settings.vaultCategoryVehicles") },
+    { value: "credentials", label: t("settings.vaultCategoryCredentials") },
+    { value: "private_notes", label: t("settings.vaultCategoryPrivateNotes") },
+  ];
+  const [configured, setConfigured] = useState<boolean | null>(null);
+  const [currentPin, setCurrentPin] = useState("");
+  const [pin, setPin] = useState("");
+  const [pinConfirm, setPinConfirm] = useState("");
+  const [verifyPin, setVerifyPin] = useState("");
+  const [manualSecretCategory, setManualSecretCategory] = useState("private_notes");
+  const [manualSecretLabel, setManualSecretLabel] = useState("");
+  const [manualSecretValue, setManualSecretValue] = useState("");
+  const [manualSecretPin, setManualSecretPin] = useState("");
+  const [vaultTab, setVaultTab] = useState<"sensitive" | "pin">("sensitive");
+  const [vaultAddOpen, setVaultAddOpen] = useState(false);
+  const [vaultRecords, setVaultRecords] = useState<VaultRecordSummary[]>([]);
+  const [recordsLoading, setRecordsLoading] = useState(false);
+  const [editingVaultRecord, setEditingVaultRecord] = useState<VaultRecordSummary | null>(null);
+  const [editVaultCategory, setEditVaultCategory] = useState("private_notes");
+  const [editVaultLabel, setEditVaultLabel] = useState("");
+  const [editVaultPin, setEditVaultPin] = useState("");
+  const [editVaultSecretValue, setEditVaultSecretValue] = useState("");
+  const [editVaultSecretUnlocked, setEditVaultSecretUnlocked] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  function selectVaultTab(tab: "sensitive" | "pin") {
+    setVaultTab(tab);
+    setNote(null);
+    setError(null);
+  }
+
+  function startVaultRecordEdit(record: VaultRecordSummary) {
+    setEditingVaultRecord(record);
+    setEditVaultCategory(record.category);
+    setEditVaultLabel(record.label);
+    setEditVaultPin("");
+    setEditVaultSecretValue("");
+    setEditVaultSecretUnlocked(false);
+    setNote(null);
+    setError(null);
+  }
+
+  function cancelVaultRecordEdit() {
+    setEditingVaultRecord(null);
+    setEditVaultLabel("");
+    setEditVaultCategory("private_notes");
+    setEditVaultPin("");
+    setEditVaultSecretValue("");
+    setEditVaultSecretUnlocked(false);
+  }
+
+  function openVaultAddModal() {
+    setVaultAddOpen(true);
+    setNote(null);
+    setError(null);
+  }
+
+  function closeVaultAddModal() {
+    setVaultAddOpen(false);
+    setManualSecretValue("");
+    setManualSecretPin("");
+    setError(null);
+  }
+
+  async function refresh() {
+    try {
+      const status = await coreBridge.vaultPinStatus();
+      setConfigured(status.configured);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  async function refreshVaultRecords() {
+    setRecordsLoading(true);
+    try {
+      const result = await coreBridge.vaultRecords();
+      setVaultRecords(result.records);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setRecordsLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void refresh();
+    void refreshVaultRecords();
+  }, []);
+
+  async function setupPin() {
+    setError(null);
+    setNote(null);
+    if (pin !== pinConfirm) {
+      setError(t("settings.vaultPinMismatch"));
+      return;
+    }
+    if (configured && currentPin.length === 0) {
+      setError(t("settings.vaultCurrentPinRequired"));
+      return;
+    }
+    setBusy(true);
+    try {
+      const status = await coreBridge.vaultPinSetup(
+        pin,
+        configured ? currentPin : undefined,
+      );
+      setConfigured(status.configured);
+      setCurrentPin("");
+      setPin("");
+      setPinConfirm("");
+      setNote(t("settings.vaultPinConfigured"));
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function verify() {
+    setError(null);
+    setNote(null);
+    setBusy(true);
+    try {
+      const result = await coreBridge.vaultPinVerify(verifyPin);
+      setNote(result.ok ? t("settings.vaultPinVerified") : t("settings.vaultPinInvalid"));
+      setVerifyPin("");
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveManualSecret() {
+    setError(null);
+    setNote(null);
+    const label = manualSecretLabel.trim();
+    if (!configured) {
+      setError(t("settings.vaultConfigurePinFirst"));
+      return;
+    }
+    if (label.length === 0 || manualSecretValue.trim().length === 0) {
+      setError(t("settings.vaultManualRequired"));
+      return;
+    }
+    if (manualSecretPin.length === 0) {
+      setError(t("settings.vaultManualPinRequired"));
+      return;
+    }
+    setBusy(true);
+    try {
+      const result = await coreBridge.vaultProposalAccept({
+        category: manualSecretCategory,
+        label,
+        redacted_preview: `[VAULT:${manualSecretCategory}:${label}]`,
+        secret_value: manualSecretValue.trim(),
+        pin: manualSecretPin,
+      });
+      setManualSecretLabel("");
+      setManualSecretValue("");
+      setManualSecretPin("");
+      setVaultAddOpen(false);
+      await refreshVaultRecords();
+      setNote(t("settings.vaultManualSaved", { id: result.record_id }));
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deleteVaultRecord(record: VaultRecordSummary) {
+    setError(null);
+    setNote(null);
+    setBusy(true);
+    try {
+      await coreBridge.vaultRecordDelete(record.id);
+      if (editingVaultRecord?.id === record.id) {
+        cancelVaultRecordEdit();
+      }
+      await refreshVaultRecords();
+      setNote(t("settings.vaultRecordDeleted", { label: record.label }));
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveVaultRecordEdit() {
+    setError(null);
+    setNote(null);
+    if (!editingVaultRecord) return;
+    const label = editVaultLabel.trim();
+    if (label.length === 0) {
+      setError(t("settings.vaultEditRequired"));
+      return;
+    }
+    setBusy(true);
+    try {
+      const result = await coreBridge.vaultRecordUpdate(editingVaultRecord.id, {
+        category: editVaultCategory,
+        label,
+        ...(editVaultSecretUnlocked
+          ? { secret_value: editVaultSecretValue, pin: editVaultPin }
+          : {}),
+      });
+      await refreshVaultRecords();
+      cancelVaultRecordEdit();
+      setNote(t("settings.vaultRecordUpdated", { label: result.record.label }));
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function revealVaultRecordSecret() {
+    setError(null);
+    setNote(null);
+    if (!editingVaultRecord) return;
+    if (editVaultPin.length === 0) {
+      setError(t("settings.vaultManualPinRequired"));
+      return;
+    }
+    setBusy(true);
+    try {
+      const result = await coreBridge.vaultRecordReveal(editingVaultRecord.id, editVaultPin);
+      setEditVaultSecretValue(result.secret_value);
+      setEditVaultSecretUnlocked(true);
+      setNote(t("settings.vaultSecretUnlocked"));
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function vaultCategoryLabel(category: string) {
+    return vaultCategories.find((item) => item.value === category)?.label ?? category;
+  }
+
+  return (
+    <div className="vault-pane">
+      <div className="set-section-label">{t("settings.vault")}</div>
+      <div className="set-seg vault-tabs" role="tablist" aria-label={t("settings.vault")}>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={vaultTab === "sensitive"}
+          className={`set-seg-item ${vaultTab === "sensitive" ? "active" : ""}`}
+          onClick={() => selectVaultTab("sensitive")}
+        >
+          {t("settings.vaultSensitiveDataTab")}
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={vaultTab === "pin"}
+          className={`set-seg-item ${vaultTab === "pin" ? "active" : ""}`}
+          onClick={() => selectVaultTab("pin")}
+        >
+          {t("settings.vaultPinTab")}
+        </button>
+      </div>
+
+      {vaultTab === "pin" && (
+        <div className="set-card" role="tabpanel">
+          <div className="set-card-top">
+            <span className="set-card-name">{t("settings.vaultLocalPin")}</span>
+            <span className={`set-badge ${configured ? "green" : "muted"}`}>
+              {configured == null
+                ? t("settings.vaultChecking")
+                : configured
+                  ? t("settings.vaultConfigured")
+                  : t("settings.vaultNotConfigured")}
+            </span>
+          </div>
+          <p className="set-hint">
+            {t("settings.vaultPinHint")}
+          </p>
+          <div className="set-card-divider" />
+          <div className="set-rows">
+            <div className="set-row">
+              <div>
+                <div className="rk">
+                  {configured ? t("settings.vaultChangePin") : t("settings.vaultNewPin")}
+                </div>
+                <div className="rv">
+                  {configured
+                    ? t("settings.vaultChangePinDesc")
+                    : t("settings.vaultNewPinDesc")}
+                </div>
+              </div>
+              <div style={{ display: "grid", gap: 8, minWidth: 220 }}>
+                {configured && (
+                  <input
+                    className="set-input"
+                    inputMode="numeric"
+                    type="password"
+                    value={currentPin}
+                    placeholder={t("settings.vaultCurrentPin")}
+                    onChange={(event) => setCurrentPin(event.target.value)}
+                  />
+                )}
+                <input
+                  className="set-input"
+                  inputMode="numeric"
+                  type="password"
+                  value={pin}
+                  placeholder={t("settings.vaultPinPlaceholder")}
+                  onChange={(event) => setPin(event.target.value)}
+                />
+                <input
+                  className="set-input"
+                  inputMode="numeric"
+                  type="password"
+                  value={pinConfirm}
+                  placeholder={t("settings.vaultConfirmPin")}
+                  onChange={(event) => setPinConfirm(event.target.value)}
+                />
+                <button
+                  className="set-btn primary"
+                  type="button"
+                  disabled={
+                    busy ||
+                    pin.length === 0 ||
+                    pinConfirm.length === 0 ||
+                    (configured === true && currentPin.length === 0)
+                  }
+                  onClick={() => void setupPin()}
+                >
+                  {configured ? t("settings.vaultChangePin") : t("settings.vaultSavePin")}
+                </button>
+              </div>
+            </div>
+            <div className="set-row">
+              <div>
+                <div className="rk">{t("settings.vaultVerifyPin")}</div>
+                <div className="rv">{t("settings.vaultVerifyPinDesc")}</div>
+              </div>
+              <div style={{ display: "flex", gap: 8, minWidth: 260 }}>
+                <input
+                  className="set-input"
+                  inputMode="numeric"
+                  type="password"
+                  value={verifyPin}
+                  placeholder={t("settings.vaultPinPlaceholder")}
+                  onChange={(event) => setVerifyPin(event.target.value)}
+                />
+                <button
+                  className="set-btn"
+                  type="button"
+                  disabled={busy || verifyPin.length === 0}
+                  onClick={() => void verify()}
+                >
+                  {t("settings.vaultVerify")}
+                </button>
+              </div>
+            </div>
+          </div>
+          {note && <p className="set-hint">{note}</p>}
+          {error && <p className="cmp-confirm-err">{error}</p>}
+        </div>
+      )}
+      {vaultTab === "sensitive" && (
+        <>
+          <div className="set-card" role="tabpanel">
+            <div className="set-card-top">
+              <span className="set-card-name">{t("settings.vaultSavedRecords")}</span>
+              <div className="vault-toolbar-actions">
+                <button
+                  className="set-btn primary"
+                  type="button"
+                  onClick={openVaultAddModal}
+                >
+                  <Plus size={14} />
+                  {t("common.add")}
+                </button>
+                <button
+                  className="set-btn"
+                  type="button"
+                  disabled={recordsLoading}
+                  onClick={() => void refreshVaultRecords()}
+                >
+                  {t("settings.refresh")}
+                </button>
+              </div>
+            </div>
+            <p className="set-hint">
+              {t("settings.vaultSaveSensitiveHint")}
+            </p>
+            <div className="set-card-divider" />
+            <div className="vault-record-list">
+              {recordsLoading && vaultRecords.length === 0 && (
+                <p className="set-hint">{t("settings.loadingShort")}</p>
+              )}
+              {!recordsLoading && vaultRecords.length === 0 && (
+                <p className="set-hint">{t("settings.vaultNoRecords")}</p>
+              )}
+              {vaultRecords.map((record) => {
+                const editing = editingVaultRecord?.id === record.id;
+                return (
+                  <div className="vault-record-row" key={record.id}>
+                    <div>
+                      <div className="vault-record-title">{record.label}</div>
+                      <div className="vault-record-meta">
+                        {vaultCategoryLabel(record.category)} · {record.redacted_preview}
+                      </div>
+                      {editing && (
+                        <div className="vault-record-edit">
+                          <select
+                            className="set-input"
+                            value={editVaultCategory}
+                            aria-label={t("settings.vaultEditCategory")}
+                            onChange={(event) => setEditVaultCategory(event.target.value)}
+                          >
+                            {vaultCategories.map((category) => (
+                              <option key={category.value} value={category.value}>
+                                {category.label}
+                              </option>
+                            ))}
+                          </select>
+                          <input
+                            className="set-input"
+                            value={editVaultLabel}
+                            aria-label={t("settings.vaultEditLabel")}
+                            onChange={(event) => setEditVaultLabel(event.target.value)}
+                          />
+                          <input
+                            className="set-input"
+                            inputMode="numeric"
+                            type="password"
+                            value={editVaultPin}
+                            placeholder={t("settings.vaultPinPlaceholder")}
+                            aria-label={t("settings.vaultEditPin")}
+                            onChange={(event) => {
+                              setEditVaultPin(event.target.value);
+                              setEditVaultSecretUnlocked(false);
+                              setEditVaultSecretValue("");
+                            }}
+                          />
+                          <button
+                            className="set-btn"
+                            type="button"
+                            disabled={busy || editVaultPin.length === 0}
+                            onClick={() => void revealVaultRecordSecret()}
+                          >
+                            {t("settings.vaultUnlockValue")}
+                          </button>
+                          {editVaultSecretUnlocked && (
+                            <textarea
+                              className="set-input vault-secret-edit"
+                              value={editVaultSecretValue}
+                              rows={3}
+                              aria-label={t("settings.vaultSecretValue")}
+                              onChange={(event) => setEditVaultSecretValue(event.target.value)}
+                            />
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    <div className="vault-record-actions">
+                      {editing ? (
+                        <>
+                          <button
+                            className="set-btn"
+                            type="button"
+                            disabled={busy}
+                            onClick={cancelVaultRecordEdit}
+                          >
+                            {t("settings.vaultCancelEdit")}
+                          </button>
+                          <button
+                            className="set-btn primary"
+                            type="button"
+                            disabled={
+                              busy ||
+                              editVaultLabel.trim().length === 0 ||
+                              (editVaultSecretUnlocked && editVaultPin.length === 0)
+                            }
+                            onClick={() => void saveVaultRecordEdit()}
+                          >
+                            {t("settings.vaultSaveEdit")}
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          className="set-btn"
+                          type="button"
+                          disabled={busy}
+                          onClick={() => startVaultRecordEdit(record)}
+                        >
+                          <Pencil size={14} />
+                          {t("settings.vaultEdit")}
+                        </button>
+                      )}
+                      <button
+                        className="set-btn danger"
+                        type="button"
+                        disabled={busy}
+                        onClick={() => void deleteVaultRecord(record)}
+                      >
+                        <Trash2 size={14} />
+                        {t("settings.deleteData")}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            {note && <p className="set-hint">{note}</p>}
+            {error && <p className="cmp-confirm-err">{error}</p>}
+          </div>
+
+          {vaultAddOpen && (
+            <div className="set-modal-overlay" role="dialog" aria-modal="true" aria-label={t("settings.vaultSaveSensitive")}>
+              <div className="set-modal-scrim" onClick={closeVaultAddModal} />
+              <div className="set-modal vault-add-modal">
+                <button className="set-modal-close" type="button" aria-label={t("common.close")} onClick={closeVaultAddModal}>
+                  <X size={16} />
+                </button>
+                <div className="mdl-detail-head">
+                  <div>
+                    <h3>{t("settings.vaultSaveSensitive")}</h3>
+                    <p className="mdl-detail-sub">{t("settings.vaultSaveSensitiveHint")}</p>
+                  </div>
+                  <span className="set-badge muted">{t("settings.vaultEncrypted")}</span>
+                </div>
+                <div className="set-rows vault-add-form">
+                  <div className="set-row">
+                    <div>
+                      <div className="rk">{t("settings.vaultCategory")}</div>
+                      <div className="rv">{t("settings.vaultCategoryDesc")}</div>
+                    </div>
+                    <select
+                      className="set-input"
+                      value={manualSecretCategory}
+                      onChange={(event) => setManualSecretCategory(event.target.value)}
+                    >
+                      {vaultCategories.map((category) => (
+                        <option key={category.value} value={category.value}>
+                          {category.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="set-row">
+                    <div>
+                      <div className="rk">{t("settings.vaultLabel")}</div>
+                      <div className="rv">{t("settings.vaultLabelDesc")}</div>
+                    </div>
+                    <input
+                      className="set-input"
+                      value={manualSecretLabel}
+                      placeholder={t("settings.vaultLabelPlaceholder")}
+                      onChange={(event) => setManualSecretLabel(event.target.value)}
+                    />
+                  </div>
+                  <div className="set-row">
+                    <div>
+                      <div className="rk">{t("settings.vaultValue")}</div>
+                      <div className="rv">{t("settings.vaultValueDesc")}</div>
+                    </div>
+                    <textarea
+                      className="set-input"
+                      value={manualSecretValue}
+                      placeholder={t("settings.vaultValuePlaceholder")}
+                      rows={4}
+                      onChange={(event) => setManualSecretValue(event.target.value)}
+                    />
+                  </div>
+                  <div className="set-row">
+                    <div>
+                      <div className="rk">{t("settings.vaultLocalPin")}</div>
+                      <div className="rv">{t("settings.vaultManualPinDesc")}</div>
+                    </div>
+                    <input
+                      className="set-input"
+                      inputMode="numeric"
+                      type="password"
+                      value={manualSecretPin}
+                      placeholder={t("settings.vaultPinPlaceholder")}
+                      onChange={(event) => setManualSecretPin(event.target.value)}
+                    />
+                  </div>
+                </div>
+                <div className="vault-modal-actions">
+                  <button
+                    className="set-btn"
+                    type="button"
+                    disabled={busy}
+                    onClick={closeVaultAddModal}
+                  >
+                    {t("common.cancel")}
+                  </button>
+                  <button
+                    className="set-btn primary"
+                    type="button"
+                    disabled={
+                      busy ||
+                      !configured ||
+                      manualSecretLabel.trim().length === 0 ||
+                      manualSecretValue.trim().length === 0 ||
+                      manualSecretPin.length === 0
+                    }
+                    onClick={() => void saveManualSecret()}
+                  >
+                    {t("settings.vaultSave")}
+                  </button>
+                </div>
+                {error && <p className="cmp-confirm-err">{error}</p>}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </div>
   );
 }
 

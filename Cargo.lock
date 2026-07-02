@@ -826,6 +826,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "codespan-reporting"
+version = "0.13.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "af491d569909a7e4dee0ad7db7f5341fef5c614d5b8ec8cf765732aba3cff681"
+dependencies = [
+ "serde",
+ "termcolor",
+ "unicode-width",
+]
+
+[[package]]
 name = "color_quant"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1252,6 +1263,68 @@ version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f46882e17999c6cc590af592290432be3bce0428cb0d5f8b6715e4dc7b383eb3"
 dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
+name = "cxx"
+version = "1.0.194"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "747d8437319e3a2f43d93b341c137927ca70c0f5dabeea7a005a73665e247c7e"
+dependencies = [
+ "cc",
+ "cxx-build",
+ "cxxbridge-cmd",
+ "cxxbridge-flags",
+ "cxxbridge-macro",
+ "foldhash 0.2.0",
+ "link-cplusplus",
+]
+
+[[package]]
+name = "cxx-build"
+version = "1.0.194"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b0f4697d190a142477b16aef7da8a99bfdc41e7e8b1687583c0d23a79c7afc1e"
+dependencies = [
+ "cc",
+ "codespan-reporting",
+ "indexmap 2.14.0",
+ "proc-macro2",
+ "quote",
+ "scratch",
+ "syn 2.0.117",
+]
+
+[[package]]
+name = "cxxbridge-cmd"
+version = "1.0.194"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d0956799fa8678d4c50eed028f2de1c0552ae183c76e976cf7ca8c4e36a7c328"
+dependencies = [
+ "clap",
+ "codespan-reporting",
+ "indexmap 2.14.0",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
+name = "cxxbridge-flags"
+version = "1.0.194"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "23384a836ab4f0ad98ace7e3955ad2de39de42378ab487dc28d3990392cb283a"
+
+[[package]]
+name = "cxxbridge-macro"
+version = "1.0.194"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e6acc6b5822b9526adfb4fc377b67128fdd60aac757cc4a741a6278603f763cf"
+dependencies = [
+ "indexmap 2.14.0",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -1716,6 +1789,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a1e6a265c649f3f5979b601d26f1d05ada116434c87741c9493cb56218f76cbc"
 dependencies = [
  "heck",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
+name = "enumflags2"
+version = "0.7.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1027f7680c853e056ebcec683615fb6fbbc07dbaa13b4d5d9442b146ded4ecef"
+dependencies = [
+ "enumflags2_derive",
+]
+
+[[package]]
+name = "enumflags2_derive"
+version = "0.7.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "67c78a4d8fdf9953a5c9d458f9efe940fd97a0cab0941c075a813ac594733827"
+dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -3119,6 +3212,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "landlock"
+version = "0.4.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "635839550ae8b90d9fd2571460a6645dc0aec070225956ca7a2831ed31d2795d"
+dependencies = [
+ "enumflags2",
+ "libc",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "lazy_static"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3186,6 +3290,15 @@ dependencies = [
  "cc",
  "pkg-config",
  "vcpkg",
+]
+
+[[package]]
+name = "link-cplusplus"
+version = "1.0.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f78c730aaa7d0b9336a299029ea49f9ee53b0ed06e9202e8cb7db9bae7b8c82"
+dependencies = [
+ "cc",
 ]
 
 [[package]]
@@ -3268,6 +3381,7 @@ dependencies = [
  "futures-util",
  "image",
  "jiff",
+ "landlock",
  "libc",
  "local-first-browser-automation",
  "local-first-capabilities",
@@ -3280,6 +3394,7 @@ dependencies = [
  "local-first-secrets",
  "local-first-subagents",
  "local-first-task-runtime",
+ "local-first-vault",
  "pdfium-render",
  "printpdf",
  "pulldown-cmark",
@@ -3291,6 +3406,7 @@ dependencies = [
  "time",
  "tokio",
  "tokio-tungstenite 0.29.0",
+ "tower",
  "tower-http",
  "uuid 1.23.1",
  "zip 2.4.2",
@@ -3326,11 +3442,13 @@ version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "chacha20poly1305",
+ "local-first-vault",
  "rand 0.8.6",
  "rusqlite",
  "serde",
  "serde_json",
  "sha2",
+ "usearch",
  "uuid 1.23.1",
 ]
 
@@ -3422,6 +3540,20 @@ dependencies = [
  "serde_json",
  "time",
  "uuid 1.23.1",
+]
+
+[[package]]
+name = "local-first-vault"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "chacha20poly1305",
+ "local-first-secrets",
+ "rand 0.8.6",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2",
 ]
 
 [[package]]
@@ -5620,6 +5752,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "scratch"
+version = "1.0.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d68f2ec51b097e4c1a75b681a8bec621909b5e91f15bb7b840c4f2f7b01148b2"
+
+[[package]]
 name = "security-framework"
 version = "3.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7117,6 +7255,16 @@ name = "urlencoding"
 version = "2.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "daf8dba3b7eb870caf1ddeed7bc9d2a049f3cfdfae7cb521b087cc33ae4c49da"
+
+[[package]]
+name = "usearch"
+version = "2.25.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c08f764417012cf6aea6d1380ef9ea8712c5795a938b726fc67b9bf7ea8824b"
+dependencies = [
+ "cxx",
+ "cxx-build",
+]
 
 [[package]]
 name = "utf-8"

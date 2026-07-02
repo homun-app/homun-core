@@ -23,6 +23,10 @@ pub fn redact_json(value: &serde_json::Value) -> serde_json::Value {
 }
 
 pub fn redact_text(text: &str) -> String {
+    let vault = local_first_vault::classify_sensitive_text(text);
+    if vault.has_critical {
+        return vault.redacted_text;
+    }
     let lowered = text.to_ascii_lowercase();
     if lowered.contains("api key")
         || lowered.contains("access token")
@@ -42,7 +46,10 @@ pub fn contains_secret(value: &serde_json::Value) -> bool {
             .iter()
             .any(|(key, value)| is_secret_key(key) || contains_secret(value)),
         serde_json::Value::Array(values) => values.iter().any(contains_secret),
-        serde_json::Value::String(text) => redact_text(text) == "[REDACTED]",
+        serde_json::Value::String(text) => {
+            local_first_vault::classify_sensitive_text(text).has_critical
+                || redact_text(text) == "[REDACTED]"
+        }
         _ => false,
     }
 }

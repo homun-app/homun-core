@@ -63,7 +63,7 @@ import {
   WandSparkles,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import ForceGraph2D from "react-force-graph-2d";
 import type {
@@ -80,6 +80,7 @@ import {
   type ActiveModelInfo,
   type ChatAttachmentInput,
   type CoreBranchPoint,
+  type CoreChatStreamEvent,
   type CoreComputerSessionSnapshot,
   type CorePromptSubmissionResult,
   type CoreTaskQueueSnapshot,
@@ -93,6 +94,7 @@ import {
   type MemoryGraphNode,
   type MemoryHygieneSuggestion,
   type MemoryWikiPage,
+  type PaymentApprovalSnapshot,
   type ProjectSubdir,
   modelIsCloud,
   type ProviderModelsGroup,
@@ -106,13 +108,37 @@ import {
 import { captureAppScreenshot, fileLocalPathFromBridge, IS_DESKTOP } from "../lib/gatewayConfig";
 import { copyText } from "../lib/clipboard";
 import { connectComposioToolkit } from "../lib/composioConnect";
+import {
+  STRUCTURED_MARKER_DELTA_RE,
+  COMPOSIO_CONFIRM_RE,
+  MCP_CONFIRM_RE,
+  FS_AUTHORIZE_RE,
+  SANDBOX_ESCALATE_RE,
+  CONNECT_SUGGEST_RE,
+  COMPOSIO_DONE_RE,
+  COMPOSIO_RECONNECT_RE,
+  VAULT_PROPOSE_RE,
+  VAULT_REVEAL_RE,
+  PAYMENT_APPROVAL_RE,
+  CHOICES_RE,
+  PLAN_PROPOSE_RE,
+  GOAL_PROPOSE_RE,
+  UNCLOSED_PROPOSE_RE,
+  COMPOSIO_MARKERS_RE,
+  PROPOSE_MARKERS_VISIBLE_RE,
+  ACTIVITY_RE,
+  ARTIFACT_RE,
+  PLAN_RE,
+} from "../lib/markers";
 import { MarkdownEditor } from "./MarkdownEditor";
 import { RichMessage } from "./RichMessage";
 import { CodeView, DiffView, diffStats } from "./CodeView";
 import { ChatComputerPanel } from "./ChatComputerPanel";
+import { ProjectContextPanel } from "./ProjectContextPanel";
 import type {
   ChatMessage,
   ChatMessageMetrics,
+  ChatEventPart,
   ChatAttachment,
   ChatThread,
   ComputerSession,
@@ -120,6 +146,7 @@ import type {
   ApprovelItem,
   RuntimeHealth,
   TaskItem,
+  DiffEventPayload,
 } from "../types";
 
 const CHAT_VIEW_SESSION_ID =
@@ -175,7 +202,59 @@ interface ReplyContext {
 
 type MessageFeedback = NonNullable<ChatMessage["feedback"]>;
 type MessageContentKind = "user" | "system" | "text" | "code" | "diagram";
-type ChatStreamPhase = "accepted" | "thinking" | "writing";
+type ChatStreamPhase = "accepted" | "thinking" | "writing" | "recalling";
+
+function chatEventPartFromStream(event: CoreChatStreamEvent): ChatEventPart | null {
+  switch (event.type) {
+    case "reasoning":
+      return { type: "reasoning", text: event.text };
+    case "activity":
+      return { type: "activity", text: event.text };
+    case "plan_update":
+      return { type: "plan_update", markdown: event.markdown };
+    case "choice_prompt":
+    case "vault_propose":
+    case "vault_reveal":
+    case "payment_approval":
+    case "tool_result":
+    case "recall":
+    case "diff":
+      return { type: event.type, payload: event.payload } as ChatEventPart;
+    default:
+      return null;
+  }
+}
+
+function normalizeChatEventParts(parts: unknown[] | undefined): ChatEventPart[] {
+  if (!Array.isArray(parts)) return [];
+  return parts.flatMap((part): ChatEventPart[] => {
+    if (!part || typeof part !== "object") return [];
+    const item = part as Record<string, unknown>;
+    switch (item.type) {
+      case "reasoning":
+      case "activity":
+        return typeof item.text === "string" ? [{ type: item.type, text: item.text }] : [];
+      case "plan_update":
+        return typeof item.markdown === "string"
+          ? [{ type: "plan_update", markdown: item.markdown }]
+          : [];
+      case "choice_prompt":
+      case "vault_propose":
+      case "vault_reveal":
+      case "payment_approval":
+      case "tool_result":
+      case "recall":
+      case "diff":
+        return [{ type: item.type, payload: item.payload } as ChatEventPart];
+      default:
+        return [];
+    }
+  });
+}
+
+function shouldDropStructuredMarkerDelta(delta: string) {
+  return STRUCTURED_MARKER_DELTA_RE.test(delta.trim());
+}
 
 interface ChatStreamStatus {
   requestId: string;
@@ -320,10 +399,16 @@ export function ChatView({
   }, [optimisticMessages, messages]);
   // All artifacts generated in this conversation (from persisted ‹‹ARTIFACT››
   // markers) — drives the Artifacts workspace panel.
+  // ADR 0022 (Piano UI C2): dipende dai messaggi PERSISTED (`messages`), NON da
+  // `threadMessages` (che include optimisticMessages e cambia ogni frame di stream).
+  // Così questo memo NON ricalcola durante lo streaming del messaggio corrente —
+  // il vero riduttore di jank su thread lunghi. Gli artifact del messaggio streaming
+  // si vedono quando viene persisted.
   const conversationArtifacts = useMemo(() => {
     const seen = new Set<string>();
     const out: ParsedArtifact[] = [];
-    for (const message of threadMessages) {
+    for (const message of messages) {
+      if (message.role === "assistant" && message.id.endsWith("_ready")) continue;
       for (const artifact of parseArtifacts(message.text ?? "")) {
         if (!seen.has(artifact.name)) {
           seen.add(artifact.name);
@@ -332,7 +417,7 @@ export function ChatView({
       }
     }
     return out;
-  }, [threadMessages]);
+  }, [messages]);
   const workbenchArtifacts = useMemo(() => {
     const seen = new Set<string>();
     const out: ParsedArtifact[] = [];
@@ -358,8 +443,11 @@ export function ChatView({
   }, [conversationArtifacts, memoryArtifacts, thread.threadId]);
   // The agent's operational plan for this conversation (latest update_plan), shown
   // in the Workbench "Piano" panel.
-  const conversationPlan = useMemo(() => latestPlanMarkdown(threadMessages), [threadMessages]);
-  const conversationActivity = useMemo(() => latestActivitySteps(threadMessages), [threadMessages]);
+  // ADR 0022 (Piano UI C2): plan/activity derivati dai messaggi PERSISTED, non da
+  // threadMessages (che cambia ogni frame di stream). Il plan/activity del messaggio
+  // streaming si vede quando viene persisted.
+  const conversationPlan = useMemo(() => latestPlanMarkdown(messages), [messages]);
+  const conversationActivity = useMemo(() => latestActivitySteps(messages), [messages]);
   const workspacePlanSteps = useMemo(
     () => (conversationPlan ? parsePlanSteps(conversationPlan) : []),
     [conversationPlan],
@@ -369,7 +457,8 @@ export function ChatView({
   const uploadedFiles = useMemo(() => {
     const seen = new Set<string>();
     const out: ChatAttachment[] = [];
-    for (const message of threadMessages) {
+    for (const message of messages) {
+      if (message.role === "assistant" && message.id.endsWith("_ready")) continue;
       for (const attachment of message.attachments ?? []) {
         if (!seen.has(attachment.title)) {
           seen.add(attachment.title);
@@ -378,7 +467,7 @@ export function ChatView({
       }
     }
     return out;
-  }, [threadMessages]);
+  }, [messages]);
   const activeApprovels = approvals.filter((approval) =>
     approval.requestedBy.includes(computerSessionId),
   );
@@ -578,6 +667,7 @@ export function ChatView({
       metadata: "Local model",
     };
     let streamedText = "";
+    let streamEventParts: ChatEventPart[] = [];
     let streamChunks = 0;
     const streamStartedAt = performance.now();
     let unlistenStream: (() => void) | undefined;
@@ -589,6 +679,7 @@ export function ChatView({
         {
           ...streamingMessage,
           text: streamedText,
+          eventParts: streamEventParts,
         },
       ]);
       afterStreamingFramePaint();
@@ -624,6 +715,7 @@ export function ChatView({
         {
           ...streamingMessage,
           text: streamedText || "Answer interrupted.",
+          eventParts: streamEventParts,
           metadata: "Interrotta localmente",
         },
       ];
@@ -650,9 +742,31 @@ export function ChatView({
         userText: userVisibleText,
         assistantMessageId: streamingMessage.id,
       });
-      unlistenStream = await coreBridge.listenChatStreamDelta((payload) => {
+      unlistenStream = await coreBridge.listenChatStreamEvent((payload) => {
         if (payload.request_id !== requestId) return;
         if (cancelledStreamIdsRef.current.has(requestId)) return;
+        const part = chatEventPartFromStream(payload);
+        if (part) {
+          // ADR 0022 (Piano UI A2): quando arriva un evento recall, mostra la fase
+          // "Sto controllando la memoria…" (precedenza su thinking/writing).
+          if (part.type === "recall") {
+            const count = part.payload?.hits?.length ?? 0;
+            setStreamStatus({
+              requestId,
+              phase: "recalling",
+              title: t("chat.recalling"),
+              detail:
+                count > 0
+                  ? t("chat.recallingHits", { count })
+                  : t("chat.recallingNoHits"),
+            });
+          }
+          streamEventParts = [...streamEventParts, part];
+          scheduleStreamingMessage();
+          return;
+        }
+        if (payload.type !== "delta") return;
+        if (shouldDropStructuredMarkerDelta(payload.delta)) return;
         const firstDelta = streamedText.length === 0;
         streamChunks += 1;
         streamedText += payload.delta;
@@ -692,6 +806,7 @@ export function ChatView({
         return;
       }
       streamedText = result.assistant_message.text || streamedText;
+      streamEventParts = [];
       await persistAutoTitleForCompletedTurn(
         promptMessages,
         streamedText,
@@ -831,10 +946,18 @@ export function ChatView({
     };
     const promptMessages = [...messages, userMessage];
     let streamedText = "";
+    let streamEventParts: ChatEventPart[] = [];
     let unlistenStream: (() => void) | undefined;
     const flushStreamingMessage = () => {
       streamingFrameRef.current = null;
-      setOptimisticMessages([...promptMessages, { ...streamingMessage, text: streamedText }]);
+      setOptimisticMessages([
+        ...promptMessages,
+        {
+          ...streamingMessage,
+          text: streamedText,
+          eventParts: streamEventParts,
+        },
+      ]);
       afterStreamingFramePaint();
     };
     const scheduleStreamingMessage = () => {
@@ -855,8 +978,16 @@ export function ChatView({
       detail: t("chat.reattachingGeneration"),
     });
     try {
-      unlistenStream = await coreBridge.listenChatStreamDelta((payload) => {
+      unlistenStream = await coreBridge.listenChatStreamEvent((payload) => {
         if (payload.request_id !== requestId) return;
+        const part = chatEventPartFromStream(payload);
+        if (part) {
+          streamEventParts = [...streamEventParts, part];
+          scheduleStreamingMessage();
+          return;
+        }
+        if (payload.type !== "delta") return;
+        if (shouldDropStructuredMarkerDelta(payload.delta)) return;
         streamedText += payload.delta;
         setStreamHasVisibleText(true);
         scheduleStreamingMessage();
@@ -870,6 +1001,7 @@ export function ChatView({
         options?.commitResult ?? true,
       );
       streamedText = result.assistant_message.text || streamedText;
+      streamEventParts = [];
       if (options?.commitResult !== false) {
         await persistAutoTitleForCompletedTurn(
           promptMessages,
@@ -1120,12 +1252,19 @@ export function ChatView({
   ) {
     const requestId = `chat_stream_regen_${Date.now()}_${Math.random().toString(36).slice(2)}`;
     let streamedText = "";
+    let streamEventParts: ChatEventPart[] = [];
     let unlistenStream: (() => void) | undefined;
     const flushStreamingMessage = () => {
       streamingFrameRef.current = null;
       setOptimisticMessages(
         baseMessages.map((item) =>
-          item.id === message.id ? { ...item, text: streamedText } : item,
+          item.id === message.id
+            ? {
+                ...item,
+                text: streamedText,
+                eventParts: streamEventParts,
+              }
+            : item,
         ),
       );
       afterStreamingFramePaint();
@@ -1162,9 +1301,17 @@ export function ChatView({
       detail: t("chat.generatingAlternativeVariant"),
     });
     cancelStreamingRequestRef.current = cancelStreamingRequest;
-    unlistenStream = await coreBridge.listenChatStreamDelta((payload) => {
+    unlistenStream = await coreBridge.listenChatStreamEvent((payload) => {
       if (payload.request_id !== requestId) return;
       if (cancelledStreamIdsRef.current.has(requestId)) return;
+      const part = chatEventPartFromStream(payload);
+      if (part) {
+        streamEventParts = [...streamEventParts, part];
+        scheduleStreamingMessage();
+        return;
+      }
+      if (payload.type !== "delta") return;
+      if (shouldDropStructuredMarkerDelta(payload.delta)) return;
       streamedText += payload.delta;
       setStreamHasVisibleText(true);
       scheduleStreamingMessage();
@@ -1423,13 +1570,20 @@ export function ChatView({
   ) {
     const requestId = `chat_stream_continue_${Date.now()}_${Math.random().toString(36).slice(2)}`;
     let streamedText = message.text;
+    let streamEventParts: ChatEventPart[] = message.eventParts ?? [];
     let unlistenStream: (() => void) | undefined;
     let cancelledLocally = false;
     const flushStreamingMessage = () => {
       streamingFrameRef.current = null;
       setOptimisticMessages(
         baseMessages.map((item) =>
-          item.id === message.id ? { ...item, text: streamedText } : item,
+          item.id === message.id
+            ? {
+                ...item,
+                text: streamedText,
+                eventParts: streamEventParts,
+              }
+            : item,
         ),
       );
       afterStreamingFramePaint();
@@ -1458,9 +1612,17 @@ export function ChatView({
       detail: t("chat.generationLimitReached", { attempt }),
     });
     cancelStreamingRequestRef.current = cancelStreamingRequest;
-    unlistenStream = await coreBridge.listenChatStreamDelta((payload) => {
+    unlistenStream = await coreBridge.listenChatStreamEvent((payload) => {
       if (payload.request_id !== requestId) return;
       if (cancelledStreamIdsRef.current.has(requestId)) return;
+      const part = chatEventPartFromStream(payload);
+      if (part) {
+        streamEventParts = [...streamEventParts, part];
+        scheduleStreamingMessage();
+        return;
+      }
+      if (payload.type !== "delta") return;
+      if (shouldDropStructuredMarkerDelta(payload.delta)) return;
       const firstDelta = streamedText.length === message.text.length;
       streamedText += payload.delta;
       if (firstDelta) {
@@ -1488,6 +1650,7 @@ export function ChatView({
         return baseMessages;
       }
       streamedText = result.assistant_message.text || streamedText;
+      streamEventParts = [];
       cancelScheduledStreamingFrame();
       const updatedMessage = chatMessageFromAssistantResult(result, streamedText);
       const nextMessages = baseMessages.map((item) =>
@@ -1748,26 +1911,32 @@ export function ChatView({
       </header>
 
       <div className="chat-status-stack" aria-label="Live workspace status">
-        <WorkspaceIsland
-          activitySteps={conversationActivity}
-          artifacts={workbenchArtifacts}
-          computerActivity={computerLiveStatus.activity}
-          computerLive={computerLiveStatus.active}
-          fileCount={uploadedFiles.length}
-          goalCount={projectGoalCount}
-          memoryCount={projectMemoryCount}
-          planSteps={workspacePlanSteps}
-          streaming={promptSubmitting || Boolean(streamingAssistantId)}
-          status={streamStatus}
-          threadHasMessages={threadMessages.length > 0}
-          onCaptureScreenshot={IS_DESKTOP ? () => void captureScreenshot() : undefined}
-          onExportChat={() => void exportChatMarkdown()}
-          onOpenWorkbench={(tab) => {
-            setArtifactsInitial(null);
-            setWorkbenchTab(tab);
-            setArtifactsOpen(true);
-          }}
-        />
+        {/* ADR 0022: un unico pannello unificato — ProjectContextPanel (solo progetti)
+            + WorkspaceIsland fusi visivamente in una sola card contigua, senza gap. */}
+        <div className={`unified-status-panel${thread.workspaceId ? " has-project-context" : ""}`}>
+          {thread.workspaceId && <ProjectContextPanel threadId={thread.threadId} />}
+          <WorkspaceIsland
+            threadId={thread.threadId}
+            activitySteps={conversationActivity}
+            artifacts={workbenchArtifacts}
+            computerActivity={computerLiveStatus.activity}
+            computerLive={computerLiveStatus.active}
+            fileCount={uploadedFiles.length}
+            goalCount={projectGoalCount}
+            memoryCount={projectMemoryCount}
+            planSteps={workspacePlanSteps}
+            streaming={promptSubmitting || Boolean(streamingAssistantId)}
+            status={streamStatus}
+            threadHasMessages={threadMessages.length > 0}
+            onCaptureScreenshot={IS_DESKTOP ? () => void captureScreenshot() : undefined}
+            onExportChat={() => void exportChatMarkdown()}
+            onOpenWorkbench={(tab) => {
+              setArtifactsInitial(null);
+              setWorkbenchTab(tab);
+              setArtifactsOpen(true);
+            }}
+          />
+        </div>
         <ChatComputerPanel threadId={thread.threadId} onLiveChange={setComputerLiveStatus} />
       </div>
 
@@ -1811,6 +1980,7 @@ export function ChatView({
                   {displayMessage.text && (
                     <AssistantMessageBody
                       text={displayMessage.text}
+                      eventParts={displayMessage.eventParts}
                       streaming
                       messageId={displayMessage.id}
                       threadId={thread.threadId}
@@ -1855,6 +2025,7 @@ export function ChatView({
               ) : displayMessage.text ? (
                 <AssistantMessageBody
                   text={displayMessage.text}
+                  eventParts={displayMessage.eventParts}
                   messageId={displayMessage.id}
                   threadId={thread.threadId}
                   onOpenArtifact={(artifact) => {
@@ -2027,6 +2198,28 @@ export function ChatView({
                         </span>
                       );
                     })()}
+                    {/* ADR 0022 (Piano UI A3): memory badge — quante memorie sono
+                        state richiamate per questa risposta. Derivato dalle
+                        eventParts recall (se l'evento Recall è stato emesso). */}
+                    {(() => {
+                      const recallCount =
+                        displayMessage.eventParts
+                          ?.filter((p) => p.type === "recall")
+                          .reduce((sum, p) => sum + (p.payload?.hits?.length ?? 0), 0) ?? 0;
+                      if (recallCount === 0) return null;
+                      return (
+                        <span
+                          className="memory-recall-badge"
+                          title={displayMessage.eventParts
+                            ?.filter((p) => p.type === "recall")
+                            .flatMap((p) => p.payload?.hits ?? [])
+                            .map((h) => `• ${h.text}`)
+                            .join("\n")}
+                        >
+                          📝 {t("chat.memoryBadge", { count: recallCount })}
+                        </span>
+                      );
+                    })()}
                   </>
                 ) : (
                   visibleMessageMetadata(displayMessage.metadata) && (
@@ -2121,8 +2314,22 @@ export function ChatView({
   );
 }
 
+// ADR 0022 (Piano UI D1): activity signal = verb-tense + timer + count (non
+// spinner-only). I typing-dots restano come affiancamento visivo, ma il label
+// mostra la fase verb-tense + un timer elapsed + il detail (count per recall).
 function AssistantThinkingState({ status }: { status: ChatStreamStatus | null }) {
   const { t } = useTranslation();
+  // Timer elapsed dalla comparsa dello stato (per mostrare "thinking… 3s").
+  const [elapsed, setElapsed] = useState(0);
+  const startRef = useRef<number | null>(null);
+  useEffect(() => {
+    startRef.current = Date.now();
+    setElapsed(0);
+    const id = window.setInterval(() => {
+      if (startRef.current) setElapsed(Math.floor((Date.now() - startRef.current) / 1000));
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [status?.requestId, status?.phase]);
   return (
     <div className="assistant-thinking-state" aria-live="polite">
       <span className="typing-dots" aria-hidden="true">
@@ -2130,7 +2337,11 @@ function AssistantThinkingState({ status }: { status: ChatStreamStatus | null })
         <i />
         <i />
       </span>
-      <span className="thinking-label">{status?.title ?? t("chat.thinking")}</span>
+      <span className="thinking-label">
+        {status?.title ?? t("chat.thinking")}
+        {elapsed > 0 && <span className="thinking-elapsed"> {elapsed}s</span>}
+      </span>
+      {status?.detail && <span className="thinking-detail">{status.detail}</span>}
     </div>
   );
 }
@@ -2146,6 +2357,7 @@ function loadWorkspaceIslandMode(): WorkspaceIslandMode {
 }
 
 function WorkspaceIsland({
+  threadId,
   activitySteps,
   artifacts,
   computerActivity,
@@ -2161,6 +2373,7 @@ function WorkspaceIsland({
   onExportChat,
   onOpenWorkbench,
 }: {
+  threadId: string;
   activitySteps: string[];
   artifacts: ParsedArtifact[];
   computerActivity: string | null;
@@ -2181,6 +2394,10 @@ function WorkspaceIsland({
   const [expanded, setExpanded] = useState(() => loadWorkspaceIslandMode() === "expanded");
   const [menuOpen, setMenuOpen] = useState(false);
   const [completedExpanded, setCompletedExpanded] = useState(false);
+  // Latch: once the island has shown work this thread, keep it AROUND (collapsed) after
+  // the run instead of unmounting the moment the live state empties — so the user can
+  // review what the agent did ("it disappears and doesn't stay"). Reset per thread.
+  const [hadWorkspaceState, setHadWorkspaceState] = useState(false);
   const doneCount = planSteps.filter((step) => step.status === "done").length;
   const completedSteps = planSteps.filter((step) => step.status === "done");
   const openSteps = planSteps.filter((step) => step.status !== "done");
@@ -2198,12 +2415,22 @@ function WorkspaceIsland({
       fileCount > 0 ||
       goalCount > 0 ||
       memoryCount > 0);
+  useEffect(() => setHadWorkspaceState(false), [threadId]);
+  useEffect(() => {
+    if (hasWorkspaceState) setHadWorkspaceState(true);
+  }, [hasWorkspaceState]);
+  // Headline precedence: REAL work signals first (the running/blocked plan step,
+  // the live ‹‹ACT›› activity, the computer activity) so the task's title shows up
+  // IMMEDIATELY as the agent works — the generic phase label ("thinking"/"writing")
+  // is only a fallback for the brief moment before any concrete activity exists.
+  // Previously `status?.title` sat above the activity signals, so the island showed
+  // "thinking"/"writing" for the whole turn and the real title appeared only at the end.
   const headline =
     blockedPlan?.title ??
     runningPlan?.title ??
-    status?.title ??
     latestActivity ??
     computerActivity ??
+    status?.title ??
     (computerLive ? "Computer" : null) ??
     (artifactsCount > 0
       ? `${artifactsCount} artifact`
@@ -2275,7 +2502,7 @@ function WorkspaceIsland({
     { value: "collapsed", label: "Always collapsed" },
   ];
 
-  if (!hasWorkspaceState) return null;
+  if (!hasWorkspaceState && !hadWorkspaceState) return null;
 
   return (
     <div className={`workspace-island${expanded ? " expanded" : ""}${streaming ? " live" : ""}`}>
@@ -2554,6 +2781,7 @@ function chatMessageFromAssistantResult(
             result.assistant_message.metrics.runtime_status_before ?? undefined,
         }
       : undefined,
+    eventParts: normalizeChatEventParts(result.assistant_message.event_parts),
   };
 }
 
@@ -2584,20 +2812,29 @@ function hasCodeContent(text: string) {
 }
 
 function isLikelyIncompleteMessage(message: ChatMessage) {
-  const metrics = message.metrics;
-  if (
-    metrics &&
-    metrics.maxTokens > 0 &&
-    metrics.generationTokens >= Math.floor(metrics.maxTokens * 0.96)
-  ) {
-    return true;
-  }
   const trimmed = message.text.trim();
   if (!trimmed) return false;
+  // Structural truncation signals: an unclosed code fence, a dangling open bracket, or a
+  // numbered-list item with a bold lead-in but no body — these mean the text was genuinely cut.
   const fenceCount = (trimmed.match(/```/g) ?? []).length;
   if (fenceCount % 2 !== 0) return true;
   if (/[({[]$/.test(trimmed)) return true;
   if (/(^|\n)\s*\d+\.\s+\*\*[^*\n]*$/.test(trimmed)) return true;
+  // Near the token budget is NOT truncation on its own: a reasoning model can spend its whole
+  // budget THINKING (the ‹‹REASONING›› trace lives at the START, the answer at the END) and
+  // still finish a clean answer. Auto-continuing it then re-feeds a COMPLETE answer and the
+  // model rambles "il testo è già completo". So only treat near-max as incomplete when the text
+  // ALSO ends mid-thought — no sentence-terminating punctuation, closing fence, or table row.
+  const metrics = message.metrics;
+  const nearMax = Boolean(
+    metrics &&
+      metrics.maxTokens > 0 &&
+      metrics.generationTokens >= Math.floor(metrics.maxTokens * 0.96),
+  );
+  if (nearMax) {
+    const endsCleanly = /[.!?…»"'”’)\]`|]\s*$/u.test(trimmed);
+    return !endsCleanly;
+  }
   return false;
 }
 
@@ -3178,29 +3415,6 @@ interface ComposioPendingAction {
   kind?: "composio" | "mcp";
 }
 
-const COMPOSIO_CONFIRM_RE = /‹‹COMPOSIO_CONFIRM››([\s\S]*?)‹‹\/COMPOSIO_CONFIRM››/;
-const MCP_CONFIRM_RE = /‹‹MCP_CONFIRM››([\s\S]*?)‹‹\/MCP_CONFIRM››/;
-const FS_AUTHORIZE_RE = /‹‹FS_AUTHORIZE››([\s\S]*?)‹‹\/FS_AUTHORIZE››/;
-const CONNECT_SUGGEST_RE = /‹‹CONNECT_SUGGEST››([\s\S]*?)‹‹\/CONNECT_SUGGEST››/;
-const COMPOSIO_DONE_RE = /‹‹COMPOSIO_DONE››([\s\S]*?)‹‹\/COMPOSIO_DONE››/;
-const COMPOSIO_RECONNECT_RE = /‹‹COMPOSIO_RECONNECT››([\s\S]*?)‹‹\/COMPOSIO_RECONNECT››/;
-// Single/multi-choice question card (Claude-Code style): the model emits the choices
-// instead of listing them in prose, and the click sends the answer back.
-const CHOICES_RE = /‹‹CHOICES››([\s\S]*?)‹‹\/CHOICES››/;
-// Plan-mode: the model proposes a plan and STOPS; the card gates execution behind
-// Accetta / Edit (the answer becomes the next user message).
-// Require a closed marker before rendering an actionable plan card. During streaming an
-// incomplete marker is hidden from prose below, but it is not accepted as a proposal.
-const PLAN_PROPOSE_RE = /‹‹PLAN_PROPOSE››([\s\S]*?)‹‹\/PLAN_PROPOSE››/;
-// Goal-propose: the model proposes the project's objective(s); the card lets the user save.
-const GOAL_PROPOSE_RE = /‹‹GOAL_PROPOSE››([\s\S]*?)‹‹\/GOAL_PROPOSE››/;
-// Strips an UNCLOSED plan/goal marker (open present, no close) from the visible prose.
-const UNCLOSED_PROPOSE_RE = /‹‹(?:PLAN_PROPOSE|GOAL_PROPOSE)››[\s\S]*$/;
-const COMPOSIO_MARKERS_RE =
-  /‹‹(?:COMPOSIO_(?:CONFIRM|DONE|RECONNECT)|MCP_CONFIRM|FS_AUTHORIZE|CONNECT_SUGGEST|CHOICES|PLAN_PROPOSE|GOAL_PROPOSE|PLAN)››[\s\S]*?‹‹\/(?:COMPOSIO_(?:CONFIRM|DONE|RECONNECT)|MCP_CONFIRM|FS_AUTHORIZE|CONNECT_SUGGEST|CHOICES|PLAN_PROPOSE|GOAL_PROPOSE|PLAN)››/g;
-const PROPOSE_MARKERS_VISIBLE_RE =
-  /‹‹(?:PLAN_PROPOSE|GOAL_PROPOSE)››[\s\S]*?‹‹\/(?:PLAN_PROPOSE|GOAL_PROPOSE)››/g;
-
 /** One clickable suggestion in an in-chat connect-card. */
 interface ConnectSuggestItem {
   kind: "mcp" | "skill" | "composio";
@@ -3218,6 +3432,24 @@ interface ConnectSuggestItem {
 interface ConnectSuggest {
   need: string;
   items: ConnectSuggestItem[];
+}
+
+interface VaultProposal {
+  category: string;
+  label: string;
+  redacted_preview: string;
+  pending_id?: string;
+}
+
+interface VaultRevealProposal {
+  record_id: string;
+  category: string;
+  label: string;
+  redacted_preview: string;
+}
+
+interface PaymentApprovalProposal {
+  snapshot: PaymentApprovalSnapshot;
 }
 
 /** Composer interaction modes (Cursor-style, adapted for a general assistant).
@@ -3257,6 +3489,85 @@ interface PlanStep {
   detail: string;
 }
 
+function eventPayload(parts: ChatEventPart[] | undefined, type: ChatEventPart["type"]) {
+  const part = parts?.find((item) => item.type === type);
+  return part && "payload" in part ? part.payload : null;
+}
+
+function latestPlanUpdateMarkdown(parts: ChatEventPart[] | undefined) {
+  const plans = (parts ?? []).filter(
+    (item): item is Extract<ChatEventPart, { type: "plan_update" }> =>
+      item.type === "plan_update",
+  );
+  return plans.length > 0 ? plans[plans.length - 1].markdown : null;
+}
+
+function parseVaultProposalPayload(payload: unknown): VaultProposal | null {
+  const parsed = payload as Partial<VaultProposal> | null;
+  if (
+    parsed &&
+    typeof parsed.category === "string" &&
+    typeof parsed.label === "string" &&
+    typeof parsed.redacted_preview === "string"
+  ) {
+    return {
+      category: parsed.category,
+      label: parsed.label,
+      redacted_preview: parsed.redacted_preview,
+      ...(typeof parsed.pending_id === "string" ? { pending_id: parsed.pending_id } : {}),
+    };
+  }
+  return null;
+}
+
+function parseVaultRevealPayload(payload: unknown): VaultRevealProposal | null {
+  const parsed = payload as Partial<VaultRevealProposal> | null;
+  if (
+    parsed &&
+    typeof parsed.record_id === "string" &&
+    typeof parsed.category === "string" &&
+    typeof parsed.label === "string" &&
+    typeof parsed.redacted_preview === "string"
+  ) {
+    return {
+      record_id: parsed.record_id,
+      category: parsed.category,
+      label: parsed.label,
+      redacted_preview: parsed.redacted_preview,
+    };
+  }
+  return null;
+}
+
+function parsePaymentApprovalPayload(payload: unknown): PaymentApprovalProposal | null {
+  const parsed = payload as { snapshot?: Partial<PaymentApprovalSnapshot> } | null;
+  const snapshot = parsed?.snapshot;
+  if (
+    snapshot &&
+    typeof snapshot.approval_id === "string" &&
+    typeof snapshot.merchant === "string" &&
+    typeof snapshot.domain === "string" &&
+    typeof snapshot.amount_minor === "number" &&
+    typeof snapshot.currency === "string" &&
+    typeof snapshot.product_summary === "string" &&
+    typeof snapshot.payment_method_label === "string" &&
+    typeof snapshot.checkout_fingerprint === "string"
+  ) {
+    return { snapshot: snapshot as PaymentApprovalSnapshot };
+  }
+  return null;
+}
+
+function parseChoicePromptPayload(payload: unknown): ChoicePrompt | null {
+  const parsed = payload as Partial<ChoicePrompt> | null;
+  if (!parsed || !Array.isArray(parsed.options) || parsed.options.length === 0) return null;
+  return {
+    question: typeof parsed.question === "string" ? parsed.question : "",
+    multi: parsed.multi === true,
+    options: parsed.options.filter((option) => typeof option === "string" && option.trim()),
+  };
+}
+
 /** Parses the ‹‹PLAN›› markdown (`- [x] **Title** (`s1`): detail`) into typed steps. */
 function parsePlanSteps(markdown: string): PlanStep[] {
   const out: PlanStep[] = [];
@@ -3274,7 +3585,6 @@ function parsePlanSteps(markdown: string): PlanStep[] {
 // Tool-activity trace markers (browser / skill / sandbox / connected-tool steps).
 // They are extracted into a compact collapsible panel so the answer body stays
 // clean — the pattern Claude/assistant-ui use for "tool activity".
-const ACTIVITY_RE = /‹‹ACT››([\s\S]*?)‹‹\/ACT››/g;
 
 function parseActivitySteps(text: string): string[] {
   if (!text.includes("‹‹ACT››")) return [];
@@ -3284,7 +3594,6 @@ function parseActivitySteps(text: string): string[] {
 }
 
 // Generated-file artifacts surfaced by the gateway (skill outputs in $OUTPUT_DIR).
-const ARTIFACT_RE = /‹‹ARTIFACT››([\s\S]*?)‹‹\/ARTIFACT››/g;
 
 interface ParsedArtifact {
   name: string;
@@ -3319,11 +3628,15 @@ function parseArtifacts(text: string): ParsedArtifact[] {
 
 // Operational plan emitted by the agent via the update_plan tool (‹‹PLAN›› markers).
 // The latest one in the conversation drives the Workbench "Piano" panel.
-const PLAN_RE = /‹‹PLAN››([\s\S]*?)‹‹\/PLAN››/g;
 
-function latestPlanMarkdown(messages: { text?: string }[]): string | null {
+function latestPlanMarkdown(messages: { text?: string; eventParts?: ChatEventPart[] }[]): string | null {
   let latest: string | null = null;
   for (const message of messages) {
+    const structuredPlan = latestPlanUpdateMarkdown(message.eventParts);
+    if (structuredPlan) {
+      latest = structuredPlan;
+      continue;
+    }
     const text = message.text ?? "";
     if (!text.includes("‹‹PLAN››")) continue;
     for (const match of text.matchAll(PLAN_RE)) latest = match[1].trim();
@@ -5611,13 +5924,17 @@ function MessageActivity({ text, live = false }: { text: string; live?: boolean 
 
 /** Splits an assistant message into visible text + an optional pending write
  *  action (editable card) OR an already-executed marker (static "done" note). */
-function parseComposioConfirm(text: string): {
+function parseComposioConfirm(text: string, eventParts?: ChatEventPart[]): {
   visible: string;
   action: ComposioPendingAction | null;
   doneTool: string | null;
   reconnectSlug: string | null;
   fsAuthorize: { path: string; op: string } | null;
+  sandboxEscalate: { command: string; cwd: string } | null;
   connectSuggest: ConnectSuggest | null;
+  vaultPropose: VaultProposal | null;
+  vaultReveal: VaultRevealProposal | null;
+  paymentApproval: PaymentApprovalProposal | null;
   choices: ChoicePrompt | null;
   planPropose: PlanProposal | null;
   goalPropose: string[] | null;
@@ -5661,6 +5978,23 @@ function parseComposioConfirm(text: string): {
       /* malformed → just hide it */
     }
   }
+  // ADR 0023: shell command blocked by the Seatbelt sandbox → in-chat "run without
+  // sandbox" card. Payload is a tool call: {arguments:{command,cwd}}.
+  let sandboxEscalate: { command: string; cwd: string } | null = null;
+  const escMatch = text.match(SANDBOX_ESCALATE_RE);
+  if (escMatch) {
+    try {
+      const parsed = JSON.parse(escMatch[1]) as {
+        arguments?: { command?: string; cwd?: string };
+      };
+      const command = parsed?.arguments?.command;
+      if (typeof command === "string") {
+        sandboxEscalate = { command, cwd: parsed.arguments?.cwd ?? "" };
+      }
+    } catch {
+      /* malformed → just hide it */
+    }
+  }
   // Clickable connect-cards from suggest_capabilities (install skill / connect MCP
   // / link Composio in-chat, no Settings trip).
   let connectSuggest: ConnectSuggest | null = null;
@@ -5675,19 +6009,47 @@ function parseComposioConfirm(text: string): {
       /* malformed → just hide it */
     }
   }
-  // Single/multi-choice question card.
-  let choices: ChoicePrompt | null = null;
-  const chMatch = text.match(CHOICES_RE);
-  if (chMatch) {
+  let vaultPropose: VaultProposal | null = parseVaultProposalPayload(
+    eventPayload(eventParts, "vault_propose"),
+  );
+  const vaultMatch = text.match(VAULT_PROPOSE_RE);
+  if (!vaultPropose && vaultMatch) {
     try {
-      const parsed = JSON.parse(chMatch[1]) as ChoicePrompt;
-      if (parsed && Array.isArray(parsed.options) && parsed.options.length > 0) {
-        choices = {
-          question: typeof parsed.question === "string" ? parsed.question : "",
-          multi: parsed.multi === true,
-          options: parsed.options.filter((o) => typeof o === "string" && o.trim().length > 0),
-        };
-      }
+      vaultPropose = parseVaultProposalPayload(JSON.parse(vaultMatch[1]));
+    } catch {
+      /* malformed → just hide it */
+    }
+  }
+  let vaultReveal: VaultRevealProposal | null = parseVaultRevealPayload(
+    eventPayload(eventParts, "vault_reveal"),
+  );
+  const vaultRevealMatch = text.match(VAULT_REVEAL_RE);
+  if (!vaultReveal && vaultRevealMatch) {
+    try {
+      vaultReveal = parseVaultRevealPayload(JSON.parse(vaultRevealMatch[1]));
+    } catch {
+      /* malformed → just hide it */
+    }
+  }
+  let paymentApproval: PaymentApprovalProposal | null = parsePaymentApprovalPayload(
+    eventPayload(eventParts, "payment_approval"),
+  );
+  const paymentMatch = text.match(PAYMENT_APPROVAL_RE);
+  if (!paymentApproval && paymentMatch) {
+    try {
+      paymentApproval = parsePaymentApprovalPayload(JSON.parse(paymentMatch[1]));
+    } catch {
+      /* malformed → just hide it */
+    }
+  }
+  // Single/multi-choice question card.
+  let choices: ChoicePrompt | null = parseChoicePromptPayload(
+    eventPayload(eventParts, "choice_prompt"),
+  );
+  const chMatch = text.match(CHOICES_RE);
+  if (!choices && chMatch) {
+    try {
+      choices = parseChoicePromptPayload(JSON.parse(chMatch[1]));
     } catch {
       /* malformed → just hide it */
     }
@@ -5741,9 +6103,14 @@ function parseComposioConfirm(text: string): {
   // Live operational plan (update_plan): take the LATEST ‹‹PLAN›› in the message and
   // render it inline with per-step status. PLAN_RE is global → matchAll gives all.
   let planSteps: PlanStep[] = [];
-  const planMatches = [...text.matchAll(PLAN_RE)];
-  if (planMatches.length > 0) {
+  const structuredPlan = latestPlanUpdateMarkdown(eventParts);
+  if (structuredPlan) {
+    planSteps = parsePlanSteps(structuredPlan);
+  } else {
+    const planMatches = [...text.matchAll(PLAN_RE)];
+    if (planMatches.length > 0) {
     planSteps = parsePlanSteps(planMatches[planMatches.length - 1][1]);
+    }
   }
   const done = text.match(COMPOSIO_DONE_RE);
   const doneTool = done ? done[1].trim() : null;
@@ -5765,7 +6132,11 @@ function parseComposioConfirm(text: string): {
     doneTool,
     reconnectSlug,
     fsAuthorize,
+    sandboxEscalate,
     connectSuggest,
+    vaultPropose,
+    vaultReveal,
+    paymentApproval,
     choices,
     planPropose,
     goalPropose,
@@ -5783,36 +6154,48 @@ function humanizeToolSlugs(text: string): string {
 /** Renders an assistant message body, surfacing a write-confirmation card when
  *  the model proposed a write action that needs approval (once / always), or a
  *  static "done" note once it has been executed. */
-function AssistantMessageBody({
-  text,
-  streaming,
-  messageId,
-  threadId,
-  onOpenArtifact,
-  onChoose,
-}: {
-  text: string;
-  streaming?: boolean;
-  messageId?: string;
-  threadId?: string;
-  onOpenArtifact?: (artifact: ParsedArtifact) => void;
-  onChoose?: (answer: string) => void;
-}) {
+// ADR 0022 (Piano UI C4): memo per stabilizzare l'identity dei messaggi non-
+// streaming. Durante lo stream di un messaggio, l'array optimisticMessages è
+// fresco ogni frame → senza memo TUTTI i messaggi re-renderizzano. Questo comparatore
+// re-renderizza un messaggio solo se il suo text/eventParts/streaming cambiano;
+// i messaggi finalizzati (text stabile) NON re-renderizzano durante lo stream altrui.
+const AssistantMessageBody = memo(
+  function AssistantMessageBody({
+    text,
+    eventParts,
+    streaming,
+    messageId,
+    threadId,
+    onOpenArtifact,
+    onChoose,
+  }: {
+    text: string;
+    eventParts?: ChatEventPart[];
+    streaming?: boolean;
+    messageId?: string;
+    threadId?: string;
+    onOpenArtifact?: (artifact: ParsedArtifact) => void;
+    onChoose?: (answer: string) => void;
+  }) {
   const {
     visible,
     action,
     doneTool,
     reconnectSlug,
     fsAuthorize,
+    sandboxEscalate,
     connectSuggest,
+    vaultPropose,
+    vaultReveal,
+    paymentApproval,
     choices,
     planPropose,
     goalPropose,
-  } = useMemo(() => parseComposioConfirm(text), [text]);
+  } = useMemo(() => parseComposioConfirm(text, eventParts), [text, eventParts]);
   const readable = useMemo(() => humanizeToolSlugs(visible), [visible]);
   return (
     <>
-      {readable && <RichMessage text={readable} streaming={streaming} />}
+      {readable && <RichMessage text={readable} streaming={streaming} eventParts={eventParts} />}
       {!streaming && onOpenArtifact && <MessageArtifacts text={text} onOpen={onOpenArtifact} />}
       {doneTool && !streaming && (
         <div className="cmp-confirm done">
@@ -5832,9 +6215,32 @@ function AssistantMessageBody({
           threadId={threadId}
         />
       )}
+      {sandboxEscalate && !streaming && (
+        <SandboxEscalateCard
+          command={sandboxEscalate.command}
+          cwd={sandboxEscalate.cwd}
+          messageId={messageId}
+          threadId={threadId}
+        />
+      )}
       {connectSuggest && !streaming && (
         <ConnectSuggestCard
           suggest={connectSuggest}
+          messageId={messageId}
+          threadId={threadId}
+        />
+      )}
+      {vaultPropose && !streaming && (
+        <VaultProposeCard
+          proposal={vaultPropose}
+          messageId={messageId}
+          threadId={threadId}
+        />
+      )}
+      {vaultReveal && !streaming && <VaultRevealCard proposal={vaultReveal} />}
+      {paymentApproval && !streaming && (
+        <PaymentApprovalCard
+          proposal={paymentApproval}
           messageId={messageId}
           threadId={threadId}
         />
@@ -5848,8 +6254,343 @@ function AssistantMessageBody({
       {goalPropose && !streaming && threadId && (
         <GoalProposeCard objectives={goalPropose} threadId={threadId} />
       )}
+      {eventParts
+        ?.filter((p): p is Extract<ChatEventPart, { type: "diff" }> => p.type === "diff")
+        .map((part, index) => (
+          <DiffCard key={`diff-${index}`} payload={part.payload} />
+        ))}
     </>
   );
+  },
+  // Comparatore: re-renderizza solo se il contenuto del messaggio cambia.
+  // Le callback (onOpenArtifact/onChoose) sono stabili nel caller — skip.
+  (prev, next) =>
+    prev.text === next.text &&
+    prev.streaming === next.streaming &&
+    prev.messageId === next.messageId &&
+    prev.threadId === next.threadId &&
+    prev.eventParts === next.eventParts,
+);
+
+// D3 (Piano UI): inline code-diff card. Renders the model's proposed change for a single
+// file path with a header and the unified line diff (added=green, removed=red).
+function DiffCard({ payload }: { payload: DiffEventPayload }) {
+  return (
+    <div className="diff-card">
+      <div className="diff-card-header">
+        <span className="diff-card-path">📄 {payload.path}</span>
+        {payload.label && <span className="diff-card-label">{payload.label}</span>}
+      </div>
+      <DiffView oldText={payload.old ?? ""} newText={payload.new} />
+    </div>
+  );
+}
+
+function VaultProposeCard({
+  proposal,
+  messageId,
+  threadId,
+}: {
+  proposal: VaultProposal;
+  messageId?: string;
+  threadId?: string;
+}) {
+  const [status, setStatus] = useState<"idle" | "saving" | "saved" | "dismissed" | "error">(
+    "idle",
+  );
+  const [note, setNote] = useState<string | null>(null);
+
+  const payload = {
+    category: proposal.category,
+    label: proposal.label,
+    redacted_preview: proposal.redacted_preview,
+    ...(proposal.pending_id ? { pending_id: proposal.pending_id } : {}),
+    ...(threadId ? { thread_id: threadId } : {}),
+    ...(messageId ? { message_id: messageId } : {}),
+  };
+
+  const save = async () => {
+    setStatus("saving");
+    setNote(null);
+    try {
+      const result = await coreBridge.vaultProposalAccept(payload);
+      setStatus("saved");
+      setNote(`Salvato nel Vault (${result.record_id}).`);
+    } catch (error) {
+      setStatus("error");
+      setNote((error as Error).message);
+    }
+  };
+
+  const dismiss = async () => {
+    setStatus("saving");
+    setNote(null);
+    try {
+      await coreBridge.vaultProposalDismiss(payload);
+      setStatus("dismissed");
+      setNote("Proposta scartata.");
+    } catch (error) {
+      setStatus("error");
+      setNote((error as Error).message);
+    }
+  };
+
+  const busy = status === "saving";
+
+  if (status === "saved") {
+    return (
+      <div className="cmp-confirm done">
+        <Check size={15} />
+        <span>Saved to Vault</span>
+      </div>
+    );
+  }
+
+  if (status === "dismissed") {
+    return (
+      <div className="cmp-confirm done">
+        <Check size={15} />
+        <span>Vault proposal dismissed</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="cmp-confirm">
+      <div className="cmp-confirm-head">
+        <ShieldCheck size={15} />
+        <strong>Sensitive data detected</strong>
+        <span className="cmp-confirm-name">{proposal.category}</span>
+      </div>
+      <div className="cmp-confirm-fields">
+        <label>Record</label>
+        <input className="set-input" readOnly value={proposal.label} />
+        <label>Redacted preview</label>
+        <input className="set-input" readOnly value={proposal.redacted_preview} />
+      </div>
+      <p className="cmp-confirm-note">
+        The value stays out of normal memory. Save stores the redacted record now; local PIN is
+        required later to reveal or edit the value.
+      </p>
+      {status === "error" && <p className="cmp-confirm-err">Error: {note}</p>}
+      <div className="cmp-confirm-actions">
+        <button className="set-btn primary" type="button" disabled={busy} onClick={() => void save()}>
+          Save to Vault
+        </button>
+        <button className="set-btn" type="button" disabled={busy} onClick={() => void dismiss()}>
+          Do not save
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function VaultRevealCard({ proposal }: { proposal: VaultRevealProposal }) {
+  const [pin, setPin] = useState("");
+  const [status, setStatus] = useState<"idle" | "running" | "revealed" | "error">("idle");
+  const [secretValue, setSecretValue] = useState("");
+  const [showValue, setShowValue] = useState(true);
+  const [note, setNote] = useState<string | null>(null);
+  const busy = status === "running";
+
+  const reveal = async () => {
+    setStatus("running");
+    setNote(null);
+    try {
+      const result = await coreBridge.vaultRecordReveal(proposal.record_id, pin);
+      setSecretValue(result.secret_value);
+      setPin("");
+      setShowValue(true);
+      setStatus("revealed");
+    } catch (error) {
+      setStatus("error");
+      setNote((error as Error).message);
+    }
+  };
+
+  return (
+    <div className="cmp-confirm">
+      <div className="cmp-confirm-head">
+        <ShieldCheck size={15} />
+        <strong>Vault unlock required</strong>
+        <span className="cmp-confirm-name">{proposal.category}</span>
+      </div>
+      <div className="cmp-confirm-fields">
+        <label>Record</label>
+        <input className="set-input" readOnly value={proposal.label} />
+        <label>Redacted preview</label>
+        <input className="set-input" readOnly value={proposal.redacted_preview} />
+      </div>
+      {status !== "revealed" ? (
+        <>
+          <p className="cmp-confirm-note">
+            Enter your local PIN to reveal this value on this device. The value is not saved back
+            into the chat transcript.
+          </p>
+          <div className="cmp-confirm-fields">
+            <label>Local PIN</label>
+            <input
+              className="set-input"
+              inputMode="numeric"
+              type="password"
+              value={pin}
+              disabled={busy}
+              onChange={(event) => setPin(event.target.value)}
+            />
+          </div>
+          {status === "error" && <p className="cmp-confirm-err">Error: {note}</p>}
+          <div className="cmp-confirm-actions">
+            <button
+              className="set-btn primary"
+              type="button"
+              disabled={busy || pin.length === 0}
+              onClick={() => void reveal()}
+            >
+              {busy ? "Unlocking..." : "Reveal value"}
+            </button>
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="cmp-confirm-fields">
+            <label>Value</label>
+            <input
+              className="set-input"
+              readOnly
+              type={showValue ? "text" : "password"}
+              value={secretValue}
+            />
+          </div>
+          <div className="cmp-confirm-actions">
+            <button className="set-btn" type="button" onClick={() => setShowValue((value) => !value)}>
+              {showValue ? "Hide value" : "Show value"}
+            </button>
+            <button
+              className="set-btn"
+              type="button"
+              onClick={() => {
+                setSecretValue("");
+                setStatus("idle");
+                setShowValue(true);
+              }}
+            >
+              Lock
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function PaymentApprovalCard({
+  proposal,
+  messageId,
+  threadId,
+}: {
+  proposal: PaymentApprovalProposal;
+  messageId?: string;
+  threadId?: string;
+}) {
+  const snapshot = proposal.snapshot;
+  const [pin, setPin] = useState("");
+  const [cvv, setCvv] = useState("");
+  const [status, setStatus] = useState<"idle" | "running" | "approved" | "error">("idle");
+  const [note, setNote] = useState<string | null>(null);
+
+  const approve = async () => {
+    setStatus("running");
+    setNote(null);
+    try {
+      const result = await coreBridge.vaultPaymentApprovalApprove(snapshot, pin, cvv, {
+        threadId,
+        messageId,
+      });
+      setPin("");
+      setCvv("");
+      setStatus("approved");
+      setNote(
+        `Pagamento autorizzato: ${result.payment_approval_id}. L'autorizzazione scade tra ${result.expires_in_seconds}s.`,
+      );
+    } catch (error) {
+      setStatus("error");
+      setNote((error as Error).message);
+    }
+  };
+
+  const amount = formatPaymentAmount(snapshot.amount_minor, snapshot.currency);
+  const busy = status === "running";
+
+  return (
+    <div className="cmp-confirm destructive">
+      <div className="cmp-confirm-head">
+        <ShieldCheck size={15} />
+        <strong>Conferma pagamento</strong>
+        <span className="cmp-confirm-name">{amount}</span>
+      </div>
+      <div className="cmp-confirm-fields">
+        <label>Merchant</label>
+        <input readOnly value={snapshot.merchant} />
+        <label>Dominio</label>
+        <input readOnly value={snapshot.domain} />
+        <label>Prodotto</label>
+        <textarea className="set-input" readOnly rows={2} value={snapshot.product_summary} />
+        <label>Metodo</label>
+        <input readOnly value={snapshot.payment_method_label} />
+      </div>
+      <p className="cmp-confirm-note">
+        Il click finale resta bloccato finché PIN e CVV one-shot non sono verificati localmente.
+        Il CVV non viene salvato.
+      </p>
+      {status !== "approved" && (
+        <div className="cmp-confirm-fields">
+          <label>PIN locale</label>
+          <input
+            className="set-input"
+            inputMode="numeric"
+            type="password"
+            value={pin}
+            disabled={busy}
+            onChange={(event) => setPin(event.target.value)}
+          />
+          <label>CVV/CV2 one-shot</label>
+          <input
+            className="set-input"
+            inputMode="numeric"
+            type="password"
+            value={cvv}
+            disabled={busy}
+            onChange={(event) => setCvv(event.target.value)}
+          />
+        </div>
+      )}
+      {status === "error" && <p className="cmp-confirm-err">Errore: {note}</p>}
+      {status === "approved" && note && <p className="cmp-confirm-note">{note}</p>}
+      {status !== "approved" && (
+        <div className="cmp-confirm-actions">
+          <button
+            className="set-btn primary"
+            type="button"
+            disabled={busy || pin.length === 0 || cvv.length === 0}
+            onClick={() => void approve()}
+          >
+            {busy ? "Verifico..." : "Autorizza pagamento"}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function formatPaymentAmount(amountMinor: number, currency: string): string {
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency,
+    }).format(amountMinor / 100);
+  } catch {
+    return `${(amountMinor / 100).toFixed(2)} ${currency}`;
+  }
 }
 
 /** Plan-mode card: the model proposed a plan and stopped. Accetta sends the approval
@@ -6478,6 +7219,98 @@ function FsAuthorizeCard({
               : op === "read"
                 ? "Autorizza e leggi"
                 : "Autorizza ed elenca"}
+          </span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** ADR 0023 — on-failure sandbox escalation card. A shell command failed under the
+ *  Seatbelt workspace sandbox; approving re-runs it UNSANDBOXED with full access.
+ *  Mirrors FsAuthorizeCard: the backend rewrites the originating message to a
+ *  done-note (via ctx), so the card can't reopen after a successful run. */
+function SandboxEscalateCard({
+  command,
+  cwd,
+  messageId,
+  threadId,
+}: {
+  command: string;
+  cwd: string;
+  messageId?: string;
+  threadId?: string;
+}) {
+  const { t } = useTranslation();
+  const [status, setStatus] = useState<"idle" | "running" | "done" | "error">("idle");
+  const [output, setOutput] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+
+  const run = async () => {
+    setStatus("running");
+    setNote(null);
+    try {
+      const result = await coreBridge.runEscalate(command, cwd, { threadId, messageId });
+      if (!result.ok) {
+        setStatus("error");
+        setNote(result.summary || t("chat.failed"));
+        return;
+      }
+      setOutput(result.output ?? "");
+      setStatus("done");
+    } catch (error) {
+      setStatus("error");
+      setNote((error as Error).message);
+    }
+  };
+
+  if (status === "done") {
+    return (
+      <div className="cmp-confirm">
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <ShieldCheck size={15} />
+          <strong>Command ran with full access</strong>
+        </div>
+        {output && (
+          <pre
+            style={{
+              whiteSpace: "pre-wrap",
+              fontSize: 12,
+              marginTop: 8,
+              maxHeight: 300,
+              overflow: "auto",
+            }}
+          >
+            {output}
+          </pre>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="cmp-confirm">
+      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <SquareTerminal size={15} />
+        <strong>This command was blocked by the workspace sandbox. Run it with full access?</strong>
+      </div>
+      <code style={{ fontSize: 12, wordBreak: "break-all", display: "block", marginTop: 4 }}>
+        {command}
+      </code>
+      <p className="set-hint" style={{ fontSize: 12 }}>
+        It will run outside the sandbox with full access to your machine. Only approve commands you trust.
+      </p>
+      {status === "error" && <p className="cmp-confirm-err">{t("chat.failed")}: {note}</p>}
+      <div className="cmp-confirm-actions">
+        <button
+          className="set-btn primary"
+          type="button"
+          disabled={status === "running"}
+          onClick={() => void run()}
+        >
+          <SquareTerminal size={14} />
+          <span style={{ marginLeft: 6 }}>
+            {status === "running" ? "Running…" : "Run without sandbox"}
           </span>
         </button>
       </div>

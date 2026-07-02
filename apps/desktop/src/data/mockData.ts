@@ -15,6 +15,7 @@ import {
   MonitorPlay,
   Palette,
   Plug,
+  ShieldCheck,
   SlidersHorizontal,
   Sparkles,
   User,
@@ -40,8 +41,10 @@ import type {
 // l'addon ne fa sparire la voce di nav.
 export const navItems: NavItem[] = [
   { id: "chat", label: "chat.newTask", icon: MessageSquare },
-  // "Apprendimento" è confluito in Homun. "Memory" è stata unificata nelle
-  // Impostazioni → Memory (un'unica superficie, fuori più pulito).
+  // ADR 0022 (Piano UI A4): Memory torna nel nav top-level come vista dedicata
+  // (la memoria è un differenziatore di prodotto; averla visibile e raggiungibile
+  // direttamente la valorizza). Resta raggiungibile anche da Impostazioni → Memory.
+  { id: "memory", label: "nav.memory", icon: Database, navSection: "workspace" },
   // "Pianificato" (coda dei run) è confluito in Automazioni: la regola è la cosa
   // di prima classe; i run si vedono nei thread. Manteniamo l'icona-calendario.
   { id: "automations", label: "nav.automations", icon: CalendarClock },
@@ -406,6 +409,7 @@ export const settingsSections: Array<{
   { id: "appearance", label: "settings.appearance", icon: Palette, group: "account" },
   { id: "runtime", label: "settings.runtime", icon: Cpu, group: "account" },
   { id: "privacy", label: "settings.privacy", icon: KeyRound, group: "account" },
+  { id: "vault", label: "settings.vault", icon: ShieldCheck, group: "account" },
   { id: "memory", label: "nav.memory", icon: Brain, group: "account" },
   { id: "artifacts", label: "settings.artifacts", icon: FileText, group: "account" },
   { id: "contacts", label: "nav.contacts", icon: Users, group: "account" },
@@ -413,7 +417,7 @@ export const settingsSections: Array<{
   { id: "connections", label: "settings.connectors", icon: Plug, group: "capabilities" },
   { id: "skills", label: "settings.skills", icon: Sparkles, group: "capabilities" },
   { id: "addon", label: "settings.addon", icon: Blocks, group: "capabilities" },
-  { id: "computer", label: "Local computer", icon: MonitorPlay, group: "capabilities" },
+  { id: "computer", label: "settings.computer", icon: MonitorPlay, group: "capabilities" },
 ];
 
 export const settingsGroupLabels: Record<"account" | "capabilities", string> = {

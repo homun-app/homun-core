@@ -4,7 +4,13 @@ Date: 2026-05-28
 
 ## Status
 
-Accepted.
+Accepted. **Nota (2026-06-29): parzialmente STALE sull'implementazione.** Questa ADR (e i due
+`docs/research/2026-05-28-openclaw-*`) descrivono ancora come design vivo il **`generate_json` browser
+loop** (`RuntimeBrowserLoopPlanner`/`BrowserLoopRunner`) per modelli deboli. Quel loop è stato **RITIRATO**
+nel codice: motore #1 pilota il browser con **native tool-calling** inline (tool granulari) — più fedele
+a OpenClaw del testo qui sotto. Il `generate_json` loop sopravvive solo nel drive (`run_agentic_step`) ed
+è la **regressione** da ritirare (Increment B). Decisione di principio (OpenClaw = riferimento per *come*
+pilotare il browser) **invariata e valida**; cambiato solo il *come* a livello di codice.
 
 ## Context
 

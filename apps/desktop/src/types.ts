@@ -1,4 +1,5 @@
 import type { LucideIcon } from "lucide-react";
+import type { PaymentApprovalSnapshot } from "./lib/coreBridge";
 
 export type ViewId =
   | "chat"
@@ -19,6 +20,7 @@ export type SettingsSectionId =
   | "appearance"
   | "runtime"
   | "privacy"
+  | "vault"
   | "memory"
   | "artifacts"
   | "contacts"
@@ -63,7 +65,43 @@ export interface ChatMessage {
   linkedTaskId?: string;
   linkedAutomationRef?: string;
   attachments?: ChatAttachment[];
+  eventParts?: ChatEventPart[];
 }
+
+/** B2 (Piano UI): i payload dei ChatEventPart sono tipizzati. Le interfacce
+ *  vivono in `lib/coreBridge.ts` (lower layer) per evitare import circolari, e
+ *  vengono re-esportate qui come fonte autoritativa per i consumer. */
+export type {
+  ChoicePromptPayload,
+  VaultProposePayload,
+  VaultRevealPayload,
+  PaymentApprovalPayload,
+  ToolResultPayload,
+  RecallHitPayload,
+  RecallEventPayload,
+  DiffEventPayload,
+} from "./lib/coreBridge";
+import type {
+  ChoicePromptPayload,
+  VaultProposePayload,
+  VaultRevealPayload,
+  PaymentApprovalPayload,
+  ToolResultPayload,
+  RecallEventPayload,
+  DiffEventPayload,
+} from "./lib/coreBridge";
+
+export type ChatEventPart =
+  | { type: "reasoning"; text: string }
+  | { type: "activity"; text: string }
+  | { type: "plan_update"; markdown: string }
+  | { type: "choice_prompt"; payload: ChoicePromptPayload }
+  | { type: "vault_propose"; payload: VaultProposePayload }
+  | { type: "vault_reveal"; payload: VaultRevealPayload }
+  | { type: "payment_approval"; payload: PaymentApprovalPayload }
+  | { type: "tool_result"; payload: ToolResultPayload }
+  | { type: "recall"; payload: RecallEventPayload }
+  | { type: "diff"; payload: DiffEventPayload };
 
 export interface ChatMessageMetrics {
   promptTokens: number;
