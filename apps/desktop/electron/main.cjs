@@ -448,6 +448,10 @@ function createWindow() {
       nodeIntegration: false,
       sandbox: true,
       webSecurity: true,
+      // No DevTools in the shipped app (they're a remote-debugging / arbitrary
+      // in-page eval surface). Kept on in dev and behind the explicit
+      // HOMUN_ELECTRON_DEVTOOLS flag so the openDevTools call below still works.
+      devTools: !app.isPackaged || process.env.HOMUN_ELECTRON_DEVTOOLS === "1",
     },
   });
   mainWindows.add(window);
