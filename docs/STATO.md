@@ -327,7 +327,7 @@ chat di default = deepseek-v4-pro:cloud (Z.ai, tier **Balanced**); Composio non 
 
 ## Cosa è stato fatto (rolling, conciso)
 
-**Sessione 2026-07-02 — gap analysis production-readiness vs Codex.app (bundle reverse-engineered):**
+**Sessione 2026-07-02 — gap analysis production-readiness vs Codex.app + P0 IMPLEMENTATO (branch `feat/p0-production-hygiene`):**
 Analizzato il bundle distribuito di Codex (`/Users/fabio/Projects/codex/Contents`: asar estratto,
 binario `codex` 0.142.5, chronicle, cua_node, 7 plugin) e auditata Homun v0.1.x sulle dimensioni di
 produzione. Risultato in [confronto-codex-produzione.md](confronto-codex-produzione.md) (complementare
@@ -335,9 +335,22 @@ al confronto strutturale): gap 🔴 = osservabilità (zero log persistenti nel p
 hook/crash report) + resilienza (no single-instance lock, no recovery SQLite corrotto); 🟠 =
 sandbox-enforcement (approvals cooperativi vs recinto OS-level 3-livelli di Codex) + firma
 Windows/Linux; 🟡 = CSP/fuses/devTools, `homun://`, manifest plugin installabile (formato
-plugin.json+SKILL.md+.mcp.json = la formalizzazione che manca a F0–F3), e2e. Piano P0–P3 nel doc;
-P0 è ortogonale alla convergenza ADR 0021/0022 (fattibile subito). Idea da rubare: record-and-replay
-→ skill (chiude il cerchio con `routines`/`automation_candidates`, memoria-centrico in Homun).
+plugin.json+SKILL.md+.mcp.json = la formalizzazione che manca a F0–F3), e2e. Piano P0–P3 nel doc.
+- **P0 COMPLETO E APPROVATO** (piano [plans/2026-07-02-p0-production-hygiene.md](plans/2026-07-02-p0-production-hygiene.md),
+  esecuzione subagent-driven con doppia review spec+qualità per ogni task; mappa in
+  [architecture/desktop-shell.md](architecture/desktop-shell.md)): (1) **logging** su file con rotazione
+  `electron/lib/logging.cjs`; (2) **cattura stdio** del gateway packaged → `~/.homun/logs/gateway.log`
+  (era `ignore`) + handler spawn-failure + guardia stale-exit; (3) **single-instance lock**; (4)
+  **watchdog** respawn backoff 1s→5s→15s + give-up 3/5min; (5) **panic hook Rust** `panic_log.rs` →
+  `panic.log`+`last-crash.json` (0600, testabile puro, hook e2e `#[ignore]`); (6) **integrity sweep**
+  `store_integrity.rs` quick_check→quarantena SOLO su corruzione positiva (busy/locked=inconclusive→
+  non toccato, evita data-loss), esito in `/api/health`; (7) **feedback bundle** tar.gz locale solo
+  log+report.json (mai `.sqlite`, symlink-safe), errori visibili in UI. Commit `8a240350`→`6383646e`.
+  **Review-driven catches notevoli:** crash del main via readime su stderr del gateway (Task 1); il data-loss
+  della quarantena su store lockato (Task 6). **Resta P1–P3** (sandbox OS-level, firma Win/Linux, `homun://`,
+  manifest plugin, e2e, UDS) — fuori scope P0, ortogonali alla convergenza ADR 0021/0022.
+- **Debito pre-esistente sfiorato:** `test:ui-contract` era rosso per drift `ChatView.tsx`↔script
+  (`eventParts` aggiunto a `RichMessage` da altra sessione); allineato lo script nel Task 8.
 
 **Sessione 2026-06-29 (5g) — ADR 0021 (single-loop) + batch fix chat-UX/funzionali (validati live nell'app):**
 La sessione è passata dalla diagnosi browse all'azione: scritto l'**ADR 0021** (un loop guardato + piano

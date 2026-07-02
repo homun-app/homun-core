@@ -63,8 +63,10 @@ Nota: `docs/decisions/0022-*.md` e `docs/piano-ui-fluidita-memoria.md` sono untr
 In `apps/desktop/package.json`, dentro `scripts`, dopo la riga `"test:ui-contract": …`:
 
 ```json
-    "test:electron": "node --test tests/",
+    "test:electron": "node --test 'tests/*.test.mjs'",
 ```
+
+(Forma glob, NON `node --test tests/`: su Node 25 il positional-arg directory non viene scandito — verificato in isolamento il 2026-07-02.)
 
 - [ ] **Step 1.2: Scrivi i test (falliranno: modulo assente)**
 
@@ -288,7 +290,9 @@ con:
       const gatewayLog = createLogWriter(LOGS_DIR, "gateway.log");
       pipeChildStream(gatewayProcess.stdout, gatewayLog);
       pipeChildStream(gatewayProcess.stderr, gatewayLog, "err");
-      gatewayProcess.once("exit", () => gatewayLog.stream.end());
+      // "close" (not "exit"): exit can fire before stdio drains, and the last
+      // lines (a panic message!) are the most valuable ones.
+      gatewayProcess.once("close", () => gatewayLog.stream.end());
     }
   } else {
 ```
@@ -487,7 +491,10 @@ Stato (accanto a `let gatewayProcess = null;`, r.20 pre-modifica):
 let gatewayRestarts = []; // timestamps of watchdog respawns (see lib/watchdog.cjs)
 ```
 
-Sostituisci l'exit-handler del Task 2.3 con la versione completa:
+Sostituisci l'exit-handler del Task 2.3 con la versione completa. ⚠️ **Preserva la
+guardia `child` e l'handler `error`** introdotti dal fix di review del Task 2 (lo stale-exit
+di un child precedente NON deve nullare il riferimento al nuovo processo né innescare un
+respawn spurio — orfanerebbe il gateway): il respawn scatta solo se `gatewayProcess === child`.
 
 ```js
   gatewayProcess.on("exit", (code, signal) => {
@@ -1079,11 +1086,11 @@ Poi, come ULTIMO figlio del container `set-rows` della sezione `t("settings.abou
 
 - [ ] **Step 7.5: Chiavi i18n**
 
-In `it.json`, nel blocco `settings` (accanto ad `aboutVersion`, r.956):
+In `it.json`, nel blocco `settings` (accanto ad `aboutVersion`, r.956). ⚠️ La `feedbackHint` deve avvisare che i log di diagnostica possono contenere frammenti di percorsi file o messaggi (i backtrace di panic finiscono in `panic.log`, incluso nel bundle) — così chi incolla l'archivio in un issue tracker pubblico non è sorpreso:
 
 ```json
     "feedbackTitle": "Segnala un problema",
-    "feedbackHint": "Crea un archivio con i log tecnici (nessun dato di memoria o chat) da allegare alla segnalazione.",
+    "feedbackHint": "Crea un archivio con i log tecnici (nessun dato di memoria o chat; i log possono contenere percorsi file o frammenti di messaggi) da allegare alla segnalazione.",
     "feedbackButton": "Crea archivio log",
     "feedbackBuilding": "Creo l'archivio…",
     "feedbackDone": "Archivio creato: {{path}}",
@@ -1093,7 +1100,7 @@ In `en.json`, stessa posizione:
 
 ```json
     "feedbackTitle": "Report a problem",
-    "feedbackHint": "Creates an archive with the technical logs (no memory or chat data) to attach to your report.",
+    "feedbackHint": "Creates an archive with the technical logs (no memory or chat data; logs may contain file paths or message fragments) to attach to your report.",
     "feedbackButton": "Create log archive",
     "feedbackBuilding": "Building archive…",
     "feedbackDone": "Archive created: {{path}}",
@@ -1135,7 +1142,7 @@ In `docs/confronto-codex-produzione.md`, sezione "Piano d'azione": marca 1-4 com
 
 - [ ] **Step 8.3: CI**
 
-In `.github/workflows/ci.yml`, nel job che esegue typecheck/build del desktop, aggiungi lo step `npm run test:electron` (stessa working-directory del typecheck). Verifica prima la struttura reale: `grep -n "typecheck\|working-directory" .github/workflows/ci.yml`.
+In `.github/workflows/ci.yml`, nel job che esegue typecheck/build del desktop, aggiungi lo step `npm run test:electron` (stessa working-directory del typecheck). Verifica prima la struttura reale: `grep -n "typecheck\|working-directory\|node-version" .github/workflows/ci.yml`. ⚠️ Il glob quotato `'tests/*.test.mjs'` richiede Node ≥21 (espansione interna di node --test) e le single quote non funzionano su cmd.exe: se il runner CI usa Node 20 o Windows, elenca i file esplicitamente o alza node-version.
 
 - [ ] **Step 8.4: Gate finale completo**
 

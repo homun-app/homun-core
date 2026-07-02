@@ -209,13 +209,21 @@ convergenza naturale di memoria (differenziatore #1) + plugin roadmap.
 
 ## Piano d'azione proposto (ordine di ROI, effort ≈ S/M/L)
 
-**P0 — igiene di produzione (senza questo, ogni bug utente è cieco):**
-1. (S) Single-instance lock + second-instance routing.
-2. (M) Log su file con rotazione per gateway (tracing-appender) e main Electron; panic
-   hook Rust con backtrace + crash-marker; stdio del gateway NON più `ignore` ma piped→file.
-3. (S) "Segnala un problema" = zip locale di log+versione+specs (feedback-archive senza vendor).
-4. (M) Recovery SQLite: quick_check all'avvio, backup+ricrea+informa; watchdog respawn
-   gateway con backoff.
+**P0 — igiene di produzione (senza questo, ogni bug utente è cieco): ✅ FATTO (2026-07-02, branch
+`feat/p0-production-hygiene`). Dettaglio in [architecture/desktop-shell.md](architecture/desktop-shell.md).**
+1. ✅ (S) Single-instance lock + second-instance routing (focus della prima finestra; guardia in
+   `whenReady`). `main.cjs`, commit `5146a524`.
+2. ✅ (M) Log su file con rotazione (`electron/lib/logging.cjs`, 5×5MB) per gateway e main Electron;
+   panic hook Rust (`panic_log.rs`) con backtrace + crash-marker (file 0600); stdio del gateway NON
+   più `ignore` ma piped→`~/.homun/logs/gateway.log`. Commit `8a240350`/`60f4c1af`, `cf4bda15`/`362b8ad7`.
+   (Scelta: cattura stdio invece di `tracing-appender` — è il punto di leva minimo finché il motore
+   non è separato; vedi doc gemello §strutturale.)
+3. ✅ (S) "Segnala un problema" = tar.gz locale di **soli** log + report.json (versioni/specs), mai i
+   `.sqlite` (caposaldo #3), copia symlink-safe. Commit `c7bc4e50`/`6383646e`.
+4. ✅ (M) Recovery SQLite: `PRAGMA quick_check` all'avvio, quarantena (mai delete) dei **soli** DB
+   davvero corrotti — busy/locked = inconclusive → non toccato (evita il data-loss), esito in
+   `/api/health`; watchdog respawn gateway con backoff 1s→5s→15s + give-up dopo 3 crash/5min.
+   Commit `0625634f`/`d470b1b3`, `6b0940d1`/`4188f653`.
 
 **P1 — enforcement e fiducia:**
 5. (M) Sandbox-mode a 3 livelli imposto dal gateway sull'esecuzione shell/file
