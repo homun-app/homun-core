@@ -441,11 +441,22 @@ plugin.json+SKILL.md+.mcp.json = la formalizzazione che manca a F0–F3), e2e. P
   canonicalizzare, il recinto negava ANCHE le scritture consentite (ogni comando col flag on sarebbe fallito).
   Fix: `canonical_or_raw` in `seatbelt.rs` canonicalizza roots+tmp (fallback al literal se il path non esiste →
   test sintetici deterministici). Provato: write progetto OK, home/etc bloccate, `git init` OK. **Lezione: i
-  feature di sicurezza si validano ESEGUENDO, il diff+unit-test non bastano.** PROSSIME AZIONI (follow-up, in
-  ordine): (1) raccogliere dati reali col flag on (righe `SANDBOX-SHADOW` + comandi recintati) per tarare i root;
-  (2) escalation completa (card "approva → riesegui senza recinto" + resume, come Codex on-failure); (3) opzione
-  network-off + allowlist `sysctl-name` esatta di Codex (fedeltà); (4) Linux (Landlock+seccomp via helper
-  binary), Windows (approval-only). Poi
+  feature di sicurezza si validano ESEGUENDO, il diff+unit-test non bastano.** ESCALATION on-failure COMPLETA
+  (backend `668a5d0b` + frontend `04360bc5`): comando fallisce nel recinto (denial) → `run_in_project` ritorna
+  `RunProjectOutcome::NeedsEscalation` → `emit_approval_card` con marker `‹‹SANDBOX_ESCALATE››` → utente approva
+  → endpoint `POST /api/capabilities/run/escalate` (gate provenance: `sandbox_escalate_matches` sul messaggio
+  memorizzato, 403 se il comando non combacia — no RCE arbitrario) riesegue via `run_bash_unsandboxed` → rewrite
+  marker. Card `SandboxEscalateCard` (mirror `FsAuthorizeCard`). **Root larghi CONFERMATI giusti**: test
+  empirico mostra npm/cargo scrivono nelle cache home di routine → root stretti farebbero scattare l'escalation
+  di continuo; i root larghi (project+cache) + escalation-per-il-raro è la UX giusta. **Profilo minimale
+  SUFFICIENTE** (test empirico): node/python3/git/npm/bash girano tutti → le allowance extra Codex
+  (`mach-lookup`/`ipc`) NON servono per il caso comune → #fedeltà-profilo declassato a polish opzionale.
+  **RIMANE (ADR 0023 completamento): Settings UI** (esporre sandbox mode + approval policy come impostazione
+  utente, sostituendo il flag env `HOMUN_TOOL_SAFETY`); **skill confirmation policies** (Step 5 ADR: categorie
+  di conferma dichiarative in SKILL.md rispettate dall'harness); **Windows** (approval-only, quasi no-op:
+  non-macOS già gira senza fence + gate approvazione); **Linux** (Landlock+seccomp — ⚠️ NON validabile su questa
+  macchina macOS: da costruire dietro flag e marcare UNVALIDATED finché testato su Linux, vista la lezione del
+  bug canonicalizzazione trovato solo eseguendo). Opz: network-off. Poi
   (classifica footprint tool, shadow-log), Step 3 (enforcement OS: Seatbelt macOS prima), Step 4 (Settings UI
   + Windows/Linux), Step 5 (confirmation policy dichiarative nelle skill). La convergenza-facade (Fasi 2b/3/4
   vecchie) è DEROGATA: non è Codex e non è prerequisito, il chokepoint c'è già.
