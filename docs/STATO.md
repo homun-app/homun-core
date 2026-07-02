@@ -364,6 +364,23 @@ plugin.json+SKILL.md+.mcp.json = la formalizzazione che manca a F0–F3), e2e. P
   **Proposed, non implementato.** ⚠️ 0021 è Accepted ma 0022/0023/0024 sono **Proposed**: la direzione
   architettturale (memoria off-path + sandbox + estrazione motore) va ratificata prima di un'estrazione
   da 5.700 righe.
+- **⭐ RIPRESA — CHOKEPOINT TOOL (ADR 0024 step 2) IN CORSO.** Decisione utente: firma Windows parcheggiata
+  (si comprerà il certificato); "procedi su tutto il resto" → attaccata la separazione motore in ordine.
+  **Map fatto** (subagent, 2026-07-02): il chat loop **bypassa completamente `CapabilityFacade`** — 0 tool
+  ci passano; le 4 famiglie (browser/~34 builtin/MCP/Composio) sono dispatchate inline in ~3.200 righe dentro
+  `stream_chat_via_openai` (main.rs blocco `20422–23664`) + 1 duplicato orchestrator (`37735–37796`).
+  `CapabilityFacade::call_tool` (`crates/capabilities/src/facade.rs:100`) oggi instrada solo provider MCP
+  registrati. Convergere = provider-ificare builtin+browser (stato accoppiato a memoria/artefatti/piani) +
+  spostare confirmation card nel policy layer — NON un refactor piccolo. **Piano fasato per rischio:**
+  [plans/2026-07-02-tool-chokepoint-convergence.md](plans/2026-07-02-tool-chokepoint-convergence.md).
+  **Fase 0 FATTA** (`59a48f2d`): `crates/desktop-gateway/src/tool_exec.rs` — tipi seam `ToolCall`/`ToolOutcome`/
+  trait `ToolExecutor` (pura addizione, 3 test, non ancora cablato, `#![allow(dead_code)]`).
+  **PROSSIMO = Fase 1** (rischio medio-alto): estrarre il dispatch inline in UNA funzione chokepoint
+  `execute_chat_tool(ctx, call)` behavior-preserving — path chat LIVE, va fatta con subagent+TDD+**parità
+  live** (stesso prompt→stessa risposta/tool-trace). Poi Fase 2 (MCP+Composio via facade, basso rischio) →
+  checkpoint utente → Fasi 3–4 (browser, builtin file/shell-first). Il chokepoint di Fase 5 è il prerequisito
+  della sandbox 0023. NB: `check-ui-contract.mjs` toccato da sessione vault concorrente (task chip vault) —
+  non è mio.
 - **Debito pre-esistente sfiorato:** `test:ui-contract` era rosso per drift `ChatView.tsx`↔script
   (`eventParts` aggiunto a `RichMessage` da altra sessione); allineato lo script nel Task 8.
 
