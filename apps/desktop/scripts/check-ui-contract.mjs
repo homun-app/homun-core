@@ -425,7 +425,7 @@ assertContains("src/styles.css", ".artifacts-panel.embedded .artifacts-preview",
 assertContains("src/styles.css", ".workbench-artifacts-list .artifact-row-wrap", "artifact review must frame artifacts as cards inside the workbench");
 assertContains("src/styles.css", ".workbench-artifacts-list .artifact-preview-doc", "artifact preview content must be padded and bounded inside the workbench");
 assertNotContains("src/components/ChatView.tsx", "{planSteps.length > 0 && <PlanProgressCard steps={planSteps} />}", "operational plan markers must not render duplicate inline cards inside the assistant answer");
-assertContains("src/components/ChatView.tsx", "{readable && <RichMessage text={readable} streaming={streaming} />}", "assistant markdown must stay progressive while the message streams");
+assertContains("src/components/ChatView.tsx", "{readable && <RichMessage text={readable} streaming={streaming} eventParts={eventParts} />}", "assistant markdown must stay progressive while the message streams");
 assertContains("src/components/ChatView.tsx", "{planPropose && !streaming && onChoose && (", "actionable plan proposal cards must wait for a completed non-streaming message");
 assertContains("src/components/ChatView.tsx", "streamingUserPinnedRef", "chat must keep new streaming responses visible");
 assertNotContains("src/components/ChatView.tsx", "STREAM_TYPEWRITER_INTERVAL_MS", "chat streaming must not use timer-based typewriter rendering");

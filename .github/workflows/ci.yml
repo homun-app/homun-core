@@ -48,6 +48,10 @@ jobs:
         working-directory: apps/desktop
         run: npm run build
 
+      - name: Electron shell unit tests
+        working-directory: apps/desktop
+        run: npm run test:electron
+
   backend:
     name: Backend (build + gateway tests)
     runs-on: ubuntu-22.04
