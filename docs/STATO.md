@@ -398,11 +398,18 @@ plugin.json+SKILL.md+.mcp.json = la formalizzazione che manca a F0–F3), e2e. P
   **PROSSIMO = pivot ad ADR 0023 al chokepoint (direttiva utente: "il più vicino a come è strutturato Codex").**
   Verificato sul bundle Codex reale: usa esattamente `SandboxPolicy` (read-only/workspace-write/danger-full-access)
   + `AskForApproval` (untrusted/on-failure/on-request/never) + Seatbelt/Landlock/seccomp — ADR 0023 È Codex.
-  La Fase 1 ha soddisfatto il prerequisito (chokepoint = `execute_chat_tool`). **Step 2a** (prossima azione):
-  introdurre i due enum Codex + una `assess_tool_safety(name,args,sandbox,approval,ctx) -> SafetyDecision`
-  (equivalente `safety.rs::assess_command_safety`) in cima a `execute_chat_tool`, **behavior-preserving**
-  (default `danger-full-access` + comportamento approval attuale dietro flag), **fondendo le due card
-  MCP/Composio duplicate in UN gate unificato** (= Option A, la metà "approval" dell'ADR). Poi Step 2b
+  La Fase 1 ha soddisfatto il prerequisito (chokepoint = `execute_chat_tool`). **Step 2a deliverable 1 FATTO**
+  (`6725c0d8`): `crates/desktop-gateway/src/tool_safety.rs` — enum Codex `SandboxPolicy`/`AskForApproval`/
+  `SandboxKind`/`SafetyDecision` + `assess_tool_safety(approval, sandbox, is_effectful_write, pre_authorized)
+  -> SafetyDecision` puro (equiv. `safety.rs::assess_command_safety`, 10 test, `#![allow(dead_code)]`, NON
+  cablato). Tabella di verità behavior-preserving verificata contro i rami reali: `Never`≡`autonomous`,
+  `pre_authorized`≡`workspace_scoped`(MCP)/`composio_tool_allowed`(Composio). **PROSSIMA AZIONE = wiring
+  (Step 2 dell'ADR, cambio di comportamento):** chiamare `assess_tool_safety` in cima a `execute_chat_tool`
+  e **fondere le due card MCP/Composio duplicate in UN gate unificato** (`emit_approval_card(ctx, marker_kind,
+  label, args)`), default `AskForApproval` = comportamento attuale + `SandboxPolicy::DangerFullAccess` (no
+  enforcement) dietro flag `HOMUN_TOOL_SAFETY`. **Prima del wiring: MAPPARE il flusso resume approvazione**
+  (`crates/task-runtime/src/approval.rs` + come la card `‹‹*_CONFIRM››` torna e riprende) — non ancora fatto.
+  Poi Step 2b
   (classifica footprint tool, shadow-log), Step 3 (enforcement OS: Seatbelt macOS prima), Step 4 (Settings UI
   + Windows/Linux), Step 5 (confirmation policy dichiarative nelle skill). La convergenza-facade (Fasi 2b/3/4
   vecchie) è DEROGATA: non è Codex e non è prerequisito, il chokepoint c'è già.
