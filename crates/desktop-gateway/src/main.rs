@@ -18363,6 +18363,10 @@ struct ChatToolCtx<'a> {
     tx: &'a StreamSink,
     thread_id: Option<&'a str>,
     prompt: &'a str,
+    // The original per-turn request (read-only): the dispatch reads
+    // `request.model` to detect an EXPLICIT per-message model override before
+    // switching to the browser driver model. Turn-constant.
+    request: &'a ChatGenerateStreamRequest,
     read_only: bool,
     channel_owner: bool,
     contact_only: bool,
@@ -18377,6 +18381,3180 @@ struct ChatToolCtx<'a> {
     turn_scaffold: &'a scaffold::ScaffoldProfile,
     floor_acting: bool,
     round: usize,
+}
+
+/// Pure per-tool-call dispatch for the chat loop: the single `if name == … else if …`
+/// chain, extracted verbatim from `stream_chat_via_openai`'s dispatch loop (fase 1b).
+/// Turn-state is read/mutated through `ctx.<field>` exactly as inline (disjoint field
+/// borrows preserved); `name`/`args_raw`/`call_id` are the per-call parse results. The
+/// caller keeps the harness snapshots, the blocked-guard, and the post-result push.
+async fn execute_chat_tool(
+    ctx: &mut ChatToolCtx<'_>,
+    name: &str,
+    args_raw: &str,
+    call_id: &str,
+) -> String {
+    let result = if ctx.read_only
+        && matches!(
+            name,
+            "run_in_sandbox"
+                | "create_artifact"
+                | "generate_image"
+                | "save_artifact"
+                | "read_file"
+                | "write_file"
+                | "edit_file"
+                | "list_files"
+                | "run_in_project"
+                | "schedule_task"
+                | "cancel_scheduled_task"
+                | "customize_addon"
+                | "create_skill"
+        ) {
+        // Defensive: these aren't offered in read-only mode, but if the
+        // model calls one anyway, refuse instead of executing.
+        "Action not available from the channel: operations with effects \
+require your confirmation in the app. Propose it and stop."
+            .to_string()
+    } else if matches!(
+        name,
+        "browser_navigate"
+            | "browser_snapshot"
+            | "browser_act"
+            | "browser_screenshot"
+            | "browser_tabs"
+            | "browser_dialog"
+    ) {
+        // Granular browser tools (HOMUN_CHAT_BROWSER_GRANULAR):
+        // the main agent drives the browser one micro-action at a
+        // time against a per-turn session.
+        let args: serde_json::Value = serde_json::from_str(args_raw)
+            .unwrap_or_else(|_| serde_json::json!({}));
+        // First browser tool this turn: mark used (raises round
+        // budget), publish live activity, acquire the session
+        // (reuse the thread's warm one, else spawn a chat sidecar).
+        if !*ctx.browser_used {
+            *ctx.browser_used = true;
+            begin_browser_activity(
+                ctx.prompt.to_string(),
+                ctx.thread_id.map(|s| s.to_string()),
+            );
+            // Honor an EXPLICIT "browser" role: switch the driver
+            // model for the rest of this (browsing) turn. Skipped
+            // when the user forced a per-message model override.
+            let has_msg_override = ctx
+                .request
+                .model
+                .as_deref()
+                .map(|m| !m.trim().is_empty())
+                .unwrap_or(false);
+            if !has_msg_override {
+                if let Some((b_url, b_model, b_key)) =
+                    browser_openai_stream_config()
+                {
+                    if b_model != *ctx.model || b_url != *ctx.base_url {
+                        let _ = emit_stream_event(
+                            ctx.tx,
+                            GenerateStreamEvent::Delta {
+                                text: format!(
+                                    "‹‹ACT››🧠 Passo al modello browser: {b_model}‹‹/ACT››"
+                                ),
+                            },
+                        )
+                        .await;
+                        *ctx.base_url = b_url;
+                        *ctx.model = b_model;
+                        *ctx.api_key = b_key;
+                        // Provider-aware endpoint: an Ollama-based
+                        // browser role needs native /api/chat — the
+                        // old hardcoded "/chat/completions" sent
+                        // NATIVE-shaped payloads (object arguments)
+                        // to the strict /v1 endpoint → 400 on every
+                        // mid-turn model switch (task #105).
+                        *ctx.endpoint = chat_endpoint(ctx.base_url);
+                    }
+                }
+            }
+        }
+        if ctx.browser_session.is_none() {
+            let reused = match ctx.thread_id {
+                Some(t) => {
+                    let st = ctx.state.clone();
+                    let t = t.to_string();
+                    tokio::task::spawn_blocking(move || {
+                        take_thread_browser_session(&st, &t)
+                    })
+                    .await
+                    .ok()
+                    .flatten()
+                }
+                None => None,
+            };
+            // A reused session already has the "chat_0" tab open;
+            // mark it opened so navigate reuses it (Navigate, not
+            // Open). A fresh session has no tabs yet.
+            if reused.is_some() && !ctx.opened_targets.iter().any(|t| t == "chat_0") {
+                ctx.opened_targets.push("chat_0".to_string());
+            }
+            match reused {
+                Some(existing) => *ctx.browser_session = Some(existing),
+                None => {
+                    // Self-heal: a wedged contained-computer CDP makes the
+                    // sidecar's connectOverCDP time out. Health-check BEFORE
+                    // connecting; and if the spawn/connect fails anyway (a
+                    // race, or a container that wedged after the check),
+                    // recycle + recreate and retry once — resolve the block
+                    // automatically instead of reporting "non disponibile".
+                    if !browser_cdp_ok(ctx.state).await {
+                        let _ = emit_stream_event(
+                            ctx.tx,
+                            GenerateStreamEvent::Delta {
+                                text: "‹‹ACT››🔧 Browser stuck: restarting the contained computer…‹‹/ACT››".to_string(),
+                            },
+                        )
+                        .await;
+                        ensure_browser_cdp_healthy(ctx.state).await;
+                    }
+                    for attempt in 0u8..2 {
+                        let st = ctx.state.clone();
+                        let spawned = tokio::task::spawn_blocking(move || {
+                            spawn_browser_sidecar_for_chat(&st)
+                        })
+                        .await;
+                        match spawned {
+                            Ok(Ok(session)) => {
+                                *ctx.browser_session =
+                                    Some(BrowserAutomationClient::new(session));
+                                break;
+                            }
+                            // First failure → recycle the container + retry.
+                            _ if attempt == 0 => {
+                                let _ = emit_stream_event(
+                                    ctx.tx,
+                                    GenerateStreamEvent::Delta {
+                                        text: "‹‹ACT››🔧 Browser unreachable: restarting and retrying…‹‹/ACT››".to_string(),
+                                    },
+                                )
+                                .await;
+                                ensure_browser_cdp_healthy(ctx.state).await;
+                            }
+                            // Second failure → give up; reported below.
+                            _ => {}
+                        }
+                    }
+                }
+            }
+        }
+        // Mark this tool result as carrying a (potentially large)
+        // snapshot so the pruner stubs older ones.
+        ctx.browser_tool_call_ids.insert(call_id.to_string());
+        // We hold the session for the duration of this branch; the
+        // GLOBAL lock is acquired only around each single call.
+        let outcome: Result<String, String> = match ctx.browser_session.take() {
+            None => {
+                push_browser_step(
+                    "browser: session unavailable".to_string(),
+                    "error",
+                );
+                Err("Browser unavailable: the contained-computer browser (a headless \
+Chromium in a Docker container, driven over CDP — there is NO local browser binary) did not start. \
+Usually transient, or the contained computer isn't running yet. Do NOT look for a local \
+chromium/firefox install and do NOT conclude Chromium is missing or that it's a known bug. Retry, \
+or tell the user to start the contained computer (Settings → Local computer)."
+                    .to_string())
+            }
+            Some(client) => match name {
+                "browser_navigate" => {
+                    // Multi-tab: an explicit `target` switches the current
+                    // tab; `new_tab` allocates a fresh chat_N id (so the
+                    // logic below treats it as not-yet-opened → Open).
+                    if let Some(t) = args.get("target").and_then(|v| v.as_str()) {
+                        if !t.trim().is_empty() {
+                            *ctx.current_target = t.to_string();
+                        }
+                    }
+                    if args
+                        .get("new_tab")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false)
+                    {
+                        *ctx.current_target = format!("chat_{}", ctx.opened_targets.len());
+                    }
+                    let url = args
+                        .get("url")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    if url.trim().is_empty() {
+                        *ctx.browser_session = Some(client);
+                        Err("Missing URL for browser_navigate.".to_string())
+                    } else {
+                        let _ = emit_stream_event(
+                            ctx.tx,
+                            GenerateStreamEvent::Delta {
+                                text: format!("‹‹ACT››🌐 Opening {url}‹‹/ACT››"),
+                            },
+                        )
+                        .await;
+                        let guard = browse_web_lock().lock().await;
+                        // Open the current tab the first time, then Navigate.
+                        let already_open =
+                            ctx.opened_targets.iter().any(|t| t.as_str() == ctx.current_target.as_str());
+                        let (open_method, open_params) = if already_open {
+                            (
+                                BrowserMethod::Navigate,
+                                serde_json::json!({
+                                    "target_id": ctx.current_target.as_str(),
+                                    "url": url,
+                                }),
+                            )
+                        } else {
+                            (
+                                BrowserMethod::Open,
+                                serde_json::json!({
+                                    "url": url,
+                                    "label": ctx.current_target.as_str(),
+                                }),
+                            )
+                        };
+                        let (client_back, nav_res) =
+                            chat_browser_call(client, open_method, open_params)
+                                .await;
+                        let nav_err = nav_res.err();
+                        // Navigate/Open return no snapshot → snapshot now.
+                        let mut client_now = client_back;
+                        let snap_result = if nav_err.is_none() {
+                            if let Some(c) = client_now.take() {
+                                let (c2, snap) = chat_browser_call(
+                                    c,
+                                    BrowserMethod::Snapshot,
+                                    browser_chat_snapshot_params(
+                                        ctx.current_target.as_str(),
+                                    ),
+                                )
+                                .await;
+                                client_now = c2;
+                                snap
+                            } else {
+                                Err("session lost after navigation".to_string())
+                            }
+                        } else {
+                            Err(nav_err.clone().unwrap_or_default())
+                        };
+                        drop(guard);
+                        *ctx.browser_session = client_now;
+                        // Mark this tab opened once the Open/Navigate succeeds.
+                        if nav_err.is_none()
+                            && !ctx.opened_targets.iter().any(|t| t.as_str() == ctx.current_target.as_str())
+                        {
+                            ctx.opened_targets.push(ctx.current_target.clone());
+                        }
+                        match (nav_err, snap_result) {
+                            (Some(error), _) => {
+                                if verbose_debug() {
+                                    eprintln!(
+                                        "[browser] navigate {url} FAILED: {error}"
+                                    );
+                                }
+                                push_browser_step(
+                                    format!("navigate {url}"),
+                                    "error",
+                                );
+                                // CDP wedge (connectOverCDP timeout despite an
+                                // HTTP-OK /json/version): recycle the contained
+                                // computer once per window and DROP the session so
+                                // the next call respawns against fresh CDP. motore
+                                // #1's pre-spawn `browser_cdp_ok` can't see this
+                                // ws-level wedge, so heal it on the failure (same
+                                // self-heal the drive's shared path already has).
+                                if cdp_wedge_signature(&error) {
+                                    let _ = emit_stream_event(
+                                        ctx.tx,
+                                        GenerateStreamEvent::Delta {
+                                            text: "‹‹ACT››🔧 Browser bloccato: riavvio il computer…‹‹/ACT››".to_string(),
+                                        },
+                                    )
+                                    .await;
+                                    let healed = force_recycle_contained_computer(
+                                        ctx.state,
+                                    )
+                                    .await;
+                                    *ctx.browser_session = None;
+                                    ctx.opened_targets.clear();
+                                    if healed {
+                                        Err("The browser was wedged; I recycled the contained computer. Retry the SAME navigation now.".to_string())
+                                    } else {
+                                        Err("The browser is unavailable (the contained computer did not recover). Tell the user to check Settings → Local computer.".to_string())
+                                    }
+                                } else {
+                                    let fails = {
+                                        let entry = ctx.nav_failures
+                                            .entry(url.to_string())
+                                            .or_insert(0);
+                                        *entry += 1;
+                                        *entry
+                                    };
+                                    Err(format!(
+                                        "Navigation failed: {error}{}",
+                                        browser_navigate_failure_hint(&url, fails)
+                                    ))
+                                }
+                            }
+                            (None, Ok(value)) => {
+                                let snap = browser_snapshot_text(&value);
+                                if !snap.is_empty() {
+                                    *ctx.last_snapshot = snap.clone();
+                                }
+                                push_browser_step(
+                                    format!("navigate {url}"),
+                                    "done",
+                                );
+                                let page_url = value
+                                    .get("url")
+                                    .and_then(|u| u.as_str())
+                                    .unwrap_or(url.as_str());
+                                Ok(format!(
+                                    "Page opened ({page_url}). Snapshot:\n{snap}"
+                                ))
+                            }
+                            (None, Err(error)) => {
+                                push_browser_step(
+                                    format!("navigate {url}"),
+                                    "error",
+                                );
+                                Err(format!(
+                                    "Page opened but snapshot failed: {error}"
+                                ))
+                            }
+                        }
+                    }
+                }
+                "browser_snapshot" => {
+                    if let Some(t) = args.get("target").and_then(|v| v.as_str()) {
+                        if !t.trim().is_empty() {
+                            *ctx.current_target = t.to_string();
+                        }
+                    }
+                    let _ = emit_stream_event(
+                        ctx.tx,
+                        GenerateStreamEvent::Delta {
+                            text: "‹‹ACT››👁️ Re-reading the page‹‹/ACT››"
+                                .to_string(),
+                        },
+                    )
+                    .await;
+                    let guard = browse_web_lock().lock().await;
+                    let (client_back, snap) = chat_browser_call(
+                        client,
+                        BrowserMethod::Snapshot,
+                        browser_chat_snapshot_params(ctx.current_target.as_str()),
+                    )
+                    .await;
+                    drop(guard);
+                    *ctx.browser_session = client_back;
+                    match snap {
+                        Ok(value) => {
+                            let snap = browser_snapshot_text(&value);
+                            if !snap.is_empty() {
+                                *ctx.last_snapshot = snap.clone();
+                            }
+                            push_browser_step("snapshot".to_string(), "done");
+                            Ok(format!("Page snapshot:\n{snap}"))
+                        }
+                        Err(error) => {
+                            push_browser_step("snapshot".to_string(), "error");
+                            Err(format!("Snapshot failed: {error}"))
+                        }
+                    }
+                }
+                "browser_act" => {
+                    // Build the action the sidecar runs (and the safety gate
+                    // inspects), coercing a common model mistake that otherwise
+                    // dead-ends in a retry loop: an element ref (e83) passed as
+                    // `target` — which is a TAB id, so the sidecar errors "tab
+                    // not found: e83". Re-route a ref-shaped target into `ref`
+                    // (when none was given) instead of switching to a missing tab.
+                    let mut action = args.clone();
+                    let target_arg = args
+                        .get("target")
+                        .and_then(|v| v.as_str())
+                        .map(str::to_string);
+                    let has_ref = action
+                        .get("ref")
+                        .and_then(|v| v.as_str())
+                        .is_some_and(|r| !r.trim().is_empty());
+                    let target_is_ref = target_arg.as_deref().is_some_and(|t| {
+                        t.len() >= 2
+                            && t.starts_with('e')
+                            && t[1..].chars().all(|c| c.is_ascii_digit())
+                    });
+                    if let Some(obj) = action.as_object_mut() {
+                        if target_is_ref && !has_ref {
+                            if let Some(t) = target_arg.clone() {
+                                obj.insert(
+                                    "ref".to_string(),
+                                    serde_json::Value::String(t),
+                                );
+                            }
+                            obj.remove("target");
+                        } else if let Some(t) = target_arg.as_deref() {
+                            if !t.trim().is_empty() {
+                                *ctx.current_target = t.to_string();
+                            }
+                        }
+                        obj.insert(
+                            "target_id".to_string(),
+                            serde_json::Value::String(ctx.current_target.clone()),
+                        );
+                    }
+                    let mut preflight_error = None;
+                    let vault_secret_used =
+                        match apply_payment_approval_secret_for_action(
+                            ctx.state,
+                            &mut action,
+                        ) {
+                            Ok(used) => used,
+                            Err(error) => {
+                                push_browser_step(
+                                    "payment vault secret blocked".to_string(),
+                                    "error",
+                                );
+                                preflight_error = Some(format!(
+                                    "Payment vault secret unavailable: {error}. Ask the user to approve the Payment Approval Card again."
+                                ));
+                                false
+                            }
+                        };
+                    // SAFETY GATE: high-risk (buy/login/booking, or
+                    // evaluate) is refused for EVERYONE. In read-only
+                    // (channel) turns any committing action is also
+                    // refused — EXCEPT when the sender is the OWNER
+                    // (is_self card): that block protects the user from
+                    // other people, not from their own requests (e.g.
+                    // clicking "Cerca" on a train search they asked for).
+                    let approved_payment_id =
+                        approved_payment_id_for_action(ctx.state, &action);
+                    let blocked = browser_safety::high_risk_reason_with_payment_approval(
+                        &action,
+                        ctx.last_snapshot,
+                        approved_payment_id.as_deref(),
+                    )
+                    .or_else(|| {
+                        if ctx.read_only
+                            && !ctx.channel_owner
+                            && browser_safety::is_committing_action(&action)
+                        {
+                            Some(
+                                "action that confirms/submits is not allowed from the channel"
+                                    .to_string(),
+                            )
+                        } else {
+                            None
+                        }
+                    });
+                    if let Some(error) = preflight_error {
+                        *ctx.browser_session = Some(client);
+                        Err(error)
+                    } else if let Some(reason) = blocked {
+                        eprintln!("browser-gate: BLOCKED ({reason})");
+                        *ctx.browser_session = Some(client);
+                        push_browser_step(
+                            format!(
+                                "action blocked: {}",
+                                args.get("kind")
+                                    .and_then(|k| k.as_str())
+                                    .unwrap_or("?")
+                            ),
+                            "error",
+                        );
+                        Err(format!(
+                            "🚫 action blocked, user confirmation needed: {reason}.{} \
+I did nothing: propose to the user what to do and wait — do NOT retry the same action.",
+                            browser_act_error_hint(&reason)
+                        ))
+                    } else {
+                        let kind = args
+                            .get("kind")
+                            .and_then(|k| k.as_str())
+                            .unwrap_or("action")
+                            .to_string();
+                        let _ = emit_stream_event(
+                            ctx.tx,
+                            GenerateStreamEvent::Delta {
+                                text: format!(
+                                    "‹‹ACT››✋ {kind} on the page‹‹/ACT››"
+                                ),
+                            },
+                        )
+                        .await;
+                        let guard = browse_web_lock().lock().await;
+                        let (client_back, act_res) =
+                            chat_browser_call(client, BrowserMethod::Act, action)
+                                .await;
+                        drop(guard);
+                        *ctx.browser_session = client_back;
+                        match act_res {
+                            Ok(value) => {
+                                let snap = browser_snapshot_text(&value);
+                                // No-progress detection: if the action left
+                                // the page identical, nudge the model to try
+                                // a different element/approach instead of
+                                // repeating the same move.
+                                let no_change =
+                                    !snap.is_empty() && snap == *ctx.last_snapshot;
+                                if !snap.is_empty() {
+                                    *ctx.last_snapshot = snap.clone();
+                                }
+                                push_browser_step(format!("{kind}"), "done");
+                                let mut out = if snap.is_empty() {
+                                    "Action performed.".to_string()
+                                } else {
+                                    format!(
+                                        "Action performed. Updated snapshot:\n{snap}"
+                                    )
+                                };
+                                if no_change {
+                                    out.push_str(
+                                    "\n[note: the page did NOT change from before — \
+don't repeat the same action; try a different element, scroll, or wait (kind=wait).]",
+                                );
+                                }
+                                if let Some(committed) =
+                                    value.get("committedOption")
+                                {
+                                    out.push_str(&format!(
+                                        "\n[automatic selection: {committed}]"
+                                    ));
+                                }
+                                if let Some(sugg) = value.get("suggestions") {
+                                    out.push_str(&format!(
+                                        "\n[suggestions: {sugg}]"
+                                    ));
+                                }
+                                // Guardrail (advisory, Layer C.3): if the model just
+                                // typed/filled a date that is in the PAST, nudge it to
+                                // re-resolve via resolve_datetime instead of submitting.
+                                // Advisory (not a hard block) because some past dates are
+                                // legitimate (birthdays, historical lookups).
+                                if matches!(
+                                    args.get("kind").and_then(|k| k.as_str()),
+                                    Some("type") | Some("fill")
+                                ) {
+                                    if let Some(typed) =
+                                        args.get("text").and_then(|t| t.as_str())
+                                    {
+                                        if let Some(hint) = past_date_hint(typed) {
+                                            out.push_str(&hint);
+                                        }
+                                    }
+                                }
+                                Ok(out)
+                            }
+                            Err(error) => {
+                                push_browser_step(format!("{kind}"), "error");
+                                // DIAG (HOMUN_DEBUG): what the model tried + why it
+                                // failed, to root-cause the repeated browser_act loop.
+                                if verbose_debug() {
+                                    eprintln!(
+                                        "[browser_act] kind={kind} ref={:?} selector={:?} text={:?} → ERROR: {}",
+                                        args.get("ref").and_then(|v| v.as_str()),
+                                        args.get("selector")
+                                            .and_then(|v| v.as_str()),
+                                        if vault_secret_used {
+                                            Some("[vault-secret]")
+                                        } else {
+                                            args.get("text")
+                                                .and_then(|v| v.as_str())
+                                        },
+                                        error.chars().take(220).collect::<String>()
+                                    );
+                                }
+                                // Stale-ref auto-recovery: the page changed under us
+                                // so the [ref=eN] is gone. Instead of just erroring
+                                // (forcing the model to spend a round re-snapshotting),
+                                // take a fresh snapshot NOW and hand it back so it
+                                // retries with new refs in the same round.
+                                let stale = {
+                                    let e = error.to_lowercase();
+                                    e.contains("stale") || e.contains("detached")
+                                };
+                                match (stale, ctx.browser_session.take()) {
+                                    (true, Some(c)) => {
+                                        let guard = browse_web_lock().lock().await;
+                                        let (c_back, snap_res) = chat_browser_call(
+                                            c,
+                                            BrowserMethod::Snapshot,
+                                            browser_chat_snapshot_params(
+                                                ctx.current_target.as_str(),
+                                            ),
+                                        )
+                                        .await;
+                                        drop(guard);
+                                        *ctx.browser_session = c_back;
+                                        let snap = snap_res
+                                            .as_ref()
+                                            .map(browser_snapshot_text)
+                                            .unwrap_or_default();
+                                        if snap.is_empty() {
+                                            Err(format!(
+                                                "Action failed: {error}{}",
+                                                browser_act_error_hint(&error)
+                                            ))
+                                        } else {
+                                            *ctx.last_snapshot = snap.clone();
+                                            Ok(stale_ref_recovery_message(
+                                                args.get("ref")
+                                                    .and_then(|v| v.as_str()),
+                                                &snap,
+                                            ))
+                                        }
+                                    }
+                                    (_, restored) => {
+                                        *ctx.browser_session = restored;
+                                        Err(format!(
+                                            "Action failed: {error}{}",
+                                            browser_act_error_hint(&error)
+                                        ))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                "browser_screenshot" => {
+                    if let Some(t) = args.get("target").and_then(|v| v.as_str()) {
+                        if !t.trim().is_empty() {
+                            *ctx.current_target = t.to_string();
+                        }
+                    }
+                    let full_page = args
+                        .get("full_page")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+                    let marks = args
+                        .get("marks")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+                    let _ = emit_stream_event(
+                        ctx.tx,
+                        GenerateStreamEvent::Delta {
+                            text: "‹‹ACT››📸 Capturing a screenshot‹‹/ACT››"
+                                .to_string(),
+                        },
+                    )
+                    .await;
+                    let file_name =
+                        format!("chat_shot_{}.png", uuid::Uuid::new_v4().simple());
+                    let guard = browse_web_lock().lock().await;
+                    let (client_back, shot_res) = chat_browser_call(
+                        client,
+                        BrowserMethod::Screenshot,
+                        serde_json::json!({
+                            "target_id": ctx.current_target.as_str(),
+                            "file_name": file_name,
+                            "full_page": full_page,
+                            "labels": marks,
+                        }),
+                    )
+                    .await;
+                    drop(guard);
+                    *ctx.browser_session = client_back;
+                    match shot_res {
+                        Ok(value) => {
+                            let path = value
+                                .get("path")
+                                .and_then(|p| p.as_str())
+                                .unwrap_or("")
+                                .to_string();
+                            // Set-of-marks legend: map each numbered badge
+                            // in the image back to the element's ref so the
+                            // model can act precisely (browser_act ref=eN).
+                            let legend = value
+                            .get("marks")
+                            .and_then(|m| m.as_array())
+                            .map(|entries| {
+                                let mut text = String::from(
+                                    "\nNumbered elements in the screenshot \
+(number = element):",
+                                );
+                                for entry in entries {
+                                    let mark = entry
+                                        .get("mark")
+                                        .and_then(|v| v.as_i64())
+                                        .unwrap_or_default();
+                                    let role = entry
+                                        .get("role")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("");
+                                    let name = entry
+                                        .get("name")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("");
+                                    let ref_id = entry
+                                        .get("ref")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("");
+                                    text.push_str(&format!(
+                                        "\n{mark} = {role} \"{name}\" [ref={ref_id}]"
+                                    ));
+                                }
+                                text
+                            })
+                            .unwrap_or_default();
+                            // Read + base64 the PNG. Skip the image (text
+                            // note only) if missing or too large (~1.5MB
+                            // encoded ≈ 1.1MB raw).
+                            match std::fs::read(&path) {
+                                Ok(bytes) if bytes.len() <= 1_100_000 => {
+                                    let encoded =
+                                        base64::engine::general_purpose::STANDARD
+                                            .encode(&bytes);
+                                    let dataurl =
+                                        format!("data:image/png;base64,{encoded}");
+                                    *ctx.pending_browser_image = Some(dataurl);
+                                    push_browser_step(
+                                        "screenshot".to_string(),
+                                        "done",
+                                    );
+                                    Ok(format!(
+                                        "Screenshot captured (see the image attached \
+below).{legend}"
+                                    ))
+                                }
+                                Ok(bytes) => {
+                                    push_browser_step(
+                                        "screenshot".to_string(),
+                                        "done",
+                                    );
+                                    Ok(format!(
+                                        "Screenshot captured but too large for \
+the preview ({} bytes). Proceed with the text snapshot.",
+                                        bytes.len()
+                                    ))
+                                }
+                                Err(error) => {
+                                    push_browser_step(
+                                        "screenshot".to_string(),
+                                        "error",
+                                    );
+                                    Ok(format!(
+                                        "Screenshot not readable from disk: {error}. \
+Use the text snapshot."
+                                    ))
+                                }
+                            }
+                        }
+                        Err(error) => {
+                            push_browser_step("screenshot".to_string(), "error");
+                            Err(format!("Screenshot failed: {error}"))
+                        }
+                    }
+                }
+                "browser_tabs" => {
+                    let _ = emit_stream_event(
+                        ctx.tx,
+                        GenerateStreamEvent::Delta {
+                            text: "‹‹ACT››🗂️ Listing tabs‹‹/ACT››".to_string(),
+                        },
+                    )
+                    .await;
+                    let guard = browse_web_lock().lock().await;
+                    let (client_back, tabs_res) = chat_browser_call(
+                        client,
+                        BrowserMethod::Tabs,
+                        serde_json::json!({}),
+                    )
+                    .await;
+                    drop(guard);
+                    *ctx.browser_session = client_back;
+                    match tabs_res {
+                        Ok(value) => {
+                            // Sidecar shape: { tabs: [ { targetId, url,
+                            // label?, title? } ] }. Parse defensively in
+                            // case it's a bare array or uses target_id/id.
+                            let list = value
+                                .get("tabs")
+                                .and_then(|t| t.as_array())
+                                .or_else(|| value.as_array())
+                                .cloned()
+                                .unwrap_or_default();
+                            let mut lines: Vec<String> = Vec::new();
+                            for tab in &list {
+                                let id = tab
+                                    .get("targetId")
+                                    .or_else(|| tab.get("target_id"))
+                                    .or_else(|| tab.get("id"))
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("?");
+                                let url = tab
+                                    .get("url")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("");
+                                let title = tab
+                                    .get("title")
+                                    .or_else(|| tab.get("label"))
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("");
+                                let mut line = format!("- {id}");
+                                if !url.is_empty() {
+                                    line.push_str(&format!(" | {url}"));
+                                }
+                                if !title.is_empty() {
+                                    line.push_str(&format!(" | {title}"));
+                                }
+                                lines.push(line);
+                            }
+                            push_browser_step("tabs".to_string(), "done");
+                            if lines.is_empty() {
+                                Ok("No tabs open.".to_string())
+                            } else {
+                                Ok(format!("Open tabs:\n{}", lines.join("\n")))
+                            }
+                        }
+                        Err(error) => {
+                            push_browser_step("tabs".to_string(), "error");
+                            Err(format!("Listing tabs failed: {error}"))
+                        }
+                    }
+                }
+                "browser_dialog" => {
+                    // Native alert/confirm/prompt blocks the page until
+                    // answered. In read-only (channel) turns we only allow
+                    // DISMISS, never accept (an accept could confirm an
+                    // action). The dialog message is returned so the model
+                    // sees what it answered.
+                    let accept = !ctx.read_only
+                        && args
+                            .get("accept")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false);
+                    let prompt_text = args
+                        .get("prompt_text")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    let _ = emit_stream_event(
+                        ctx.tx,
+                        GenerateStreamEvent::Delta {
+                            text: format!(
+                                "‹‹ACT››💬 Dialog: {}‹‹/ACT››",
+                                if accept { "confirming" } else { "cancelling" }
+                            ),
+                        },
+                    )
+                    .await;
+                    let guard = browse_web_lock().lock().await;
+                    let (client_back, dialog_res) = chat_browser_call(
+                        client,
+                        BrowserMethod::RespondDialog,
+                        serde_json::json!({
+                            "target_id": ctx.current_target.as_str(),
+                            "accept": accept,
+                            "promptText": prompt_text,
+                            "timeoutMs": 5_000,
+                        }),
+                    )
+                    .await;
+                    drop(guard);
+                    *ctx.browser_session = client_back;
+                    match dialog_res {
+                        Ok(value) => {
+                            let msg = value
+                                .get("message")
+                                .and_then(|m| m.as_str())
+                                .unwrap_or("");
+                            push_browser_step("dialog".to_string(), "done");
+                            Ok(format!(
+                                "Dialog {} (message: \"{msg}\"). Re-read the page with browser_snapshot.",
+                                if accept { "confirmed" } else { "cancelled" }
+                            ))
+                        }
+                        Err(error) => {
+                            push_browser_step("dialog".to_string(), "error");
+                            Err(format!("No dialog to handle or error: {error}"))
+                        }
+                    }
+                }
+                _ => Err(format!("Unknown browser tool: {name}")),
+            },
+        };
+        match outcome {
+            Ok(text) => text,
+            Err(text) => text,
+        }
+    } else if name == "github_search" {
+        // Fast, structured GitHub repo search via the API (no browser).
+        let query = serde_json::from_str::<serde_json::Value>(args_raw)
+            .ok()
+            .and_then(|a| a.get("query").and_then(|v| v.as_str()).map(String::from))
+            .unwrap_or_default();
+        if query.trim().is_empty() {
+            "Empty query.".to_string()
+        } else {
+            let _ = emit_stream_event(
+                ctx.tx,
+                GenerateStreamEvent::Delta {
+                    text: format!("‹‹ACT››🔎 Searching GitHub: «{query}»‹‹/ACT››"),
+                },
+            )
+            .await;
+            github_search(ctx.state, &query).await
+        }
+    } else if name == "use_skill" {
+        // Progressive disclosure L2: load the full SKILL.md so the
+        // model can follow the skill's instructions.
+        let id = serde_json::from_str::<serde_json::Value>(args_raw)
+            .ok()
+            .and_then(|a| a.get("id").and_then(|v| v.as_str()).map(String::from))
+            .unwrap_or_default();
+        // Narrate the skill use with its READABLE name (id → Title Case),
+        // so the activity stream reads like reasoning: "Uso la skill Code
+        // Review Discipline" (as Claude Code / Codex do).
+        let readable = id
+            .split('-')
+            .filter(|w| !w.is_empty())
+            .map(|w| {
+                let mut chars = w.chars();
+                match chars.next() {
+                    Some(first) => {
+                        first.to_uppercase().collect::<String>() + chars.as_str()
+                    }
+                    None => String::new(),
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+        let _ = emit_stream_event(
+            ctx.tx,
+            GenerateStreamEvent::Delta {
+                text: format!("‹‹ACT››📖 Using the skill «{readable}»‹‹/ACT››"),
+            },
+        )
+        .await;
+        let id_for_load = id.clone();
+        match tokio::task::spawn_blocking(move || load_skill_body(&id_for_load))
+            .await
+        {
+            Ok(Some(body)) => format!(
+                "Instructions for the skill «{id}» (SKILL.md) — FOLLOW THEM with the \
+available tools (for data from the web use the browser: browser_navigate on the indicated URL):\n\n{}",
+                body.chars().take(8000).collect::<String>()
+            ),
+            _ => format!("Skill «{id}» not found or not readable."),
+        }
+    } else if name == "run_in_sandbox" {
+        // Execute a skill command in the contained computer (auto-start
+        // Docker + container). Blocked if the command trips the security scan.
+        let parsed = serde_json::from_str::<serde_json::Value>(args_raw)
+            .unwrap_or_else(|_| serde_json::json!({}));
+        let command = parsed
+            .get("command")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let skill_id = parsed
+            .get("skill_id")
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        if command.trim().is_empty() {
+            "Empty command.".to_string()
+        } else {
+            let scan = skill_security::scan_blobs(&[(
+                "command".to_string(),
+                command.clone(),
+            )]);
+            if scan.blocked {
+                format!(
+                    "Command NOT executed: blocked by the security scan \
+(risk {}/100). Reformulate it without dangerous operations.",
+                    scan.risk_score
+                )
+            } else {
+                let _ = emit_stream_event(
+                    ctx.tx,
+                    GenerateStreamEvent::Delta {
+                        text: format!(
+                            "‹‹ACT››🖥️ Running: {}‹‹/ACT››",
+                            command.chars().take(160).collect::<String>()
+                        ),
+                    },
+                )
+                .await;
+                // If Docker is down we auto-start Docker Desktop (cold
+                // start ~1 min) before running — tell the user so the
+                // wait doesn't look like a hang.
+                let docker_up =
+                    tokio::task::spawn_blocking(sandbox::docker_running)
+                        .await
+                        .unwrap_or(false);
+                if !docker_up {
+                    let _ = emit_stream_event(
+                        ctx.tx,
+                        GenerateStreamEvent::Delta {
+                            text: "‹‹ACT››🐳 Docker isn't running: starting Docker Desktop and waiting for it to be ready (~1 min)…‹‹/ACT››".to_string(),
+                        },
+                    )
+                    .await;
+                }
+                // Publish the command to the computer terminal panel.
+                sandbox_begin(command.clone(), ctx.thread_id.map(|s| s.to_string()));
+                // Per-conversation output dir: skills save generated
+                // files to $OUTPUT_DIR, bind-mounted to the host so
+                // they become downloadable artifacts.
+                let thread_slug = artifact_thread_slug(ctx.thread_id);
+                let container_out = sandbox::container_output_dir(&thread_slug);
+                let host_out = sandbox::artifacts_dir().join(&thread_slug);
+                let run_started = std::time::SystemTime::now();
+                let cmd = format!(
+                    "export OUTPUT_DIR='{container_out}'; mkdir -p \"$OUTPUT_DIR\"; {command}"
+                );
+                // The model may omit skill_id; derive it from the
+                // command's `/home/agent/skills/<id>/…` path so the
+                // skill's files are always synced before running.
+                let sid =
+                    skill_id.clone().or_else(|| skill_id_from_command(&command));
+                let outcome = tokio::task::spawn_blocking(move || {
+                    if let Some(id) = sid.as_deref() {
+                        if let Ok(dir) = skills_dir() {
+                            sandbox::sync_skill(&dir.join(id), id);
+                        }
+                    }
+                    sandbox::run_command(&cmd, sid.as_deref())
+                })
+                .await;
+                let (panel_output, mut model_output) = match outcome {
+                    Ok(Ok(out)) => {
+                        if out.trim().is_empty() {
+                            ("(no output)".to_string(), "(no output)".to_string())
+                        } else {
+                            (out.clone(), format!("Command output:\n{out}"))
+                        }
+                    }
+                    Ok(Err(error)) => {
+                        let msg = format!("Sandbox unavailable: {error}");
+                        (msg.clone(), msg)
+                    }
+                    Err(error) => {
+                        let msg = format!("Execution error: {error}");
+                        (msg.clone(), msg)
+                    }
+                };
+                sandbox_end(panel_output);
+                // Surface files the command produced as downloadable
+                // artifacts (marker → card). If a PROJECT folder is
+                // active, also copy them there — it's the project's
+                // default folder for generated files.
+                let project_folder = active_workspace_folder();
+                for (file_name, size) in
+                    detect_new_artifacts(&host_out, run_started)
+                {
+                    let mut delivered_to: Option<String> = None;
+                    if let Some(folder) = project_folder.as_ref() {
+                        let dest = std::path::Path::new(folder).join(&file_name);
+                        if std::fs::copy(host_out.join(&file_name), &dest).is_ok() {
+                            delivered_to = Some(dest.to_string_lossy().to_string());
+                        }
+                    }
+                    let marker = serde_json::json!({
+                        "name": file_name,
+                        "thread": thread_slug,
+                        "size": size,
+                    });
+                    let artifact_mark =
+                        format!("‹‹ARTIFACT››{marker}‹‹/ARTIFACT››");
+                    // Persist in the committed answer so the UI can
+                    // render the download card + Artefatti panel (the
+                    // Done payload is authoritative).
+                    ctx.accumulated.push_str(&artifact_mark);
+                    let _ = emit_stream_event(
+                        ctx.tx,
+                        GenerateStreamEvent::Delta {
+                            text: artifact_mark,
+                        },
+                    )
+                    .await;
+                    register_artifact_memory(
+                        ctx.state,
+                        ctx.thread_id,
+                        &thread_slug,
+                        &file_name,
+                        size,
+                        false,
+                        "run_in_sandbox",
+                        delivered_to.as_deref(),
+                    )
+                    .await;
+                    match delivered_to {
+                        Some(path) => model_output.push_str(&format!(
+                            "\n[file generated and saved to {path}]"
+                        )),
+                        None => model_output.push_str(&format!(
+                            "\n[file generated: {file_name} in $OUTPUT_DIR]"
+                        )),
+                    }
+                }
+                model_output
+            }
+        }
+    } else if name == "create_artifact" {
+        // Model-authored document/code → file artifact (host-side).
+        let parsed = serde_json::from_str::<serde_json::Value>(args_raw)
+            .unwrap_or_else(|_| serde_json::json!({}));
+        let fname = parsed
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let content = parsed
+            .get("content")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let thread_slug = artifact_thread_slug(ctx.thread_id);
+        let _ = emit_stream_event(
+            ctx.tx,
+            GenerateStreamEvent::Delta {
+                text: format!("‹‹ACT››📝 Creating the file {fname}‹‹/ACT››"),
+            },
+        )
+        .await;
+        let fname_w = fname.clone();
+        let slug_w = thread_slug.clone();
+        // A `.pdf` artifact: the `content` is Markdown → render it to a
+        // real paginated PDF (in-process, always works). Everything else
+        // is written verbatim as text.
+        let is_pdf = fname.to_ascii_lowercase().ends_with(".pdf");
+        let result = tokio::task::spawn_blocking(move || {
+            if is_pdf {
+                let title =
+                    fname_w.trim_end_matches(".pdf").trim_end_matches(".PDF");
+                let bytes = pdf_render::markdown_to_pdf(title, &content)
+                    .map_err(|e| format!("PDF render failed: {e}"))?;
+                write_artifact_bytes(&slug_w, &fname_w, &bytes)
+            } else {
+                write_text_artifact(&slug_w, &fname_w, &content)
+            }
+        })
+        .await
+        .unwrap_or_else(|e| Err(format!("Error: {e}")));
+        match result {
+            Ok((size, updated)) => {
+                let marker = serde_json::json!({
+                    "name": fname,
+                    "thread": thread_slug,
+                    "size": size,
+                    "updated": updated,
+                });
+                let artifact_mark = format!("‹‹ARTIFACT››{marker}‹‹/ARTIFACT››");
+                // Persist the marker in the committed answer (Done is
+                // authoritative): the UI parses ‹‹ARTIFACT›› from the
+                // saved message to render the download card + the
+                // Artefatti panel. Without this the artifact vanishes.
+                ctx.accumulated.push_str(&artifact_mark);
+                let _ = emit_stream_event(
+                    ctx.tx,
+                    GenerateStreamEvent::Delta {
+                        text: artifact_mark,
+                    },
+                )
+                .await;
+                register_artifact_memory(
+                    ctx.state,
+                    ctx.thread_id,
+                    &thread_slug,
+                    &fname,
+                    size,
+                    updated,
+                    "create_artifact",
+                    None,
+                )
+                .await;
+                if updated {
+                    format!("Artifact «{fname}» updated (new version).")
+                } else {
+                    format!("Artifact «{fname}» created.")
+                }
+            }
+            Err(error) => error,
+        }
+    } else if name == "generate_image" {
+        // Generate an image from a prompt (local Ollama or cloud provider)
+        // and surface it as a PNG artifact, like create_artifact.
+        let parsed = serde_json::from_str::<serde_json::Value>(args_raw)
+            .unwrap_or_else(|_| serde_json::json!({}));
+        let prompt = parsed
+            .get("prompt")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        let size = parsed
+            .get("size")
+            .and_then(|v| v.as_str())
+            .unwrap_or("1024x1024")
+            .to_string();
+        let base_name = parsed
+            .get("name")
+            .and_then(|v| v.as_str())
+            .map(slugify_skill_name)
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "image".to_string());
+        let fname = format!("{base_name}.png");
+        if prompt.is_empty() {
+            "generate_image needs a prompt.".to_string()
+        } else {
+            let _ = emit_stream_event(
+                ctx.tx,
+                GenerateStreamEvent::Delta {
+                    text: format!(
+                        "‹‹ACT››🎨 Generating image: {}‹‹/ACT››",
+                        prompt.chars().take(60).collect::<String>()
+                    ),
+                },
+            )
+            .await;
+            match generate_image_png(&ctx.state.http, &prompt, &size).await {
+                Ok(bytes) => {
+                    let thread_slug = artifact_thread_slug(ctx.thread_id);
+                    let slug_w = thread_slug.clone();
+                    let fname_w = fname.clone();
+                    let result = tokio::task::spawn_blocking(move || {
+                        write_artifact_bytes(&slug_w, &fname_w, &bytes)
+                    })
+                    .await
+                    .unwrap_or_else(|e| Err(format!("Error: {e}")));
+                    match result {
+                        Ok((size_b, updated)) => {
+                            let marker = serde_json::json!({
+                                "name": fname,
+                                "thread": thread_slug,
+                                "size": size_b,
+                                "updated": updated,
+                            });
+                            let artifact_mark =
+                                format!("‹‹ARTIFACT››{marker}‹‹/ARTIFACT››");
+                            ctx.accumulated.push_str(&artifact_mark);
+                            let _ = emit_stream_event(
+                                ctx.tx,
+                                GenerateStreamEvent::Delta {
+                                    text: artifact_mark,
+                                },
+                            )
+                            .await;
+                            register_artifact_memory(
+                                ctx.state,
+                                ctx.thread_id,
+                                &thread_slug,
+                                &fname,
+                                size_b,
+                                updated,
+                                "generate_image",
+                                None,
+                            )
+                            .await;
+                            format!(
+                                "Image «{fname}» generated and shown to the user \
+                                 inline. Do NOT embed it as a markdown image link \
+                                 (![]()); just refer to it in one short sentence."
+                            )
+                        }
+                        Err(error) => error,
+                    }
+                }
+                Err(error) => error,
+            }
+        }
+    } else if name == "get_brand_kit" {
+        // Materialize the brand into the thread's output dir (brand.json +
+        // logo.png) so the renderer applies it and the model needn't embed
+        // the logo data URL in deck.json. Return colours/fonts (for image
+        // prompts) but REPLACE the big logo data URL with a note, so the
+        // model can't paste a 13KB blob into a shell-written deck.json.
+        let slug = artifact_thread_slug(ctx.thread_id);
+        let slug2 = slug.clone();
+        let _ = tokio::task::spawn_blocking(move || materialize_brand_kit(&slug2))
+            .await;
+        let mut kit = serde_json::to_value(load_brand_kit())
+            .unwrap_or_else(|_| serde_json::json!({}));
+        if let Some(obj) = kit.as_object_mut() {
+            let has_logo = obj
+                .get("logo_data_url")
+                .and_then(|v| v.as_str())
+                .map(|s| !s.trim().is_empty())
+                .unwrap_or(false);
+            obj.insert(
+                "logo_data_url".into(),
+                serde_json::json!(if has_logo {
+                    "(applied automatically — written to logo.png in the output dir; do NOT embed in deck.json)"
+                } else {
+                    ""
+                }),
+            );
+            obj.insert("note".into(), serde_json::json!(
+                "Brand is applied automatically by deck-render via brand.json + logo.png already written to the output dir. In deck.json include ONLY slide content — OMIT `theme` and `logo` entirely."
+            ));
+        }
+        serde_json::to_string(&kit).unwrap_or_else(|_| "{}".to_string())
+    } else if name == "render_deck" {
+        // Deterministic deck render: the model passes ONLY content; the
+        // gateway writes deck.json + brand files and runs deck-render +
+        // chromium in the sandbox. Removes ALL model filesystem juggling
+        // (no shell, no find, no path/dir confusion → no regenerate loop).
+        let parsed = serde_json::from_str::<serde_json::Value>(args_raw)
+            .unwrap_or_else(|_| serde_json::json!({}));
+        let deck = parsed.get("deck").cloned().unwrap_or(parsed);
+        let has_slides = deck
+            .get("slides")
+            .and_then(|s| s.as_array())
+            .map(|a| !a.is_empty())
+            .unwrap_or(false);
+        if !has_slides {
+            "render_deck needs a non-empty 'slides' array (content only)."
+                .to_string()
+        } else {
+            let thread_slug = artifact_thread_slug(ctx.thread_id);
+            let _ = emit_stream_event(
+                ctx.tx,
+                GenerateStreamEvent::Delta {
+                    text: "‹‹ACT››🎬 Rendering the deck (PPTX + preview)‹‹/ACT››"
+                        .to_string(),
+                },
+            )
+            .await;
+            // 1) brand.json + logo.png + deck.json into the output dir
+            //    (host side = bind-mounted into the sandbox).
+            let slug_b = thread_slug.clone();
+            let _ =
+                tokio::task::spawn_blocking(move || materialize_brand_kit(&slug_b))
+                    .await;
+            let deck_bytes = serde_json::to_vec_pretty(&deck).unwrap_or_default();
+            let slug_w = thread_slug.clone();
+            let write_res = tokio::task::spawn_blocking(move || {
+                write_artifact_bytes(&slug_w, "deck.json", &deck_bytes)
+            })
+            .await
+            .unwrap_or_else(|e| Err(format!("join error: {e}")));
+            if let Err(e) = write_res {
+                format!("Could not write deck.json: {e}")
+            } else {
+                // 2) render in the sandbox (no model shell).
+                let container_out = sandbox::container_output_dir(&thread_slug);
+                let cmd = format!(
+                    "cd '{container_out}' && deck-render deck.json --prefix deck && \
+                     chromium --headless --no-sandbox --disable-gpu \
+                     --print-to-pdf=deck.pdf deck.html >/dev/null 2>&1 && \
+                     qa=$(deck-qa deck.html --json 2>&1); qa_code=$?; \
+                     echo \"DECK_QA_JSON:$qa\"; \
+                     if [ \"$qa_code\" -ne 0 ]; then exit \"$qa_code\"; fi; \
+                     ls -la deck.pptx deck.html deck.pdf 2>&1"
+                );
+                sandbox_begin(cmd.clone(), ctx.thread_id.map(|s| s.to_string()));
+                let render = tokio::task::spawn_blocking(move || {
+                    sandbox::run_command(&cmd, None)
+                })
+                .await
+                .unwrap_or_else(|e| Err(format!("join error: {e}")));
+                let render_out = match render {
+                    Ok(o) => o,
+                    Err(e) => e,
+                };
+                sandbox_end(render_out.clone());
+                // 3) emit an artifact marker for each file produced, even when
+                // QA flags issues: the files exist and the user needs access to
+                // inspect/fix them.
+                let qa_result = rendered_deck_qa_result(&render_out);
+                let quality_metadata =
+                    deck_quality_metadata_from_qa_result(qa_result.as_ref());
+                let produced = emit_rendered_deck_artifacts(
+                    ctx.state,
+                    ctx.tx,
+                    ctx.accumulated,
+                    ctx.thread_id,
+                    &thread_slug,
+                    "render_deck",
+                    quality_metadata.as_ref(),
+                )
+                .await;
+                if let Some(error) = rendered_deck_qa_failure(&render_out) {
+                    format!(
+                        "Deck rendered with visual QA issues: {error}. Files available: {}. Renderer output:\n{}",
+                        if produced.is_empty() {
+                            "none".to_string()
+                        } else {
+                            produced.join(", ")
+                        },
+                        render_out.chars().take(1200).collect::<String>(),
+                    )
+                } else {
+                    if produced.iter().any(|fname| fname == "deck.pptx") {
+                        format!(
+                            "Deck rendered: {}. The .pptx is editable; .html/.pdf are previews. The deck is DONE — mark the plan complete and give the user a one-line summary.",
+                            produced.join(", ")
+                        )
+                    } else {
+                        format!(
+                            "Deck render did NOT produce a .pptx. Renderer output:\n{}",
+                            render_out.chars().take(800).collect::<String>()
+                        )
+                    }
+                }
+            }
+        }
+    } else if name == "make_deck" {
+        // ONE-call deck (max-scaffolding tier, ADR 0016): the model
+        // passed only a brief; the ENGINE runs the entire pipeline
+        // (brand → schema-enforced content → images → render). No
+        // model-driven planning, file I/O or shell → nothing for a
+        // weak model to get wrong beyond filling the brief slot.
+        let parsed = serde_json::from_str::<serde_json::Value>(args_raw)
+            .unwrap_or_else(|_| serde_json::json!({}));
+        let brief = parsed
+            .get("brief")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        let language = parsed
+            .get("language")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let slides = parsed
+            .get("slides")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(6)
+            .clamp(3, 12) as usize;
+        let requested_template_ref = deliverable_template_ref(&parsed);
+        let catalog_template =
+            template_catalog_by_id(requested_template_ref.as_deref());
+        let template_ref = catalog_template.as_ref().map(|entry| entry.id.clone());
+        let design_template = deliverable_design_template(&parsed).or_else(|| {
+            catalog_template
+                .as_ref()
+                .map(|entry| entry.design_template.clone())
+        });
+        let design_theme = deliverable_design_theme(&parsed).or_else(|| {
+            catalog_template
+                .as_ref()
+                .and_then(|entry| entry.design_theme.clone())
+        });
+        let design_profile = deliverable_design_profile(&parsed)
+            .or_else(|| {
+                catalog_template
+                    .as_ref()
+                    .and_then(|entry| entry.design_profile.clone())
+            })
+            .or_else(|| {
+                let (profile, _) =
+                    deliverable_template_defaults(design_template.as_deref());
+                profile.map(String::from)
+            });
+        let design_components = resolved_deliverable_design_components_with_catalog(
+            &parsed,
+            design_template.as_deref(),
+            catalog_template
+                .as_ref()
+                .map(|entry| entry.design_components.as_slice())
+                .unwrap_or(&[]),
+        );
+        if brief.is_empty() {
+            "make_deck needs a 'brief' describing the presentation.".to_string()
+        } else {
+            let workflow_plan = workflow_execution_plan(
+                &make_deck_workflow_definition(),
+                serde_json::json!({
+                    "brief": brief.clone(),
+                    "language": language.clone(),
+                    "slides": slides,
+                    "template_ref": template_ref.clone(),
+                    "design_template": design_template.clone(),
+                    "design_theme": design_theme.clone(),
+                    "design_profile": design_profile.clone(),
+                    "design_components": design_components.clone(),
+                }),
+            );
+            let workflow_plan = match run_static_workflow_plan_through_brain_async(
+                brief.clone(),
+                workflow_plan,
+            )
+            .await
+            {
+                Ok(plan) => plan,
+                Err(error) => {
+                    eprintln!(
+                        "make_deck: static workflow plan validation failed: {error}"
+                    );
+                    workflow_execution_plan(
+                        &make_deck_workflow_definition(),
+                        serde_json::json!({
+                            "brief": brief.clone(),
+                            "language": language.clone(),
+                            "slides": slides,
+                            "template_ref": template_ref.clone(),
+                            "design_template": design_template.clone(),
+                            "design_theme": design_theme.clone(),
+                            "design_profile": design_profile.clone(),
+                            "design_components": design_components.clone(),
+                        }),
+                    )
+                }
+            };
+            let thread_slug = artifact_thread_slug(ctx.thread_id);
+            let _ = emit_stream_event(
+                ctx.tx,
+                GenerateStreamEvent::Delta {
+                    text: "‹‹ACT››🎬 Building the deck (brand · content · images · render)‹‹/ACT››".to_string(),
+                },
+            )
+            .await;
+            // 1) brand into the output dir + load colours for prompts.
+            let slug_b = thread_slug.clone();
+            let _ =
+                tokio::task::spawn_blocking(move || materialize_brand_kit(&slug_b))
+                    .await;
+            let brand = tokio::task::spawn_blocking(load_brand_kit)
+                .await
+                .unwrap_or_default();
+            // 2) slide content — schema-enforced model call (the floor).
+            match generate_deck_content(
+                &ctx.state.http,
+                ctx.base_url,
+                ctx.model,
+                ctx.api_key.as_deref(),
+                &brief,
+                &brand,
+                slides,
+                &language,
+                design_template.as_deref(),
+                design_theme.as_deref(),
+                design_profile.as_deref(),
+                &design_components,
+            )
+            .await
+            {
+                Err(e) => make_deck_content_failure_message(
+                    &e,
+                    requested_template_ref.as_deref(),
+                    template_ref.as_deref(),
+                    ctx.base_url,
+                    ctx.model,
+                ),
+                Ok(mut deck) => {
+                    apply_deck_design_components(&mut deck, &design_components);
+                    apply_deck_design_theme(
+                        &mut deck,
+                        design_theme.as_deref(),
+                        &brand,
+                    );
+                    let quality_issues = apply_deck_quality_guardrails(&mut deck);
+                    if !quality_issues.is_empty() {
+                        let _ = emit_stream_event(
+                            ctx.tx,
+                            GenerateStreamEvent::Delta {
+                                text: format!(
+                                    "‹‹ACT››🔎 Deck QA adjusted {} layout-risk items‹‹/ACT››",
+                                    quality_issues.len()
+                                ),
+                            },
+                        )
+                        .await;
+                    }
+                    // 3) images for want_image slides (cap 3, cover first).
+                    let accent = brand.accent_color.clone();
+                    let mut made = 0usize;
+                    if let Some(arr) =
+                        deck.get_mut("slides").and_then(|s| s.as_array_mut())
+                    {
+                        for (idx, slide) in arr.iter_mut().enumerate() {
+                            if made >= 3 {
+                                break;
+                            }
+                            if !slide
+                                .get("want_image")
+                                .and_then(|v| v.as_bool())
+                                .unwrap_or(false)
+                            {
+                                continue;
+                            }
+                            let title = slide
+                                .get("title")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("")
+                                .to_string();
+                            let layout = slide
+                                .get("layout")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("bullets")
+                                .to_string();
+                            let iname = if layout == "cover" {
+                                "cover".to_string()
+                            } else {
+                                format!("s{idx}")
+                            };
+                            let prompt = deck_slide_image_prompt(&title, &accent);
+                            let _ = emit_stream_event(
+                                ctx.tx,
+                                GenerateStreamEvent::Delta {
+                                    text: format!(
+                                        "‹‹ACT››🎨 Image: {}‹‹/ACT››",
+                                        title.chars().take(40).collect::<String>()
+                                    ),
+                                },
+                            )
+                            .await;
+                            if let Ok(bytes) = generate_image_png(
+                                &ctx.state.http,
+                                &prompt,
+                                "1280x720",
+                            )
+                            .await
+                            {
+                                let fname = format!("{iname}.png");
+                                let slug_w = thread_slug.clone();
+                                let fname_w = fname.clone();
+                                let w = tokio::task::spawn_blocking(move || {
+                                    write_artifact_bytes(&slug_w, &fname_w, &bytes)
+                                })
+                                .await
+                                .unwrap_or_else(|e| Err(format!("{e}")));
+                                if w.is_ok() {
+                                    slide["image"] = serde_json::json!(fname);
+                                    if layout == "bullets" {
+                                        slide["layout"] =
+                                            serde_json::json!("image_right");
+                                    }
+                                    made += 1;
+                                }
+                            }
+                        }
+                    }
+                    // 4) write deck.json.
+                    let slide_count = deck
+                        .get("slides")
+                        .and_then(|s| s.as_array())
+                        .map(|a| a.len())
+                        .unwrap_or(0);
+                    let deck_bytes =
+                        serde_json::to_vec_pretty(&deck).unwrap_or_default();
+                    let slug_w = thread_slug.clone();
+                    let write_res = tokio::task::spawn_blocking(move || {
+                        write_artifact_bytes(&slug_w, "deck.json", &deck_bytes)
+                    })
+                    .await
+                    .unwrap_or_else(|e| Err(format!("join error: {e}")));
+                    if let Err(e) = write_res {
+                        format!("Could not write deck.json: {e}")
+                    } else {
+                        let template_render_arg =
+                            match materialize_deck_template_source(
+                                &thread_slug,
+                                catalog_template.as_ref(),
+                            ) {
+                                Ok(Some(filename)) => {
+                                    let _ = emit_stream_event(
+                                        ctx.tx,
+                                        GenerateStreamEvent::Delta {
+                                            text: "‹‹ACT››📐 Using imported PPTX template‹‹/ACT››".to_string(),
+                                        },
+                                    )
+                                    .await;
+                                    format!(" --template-pptx {filename}")
+                                }
+                                Ok(None) => String::new(),
+                                Err(error) => {
+                                    let _ = emit_stream_event(
+                                        ctx.tx,
+                                        GenerateStreamEvent::Delta {
+                                            text: format!(
+                                                "‹‹ACT››⚠ Template source unavailable: {error}‹‹/ACT››"
+                                            ),
+                                        },
+                                    )
+                                    .await;
+                                    String::new()
+                                }
+                            };
+                        // 5) render in the sandbox (no model shell).
+                        let container_out =
+                            sandbox::container_output_dir(&thread_slug);
+                        let cmd = format!(
+                            "cd '{container_out}' && deck-render deck.json --prefix deck{template_render_arg} && \
+                             chromium --headless --no-sandbox --disable-gpu \
+                             --print-to-pdf=deck.pdf deck.html >/dev/null 2>&1 && \
+                             qa=$(deck-qa deck.html --json 2>&1); qa_code=$?; \
+                             echo \"DECK_QA_JSON:$qa\"; \
+                             if [ \"$qa_code\" -ne 0 ]; then exit \"$qa_code\"; fi; \
+                             ls -la deck.pptx deck.html deck.pdf 2>&1"
+                        );
+                        sandbox_begin(cmd.clone(), ctx.thread_id.map(|s| s.to_string()));
+                        let render = tokio::task::spawn_blocking(move || {
+                            sandbox::run_command(&cmd, None)
+                        })
+                        .await
+                        .unwrap_or_else(|e| Err(format!("join error: {e}")));
+                        let render_out = match render {
+                            Ok(o) => o,
+                            Err(e) => e,
+                        };
+                        sandbox_end(render_out.clone());
+                        // 6) emit an artifact marker per produced file, even
+                        // when QA flags issues: the generated files still need
+                        // to be visible for review and iteration.
+                        let qa_result = rendered_deck_qa_result(&render_out);
+                        let quality_metadata = deck_quality_metadata_from_qa_result(
+                            qa_result.as_ref(),
+                        );
+                        let mut artifact_metadata =
+                            deck_template_metadata(catalog_template.as_ref());
+                        merge_object_metadata(
+                            &mut artifact_metadata,
+                            quality_metadata.as_ref(),
+                        );
+                        let artifact_metadata_ref = artifact_metadata
+                            .as_object()
+                            .filter(|metadata| !metadata.is_empty())
+                            .map(|_| &artifact_metadata);
+                        let produced = emit_rendered_deck_artifacts(
+                            ctx.state,
+                            ctx.tx,
+                            ctx.accumulated,
+                            ctx.thread_id,
+                            &thread_slug,
+                            "make_deck",
+                            artifact_metadata_ref,
+                        )
+                        .await;
+                        if let Some(error) = rendered_deck_qa_failure(&render_out) {
+                            format!(
+                                "Deck created via workflow {} with visual QA issues: {error}. Files available: {}. The .pptx is editable; .html/.pdf are previews.",
+                                workflow_plan
+                                    .steps
+                                    .first()
+                                    .and_then(|step| step
+                                        .arguments
+                                        .get("workflow_id"))
+                                    .and_then(|value| value.as_str())
+                                    .unwrap_or("make_deck"),
+                                if produced.is_empty() {
+                                    "none".to_string()
+                                } else {
+                                    produced.join(", ")
+                                },
+                            )
+                        } else {
+                            if produced.iter().any(|fname| fname == "deck.pptx") {
+                                format!(
+                                    "Deck created via workflow {}: {} ({slide_count} slides, {made} images). The .pptx is editable; .html/.pdf are previews. The deck is DONE — give the user a one-line summary.",
+                                    workflow_plan
+                                        .steps
+                                        .first()
+                                        .and_then(|step| step
+                                            .arguments
+                                            .get("workflow_id"))
+                                        .and_then(|value| value.as_str())
+                                        .unwrap_or("make_deck"),
+                                    produced.join(", ")
+                                )
+                            } else {
+                                format!(
+                                    "Deck render did NOT produce a .pptx. Renderer output:\n{}",
+                                    render_out
+                                        .chars()
+                                        .take(800)
+                                        .collect::<String>()
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    } else if name == "make_document" {
+        let parsed = serde_json::from_str::<serde_json::Value>(args_raw)
+            .unwrap_or_else(|_| serde_json::json!({}));
+        let brief = parsed
+            .get("brief")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        let language = parsed
+            .get("language")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let fname = parsed
+            .get("name")
+            .and_then(|v| v.as_str())
+            .filter(|value| !value.trim().is_empty())
+            .map(|value| document_artifact_name(Some(value)))
+            .or_else(|| document_artifact_name_from_brief(&brief))
+            .unwrap_or_else(|| document_artifact_name(None));
+        let formats = document_output_formats(&parsed, &fname, &brief);
+        let document_options = document_generation_options(&parsed);
+        if brief.is_empty() {
+            "make_document needs a 'brief' describing the document.".to_string()
+        } else {
+            let workflow_args = serde_json::json!({
+                "brief": brief.clone(),
+                "language": language.clone(),
+                "name": fname.clone(),
+                "formats": formats.clone(),
+                "template_ref": document_options.template_ref.clone(),
+                "document_type": document_options.document_type.clone(),
+                "audience": document_options.audience.clone(),
+                "tone": document_options.tone.clone(),
+                "layout_profile": document_options.layout_profile.clone(),
+                "design_template": document_options.design_template.clone(),
+                "design_theme": document_options.design_theme.clone(),
+                "design_profile": document_options.design_profile.clone(),
+                "design_components": document_options.design_components.clone(),
+                "sections": document_options.sections.clone(),
+            });
+            let workflow_plan = workflow_execution_plan(
+                &make_document_workflow_definition(),
+                workflow_args.clone(),
+            );
+            let workflow_plan = match run_static_workflow_plan_through_brain_async(
+                brief.clone(),
+                workflow_plan,
+            )
+            .await
+            {
+                Ok(plan) => plan,
+                Err(error) => {
+                    eprintln!(
+                        "make_document: static workflow plan validation failed: {error}"
+                    );
+                    workflow_execution_plan(
+                        &make_document_workflow_definition(),
+                        workflow_args,
+                    )
+                }
+            };
+            let thread_slug = artifact_thread_slug(ctx.thread_id);
+            let _ = emit_stream_event(
+                ctx.tx,
+                GenerateStreamEvent::Delta {
+                    text: "‹‹ACT››📝 Building the document (brief · draft · artifact · memory)‹‹/ACT››".to_string(),
+                },
+            )
+            .await;
+            match generate_document_markdown(
+                &ctx.state.http,
+                ctx.base_url,
+                ctx.model,
+                ctx.api_key.as_deref(),
+                &brief,
+                &language,
+                &document_options,
+            )
+            .await
+            {
+                Err(error) => {
+                    format!("Could not generate document content: {error}")
+                }
+                Ok(markdown) => {
+                    let markdown = apply_document_design_components(
+                        &markdown,
+                        &document_options.design_components,
+                    );
+                    let (markdown, repaired_issues) =
+                        apply_document_quality_guardrails(&markdown);
+                    let quality_issues = document_quality_issues(&markdown);
+                    if !repaired_issues.is_empty() && quality_issues.is_empty() {
+                        let _ = emit_stream_event(
+                            ctx.tx,
+                            GenerateStreamEvent::Delta {
+                                text: format!(
+                                    "‹‹ACT››🔎 Document QA repaired {} table-layout items‹‹/ACT››",
+                                    repaired_issues.len()
+                                ),
+                            },
+                        )
+                        .await;
+                    }
+                    if !quality_issues.is_empty() {
+                        let summary = quality_issues
+                            .iter()
+                            .take(5)
+                            .cloned()
+                            .collect::<Vec<_>>()
+                            .join("; ");
+                        format!(
+                            "Could not generate document artifact: document QA failed: {summary}"
+                        )
+                    } else {
+                        let mut produced = Vec::new();
+                        let mut artifact_error: Option<String> = None;
+                        for format in formats {
+                            let artifact_name =
+                                document_artifact_name_with_extension(
+                                    Some(&fname),
+                                    &format,
+                                );
+                            let slug_w = thread_slug.clone();
+                            let fname_w = artifact_name.clone();
+                            let markdown_w = markdown.clone();
+                            let result = tokio::task::spawn_blocking(move || {
+                                if format == "pdf" {
+                                    let title = fname_w
+                                        .trim_end_matches(".pdf")
+                                        .trim_end_matches(".PDF");
+                                    let bytes = pdf_render::markdown_to_pdf(
+                                        title,
+                                        &markdown_w,
+                                    )
+                                    .map_err(|e| {
+                                        format!("PDF render failed: {e}")
+                                    })?;
+                                    write_artifact_bytes(&slug_w, &fname_w, &bytes)
+                                } else if format == "docx" {
+                                    let title = fname_w
+                                        .trim_end_matches(".docx")
+                                        .trim_end_matches(".DOCX");
+                                    let bytes =
+                                        markdown_to_docx(title, &markdown_w)
+                                            .map_err(|e| {
+                                                format!("DOCX render failed: {e}")
+                                            })?;
+                                    write_artifact_bytes(&slug_w, &fname_w, &bytes)
+                                } else {
+                                    write_text_artifact(
+                                        &slug_w,
+                                        &fname_w,
+                                        &markdown_w,
+                                    )
+                                }
+                            })
+                            .await
+                            .unwrap_or_else(|error| Err(format!("Error: {error}")));
+                            match result {
+                                Ok((size, updated)) => {
+                                    let marker = serde_json::json!({
+                                        "name": artifact_name,
+                                        "thread": thread_slug,
+                                        "size": size,
+                                        "updated": updated,
+                                        "source": "managed",
+                                        "managed_path": sandbox::artifacts_dir()
+                                            .join(&thread_slug)
+                                            .join(&artifact_name)
+                                            .to_string_lossy()
+                                            .to_string(),
+                                    });
+                                    let artifact_mark = format!(
+                                        "‹‹ARTIFACT››{marker}‹‹/ARTIFACT››"
+                                    );
+                                    ctx.accumulated.push_str(&artifact_mark);
+                                    let _ = emit_stream_event(
+                                        ctx.tx,
+                                        GenerateStreamEvent::Delta {
+                                            text: artifact_mark,
+                                        },
+                                    )
+                                    .await;
+                                    let artifact_name = marker
+                                        .get("name")
+                                        .and_then(|value| value.as_str())
+                                        .unwrap_or("document.md")
+                                        .to_string();
+                                    register_artifact_memory(
+                                        ctx.state,
+                                        ctx.thread_id,
+                                        &thread_slug,
+                                        &artifact_name,
+                                        size,
+                                        updated,
+                                        "make_document",
+                                        None,
+                                    )
+                                    .await;
+                                    produced.push(artifact_name);
+                                }
+                                Err(error) => {
+                                    artifact_error = Some(error);
+                                    break;
+                                }
+                            }
+                        }
+                        if let Some(error) = artifact_error {
+                            error
+                        } else {
+                            format!(
+                                "Document created via workflow {}: {}. The document is DONE — give the user a one-line summary.",
+                                workflow_plan
+                                    .steps
+                                    .first()
+                                    .and_then(|step| step
+                                        .arguments
+                                        .get("workflow_id"))
+                                    .and_then(|value| value.as_str())
+                                    .unwrap_or("make_document"),
+                                produced.join(", "),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    } else if name == "save_artifact" {
+        // Deliver a generated artifact to an authorized destination
+        // (gateway performs the copy host-side, scoped to grants).
+        let parsed = serde_json::from_str::<serde_json::Value>(args_raw)
+            .unwrap_or_else(|_| serde_json::json!({}));
+        let file = parsed
+            .get("file")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let dest_name = parsed
+            .get("destination")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let thread_slug = artifact_thread_slug(ctx.thread_id);
+        let _ = emit_stream_event(
+            ctx.tx,
+            GenerateStreamEvent::Delta {
+                text: format!("‹‹ACT››💾 Saving {file} to «{dest_name}»‹‹/ACT››"),
+            },
+        )
+        .await;
+        tokio::task::spawn_blocking(move || {
+            save_artifact_to_destination(&thread_slug, &file, &dest_name)
+        })
+        .await
+        .unwrap_or_else(|e| format!("Save error: {e}"))
+    } else if name == "recall_memory" {
+        // PERIMETER (anti-exfiltration): a `contact_only` turn (a non-self
+        // contact on a channel) must NOT reach personal/Secret memory or the
+        // relationship graph. recall_memory is perimeter-blind by design, so we
+        // refuse it here — the contact's own conversation is already in context.
+        // Also refused when can_see_contacts is off (even on a "personal"-scope
+        // contact): recall traverses the relationship graph, which IS the address
+        // book — perimeter-blind recall has no way to strip other people out, so
+        // fail-closed is to block it entirely.
+        if ctx.contact_only || !ctx.can_see_contacts {
+            "Personal memory not accessible in a conversation with this \
+contact: use only the messages from this chat. Do NOT reveal personal data of the user or third parties."
+                .to_string()
+        } else {
+            let query = serde_json::from_str::<serde_json::Value>(args_raw)
+                .ok()
+                .and_then(|a| {
+                    a.get("query").and_then(|q| q.as_str()).map(String::from)
+                })
+                .unwrap_or_default();
+            // ADR 0022 (Piano UI A2/A3): emetti l'evento strutturato
+            // `Recall` con i hits richiamati (visibile in UI: fase
+            // recalling + badge). Sostituisce il delta `‹‹ACT››🧠`.
+            let query_for_ui = if query.is_empty() { "(query)".to_string() } else { query.clone() };
+            let st = ctx.state.clone();
+            let outcome = tokio::task::spawn_blocking(move || recall_memory(&st, &query))
+                .await
+                .unwrap_or_else(|e| RecallOutcome {
+                    response: format!("Execution error: {e}"),
+                    hits: Vec::new(),
+                    scope: "personal".to_string(),
+                });
+            let _ = emit_stream_event(
+                ctx.tx,
+                GenerateStreamEvent::Recall {
+                    payload: local_first_subagents::RecallStreamPayload {
+                        query: query_for_ui,
+                        hits: outcome
+                            .hits
+                            .iter()
+                            .map(|(kind, text)| local_first_subagents::RecallStreamHit {
+                                r#ref: String::new(),
+                                text: text.clone(),
+                                score: 0.0,
+                                kind: kind.clone(),
+                            })
+                            .collect(),
+                        scope: outcome.scope.clone(),
+                    },
+                },
+            )
+            .await;
+            outcome.response
+        }
+    } else if name == "query_code_graph" {
+        let symbol = serde_json::from_str::<serde_json::Value>(args_raw)
+            .ok()
+            .and_then(|a| {
+                a.get("symbol").and_then(|s| s.as_str()).map(String::from)
+            })
+            .unwrap_or_default();
+        let _ = emit_stream_event(
+            ctx.tx,
+            GenerateStreamEvent::Delta {
+                text: format!("‹‹ACT››🗺️ Exploring the code map: {symbol}‹‹/ACT››"),
+            },
+        )
+        .await;
+        let st = ctx.state.clone();
+        tokio::task::spawn_blocking(move || query_code_graph(&st, &symbol))
+            .await
+            .unwrap_or_else(|e| format!("Execution error: {e}"))
+    } else if name == "query_git_history" {
+        let query = serde_json::from_str::<serde_json::Value>(args_raw)
+            .ok()
+            .and_then(|a| a.get("query").and_then(|s| s.as_str()).map(String::from))
+            .unwrap_or_default();
+        let _ = emit_stream_event(
+            ctx.tx,
+            GenerateStreamEvent::Delta {
+                text: format!("‹‹ACT››🕰️ Checking git history: {query}‹‹/ACT››"),
+            },
+        )
+        .await;
+        tokio::task::spawn_blocking(move || query_git_history(&query))
+            .await
+            .unwrap_or_else(|e| format!("Execution error: {e}"))
+    } else if name == "resolve_datetime" {
+        // Layer C: the orchestrator passes a STRUCTURED intent it
+        // distilled from the user's phrasing (any language); jiff
+        // does the arithmetic from the tz-aware "now" and validates
+        // future/range. Deterministic — no model date math.
+        let args_val = serde_json::from_str::<serde_json::Value>(args_raw)
+            .unwrap_or_else(|_| serde_json::json!({}));
+        let must_be_future = args_val
+            .get("must_be_future")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
+        let anchor = now_local();
+        match temporal::intent_from_json(&args_val).and_then(|intent| {
+            temporal::resolve(
+                &intent,
+                &anchor,
+                temporal::ResolveOpts { must_be_future },
+            )
+        }) {
+            Ok(res) => {
+                let _ = emit_stream_event(
+                    ctx.tx,
+                    GenerateStreamEvent::Delta {
+                        text: format!(
+                            "‹‹ACT››🗓 Date resolved: {}‹‹/ACT››",
+                            res.human
+                        ),
+                    },
+                )
+                .await;
+                let window = match &res.end {
+                    Some(end) => format!(
+                        " The time window runs until {:02}:{:02}.",
+                        end.hour(),
+                        end.minute()
+                    ),
+                    None => String::new(),
+                };
+                format!(
+                    "Date/time resolved: {human}. Use EXACTLY «{iso}» as the value \
+(e.g. to write in the form or pass to another tool): do NOT recompute it.{window} \
+(Now {now}.)",
+                    human = res.human,
+                    iso = res.iso,
+                    window = window,
+                    now = now_block(),
+                )
+            }
+            Err(e) => format!(
+                "⚠️ I couldn't resolve the date: {e}. (Now {now}.) \
+Fix the parameters (kind/offset_days/weekday/date/time) and try again; do not proceed with \
+an uncertain date.",
+                now = now_block(),
+            ),
+        }
+    } else if name == "record_decision" {
+        let args_val: serde_json::Value = serde_json::from_str(args_raw)
+            .unwrap_or_else(|_| serde_json::json!({}));
+        let _ = emit_stream_event(
+            ctx.tx,
+            GenerateStreamEvent::Delta {
+                text: "‹‹ACT››🧠 Recording the decision in memory‹‹/ACT››"
+                    .to_string(),
+            },
+        )
+        .await;
+        let st = ctx.state.clone();
+        tokio::task::spawn_blocking(move || record_decision(&st, &args_val))
+            .await
+            .unwrap_or_else(|e| format!("Execution error: {e}"))
+    } else if name == "forget_memory" {
+        let args_val: serde_json::Value = serde_json::from_str(args_raw)
+            .unwrap_or_else(|_| serde_json::json!({}));
+        let _ = emit_stream_event(
+            ctx.tx,
+            GenerateStreamEvent::Delta {
+                text: "‹‹ACT››🗑️ Forgetting from memory‹‹/ACT››".to_string(),
+            },
+        )
+        .await;
+        let st = ctx.state.clone();
+        tokio::task::spawn_blocking(move || forget_memory(&st, &args_val))
+            .await
+            .unwrap_or_else(|e| format!("Execution error: {e}"))
+    } else if name == "update_plan" || name == "step_advance" {
+        let args_val: serde_json::Value = serde_json::from_str(args_raw)
+            .unwrap_or_else(|_| serde_json::json!({}));
+        // `step_advance` reports progress on a SINGLE step by id (no need to
+        // re-send the whole plan → weak-model-proof, no ballooning). It maps to
+        // a one-element `sent` and rides the exact same merge + F2-verify path.
+        let sent = if name == "step_advance" {
+            vec![serde_json::json!({
+                "id": args_val.get("id").and_then(|v| v.as_str()).unwrap_or(""),
+                "status": args_val.get("status").and_then(|v| v.as_str()).unwrap_or("doing"),
+                "detail": args_val.get("detail").and_then(|v| v.as_str()).unwrap_or(""),
+            })]
+        } else {
+            args_val
+                .get("steps")
+                .and_then(|s| s.as_array())
+                .cloned()
+                .unwrap_or_default()
+        };
+        // MERGE the model's steps into the CANONICAL plan (never replace);
+        // returns the canonical indices newly claimed done (held `doing`
+        // until F2 verifies). See `merge_plan` for the anti-reset rule.
+        let claims = merge_execution_plan(ctx.plan, &sent);
+        let mut plan_steps = execution_plan_steps(ctx.plan);
+        // DIAG (HOMUN_DEBUG): the plan lifecycle, to see if the model
+        // re-proposes the whole plan (churn) or advances one step, and
+        // whether a re-proposal RESETS statuses (the "il piano riparta"
+        // symptom). One line per update_plan/step_advance call.
+        if verbose_debug() {
+            let sig = |s: &serde_json::Value| {
+                format!(
+                    "{}:{}",
+                    s.get("id").and_then(|v| v.as_str()).unwrap_or("?"),
+                    s.get("status").and_then(|v| v.as_str()).unwrap_or("?")
+                )
+            };
+            let sent_sig: Vec<String> = sent.iter().map(&sig).collect();
+            let plan_sig: Vec<String> = plan_steps.iter().map(&sig).collect();
+            eprintln!(
+                "[plan] {name}: sent[{}]=[{}] → canonical[{}]=[{}]",
+                sent.len(),
+                sent_sig.join(","),
+                plan_steps.len(),
+                plan_sig.join(",")
+            );
+        }
+        if plan_steps.is_empty() {
+            "Empty plan: provide at least one step with a title.".to_string()
+        } else {
+            // F2 gate: verify each newly-claimed-done step before it counts
+            // (using the evidence gathered since the last completed step).
+            // Adaptive floor (ADR 0018): when ON, the model tier modulates
+            // depth — capable models skip the extra verify round on steps
+            // with NO external action (nothing to verify against, low risk);
+            // weak models (Always) still verify everything. OFF → unchanged.
+            let verify = step_verification_enabled()
+                && if ctx.floor_acting {
+                    match ctx.turn_scaffold.verify_depth {
+                        scaffold::VerifyDepth::Always => true,
+                        scaffold::VerifyDepth::OnRisk => !ctx.step_evidence.is_empty(),
+                    }
+                } else {
+                    true
+                };
+            let mut rejection: Option<String> = None;
+            for i in claims {
+                let title = plan_step_title(&plan_steps[i]).to_string();
+                let criterion = plan_steps[i]
+                    .get("done_criterion")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let (ok, reason) = if verify {
+                    let evidence = if ctx.step_evidence.is_empty() {
+                        "(no tool activity recorded for this step)".to_string()
+                    } else {
+                        ctx.step_evidence.join("\n")
+                    };
+                    verify_step_complete(
+                        &ctx.state.http,
+                        &title,
+                        &criterion,
+                        &evidence,
+                    )
+                    .await
+                } else {
+                    (true, String::new())
+                };
+                if ok {
+                    plan_steps[i]["status"] = serde_json::json!("done");
+                    let verified_step = plan_steps[i].clone();
+                    let verified_evidence = ctx.step_evidence.clone();
+                    let st = ctx.state.clone();
+                    let thread_for_memory = ctx.thread_id.map(|s| s.to_string());
+                    let _ = tokio::task::spawn_blocking(move || {
+                        record_runtime_plan_step_outcome_from_state(
+                            &st,
+                            thread_for_memory.as_deref(),
+                            &verified_step,
+                            &verified_evidence,
+                        );
+                    })
+                    .await;
+                    *ctx.plan = runtime_execution_plan(&plan_steps);
+                    *ctx.progress_anchor_round = ctx.round; // F1: real progress
+                    ctx.step_evidence.clear();
+                    ctx.last_round_sig.clear();
+                    *ctx.repeat_count = 0;
+                    *ctx.pending_compaction = true; // F3
+                    if verify {
+                        let _ = emit_stream_event(
+                            ctx.tx,
+                            GenerateStreamEvent::Delta {
+                                text: format!(
+                                    "‹‹ACT››✓ Step verified: {}‹‹/ACT››",
+                                    title.chars().take(60).collect::<String>()
+                                ),
+                            },
+                        )
+                        .await;
+                    }
+                } else {
+                    rejection = Some(format!(
+                        "Step «{title}» is NOT verified complete: {}. Keep working on it — re-mark it done ONLY once its result actually exists.",
+                        if reason.is_empty() {
+                            "the evidence does not show it was finished"
+                        } else {
+                            &reason
+                        }
+                    ));
+                    break;
+                }
+            }
+            // Marker rendered from the CANONICAL plan — the single source of
+            // truth (verified state), not the model's raw claim. This is what
+            // the UI shows and what the next turn resumes from.
+            plan_steps = execution_plan_steps(ctx.plan);
+            let plan_mark =
+                format!("‹‹PLAN››{}‹‹/PLAN››", build_plan_markdown(&plan_steps));
+            ctx.accumulated.push_str(&plan_mark);
+            let _ = emit_stream_event(
+                ctx.tx,
+                GenerateStreamEvent::Delta { text: plan_mark },
+            )
+            .await;
+            upsert_runtime_plan_memory_from_state(
+                ctx.state,
+                ctx.thread_id,
+                &plan_steps,
+            );
+            let done = plan_done_count(&plan_steps);
+            match rejection {
+                Some(msg) => format!("⚠️ {msg} (done {done}/{})", plan_steps.len()),
+                None => {
+                    format!("Plan updated: {done}/{} steps done.", plan_steps.len())
+                }
+            }
+        }
+    } else if name == "create_automation" {
+        let _ = emit_stream_event(
+            ctx.tx,
+            GenerateStreamEvent::Delta {
+                text: "‹‹ACT››⚡ Creating an automation‹‹/ACT››".to_string(),
+            },
+        )
+        .await;
+        create_automation_from_chat(
+            ctx.state,
+            args_raw,
+            ctx.automation_user_id,
+            ctx.automation_workspace_id,
+        )
+    } else if name == "update_automation" {
+        let _ = emit_stream_event(
+            ctx.tx,
+            GenerateStreamEvent::Delta {
+                text: "‹‹ACT››⚡ Updating an automation‹‹/ACT››".to_string(),
+            },
+        )
+        .await;
+        update_automation_from_chat(
+            ctx.state,
+            args_raw,
+            ctx.automation_user_id,
+            ctx.automation_workspace_id,
+        )
+    } else if name == "find_capability" {
+        // Tool Search: discover DEFERRED native tools by intent and activate
+        // them (push into the live tool set) so the model calls them next
+        // round — same mechanism as find_connected_tools, for built-in tools.
+        let parsed = serde_json::from_str::<serde_json::Value>(args_raw).ok();
+        let intent = parsed
+            .as_ref()
+            .and_then(|a| {
+                a.get("intent")
+                    .or_else(|| a.get("query"))
+                    .and_then(|v| v.as_str())
+                    .map(String::from)
+            })
+            .unwrap_or_default();
+        let _ = emit_stream_event(
+            ctx.tx,
+            GenerateStreamEvent::Delta {
+                text: format!(
+                    "‹‹ACT››🧭 Searching for a capability: {}‹‹/ACT››",
+                    if intent.is_empty() {
+                        "(intent)"
+                    } else {
+                        intent.as_str()
+                    }
+                ),
+            },
+        )
+        .await;
+        let mut lines = Vec::new();
+        let mut discovered_entries: Vec<CapabilityEntry> = Vec::new();
+        // In-house tools + skills (BM25 over the unified corpus).
+        for entry in bm25_rank(ctx.capability_corpus, &intent, 6) {
+            if entry.is_skill {
+                lines.push(format!(
+                    "- skill «{}»: {} → load it with use_skill(\"{}\")",
+                    entry.key, entry.desc, entry.key
+                ));
+                discovered_entries.push(entry.clone());
+            } else if entry.source == CapabilitySource::TemplateCatalog {
+                lines.push(format!(
+                    "- template «{}»: {} → pass template_ref=\"{}\" to make_deck/make_document",
+                    entry.key, entry.desc, entry.key
+                ));
+                discovered_entries.push(entry.clone());
+            } else if let Some(schema) = &entry.schema {
+                if ctx.loaded_tools.insert(entry.key.clone()) {
+                    ctx.tool_schemas.push(schema.clone());
+                }
+                let label = capability_source_label(entry.source);
+                lines.push(format!("- {label} «{}»: {}", entry.key, entry.desc));
+                discovered_entries.push(entry.clone());
+            }
+        }
+        // Connected services (toolkit-aware): activate the matching toolkit's
+        // tools so the model sees its full CRUD together. Channels: READ only.
+        // contact_only turns: don't surface connected services at all (the
+        // dispatch refuses them anyway — this just avoids a wasted round).
+        if !ctx.catalog_index.is_empty() && !ctx.contact_only {
+            for entry in search_connector_capability_entries(
+                ctx.catalog_index,
+                &intent,
+                COMPOSIO_DISCOVERY_RESULTS,
+            ) {
+                if ctx.read_only && !composio_tool_is_read(&entry.key) {
+                    continue;
+                }
+                // PERIMETER: don't even surface calendar/contacts tools when the
+                // matching axis is off (the dispatch refuses them anyway).
+                if !ctx.can_see_calendar && tool_touches_calendar(&entry.key) {
+                    continue;
+                }
+                if !ctx.can_see_contacts && tool_touches_contacts(&entry.key) {
+                    continue;
+                }
+                if ctx.loaded_tools.insert(entry.key.clone()) {
+                    if let Some(schema) = &entry.schema {
+                        ctx.tool_schemas.push(schema.clone());
+                    }
+                }
+                lines.push(format!("- connector «{}»: {}", entry.key, entry.desc));
+                discovered_entries.push(entry);
+            }
+        }
+        if ctx.tool_trace.len() < 20 {
+            if let Some(trace_line) =
+                capability_discovery_trace_line(&intent, &discovered_entries)
+            {
+                ctx.tool_trace.push(trace_line);
+            }
+        }
+        if lines.is_empty() {
+            "No capability matches. Rephrase with what you want to do (e.g. \
+\"browse the web\", \"search GitHub\", \"read the user's files\", \"send an email\")."
+                .to_string()
+        } else {
+            format!(
+                "Capabilities found (the tools are now CALLABLE; skills are \
+loaded with use_skill):\n{}",
+                lines.join("\n")
+            )
+        }
+    } else if name == "schedule_task" {
+        let args_val: serde_json::Value = serde_json::from_str(args_raw)
+            .unwrap_or_else(|_| serde_json::json!({}));
+        let goal = args_val
+            .get("goal")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        let every = args_val
+            .get("every")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        let timezone = args_val
+            .get("timezone")
+            .and_then(|v| v.as_str())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+        if goal.is_empty() || every.is_empty() {
+            "Scheduling requires 'goal' (what to do) and 'every' (how often: \
+\"every 1d\", \"daily@08:00\", \"weekly@mon@09:30\")."
+                .to_string()
+        } else {
+            let _ = emit_stream_event(
+                ctx.tx,
+                GenerateStreamEvent::Delta {
+                    text: format!("‹‹ACT››⏰ Scheduling: {goal} ({every})‹‹/ACT››"),
+                },
+            )
+            .await;
+            // Route through the first-class Automation model so a chat-
+            // scheduled task shows up in the Automazioni view (not a hidden run).
+            let st = ctx.state.clone();
+            let user_id = ctx.automation_user_id.clone();
+            let workspace_id = ctx.automation_workspace_id.clone();
+            let title: String = goal.chars().take(48).collect();
+            let auto_args = serde_json::json!({
+                "title": title,
+                "prompt": goal,
+                "trigger_type": "schedule",
+                "recurrence": every,
+                "timezone": timezone,
+            })
+            .to_string();
+            tokio::task::spawn_blocking(move || {
+                create_automation_from_chat(
+                    &st,
+                    &auto_args,
+                    &user_id,
+                    &workspace_id,
+                )
+            })
+            .await
+            .unwrap_or_else(|e| format!("Scheduling error: {e}"))
+        }
+    } else if name == "read_file" {
+        let args_val: serde_json::Value = serde_json::from_str(args_raw)
+            .unwrap_or_else(|_| serde_json::json!({}));
+        let path = args_val
+            .get("path")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let _ = emit_stream_event(
+            ctx.tx,
+            GenerateStreamEvent::Delta {
+                text: format!("‹‹ACT››📄 Reading {path}‹‹/ACT››"),
+            },
+        )
+        .await;
+        let st = ctx.state.clone();
+        let tid = ctx.thread_id.map(|s| s.to_string());
+        let recall_path = path.clone();
+        let mut out = tokio::task::spawn_blocking(move || {
+            read_project_file(&st, tid.as_deref(), &path)
+        })
+        .await
+        .unwrap_or_else(|e| format!("Error: {e}"));
+        // Per-file recall: surface past DECISIONS about this file so the
+        // agent remembers WHY it's like this instead of re-deriving it.
+        let st2 = ctx.state.clone();
+        if let Some(note) = tokio::task::spawn_blocking(move || {
+            decisions_for_path(&st2, &recall_path)
+        })
+        .await
+        .ok()
+        .flatten()
+        {
+            out.push_str("\n\n");
+            out.push_str(&note);
+        }
+        out
+    } else if name == "write_file" {
+        let args_val: serde_json::Value = serde_json::from_str(args_raw)
+            .unwrap_or_else(|_| serde_json::json!({}));
+        let path = args_val
+            .get("path")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let content = args_val
+            .get("content")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let _ = emit_stream_event(
+            ctx.tx,
+            GenerateStreamEvent::Delta {
+                text: format!("‹‹ACT››✍️ Scrivo {path}‹‹/ACT››"),
+            },
+        )
+        .await;
+        let st = ctx.state.clone();
+        let tid = ctx.thread_id.map(|s| s.to_string());
+        let path_for_memory = path.clone();
+        let content_len = content.len() as u64;
+        let result = tokio::task::spawn_blocking(move || {
+            write_project_file(&st, tid.as_deref(), &path, &content)
+        })
+        .await
+        .unwrap_or_else(|e| format!("Error: {e}"));
+        if result.starts_with("✅ Wrote ") {
+            register_project_file_artifact_memory(
+                ctx.state,
+                ctx.thread_id,
+                &path_for_memory,
+                content_len,
+                "write_file",
+            )
+            .await;
+        }
+        result
+    } else if name == "edit_file" {
+        let args_val: serde_json::Value = serde_json::from_str(args_raw)
+            .unwrap_or_else(|_| serde_json::json!({}));
+        let path = args_val
+            .get("path")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let old = args_val
+            .get("old_string")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let new = args_val
+            .get("new_string")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let _ = emit_stream_event(
+            ctx.tx,
+            GenerateStreamEvent::Delta {
+                text: format!("‹‹ACT››✏️ Modifico {path}‹‹/ACT››"),
+            },
+        )
+        .await;
+        let st = ctx.state.clone();
+        let tid = ctx.thread_id.map(|s| s.to_string());
+        tokio::task::spawn_blocking(move || {
+            edit_project_file(&st, tid.as_deref(), &path, &old, &new)
+        })
+        .await
+        .unwrap_or_else(|e| format!("Error: {e}"))
+    } else if name == "list_files" {
+        let _ = emit_stream_event(
+            ctx.tx,
+            GenerateStreamEvent::Delta {
+                text: "‹‹ACT››📂 Exploring the project‹‹/ACT››".to_string(),
+            },
+        )
+        .await;
+        let st = ctx.state.clone();
+        let tid = ctx.thread_id.map(|s| s.to_string());
+        tokio::task::spawn_blocking(move || list_project_files(&st, tid.as_deref()))
+            .await
+            .unwrap_or_else(|e| format!("Error: {e}"))
+    } else if name == "list_directory" || name == "read_text_file" {
+        let is_read = name == "read_text_file";
+        let args_val: serde_json::Value = serde_json::from_str(args_raw)
+            .unwrap_or_else(|_| serde_json::json!({}));
+        let p = args_val
+            .get("path")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let st = ctx.state.clone();
+        let tid = ctx.thread_id.map(|s| s.to_string());
+        let pr = p.clone();
+        let resolved = tokio::task::spawn_blocking(move || {
+            fs_resolve_authorized(&st, tid.as_deref(), &pr)
+        })
+        .await
+        .unwrap_or_else(|_| {
+            Err(FsAuthIssue::Invalid("internal error".to_string()))
+        });
+        match resolved {
+            Ok(path) => {
+                let icon = if is_read {
+                    "📄 Reading"
+                } else {
+                    "📂 Listing"
+                };
+                let _ = emit_stream_event(
+                    ctx.tx,
+                    GenerateStreamEvent::Delta {
+                        text: format!("‹‹ACT››{icon} {p}‹‹/ACT››"),
+                    },
+                )
+                .await;
+                tokio::task::spawn_blocking(move || {
+                    if is_read {
+                        fs_read_text(&path)
+                    } else {
+                        fs_list_dir_contents(&path)
+                    }
+                })
+                .await
+                .unwrap_or_else(|e| format!("Error: {e}"))
+            }
+            Err(FsAuthIssue::Invalid(msg)) => msg,
+            Err(FsAuthIssue::NeedsAuth(path)) => {
+                // In-chat authorize card: grant access WITHOUT going to Settings.
+                let marker = serde_json::json!({
+                    "path": path.display().to_string(),
+                    "op": if is_read { "read" } else { "list" }
+                })
+                .to_string();
+                let card = format!(
+                    "\n\nTo access this folder I need your authorization.\n\
+‹‹FS_AUTHORIZE››{marker}‹‹/FS_AUTHORIZE››\n"
+                );
+                ctx.accumulated.push_str(&card);
+                let _ = emit_stream_event(
+                    ctx.tx,
+                    GenerateStreamEvent::Delta { text: card },
+                )
+                .await;
+                *ctx.pending_confirm = true;
+                "AWAITING AUTHORIZATION: I showed the user a card with the \
+button to authorize access to the folder. Do NOT say you have read/listed it."
+                    .to_string()
+            }
+        }
+    } else if name == "run_in_project" {
+        let args_val: serde_json::Value = serde_json::from_str(args_raw)
+            .unwrap_or_else(|_| serde_json::json!({}));
+        let command = args_val
+            .get("command")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let _ = emit_stream_event(
+            ctx.tx,
+            GenerateStreamEvent::Delta {
+                text: format!(
+                    "‹‹ACT››🛠️ Running in the project: {}‹‹/ACT››",
+                    command.chars().take(120).collect::<String>()
+                ),
+            },
+        )
+        .await;
+        run_in_project(ctx.state, ctx.thread_id, &command).await
+    } else if name == "list_addons" {
+        tokio::task::spawn_blocking(process_skills::addons_list_text)
+            .await
+            .unwrap_or_else(|e| format!("Error: {e}"))
+    } else if name == "show_addon" {
+        let args_val: serde_json::Value = serde_json::from_str(args_raw)
+            .unwrap_or_else(|_| serde_json::json!({}));
+        let addon_id = args_val
+            .get("addon_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        tokio::task::spawn_blocking(move || {
+            process_skills::addon_show_text(&addon_id)
+        })
+        .await
+        .unwrap_or_else(|e| format!("Error: {e}"))
+    } else if name == "customize_addon" {
+        let args_val: serde_json::Value = serde_json::from_str(args_raw)
+            .unwrap_or_else(|_| serde_json::json!({}));
+        let addon_id = args_val
+            .get("addon_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let changes = args_val
+            .get("changes")
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!({}));
+        let _ = emit_stream_event(
+            ctx.tx,
+            GenerateStreamEvent::Delta {
+                text: format!("‹‹ACT››🧩 Customizing addon {addon_id}‹‹/ACT››"),
+            },
+        )
+        .await;
+        tokio::task::spawn_blocking(move || {
+            process_skills::addon_customize_text(&addon_id, &changes)
+        })
+        .await
+        .unwrap_or_else(|e| format!("Error: {e}"))
+    } else if name == "create_skill" {
+        let args_val: serde_json::Value = serde_json::from_str(args_raw)
+            .unwrap_or_else(|_| serde_json::json!({}));
+        let skill_name = args_val
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let skill_desc = args_val
+            .get("description")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let skill_instr = args_val
+            .get("instructions")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let _ = emit_stream_event(
+            ctx.tx,
+            GenerateStreamEvent::Delta {
+                text: format!("‹‹ACT››🧩 Creating the skill {skill_name}‹‹/ACT››"),
+            },
+        )
+        .await;
+        tokio::task::spawn_blocking(move || {
+            create_skill(&skill_name, &skill_desc, &skill_instr)
+        })
+        .await
+        .unwrap_or_else(|e| format!("Error: {e}"))
+    } else if name == "suggest_capabilities" {
+        let args_val: serde_json::Value = serde_json::from_str(args_raw)
+            .unwrap_or_else(|_| serde_json::json!({}));
+        let need = args_val
+            .get("need")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let _ = emit_stream_event(
+            ctx.tx,
+            GenerateStreamEvent::Delta {
+                text: format!("‹‹ACT››🧭 Searching connectors for: {need}‹‹/ACT››"),
+            },
+        )
+        .await;
+        let suggestions = suggest_capabilities(ctx.state, &need).await;
+        match suggestions.card {
+            Some(card) => {
+                // In-chat connect-cards: render the suggestions as
+                // clickable connect buttons (skill/MCP/Composio) so the
+                // user acts from chat, no Settings trip. End the turn
+                // here — the user must connect, then re-ask.
+                let marker = card.to_string();
+                let card_text = format!(
+                    "\n\nHere's what I can connect for this. Choose below.\n\
+‹‹CONNECT_SUGGEST››{marker}‹‹/CONNECT_SUGGEST››\n"
+                );
+                ctx.accumulated.push_str(&card_text);
+                let _ = emit_stream_event(
+                    ctx.tx,
+                    GenerateStreamEvent::Delta { text: card_text },
+                )
+                .await;
+                *ctx.pending_confirm = true;
+                "AWAITING: I showed the user clickable cards to \
+connect the suggested connectors (skill/MCP/Composio). Do NOT say you have already connected anything."
+                    .to_string()
+            }
+            None => suggestions.model_text,
+        }
+    } else if name == "list_scheduled_tasks" {
+        let st = ctx.state.clone();
+        tokio::task::spawn_blocking(move || list_scheduled_tasks(&st))
+            .await
+            .unwrap_or_else(|e| format!("Error: {e}"))
+    } else if name == "cancel_scheduled_task" {
+        let args_val: serde_json::Value = serde_json::from_str(args_raw)
+            .unwrap_or_else(|_| serde_json::json!({}));
+        let task_id = args_val
+            .get("task_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        let _ = emit_stream_event(
+            ctx.tx,
+            GenerateStreamEvent::Delta {
+                text: "‹‹ACT››🗑️ Cancelling scheduled task‹‹/ACT››".to_string(),
+            },
+        )
+        .await;
+        let st = ctx.state.clone();
+        tokio::task::spawn_blocking(move || cancel_scheduled_task(&st, &task_id))
+            .await
+            .unwrap_or_else(|e| format!("Error: {e}"))
+    } else if !ctx.can_see_calendar && !name.is_empty() && tool_touches_calendar(name) {
+        // PERIMETER (anti-exfiltration): the can_see_calendar axis is enforced
+        // HARD here, independent of memory_scope — a "personal"-scope contact that
+        // is NOT contact_only still can't pull the user's calendar. All builtins
+        // are matched in earlier arms, so this only catches calendar connectors.
+        "The user's calendar is not accessible in this conversation. \
+Do not reveal commitments, appointments or events."
+            .to_string()
+    } else if !ctx.can_see_contacts && !name.is_empty() && tool_touches_contacts(name) {
+        // PERIMETER (anti-exfiltration): the can_see_contacts axis, enforced HARD
+        // here too — block the user's address book (Google Contacts / People etc.)
+        // even on a non-contact_only turn.
+        "The user's address book is not accessible in this conversation. \
+Do not reveal other contacts, people or relationships of the user."
+            .to_string()
+    } else if ctx.contact_only && !name.is_empty() {
+        // PERIMETER (anti-exfiltration): a `contact_only` turn must not reach the
+        // user's connected services. All builtins are matched in earlier arms, so
+        // any tool reaching here is a connected Composio/MCP tool — refuse it so a
+        // contact can't make the assistant read Gmail/Calendar/etc. and leak them.
+        "Connected-service tools not available in a conversation with \
+this contact. Answer only with what's in this chat; do not reveal personal data \
+of the user or third parties."
+            .to_string()
+    } else if ctx.read_only && !name.is_empty() && ctx.composio_writes.contains(name) {
+        // Channel (read-only) turn: never run a write tool, never even
+        // surface a confirm card (no UI on the channel). Phase 2 routes
+        // these to the in-app approval center.
+        "Action not available from the channel: operations with effects \
+require your confirmation in the app. Propose it and stop."
+            .to_string()
+    } else if let Some((mcp_provider, mcp_tool)) = parse_mcp_chat_name(name) {
+        // Connected MCP server tool. Writes (per the cached ActionClass,
+        // derived from the MCP readOnlyHint) need confirmation; reads run
+        // with a timeout so a hung server can't freeze the turn. A
+        // read_only channel + write was already rejected just above
+        // (composio_writes now includes MCP writes). `autonomous` runs skip
+        // the card and execute (explicit per-automation opt-in).
+        let args_val: serde_json::Value = serde_json::from_str(args_raw)
+            .unwrap_or_else(|_| serde_json::json!({}));
+        let workspace_scoped = workspace_scoped_mcp_write(
+            ctx.state,
+            ctx.thread_id,
+            &mcp_provider,
+            &mcp_tool,
+            &args_val,
+        );
+        if ctx.composio_writes.contains(name) && !ctx.autonomous && !workspace_scoped {
+            let approval = create_pending_approval(
+                ctx.state,
+                name,
+                &args_val,
+                &mcp_tool,
+                ctx.thread_id,
+                true,
+            );
+            let marker = match approval.as_ref() {
+                Some(approval) => serde_json::json!({
+                    "approval_id": approval.approval_id,
+                    "tool": name,
+                    "arguments": args_val,
+                }),
+                None => serde_json::json!({ "tool": name, "arguments": args_val }),
+            }
+            .to_string();
+            let card = format!(
+                "\n\nI need your confirmation for the action below.\n\
+‹‹MCP_CONFIRM››{marker}‹‹/MCP_CONFIRM››\n"
+            );
+            ctx.accumulated.push_str(&card);
+            let _ =
+                emit_stream_event(ctx.tx, GenerateStreamEvent::Delta { text: card })
+                    .await;
+            *ctx.pending_confirm = true;
+            "AWAITING USER CONFIRMATION: the action was proposed via a \
+confirmation card in the interface. Do NOT say it was executed."
+                .to_string()
+        } else {
+            let _ = emit_stream_event(
+                ctx.tx,
+                GenerateStreamEvent::Delta {
+                    text: format!("‹‹ACT››🔌 Using {mcp_tool}‹‹/ACT››"),
+                },
+            )
+            .await;
+            let st = ctx.state.clone();
+            let prov = mcp_provider.clone();
+            let tool = mcp_tool.clone();
+            let args_for_artifact = args_val.clone();
+            let args = args_val;
+            let mcp_started = std::time::Instant::now();
+            let exec = tokio::task::spawn_blocking(move || {
+                run_mcp_chat_tool(&st, &prov, &tool, args)
+            });
+            let mut run_ok = false;
+            let mut run_err: Option<&'static str> = None;
+            let mcp_result = match tokio::time::timeout(mcp_call_timeout(), exec)
+                .await
+            {
+                Ok(Ok(Ok(value))) => {
+                    run_ok = true;
+                    value
+                        .to_string()
+                        .chars()
+                        .take(COMPOSIO_RESULT_CHARS)
+                        .collect()
+                }
+                Ok(Ok(Err(error))) => {
+                    // Classify the failure so a broken MCP server tells the user
+                    // what to do (reconnect / wait) instead of a raw error.
+                    run_err = classify_connector_error(&error.to_string())
+                        .map(connector_error_kind_str)
+                        .or(Some("other"));
+                    let hint = mcp_error_hint(&error.to_string())
+                        .map(|h| format!(" {h}"))
+                        .unwrap_or_default();
+                    format!("MCP tool error: {error}.{hint}")
+                }
+                Ok(Err(_join)) => {
+                    run_err = Some("other");
+                    "Error: MCP execution interrupted.".to_string()
+                }
+                Err(_elapsed) => {
+                    run_err = Some("unavailable");
+                    format!(
+                        "The MCP tool didn't respond within {}s (timeout): the server \
+may be stuck or offline. Tell the user to check/reconnect it from Settings → \
+Connectors → MCP; do NOT claim it's done.",
+                        mcp_call_timeout().as_secs()
+                    )
+                }
+            };
+            record_connector_run(
+                ctx.state,
+                ctx.thread_id,
+                name,
+                "mcp",
+                run_ok,
+                run_err,
+                mcp_started.elapsed(),
+            );
+            if run_ok {
+                register_mcp_filesystem_artifact_memory(
+                    ctx.state,
+                    ctx.thread_id,
+                    mcp_provider.as_str(),
+                    &mcp_tool,
+                    &args_for_artifact,
+                )
+                .await;
+            }
+            mcp_result
+        }
+    } else if !name.is_empty() {
+        // A connected-service (Composio) tool. Writes need explicit
+        // confirmation unless the user marked this tool "always allow" OR the
+        // run is an autonomous automation (explicit per-automation opt-in).
+        let needs_confirm = ctx.composio_writes.contains(name)
+            && !composio_tool_allowed(name)
+            && !ctx.autonomous;
+        if needs_confirm {
+            // Do NOT execute. Emit a confirmation card carrying the exact
+            // action; the user runs it (once/always) via the card. The model
+            // must never claim it's done — the real outcome comes from the card.
+            let args_val: serde_json::Value = serde_json::from_str(args_raw)
+                .unwrap_or_else(|_| serde_json::json!({}));
+            let approval = create_pending_approval(
+                ctx.state,
+                name,
+                &args_val,
+                &humanize_composio_tool(name),
+                ctx.thread_id,
+                true,
+            );
+            let marker = match approval.as_ref() {
+                Some(approval) => serde_json::json!({
+                    "approval_id": approval.approval_id,
+                    "tool": name,
+                    "arguments": args_val,
+                }),
+                None => serde_json::json!({ "tool": name, "arguments": args_val }),
+            }
+            .to_string();
+            let card = format!(
+                "\n\nI need your confirmation for the action below.\n\
+‹‹COMPOSIO_CONFIRM››{marker}‹‹/COMPOSIO_CONFIRM››\n"
+            );
+            ctx.accumulated.push_str(&card);
+            let _ =
+                emit_stream_event(ctx.tx, GenerateStreamEvent::Delta { text: card })
+                    .await;
+            *ctx.pending_confirm = true;
+            "AWAITING USER CONFIRMATION: the action was proposed via a \
+confirmation card in the interface. Do NOT say it was executed."
+                .to_string()
+        } else {
+            let _ = emit_stream_event(
+                ctx.tx,
+                GenerateStreamEvent::Delta {
+                    text: format!(
+                        "‹‹ACT››🔧 Using {}‹‹/ACT››",
+                        humanize_composio_tool(name)
+                    ),
+                },
+            )
+            .await;
+            let st = ctx.state.clone();
+            let tool = name.to_string();
+            let args: serde_json::Value = serde_json::from_str(args_raw)
+                .unwrap_or_else(|_| serde_json::json!({}));
+            let composio_started = std::time::Instant::now();
+            let outcome = tokio::task::spawn_blocking(move || {
+                composio_execute_tool(&st, &tool, &args)
+            })
+            .await;
+            let mut run_ok = false;
+            let mut run_err: Option<&'static str> = None;
+            let composio_result = match outcome {
+                Ok(Ok(value)) => match composio_execution_error(&value) {
+                    // Composio returned 200 but the tool failed: tell the
+                    // model so it reports the failure, not a false success.
+                    Some(error) => {
+                        run_err = classify_connector_error(&error)
+                            .map(connector_error_kind_str)
+                            .or(Some("other"));
+                        let hint = connector_error_hint(&error)
+                            .map(|h| format!(" {h}"))
+                            .unwrap_or_default();
+                        format!(
+                            "The tool {name} did NOT perform the action: {error}.{hint} \
+Tell the user clearly; do NOT claim it's done."
+                        )
+                    }
+                    None => {
+                        run_ok = true;
+                        value
+                            .to_string()
+                            .chars()
+                            .take(COMPOSIO_RESULT_CHARS)
+                            .collect()
+                    }
+                },
+                Ok(Err(error)) => {
+                    run_err = classify_connector_error(&error.message)
+                        .map(connector_error_kind_str)
+                        .or(Some("other"));
+                    let hint = connector_error_hint(&error.message)
+                        .map(|h| format!(" {h}"))
+                        .unwrap_or_default();
+                    format!("Error from the tool {name}: {}.{hint}", error.message)
+                }
+                Err(error) => {
+                    run_err = Some("other");
+                    format!("Tool execution error: {error}")
+                }
+            };
+            record_connector_run(
+                ctx.state,
+                ctx.thread_id,
+                name,
+                "composio",
+                run_ok,
+                run_err,
+                composio_started.elapsed(),
+            );
+            composio_result
+        }
+    } else {
+        format!("Tool not available: {name}")
+    };
+    result
 }
 
 async fn stream_chat_via_openai(
@@ -20482,7 +23660,7 @@ check/update the key in Settings → Model & Runtime."
                 // after the dispatch loop so the borrows release before the post-loop
                 // reads (screenshot push, `if pending_confirm`) touch the raw locals.
                 {
-                    let ctx = ChatToolCtx {
+                    let mut ctx = ChatToolCtx {
                         messages: &mut messages,
                         accumulated: &mut accumulated,
                         browser_session: &mut browser_session,
@@ -20513,6 +23691,7 @@ check/update the key in Settings → Model & Runtime."
                         tx: &tx,
                         thread_id: thread_id.as_deref(),
                         prompt: &prompt,
+                        request: &request,
                         read_only,
                         channel_owner,
                         contact_only,
@@ -20633,3165 +23812,7 @@ check/update the key in Settings → Model & Runtime."
                         }
                     }
 
-                    let result = if ctx.read_only
-                        && matches!(
-                            name,
-                            "run_in_sandbox"
-                                | "create_artifact"
-                                | "generate_image"
-                                | "save_artifact"
-                                | "read_file"
-                                | "write_file"
-                                | "edit_file"
-                                | "list_files"
-                                | "run_in_project"
-                                | "schedule_task"
-                                | "cancel_scheduled_task"
-                                | "customize_addon"
-                                | "create_skill"
-                        ) {
-                        // Defensive: these aren't offered in read-only mode, but if the
-                        // model calls one anyway, refuse instead of executing.
-                        "Action not available from the channel: operations with effects \
-require your confirmation in the app. Propose it and stop."
-                            .to_string()
-                    } else if matches!(
-                        name,
-                        "browser_navigate"
-                            | "browser_snapshot"
-                            | "browser_act"
-                            | "browser_screenshot"
-                            | "browser_tabs"
-                            | "browser_dialog"
-                    ) {
-                        // Granular browser tools (HOMUN_CHAT_BROWSER_GRANULAR):
-                        // the main agent drives the browser one micro-action at a
-                        // time against a per-turn session.
-                        let args: serde_json::Value = serde_json::from_str(args_raw)
-                            .unwrap_or_else(|_| serde_json::json!({}));
-                        // First browser tool this turn: mark used (raises round
-                        // budget), publish live activity, acquire the session
-                        // (reuse the thread's warm one, else spawn a chat sidecar).
-                        if !*ctx.browser_used {
-                            *ctx.browser_used = true;
-                            begin_browser_activity(
-                                ctx.prompt.to_string(),
-                                ctx.thread_id.map(|s| s.to_string()),
-                            );
-                            // Honor an EXPLICIT "browser" role: switch the driver
-                            // model for the rest of this (browsing) turn. Skipped
-                            // when the user forced a per-message model override.
-                            let has_msg_override = request
-                                .model
-                                .as_deref()
-                                .map(|m| !m.trim().is_empty())
-                                .unwrap_or(false);
-                            if !has_msg_override {
-                                if let Some((b_url, b_model, b_key)) =
-                                    browser_openai_stream_config()
-                                {
-                                    if b_model != *ctx.model || b_url != *ctx.base_url {
-                                        let _ = emit_stream_event(
-                                            ctx.tx,
-                                            GenerateStreamEvent::Delta {
-                                                text: format!(
-                                                    "‹‹ACT››🧠 Passo al modello browser: {b_model}‹‹/ACT››"
-                                                ),
-                                            },
-                                        )
-                                        .await;
-                                        *ctx.base_url = b_url;
-                                        *ctx.model = b_model;
-                                        *ctx.api_key = b_key;
-                                        // Provider-aware endpoint: an Ollama-based
-                                        // browser role needs native /api/chat — the
-                                        // old hardcoded "/chat/completions" sent
-                                        // NATIVE-shaped payloads (object arguments)
-                                        // to the strict /v1 endpoint → 400 on every
-                                        // mid-turn model switch (task #105).
-                                        *ctx.endpoint = chat_endpoint(ctx.base_url);
-                                    }
-                                }
-                            }
-                        }
-                        if ctx.browser_session.is_none() {
-                            let reused = match ctx.thread_id {
-                                Some(t) => {
-                                    let st = ctx.state.clone();
-                                    let t = t.to_string();
-                                    tokio::task::spawn_blocking(move || {
-                                        take_thread_browser_session(&st, &t)
-                                    })
-                                    .await
-                                    .ok()
-                                    .flatten()
-                                }
-                                None => None,
-                            };
-                            // A reused session already has the "chat_0" tab open;
-                            // mark it opened so navigate reuses it (Navigate, not
-                            // Open). A fresh session has no tabs yet.
-                            if reused.is_some() && !ctx.opened_targets.iter().any(|t| t == "chat_0") {
-                                ctx.opened_targets.push("chat_0".to_string());
-                            }
-                            match reused {
-                                Some(existing) => *ctx.browser_session = Some(existing),
-                                None => {
-                                    // Self-heal: a wedged contained-computer CDP makes the
-                                    // sidecar's connectOverCDP time out. Health-check BEFORE
-                                    // connecting; and if the spawn/connect fails anyway (a
-                                    // race, or a container that wedged after the check),
-                                    // recycle + recreate and retry once — resolve the block
-                                    // automatically instead of reporting "non disponibile".
-                                    if !browser_cdp_ok(ctx.state).await {
-                                        let _ = emit_stream_event(
-                                            ctx.tx,
-                                            GenerateStreamEvent::Delta {
-                                                text: "‹‹ACT››🔧 Browser stuck: restarting the contained computer…‹‹/ACT››".to_string(),
-                                            },
-                                        )
-                                        .await;
-                                        ensure_browser_cdp_healthy(ctx.state).await;
-                                    }
-                                    for attempt in 0u8..2 {
-                                        let st = ctx.state.clone();
-                                        let spawned = tokio::task::spawn_blocking(move || {
-                                            spawn_browser_sidecar_for_chat(&st)
-                                        })
-                                        .await;
-                                        match spawned {
-                                            Ok(Ok(session)) => {
-                                                *ctx.browser_session =
-                                                    Some(BrowserAutomationClient::new(session));
-                                                break;
-                                            }
-                                            // First failure → recycle the container + retry.
-                                            _ if attempt == 0 => {
-                                                let _ = emit_stream_event(
-                                                    ctx.tx,
-                                                    GenerateStreamEvent::Delta {
-                                                        text: "‹‹ACT››🔧 Browser unreachable: restarting and retrying…‹‹/ACT››".to_string(),
-                                                    },
-                                                )
-                                                .await;
-                                                ensure_browser_cdp_healthy(ctx.state).await;
-                                            }
-                                            // Second failure → give up; reported below.
-                                            _ => {}
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        // Mark this tool result as carrying a (potentially large)
-                        // snapshot so the pruner stubs older ones.
-                        ctx.browser_tool_call_ids.insert(call_id.clone());
-                        // We hold the session for the duration of this branch; the
-                        // GLOBAL lock is acquired only around each single call.
-                        let outcome: Result<String, String> = match ctx.browser_session.take() {
-                            None => {
-                                push_browser_step(
-                                    "browser: session unavailable".to_string(),
-                                    "error",
-                                );
-                                Err("Browser unavailable: the contained-computer browser (a headless \
-Chromium in a Docker container, driven over CDP — there is NO local browser binary) did not start. \
-Usually transient, or the contained computer isn't running yet. Do NOT look for a local \
-chromium/firefox install and do NOT conclude Chromium is missing or that it's a known bug. Retry, \
-or tell the user to start the contained computer (Settings → Local computer)."
-                                    .to_string())
-                            }
-                            Some(client) => match name {
-                                "browser_navigate" => {
-                                    // Multi-tab: an explicit `target` switches the current
-                                    // tab; `new_tab` allocates a fresh chat_N id (so the
-                                    // logic below treats it as not-yet-opened → Open).
-                                    if let Some(t) = args.get("target").and_then(|v| v.as_str()) {
-                                        if !t.trim().is_empty() {
-                                            *ctx.current_target = t.to_string();
-                                        }
-                                    }
-                                    if args
-                                        .get("new_tab")
-                                        .and_then(|v| v.as_bool())
-                                        .unwrap_or(false)
-                                    {
-                                        *ctx.current_target = format!("chat_{}", ctx.opened_targets.len());
-                                    }
-                                    let url = args
-                                        .get("url")
-                                        .and_then(|v| v.as_str())
-                                        .unwrap_or("")
-                                        .to_string();
-                                    if url.trim().is_empty() {
-                                        *ctx.browser_session = Some(client);
-                                        Err("Missing URL for browser_navigate.".to_string())
-                                    } else {
-                                        let _ = emit_stream_event(
-                                            ctx.tx,
-                                            GenerateStreamEvent::Delta {
-                                                text: format!("‹‹ACT››🌐 Opening {url}‹‹/ACT››"),
-                                            },
-                                        )
-                                        .await;
-                                        let guard = browse_web_lock().lock().await;
-                                        // Open the current tab the first time, then Navigate.
-                                        let already_open =
-                                            ctx.opened_targets.iter().any(|t| t.as_str() == ctx.current_target.as_str());
-                                        let (open_method, open_params) = if already_open {
-                                            (
-                                                BrowserMethod::Navigate,
-                                                serde_json::json!({
-                                                    "target_id": ctx.current_target.as_str(),
-                                                    "url": url,
-                                                }),
-                                            )
-                                        } else {
-                                            (
-                                                BrowserMethod::Open,
-                                                serde_json::json!({
-                                                    "url": url,
-                                                    "label": ctx.current_target.as_str(),
-                                                }),
-                                            )
-                                        };
-                                        let (client_back, nav_res) =
-                                            chat_browser_call(client, open_method, open_params)
-                                                .await;
-                                        let nav_err = nav_res.err();
-                                        // Navigate/Open return no snapshot → snapshot now.
-                                        let mut client_now = client_back;
-                                        let snap_result = if nav_err.is_none() {
-                                            if let Some(c) = client_now.take() {
-                                                let (c2, snap) = chat_browser_call(
-                                                    c,
-                                                    BrowserMethod::Snapshot,
-                                                    browser_chat_snapshot_params(
-                                                        ctx.current_target.as_str(),
-                                                    ),
-                                                )
-                                                .await;
-                                                client_now = c2;
-                                                snap
-                                            } else {
-                                                Err("session lost after navigation".to_string())
-                                            }
-                                        } else {
-                                            Err(nav_err.clone().unwrap_or_default())
-                                        };
-                                        drop(guard);
-                                        *ctx.browser_session = client_now;
-                                        // Mark this tab opened once the Open/Navigate succeeds.
-                                        if nav_err.is_none()
-                                            && !ctx.opened_targets.iter().any(|t| t.as_str() == ctx.current_target.as_str())
-                                        {
-                                            ctx.opened_targets.push(ctx.current_target.clone());
-                                        }
-                                        match (nav_err, snap_result) {
-                                            (Some(error), _) => {
-                                                if verbose_debug() {
-                                                    eprintln!(
-                                                        "[browser] navigate {url} FAILED: {error}"
-                                                    );
-                                                }
-                                                push_browser_step(
-                                                    format!("navigate {url}"),
-                                                    "error",
-                                                );
-                                                // CDP wedge (connectOverCDP timeout despite an
-                                                // HTTP-OK /json/version): recycle the contained
-                                                // computer once per window and DROP the session so
-                                                // the next call respawns against fresh CDP. motore
-                                                // #1's pre-spawn `browser_cdp_ok` can't see this
-                                                // ws-level wedge, so heal it on the failure (same
-                                                // self-heal the drive's shared path already has).
-                                                if cdp_wedge_signature(&error) {
-                                                    let _ = emit_stream_event(
-                                                        ctx.tx,
-                                                        GenerateStreamEvent::Delta {
-                                                            text: "‹‹ACT››🔧 Browser bloccato: riavvio il computer…‹‹/ACT››".to_string(),
-                                                        },
-                                                    )
-                                                    .await;
-                                                    let healed = force_recycle_contained_computer(
-                                                        ctx.state,
-                                                    )
-                                                    .await;
-                                                    *ctx.browser_session = None;
-                                                    ctx.opened_targets.clear();
-                                                    if healed {
-                                                        Err("The browser was wedged; I recycled the contained computer. Retry the SAME navigation now.".to_string())
-                                                    } else {
-                                                        Err("The browser is unavailable (the contained computer did not recover). Tell the user to check Settings → Local computer.".to_string())
-                                                    }
-                                                } else {
-                                                    let fails = {
-                                                        let entry = ctx.nav_failures
-                                                            .entry(url.to_string())
-                                                            .or_insert(0);
-                                                        *entry += 1;
-                                                        *entry
-                                                    };
-                                                    Err(format!(
-                                                        "Navigation failed: {error}{}",
-                                                        browser_navigate_failure_hint(&url, fails)
-                                                    ))
-                                                }
-                                            }
-                                            (None, Ok(value)) => {
-                                                let snap = browser_snapshot_text(&value);
-                                                if !snap.is_empty() {
-                                                    *ctx.last_snapshot = snap.clone();
-                                                }
-                                                push_browser_step(
-                                                    format!("navigate {url}"),
-                                                    "done",
-                                                );
-                                                let page_url = value
-                                                    .get("url")
-                                                    .and_then(|u| u.as_str())
-                                                    .unwrap_or(url.as_str());
-                                                Ok(format!(
-                                                    "Page opened ({page_url}). Snapshot:\n{snap}"
-                                                ))
-                                            }
-                                            (None, Err(error)) => {
-                                                push_browser_step(
-                                                    format!("navigate {url}"),
-                                                    "error",
-                                                );
-                                                Err(format!(
-                                                    "Page opened but snapshot failed: {error}"
-                                                ))
-                                            }
-                                        }
-                                    }
-                                }
-                                "browser_snapshot" => {
-                                    if let Some(t) = args.get("target").and_then(|v| v.as_str()) {
-                                        if !t.trim().is_empty() {
-                                            *ctx.current_target = t.to_string();
-                                        }
-                                    }
-                                    let _ = emit_stream_event(
-                                        ctx.tx,
-                                        GenerateStreamEvent::Delta {
-                                            text: "‹‹ACT››👁️ Re-reading the page‹‹/ACT››"
-                                                .to_string(),
-                                        },
-                                    )
-                                    .await;
-                                    let guard = browse_web_lock().lock().await;
-                                    let (client_back, snap) = chat_browser_call(
-                                        client,
-                                        BrowserMethod::Snapshot,
-                                        browser_chat_snapshot_params(ctx.current_target.as_str()),
-                                    )
-                                    .await;
-                                    drop(guard);
-                                    *ctx.browser_session = client_back;
-                                    match snap {
-                                        Ok(value) => {
-                                            let snap = browser_snapshot_text(&value);
-                                            if !snap.is_empty() {
-                                                *ctx.last_snapshot = snap.clone();
-                                            }
-                                            push_browser_step("snapshot".to_string(), "done");
-                                            Ok(format!("Page snapshot:\n{snap}"))
-                                        }
-                                        Err(error) => {
-                                            push_browser_step("snapshot".to_string(), "error");
-                                            Err(format!("Snapshot failed: {error}"))
-                                        }
-                                    }
-                                }
-                                "browser_act" => {
-                                    // Build the action the sidecar runs (and the safety gate
-                                    // inspects), coercing a common model mistake that otherwise
-                                    // dead-ends in a retry loop: an element ref (e83) passed as
-                                    // `target` — which is a TAB id, so the sidecar errors "tab
-                                    // not found: e83". Re-route a ref-shaped target into `ref`
-                                    // (when none was given) instead of switching to a missing tab.
-                                    let mut action = args.clone();
-                                    let target_arg = args
-                                        .get("target")
-                                        .and_then(|v| v.as_str())
-                                        .map(str::to_string);
-                                    let has_ref = action
-                                        .get("ref")
-                                        .and_then(|v| v.as_str())
-                                        .is_some_and(|r| !r.trim().is_empty());
-                                    let target_is_ref = target_arg.as_deref().is_some_and(|t| {
-                                        t.len() >= 2
-                                            && t.starts_with('e')
-                                            && t[1..].chars().all(|c| c.is_ascii_digit())
-                                    });
-                                    if let Some(obj) = action.as_object_mut() {
-                                        if target_is_ref && !has_ref {
-                                            if let Some(t) = target_arg.clone() {
-                                                obj.insert(
-                                                    "ref".to_string(),
-                                                    serde_json::Value::String(t),
-                                                );
-                                            }
-                                            obj.remove("target");
-                                        } else if let Some(t) = target_arg.as_deref() {
-                                            if !t.trim().is_empty() {
-                                                *ctx.current_target = t.to_string();
-                                            }
-                                        }
-                                        obj.insert(
-                                            "target_id".to_string(),
-                                            serde_json::Value::String(ctx.current_target.clone()),
-                                        );
-                                    }
-                                    let mut preflight_error = None;
-                                    let vault_secret_used =
-                                        match apply_payment_approval_secret_for_action(
-                                            ctx.state,
-                                            &mut action,
-                                        ) {
-                                            Ok(used) => used,
-                                            Err(error) => {
-                                                push_browser_step(
-                                                    "payment vault secret blocked".to_string(),
-                                                    "error",
-                                                );
-                                                preflight_error = Some(format!(
-                                                    "Payment vault secret unavailable: {error}. Ask the user to approve the Payment Approval Card again."
-                                                ));
-                                                false
-                                            }
-                                        };
-                                    // SAFETY GATE: high-risk (buy/login/booking, or
-                                    // evaluate) is refused for EVERYONE. In read-only
-                                    // (channel) turns any committing action is also
-                                    // refused — EXCEPT when the sender is the OWNER
-                                    // (is_self card): that block protects the user from
-                                    // other people, not from their own requests (e.g.
-                                    // clicking "Cerca" on a train search they asked for).
-                                    let approved_payment_id =
-                                        approved_payment_id_for_action(ctx.state, &action);
-                                    let blocked = browser_safety::high_risk_reason_with_payment_approval(
-                                        &action,
-                                        ctx.last_snapshot,
-                                        approved_payment_id.as_deref(),
-                                    )
-                                    .or_else(|| {
-                                        if ctx.read_only
-                                            && !ctx.channel_owner
-                                            && browser_safety::is_committing_action(&action)
-                                        {
-                                            Some(
-                                                "action that confirms/submits is not allowed from the channel"
-                                                    .to_string(),
-                                            )
-                                        } else {
-                                            None
-                                        }
-                                    });
-                                    if let Some(error) = preflight_error {
-                                        *ctx.browser_session = Some(client);
-                                        Err(error)
-                                    } else if let Some(reason) = blocked {
-                                        eprintln!("browser-gate: BLOCKED ({reason})");
-                                        *ctx.browser_session = Some(client);
-                                        push_browser_step(
-                                            format!(
-                                                "action blocked: {}",
-                                                args.get("kind")
-                                                    .and_then(|k| k.as_str())
-                                                    .unwrap_or("?")
-                                            ),
-                                            "error",
-                                        );
-                                        Err(format!(
-                                            "🚫 action blocked, user confirmation needed: {reason}.{} \
-I did nothing: propose to the user what to do and wait — do NOT retry the same action.",
-                                            browser_act_error_hint(&reason)
-                                        ))
-                                    } else {
-                                        let kind = args
-                                            .get("kind")
-                                            .and_then(|k| k.as_str())
-                                            .unwrap_or("action")
-                                            .to_string();
-                                        let _ = emit_stream_event(
-                                            ctx.tx,
-                                            GenerateStreamEvent::Delta {
-                                                text: format!(
-                                                    "‹‹ACT››✋ {kind} on the page‹‹/ACT››"
-                                                ),
-                                            },
-                                        )
-                                        .await;
-                                        let guard = browse_web_lock().lock().await;
-                                        let (client_back, act_res) =
-                                            chat_browser_call(client, BrowserMethod::Act, action)
-                                                .await;
-                                        drop(guard);
-                                        *ctx.browser_session = client_back;
-                                        match act_res {
-                                            Ok(value) => {
-                                                let snap = browser_snapshot_text(&value);
-                                                // No-progress detection: if the action left
-                                                // the page identical, nudge the model to try
-                                                // a different element/approach instead of
-                                                // repeating the same move.
-                                                let no_change =
-                                                    !snap.is_empty() && snap == *ctx.last_snapshot;
-                                                if !snap.is_empty() {
-                                                    *ctx.last_snapshot = snap.clone();
-                                                }
-                                                push_browser_step(format!("{kind}"), "done");
-                                                let mut out = if snap.is_empty() {
-                                                    "Action performed.".to_string()
-                                                } else {
-                                                    format!(
-                                                        "Action performed. Updated snapshot:\n{snap}"
-                                                    )
-                                                };
-                                                if no_change {
-                                                    out.push_str(
-                                                    "\n[note: the page did NOT change from before — \
-don't repeat the same action; try a different element, scroll, or wait (kind=wait).]",
-                                                );
-                                                }
-                                                if let Some(committed) =
-                                                    value.get("committedOption")
-                                                {
-                                                    out.push_str(&format!(
-                                                        "\n[automatic selection: {committed}]"
-                                                    ));
-                                                }
-                                                if let Some(sugg) = value.get("suggestions") {
-                                                    out.push_str(&format!(
-                                                        "\n[suggestions: {sugg}]"
-                                                    ));
-                                                }
-                                                // Guardrail (advisory, Layer C.3): if the model just
-                                                // typed/filled a date that is in the PAST, nudge it to
-                                                // re-resolve via resolve_datetime instead of submitting.
-                                                // Advisory (not a hard block) because some past dates are
-                                                // legitimate (birthdays, historical lookups).
-                                                if matches!(
-                                                    args.get("kind").and_then(|k| k.as_str()),
-                                                    Some("type") | Some("fill")
-                                                ) {
-                                                    if let Some(typed) =
-                                                        args.get("text").and_then(|t| t.as_str())
-                                                    {
-                                                        if let Some(hint) = past_date_hint(typed) {
-                                                            out.push_str(&hint);
-                                                        }
-                                                    }
-                                                }
-                                                Ok(out)
-                                            }
-                                            Err(error) => {
-                                                push_browser_step(format!("{kind}"), "error");
-                                                // DIAG (HOMUN_DEBUG): what the model tried + why it
-                                                // failed, to root-cause the repeated browser_act loop.
-                                                if verbose_debug() {
-                                                    eprintln!(
-                                                        "[browser_act] kind={kind} ref={:?} selector={:?} text={:?} → ERROR: {}",
-                                                        args.get("ref").and_then(|v| v.as_str()),
-                                                        args.get("selector")
-                                                            .and_then(|v| v.as_str()),
-                                                        if vault_secret_used {
-                                                            Some("[vault-secret]")
-                                                        } else {
-                                                            args.get("text")
-                                                                .and_then(|v| v.as_str())
-                                                        },
-                                                        error.chars().take(220).collect::<String>()
-                                                    );
-                                                }
-                                                // Stale-ref auto-recovery: the page changed under us
-                                                // so the [ref=eN] is gone. Instead of just erroring
-                                                // (forcing the model to spend a round re-snapshotting),
-                                                // take a fresh snapshot NOW and hand it back so it
-                                                // retries with new refs in the same round.
-                                                let stale = {
-                                                    let e = error.to_lowercase();
-                                                    e.contains("stale") || e.contains("detached")
-                                                };
-                                                match (stale, ctx.browser_session.take()) {
-                                                    (true, Some(c)) => {
-                                                        let guard = browse_web_lock().lock().await;
-                                                        let (c_back, snap_res) = chat_browser_call(
-                                                            c,
-                                                            BrowserMethod::Snapshot,
-                                                            browser_chat_snapshot_params(
-                                                                ctx.current_target.as_str(),
-                                                            ),
-                                                        )
-                                                        .await;
-                                                        drop(guard);
-                                                        *ctx.browser_session = c_back;
-                                                        let snap = snap_res
-                                                            .as_ref()
-                                                            .map(browser_snapshot_text)
-                                                            .unwrap_or_default();
-                                                        if snap.is_empty() {
-                                                            Err(format!(
-                                                                "Action failed: {error}{}",
-                                                                browser_act_error_hint(&error)
-                                                            ))
-                                                        } else {
-                                                            *ctx.last_snapshot = snap.clone();
-                                                            Ok(stale_ref_recovery_message(
-                                                                args.get("ref")
-                                                                    .and_then(|v| v.as_str()),
-                                                                &snap,
-                                                            ))
-                                                        }
-                                                    }
-                                                    (_, restored) => {
-                                                        *ctx.browser_session = restored;
-                                                        Err(format!(
-                                                            "Action failed: {error}{}",
-                                                            browser_act_error_hint(&error)
-                                                        ))
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                                "browser_screenshot" => {
-                                    if let Some(t) = args.get("target").and_then(|v| v.as_str()) {
-                                        if !t.trim().is_empty() {
-                                            *ctx.current_target = t.to_string();
-                                        }
-                                    }
-                                    let full_page = args
-                                        .get("full_page")
-                                        .and_then(|v| v.as_bool())
-                                        .unwrap_or(false);
-                                    let marks = args
-                                        .get("marks")
-                                        .and_then(|v| v.as_bool())
-                                        .unwrap_or(false);
-                                    let _ = emit_stream_event(
-                                        ctx.tx,
-                                        GenerateStreamEvent::Delta {
-                                            text: "‹‹ACT››📸 Capturing a screenshot‹‹/ACT››"
-                                                .to_string(),
-                                        },
-                                    )
-                                    .await;
-                                    let file_name =
-                                        format!("chat_shot_{}.png", uuid::Uuid::new_v4().simple());
-                                    let guard = browse_web_lock().lock().await;
-                                    let (client_back, shot_res) = chat_browser_call(
-                                        client,
-                                        BrowserMethod::Screenshot,
-                                        serde_json::json!({
-                                            "target_id": ctx.current_target.as_str(),
-                                            "file_name": file_name,
-                                            "full_page": full_page,
-                                            "labels": marks,
-                                        }),
-                                    )
-                                    .await;
-                                    drop(guard);
-                                    *ctx.browser_session = client_back;
-                                    match shot_res {
-                                        Ok(value) => {
-                                            let path = value
-                                                .get("path")
-                                                .and_then(|p| p.as_str())
-                                                .unwrap_or("")
-                                                .to_string();
-                                            // Set-of-marks legend: map each numbered badge
-                                            // in the image back to the element's ref so the
-                                            // model can act precisely (browser_act ref=eN).
-                                            let legend = value
-                                            .get("marks")
-                                            .and_then(|m| m.as_array())
-                                            .map(|entries| {
-                                                let mut text = String::from(
-                                                    "\nNumbered elements in the screenshot \
-(number = element):",
-                                                );
-                                                for entry in entries {
-                                                    let mark = entry
-                                                        .get("mark")
-                                                        .and_then(|v| v.as_i64())
-                                                        .unwrap_or_default();
-                                                    let role = entry
-                                                        .get("role")
-                                                        .and_then(|v| v.as_str())
-                                                        .unwrap_or("");
-                                                    let name = entry
-                                                        .get("name")
-                                                        .and_then(|v| v.as_str())
-                                                        .unwrap_or("");
-                                                    let ref_id = entry
-                                                        .get("ref")
-                                                        .and_then(|v| v.as_str())
-                                                        .unwrap_or("");
-                                                    text.push_str(&format!(
-                                                        "\n{mark} = {role} \"{name}\" [ref={ref_id}]"
-                                                    ));
-                                                }
-                                                text
-                                            })
-                                            .unwrap_or_default();
-                                            // Read + base64 the PNG. Skip the image (text
-                                            // note only) if missing or too large (~1.5MB
-                                            // encoded ≈ 1.1MB raw).
-                                            match std::fs::read(&path) {
-                                                Ok(bytes) if bytes.len() <= 1_100_000 => {
-                                                    let encoded =
-                                                        base64::engine::general_purpose::STANDARD
-                                                            .encode(&bytes);
-                                                    let dataurl =
-                                                        format!("data:image/png;base64,{encoded}");
-                                                    *ctx.pending_browser_image = Some(dataurl);
-                                                    push_browser_step(
-                                                        "screenshot".to_string(),
-                                                        "done",
-                                                    );
-                                                    Ok(format!(
-                                                        "Screenshot captured (see the image attached \
-below).{legend}"
-                                                    ))
-                                                }
-                                                Ok(bytes) => {
-                                                    push_browser_step(
-                                                        "screenshot".to_string(),
-                                                        "done",
-                                                    );
-                                                    Ok(format!(
-                                                        "Screenshot captured but too large for \
-the preview ({} bytes). Proceed with the text snapshot.",
-                                                        bytes.len()
-                                                    ))
-                                                }
-                                                Err(error) => {
-                                                    push_browser_step(
-                                                        "screenshot".to_string(),
-                                                        "error",
-                                                    );
-                                                    Ok(format!(
-                                                        "Screenshot not readable from disk: {error}. \
-Use the text snapshot."
-                                                    ))
-                                                }
-                                            }
-                                        }
-                                        Err(error) => {
-                                            push_browser_step("screenshot".to_string(), "error");
-                                            Err(format!("Screenshot failed: {error}"))
-                                        }
-                                    }
-                                }
-                                "browser_tabs" => {
-                                    let _ = emit_stream_event(
-                                        ctx.tx,
-                                        GenerateStreamEvent::Delta {
-                                            text: "‹‹ACT››🗂️ Listing tabs‹‹/ACT››".to_string(),
-                                        },
-                                    )
-                                    .await;
-                                    let guard = browse_web_lock().lock().await;
-                                    let (client_back, tabs_res) = chat_browser_call(
-                                        client,
-                                        BrowserMethod::Tabs,
-                                        serde_json::json!({}),
-                                    )
-                                    .await;
-                                    drop(guard);
-                                    *ctx.browser_session = client_back;
-                                    match tabs_res {
-                                        Ok(value) => {
-                                            // Sidecar shape: { tabs: [ { targetId, url,
-                                            // label?, title? } ] }. Parse defensively in
-                                            // case it's a bare array or uses target_id/id.
-                                            let list = value
-                                                .get("tabs")
-                                                .and_then(|t| t.as_array())
-                                                .or_else(|| value.as_array())
-                                                .cloned()
-                                                .unwrap_or_default();
-                                            let mut lines: Vec<String> = Vec::new();
-                                            for tab in &list {
-                                                let id = tab
-                                                    .get("targetId")
-                                                    .or_else(|| tab.get("target_id"))
-                                                    .or_else(|| tab.get("id"))
-                                                    .and_then(|v| v.as_str())
-                                                    .unwrap_or("?");
-                                                let url = tab
-                                                    .get("url")
-                                                    .and_then(|v| v.as_str())
-                                                    .unwrap_or("");
-                                                let title = tab
-                                                    .get("title")
-                                                    .or_else(|| tab.get("label"))
-                                                    .and_then(|v| v.as_str())
-                                                    .unwrap_or("");
-                                                let mut line = format!("- {id}");
-                                                if !url.is_empty() {
-                                                    line.push_str(&format!(" | {url}"));
-                                                }
-                                                if !title.is_empty() {
-                                                    line.push_str(&format!(" | {title}"));
-                                                }
-                                                lines.push(line);
-                                            }
-                                            push_browser_step("tabs".to_string(), "done");
-                                            if lines.is_empty() {
-                                                Ok("No tabs open.".to_string())
-                                            } else {
-                                                Ok(format!("Open tabs:\n{}", lines.join("\n")))
-                                            }
-                                        }
-                                        Err(error) => {
-                                            push_browser_step("tabs".to_string(), "error");
-                                            Err(format!("Listing tabs failed: {error}"))
-                                        }
-                                    }
-                                }
-                                "browser_dialog" => {
-                                    // Native alert/confirm/prompt blocks the page until
-                                    // answered. In read-only (channel) turns we only allow
-                                    // DISMISS, never accept (an accept could confirm an
-                                    // action). The dialog message is returned so the model
-                                    // sees what it answered.
-                                    let accept = !ctx.read_only
-                                        && args
-                                            .get("accept")
-                                            .and_then(|v| v.as_bool())
-                                            .unwrap_or(false);
-                                    let prompt_text = args
-                                        .get("prompt_text")
-                                        .and_then(|v| v.as_str())
-                                        .unwrap_or("");
-                                    let _ = emit_stream_event(
-                                        ctx.tx,
-                                        GenerateStreamEvent::Delta {
-                                            text: format!(
-                                                "‹‹ACT››💬 Dialog: {}‹‹/ACT››",
-                                                if accept { "confirming" } else { "cancelling" }
-                                            ),
-                                        },
-                                    )
-                                    .await;
-                                    let guard = browse_web_lock().lock().await;
-                                    let (client_back, dialog_res) = chat_browser_call(
-                                        client,
-                                        BrowserMethod::RespondDialog,
-                                        serde_json::json!({
-                                            "target_id": ctx.current_target.as_str(),
-                                            "accept": accept,
-                                            "promptText": prompt_text,
-                                            "timeoutMs": 5_000,
-                                        }),
-                                    )
-                                    .await;
-                                    drop(guard);
-                                    *ctx.browser_session = client_back;
-                                    match dialog_res {
-                                        Ok(value) => {
-                                            let msg = value
-                                                .get("message")
-                                                .and_then(|m| m.as_str())
-                                                .unwrap_or("");
-                                            push_browser_step("dialog".to_string(), "done");
-                                            Ok(format!(
-                                                "Dialog {} (message: \"{msg}\"). Re-read the page with browser_snapshot.",
-                                                if accept { "confirmed" } else { "cancelled" }
-                                            ))
-                                        }
-                                        Err(error) => {
-                                            push_browser_step("dialog".to_string(), "error");
-                                            Err(format!("No dialog to handle or error: {error}"))
-                                        }
-                                    }
-                                }
-                                _ => Err(format!("Unknown browser tool: {name}")),
-                            },
-                        };
-                        match outcome {
-                            Ok(text) => text,
-                            Err(text) => text,
-                        }
-                    } else if name == "github_search" {
-                        // Fast, structured GitHub repo search via the API (no browser).
-                        let query = serde_json::from_str::<serde_json::Value>(args_raw)
-                            .ok()
-                            .and_then(|a| a.get("query").and_then(|v| v.as_str()).map(String::from))
-                            .unwrap_or_default();
-                        if query.trim().is_empty() {
-                            "Empty query.".to_string()
-                        } else {
-                            let _ = emit_stream_event(
-                                ctx.tx,
-                                GenerateStreamEvent::Delta {
-                                    text: format!("‹‹ACT››🔎 Searching GitHub: «{query}»‹‹/ACT››"),
-                                },
-                            )
-                            .await;
-                            github_search(ctx.state, &query).await
-                        }
-                    } else if name == "use_skill" {
-                        // Progressive disclosure L2: load the full SKILL.md so the
-                        // model can follow the skill's instructions.
-                        let id = serde_json::from_str::<serde_json::Value>(args_raw)
-                            .ok()
-                            .and_then(|a| a.get("id").and_then(|v| v.as_str()).map(String::from))
-                            .unwrap_or_default();
-                        // Narrate the skill use with its READABLE name (id → Title Case),
-                        // so the activity stream reads like reasoning: "Uso la skill Code
-                        // Review Discipline" (as Claude Code / Codex do).
-                        let readable = id
-                            .split('-')
-                            .filter(|w| !w.is_empty())
-                            .map(|w| {
-                                let mut chars = w.chars();
-                                match chars.next() {
-                                    Some(first) => {
-                                        first.to_uppercase().collect::<String>() + chars.as_str()
-                                    }
-                                    None => String::new(),
-                                }
-                            })
-                            .collect::<Vec<_>>()
-                            .join(" ");
-                        let _ = emit_stream_event(
-                            ctx.tx,
-                            GenerateStreamEvent::Delta {
-                                text: format!("‹‹ACT››📖 Using the skill «{readable}»‹‹/ACT››"),
-                            },
-                        )
-                        .await;
-                        let id_for_load = id.clone();
-                        match tokio::task::spawn_blocking(move || load_skill_body(&id_for_load))
-                            .await
-                        {
-                            Ok(Some(body)) => format!(
-                                "Instructions for the skill «{id}» (SKILL.md) — FOLLOW THEM with the \
-available tools (for data from the web use the browser: browser_navigate on the indicated URL):\n\n{}",
-                                body.chars().take(8000).collect::<String>()
-                            ),
-                            _ => format!("Skill «{id}» not found or not readable."),
-                        }
-                    } else if name == "run_in_sandbox" {
-                        // Execute a skill command in the contained computer (auto-start
-                        // Docker + container). Blocked if the command trips the security scan.
-                        let parsed = serde_json::from_str::<serde_json::Value>(args_raw)
-                            .unwrap_or_else(|_| serde_json::json!({}));
-                        let command = parsed
-                            .get("command")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string();
-                        let skill_id = parsed
-                            .get("skill_id")
-                            .and_then(|v| v.as_str())
-                            .map(String::from);
-                        if command.trim().is_empty() {
-                            "Empty command.".to_string()
-                        } else {
-                            let scan = skill_security::scan_blobs(&[(
-                                "command".to_string(),
-                                command.clone(),
-                            )]);
-                            if scan.blocked {
-                                format!(
-                                    "Command NOT executed: blocked by the security scan \
-(risk {}/100). Reformulate it without dangerous operations.",
-                                    scan.risk_score
-                                )
-                            } else {
-                                let _ = emit_stream_event(
-                                    ctx.tx,
-                                    GenerateStreamEvent::Delta {
-                                        text: format!(
-                                            "‹‹ACT››🖥️ Running: {}‹‹/ACT››",
-                                            command.chars().take(160).collect::<String>()
-                                        ),
-                                    },
-                                )
-                                .await;
-                                // If Docker is down we auto-start Docker Desktop (cold
-                                // start ~1 min) before running — tell the user so the
-                                // wait doesn't look like a hang.
-                                let docker_up =
-                                    tokio::task::spawn_blocking(sandbox::docker_running)
-                                        .await
-                                        .unwrap_or(false);
-                                if !docker_up {
-                                    let _ = emit_stream_event(
-                                        ctx.tx,
-                                        GenerateStreamEvent::Delta {
-                                            text: "‹‹ACT››🐳 Docker isn't running: starting Docker Desktop and waiting for it to be ready (~1 min)…‹‹/ACT››".to_string(),
-                                        },
-                                    )
-                                    .await;
-                                }
-                                // Publish the command to the computer terminal panel.
-                                sandbox_begin(command.clone(), ctx.thread_id.map(|s| s.to_string()));
-                                // Per-conversation output dir: skills save generated
-                                // files to $OUTPUT_DIR, bind-mounted to the host so
-                                // they become downloadable artifacts.
-                                let thread_slug = artifact_thread_slug(ctx.thread_id);
-                                let container_out = sandbox::container_output_dir(&thread_slug);
-                                let host_out = sandbox::artifacts_dir().join(&thread_slug);
-                                let run_started = std::time::SystemTime::now();
-                                let cmd = format!(
-                                    "export OUTPUT_DIR='{container_out}'; mkdir -p \"$OUTPUT_DIR\"; {command}"
-                                );
-                                // The model may omit skill_id; derive it from the
-                                // command's `/home/agent/skills/<id>/…` path so the
-                                // skill's files are always synced before running.
-                                let sid =
-                                    skill_id.clone().or_else(|| skill_id_from_command(&command));
-                                let outcome = tokio::task::spawn_blocking(move || {
-                                    if let Some(id) = sid.as_deref() {
-                                        if let Ok(dir) = skills_dir() {
-                                            sandbox::sync_skill(&dir.join(id), id);
-                                        }
-                                    }
-                                    sandbox::run_command(&cmd, sid.as_deref())
-                                })
-                                .await;
-                                let (panel_output, mut model_output) = match outcome {
-                                    Ok(Ok(out)) => {
-                                        if out.trim().is_empty() {
-                                            ("(no output)".to_string(), "(no output)".to_string())
-                                        } else {
-                                            (out.clone(), format!("Command output:\n{out}"))
-                                        }
-                                    }
-                                    Ok(Err(error)) => {
-                                        let msg = format!("Sandbox unavailable: {error}");
-                                        (msg.clone(), msg)
-                                    }
-                                    Err(error) => {
-                                        let msg = format!("Execution error: {error}");
-                                        (msg.clone(), msg)
-                                    }
-                                };
-                                sandbox_end(panel_output);
-                                // Surface files the command produced as downloadable
-                                // artifacts (marker → card). If a PROJECT folder is
-                                // active, also copy them there — it's the project's
-                                // default folder for generated files.
-                                let project_folder = active_workspace_folder();
-                                for (file_name, size) in
-                                    detect_new_artifacts(&host_out, run_started)
-                                {
-                                    let mut delivered_to: Option<String> = None;
-                                    if let Some(folder) = project_folder.as_ref() {
-                                        let dest = std::path::Path::new(folder).join(&file_name);
-                                        if std::fs::copy(host_out.join(&file_name), &dest).is_ok() {
-                                            delivered_to = Some(dest.to_string_lossy().to_string());
-                                        }
-                                    }
-                                    let marker = serde_json::json!({
-                                        "name": file_name,
-                                        "thread": thread_slug,
-                                        "size": size,
-                                    });
-                                    let artifact_mark =
-                                        format!("‹‹ARTIFACT››{marker}‹‹/ARTIFACT››");
-                                    // Persist in the committed answer so the UI can
-                                    // render the download card + Artefatti panel (the
-                                    // Done payload is authoritative).
-                                    ctx.accumulated.push_str(&artifact_mark);
-                                    let _ = emit_stream_event(
-                                        ctx.tx,
-                                        GenerateStreamEvent::Delta {
-                                            text: artifact_mark,
-                                        },
-                                    )
-                                    .await;
-                                    register_artifact_memory(
-                                        ctx.state,
-                                        ctx.thread_id,
-                                        &thread_slug,
-                                        &file_name,
-                                        size,
-                                        false,
-                                        "run_in_sandbox",
-                                        delivered_to.as_deref(),
-                                    )
-                                    .await;
-                                    match delivered_to {
-                                        Some(path) => model_output.push_str(&format!(
-                                            "\n[file generated and saved to {path}]"
-                                        )),
-                                        None => model_output.push_str(&format!(
-                                            "\n[file generated: {file_name} in $OUTPUT_DIR]"
-                                        )),
-                                    }
-                                }
-                                model_output
-                            }
-                        }
-                    } else if name == "create_artifact" {
-                        // Model-authored document/code → file artifact (host-side).
-                        let parsed = serde_json::from_str::<serde_json::Value>(args_raw)
-                            .unwrap_or_else(|_| serde_json::json!({}));
-                        let fname = parsed
-                            .get("name")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string();
-                        let content = parsed
-                            .get("content")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string();
-                        let thread_slug = artifact_thread_slug(ctx.thread_id);
-                        let _ = emit_stream_event(
-                            ctx.tx,
-                            GenerateStreamEvent::Delta {
-                                text: format!("‹‹ACT››📝 Creating the file {fname}‹‹/ACT››"),
-                            },
-                        )
-                        .await;
-                        let fname_w = fname.clone();
-                        let slug_w = thread_slug.clone();
-                        // A `.pdf` artifact: the `content` is Markdown → render it to a
-                        // real paginated PDF (in-process, always works). Everything else
-                        // is written verbatim as text.
-                        let is_pdf = fname.to_ascii_lowercase().ends_with(".pdf");
-                        let result = tokio::task::spawn_blocking(move || {
-                            if is_pdf {
-                                let title =
-                                    fname_w.trim_end_matches(".pdf").trim_end_matches(".PDF");
-                                let bytes = pdf_render::markdown_to_pdf(title, &content)
-                                    .map_err(|e| format!("PDF render failed: {e}"))?;
-                                write_artifact_bytes(&slug_w, &fname_w, &bytes)
-                            } else {
-                                write_text_artifact(&slug_w, &fname_w, &content)
-                            }
-                        })
-                        .await
-                        .unwrap_or_else(|e| Err(format!("Error: {e}")));
-                        match result {
-                            Ok((size, updated)) => {
-                                let marker = serde_json::json!({
-                                    "name": fname,
-                                    "thread": thread_slug,
-                                    "size": size,
-                                    "updated": updated,
-                                });
-                                let artifact_mark = format!("‹‹ARTIFACT››{marker}‹‹/ARTIFACT››");
-                                // Persist the marker in the committed answer (Done is
-                                // authoritative): the UI parses ‹‹ARTIFACT›› from the
-                                // saved message to render the download card + the
-                                // Artefatti panel. Without this the artifact vanishes.
-                                ctx.accumulated.push_str(&artifact_mark);
-                                let _ = emit_stream_event(
-                                    ctx.tx,
-                                    GenerateStreamEvent::Delta {
-                                        text: artifact_mark,
-                                    },
-                                )
-                                .await;
-                                register_artifact_memory(
-                                    ctx.state,
-                                    ctx.thread_id,
-                                    &thread_slug,
-                                    &fname,
-                                    size,
-                                    updated,
-                                    "create_artifact",
-                                    None,
-                                )
-                                .await;
-                                if updated {
-                                    format!("Artifact «{fname}» updated (new version).")
-                                } else {
-                                    format!("Artifact «{fname}» created.")
-                                }
-                            }
-                            Err(error) => error,
-                        }
-                    } else if name == "generate_image" {
-                        // Generate an image from a prompt (local Ollama or cloud provider)
-                        // and surface it as a PNG artifact, like create_artifact.
-                        let parsed = serde_json::from_str::<serde_json::Value>(args_raw)
-                            .unwrap_or_else(|_| serde_json::json!({}));
-                        let prompt = parsed
-                            .get("prompt")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .trim()
-                            .to_string();
-                        let size = parsed
-                            .get("size")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("1024x1024")
-                            .to_string();
-                        let base_name = parsed
-                            .get("name")
-                            .and_then(|v| v.as_str())
-                            .map(slugify_skill_name)
-                            .filter(|s| !s.is_empty())
-                            .unwrap_or_else(|| "image".to_string());
-                        let fname = format!("{base_name}.png");
-                        if prompt.is_empty() {
-                            "generate_image needs a prompt.".to_string()
-                        } else {
-                            let _ = emit_stream_event(
-                                ctx.tx,
-                                GenerateStreamEvent::Delta {
-                                    text: format!(
-                                        "‹‹ACT››🎨 Generating image: {}‹‹/ACT››",
-                                        prompt.chars().take(60).collect::<String>()
-                                    ),
-                                },
-                            )
-                            .await;
-                            match generate_image_png(&ctx.state.http, &prompt, &size).await {
-                                Ok(bytes) => {
-                                    let thread_slug = artifact_thread_slug(ctx.thread_id);
-                                    let slug_w = thread_slug.clone();
-                                    let fname_w = fname.clone();
-                                    let result = tokio::task::spawn_blocking(move || {
-                                        write_artifact_bytes(&slug_w, &fname_w, &bytes)
-                                    })
-                                    .await
-                                    .unwrap_or_else(|e| Err(format!("Error: {e}")));
-                                    match result {
-                                        Ok((size_b, updated)) => {
-                                            let marker = serde_json::json!({
-                                                "name": fname,
-                                                "thread": thread_slug,
-                                                "size": size_b,
-                                                "updated": updated,
-                                            });
-                                            let artifact_mark =
-                                                format!("‹‹ARTIFACT››{marker}‹‹/ARTIFACT››");
-                                            ctx.accumulated.push_str(&artifact_mark);
-                                            let _ = emit_stream_event(
-                                                ctx.tx,
-                                                GenerateStreamEvent::Delta {
-                                                    text: artifact_mark,
-                                                },
-                                            )
-                                            .await;
-                                            register_artifact_memory(
-                                                ctx.state,
-                                                ctx.thread_id,
-                                                &thread_slug,
-                                                &fname,
-                                                size_b,
-                                                updated,
-                                                "generate_image",
-                                                None,
-                                            )
-                                            .await;
-                                            format!(
-                                                "Image «{fname}» generated and shown to the user \
-                                                 inline. Do NOT embed it as a markdown image link \
-                                                 (![]()); just refer to it in one short sentence."
-                                            )
-                                        }
-                                        Err(error) => error,
-                                    }
-                                }
-                                Err(error) => error,
-                            }
-                        }
-                    } else if name == "get_brand_kit" {
-                        // Materialize the brand into the thread's output dir (brand.json +
-                        // logo.png) so the renderer applies it and the model needn't embed
-                        // the logo data URL in deck.json. Return colours/fonts (for image
-                        // prompts) but REPLACE the big logo data URL with a note, so the
-                        // model can't paste a 13KB blob into a shell-written deck.json.
-                        let slug = artifact_thread_slug(ctx.thread_id);
-                        let slug2 = slug.clone();
-                        let _ = tokio::task::spawn_blocking(move || materialize_brand_kit(&slug2))
-                            .await;
-                        let mut kit = serde_json::to_value(load_brand_kit())
-                            .unwrap_or_else(|_| serde_json::json!({}));
-                        if let Some(obj) = kit.as_object_mut() {
-                            let has_logo = obj
-                                .get("logo_data_url")
-                                .and_then(|v| v.as_str())
-                                .map(|s| !s.trim().is_empty())
-                                .unwrap_or(false);
-                            obj.insert(
-                                "logo_data_url".into(),
-                                serde_json::json!(if has_logo {
-                                    "(applied automatically — written to logo.png in the output dir; do NOT embed in deck.json)"
-                                } else {
-                                    ""
-                                }),
-                            );
-                            obj.insert("note".into(), serde_json::json!(
-                                "Brand is applied automatically by deck-render via brand.json + logo.png already written to the output dir. In deck.json include ONLY slide content — OMIT `theme` and `logo` entirely."
-                            ));
-                        }
-                        serde_json::to_string(&kit).unwrap_or_else(|_| "{}".to_string())
-                    } else if name == "render_deck" {
-                        // Deterministic deck render: the model passes ONLY content; the
-                        // gateway writes deck.json + brand files and runs deck-render +
-                        // chromium in the sandbox. Removes ALL model filesystem juggling
-                        // (no shell, no find, no path/dir confusion → no regenerate loop).
-                        let parsed = serde_json::from_str::<serde_json::Value>(args_raw)
-                            .unwrap_or_else(|_| serde_json::json!({}));
-                        let deck = parsed.get("deck").cloned().unwrap_or(parsed);
-                        let has_slides = deck
-                            .get("slides")
-                            .and_then(|s| s.as_array())
-                            .map(|a| !a.is_empty())
-                            .unwrap_or(false);
-                        if !has_slides {
-                            "render_deck needs a non-empty 'slides' array (content only)."
-                                .to_string()
-                        } else {
-                            let thread_slug = artifact_thread_slug(ctx.thread_id);
-                            let _ = emit_stream_event(
-                                ctx.tx,
-                                GenerateStreamEvent::Delta {
-                                    text: "‹‹ACT››🎬 Rendering the deck (PPTX + preview)‹‹/ACT››"
-                                        .to_string(),
-                                },
-                            )
-                            .await;
-                            // 1) brand.json + logo.png + deck.json into the output dir
-                            //    (host side = bind-mounted into the sandbox).
-                            let slug_b = thread_slug.clone();
-                            let _ =
-                                tokio::task::spawn_blocking(move || materialize_brand_kit(&slug_b))
-                                    .await;
-                            let deck_bytes = serde_json::to_vec_pretty(&deck).unwrap_or_default();
-                            let slug_w = thread_slug.clone();
-                            let write_res = tokio::task::spawn_blocking(move || {
-                                write_artifact_bytes(&slug_w, "deck.json", &deck_bytes)
-                            })
-                            .await
-                            .unwrap_or_else(|e| Err(format!("join error: {e}")));
-                            if let Err(e) = write_res {
-                                format!("Could not write deck.json: {e}")
-                            } else {
-                                // 2) render in the sandbox (no model shell).
-                                let container_out = sandbox::container_output_dir(&thread_slug);
-                                let cmd = format!(
-                                    "cd '{container_out}' && deck-render deck.json --prefix deck && \
-                                     chromium --headless --no-sandbox --disable-gpu \
-                                     --print-to-pdf=deck.pdf deck.html >/dev/null 2>&1 && \
-                                     qa=$(deck-qa deck.html --json 2>&1); qa_code=$?; \
-                                     echo \"DECK_QA_JSON:$qa\"; \
-                                     if [ \"$qa_code\" -ne 0 ]; then exit \"$qa_code\"; fi; \
-                                     ls -la deck.pptx deck.html deck.pdf 2>&1"
-                                );
-                                sandbox_begin(cmd.clone(), ctx.thread_id.map(|s| s.to_string()));
-                                let render = tokio::task::spawn_blocking(move || {
-                                    sandbox::run_command(&cmd, None)
-                                })
-                                .await
-                                .unwrap_or_else(|e| Err(format!("join error: {e}")));
-                                let render_out = match render {
-                                    Ok(o) => o,
-                                    Err(e) => e,
-                                };
-                                sandbox_end(render_out.clone());
-                                // 3) emit an artifact marker for each file produced, even when
-                                // QA flags issues: the files exist and the user needs access to
-                                // inspect/fix them.
-                                let qa_result = rendered_deck_qa_result(&render_out);
-                                let quality_metadata =
-                                    deck_quality_metadata_from_qa_result(qa_result.as_ref());
-                                let produced = emit_rendered_deck_artifacts(
-                                    ctx.state,
-                                    ctx.tx,
-                                    ctx.accumulated,
-                                    ctx.thread_id,
-                                    &thread_slug,
-                                    "render_deck",
-                                    quality_metadata.as_ref(),
-                                )
-                                .await;
-                                if let Some(error) = rendered_deck_qa_failure(&render_out) {
-                                    format!(
-                                        "Deck rendered with visual QA issues: {error}. Files available: {}. Renderer output:\n{}",
-                                        if produced.is_empty() {
-                                            "none".to_string()
-                                        } else {
-                                            produced.join(", ")
-                                        },
-                                        render_out.chars().take(1200).collect::<String>(),
-                                    )
-                                } else {
-                                    if produced.iter().any(|fname| fname == "deck.pptx") {
-                                        format!(
-                                            "Deck rendered: {}. The .pptx is editable; .html/.pdf are previews. The deck is DONE — mark the plan complete and give the user a one-line summary.",
-                                            produced.join(", ")
-                                        )
-                                    } else {
-                                        format!(
-                                            "Deck render did NOT produce a .pptx. Renderer output:\n{}",
-                                            render_out.chars().take(800).collect::<String>()
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    } else if name == "make_deck" {
-                        // ONE-call deck (max-scaffolding tier, ADR 0016): the model
-                        // passed only a brief; the ENGINE runs the entire pipeline
-                        // (brand → schema-enforced content → images → render). No
-                        // model-driven planning, file I/O or shell → nothing for a
-                        // weak model to get wrong beyond filling the brief slot.
-                        let parsed = serde_json::from_str::<serde_json::Value>(args_raw)
-                            .unwrap_or_else(|_| serde_json::json!({}));
-                        let brief = parsed
-                            .get("brief")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .trim()
-                            .to_string();
-                        let language = parsed
-                            .get("language")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string();
-                        let slides = parsed
-                            .get("slides")
-                            .and_then(|v| v.as_u64())
-                            .unwrap_or(6)
-                            .clamp(3, 12) as usize;
-                        let requested_template_ref = deliverable_template_ref(&parsed);
-                        let catalog_template =
-                            template_catalog_by_id(requested_template_ref.as_deref());
-                        let template_ref = catalog_template.as_ref().map(|entry| entry.id.clone());
-                        let design_template = deliverable_design_template(&parsed).or_else(|| {
-                            catalog_template
-                                .as_ref()
-                                .map(|entry| entry.design_template.clone())
-                        });
-                        let design_theme = deliverable_design_theme(&parsed).or_else(|| {
-                            catalog_template
-                                .as_ref()
-                                .and_then(|entry| entry.design_theme.clone())
-                        });
-                        let design_profile = deliverable_design_profile(&parsed)
-                            .or_else(|| {
-                                catalog_template
-                                    .as_ref()
-                                    .and_then(|entry| entry.design_profile.clone())
-                            })
-                            .or_else(|| {
-                                let (profile, _) =
-                                    deliverable_template_defaults(design_template.as_deref());
-                                profile.map(String::from)
-                            });
-                        let design_components = resolved_deliverable_design_components_with_catalog(
-                            &parsed,
-                            design_template.as_deref(),
-                            catalog_template
-                                .as_ref()
-                                .map(|entry| entry.design_components.as_slice())
-                                .unwrap_or(&[]),
-                        );
-                        if brief.is_empty() {
-                            "make_deck needs a 'brief' describing the presentation.".to_string()
-                        } else {
-                            let workflow_plan = workflow_execution_plan(
-                                &make_deck_workflow_definition(),
-                                serde_json::json!({
-                                    "brief": brief.clone(),
-                                    "language": language.clone(),
-                                    "slides": slides,
-                                    "template_ref": template_ref.clone(),
-                                    "design_template": design_template.clone(),
-                                    "design_theme": design_theme.clone(),
-                                    "design_profile": design_profile.clone(),
-                                    "design_components": design_components.clone(),
-                                }),
-                            );
-                            let workflow_plan = match run_static_workflow_plan_through_brain_async(
-                                brief.clone(),
-                                workflow_plan,
-                            )
-                            .await
-                            {
-                                Ok(plan) => plan,
-                                Err(error) => {
-                                    eprintln!(
-                                        "make_deck: static workflow plan validation failed: {error}"
-                                    );
-                                    workflow_execution_plan(
-                                        &make_deck_workflow_definition(),
-                                        serde_json::json!({
-                                            "brief": brief.clone(),
-                                            "language": language.clone(),
-                                            "slides": slides,
-                                            "template_ref": template_ref.clone(),
-                                            "design_template": design_template.clone(),
-                                            "design_theme": design_theme.clone(),
-                                            "design_profile": design_profile.clone(),
-                                            "design_components": design_components.clone(),
-                                        }),
-                                    )
-                                }
-                            };
-                            let thread_slug = artifact_thread_slug(ctx.thread_id);
-                            let _ = emit_stream_event(
-                                ctx.tx,
-                                GenerateStreamEvent::Delta {
-                                    text: "‹‹ACT››🎬 Building the deck (brand · content · images · render)‹‹/ACT››".to_string(),
-                                },
-                            )
-                            .await;
-                            // 1) brand into the output dir + load colours for prompts.
-                            let slug_b = thread_slug.clone();
-                            let _ =
-                                tokio::task::spawn_blocking(move || materialize_brand_kit(&slug_b))
-                                    .await;
-                            let brand = tokio::task::spawn_blocking(load_brand_kit)
-                                .await
-                                .unwrap_or_default();
-                            // 2) slide content — schema-enforced model call (the floor).
-                            match generate_deck_content(
-                                &ctx.state.http,
-                                ctx.base_url,
-                                ctx.model,
-                                ctx.api_key.as_deref(),
-                                &brief,
-                                &brand,
-                                slides,
-                                &language,
-                                design_template.as_deref(),
-                                design_theme.as_deref(),
-                                design_profile.as_deref(),
-                                &design_components,
-                            )
-                            .await
-                            {
-                                Err(e) => make_deck_content_failure_message(
-                                    &e,
-                                    requested_template_ref.as_deref(),
-                                    template_ref.as_deref(),
-                                    ctx.base_url,
-                                    ctx.model,
-                                ),
-                                Ok(mut deck) => {
-                                    apply_deck_design_components(&mut deck, &design_components);
-                                    apply_deck_design_theme(
-                                        &mut deck,
-                                        design_theme.as_deref(),
-                                        &brand,
-                                    );
-                                    let quality_issues = apply_deck_quality_guardrails(&mut deck);
-                                    if !quality_issues.is_empty() {
-                                        let _ = emit_stream_event(
-                                            ctx.tx,
-                                            GenerateStreamEvent::Delta {
-                                                text: format!(
-                                                    "‹‹ACT››🔎 Deck QA adjusted {} layout-risk items‹‹/ACT››",
-                                                    quality_issues.len()
-                                                ),
-                                            },
-                                        )
-                                        .await;
-                                    }
-                                    // 3) images for want_image slides (cap 3, cover first).
-                                    let accent = brand.accent_color.clone();
-                                    let mut made = 0usize;
-                                    if let Some(arr) =
-                                        deck.get_mut("slides").and_then(|s| s.as_array_mut())
-                                    {
-                                        for (idx, slide) in arr.iter_mut().enumerate() {
-                                            if made >= 3 {
-                                                break;
-                                            }
-                                            if !slide
-                                                .get("want_image")
-                                                .and_then(|v| v.as_bool())
-                                                .unwrap_or(false)
-                                            {
-                                                continue;
-                                            }
-                                            let title = slide
-                                                .get("title")
-                                                .and_then(|v| v.as_str())
-                                                .unwrap_or("")
-                                                .to_string();
-                                            let layout = slide
-                                                .get("layout")
-                                                .and_then(|v| v.as_str())
-                                                .unwrap_or("bullets")
-                                                .to_string();
-                                            let iname = if layout == "cover" {
-                                                "cover".to_string()
-                                            } else {
-                                                format!("s{idx}")
-                                            };
-                                            let prompt = deck_slide_image_prompt(&title, &accent);
-                                            let _ = emit_stream_event(
-                                                ctx.tx,
-                                                GenerateStreamEvent::Delta {
-                                                    text: format!(
-                                                        "‹‹ACT››🎨 Image: {}‹‹/ACT››",
-                                                        title.chars().take(40).collect::<String>()
-                                                    ),
-                                                },
-                                            )
-                                            .await;
-                                            if let Ok(bytes) = generate_image_png(
-                                                &ctx.state.http,
-                                                &prompt,
-                                                "1280x720",
-                                            )
-                                            .await
-                                            {
-                                                let fname = format!("{iname}.png");
-                                                let slug_w = thread_slug.clone();
-                                                let fname_w = fname.clone();
-                                                let w = tokio::task::spawn_blocking(move || {
-                                                    write_artifact_bytes(&slug_w, &fname_w, &bytes)
-                                                })
-                                                .await
-                                                .unwrap_or_else(|e| Err(format!("{e}")));
-                                                if w.is_ok() {
-                                                    slide["image"] = serde_json::json!(fname);
-                                                    if layout == "bullets" {
-                                                        slide["layout"] =
-                                                            serde_json::json!("image_right");
-                                                    }
-                                                    made += 1;
-                                                }
-                                            }
-                                        }
-                                    }
-                                    // 4) write deck.json.
-                                    let slide_count = deck
-                                        .get("slides")
-                                        .and_then(|s| s.as_array())
-                                        .map(|a| a.len())
-                                        .unwrap_or(0);
-                                    let deck_bytes =
-                                        serde_json::to_vec_pretty(&deck).unwrap_or_default();
-                                    let slug_w = thread_slug.clone();
-                                    let write_res = tokio::task::spawn_blocking(move || {
-                                        write_artifact_bytes(&slug_w, "deck.json", &deck_bytes)
-                                    })
-                                    .await
-                                    .unwrap_or_else(|e| Err(format!("join error: {e}")));
-                                    if let Err(e) = write_res {
-                                        format!("Could not write deck.json: {e}")
-                                    } else {
-                                        let template_render_arg =
-                                            match materialize_deck_template_source(
-                                                &thread_slug,
-                                                catalog_template.as_ref(),
-                                            ) {
-                                                Ok(Some(filename)) => {
-                                                    let _ = emit_stream_event(
-                                                        ctx.tx,
-                                                        GenerateStreamEvent::Delta {
-                                                            text: "‹‹ACT››📐 Using imported PPTX template‹‹/ACT››".to_string(),
-                                                        },
-                                                    )
-                                                    .await;
-                                                    format!(" --template-pptx {filename}")
-                                                }
-                                                Ok(None) => String::new(),
-                                                Err(error) => {
-                                                    let _ = emit_stream_event(
-                                                        ctx.tx,
-                                                        GenerateStreamEvent::Delta {
-                                                            text: format!(
-                                                                "‹‹ACT››⚠ Template source unavailable: {error}‹‹/ACT››"
-                                                            ),
-                                                        },
-                                                    )
-                                                    .await;
-                                                    String::new()
-                                                }
-                                            };
-                                        // 5) render in the sandbox (no model shell).
-                                        let container_out =
-                                            sandbox::container_output_dir(&thread_slug);
-                                        let cmd = format!(
-                                            "cd '{container_out}' && deck-render deck.json --prefix deck{template_render_arg} && \
-                                             chromium --headless --no-sandbox --disable-gpu \
-                                             --print-to-pdf=deck.pdf deck.html >/dev/null 2>&1 && \
-                                             qa=$(deck-qa deck.html --json 2>&1); qa_code=$?; \
-                                             echo \"DECK_QA_JSON:$qa\"; \
-                                             if [ \"$qa_code\" -ne 0 ]; then exit \"$qa_code\"; fi; \
-                                             ls -la deck.pptx deck.html deck.pdf 2>&1"
-                                        );
-                                        sandbox_begin(cmd.clone(), ctx.thread_id.map(|s| s.to_string()));
-                                        let render = tokio::task::spawn_blocking(move || {
-                                            sandbox::run_command(&cmd, None)
-                                        })
-                                        .await
-                                        .unwrap_or_else(|e| Err(format!("join error: {e}")));
-                                        let render_out = match render {
-                                            Ok(o) => o,
-                                            Err(e) => e,
-                                        };
-                                        sandbox_end(render_out.clone());
-                                        // 6) emit an artifact marker per produced file, even
-                                        // when QA flags issues: the generated files still need
-                                        // to be visible for review and iteration.
-                                        let qa_result = rendered_deck_qa_result(&render_out);
-                                        let quality_metadata = deck_quality_metadata_from_qa_result(
-                                            qa_result.as_ref(),
-                                        );
-                                        let mut artifact_metadata =
-                                            deck_template_metadata(catalog_template.as_ref());
-                                        merge_object_metadata(
-                                            &mut artifact_metadata,
-                                            quality_metadata.as_ref(),
-                                        );
-                                        let artifact_metadata_ref = artifact_metadata
-                                            .as_object()
-                                            .filter(|metadata| !metadata.is_empty())
-                                            .map(|_| &artifact_metadata);
-                                        let produced = emit_rendered_deck_artifacts(
-                                            ctx.state,
-                                            ctx.tx,
-                                            ctx.accumulated,
-                                            ctx.thread_id,
-                                            &thread_slug,
-                                            "make_deck",
-                                            artifact_metadata_ref,
-                                        )
-                                        .await;
-                                        if let Some(error) = rendered_deck_qa_failure(&render_out) {
-                                            format!(
-                                                "Deck created via workflow {} with visual QA issues: {error}. Files available: {}. The .pptx is editable; .html/.pdf are previews.",
-                                                workflow_plan
-                                                    .steps
-                                                    .first()
-                                                    .and_then(|step| step
-                                                        .arguments
-                                                        .get("workflow_id"))
-                                                    .and_then(|value| value.as_str())
-                                                    .unwrap_or("make_deck"),
-                                                if produced.is_empty() {
-                                                    "none".to_string()
-                                                } else {
-                                                    produced.join(", ")
-                                                },
-                                            )
-                                        } else {
-                                            if produced.iter().any(|fname| fname == "deck.pptx") {
-                                                format!(
-                                                    "Deck created via workflow {}: {} ({slide_count} slides, {made} images). The .pptx is editable; .html/.pdf are previews. The deck is DONE — give the user a one-line summary.",
-                                                    workflow_plan
-                                                        .steps
-                                                        .first()
-                                                        .and_then(|step| step
-                                                            .arguments
-                                                            .get("workflow_id"))
-                                                        .and_then(|value| value.as_str())
-                                                        .unwrap_or("make_deck"),
-                                                    produced.join(", ")
-                                                )
-                                            } else {
-                                                format!(
-                                                    "Deck render did NOT produce a .pptx. Renderer output:\n{}",
-                                                    render_out
-                                                        .chars()
-                                                        .take(800)
-                                                        .collect::<String>()
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    } else if name == "make_document" {
-                        let parsed = serde_json::from_str::<serde_json::Value>(args_raw)
-                            .unwrap_or_else(|_| serde_json::json!({}));
-                        let brief = parsed
-                            .get("brief")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .trim()
-                            .to_string();
-                        let language = parsed
-                            .get("language")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string();
-                        let fname = parsed
-                            .get("name")
-                            .and_then(|v| v.as_str())
-                            .filter(|value| !value.trim().is_empty())
-                            .map(|value| document_artifact_name(Some(value)))
-                            .or_else(|| document_artifact_name_from_brief(&brief))
-                            .unwrap_or_else(|| document_artifact_name(None));
-                        let formats = document_output_formats(&parsed, &fname, &brief);
-                        let document_options = document_generation_options(&parsed);
-                        if brief.is_empty() {
-                            "make_document needs a 'brief' describing the document.".to_string()
-                        } else {
-                            let workflow_args = serde_json::json!({
-                                "brief": brief.clone(),
-                                "language": language.clone(),
-                                "name": fname.clone(),
-                                "formats": formats.clone(),
-                                "template_ref": document_options.template_ref.clone(),
-                                "document_type": document_options.document_type.clone(),
-                                "audience": document_options.audience.clone(),
-                                "tone": document_options.tone.clone(),
-                                "layout_profile": document_options.layout_profile.clone(),
-                                "design_template": document_options.design_template.clone(),
-                                "design_theme": document_options.design_theme.clone(),
-                                "design_profile": document_options.design_profile.clone(),
-                                "design_components": document_options.design_components.clone(),
-                                "sections": document_options.sections.clone(),
-                            });
-                            let workflow_plan = workflow_execution_plan(
-                                &make_document_workflow_definition(),
-                                workflow_args.clone(),
-                            );
-                            let workflow_plan = match run_static_workflow_plan_through_brain_async(
-                                brief.clone(),
-                                workflow_plan,
-                            )
-                            .await
-                            {
-                                Ok(plan) => plan,
-                                Err(error) => {
-                                    eprintln!(
-                                        "make_document: static workflow plan validation failed: {error}"
-                                    );
-                                    workflow_execution_plan(
-                                        &make_document_workflow_definition(),
-                                        workflow_args,
-                                    )
-                                }
-                            };
-                            let thread_slug = artifact_thread_slug(ctx.thread_id);
-                            let _ = emit_stream_event(
-                                ctx.tx,
-                                GenerateStreamEvent::Delta {
-                                    text: "‹‹ACT››📝 Building the document (brief · draft · artifact · memory)‹‹/ACT››".to_string(),
-                                },
-                            )
-                            .await;
-                            match generate_document_markdown(
-                                &ctx.state.http,
-                                ctx.base_url,
-                                ctx.model,
-                                ctx.api_key.as_deref(),
-                                &brief,
-                                &language,
-                                &document_options,
-                            )
-                            .await
-                            {
-                                Err(error) => {
-                                    format!("Could not generate document content: {error}")
-                                }
-                                Ok(markdown) => {
-                                    let markdown = apply_document_design_components(
-                                        &markdown,
-                                        &document_options.design_components,
-                                    );
-                                    let (markdown, repaired_issues) =
-                                        apply_document_quality_guardrails(&markdown);
-                                    let quality_issues = document_quality_issues(&markdown);
-                                    if !repaired_issues.is_empty() && quality_issues.is_empty() {
-                                        let _ = emit_stream_event(
-                                            ctx.tx,
-                                            GenerateStreamEvent::Delta {
-                                                text: format!(
-                                                    "‹‹ACT››🔎 Document QA repaired {} table-layout items‹‹/ACT››",
-                                                    repaired_issues.len()
-                                                ),
-                                            },
-                                        )
-                                        .await;
-                                    }
-                                    if !quality_issues.is_empty() {
-                                        let summary = quality_issues
-                                            .iter()
-                                            .take(5)
-                                            .cloned()
-                                            .collect::<Vec<_>>()
-                                            .join("; ");
-                                        format!(
-                                            "Could not generate document artifact: document QA failed: {summary}"
-                                        )
-                                    } else {
-                                        let mut produced = Vec::new();
-                                        let mut artifact_error: Option<String> = None;
-                                        for format in formats {
-                                            let artifact_name =
-                                                document_artifact_name_with_extension(
-                                                    Some(&fname),
-                                                    &format,
-                                                );
-                                            let slug_w = thread_slug.clone();
-                                            let fname_w = artifact_name.clone();
-                                            let markdown_w = markdown.clone();
-                                            let result = tokio::task::spawn_blocking(move || {
-                                                if format == "pdf" {
-                                                    let title = fname_w
-                                                        .trim_end_matches(".pdf")
-                                                        .trim_end_matches(".PDF");
-                                                    let bytes = pdf_render::markdown_to_pdf(
-                                                        title,
-                                                        &markdown_w,
-                                                    )
-                                                    .map_err(|e| {
-                                                        format!("PDF render failed: {e}")
-                                                    })?;
-                                                    write_artifact_bytes(&slug_w, &fname_w, &bytes)
-                                                } else if format == "docx" {
-                                                    let title = fname_w
-                                                        .trim_end_matches(".docx")
-                                                        .trim_end_matches(".DOCX");
-                                                    let bytes =
-                                                        markdown_to_docx(title, &markdown_w)
-                                                            .map_err(|e| {
-                                                                format!("DOCX render failed: {e}")
-                                                            })?;
-                                                    write_artifact_bytes(&slug_w, &fname_w, &bytes)
-                                                } else {
-                                                    write_text_artifact(
-                                                        &slug_w,
-                                                        &fname_w,
-                                                        &markdown_w,
-                                                    )
-                                                }
-                                            })
-                                            .await
-                                            .unwrap_or_else(|error| Err(format!("Error: {error}")));
-                                            match result {
-                                                Ok((size, updated)) => {
-                                                    let marker = serde_json::json!({
-                                                        "name": artifact_name,
-                                                        "thread": thread_slug,
-                                                        "size": size,
-                                                        "updated": updated,
-                                                        "source": "managed",
-                                                        "managed_path": sandbox::artifacts_dir()
-                                                            .join(&thread_slug)
-                                                            .join(&artifact_name)
-                                                            .to_string_lossy()
-                                                            .to_string(),
-                                                    });
-                                                    let artifact_mark = format!(
-                                                        "‹‹ARTIFACT››{marker}‹‹/ARTIFACT››"
-                                                    );
-                                                    ctx.accumulated.push_str(&artifact_mark);
-                                                    let _ = emit_stream_event(
-                                                        ctx.tx,
-                                                        GenerateStreamEvent::Delta {
-                                                            text: artifact_mark,
-                                                        },
-                                                    )
-                                                    .await;
-                                                    let artifact_name = marker
-                                                        .get("name")
-                                                        .and_then(|value| value.as_str())
-                                                        .unwrap_or("document.md")
-                                                        .to_string();
-                                                    register_artifact_memory(
-                                                        ctx.state,
-                                                        ctx.thread_id,
-                                                        &thread_slug,
-                                                        &artifact_name,
-                                                        size,
-                                                        updated,
-                                                        "make_document",
-                                                        None,
-                                                    )
-                                                    .await;
-                                                    produced.push(artifact_name);
-                                                }
-                                                Err(error) => {
-                                                    artifact_error = Some(error);
-                                                    break;
-                                                }
-                                            }
-                                        }
-                                        if let Some(error) = artifact_error {
-                                            error
-                                        } else {
-                                            format!(
-                                                "Document created via workflow {}: {}. The document is DONE — give the user a one-line summary.",
-                                                workflow_plan
-                                                    .steps
-                                                    .first()
-                                                    .and_then(|step| step
-                                                        .arguments
-                                                        .get("workflow_id"))
-                                                    .and_then(|value| value.as_str())
-                                                    .unwrap_or("make_document"),
-                                                produced.join(", "),
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    } else if name == "save_artifact" {
-                        // Deliver a generated artifact to an authorized destination
-                        // (gateway performs the copy host-side, scoped to grants).
-                        let parsed = serde_json::from_str::<serde_json::Value>(args_raw)
-                            .unwrap_or_else(|_| serde_json::json!({}));
-                        let file = parsed
-                            .get("file")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string();
-                        let dest_name = parsed
-                            .get("destination")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string();
-                        let thread_slug = artifact_thread_slug(ctx.thread_id);
-                        let _ = emit_stream_event(
-                            ctx.tx,
-                            GenerateStreamEvent::Delta {
-                                text: format!("‹‹ACT››💾 Saving {file} to «{dest_name}»‹‹/ACT››"),
-                            },
-                        )
-                        .await;
-                        tokio::task::spawn_blocking(move || {
-                            save_artifact_to_destination(&thread_slug, &file, &dest_name)
-                        })
-                        .await
-                        .unwrap_or_else(|e| format!("Save error: {e}"))
-                    } else if name == "recall_memory" {
-                        // PERIMETER (anti-exfiltration): a `contact_only` turn (a non-self
-                        // contact on a channel) must NOT reach personal/Secret memory or the
-                        // relationship graph. recall_memory is perimeter-blind by design, so we
-                        // refuse it here — the contact's own conversation is already in context.
-                        // Also refused when can_see_contacts is off (even on a "personal"-scope
-                        // contact): recall traverses the relationship graph, which IS the address
-                        // book — perimeter-blind recall has no way to strip other people out, so
-                        // fail-closed is to block it entirely.
-                        if ctx.contact_only || !ctx.can_see_contacts {
-                            "Personal memory not accessible in a conversation with this \
-contact: use only the messages from this chat. Do NOT reveal personal data of the user or third parties."
-                                .to_string()
-                        } else {
-                            let query = serde_json::from_str::<serde_json::Value>(args_raw)
-                                .ok()
-                                .and_then(|a| {
-                                    a.get("query").and_then(|q| q.as_str()).map(String::from)
-                                })
-                                .unwrap_or_default();
-                            // ADR 0022 (Piano UI A2/A3): emetti l'evento strutturato
-                            // `Recall` con i hits richiamati (visibile in UI: fase
-                            // recalling + badge). Sostituisce il delta `‹‹ACT››🧠`.
-                            let query_for_ui = if query.is_empty() { "(query)".to_string() } else { query.clone() };
-                            let st = ctx.state.clone();
-                            let outcome = tokio::task::spawn_blocking(move || recall_memory(&st, &query))
-                                .await
-                                .unwrap_or_else(|e| RecallOutcome {
-                                    response: format!("Execution error: {e}"),
-                                    hits: Vec::new(),
-                                    scope: "personal".to_string(),
-                                });
-                            let _ = emit_stream_event(
-                                ctx.tx,
-                                GenerateStreamEvent::Recall {
-                                    payload: local_first_subagents::RecallStreamPayload {
-                                        query: query_for_ui,
-                                        hits: outcome
-                                            .hits
-                                            .iter()
-                                            .map(|(kind, text)| local_first_subagents::RecallStreamHit {
-                                                r#ref: String::new(),
-                                                text: text.clone(),
-                                                score: 0.0,
-                                                kind: kind.clone(),
-                                            })
-                                            .collect(),
-                                        scope: outcome.scope.clone(),
-                                    },
-                                },
-                            )
-                            .await;
-                            outcome.response
-                        }
-                    } else if name == "query_code_graph" {
-                        let symbol = serde_json::from_str::<serde_json::Value>(args_raw)
-                            .ok()
-                            .and_then(|a| {
-                                a.get("symbol").and_then(|s| s.as_str()).map(String::from)
-                            })
-                            .unwrap_or_default();
-                        let _ = emit_stream_event(
-                            ctx.tx,
-                            GenerateStreamEvent::Delta {
-                                text: format!("‹‹ACT››🗺️ Exploring the code map: {symbol}‹‹/ACT››"),
-                            },
-                        )
-                        .await;
-                        let st = ctx.state.clone();
-                        tokio::task::spawn_blocking(move || query_code_graph(&st, &symbol))
-                            .await
-                            .unwrap_or_else(|e| format!("Execution error: {e}"))
-                    } else if name == "query_git_history" {
-                        let query = serde_json::from_str::<serde_json::Value>(args_raw)
-                            .ok()
-                            .and_then(|a| a.get("query").and_then(|s| s.as_str()).map(String::from))
-                            .unwrap_or_default();
-                        let _ = emit_stream_event(
-                            ctx.tx,
-                            GenerateStreamEvent::Delta {
-                                text: format!("‹‹ACT››🕰️ Checking git history: {query}‹‹/ACT››"),
-                            },
-                        )
-                        .await;
-                        tokio::task::spawn_blocking(move || query_git_history(&query))
-                            .await
-                            .unwrap_or_else(|e| format!("Execution error: {e}"))
-                    } else if name == "resolve_datetime" {
-                        // Layer C: the orchestrator passes a STRUCTURED intent it
-                        // distilled from the user's phrasing (any language); jiff
-                        // does the arithmetic from the tz-aware "now" and validates
-                        // future/range. Deterministic — no model date math.
-                        let args_val = serde_json::from_str::<serde_json::Value>(args_raw)
-                            .unwrap_or_else(|_| serde_json::json!({}));
-                        let must_be_future = args_val
-                            .get("must_be_future")
-                            .and_then(|v| v.as_bool())
-                            .unwrap_or(true);
-                        let anchor = now_local();
-                        match temporal::intent_from_json(&args_val).and_then(|intent| {
-                            temporal::resolve(
-                                &intent,
-                                &anchor,
-                                temporal::ResolveOpts { must_be_future },
-                            )
-                        }) {
-                            Ok(res) => {
-                                let _ = emit_stream_event(
-                                    ctx.tx,
-                                    GenerateStreamEvent::Delta {
-                                        text: format!(
-                                            "‹‹ACT››🗓 Date resolved: {}‹‹/ACT››",
-                                            res.human
-                                        ),
-                                    },
-                                )
-                                .await;
-                                let window = match &res.end {
-                                    Some(end) => format!(
-                                        " The time window runs until {:02}:{:02}.",
-                                        end.hour(),
-                                        end.minute()
-                                    ),
-                                    None => String::new(),
-                                };
-                                format!(
-                                    "Date/time resolved: {human}. Use EXACTLY «{iso}» as the value \
-(e.g. to write in the form or pass to another tool): do NOT recompute it.{window} \
-(Now {now}.)",
-                                    human = res.human,
-                                    iso = res.iso,
-                                    window = window,
-                                    now = now_block(),
-                                )
-                            }
-                            Err(e) => format!(
-                                "⚠️ I couldn't resolve the date: {e}. (Now {now}.) \
-Fix the parameters (kind/offset_days/weekday/date/time) and try again; do not proceed with \
-an uncertain date.",
-                                now = now_block(),
-                            ),
-                        }
-                    } else if name == "record_decision" {
-                        let args_val: serde_json::Value = serde_json::from_str(args_raw)
-                            .unwrap_or_else(|_| serde_json::json!({}));
-                        let _ = emit_stream_event(
-                            ctx.tx,
-                            GenerateStreamEvent::Delta {
-                                text: "‹‹ACT››🧠 Recording the decision in memory‹‹/ACT››"
-                                    .to_string(),
-                            },
-                        )
-                        .await;
-                        let st = ctx.state.clone();
-                        tokio::task::spawn_blocking(move || record_decision(&st, &args_val))
-                            .await
-                            .unwrap_or_else(|e| format!("Execution error: {e}"))
-                    } else if name == "forget_memory" {
-                        let args_val: serde_json::Value = serde_json::from_str(args_raw)
-                            .unwrap_or_else(|_| serde_json::json!({}));
-                        let _ = emit_stream_event(
-                            ctx.tx,
-                            GenerateStreamEvent::Delta {
-                                text: "‹‹ACT››🗑️ Forgetting from memory‹‹/ACT››".to_string(),
-                            },
-                        )
-                        .await;
-                        let st = ctx.state.clone();
-                        tokio::task::spawn_blocking(move || forget_memory(&st, &args_val))
-                            .await
-                            .unwrap_or_else(|e| format!("Execution error: {e}"))
-                    } else if name == "update_plan" || name == "step_advance" {
-                        let args_val: serde_json::Value = serde_json::from_str(args_raw)
-                            .unwrap_or_else(|_| serde_json::json!({}));
-                        // `step_advance` reports progress on a SINGLE step by id (no need to
-                        // re-send the whole plan → weak-model-proof, no ballooning). It maps to
-                        // a one-element `sent` and rides the exact same merge + F2-verify path.
-                        let sent = if name == "step_advance" {
-                            vec![serde_json::json!({
-                                "id": args_val.get("id").and_then(|v| v.as_str()).unwrap_or(""),
-                                "status": args_val.get("status").and_then(|v| v.as_str()).unwrap_or("doing"),
-                                "detail": args_val.get("detail").and_then(|v| v.as_str()).unwrap_or(""),
-                            })]
-                        } else {
-                            args_val
-                                .get("steps")
-                                .and_then(|s| s.as_array())
-                                .cloned()
-                                .unwrap_or_default()
-                        };
-                        // MERGE the model's steps into the CANONICAL plan (never replace);
-                        // returns the canonical indices newly claimed done (held `doing`
-                        // until F2 verifies). See `merge_plan` for the anti-reset rule.
-                        let claims = merge_execution_plan(ctx.plan, &sent);
-                        let mut plan_steps = execution_plan_steps(ctx.plan);
-                        // DIAG (HOMUN_DEBUG): the plan lifecycle, to see if the model
-                        // re-proposes the whole plan (churn) or advances one step, and
-                        // whether a re-proposal RESETS statuses (the "il piano riparta"
-                        // symptom). One line per update_plan/step_advance call.
-                        if verbose_debug() {
-                            let sig = |s: &serde_json::Value| {
-                                format!(
-                                    "{}:{}",
-                                    s.get("id").and_then(|v| v.as_str()).unwrap_or("?"),
-                                    s.get("status").and_then(|v| v.as_str()).unwrap_or("?")
-                                )
-                            };
-                            let sent_sig: Vec<String> = sent.iter().map(&sig).collect();
-                            let plan_sig: Vec<String> = plan_steps.iter().map(&sig).collect();
-                            eprintln!(
-                                "[plan] {name}: sent[{}]=[{}] → canonical[{}]=[{}]",
-                                sent.len(),
-                                sent_sig.join(","),
-                                plan_steps.len(),
-                                plan_sig.join(",")
-                            );
-                        }
-                        if plan_steps.is_empty() {
-                            "Empty plan: provide at least one step with a title.".to_string()
-                        } else {
-                            // F2 gate: verify each newly-claimed-done step before it counts
-                            // (using the evidence gathered since the last completed step).
-                            // Adaptive floor (ADR 0018): when ON, the model tier modulates
-                            // depth — capable models skip the extra verify round on steps
-                            // with NO external action (nothing to verify against, low risk);
-                            // weak models (Always) still verify everything. OFF → unchanged.
-                            let verify = step_verification_enabled()
-                                && if ctx.floor_acting {
-                                    match ctx.turn_scaffold.verify_depth {
-                                        scaffold::VerifyDepth::Always => true,
-                                        scaffold::VerifyDepth::OnRisk => !ctx.step_evidence.is_empty(),
-                                    }
-                                } else {
-                                    true
-                                };
-                            let mut rejection: Option<String> = None;
-                            for i in claims {
-                                let title = plan_step_title(&plan_steps[i]).to_string();
-                                let criterion = plan_steps[i]
-                                    .get("done_criterion")
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or("")
-                                    .to_string();
-                                let (ok, reason) = if verify {
-                                    let evidence = if ctx.step_evidence.is_empty() {
-                                        "(no tool activity recorded for this step)".to_string()
-                                    } else {
-                                        ctx.step_evidence.join("\n")
-                                    };
-                                    verify_step_complete(
-                                        &ctx.state.http,
-                                        &title,
-                                        &criterion,
-                                        &evidence,
-                                    )
-                                    .await
-                                } else {
-                                    (true, String::new())
-                                };
-                                if ok {
-                                    plan_steps[i]["status"] = serde_json::json!("done");
-                                    let verified_step = plan_steps[i].clone();
-                                    let verified_evidence = ctx.step_evidence.clone();
-                                    let st = ctx.state.clone();
-                                    let thread_for_memory = ctx.thread_id.map(|s| s.to_string());
-                                    let _ = tokio::task::spawn_blocking(move || {
-                                        record_runtime_plan_step_outcome_from_state(
-                                            &st,
-                                            thread_for_memory.as_deref(),
-                                            &verified_step,
-                                            &verified_evidence,
-                                        );
-                                    })
-                                    .await;
-                                    *ctx.plan = runtime_execution_plan(&plan_steps);
-                                    *ctx.progress_anchor_round = round; // F1: real progress
-                                    ctx.step_evidence.clear();
-                                    ctx.last_round_sig.clear();
-                                    *ctx.repeat_count = 0;
-                                    *ctx.pending_compaction = true; // F3
-                                    if verify {
-                                        let _ = emit_stream_event(
-                                            ctx.tx,
-                                            GenerateStreamEvent::Delta {
-                                                text: format!(
-                                                    "‹‹ACT››✓ Step verified: {}‹‹/ACT››",
-                                                    title.chars().take(60).collect::<String>()
-                                                ),
-                                            },
-                                        )
-                                        .await;
-                                    }
-                                } else {
-                                    rejection = Some(format!(
-                                        "Step «{title}» is NOT verified complete: {}. Keep working on it — re-mark it done ONLY once its result actually exists.",
-                                        if reason.is_empty() {
-                                            "the evidence does not show it was finished"
-                                        } else {
-                                            &reason
-                                        }
-                                    ));
-                                    break;
-                                }
-                            }
-                            // Marker rendered from the CANONICAL plan — the single source of
-                            // truth (verified state), not the model's raw claim. This is what
-                            // the UI shows and what the next turn resumes from.
-                            plan_steps = execution_plan_steps(ctx.plan);
-                            let plan_mark =
-                                format!("‹‹PLAN››{}‹‹/PLAN››", build_plan_markdown(&plan_steps));
-                            ctx.accumulated.push_str(&plan_mark);
-                            let _ = emit_stream_event(
-                                ctx.tx,
-                                GenerateStreamEvent::Delta { text: plan_mark },
-                            )
-                            .await;
-                            upsert_runtime_plan_memory_from_state(
-                                ctx.state,
-                                ctx.thread_id,
-                                &plan_steps,
-                            );
-                            let done = plan_done_count(&plan_steps);
-                            match rejection {
-                                Some(msg) => format!("⚠️ {msg} (done {done}/{})", plan_steps.len()),
-                                None => {
-                                    format!("Plan updated: {done}/{} steps done.", plan_steps.len())
-                                }
-                            }
-                        }
-                    } else if name == "create_automation" {
-                        let _ = emit_stream_event(
-                            ctx.tx,
-                            GenerateStreamEvent::Delta {
-                                text: "‹‹ACT››⚡ Creating an automation‹‹/ACT››".to_string(),
-                            },
-                        )
-                        .await;
-                        create_automation_from_chat(
-                            ctx.state,
-                            args_raw,
-                            ctx.automation_user_id,
-                            ctx.automation_workspace_id,
-                        )
-                    } else if name == "update_automation" {
-                        let _ = emit_stream_event(
-                            ctx.tx,
-                            GenerateStreamEvent::Delta {
-                                text: "‹‹ACT››⚡ Updating an automation‹‹/ACT››".to_string(),
-                            },
-                        )
-                        .await;
-                        update_automation_from_chat(
-                            ctx.state,
-                            args_raw,
-                            ctx.automation_user_id,
-                            ctx.automation_workspace_id,
-                        )
-                    } else if name == "find_capability" {
-                        // Tool Search: discover DEFERRED native tools by intent and activate
-                        // them (push into the live tool set) so the model calls them next
-                        // round — same mechanism as find_connected_tools, for built-in tools.
-                        let parsed = serde_json::from_str::<serde_json::Value>(args_raw).ok();
-                        let intent = parsed
-                            .as_ref()
-                            .and_then(|a| {
-                                a.get("intent")
-                                    .or_else(|| a.get("query"))
-                                    .and_then(|v| v.as_str())
-                                    .map(String::from)
-                            })
-                            .unwrap_or_default();
-                        let _ = emit_stream_event(
-                            ctx.tx,
-                            GenerateStreamEvent::Delta {
-                                text: format!(
-                                    "‹‹ACT››🧭 Searching for a capability: {}‹‹/ACT››",
-                                    if intent.is_empty() {
-                                        "(intent)"
-                                    } else {
-                                        intent.as_str()
-                                    }
-                                ),
-                            },
-                        )
-                        .await;
-                        let mut lines = Vec::new();
-                        let mut discovered_entries: Vec<CapabilityEntry> = Vec::new();
-                        // In-house tools + skills (BM25 over the unified corpus).
-                        for entry in bm25_rank(ctx.capability_corpus, &intent, 6) {
-                            if entry.is_skill {
-                                lines.push(format!(
-                                    "- skill «{}»: {} → load it with use_skill(\"{}\")",
-                                    entry.key, entry.desc, entry.key
-                                ));
-                                discovered_entries.push(entry.clone());
-                            } else if entry.source == CapabilitySource::TemplateCatalog {
-                                lines.push(format!(
-                                    "- template «{}»: {} → pass template_ref=\"{}\" to make_deck/make_document",
-                                    entry.key, entry.desc, entry.key
-                                ));
-                                discovered_entries.push(entry.clone());
-                            } else if let Some(schema) = &entry.schema {
-                                if ctx.loaded_tools.insert(entry.key.clone()) {
-                                    ctx.tool_schemas.push(schema.clone());
-                                }
-                                let label = capability_source_label(entry.source);
-                                lines.push(format!("- {label} «{}»: {}", entry.key, entry.desc));
-                                discovered_entries.push(entry.clone());
-                            }
-                        }
-                        // Connected services (toolkit-aware): activate the matching toolkit's
-                        // tools so the model sees its full CRUD together. Channels: READ only.
-                        // contact_only turns: don't surface connected services at all (the
-                        // dispatch refuses them anyway — this just avoids a wasted round).
-                        if !ctx.catalog_index.is_empty() && !ctx.contact_only {
-                            for entry in search_connector_capability_entries(
-                                ctx.catalog_index,
-                                &intent,
-                                COMPOSIO_DISCOVERY_RESULTS,
-                            ) {
-                                if ctx.read_only && !composio_tool_is_read(&entry.key) {
-                                    continue;
-                                }
-                                // PERIMETER: don't even surface calendar/contacts tools when the
-                                // matching axis is off (the dispatch refuses them anyway).
-                                if !ctx.can_see_calendar && tool_touches_calendar(&entry.key) {
-                                    continue;
-                                }
-                                if !ctx.can_see_contacts && tool_touches_contacts(&entry.key) {
-                                    continue;
-                                }
-                                if ctx.loaded_tools.insert(entry.key.clone()) {
-                                    if let Some(schema) = &entry.schema {
-                                        ctx.tool_schemas.push(schema.clone());
-                                    }
-                                }
-                                lines.push(format!("- connector «{}»: {}", entry.key, entry.desc));
-                                discovered_entries.push(entry);
-                            }
-                        }
-                        if ctx.tool_trace.len() < 20 {
-                            if let Some(trace_line) =
-                                capability_discovery_trace_line(&intent, &discovered_entries)
-                            {
-                                ctx.tool_trace.push(trace_line);
-                            }
-                        }
-                        if lines.is_empty() {
-                            "No capability matches. Rephrase with what you want to do (e.g. \
-\"browse the web\", \"search GitHub\", \"read the user's files\", \"send an email\")."
-                                .to_string()
-                        } else {
-                            format!(
-                                "Capabilities found (the tools are now CALLABLE; skills are \
-loaded with use_skill):\n{}",
-                                lines.join("\n")
-                            )
-                        }
-                    } else if name == "schedule_task" {
-                        let args_val: serde_json::Value = serde_json::from_str(args_raw)
-                            .unwrap_or_else(|_| serde_json::json!({}));
-                        let goal = args_val
-                            .get("goal")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .trim()
-                            .to_string();
-                        let every = args_val
-                            .get("every")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .trim()
-                            .to_string();
-                        let timezone = args_val
-                            .get("timezone")
-                            .and_then(|v| v.as_str())
-                            .map(|s| s.trim().to_string())
-                            .filter(|s| !s.is_empty());
-                        if goal.is_empty() || every.is_empty() {
-                            "Scheduling requires 'goal' (what to do) and 'every' (how often: \
-\"every 1d\", \"daily@08:00\", \"weekly@mon@09:30\")."
-                                .to_string()
-                        } else {
-                            let _ = emit_stream_event(
-                                ctx.tx,
-                                GenerateStreamEvent::Delta {
-                                    text: format!("‹‹ACT››⏰ Scheduling: {goal} ({every})‹‹/ACT››"),
-                                },
-                            )
-                            .await;
-                            // Route through the first-class Automation model so a chat-
-                            // scheduled task shows up in the Automazioni view (not a hidden run).
-                            let st = ctx.state.clone();
-                            let user_id = ctx.automation_user_id.clone();
-                            let workspace_id = ctx.automation_workspace_id.clone();
-                            let title: String = goal.chars().take(48).collect();
-                            let auto_args = serde_json::json!({
-                                "title": title,
-                                "prompt": goal,
-                                "trigger_type": "schedule",
-                                "recurrence": every,
-                                "timezone": timezone,
-                            })
-                            .to_string();
-                            tokio::task::spawn_blocking(move || {
-                                create_automation_from_chat(
-                                    &st,
-                                    &auto_args,
-                                    &user_id,
-                                    &workspace_id,
-                                )
-                            })
-                            .await
-                            .unwrap_or_else(|e| format!("Scheduling error: {e}"))
-                        }
-                    } else if name == "read_file" {
-                        let args_val: serde_json::Value = serde_json::from_str(args_raw)
-                            .unwrap_or_else(|_| serde_json::json!({}));
-                        let path = args_val
-                            .get("path")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string();
-                        let _ = emit_stream_event(
-                            ctx.tx,
-                            GenerateStreamEvent::Delta {
-                                text: format!("‹‹ACT››📄 Reading {path}‹‹/ACT››"),
-                            },
-                        )
-                        .await;
-                        let st = ctx.state.clone();
-                        let tid = ctx.thread_id.map(|s| s.to_string());
-                        let recall_path = path.clone();
-                        let mut out = tokio::task::spawn_blocking(move || {
-                            read_project_file(&st, tid.as_deref(), &path)
-                        })
-                        .await
-                        .unwrap_or_else(|e| format!("Error: {e}"));
-                        // Per-file recall: surface past DECISIONS about this file so the
-                        // agent remembers WHY it's like this instead of re-deriving it.
-                        let st2 = ctx.state.clone();
-                        if let Some(note) = tokio::task::spawn_blocking(move || {
-                            decisions_for_path(&st2, &recall_path)
-                        })
-                        .await
-                        .ok()
-                        .flatten()
-                        {
-                            out.push_str("\n\n");
-                            out.push_str(&note);
-                        }
-                        out
-                    } else if name == "write_file" {
-                        let args_val: serde_json::Value = serde_json::from_str(args_raw)
-                            .unwrap_or_else(|_| serde_json::json!({}));
-                        let path = args_val
-                            .get("path")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string();
-                        let content = args_val
-                            .get("content")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string();
-                        let _ = emit_stream_event(
-                            ctx.tx,
-                            GenerateStreamEvent::Delta {
-                                text: format!("‹‹ACT››✍️ Scrivo {path}‹‹/ACT››"),
-                            },
-                        )
-                        .await;
-                        let st = ctx.state.clone();
-                        let tid = ctx.thread_id.map(|s| s.to_string());
-                        let path_for_memory = path.clone();
-                        let content_len = content.len() as u64;
-                        let result = tokio::task::spawn_blocking(move || {
-                            write_project_file(&st, tid.as_deref(), &path, &content)
-                        })
-                        .await
-                        .unwrap_or_else(|e| format!("Error: {e}"));
-                        if result.starts_with("✅ Wrote ") {
-                            register_project_file_artifact_memory(
-                                ctx.state,
-                                ctx.thread_id,
-                                &path_for_memory,
-                                content_len,
-                                "write_file",
-                            )
-                            .await;
-                        }
-                        result
-                    } else if name == "edit_file" {
-                        let args_val: serde_json::Value = serde_json::from_str(args_raw)
-                            .unwrap_or_else(|_| serde_json::json!({}));
-                        let path = args_val
-                            .get("path")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string();
-                        let old = args_val
-                            .get("old_string")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string();
-                        let new = args_val
-                            .get("new_string")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string();
-                        let _ = emit_stream_event(
-                            ctx.tx,
-                            GenerateStreamEvent::Delta {
-                                text: format!("‹‹ACT››✏️ Modifico {path}‹‹/ACT››"),
-                            },
-                        )
-                        .await;
-                        let st = ctx.state.clone();
-                        let tid = ctx.thread_id.map(|s| s.to_string());
-                        tokio::task::spawn_blocking(move || {
-                            edit_project_file(&st, tid.as_deref(), &path, &old, &new)
-                        })
-                        .await
-                        .unwrap_or_else(|e| format!("Error: {e}"))
-                    } else if name == "list_files" {
-                        let _ = emit_stream_event(
-                            ctx.tx,
-                            GenerateStreamEvent::Delta {
-                                text: "‹‹ACT››📂 Exploring the project‹‹/ACT››".to_string(),
-                            },
-                        )
-                        .await;
-                        let st = ctx.state.clone();
-                        let tid = ctx.thread_id.map(|s| s.to_string());
-                        tokio::task::spawn_blocking(move || list_project_files(&st, tid.as_deref()))
-                            .await
-                            .unwrap_or_else(|e| format!("Error: {e}"))
-                    } else if name == "list_directory" || name == "read_text_file" {
-                        let is_read = name == "read_text_file";
-                        let args_val: serde_json::Value = serde_json::from_str(args_raw)
-                            .unwrap_or_else(|_| serde_json::json!({}));
-                        let p = args_val
-                            .get("path")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string();
-                        let st = ctx.state.clone();
-                        let tid = ctx.thread_id.map(|s| s.to_string());
-                        let pr = p.clone();
-                        let resolved = tokio::task::spawn_blocking(move || {
-                            fs_resolve_authorized(&st, tid.as_deref(), &pr)
-                        })
-                        .await
-                        .unwrap_or_else(|_| {
-                            Err(FsAuthIssue::Invalid("internal error".to_string()))
-                        });
-                        match resolved {
-                            Ok(path) => {
-                                let icon = if is_read {
-                                    "📄 Reading"
-                                } else {
-                                    "📂 Listing"
-                                };
-                                let _ = emit_stream_event(
-                                    ctx.tx,
-                                    GenerateStreamEvent::Delta {
-                                        text: format!("‹‹ACT››{icon} {p}‹‹/ACT››"),
-                                    },
-                                )
-                                .await;
-                                tokio::task::spawn_blocking(move || {
-                                    if is_read {
-                                        fs_read_text(&path)
-                                    } else {
-                                        fs_list_dir_contents(&path)
-                                    }
-                                })
-                                .await
-                                .unwrap_or_else(|e| format!("Error: {e}"))
-                            }
-                            Err(FsAuthIssue::Invalid(msg)) => msg,
-                            Err(FsAuthIssue::NeedsAuth(path)) => {
-                                // In-chat authorize card: grant access WITHOUT going to Settings.
-                                let marker = serde_json::json!({
-                                    "path": path.display().to_string(),
-                                    "op": if is_read { "read" } else { "list" }
-                                })
-                                .to_string();
-                                let card = format!(
-                                    "\n\nTo access this folder I need your authorization.\n\
-‹‹FS_AUTHORIZE››{marker}‹‹/FS_AUTHORIZE››\n"
-                                );
-                                ctx.accumulated.push_str(&card);
-                                let _ = emit_stream_event(
-                                    ctx.tx,
-                                    GenerateStreamEvent::Delta { text: card },
-                                )
-                                .await;
-                                *ctx.pending_confirm = true;
-                                "AWAITING AUTHORIZATION: I showed the user a card with the \
-button to authorize access to the folder. Do NOT say you have read/listed it."
-                                    .to_string()
-                            }
-                        }
-                    } else if name == "run_in_project" {
-                        let args_val: serde_json::Value = serde_json::from_str(args_raw)
-                            .unwrap_or_else(|_| serde_json::json!({}));
-                        let command = args_val
-                            .get("command")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string();
-                        let _ = emit_stream_event(
-                            ctx.tx,
-                            GenerateStreamEvent::Delta {
-                                text: format!(
-                                    "‹‹ACT››🛠️ Running in the project: {}‹‹/ACT››",
-                                    command.chars().take(120).collect::<String>()
-                                ),
-                            },
-                        )
-                        .await;
-                        run_in_project(ctx.state, ctx.thread_id, &command).await
-                    } else if name == "list_addons" {
-                        tokio::task::spawn_blocking(process_skills::addons_list_text)
-                            .await
-                            .unwrap_or_else(|e| format!("Error: {e}"))
-                    } else if name == "show_addon" {
-                        let args_val: serde_json::Value = serde_json::from_str(args_raw)
-                            .unwrap_or_else(|_| serde_json::json!({}));
-                        let addon_id = args_val
-                            .get("addon_id")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string();
-                        tokio::task::spawn_blocking(move || {
-                            process_skills::addon_show_text(&addon_id)
-                        })
-                        .await
-                        .unwrap_or_else(|e| format!("Error: {e}"))
-                    } else if name == "customize_addon" {
-                        let args_val: serde_json::Value = serde_json::from_str(args_raw)
-                            .unwrap_or_else(|_| serde_json::json!({}));
-                        let addon_id = args_val
-                            .get("addon_id")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string();
-                        let changes = args_val
-                            .get("changes")
-                            .cloned()
-                            .unwrap_or_else(|| serde_json::json!({}));
-                        let _ = emit_stream_event(
-                            ctx.tx,
-                            GenerateStreamEvent::Delta {
-                                text: format!("‹‹ACT››🧩 Customizing addon {addon_id}‹‹/ACT››"),
-                            },
-                        )
-                        .await;
-                        tokio::task::spawn_blocking(move || {
-                            process_skills::addon_customize_text(&addon_id, &changes)
-                        })
-                        .await
-                        .unwrap_or_else(|e| format!("Error: {e}"))
-                    } else if name == "create_skill" {
-                        let args_val: serde_json::Value = serde_json::from_str(args_raw)
-                            .unwrap_or_else(|_| serde_json::json!({}));
-                        let skill_name = args_val
-                            .get("name")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string();
-                        let skill_desc = args_val
-                            .get("description")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string();
-                        let skill_instr = args_val
-                            .get("instructions")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string();
-                        let _ = emit_stream_event(
-                            ctx.tx,
-                            GenerateStreamEvent::Delta {
-                                text: format!("‹‹ACT››🧩 Creating the skill {skill_name}‹‹/ACT››"),
-                            },
-                        )
-                        .await;
-                        tokio::task::spawn_blocking(move || {
-                            create_skill(&skill_name, &skill_desc, &skill_instr)
-                        })
-                        .await
-                        .unwrap_or_else(|e| format!("Error: {e}"))
-                    } else if name == "suggest_capabilities" {
-                        let args_val: serde_json::Value = serde_json::from_str(args_raw)
-                            .unwrap_or_else(|_| serde_json::json!({}));
-                        let need = args_val
-                            .get("need")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string();
-                        let _ = emit_stream_event(
-                            ctx.tx,
-                            GenerateStreamEvent::Delta {
-                                text: format!("‹‹ACT››🧭 Searching connectors for: {need}‹‹/ACT››"),
-                            },
-                        )
-                        .await;
-                        let suggestions = suggest_capabilities(ctx.state, &need).await;
-                        match suggestions.card {
-                            Some(card) => {
-                                // In-chat connect-cards: render the suggestions as
-                                // clickable connect buttons (skill/MCP/Composio) so the
-                                // user acts from chat, no Settings trip. End the turn
-                                // here — the user must connect, then re-ask.
-                                let marker = card.to_string();
-                                let card_text = format!(
-                                    "\n\nHere's what I can connect for this. Choose below.\n\
-‹‹CONNECT_SUGGEST››{marker}‹‹/CONNECT_SUGGEST››\n"
-                                );
-                                ctx.accumulated.push_str(&card_text);
-                                let _ = emit_stream_event(
-                                    ctx.tx,
-                                    GenerateStreamEvent::Delta { text: card_text },
-                                )
-                                .await;
-                                *ctx.pending_confirm = true;
-                                "AWAITING: I showed the user clickable cards to \
-connect the suggested connectors (skill/MCP/Composio). Do NOT say you have already connected anything."
-                                    .to_string()
-                            }
-                            None => suggestions.model_text,
-                        }
-                    } else if name == "list_scheduled_tasks" {
-                        let st = ctx.state.clone();
-                        tokio::task::spawn_blocking(move || list_scheduled_tasks(&st))
-                            .await
-                            .unwrap_or_else(|e| format!("Error: {e}"))
-                    } else if name == "cancel_scheduled_task" {
-                        let args_val: serde_json::Value = serde_json::from_str(args_raw)
-                            .unwrap_or_else(|_| serde_json::json!({}));
-                        let task_id = args_val
-                            .get("task_id")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .trim()
-                            .to_string();
-                        let _ = emit_stream_event(
-                            ctx.tx,
-                            GenerateStreamEvent::Delta {
-                                text: "‹‹ACT››🗑️ Cancelling scheduled task‹‹/ACT››".to_string(),
-                            },
-                        )
-                        .await;
-                        let st = ctx.state.clone();
-                        tokio::task::spawn_blocking(move || cancel_scheduled_task(&st, &task_id))
-                            .await
-                            .unwrap_or_else(|e| format!("Error: {e}"))
-                    } else if !ctx.can_see_calendar && !name.is_empty() && tool_touches_calendar(name) {
-                        // PERIMETER (anti-exfiltration): the can_see_calendar axis is enforced
-                        // HARD here, independent of memory_scope — a "personal"-scope contact that
-                        // is NOT contact_only still can't pull the user's calendar. All builtins
-                        // are matched in earlier arms, so this only catches calendar connectors.
-                        "The user's calendar is not accessible in this conversation. \
-Do not reveal commitments, appointments or events."
-                            .to_string()
-                    } else if !ctx.can_see_contacts && !name.is_empty() && tool_touches_contacts(name) {
-                        // PERIMETER (anti-exfiltration): the can_see_contacts axis, enforced HARD
-                        // here too — block the user's address book (Google Contacts / People etc.)
-                        // even on a non-contact_only turn.
-                        "The user's address book is not accessible in this conversation. \
-Do not reveal other contacts, people or relationships of the user."
-                            .to_string()
-                    } else if ctx.contact_only && !name.is_empty() {
-                        // PERIMETER (anti-exfiltration): a `contact_only` turn must not reach the
-                        // user's connected services. All builtins are matched in earlier arms, so
-                        // any tool reaching here is a connected Composio/MCP tool — refuse it so a
-                        // contact can't make the assistant read Gmail/Calendar/etc. and leak them.
-                        "Connected-service tools not available in a conversation with \
-this contact. Answer only with what's in this chat; do not reveal personal data \
-of the user or third parties."
-                            .to_string()
-                    } else if ctx.read_only && !name.is_empty() && ctx.composio_writes.contains(name) {
-                        // Channel (read-only) turn: never run a write tool, never even
-                        // surface a confirm card (no UI on the channel). Phase 2 routes
-                        // these to the in-app approval center.
-                        "Action not available from the channel: operations with effects \
-require your confirmation in the app. Propose it and stop."
-                            .to_string()
-                    } else if let Some((mcp_provider, mcp_tool)) = parse_mcp_chat_name(name) {
-                        // Connected MCP server tool. Writes (per the cached ActionClass,
-                        // derived from the MCP readOnlyHint) need confirmation; reads run
-                        // with a timeout so a hung server can't freeze the turn. A
-                        // read_only channel + write was already rejected just above
-                        // (composio_writes now includes MCP writes). `autonomous` runs skip
-                        // the card and execute (explicit per-automation opt-in).
-                        let args_val: serde_json::Value = serde_json::from_str(args_raw)
-                            .unwrap_or_else(|_| serde_json::json!({}));
-                        let workspace_scoped = workspace_scoped_mcp_write(
-                            ctx.state,
-                            ctx.thread_id,
-                            &mcp_provider,
-                            &mcp_tool,
-                            &args_val,
-                        );
-                        if ctx.composio_writes.contains(name) && !ctx.autonomous && !workspace_scoped {
-                            let approval = create_pending_approval(
-                                ctx.state,
-                                name,
-                                &args_val,
-                                &mcp_tool,
-                                ctx.thread_id,
-                                true,
-                            );
-                            let marker = match approval.as_ref() {
-                                Some(approval) => serde_json::json!({
-                                    "approval_id": approval.approval_id,
-                                    "tool": name,
-                                    "arguments": args_val,
-                                }),
-                                None => serde_json::json!({ "tool": name, "arguments": args_val }),
-                            }
-                            .to_string();
-                            let card = format!(
-                                "\n\nI need your confirmation for the action below.\n\
-‹‹MCP_CONFIRM››{marker}‹‹/MCP_CONFIRM››\n"
-                            );
-                            ctx.accumulated.push_str(&card);
-                            let _ =
-                                emit_stream_event(ctx.tx, GenerateStreamEvent::Delta { text: card })
-                                    .await;
-                            *ctx.pending_confirm = true;
-                            "AWAITING USER CONFIRMATION: the action was proposed via a \
-confirmation card in the interface. Do NOT say it was executed."
-                                .to_string()
-                        } else {
-                            let _ = emit_stream_event(
-                                ctx.tx,
-                                GenerateStreamEvent::Delta {
-                                    text: format!("‹‹ACT››🔌 Using {mcp_tool}‹‹/ACT››"),
-                                },
-                            )
-                            .await;
-                            let st = ctx.state.clone();
-                            let prov = mcp_provider.clone();
-                            let tool = mcp_tool.clone();
-                            let args_for_artifact = args_val.clone();
-                            let args = args_val;
-                            let mcp_started = std::time::Instant::now();
-                            let exec = tokio::task::spawn_blocking(move || {
-                                run_mcp_chat_tool(&st, &prov, &tool, args)
-                            });
-                            let mut run_ok = false;
-                            let mut run_err: Option<&'static str> = None;
-                            let mcp_result = match tokio::time::timeout(mcp_call_timeout(), exec)
-                                .await
-                            {
-                                Ok(Ok(Ok(value))) => {
-                                    run_ok = true;
-                                    value
-                                        .to_string()
-                                        .chars()
-                                        .take(COMPOSIO_RESULT_CHARS)
-                                        .collect()
-                                }
-                                Ok(Ok(Err(error))) => {
-                                    // Classify the failure so a broken MCP server tells the user
-                                    // what to do (reconnect / wait) instead of a raw error.
-                                    run_err = classify_connector_error(&error.to_string())
-                                        .map(connector_error_kind_str)
-                                        .or(Some("other"));
-                                    let hint = mcp_error_hint(&error.to_string())
-                                        .map(|h| format!(" {h}"))
-                                        .unwrap_or_default();
-                                    format!("MCP tool error: {error}.{hint}")
-                                }
-                                Ok(Err(_join)) => {
-                                    run_err = Some("other");
-                                    "Error: MCP execution interrupted.".to_string()
-                                }
-                                Err(_elapsed) => {
-                                    run_err = Some("unavailable");
-                                    format!(
-                                        "The MCP tool didn't respond within {}s (timeout): the server \
-may be stuck or offline. Tell the user to check/reconnect it from Settings → \
-Connectors → MCP; do NOT claim it's done.",
-                                        mcp_call_timeout().as_secs()
-                                    )
-                                }
-                            };
-                            record_connector_run(
-                                ctx.state,
-                                ctx.thread_id,
-                                name,
-                                "mcp",
-                                run_ok,
-                                run_err,
-                                mcp_started.elapsed(),
-                            );
-                            if run_ok {
-                                register_mcp_filesystem_artifact_memory(
-                                    ctx.state,
-                                    ctx.thread_id,
-                                    mcp_provider.as_str(),
-                                    &mcp_tool,
-                                    &args_for_artifact,
-                                )
-                                .await;
-                            }
-                            mcp_result
-                        }
-                    } else if !name.is_empty() {
-                        // A connected-service (Composio) tool. Writes need explicit
-                        // confirmation unless the user marked this tool "always allow" OR the
-                        // run is an autonomous automation (explicit per-automation opt-in).
-                        let needs_confirm = ctx.composio_writes.contains(name)
-                            && !composio_tool_allowed(name)
-                            && !ctx.autonomous;
-                        if needs_confirm {
-                            // Do NOT execute. Emit a confirmation card carrying the exact
-                            // action; the user runs it (once/always) via the card. The model
-                            // must never claim it's done — the real outcome comes from the card.
-                            let args_val: serde_json::Value = serde_json::from_str(args_raw)
-                                .unwrap_or_else(|_| serde_json::json!({}));
-                            let approval = create_pending_approval(
-                                ctx.state,
-                                name,
-                                &args_val,
-                                &humanize_composio_tool(name),
-                                ctx.thread_id,
-                                true,
-                            );
-                            let marker = match approval.as_ref() {
-                                Some(approval) => serde_json::json!({
-                                    "approval_id": approval.approval_id,
-                                    "tool": name,
-                                    "arguments": args_val,
-                                }),
-                                None => serde_json::json!({ "tool": name, "arguments": args_val }),
-                            }
-                            .to_string();
-                            let card = format!(
-                                "\n\nI need your confirmation for the action below.\n\
-‹‹COMPOSIO_CONFIRM››{marker}‹‹/COMPOSIO_CONFIRM››\n"
-                            );
-                            ctx.accumulated.push_str(&card);
-                            let _ =
-                                emit_stream_event(ctx.tx, GenerateStreamEvent::Delta { text: card })
-                                    .await;
-                            *ctx.pending_confirm = true;
-                            "AWAITING USER CONFIRMATION: the action was proposed via a \
-confirmation card in the interface. Do NOT say it was executed."
-                                .to_string()
-                        } else {
-                            let _ = emit_stream_event(
-                                ctx.tx,
-                                GenerateStreamEvent::Delta {
-                                    text: format!(
-                                        "‹‹ACT››🔧 Using {}‹‹/ACT››",
-                                        humanize_composio_tool(name)
-                                    ),
-                                },
-                            )
-                            .await;
-                            let st = ctx.state.clone();
-                            let tool = name.to_string();
-                            let args: serde_json::Value = serde_json::from_str(args_raw)
-                                .unwrap_or_else(|_| serde_json::json!({}));
-                            let composio_started = std::time::Instant::now();
-                            let outcome = tokio::task::spawn_blocking(move || {
-                                composio_execute_tool(&st, &tool, &args)
-                            })
-                            .await;
-                            let mut run_ok = false;
-                            let mut run_err: Option<&'static str> = None;
-                            let composio_result = match outcome {
-                                Ok(Ok(value)) => match composio_execution_error(&value) {
-                                    // Composio returned 200 but the tool failed: tell the
-                                    // model so it reports the failure, not a false success.
-                                    Some(error) => {
-                                        run_err = classify_connector_error(&error)
-                                            .map(connector_error_kind_str)
-                                            .or(Some("other"));
-                                        let hint = connector_error_hint(&error)
-                                            .map(|h| format!(" {h}"))
-                                            .unwrap_or_default();
-                                        format!(
-                                            "The tool {name} did NOT perform the action: {error}.{hint} \
-Tell the user clearly; do NOT claim it's done."
-                                        )
-                                    }
-                                    None => {
-                                        run_ok = true;
-                                        value
-                                            .to_string()
-                                            .chars()
-                                            .take(COMPOSIO_RESULT_CHARS)
-                                            .collect()
-                                    }
-                                },
-                                Ok(Err(error)) => {
-                                    run_err = classify_connector_error(&error.message)
-                                        .map(connector_error_kind_str)
-                                        .or(Some("other"));
-                                    let hint = connector_error_hint(&error.message)
-                                        .map(|h| format!(" {h}"))
-                                        .unwrap_or_default();
-                                    format!("Error from the tool {name}: {}.{hint}", error.message)
-                                }
-                                Err(error) => {
-                                    run_err = Some("other");
-                                    format!("Tool execution error: {error}")
-                                }
-                            };
-                            record_connector_run(
-                                ctx.state,
-                                ctx.thread_id,
-                                name,
-                                "composio",
-                                run_ok,
-                                run_err,
-                                composio_started.elapsed(),
-                            );
-                            composio_result
-                        }
-                    } else {
-                        format!("Tool not available: {name}")
-                    };
+                    let result = execute_chat_tool(&mut ctx, name, args_raw, &call_id).await;
 
                     // Collect source URLs from browser results so the final
                     // answer can carry a deterministic "Fonti" section. The
