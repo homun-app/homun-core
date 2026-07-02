@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, shell, ipcMain, dialog, nativeImage, powerSaveBlocker } = require("electron");
+const { app, BrowserWindow, Menu, shell, ipcMain, dialog, nativeImage, powerSaveBlocker, session } = require("electron");
 const { autoUpdater } = require("electron-updater");
 const { spawn, spawnSync, execFileSync } = require("node:child_process");
 const { randomBytes } = require("node:crypto");
@@ -788,8 +788,48 @@ ipcMain.handle("lfpa:update-install", async (event) => {
   }
 });
 
+// Content-Security-Policy for the packaged renderer (P1 hardening). Applied via
+// response headers so it covers the loaded document and every subresource. Only
+// in packaged/staged builds: the Vite dev server needs a looser policy (inline
+// HMR client + its own websocket), so dev is left to Vite's defaults.
+//
+// Scoped to what the renderer actually uses (verified in the source):
+//   script-src 'self'      — Vite emits an external module bundle, no inline JS.
+//   style-src  'unsafe-inline' — mermaid + highlight.js inject <style>, React uses
+//                                 inline style attributes.
+//   img/font   data:/blob: — screenshots, generated logos, bundled fonts.
+//   connect-src 127.0.0.1  — the local gateway (fetch + NDJSON streams).
+//   frame-src  127.0.0.1   — the embedded noVNC "contained computer" iframe.
+function applyContentSecurityPolicy() {
+  const shouldApply = app.isPackaged || process.env.HOMUN_DESKTOP_RESOURCES_DIR;
+  if (!shouldApply) return;
+  const policy = [
+    "default-src 'self'",
+    "script-src 'self'",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: blob:",
+    "font-src 'self' data:",
+    "media-src 'self' blob:",
+    "connect-src 'self' http://127.0.0.1:* ws://127.0.0.1:* http://localhost:* ws://localhost:*",
+    "frame-src 'self' http://127.0.0.1:* http://localhost:*",
+    "worker-src 'self' blob:",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+  ].join("; ");
+  session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+    callback({
+      responseHeaders: {
+        ...details.responseHeaders,
+        "Content-Security-Policy": [policy],
+      },
+    });
+  });
+}
+
 app.whenReady().then(async () => {
   if (!hasSingleInstanceLock) return; // quitting — don't spawn the gateway
+  applyContentSecurityPolicy();
   applyAppMenu();
   if (process.platform === "darwin" && app.dock) {
     const iconPath = brandIconPath();
