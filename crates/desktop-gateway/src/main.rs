@@ -659,6 +659,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     start_task_executor_worker(state.clone());
     spawn_memory_consolidation_tick(state.clone());
     spawn_embedding_catchup(state.clone());
+    spawn_memory_hygiene_sweep(state.clone());
     spawn_thread_browser_session_reaper(state.clone());
     spawn_contained_computer_idle_reaper(state.clone());
     spawn_browser_handoff_reaper(state.clone());
@@ -1691,6 +1692,43 @@ fn spawn_embedding_catchup(state: AppState) {
         }
         if total > 0 {
             eprintln!("memory embedding catch-up: vectorized {total} memories");
+        }
+    });
+}
+
+/// Boot-time memory hygiene sweep (ADR 0022 follow-up). Esegue due pulizie
+/// one-shot per ogni scope, ritardate per non competere con l'avvio:
+/// 1. `sweep_gap_facts` — ritira i gap fact obsoleti contraddetti da fatti
+///    positivi già confirmed (bug "non ricorda che lavoro faccio").
+/// 2. `promote_aged_candidates` — conferma i candidate invecchiati (>10 min)
+///    che non sono mai stati rejectati dall'utente.
+fn spawn_memory_hygiene_sweep(state: AppState) {
+    tokio::spawn(async move {
+        // Delay so it never competes with the HTTP bind / first turn.
+        tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+        let user = gateway_memory_user_id();
+        let mut scopes = vec![PERSONAL_WORKSPACE.to_string()];
+        for ws in load_workspaces_file().workspaces {
+            if ws.id != base_workspace_id() && ws.id != PERSONAL_WORKSPACE {
+                scopes.push(ws.id);
+            }
+        }
+        let mut total_gaps = 0usize;
+        let mut total_promoted = 0usize;
+        for scope in scopes {
+            let Some(facade) = lock_memory_facade(&state).ok() else {
+                continue;
+            };
+            let ws = MemoryWorkspaceId::new(&scope);
+            total_gaps += local_first_memory::sweep_gap_facts(&facade, &user, &ws);
+            total_promoted +=
+                local_first_memory::promote_aged_candidates(&facade, &user, &ws);
+        }
+        if total_gaps > 0 {
+            eprintln!("memory hygiene: retired {total_gaps} obsolete gap facts");
+        }
+        if total_promoted > 0 {
+            eprintln!("memory hygiene: promoted {total_promoted} aged candidates");
         }
     });
 }

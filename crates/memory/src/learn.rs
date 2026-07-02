@@ -262,9 +262,192 @@ loop text/paraphrase:\n{known_open_loops}"
     }
 }
 
+/// Soglia di overlap coefficient (intersezione / min(|A|,|B|)) per decidere se
+/// un gap fact è topicalamente correlato a un nuovo fatto positivo. Usiamo
+/// overlap coefficient invece di jaccard perché i gap fact sono tipicamente
+/// lunghi e verbose ("Non è ancora noto il titolo di ruolo…") mentre i fatti
+/// positivi sono concisi ("L'utente lavora come senior developer"): la jaccard
+/// penalizza il confronte breve↔lungo, l'overlap coefficient no.
+const GAP_RETIRE_OVERLAP: f32 = 0.30;
+
+/// Riconosce un "gap fact" — un fatto che asserisce l'ASSENZA o mancanza di
+/// un'informazione ("non è noto", "still unknown", "non abbiamo", "not yet").
+/// Il prompt di estrazione (`EXTRACTOR_BASE_SYSTEM`) incoraggia esplicitamente a
+/// catturare questi NEGATIVES. Il problema: quando poi l'info diventa nota, il
+/// gap fact resta attivo e contraddice il nuovo fatto, confondendo il modello
+/// nel briefing (bug: "non ricorda che lavoro faccio").
+///
+/// Pattern multilingua (it/en). `text` viene normalizzato lowercase.
+fn is_gap_fact(text: &str) -> bool {
+    let low = text.to_lowercase();
+    const MARKERS_IT: &[&str] = &[
+        "non è ancora noto",
+        "non è noto",
+        "non risulta",
+        "non è chiaro",
+        "non è specificato",
+        "non abbiamo",
+        "non è stato",
+        "non è stata",
+        "ancora non",
+        "tuttora non",
+        "manca",
+        "mancano",
+        "sconosciuto",
+        "ignoto",
+        "non noto",
+        "nessun titolo",
+        "nessuna informazione",
+    ];
+    const MARKERS_EN: &[&str] = &[
+        "not yet known",
+        "not known",
+        "still unknown",
+        "is unknown",
+        "are unknown",
+        "not specified",
+        "not clear",
+        "we don't have",
+        "we do not have",
+        "no information",
+        "not yet available",
+        "missing",
+        "unspecified",
+        "undetermined",
+        "no record of",
+    ];
+    MARKERS_IT.iter().any(|m| low.contains(m)) || MARKERS_EN.iter().any(|m| low.contains(m))
+}
+
+/// Overlap coefficient = |A ∩ B| / min(|A|, |B|). A differenza della jaccard
+/// (che divide per |A ∪ B|), questa metrica è robusta quando i due insiemi
+/// hanno cardinalità molto diverse (caso tipico gap-verbose vs fatto-conciso).
+fn overlap_coefficient(a: &std::collections::HashSet<String>, b: &std::collections::HashSet<String>) -> f32 {
+    if a.is_empty() || b.is_empty() {
+        return 0.0;
+    }
+    let inter = a.intersection(b).count() as f32;
+    let min_size = a.len().min(b.len()) as f32;
+    inter / min_size
+}
+
+/// Gap retirement (ADR 0022 follow-up). Quando si apprende un fatto POSITIVO
+/// nuovo, cerca fact confirmed che esprimono un GAP (assenza/mancanza) e hanno
+/// overlap topicale (jaccard) con il nuovo fatto → li marca stale. Risolve il
+/// bug in cui "Non è ancora noto il titolo di ruolo" resta attivo e contraddice
+/// "L'utente lavora come senior developer".
+///
+/// Solo `fact`/`preference` confirmed vengono ritirati (non decisions/goals/open_loops,
+/// che hanno semantica diversa). Ritorna il numero di gap ritirati.
+fn retire_contradicted_gaps(
+    facade: &MemoryFacade,
+    user_id: &UserId,
+    workspace_id: &WorkspaceId,
+    new_memory: &ExtractedMemory,
+) -> usize {
+    // Solo fatti positivi ritirano i gap (non un altro gap, non una preferenza
+    // generica — serve un'asserzione concreta).
+    if !matches!(new_memory.memory_type.as_str(), "fact" | "preference") {
+        return 0;
+    }
+    if is_gap_fact(&new_memory.text) {
+        return 0; // il nuovo fatto è esso stesso un gap: niente da ritirare
+    }
+    let new_tokens = dedup_tokens(&new_memory.text);
+    if new_tokens.len() < 2 {
+        return 0;
+    }
+    let existing = match facade.list_memories_for_ui(user_id, workspace_id) {
+        Ok(items) => items,
+        Err(_) => return 0,
+    };
+    let request = lifecycle_request(user_id, workspace_id);
+    let mut retired = 0;
+    for m in existing {
+        if m.memory_type != "fact" && m.memory_type != "preference" {
+            continue;
+        }
+        if !matches!(m.status, MemoryStatus::Confirmed | MemoryStatus::Candidate) {
+            continue;
+        }
+        if !is_gap_fact(&m.text) {
+            continue;
+        }
+        let gap_tokens = dedup_tokens(&m.text);
+        if overlap_coefficient(&new_tokens, &gap_tokens) >= GAP_RETIRE_OVERLAP {
+            if facade
+                .mark_memory_stale(&request, &m.reference, "superseded by a positive fact")
+                .is_ok()
+            {
+                retired += 1;
+            }
+        }
+    }
+    retired
+}
+
+/// Sweep retroattivo one-shot: scansiona tutti i gap fact confirmed in uno scope
+/// e ritira quelli per cui esiste GIÀ un fatto positivo confirmed che li contraddice.
+/// Serve per pulire i dati legacy creati prima del gap retirement (`retire_contradicted_gaps`).
+///
+/// Da chiamare all'avvio del gateway (una volta per scope) o via endpoint consolidate.
+/// Ritorna il numero di gap ritirati. Idempotente: rieseguire non ritira nulla
+/// (i gap già stale vengono saltati dal filtro status).
+pub fn sweep_gap_facts(facade: &MemoryFacade, user: &UserId, workspace: &WorkspaceId) -> usize {
+    let items = match facade.list_memories_for_ui(user, workspace) {
+        Ok(items) => items,
+        Err(_) => return 0,
+    };
+    // Partition: gap facts (candidates for retirement) vs positive facts (the
+    // contradictors). Solo fact/preference confirmed.
+    let gaps: Vec<&crate::MemoryRecord> = items
+        .iter()
+        .filter(|m| {
+            matches!(m.memory_type.as_str(), "fact" | "preference")
+                && matches!(m.status, MemoryStatus::Confirmed | MemoryStatus::Candidate)
+                && is_gap_fact(&m.text)
+        })
+        .collect();
+    let positives: Vec<(&crate::MemoryRecord, std::collections::HashSet<String>)> = items
+        .iter()
+        .filter(|m| {
+            matches!(m.memory_type.as_str(), "fact" | "preference")
+                && matches!(m.status, MemoryStatus::Confirmed | MemoryStatus::Candidate)
+                && !is_gap_fact(&m.text)
+        })
+        .map(|m| (m, dedup_tokens(&m.text)))
+        .collect();
+    if gaps.is_empty() || positives.is_empty() {
+        return 0;
+    }
+    let request = crate::MemoryLifecycleRequest {
+        actor_id: "gap-sweep".to_string(),
+        user_id: user.clone(),
+        workspace_id: workspace.clone(),
+        purpose: "retroactive_gap_retirement".to_string(),
+    };
+    let mut retired = 0;
+    for gap in gaps {
+        let gap_tokens = dedup_tokens(&gap.text);
+        // Un gap viene ritirato se ALMENO un fatto positivo ha overlap superiore alla soglia.
+        let contradicted = positives.iter().any(|(_, pos_tokens)| {
+            overlap_coefficient(pos_tokens, &gap_tokens) >= GAP_RETIRE_OVERLAP
+        });
+        if contradicted {
+            if facade
+                .mark_memory_stale(&request, &gap.reference, "retroactive gap sweep")
+                .is_ok()
+            {
+                retired += 1;
+            }
+        }
+    }
+    retired
+}
+
 /// Persiste le memorie estratte in uno scope, deduplicando contro l'esistente per
-/// overlap di contenuto (jaccard) e chiudendo open-loop. Spostato fedelmente dal
-/// gateway (`persist_scope_memories`).
+/// overlap di contenuto (jaccard) e chiudendo open-loop. Spostato fedelmente
+/// dal gateway (`persist_scope_memories`).
 pub fn persist_scope_memories(
     facade: &MemoryFacade,
     user_id: &UserId,
@@ -300,6 +483,11 @@ pub fn persist_scope_memories(
         return;
     }
     for memory in memories {
+        // Gap retirement: se il nuovo fatto è positivo, ritira i gap fact
+        // (assenza/mancanza) topicalamente correlati che ora risultano obsoleti.
+        // Deve avvenire PRIMA della persistenza per evitare di ritirare il fatto
+        // appena creato (che verrebbe dedup-persisted dopo).
+        let _ = retire_contradicted_gaps(facade, user_id, workspace_id, &memory);
         // Open-loop closure: if this memory closes an existing loop, mark it stale.
         if !closure_targets.is_empty() {
             let new_tokens = dedup_tokens(&memory.text);
@@ -590,6 +778,13 @@ pub fn persist_learn_extraction(
     if has_project {
         promote_aged_candidates(facade, user, active);
     }
+    // Gap retirement retroattivo: dopo aver persistito nuovi fatti, ritira i
+    // gap fact obsoleti in TUTTI gli scope toccati (non solo quello attivo,
+    // perché il prompt personal può aver creato gap nello scope personale).
+    sweep_gap_facts(facade, user, &WorkspaceId::new(PERSONAL_WORKSPACE));
+    if has_project {
+        sweep_gap_facts(facade, user, active);
+    }
     true
 }
 
@@ -750,6 +945,123 @@ mod tests {
         persist_scope_memories(&facade, &user, &ws, vec![paraphrase]);
         let count_after_dup = facade.list_memories_for_ui(&user, &ws).unwrap().len();
         assert_eq!(count_after_dup, 1, "paraphrase ad alta jaccard dedupplicata");
+    }
+
+    #[test]
+    fn is_gap_fact_detects_negative_assertions_multilang() {
+        // Italian gap facts.
+        assert!(is_gap_fact("Non è ancora noto il titolo di ruolo professionale"));
+        assert!(is_gap_fact("Il nome dell'azienda è sconosciuto"));
+        assert!(is_gap_fact("Non risulta alcuna informazione sul progetto"));
+        assert!(is_gap_fact("manca la data di consegna"));
+        // English gap facts.
+        assert!(is_gap_fact("The role is still unknown"));
+        assert!(is_gap_fact("No information about the deadline"));
+        assert!(is_gap_fact("not yet available"));
+        // Positive facts must NOT match.
+        assert!(!is_gap_fact("L'utente lavora come senior developer"));
+        assert!(!is_gap_fact("The user owns a Moto Guzzi V7 Stone"));
+        assert!(!is_gap_fact("Prefers replies in Italian"));
+    }
+
+    #[test]
+    fn gap_retirement_retires_contradictory_gap_on_positive_fact() {
+        let facade = MemoryFacade::new(SQLiteMemoryStore::open_in_memory().unwrap());
+        let user = UserId::new("gap-user");
+        let ws = WorkspaceId::new(PERSONAL_WORKSPACE);
+        // Pre-existing gap fact (the bug: stays active and contradicts the truth).
+        let gap = ExtractedMemory {
+            memory_type: "fact".into(),
+            text: "Non è ancora noto il titolo di ruolo professionale dell'utente né \
+                   l'azienda per cui lavora"
+                .into(),
+            aliases: vec![],
+            language_hints: vec![],
+            confidence: 0.9,
+            privacy_domain: PrivacyDomain::new("personal"),
+            sensitivity: crate::DataSensitivity::Public,
+            metadata: serde_json::json!({"scope": "personal"}),
+            evidence_refs: vec![],
+        };
+        persist_scope_memories(&facade, &user, &ws, vec![gap]);
+        let confirmed_count = facade.list_memories_for_ui(&user, &ws).unwrap().len();
+        assert_eq!(confirmed_count, 1, "gap fact persistito come confirmed");
+        // Now learn the positive fact that contradicts the gap.
+        let positive = ExtractedMemory {
+            memory_type: "fact".into(),
+            text: "L'utente lavora come senior developer".into(),
+            aliases: vec![],
+            language_hints: vec![],
+            confidence: 1.0,
+            privacy_domain: PrivacyDomain::new("personal"),
+            sensitivity: crate::DataSensitivity::Public,
+            metadata: serde_json::json!({"scope": "personal"}),
+            evidence_refs: vec![],
+        };
+        persist_scope_memories(&facade, &user, &ws, vec![positive]);
+        let items = facade.list_memories_for_ui(&user, &ws).unwrap();
+        // The positive fact must be present and confirmed...
+        let has_positive = items.iter().any(|m| {
+            m.status == MemoryStatus::Confirmed && m.text.contains("senior developer")
+        });
+        assert!(has_positive, "il fatto positivo è confirmed");
+        // ...and the gap fact must be RETIRED (stale), not confirmed/candidate.
+        // list_memories_for_ui include gli stale (filtra solo tombstoned/deleted),
+        // quindi possiamo ispezionare lo status direttamente.
+        let raw = facade.list_memories_for_ui(&user, &ws).unwrap();
+        let gap_record = raw
+            .iter()
+            .find(|m| m.text.contains("Non è ancora noto"))
+            .expect("il gap fact è ancora nel DB (stale, non cancellato)");
+        assert_eq!(
+            gap_record.status,
+            MemoryStatus::Stale,
+            "il gap fact contraddetto è stato ritirato (stale)"
+        );
+    }
+
+    #[test]
+    fn gap_retirement_does_not_retire_unrelated_gap() {
+        let facade = MemoryFacade::new(SQLiteMemoryStore::open_in_memory().unwrap());
+        let user = UserId::new("gap-unrelated");
+        let ws = WorkspaceId::new(PERSONAL_WORKSPACE);
+        // Unrelated gap fact about a different topic.
+        let gap = ExtractedMemory {
+            memory_type: "fact".into(),
+            text: "Non è noto il colore preferito dell'utente".into(),
+            aliases: vec![],
+            language_hints: vec![],
+            confidence: 0.8,
+            privacy_domain: PrivacyDomain::new("personal"),
+            sensitivity: crate::DataSensitivity::Public,
+            metadata: serde_json::json!({"scope": "personal"}),
+            evidence_refs: vec![],
+        };
+        persist_scope_memories(&facade, &user, &ws, vec![gap]);
+        // Positive fact about a different topic (job, not color).
+        let positive = ExtractedMemory {
+            memory_type: "fact".into(),
+            text: "L'utente lavora come senior developer".into(),
+            aliases: vec![],
+            language_hints: vec![],
+            confidence: 1.0,
+            privacy_domain: PrivacyDomain::new("personal"),
+            sensitivity: crate::DataSensitivity::Public,
+            metadata: serde_json::json!({"scope": "personal"}),
+            evidence_refs: vec![],
+        };
+        persist_scope_memories(&facade, &user, &ws, vec![positive]);
+        let raw = facade.list_memories_for_ui(&user, &ws).unwrap();
+        let gap_record = raw
+            .iter()
+            .find(|m| m.text.contains("colore preferito"))
+            .expect("unrelated gap fact presente");
+        // Unrelated gap must remain confirmed (jaccard too low).
+        assert_eq!(
+            gap_record.status,
+            MemoryStatus::Confirmed,
+            "un gap non correlato topicamente non viene ritirato"
+        );
     }
 }
 
