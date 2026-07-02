@@ -30,6 +30,7 @@ mod sandbox;
 mod task_registry;
 mod temporal;
 mod tool_exec;
+mod tool_trace_dump;
 
 use axum::{
     Json, Router,
@@ -20420,7 +20421,13 @@ check/update the key in Settings → Model & Runtime."
                 // Set when a write tool needs confirmation: we stop the loop and let
                 // the user run it from the card instead of looping/hallucinating.
                 let mut pending_confirm = false;
-                for call in &calls {
+                for (idx, call) in calls.iter().enumerate() {
+                    // Parity-harness snapshots (see `tool_trace_dump`): capture the
+                    // pre-dispatch state so the record built after the tool push can
+                    // measure the deltas. Zero cost beyond two `len()` reads when the
+                    // dump is disarmed; the record itself is fully gated below.
+                    let acc_before = accumulated.len();
+                    let msgs_before = messages.len();
                     let name = call
                         .get("function")
                         .and_then(|f| f.get("name"))
@@ -23658,11 +23665,53 @@ Tell the user clearly; do NOT claim it's done."
                             step_evidence.remove(0);
                         }
                     }
+                    // Parity harness: compute the result-derived fingerprint fields
+                    // from `&result` BEFORE the push moves `result` into the message.
+                    // Gated on `dump_enabled()` so there is no cost when disarmed.
+                    let trace_fields = if crate::tool_trace_dump::dump_enabled() {
+                        let normalized = crate::tool_trace_dump::normalize(&result);
+                        Some((
+                            crate::tool_trace_dump::hash_hex(
+                                &crate::tool_trace_dump::normalize(args_raw),
+                            ),
+                            crate::tool_trace_dump::hash_hex(&normalized),
+                            result.chars().count(),
+                            normalized.chars().take(120).collect::<String>(),
+                        ))
+                    } else {
+                        None
+                    };
                     messages.push(serde_json::json!({
                         "role": "tool",
                         "tool_call_id": call_id,
                         "content": result,
                     }));
+                    // Build + append the record AFTER the tool push so `msgs_pushed`
+                    // counts this push. If a browser screenshot pushes a SECOND
+                    // message later (outside this loop), that is intentionally not
+                    // reflected here: this record captures only what happened up to
+                    // and including the tool result push.
+                    if let Some((args_hash, result_hash, result_len, result_head)) = trace_fields {
+                        let rec = crate::tool_trace_dump::ToolTraceRecord {
+                            round,
+                            idx,
+                            name: name.to_string(),
+                            args_hash,
+                            result_hash,
+                            result_len,
+                            result_head,
+                            acc_delta_len: accumulated.len().saturating_sub(acc_before),
+                            acc_markers: crate::tool_trace_dump::extract_markers(
+                                acc_before,
+                                &accumulated,
+                            ),
+                            pending_confirm,
+                            msgs_pushed: messages.len().saturating_sub(msgs_before),
+                        };
+                        if let Ok(dir) = gateway_logs_dir() {
+                            crate::tool_trace_dump::append(&dir, &rec);
+                        }
+                    }
                 }
                 // A browser screenshot this round → feed the image to the (vision)
                 // model as a SEPARATE user message. It MUST come AFTER every tool
