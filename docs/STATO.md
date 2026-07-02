@@ -403,13 +403,20 @@ plugin.json+SKILL.md+.mcp.json = la formalizzazione che manca a F0–F3), e2e. P
   `SandboxKind`/`SafetyDecision` + `assess_tool_safety(approval, sandbox, is_effectful_write, pre_authorized)
   -> SafetyDecision` puro (equiv. `safety.rs::assess_command_safety`, 10 test, `#![allow(dead_code)]`, NON
   cablato). Tabella di verità behavior-preserving verificata contro i rami reali: `Never`≡`autonomous`,
-  `pre_authorized`≡`workspace_scoped`(MCP)/`composio_tool_allowed`(Composio). **PROSSIMA AZIONE = wiring
-  (Step 2 dell'ADR, cambio di comportamento):** chiamare `assess_tool_safety` in cima a `execute_chat_tool`
-  e **fondere le due card MCP/Composio duplicate in UN gate unificato** (`emit_approval_card(ctx, marker_kind,
-  label, args)`), default `AskForApproval` = comportamento attuale + `SandboxPolicy::DangerFullAccess` (no
-  enforcement) dietro flag `HOMUN_TOOL_SAFETY`. **Prima del wiring: MAPPARE il flusso resume approvazione**
-  (`crates/task-runtime/src/approval.rs` + come la card `‹‹*_CONFIRM››` torna e riprende) — non ancora fatto.
-  Poi Step 2b
+  `pre_authorized`≡`workspace_scoped`(MCP)/`composio_tool_allowed`(Composio). **Step 2 wiring FATTO** (`2ad6b48b`):
+  l'approvazione unificata di ADR 0023 è al chokepoint. `emit_approval_card(ctx, marker_open, marker_close,
+  name, label, args_val)` fonde i due blocchi card MCP/Composio duplicati (card byte-identica → resume via
+  parse-marker intatto). Entrambi i rami calcolano `needs_confirm` via `assess_tool_safety` quando
+  `HOMUN_TOOL_SAFETY=1` (approval `Never` se autonomous else `OnRequest`, sandbox `DangerFullAccess`), else
+  il booleano legacy — ON==OFF provato per tabella di verità (verificato sul diff: byte-identità + equivalenza
+  decisione; execute path e consumer 36287–36776 intatti). Flag default OFF. NB: la card è UI-coupled e resta
+  nel branch (giusto: `assess_tool_safety` decide, il branch emette). Il resume è disaccoppiato via testo
+  marker, quindi non serviva mapparlo. **PROSSIMA AZIONE = Step 2b** (metà sandbox, ancora senza enforcement):
+  risolvere il `SandboxPolicy` effettivo del turno (oggi fisso `DangerFullAccess`; poi da settings/workspace)
+  e **classificare il footprint dei tool file/shell** (`write_file`/`edit_file`/`run_in_project`/
+  `run_in_sandbox`/`read_file`… → read-only vs workspace-write) con **shadow-log** di cosa VERREBBE recintato,
+  senza bloccare nulla. Poi Step 3 (enforcement OS: **Seatbelt macOS** — generare il profilo `.sb` dal livello,
+  come `codex-rs/core/src/seatbelt.rs`; il bundle Codex ha il vocabolario+binari a riferimento). Poi
   (classifica footprint tool, shadow-log), Step 3 (enforcement OS: Seatbelt macOS prima), Step 4 (Settings UI
   + Windows/Linux), Step 5 (confirmation policy dichiarative nelle skill). La convergenza-facade (Fasi 2b/3/4
   vecchie) è DEROGATA: non è Codex e non è prerequisito, il chokepoint c'è già.
