@@ -420,12 +420,23 @@ plugin.json+SKILL.md+.mcp.json = la formalizzazione che manca a F0–F3), e2e. P
   + `jail_in_root`), e `eprintln!` `SANDBOX-SHADOW …` per ogni write/exec — **osserva, non blocca** (helper
   prende `&AppState`, ritorna `()` → strutturalmente non può cambiare comportamento; 59 ins/0 del). Serve a
   raccogliere dati reali PRIMA di accendere l'enforcement.
-  **PROSSIMA AZIONE = Step 3 (enforcement OS — la fase grossa, cambia davvero il comportamento):** generare un
-  profilo Seatbelt `.sb` dal `SandboxPolicy` (come `codex-rs/core/src/seatbelt.rs`) e avvolgere l'exec dei tool
-  file/shell (`run_in_project`, e le scritture) in `sandbox-exec -f profile.sb …` su macOS; gestire il flusso
-  di escalation Codex (sandbox fallisce → chiedi approvazione → riesegui senza recinto). Prima: MAPPARE come
-  `run_in_project`/`write_file` eseguono oggi (dove spawnano), e studiare il `.sb` che Codex genera (il bundle
-  `/Users/fabio/Projects/codex/Contents` ha il binario `codex` + vocabolario a riferimento). Poi Linux
+  **Step 3 in corso — enforcement OS macOS.** Decisione utente (dopo aver messo in discussione Docker): recinto
+  host con Seatbelt/Landlock, NON instradare in Docker (Docker resta opzionale, i comandi funzionano senza; è
+  la via Codex-pura). **Map fatto:** Seatbelt recinta SOTTOPROCESSI, non le `std::fs` del gateway → target =
+  `run_in_project` (main.rs:12019, `bash -lc` sull'host, unico guard oggi = `skill_security::scan_blobs`
+  euristico); `write_file`/`edit_file` restano host + `jail_in_root` applicativo (Seatbelt non li tocca — split
+  identico a Codex: `apply_patch` fa i controlli path, `shell` gira sotto Seatbelt). I 2 `sh -c` (27366/27531)
+  sono interni, fuori scope. Nessun wrapper esistente. **Profilo generator FATTO** (`eb48758e`):
+  `crates/desktop-gateway/src/seatbelt.rs` — `seatbelt_profile(&SandboxPolicy) -> Option<String>` (None per
+  DangerFullAccess), fedele a `codex-rs/core/src/seatbelt.rs`: `(version 1)(deny default)(allow file-read*)` +
+  process-exec/fork + `file-write*` solo sotto `(subpath root)` + tmp, network solo se `network_access`; 9 test,
+  puro. Deviazioni doc: root inline (non `-D` param), `(allow sysctl-read)` allow-all con TODO per l'allowlist
+  esatta. **PROSSIMA AZIONE = wiring enforcement (PRIMO cambio di comportamento reale):** avvolgere l'exec di
+  `run_in_project` in `sandbox-exec -p <profilo> -- bash -lc <cmd>` quando la policy != DangerFullAccess, dietro
+  `HOMUN_TOOL_SAFETY` (off = bash-host attuale; on = recintato) + **flusso escalation Codex** (comando fallisce
+  in sandbox → superficie approvazione → rieseguе senza recinto). **PRIMA del wiring: raccogliere i dati shadow**
+  (accendere `HOMUN_TOOL_SAFETY=1` nell'uso reale, leggere le righe `SANDBOX-SHADOW` in `~/.homun/logs/gateway.log`
+  → validare la classificazione footprint contro la realtà prima di far mordere il kernel). Poi Linux
   (Landlock+seccomp via helper binary), Windows (approval-only). Poi
   (classifica footprint tool, shadow-log), Step 3 (enforcement OS: Seatbelt macOS prima), Step 4 (Settings UI
   + Windows/Linux), Step 5 (confirmation policy dichiarative nelle skill). La convergenza-facade (Fasi 2b/3/4
