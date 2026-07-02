@@ -320,6 +320,9 @@ function spawnGateway() {
       const gatewayLog = createLogWriter(LOGS_DIR, "gateway.log");
       pipeChildStream(gatewayProcess.stdout, gatewayLog);
       pipeChildStream(gatewayProcess.stderr, gatewayLog, "err");
+      // Session delimiter: the log appends across restarts, so mark where each
+      // gateway lifetime starts (and record the pid for cross-referencing).
+      gatewayLog.log(`gateway spawned (pid=${gatewayProcess.pid ?? "?"})`);
       // "close" (not "exit"): exit can fire before stdio drains, and the last
       // lines (a panic message!) are the most valuable ones.
       gatewayProcess.once("close", () => gatewayLog.stream.end());
@@ -333,7 +336,24 @@ function spawnGateway() {
     });
   }
 
-  gatewayProcess.on("exit", (code, signal) => {
+  // Capture the child so both handlers can tell a stale event from the live
+  // process: once the watchdog respawns the gateway, a late "exit"/"error"
+  // from a replaced child must not null the NEW reference — that would orphan
+  // the fresh gateway on quit and log a spurious exit.
+  const child = gatewayProcess;
+
+  child.on("error", (err) => {
+    // spawn(2) failures (EACCES, Gatekeeper quarantine, ENOENT on the cargo
+    // fallback) surface as "error", not a throw at the call site — without
+    // this handler they crash the main process and leave no trail at all.
+    const line = `gateway spawn failed: ${err.code ?? err.message}`;
+    console.error(line);
+    desktopLog.log(line);
+    if (gatewayProcess === child) gatewayProcess = null;
+  });
+
+  child.on("exit", (code, signal) => {
+    if (gatewayProcess !== child) return; // stale exit from a replaced child
     gatewayProcess = null;
     if (!isQuitting) {
       const line = `gateway exited unexpectedly (code=${code} signal=${signal})`;
