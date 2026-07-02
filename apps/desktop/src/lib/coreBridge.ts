@@ -705,6 +705,8 @@ async function electronSetRuntimeModel(model: string): Promise<{ active: string 
 /** Adaptive scaffolding floor (ADR 0018): "off" | "shadow" | "on". */
 export interface RuntimeSettings {
   adaptive_floor: string;
+  /** Sandbox mode (ADR 0023): "read-only" | "workspace-write" | "danger". */
+  sandbox_mode: string;
 }
 
 async function electronRuntimeSettings(): Promise<RuntimeSettings> {
@@ -712,7 +714,7 @@ async function electronRuntimeSettings(): Promise<RuntimeSettings> {
 }
 
 async function electronSetRuntimeSettings(
-  settings: RuntimeSettings,
+  settings: Partial<RuntimeSettings>,
 ): Promise<RuntimeSettings> {
   return gatewayPostJson<RuntimeSettings>("/api/runtime/settings", settings);
 }
@@ -2629,7 +2631,7 @@ export const coreBridge = {
   runtimeModels: (threadId?: string) => electronRuntimeModels(threadId),
   setRuntimeModel: (model: string) => electronSetRuntimeModel(model),
   runtimeSettings: () => electronRuntimeSettings(),
-  setRuntimeSettings: (settings: RuntimeSettings) =>
+  setRuntimeSettings: (settings: Partial<RuntimeSettings>) =>
     electronSetRuntimeSettings(settings),
   timezone: () => electronTimezone(),
   setTimezone: (timezone: string | null) => electronSetTimezone(timezone),
