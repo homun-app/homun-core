@@ -387,6 +387,9 @@ function spawnGateway() {
     // the child process.
     const delay = nextRestartDelay(gatewayRestarts, Date.now());
     if (delay === null) {
+      // By design (P0 scope): we stop respawning and tell the USER via a
+      // dialog, but the renderer keeps polling /api/health with no in-app
+      // signal — surfacing give-up inside the UI is deferred, not an oversight.
       desktopLog.log("gateway crash-loop: auto-restart budget exhausted, giving up");
       void dialog
         .showMessageBox({
