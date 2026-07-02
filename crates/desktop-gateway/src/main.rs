@@ -1095,6 +1095,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/capabilities/mcp/registry", get(mcp_registry_search))
         .route("/api/capabilities/mcp/connected", get(mcp_connected))
         .route("/api/capabilities/mcp/disconnect", post(mcp_disconnect))
+        .route("/api/capabilities/run/escalate", post(run_escalate))
         .route("/api/fs/authorize", post(fs_authorize))
         .route("/api/fs/list", get(fs_list))
         .route("/api/fs/file", get(fs_file))
@@ -12014,6 +12015,68 @@ fn workspace_write_roots(project_root: &std::path::Path, home: Option<&str>) -> 
     roots
 }
 
+/// Renders a finished process's combined stdout+stderr (capped) prefixed with its
+/// exit status, in the `[exit N]\n{body}` shape shared by every `run_in_project`
+/// path. Factored out so the sandboxed branch and the unsandboxed helper produce a
+/// byte-identical result string.
+fn render_project_output(output: &std::process::Output) -> String {
+    let mut combined = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if !stderr.trim().is_empty() {
+        combined.push_str("\n[stderr]\n");
+        combined.push_str(&stderr);
+    }
+    let code = output
+        .status
+        .code()
+        .map(|c| c.to_string())
+        .unwrap_or_else(|| "terminated by signal".to_string());
+    let body: String = combined.chars().take(PROJECT_CMD_MAX_OUTPUT_CHARS).collect();
+    let body = if body.trim().is_empty() {
+        "(no output)"
+    } else {
+        body.as_str()
+    };
+    format!("[exit {code}]\n{body}")
+}
+
+/// Run `command` as `bash -lc` in `root` (UNSANDBOXED), with the project timeout,
+/// returning the rendered `[exit N]\n{output}` string (or a timeout/spawn error).
+///
+/// This is the single raw-exec code path: `run_in_project`'s non-sandboxed branch
+/// AND the on-failure escalation endpoint (`run_escalate`) both call it, so the
+/// unfenced execution + output rendering live in exactly one place.
+async fn run_bash_unsandboxed(root: &std::path::Path, command: &str) -> String {
+    let mut cmd = tokio::process::Command::new("bash");
+    cmd.arg("-lc")
+        .arg(command)
+        .current_dir(root)
+        .kill_on_drop(true);
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(PROJECT_CMD_TIMEOUT_SECS),
+        cmd.output(),
+    )
+    .await
+    {
+        Ok(Ok(output)) => render_project_output(&output),
+        Ok(Err(error)) => format!("Could not run the command: {error}"),
+        Err(_) => format!(
+            "Command interrupted: exceeded the {PROJECT_CMD_TIMEOUT_SECS}s timeout (process terminated)."
+        ),
+    }
+}
+
+/// Result of a `run_in_project` invocation: either the finished, rendered output, or
+/// a signal that the sandboxed run hit a denial and the caller should offer an
+/// on-failure escalation card (ADR 0023) to re-run the same command unsandboxed.
+enum RunProjectOutcome {
+    /// Normal: the rendered `[exit N]\n{output}` result (or an error string).
+    Completed(String),
+    /// The sandboxed run failed with a sandbox-denial signature → offer to re-run
+    /// the exact command unsandboxed. `command`/`cwd` seed the escalation card.
+    NeedsEscalation { command: String, cwd: String },
+}
+
 /// Runs a shell command on the HOST with cwd = the project folder (build/test/lint
 /// on the user's real code — verify-by-execution, plus git). Gated by the same
 /// security scan as the sandbox + confined to a project that has a folder; killed
@@ -12026,59 +12089,64 @@ fn workspace_write_roots(project_root: &std::path::Path, home: Option<&str>) -> 
 /// Seatbelt profile: writes are physically fenced to the project root + standard
 /// tool caches (see `workspace_write_roots`), everything else is read-only. The flag
 /// is OFF by default, so the default path is byte-identical to the pre-ADR host
-/// exec. Non-macOS never sandboxes here yet.
+/// exec (`Completed` wraps the same rendered string). Non-macOS never sandboxes here yet.
+///
+/// ADR 0023 on-failure escalation: when a fenced run FAILS with a sandbox-denial
+/// signature, this returns `NeedsEscalation` (instead of the old inline note) so the
+/// caller can surface an approval card; approving re-runs the command unsandboxed via
+/// `run_escalate`. The non-sandboxed and flag-off paths always return `Completed`.
 /// TODO(ADR 0023): Linux Landlock+seccomp enforcement (the non-macOS fence).
-async fn run_in_project(state: &AppState, thread_id: Option<&str>, command: &str) -> String {
+async fn run_in_project(
+    state: &AppState,
+    thread_id: Option<&str>,
+    command: &str,
+) -> RunProjectOutcome {
     let command = command.trim();
     if command.is_empty() {
-        return "Empty command.".to_string();
+        return RunProjectOutcome::Completed("Empty command.".to_string());
     }
     let Some(root) = project_root_for_thread(state, thread_id) else {
-        return no_project_folder_msg();
+        return RunProjectOutcome::Completed(no_project_folder_msg());
     };
     let scan = skill_security::scan_blobs(&[("command".to_string(), command.to_string())]);
     if scan.blocked {
-        return format!(
+        return RunProjectOutcome::Completed(format!(
             "Command NOT executed: blocked by the security scan (risk {}/100). \
 Reformulate it without destructive operations.",
             scan.risk_score
-        );
+        ));
     }
     // Enforce the OS fence only when the flag is on AND we're on macOS. When either
-    // is false we build the plain `bash -lc` command exactly as before — the
-    // `cfg!` and the `HOME` env read below only happen on the sandboxed path.
+    // is false we take the plain `bash -lc` path via `run_bash_unsandboxed` exactly
+    // as before — the sandboxed branch below only runs on the enforced path.
     let sandboxed = tool_safety_enabled() && cfg!(target_os = "macos");
-    let mut cmd = if sandboxed {
-        let policy = crate::tool_safety::SandboxPolicy::WorkspaceWrite {
-            writable_roots: workspace_write_roots(&root, std::env::var("HOME").ok().as_deref()),
-            // v1: fence filesystem writes, allow network (npm/git need it). Stricter
-            // network-off is a follow-up.
-            network_access: true,
-        };
-        match crate::seatbelt::seatbelt_profile(&policy) {
-            Some(profile) => {
-                let mut c = tokio::process::Command::new("sandbox-exec");
-                c.arg("-p").arg(profile).arg("bash").arg("-lc").arg(command);
-                c
-            }
-            None => {
-                // DangerFullAccess → unreachable here (we build WorkspaceWrite), but
-                // be total: run unsandboxed rather than panic.
-                let mut c = tokio::process::Command::new("bash");
-                c.arg("-lc").arg(command);
-                c
-            }
+    if !sandboxed {
+        return RunProjectOutcome::Completed(run_bash_unsandboxed(&root, command).await);
+    }
+    // Sandboxed path: build the `sandbox-exec` fence, run inline (we need the raw
+    // status + combined output to decide whether to escalate).
+    let policy = crate::tool_safety::SandboxPolicy::WorkspaceWrite {
+        writable_roots: workspace_write_roots(&root, std::env::var("HOME").ok().as_deref()),
+        // v1: fence filesystem writes, allow network (npm/git need it). Stricter
+        // network-off is a follow-up.
+        network_access: true,
+    };
+    let mut cmd = match crate::seatbelt::seatbelt_profile(&policy) {
+        Some(profile) => {
+            let mut c = tokio::process::Command::new("sandbox-exec");
+            c.arg("-p").arg(profile).arg("bash").arg("-lc").arg(command);
+            c
         }
-    } else {
-        let mut c = tokio::process::Command::new("bash");
-        c.arg("-lc").arg(command);
-        c
+        None => {
+            // DangerFullAccess → unreachable here (we build WorkspaceWrite), but
+            // be total: run unsandboxed rather than panic.
+            return RunProjectOutcome::Completed(run_bash_unsandboxed(&root, command).await);
+        }
     };
     cmd.current_dir(&root).kill_on_drop(true);
-    let future = cmd.output();
     match tokio::time::timeout(
         std::time::Duration::from_secs(PROJECT_CMD_TIMEOUT_SECS),
-        future,
+        cmd.output(),
     )
     .await
     {
@@ -12089,52 +12157,31 @@ Reformulate it without destructive operations.",
                 combined.push_str("\n[stderr]\n");
                 combined.push_str(&stderr);
             }
-            let code = output
-                .status
-                .code()
-                .map(|c| c.to_string())
-                .unwrap_or_else(|| "terminated by signal".to_string());
-            let body: String = combined
-                .chars()
-                .take(PROJECT_CMD_MAX_OUTPUT_CHARS)
-                .collect();
-            let body = if body.trim().is_empty() {
-                "(no output)"
-            } else {
-                body.as_str()
-            };
-            let mut rendered = format!("[exit {code}]\n{body}");
-            // Escalation-lite: if the fenced command failed and the output carries a
-            // sandbox denial marker, hint that the fence — not the command — may be at
-            // fault. The full "approve → re-run unsandboxed" card is a follow-up.
-            // TODO(ADR 0023): full on-failure escalation (approve → re-run unsandboxed card).
-            if sandboxed
-                && !output.status.success()
+            // On-failure escalation: if the fenced command failed and the output carries
+            // a sandbox-denial signature, the fence — not the command — is the likely
+            // culprit. Signal the caller to offer an "approve → re-run unsandboxed" card
+            // instead of just noting it (ADR 0023).
+            if !output.status.success()
                 && (combined.contains("Operation not permitted") || combined.contains("sandbox"))
             {
-                rendered.push_str(
-                    "\n\n(Note: this ran in a workspace-write sandbox — writes are limited to the \
-project and standard caches. If it failed because it needed to write elsewhere, that's the \
-sandbox, not a bug in the command.)",
-                );
+                return RunProjectOutcome::NeedsEscalation {
+                    command: command.to_string(),
+                    cwd: root.to_string_lossy().into_owned(),
+                };
             }
-            rendered
+            RunProjectOutcome::Completed(render_project_output(&output))
         }
         Ok(Err(error)) => {
             // Fail-closed: if the SANDBOXED spawn could not start (e.g. `sandbox-exec`
             // missing), never silently fall back to unsandboxed — surface a clear error.
-            if sandboxed {
-                format!(
-                    "Command NOT executed: the workspace sandbox could not start ({error}). \
+            RunProjectOutcome::Completed(format!(
+                "Command NOT executed: the workspace sandbox could not start ({error}). \
 The command was not run unsandboxed."
-                )
-            } else {
-                format!("Could not run the command: {error}")
-            }
+            ))
         }
-        Err(_) => format!(
+        Err(_) => RunProjectOutcome::Completed(format!(
             "Command interrupted: exceeded the {PROJECT_CMD_TIMEOUT_SECS}s timeout (process terminated)."
-        ),
+        )),
     }
 }
 
@@ -21339,7 +21386,23 @@ button to authorize access to the folder. Do NOT say you have read/listed it."
             },
         )
         .await;
-        run_in_project(ctx.state, ctx.thread_id, &command).await
+        match run_in_project(ctx.state, ctx.thread_id, &command).await {
+            RunProjectOutcome::Completed(s) => s,
+            RunProjectOutcome::NeedsEscalation { command, cwd } => {
+                // ADR 0023 on-failure escalation: the fenced run hit a sandbox denial.
+                // Surface an approval card; approving re-runs the exact command
+                // unsandboxed via /api/capabilities/run/escalate.
+                emit_approval_card(
+                    ctx,
+                    SANDBOX_ESCALATE_OPEN,
+                    SANDBOX_ESCALATE_CLOSE,
+                    "run_in_project",
+                    &command,
+                    &serde_json::json!({ "command": command, "cwd": cwd }),
+                )
+                .await
+            }
+        }
     } else if name == "list_addons" {
         tokio::task::spawn_blocking(process_skills::addons_list_text)
             .await
@@ -36757,6 +36820,11 @@ async fn mcp_disconnect(
 const FS_AUTHORIZE_OPEN: &str = "‹‹FS_AUTHORIZE››";
 const FS_AUTHORIZE_CLOSE: &str = "‹‹/FS_AUTHORIZE››";
 
+// ADR 0023 on-failure sandbox escalation card markers. Same guillemet framing as the
+// other confirm/authorize markers so the frontend renders it as an actionable card.
+const SANDBOX_ESCALATE_OPEN: &str = "‹‹SANDBOX_ESCALATE››";
+const SANDBOX_ESCALATE_CLOSE: &str = "‹‹/SANDBOX_ESCALATE››";
+
 /// Rewrites the authorize-card marker into a plain "granted" note so reopening
 /// the chat doesn't re-show the actionable card (mirrors the Composio/MCP path).
 fn rewrite_fs_authorize_to_done(text: &str, path: &str) -> String {
@@ -36846,6 +36914,115 @@ async fn fs_authorize(
         }
         Err(message) => Ok(Json(serde_json::json!({ "ok": false, "summary": message }))),
     }
+}
+
+/// Provenance gate for the on-failure escalation endpoint: true iff the stored
+/// message carries a SANDBOX_ESCALATE card whose `arguments.command` equals the
+/// requested `command`. Mirrors `mcp_confirm_matches`: the endpoint must only ever
+/// re-run the exact command that was proposed — never an arbitrary one.
+fn sandbox_escalate_matches(text: &str, command: &str) -> bool {
+    let Some(marker) = confirm_marker_value(text, SANDBOX_ESCALATE_OPEN, SANDBOX_ESCALATE_CLOSE)
+    else {
+        return false;
+    };
+    marker
+        .get("arguments")
+        .and_then(|a| a.get("command"))
+        .and_then(serde_json::Value::as_str)
+        == Some(command)
+}
+
+/// Rewrites the escalation-card marker into a plain "ran unsandboxed" note so
+/// reopening the chat doesn't re-show the actionable card (mirrors
+/// `rewrite_fs_authorize_to_done` / `rewrite_mcp_confirm_to_done`).
+fn rewrite_sandbox_escalate_to_done(text: &str, command: &str) -> String {
+    let Some(open) = text.find(SANDBOX_ESCALATE_OPEN) else {
+        return text.to_string();
+    };
+    let Some(close_rel) = text[open..].find(SANDBOX_ESCALATE_CLOSE) else {
+        return text.to_string();
+    };
+    let close = open + close_rel + SANDBOX_ESCALATE_CLOSE.len();
+    let head_end = text[..open]
+        .rfind("I need your confirmation")
+        .unwrap_or(open);
+    let mut out = text[..head_end].trim_end().to_string();
+    let tail = text[close..].trim();
+    if !tail.is_empty() {
+        if !out.is_empty() {
+            out.push_str("\n\n");
+        }
+        out.push_str(tail);
+    }
+    if !out.is_empty() {
+        out.push_str("\n\n");
+    }
+    out.push_str(&format!("✓ Ran unsandboxed: {command}"));
+    out
+}
+
+#[derive(Debug, Deserialize)]
+struct RunEscalateRequest {
+    command: String,
+    #[serde(default)]
+    cwd: Option<String>,
+    #[serde(default)]
+    thread_id: Option<String>,
+    #[serde(default)]
+    message_id: Option<String>,
+}
+
+/// ADR 0023 on-failure sandbox escalation: re-runs a `run_in_project` command
+/// UNSANDBOXED after explicit user approval (the SANDBOX_ESCALATE card calls this).
+/// Endpoint-based like `fs_authorize` — there is no `run_in_project` MCP tool, this
+/// is a local shell exec. Security gate: the stored message must carry a matching
+/// SANDBOX_ESCALATE card, so only the exact proposed command can run. On success
+/// rewrites the originating message so the card can't reopen.
+async fn run_escalate(
+    State(state): State<AppState>,
+    Json(request): Json<RunEscalateRequest>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    // Provenance gate (REQUIRED): the command must match the card in the stored
+    // message. Without a matching marker, refuse — never run an arbitrary command.
+    let confirmed = match (&request.thread_id, &request.message_id) {
+        (Some(thread_id), Some(message_id)) => lock_store(&state)
+            .ok()
+            .and_then(|store| store.message(thread_id, message_id).ok().flatten())
+            .is_some_and(|message| sandbox_escalate_matches(&message.text, &request.command)),
+        _ => false,
+    };
+    if !confirmed {
+        return Err(GatewayError {
+            status: StatusCode::FORBIDDEN,
+            code: "sandbox_escalate_required",
+            message: "Re-run unsandboxed only from its matching escalation card.".to_string(),
+        });
+    }
+    // Resolve the cwd: the card's cwd, else the thread's project root.
+    let root = request
+        .cwd
+        .as_ref()
+        .map(PathBuf::from)
+        .or_else(|| project_root_for_thread(&state, request.thread_id.as_deref()));
+    let Some(root) = root else {
+        return Err(GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "sandbox_escalate_no_root",
+            message: "No project folder to run in.".to_string(),
+        });
+    };
+    // Execute UNSANDBOXED via the shared raw-exec helper.
+    let output = run_bash_unsandboxed(&root, &request.command).await;
+    // Persist: rewrite the card marker to a "ran unsandboxed" note (no reopen on reload).
+    if let (Some(thread_id), Some(message_id)) = (&request.thread_id, &request.message_id) {
+        if let Ok(store) = lock_store(&state) {
+            if let Ok(Some(message)) = store.message(thread_id, message_id) {
+                let rewritten = rewrite_sandbox_escalate_to_done(&message.text, &request.command);
+                let _ = store.set_message_text(thread_id, message_id, &rewritten);
+            }
+        }
+    }
+    Ok(Json(serde_json::json!({ "ok": true, "output": output })))
 }
 
 const CONNECT_SUGGEST_OPEN: &str = "‹‹CONNECT_SUGGEST››";
@@ -56979,6 +57156,35 @@ data: [DONE]\n";
         assert!(out.contains("✓ Access granted to /Users/fabio/Projects"));
         // No-op when the marker is absent (idempotent on already-rewritten text).
         assert_eq!(crate::rewrite_fs_authorize_to_done("hi", "/x"), "hi");
+    }
+
+    #[test]
+    fn sandbox_escalate_matches_only_the_proposed_command() {
+        let text = "I need your confirmation for the action below.\n\
+‹‹SANDBOX_ESCALATE››{\"approval_id\":\"abc\",\"tool\":\"run_in_project\",\
+\"arguments\":{\"command\":\"npm ci\",\"cwd\":\"/proj\"}}‹‹/SANDBOX_ESCALATE››\n";
+        // Matches the exact command carried by the card.
+        assert!(crate::sandbox_escalate_matches(text, "npm ci"));
+        // Rejects any other command (the provenance gate).
+        assert!(!crate::sandbox_escalate_matches(text, "rm -rf /"));
+        // Rejects when the marker is missing entirely.
+        assert!(!crate::sandbox_escalate_matches("no card here", "npm ci"));
+    }
+
+    #[test]
+    fn sandbox_escalate_rewrite_drops_card_marker() {
+        let text = "I need your confirmation for the action below.\n\
+‹‹SANDBOX_ESCALATE››{\"tool\":\"run_in_project\",\
+\"arguments\":{\"command\":\"npm ci\",\"cwd\":\"/proj\"}}‹‹/SANDBOX_ESCALATE››\n";
+        let out = crate::rewrite_sandbox_escalate_to_done(text, "npm ci");
+        assert!(!out.contains("SANDBOX_ESCALATE"), "marker removed");
+        assert!(
+            !out.contains("I need your confirmation"),
+            "prompt line removed"
+        );
+        assert!(out.contains("✓ Ran unsandboxed: npm ci"));
+        // No-op when the marker is absent (idempotent on already-rewritten text).
+        assert_eq!(crate::rewrite_sandbox_escalate_to_done("hi", "npm ci"), "hi");
     }
 
     #[test]
