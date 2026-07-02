@@ -18436,6 +18436,59 @@ confirmation card in the interface. Do NOT say it was executed."
         .to_string()
 }
 
+/// ADR 0023 sandbox axis, SHADOW mode: classify a tool call's filesystem footprint
+/// and log what a `workspace-write` fence WOULD do — WITHOUT enforcing anything.
+/// Observe-only; no dispatch behavior changes. Runs only when `tool_safety_enabled()`.
+fn shadow_log_sandbox(state: &AppState, thread_id: Option<&str>, name: &str, args_raw: &str) {
+    use crate::tool_safety::{
+        ShadowVerdict, ToolFootprint, sandbox_shadow_verdict, tool_footprint,
+    };
+    let args: serde_json::Value =
+        serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
+    let footprint = tool_footprint(name, &args);
+    // Only the write/exec footprints are interesting; skip the noisy Allow-always cases.
+    if matches!(
+        footprint,
+        ToolFootprint::ReadOnly | ToolFootprint::NonFilesystem | ToolFootprint::Contained
+    ) {
+        return;
+    }
+    // The INTENDED policy we're shadowing against: workspace-write jailed to the
+    // thread's project root (the realistic default for step 3). No root → read-only.
+    let root = project_root_for_thread(state, thread_id);
+    let policy = match &root {
+        Some(r) => SandboxPolicy::WorkspaceWrite {
+            writable_roots: vec![r.clone()],
+            network_access: false,
+        },
+        None => SandboxPolicy::ReadOnly,
+    };
+    // For a Write footprint, resolve whether the target lands under the root.
+    // `jail_in_root(&Path, &str) -> Result<PathBuf, String>` returns Ok iff the
+    // relative path stays inside the root (rejects abs / `..` / symlink escapes).
+    let is_under_writable_root = match (&footprint, &root) {
+        (ToolFootprint::Write { path }, Some(r)) => jail_in_root(r, path.as_str()).is_ok(),
+        _ => false,
+    };
+    let verdict = sandbox_shadow_verdict(&footprint, &policy, is_under_writable_root);
+    // Log to the gateway log (captured to ~/.homun/logs/gateway.log by the P0 stdio
+    // capture). `eprintln!` is the existing pattern. Log the classification + verdict
+    // for every write/exec call so the shadow data is visible.
+    let policy_label = match &policy {
+        SandboxPolicy::WorkspaceWrite { .. } => "workspace-write",
+        SandboxPolicy::ReadOnly => "read-only",
+        SandboxPolicy::DangerFullAccess => "danger-full-access",
+    };
+    match verdict {
+        ShadowVerdict::WouldFence { reason } => eprintln!(
+            "SANDBOX-SHADOW tool={name} footprint={footprint:?} policy={policy_label} verdict=WOULD_FENCE reason=\"{reason}\""
+        ),
+        ShadowVerdict::Allow => eprintln!(
+            "SANDBOX-SHADOW tool={name} footprint={footprint:?} policy={policy_label} verdict=allow"
+        ),
+    }
+}
+
 /// Pure per-tool-call dispatch for the chat loop: the single `if name == … else if …`
 /// chain, extracted verbatim from `stream_chat_via_openai`'s dispatch loop (fase 1b).
 /// Turn-state is read/mutated through `ctx.<field>` exactly as inline (disjoint field
@@ -18447,6 +18500,12 @@ async fn execute_chat_tool(
     args_raw: &str,
     call_id: &str,
 ) -> String {
+    // ADR 0023 step 2b, SHADOW: observe-only sandbox classification/log. Gated by
+    // `tool_safety_enabled()` (default off → one env read, no-op). NEVER blocks or
+    // alters `result`; it only reads state and logs.
+    if tool_safety_enabled() {
+        shadow_log_sandbox(ctx.state, ctx.thread_id, name, args_raw);
+    }
     let result = if ctx.read_only
         && matches!(
             name,
