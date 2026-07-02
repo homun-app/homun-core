@@ -327,6 +327,18 @@ chat di default = deepseek-v4-pro:cloud (Z.ai, tier **Balanced**); Composio non 
 
 ## Cosa è stato fatto (rolling, conciso)
 
+**Sessione 2026-07-02 — gap analysis production-readiness vs Codex.app (bundle reverse-engineered):**
+Analizzato il bundle distribuito di Codex (`/Users/fabio/Projects/codex/Contents`: asar estratto,
+binario `codex` 0.142.5, chronicle, cua_node, 7 plugin) e auditata Homun v0.1.x sulle dimensioni di
+produzione. Risultato in [confronto-codex-produzione.md](confronto-codex-produzione.md) (complementare
+al confronto strutturale): gap 🔴 = osservabilità (zero log persistenti nel packaged, zero panic
+hook/crash report) + resilienza (no single-instance lock, no recovery SQLite corrotto); 🟠 =
+sandbox-enforcement (approvals cooperativi vs recinto OS-level 3-livelli di Codex) + firma
+Windows/Linux; 🟡 = CSP/fuses/devTools, `homun://`, manifest plugin installabile (formato
+plugin.json+SKILL.md+.mcp.json = la formalizzazione che manca a F0–F3), e2e. Piano P0–P3 nel doc;
+P0 è ortogonale alla convergenza ADR 0021/0022 (fattibile subito). Idea da rubare: record-and-replay
+→ skill (chiude il cerchio con `routines`/`automation_candidates`, memoria-centrico in Homun).
+
 **Sessione 2026-06-29 (5g) — ADR 0021 (single-loop) + batch fix chat-UX/funzionali (validati live nell'app):**
 La sessione è passata dalla diagnosi browse all'azione: scritto l'**ADR 0021** (un loop guardato + piano
 come tool; supersede direzione 0020, emenda 0016 — [[homun-single-loop-evidence-verdict]]) e poi una serie
