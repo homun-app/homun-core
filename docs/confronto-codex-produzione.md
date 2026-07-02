@@ -227,8 +227,10 @@ convergenza naturale di memoria (differenziatore #1) + plugin roadmap.
 
 **P1 — enforcement e fiducia:**
 5. ⏳ (M) Sandbox-mode a 3 livelli imposto dal gateway sull'esecuzione shell/file
-   (sandbox-exec su macOS), + approval policy unica a 4 livelli in Settings. **In attesa:** va
-   progettato con la separazione motore/gateway (il punto di enforcement si sposta).
+   (sandbox-exec su macOS), + approval policy unica a 4 livelli in Settings. **Progettato** in
+   [ADR 0023](decisions/0023-sandbox-enforcement-and-unified-approval.md) (2026-07-02), **non
+   implementato**: va fatto con la separazione motore/gateway (che crea il chokepoint unico su cui
+   imporre il recinto).
 6. ⏳ (M) Firma Windows + integrità Linux; publish automatico del draft release. **Bloccato su
    input utente:** firma = certificati/segreti (Azure Trusted Signing); auto-publish = decisione di
    processo (ribalta il gate draft deliberato di `build.yml`).

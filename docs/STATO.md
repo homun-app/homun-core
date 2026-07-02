@@ -347,8 +347,15 @@ plugin.json+SKILL.md+.mcp.json = la formalizzazione che manca a F0–F3), e2e. P
   non toccato, evita data-loss), esito in `/api/health`; (7) **feedback bundle** tar.gz locale solo
   log+report.json (mai `.sqlite`, symlink-safe), errori visibili in UI. Commit `8a240350`→`6383646e`.
   **Review-driven catches notevoli:** crash del main via readime su stderr del gateway (Task 1); il data-loss
-  della quarantena su store lockato (Task 6). **Resta P1–P3** (sandbox OS-level, firma Win/Linux, `homun://`,
-  manifest plugin, e2e, UDS) — fuori scope P0, ortogonali alla convergenza ADR 0021/0022.
+  della quarantena su store lockato (Task 6).
+- **P1 Pilastro 3 COMPLETO** (hardening Electron, merged in `piano-ui-completion` `a8e662e3`): **fuses**
+  (hook `afterPack`, spegne RunAsNode/inspect/NODE_OPTIONS, accende cookie-encryption/only-asar),
+  **devTools off** nel packaged, **CSP** nel renderer packaged (via `onHeadersReceived`, verificata a
+  runtime: renderer monta sotto policy, zero violazioni, `'self'` ok sotto `file://`). Commit
+  `3811b46b`+`39d3cc8e`. **P1 Pilastro 1 PROGETTATO** ([ADR 0023](decisions/0023-sandbox-enforcement-and-unified-approval.md)):
+  sandbox 3-livelli + approval unica, ibrido OS-primitive/container, da implementare CON la separazione
+  motore (crea il chokepoint). **P1 Pilastro 2 (firma Win/Linux + publish) bloccato su input utente**
+  (certificati + decisione sul gate draft di `build.yml`). Restano P2–P3.
 - **Debito pre-esistente sfiorato:** `test:ui-contract` era rosso per drift `ChatView.tsx`↔script
   (`eventParts` aggiunto a `RichMessage` da altra sessione); allineato lo script nel Task 8.
 
