@@ -26,6 +26,11 @@ mod panic_log;
 mod pdf_render;
 mod plugin_packages;
 mod privacy_guard;
+// Linux Landlock filesystem fence for `run_in_project` (ADR 0023 Linux enforcement;
+// the counterpart to `seatbelt`). Linux-only — the whole module is cfg-gated so it
+// never compiles on macOS/Windows (the `landlock` dep is Linux-only too).
+#[cfg(target_os = "linux")]
+mod landlock_fence;
 mod sandbox;
 // macOS Seatbelt (`sandbox-exec`) profile generator from a SandboxPolicy (ADR 0023,
 // step 3; pure string generation — not wired yet).
@@ -12077,6 +12082,88 @@ enum RunProjectOutcome {
     NeedsEscalation { command: String, cwd: String },
 }
 
+/// Build the OS-fenced command that runs `command` (as `bash -lc <command>`) with
+/// writes confined to `writable_roots`. Returns the ready-to-run `tokio::process::
+/// Command` (cwd/kill_on_drop are set by the caller). `Err` means the fence could NOT
+/// be constructed and the caller must FAIL CLOSED (never run unsandboxed).
+///
+/// Only ever called on the enforced path (`tool_safety_enabled()` on macOS/Linux), so
+/// exactly one platform arm is compiled in per target — no `unused` warnings.
+#[cfg(target_os = "macos")]
+fn build_sandbox_command(
+    writable_roots: &[std::path::PathBuf],
+    command: &str,
+) -> Result<tokio::process::Command, String> {
+    // macOS: `sandbox-exec -p <seatbelt-profile> bash -lc <command>` — byte-identical
+    // to the pre-Linux wiring.
+    let policy = crate::tool_safety::SandboxPolicy::WorkspaceWrite {
+        writable_roots: writable_roots.to_vec(),
+        network_access: true,
+    };
+    match crate::seatbelt::seatbelt_profile(&policy) {
+        Some(profile) => {
+            let mut c = tokio::process::Command::new("sandbox-exec");
+            c.arg("-p").arg(profile).arg("bash").arg("-lc").arg(command);
+            Ok(c)
+        }
+        // DangerFullAccess → unreachable here (we build WorkspaceWrite). Fail closed
+        // rather than silently run unsandboxed.
+        None => Err("no seatbelt profile for the workspace policy".to_string()),
+    }
+}
+
+/// Linux fence: spawn the `homun-linux-sandbox` helper, which applies a Landlock
+/// filesystem fence to itself and then execs the command. Resolves the helper via
+/// `HOMUN_LINUX_SANDBOX_BIN` (explicit override), else a sibling of the running
+/// gateway executable (`current_exe()/../homun-linux-sandbox`). Fails CLOSED if the
+/// helper can't be located or doesn't exist — the caller then refuses to run.
+///
+/// Follow-up (out of scope): the packaged Linux app must bundle `homun-linux-sandbox`
+/// next to the gateway binary (electron-builder `package:prepare`) so the sibling-exe
+/// resolution finds it in production; the CI test uses `CARGO_BIN_EXE_...` instead.
+#[cfg(target_os = "linux")]
+fn build_sandbox_command(
+    writable_roots: &[std::path::PathBuf],
+    command: &str,
+) -> Result<tokio::process::Command, String> {
+    let helper = match std::env::var_os("HOMUN_LINUX_SANDBOX_BIN") {
+        Some(path) => std::path::PathBuf::from(path),
+        None => {
+            let exe = std::env::current_exe()
+                .map_err(|e| format!("cannot resolve current executable: {e}"))?;
+            let dir = exe
+                .parent()
+                .ok_or_else(|| "current executable has no parent directory".to_string())?;
+            dir.join("homun-linux-sandbox")
+        }
+    };
+    if !helper.is_file() {
+        return Err(format!(
+            "linux sandbox helper not found at {} (set HOMUN_LINUX_SANDBOX_BIN)",
+            helper.display()
+        ));
+    }
+    let mut c = tokio::process::Command::new(&helper);
+    for root in writable_roots {
+        c.arg("--allow-write").arg(root);
+    }
+    c.arg("--").arg("bash").arg("-lc").arg(command);
+    Ok(c)
+}
+
+/// Fallback for platforms without a fence backend (Windows/other). Never actually
+/// reached — `run_in_project` gates the sandboxed path on `cfg!(macos) || cfg!(linux)`
+/// at runtime, so `sandboxed` is always false here and the caller returns before
+/// calling this. It exists only so the call site compiles on every target. The
+/// `_` bindings keep it warning-free.
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn build_sandbox_command(
+    _writable_roots: &[std::path::PathBuf],
+    _command: &str,
+) -> Result<tokio::process::Command, String> {
+    Err("no sandbox backend on this platform".to_string())
+}
+
 /// Runs a shell command on the HOST with cwd = the project folder (build/test/lint
 /// on the user's real code — verify-by-execution, plus git). Gated by the same
 /// security scan as the sandbox + confined to a project that has a folder; killed
@@ -12084,18 +12171,29 @@ enum RunProjectOutcome {
 /// with the exit status. This is the host-execution counterpart to the isolated
 /// `run_in_sandbox` (which stays for throwaway/untrusted work).
 ///
-/// ADR 0023 step 3 — macOS enforcement. When `HOMUN_TOOL_SAFETY=1` AND we are on
-/// macOS, the `bash` subprocess is wrapped in `sandbox-exec` under a workspace-write
-/// Seatbelt profile: writes are physically fenced to the project root + standard
-/// tool caches (see `workspace_write_roots`), everything else is read-only. The flag
-/// is OFF by default, so the default path is byte-identical to the pre-ADR host
-/// exec (`Completed` wraps the same rendered string). Non-macOS never sandboxes here yet.
+/// ADR 0023 step 3 — OS enforcement. When `HOMUN_TOOL_SAFETY=1` AND we are on a
+/// platform with a fence backend, the `bash` subprocess is fenced under a
+/// workspace-write policy: writes are physically confined to the project root +
+/// standard tool caches (see `workspace_write_roots`), everything else is read-only.
+/// The wrapper is `sandbox-exec` + Seatbelt on macOS, `homun-linux-sandbox` +
+/// Landlock on Linux (see `build_sandbox_command`). The flag is OFF by default, so
+/// the default path is byte-identical to the pre-ADR host exec (`Completed` wraps the
+/// same rendered string). Windows/other platforms never sandbox here yet.
 ///
 /// ADR 0023 on-failure escalation: when a fenced run FAILS with a sandbox-denial
 /// signature, this returns `NeedsEscalation` (instead of the old inline note) so the
 /// caller can surface an approval card; approving re-runs the command unsandboxed via
 /// `run_escalate`. The non-sandboxed and flag-off paths always return `Completed`.
-/// TODO(ADR 0023): Linux Landlock+seccomp enforcement (the non-macOS fence).
+///
+/// ADR 0023 step 3 — Linux enforcement. On Linux the fence is **Landlock** (kernel
+/// LSM) applied via the `homun-linux-sandbox` helper binary: instead of `sandbox-exec`
+/// we spawn `homun-linux-sandbox --allow-write <root>... -- bash -lc <command>`, which
+/// fences its own filesystem writes to the roots and then execs the command. Same
+/// writable roots as macOS (`workspace_write_roots`), same `NeedsEscalation` detection
+/// (a Landlock denial surfaces as `EACCES`/"Operation not permitted"). Helper-path
+/// resolution fails CLOSED (see `linux_sandbox_command`).
+/// TODO(ADR 0023): seccomp network-off (v1 fences filesystem writes only, allowing
+/// network, at parity with the macOS v1 profile).
 async fn run_in_project(
     state: &AppState,
     thread_id: Option<&str>,
@@ -12116,31 +12214,31 @@ Reformulate it without destructive operations.",
             scan.risk_score
         ));
     }
-    // Enforce the OS fence only when the flag is on AND we're on macOS. When either
-    // is false we take the plain `bash -lc` path via `run_bash_unsandboxed` exactly
-    // as before — the sandboxed branch below only runs on the enforced path.
-    let sandboxed = tool_safety_enabled() && cfg!(target_os = "macos");
+    // Enforce the OS fence only when the flag is on AND we're on a platform with an
+    // enforcement backend (macOS Seatbelt or Linux Landlock). When either is false we
+    // take the plain `bash -lc` path via `run_bash_unsandboxed` exactly as before —
+    // the sandboxed branch below only runs on the enforced path.
+    let sandboxed =
+        tool_safety_enabled() && (cfg!(target_os = "macos") || cfg!(target_os = "linux"));
     if !sandboxed {
         return RunProjectOutcome::Completed(run_bash_unsandboxed(&root, command).await);
     }
-    // Sandboxed path: build the `sandbox-exec` fence, run inline (we need the raw
-    // status + combined output to decide whether to escalate).
-    let policy = crate::tool_safety::SandboxPolicy::WorkspaceWrite {
-        writable_roots: workspace_write_roots(&root, std::env::var("HOME").ok().as_deref()),
-        // v1: fence filesystem writes, allow network (npm/git need it). Stricter
-        // network-off is a follow-up.
-        network_access: true,
-    };
-    let mut cmd = match crate::seatbelt::seatbelt_profile(&policy) {
-        Some(profile) => {
-            let mut c = tokio::process::Command::new("sandbox-exec");
-            c.arg("-p").arg(profile).arg("bash").arg("-lc").arg(command);
-            c
-        }
-        None => {
-            // DangerFullAccess → unreachable here (we build WorkspaceWrite), but
-            // be total: run unsandboxed rather than panic.
-            return RunProjectOutcome::Completed(run_bash_unsandboxed(&root, command).await);
+    // Sandboxed path: build the OS fence command, run inline (we need the raw status +
+    // combined output to decide whether to escalate). The writable roots are computed
+    // the same way on every platform; only the command wrapper differs.
+    let writable_roots = workspace_write_roots(&root, std::env::var("HOME").ok().as_deref());
+    // v1: fence filesystem writes, allow network (npm/git need it). Stricter
+    // network-off is a follow-up on both platforms.
+    let mut cmd = match build_sandbox_command(&writable_roots, command) {
+        Ok(cmd) => cmd,
+        // Fail-closed: the fence could not be constructed (e.g. the Linux helper
+        // binary is missing). NEVER fall back to unsandboxed — surface the same
+        // "sandbox could not start" error the failed-spawn path uses.
+        Err(error) => {
+            return RunProjectOutcome::Completed(format!(
+                "Command NOT executed: the workspace sandbox could not start ({error}). \
+The command was not run unsandboxed."
+            ));
         }
     };
     cmd.current_dir(&root).kill_on_drop(true);
