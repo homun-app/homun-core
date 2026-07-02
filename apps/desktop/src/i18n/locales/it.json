@@ -961,6 +961,7 @@
     "feedbackButton": "Crea archivio log",
     "feedbackBuilding": "Creo l'archivio…",
     "feedbackDone": "Archivio creato: {{path}}",
+    "feedbackError": "Impossibile creare l'archivio. Verifica che ~/.homun/logs sia accessibile.",
     "checkForUpdates": "Controlla aggiornamenti",
     "updateChecking": "Controllo…",
     "updateUpToDate": "Sei alla versione più recente.",

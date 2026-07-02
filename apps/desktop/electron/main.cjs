@@ -606,13 +606,29 @@ ipcMain.handle("lfpa:capture-page", async () => {
 // + a small report.json (versions/specs) — NEVER the SQLite stores (memory,
 // chats, vault). Works with the gateway down — that's exactly when it's needed.
 ipcMain.handle("lfpa:feedback-bundle", async () => {
+  // Sync fs/tar is deliberate: the payload is bounded by log rotation (~25MB
+  // ceiling), the button is disabled during the sub-second freeze, and the flow
+  // must work with the gateway down. Do NOT extend this to unbounded inputs.
   try {
     const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
     const staging = fs.mkdtempSync(path.join(os.tmpdir(), "homun-feedback-"));
     const payload = path.join(staging, `homun-feedback-${stamp}`);
     fs.mkdirSync(payload, { recursive: true });
     if (fs.existsSync(LOGS_DIR)) {
-      fs.cpSync(LOGS_DIR, path.join(payload, "logs"), { recursive: true });
+      // Copy only regular files and directories — skip symlinks/special files.
+      // Defense-in-depth for the privacy invariant (caposaldo #3): a planted
+      // symlink in logs/ must never let the bundle reach outside the logs dir.
+      fs.cpSync(LOGS_DIR, path.join(payload, "logs"), {
+        recursive: true,
+        filter: (src) => {
+          try {
+            const s = fs.lstatSync(src);
+            return s.isDirectory() || s.isFile();
+          } catch {
+            return false;
+          }
+        },
+      });
     }
     const report = {
       generatedAt: new Date().toISOString(),
