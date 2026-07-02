@@ -1196,6 +1196,7 @@ impl MemoryFacade {
             sensitivity: memory.sensitivity,
             privacy_domain: memory.privacy_domain.clone(),
             evidence,
+            confidence: memory.confidence,
         })
     }
 

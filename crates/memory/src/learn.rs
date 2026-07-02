@@ -283,14 +283,21 @@ fn is_gap_fact(text: &str) -> bool {
     const MARKERS_IT: &[&str] = &[
         "non è ancora noto",
         "non è noto",
+        "non è ancora",
+        "non ancora",
         "non risulta",
         "non è chiaro",
         "non è specificato",
+        "non è registrato",
+        "non risulta registrato",
+        "non è stato registrato",
         "non abbiamo",
         "non è stato",
         "non è stata",
+        "non è stato possibile",
         "ancora non",
         "tuttora non",
+        "in attesa di",
         "manca",
         "mancano",
         "sconosciuto",
@@ -298,6 +305,8 @@ fn is_gap_fact(text: &str) -> bool {
         "non noto",
         "nessun titolo",
         "nessuna informazione",
+        "senza precisarne",
+        "non esplicit",
     ];
     const MARKERS_EN: &[&str] = &[
         "not yet known",
@@ -306,7 +315,9 @@ fn is_gap_fact(text: &str) -> bool {
         "is unknown",
         "are unknown",
         "not specified",
+        "not registered",
         "not clear",
+        "not yet registered",
         "we don't have",
         "we do not have",
         "no information",
@@ -315,6 +326,9 @@ fn is_gap_fact(text: &str) -> bool {
         "unspecified",
         "undetermined",
         "no record of",
+        "not explicit",
+        "awaiting confirmation",
+        "waiting for confirmation",
     ];
     MARKERS_IT.iter().any(|m| low.contains(m)) || MARKERS_EN.iter().any(|m| low.contains(m))
 }
@@ -337,8 +351,10 @@ fn overlap_coefficient(a: &std::collections::HashSet<String>, b: &std::collectio
 /// bug in cui "Non è ancora noto il titolo di ruolo" resta attivo e contraddice
 /// "L'utente lavora come senior developer".
 ///
-/// Solo `fact`/`preference` confirmed vengono ritirati (non decisions/goals/open_loops,
-/// che hanno semantica diversa). Ritorna il numero di gap ritirati.
+/// Solo `fact`/`preference`/`open_loop` confirmed vengono ritirati (non
+/// decisions/goals, che hanno semantica diversa). Gli open_loop che esprimono
+/// un gap ("non è noto X") vanno chiusi quando il fatto positivo arriva.
+/// Ritorna il numero di gap ritirati.
 fn retire_contradicted_gaps(
     facade: &MemoryFacade,
     user_id: &UserId,
@@ -364,7 +380,9 @@ fn retire_contradicted_gaps(
     let request = lifecycle_request(user_id, workspace_id);
     let mut retired = 0;
     for m in existing {
-        if m.memory_type != "fact" && m.memory_type != "preference" {
+        // Ritira fact/preference/open_loop che esprimono un gap. Le open_loop
+        // che dicono "non è noto il titolo" vanno chiuse quando il titolo arriva.
+        if !matches!(m.memory_type.as_str(), "fact" | "preference" | "open_loop") {
             continue;
         }
         if !matches!(m.status, MemoryStatus::Confirmed | MemoryStatus::Candidate) {
@@ -398,12 +416,12 @@ pub fn sweep_gap_facts(facade: &MemoryFacade, user: &UserId, workspace: &Workspa
         Ok(items) => items,
         Err(_) => return 0,
     };
-    // Partition: gap facts (candidates for retirement) vs positive facts (the
-    // contradictors). Solo fact/preference confirmed.
+    // Partition: gap memories (candidates for retirement, incl. open_loops that
+    // express a gap) vs positive facts (the contradictors).
     let gaps: Vec<&crate::MemoryRecord> = items
         .iter()
         .filter(|m| {
-            matches!(m.memory_type.as_str(), "fact" | "preference")
+            matches!(m.memory_type.as_str(), "fact" | "preference" | "open_loop")
                 && matches!(m.status, MemoryStatus::Confirmed | MemoryStatus::Candidate)
                 && is_gap_fact(&m.text)
         })
@@ -705,6 +723,16 @@ pub fn persist_learn_extraction(
             m.memory_type.as_str(),
             "fact" | "preference" | "decision" | "goal" | "open_loop"
         )
+    });
+    // Anti-noise: scarta fact di stato di esecuzione del runtime ("Runtime plan
+    // step completed: …", "Runtime plan state: …") — sono tracking transitorio,
+    // non conoscenza durevole. Se persistiti, saturano il briefing budget (4000
+    // char) e spingono fuori i fatti reali (bug: "non ricorda che lavoro faccio").
+    extraction.memories.retain(|m| {
+        let low = m.text.to_lowercase();
+        !(low.starts_with("runtime plan step")
+            || low.starts_with("runtime plan state")
+            || low.starts_with("validation test:"))
     });
     if extraction.memories.is_empty()
         && graph_entities.is_empty()

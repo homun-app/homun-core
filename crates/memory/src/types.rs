@@ -172,6 +172,10 @@ pub struct MemoryContextItem {
     pub sensitivity: DataSensitivity,
     pub privacy_domain: PrivacyDomain,
     pub evidence: Vec<MemoryRef>,
+    /// Confidence score (0.0-1.0). Lets callers prioritize high-confidence facts
+    /// when budget-constrained (e.g. the 4000-char briefing must show conf=1.0
+    /// facts like "works as senior developer" before low-confidence noise).
+    pub confidence: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

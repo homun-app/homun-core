@@ -2434,11 +2434,31 @@ fn gather_profile_memory_with_options(
         facade
             .context_pack(&request)
             .map(|pack| {
-                pack.items
+                let mut items = pack.items;
+                // Sort by confidence DESC: high-confidence facts (e.g. "works as
+                // senior developer", conf 1.0) must survive the budget cut. Without
+                // this, the briefing is filled with low-confidence noise first and
+                // the key facts fall off the 4000-char tail.
+                items.sort_by(|a, b| {
+                    b.confidence
+                        .partial_cmp(&a.confidence)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
+                items
                     .into_iter()
                     // `preferences_only` keeps just the always-relevant tier (how the
                     // user likes to be treated), dropping episodic facts.
                     .filter(|item| !preferences_only || item.memory_type == "preference")
+                    // Anti-noise: scarta fact di tracking del runtime ("Runtime plan
+                    // step/state: …") che saturano il briefing budget e spingono fuori
+                    // i fatti reali. Prevenuti alla fonte in persist_learn_extraction,
+                    // ma i dati legacy vanno comunque filtrati qui.
+                    .filter(|item| {
+                        let low = item.summary.to_lowercase();
+                        !(low.starts_with("runtime plan step")
+                            || low.starts_with("runtime plan state")
+                            || low.starts_with("validation test:"))
+                    })
                     .map(|item| item.summary)
                     .collect()
             })
