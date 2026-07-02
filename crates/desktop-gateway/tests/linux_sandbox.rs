@@ -4,7 +4,9 @@
 //! Locates the `homun-linux-sandbox` helper via `CARGO_BIN_EXE_homun-linux-sandbox`
 //! (Cargo sets this for integration tests), runs commands through it, and asserts the
 //! filesystem fence actually holds: a write INSIDE the allowed root succeeds; a write
-//! OUTSIDE it (into `$HOME`) is denied.
+//! OUTSIDE it (into `$HOME`) is denied. It ALSO covers the read-only mode (ADR 0023 #2):
+//! when the helper is given NO writable roots, ALL writes are denied — including one into
+//! the command's own cwd, which the workspace-write case would otherwise permit.
 //!
 //! GitHub `ubuntu-*` runners generally provide Landlock, so the real assertions run.
 //! If the kernel lacks Landlock, the helper fails closed with "landlock unavailable";
@@ -166,10 +168,7 @@ fn read_only_fence_denies_project_write() {
 
     // Run WITHOUT --allow-write, cwd inside the workspace via an absolute redirect.
     // `|| true` keeps the script exit at 0 so we assert on file existence + the error.
-    let script = format!(
-        "echo evil > {blocked:?} 2>&1 || true",
-        blocked = blocked,
-    );
+    let script = format!("echo evil > {blocked:?} 2>&1 || true");
     let (exit, out) = run_helper_read_only(&script);
 
     if fence_unavailable(exit, &out) {

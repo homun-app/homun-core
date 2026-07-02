@@ -37262,20 +37262,25 @@ async fn run_escalate(
     // File-write escalation (ADR 0023 #2): re-run the exact blocked write, still project-jailed.
     if let Some(tool) = request.tool.as_deref() {
         if tool == "write_file" || tool == "edit_file" {
+            let path = request.path.clone().unwrap_or_default();
             let arguments = if tool == "write_file" {
                 serde_json::json!({
-                    "path": request.path.clone().unwrap_or_default(),
+                    "path": path.clone(),
                     "content": request.content.clone().unwrap_or_default(),
                 })
             } else {
                 serde_json::json!({
-                    "path": request.path.clone().unwrap_or_default(),
+                    "path": path.clone(),
                     "old_string": request.old_string.clone().unwrap_or_default(),
                     "new_string": request.new_string.clone().unwrap_or_default(),
                 })
             };
             // Provenance gate: the tool+arguments must deep-equal the stored card, so
-            // only the EXACT proposed write can run (no arbitrary-write RCE).
+            // only the EXACT proposed write can run (no arbitrary-write RCE). The deep-equal
+            // assumes the model's original blocked tool-call emitted exactly the tool's
+            // schema keys (write_file: path/content; edit_file: path/old_string/new_string);
+            // an extra/missing/non-string key makes a *legit* approval fail closed (403)
+            // rather than falsely pass — safe by design.
             let confirmed = match (&request.thread_id, &request.message_id) {
                 (Some(tid), Some(mid)) => lock_store(&state)
                     .ok()
@@ -37290,23 +37295,28 @@ async fn run_escalate(
                     message: "Re-run a write only from its matching escalation card.".to_string(),
                 });
             }
-            let path = request.path.clone().unwrap_or_default();
             // Re-run through the canonical executor — STILL jail_in_root (project-scoped).
+            // These are blocking `std::fs` calls, so run them off the async executor via
+            // spawn_blocking, exactly like the chat write_file/edit_file dispatch does.
+            let st = state.clone();
+            let tid = request.thread_id.clone();
             let output = if tool == "write_file" {
-                write_project_file(
-                    &state,
-                    request.thread_id.as_deref(),
-                    &path,
-                    &request.content.clone().unwrap_or_default(),
-                )
+                let content = request.content.clone().unwrap_or_default();
+                let path_c = path.clone();
+                tokio::task::spawn_blocking(move || {
+                    write_project_file(&st, tid.as_deref(), &path_c, &content)
+                })
+                .await
+                .unwrap_or_else(|e| format!("Error: {e}"))
             } else {
-                edit_project_file(
-                    &state,
-                    request.thread_id.as_deref(),
-                    &path,
-                    &request.old_string.clone().unwrap_or_default(),
-                    &request.new_string.clone().unwrap_or_default(),
-                )
+                let old = request.old_string.clone().unwrap_or_default();
+                let new = request.new_string.clone().unwrap_or_default();
+                let path_c = path.clone();
+                tokio::task::spawn_blocking(move || {
+                    edit_project_file(&st, tid.as_deref(), &path_c, &old, &new)
+                })
+                .await
+                .unwrap_or_else(|e| format!("Error: {e}"))
             };
             // Rewrite the card marker to a done-note so it can't reopen on reload.
             if let (Some(tid), Some(mid)) = (&request.thread_id, &request.message_id) {
@@ -48327,15 +48337,13 @@ mod tests {
             build_sandbox_command(&SandboxPolicy::ReadOnly, "echo hi > blocked.txt").unwrap();
         cmd.current_dir(&dir);
         let out = cmd.output().await.unwrap();
-        assert!(
-            !out.status.success(),
-            "write must be denied under read-only"
-        );
-        assert!(
-            !dir.join("blocked.txt").exists(),
-            "file must NOT be created"
-        );
+        // Capture the outcome BEFORE cleanup so a failing assert can't leak the temp dir
+        // under $HOME (no test framework to run teardown for us).
+        let status_success = out.status.success();
+        let file_exists = dir.join("blocked.txt").exists();
         let _ = std::fs::remove_dir_all(&dir);
+        assert!(!status_success, "write must be denied under read-only");
+        assert!(!file_exists, "file must NOT be created");
     }
 
     #[test]
