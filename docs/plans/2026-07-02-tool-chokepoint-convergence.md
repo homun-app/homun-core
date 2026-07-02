@@ -39,7 +39,14 @@ smoke live del turno chat (parità: stesso prompt → stessa risposta/tool-trace
 - **Nessun wiring nel loop.** Solo i tipi + unit test dei tipi. Il seam esiste ma non è chiamato.
 - Commit: `feat(gateway): ToolExecutor seam types (chokepoint fase 0)`.
 
-## Fase 1 — Estrai il dispatch inline in UN chokepoint (behavior-preserving)
+## Fase 1 — Estrai il dispatch inline in UN chokepoint (behavior-preserving) — ✅ FATTA
+
+> ✅ **FATTA (2026-07-02).** Dettaglio + decomposizione in [2026-07-02-fase1-chokepoint-extraction.md](2026-07-02-fase1-chokepoint-extraction.md).
+> Commit `26410823`→`9feda778`→`5bc46bc5`→`680f8d20`. Chokepoint `execute_chat_tool(ctx, name, args_raw,
+> call_id) -> String` (main.rs:18391), call-site unico 23815. Parità = compilatore + 452 test == baseline +
+> verifica strutturale verbatim (golden live nondeterministici coi modelli disponibili → non usati). Aggiunto
+> un campo `request` a `ChatToolCtx`; guardia blocked + post-processing (`browse_sources`/vault/`step_evidence`)
+> + harness restano nel loop.
 
 **File:** `crates/desktop-gateway/src/main.rs` (blocco `20422–23664`).
 

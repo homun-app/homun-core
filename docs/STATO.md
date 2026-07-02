@@ -374,13 +374,25 @@ plugin.json+SKILL.md+.mcp.json = la formalizzazione che manca a F0–F3), e2e. P
   spostare confirmation card nel policy layer — NON un refactor piccolo. **Piano fasato per rischio:**
   [plans/2026-07-02-tool-chokepoint-convergence.md](plans/2026-07-02-tool-chokepoint-convergence.md).
   **Fase 0 FATTA** (`59a48f2d`): `crates/desktop-gateway/src/tool_exec.rs` — tipi seam `ToolCall`/`ToolOutcome`/
-  trait `ToolExecutor` (pura addizione, 3 test, non ancora cablato, `#![allow(dead_code)]`).
-  **PROSSIMO = Fase 1** (rischio medio-alto): estrarre il dispatch inline in UNA funzione chokepoint
-  `execute_chat_tool(ctx, call)` behavior-preserving — path chat LIVE, va fatta con subagent+TDD+**parità
-  live** (stesso prompt→stessa risposta/tool-trace). Poi Fase 2 (MCP+Composio via facade, basso rischio) →
-  checkpoint utente → Fasi 3–4 (browser, builtin file/shell-first). Il chokepoint di Fase 5 è il prerequisito
-  della sandbox 0023. NB: `check-ui-contract.mjs` toccato da sessione vault concorrente (task chip vault) —
-  non è mio.
+  trait `ToolExecutor` (pura addizione, non ancora cablato, `#![allow(dead_code)]`).
+  **Fase 1 FATTA** (2026-07-02, 4 commit `26410823`→`9feda778`→`5bc46bc5`→`680f8d20`, piano
+  [plans/2026-07-02-fase1-chokepoint-extraction.md](plans/2026-07-02-fase1-chokepoint-extraction.md)):
+  il chat loop ora dispaccia **OGNI** tool attraverso **un** chokepoint
+  `execute_chat_tool(ctx, name, args_raw, call_id) -> String` (main.rs:18391); il call-site è l'unico punto
+  del loop (23815), la catena `else if name == …` esiste in un solo posto. (1.0) harness `HOMUN_TRACE_DUMP`
+  `tool_trace_dump.rs` (record per-call: hash FNV-1a normalizzato UTF-8-safe, marker `accumulated`, blocked,
+  screenshot flag, confirm-delta) — osservabilità anche in prod; (1.1) `ChatToolCtx<'a>` threadato (rename
+  compiler-checked, tecnica sentinel per completezza sui `&mut`); (1.2) estrazione verbatim, firma `-> String`
+  (i 3 `?` mirano a closure `spawn_blocking`, non propagano). Parità: **compilatore + 452 test == baseline +
+  verifica strutturale verbatim**. Golden live NON usati: solo modelli deboli (ollama gemma4) o cloud (z.ai)
+  raggiungibili → sequenze tool nondeterministiche; l'oracolo deterministico per un refactor del dispatch è
+  compilatore+suite, non un modello fiacco. Post-processing (`browse_sources`/vault marker/`step_evidence`) e
+  guardia blocked+harness restano nel loop (non sono esecuzione tool).
+  **PROSSIMO = Fase 2** (basso rischio): instradare i rami MCP+Composio dentro `execute_chat_tool` a
+  `CapabilityFacade::call_tool` invece di `run_mcp_chat_tool`/`composio_execute_tool` diretti, e spostare le
+  confirmation card nel policy layer. Poi **checkpoint utente** → Fasi 3–4 (browser, builtin file/shell-first).
+  Il chokepoint è ora il prerequisito soddisfatto per agganciare la sandbox 0023 in UN posto.
+  NB: `check-ui-contract.mjs` toccato da sessione vault concorrente (task chip vault) — non è mio.
 - **Debito pre-esistente sfiorato:** `test:ui-contract` era rosso per drift `ChatView.tsx`↔script
   (`eventParts` aggiunto a `RichMessage` da altra sessione); allineato lo script nel Task 8.
 
