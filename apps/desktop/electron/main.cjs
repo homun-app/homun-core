@@ -48,6 +48,22 @@ process.env.HOMUN_DESKTOP_GATEWAY_TOKEN = GATEWAY_TOKEN;
 // (crate/binary "local-first-desktop-gateway", HOMUN_* env) are unchanged.
 app.setName("Homun");
 
+// Two app instances would spawn two gateways racing on the same port and the
+// same ~/.homun SQLite files — nondeterministic contention. First instance
+// wins; a second launch just focuses the existing window.
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+if (!hasSingleInstanceLock) {
+  app.quit();
+}
+app.on("second-instance", () => {
+  const win = BrowserWindow.getAllWindows()[0] ?? null;
+  if (win) {
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+  }
+});
+
 // Public page where each release's notes live (also where electron-updater pulls
 // installers from). Surfaced from the "About" menu and the Settings version card.
 const RELEASES_URL = "https://github.com/homun-app/homun-releases/releases";
@@ -669,6 +685,7 @@ ipcMain.handle("lfpa:update-install", async (event) => {
 });
 
 app.whenReady().then(async () => {
+  if (!hasSingleInstanceLock) return; // quitting — don't spawn the gateway
   applyAppMenu();
   if (process.platform === "darwin" && app.dock) {
     const iconPath = brandIconPath();
