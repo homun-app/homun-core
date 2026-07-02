@@ -4,7 +4,17 @@ Date: 2026-07-02
 
 ## Status
 
-**Proposed.** Definisce il **Pilastro 1 di P1** ([confronto-codex-produzione.md](../confronto-codex-produzione.md) §3):
+**Accepted — implementazione in corso.** Aggiornamento **2026-07-03**: l'**asse sandbox** è implementato e
+validato eseguendo (macOS Seatbelt + Linux Landlock via CI). Esiste UNA sorgente di risoluzione
+`resolved_sandbox_mode()` (precedenza env > `RuntimeSettings.sandbox_mode` persistito > default `danger`), onorata
+da **tutti i tool effettful**: `run_in_project` (bash) costruisce la policy dal resolver (`read-only` reale),
+e `write_file`/`edit_file` sono gated al chokepoint (`read-only` → escalation card che riesegue project-jailed su
+approvazione, con gate provenance anti-RCE). Default `danger` = behavior-preserving finché il flip non è deciso.
+**Pendenti:** Settings UI (asse **approval** + esporre il mode, poi flip del default a `workspace-write`), Windows
+(approval-only), skill confirmation policies (Step 5), network-off opzionale. Spec+piano:
+[specs/2026-07-03-sandbox-policy-resolution-design.md](../superpowers/specs/2026-07-03-sandbox-policy-resolution-design.md).
+
+Definisce il **Pilastro 1 di P1** ([confronto-codex-produzione.md](../confronto-codex-produzione.md) §3):
 portare l'esecuzione dei tool (shell, filesystem, processi) da un modello **cooperativo**
 (il modello *chiede* il permesso) a un modello **enforced** (il processo *non può* uscire dal
 recinto), con una **policy di approvazione unica** al posto dei gate sparsi per-capability.
@@ -118,6 +128,11 @@ eseguire un tool (`CapabilityFacade::call_tool` o il suo successore dopo la sepa
 - **Invarianti:** default **mai** `danger-full-access`; il livello è di **codice**, non inferito dal
   modello (caposaldo #2/#6); local-first e privacy preservati (caposaldo #3) — il recinto è locale, non
   richiede cloud.
+- **Limite onesto — MCP/Composio (documentato, non finto enforcement):** l'asse sandbox **non recinta** i tool
+  MCP/Composio. Sono processi esterni / chiamate di rete, non sottoprocessi che il gateway spawna sotto il fence
+  OS (identico a Codex: gli MCP server girano non-sandboxati). Il loro gate è l'**asse approval** (già cablato via
+  `emit_approval_card`). Sotto `read-only` un tool MCP/Composio effettful resta gated dall'approval, non dal
+  sandbox: non lo classifichiamo (footprint arbitrario) e **non fingiamo** un recinto che non c'è.
 
 ## Sequenza (come si lega alla separazione motore)
 

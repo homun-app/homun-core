@@ -3,7 +3,7 @@
 > Aggiornato a OGNI sessione (vedi [METHODOLOGY.md](METHODOLOGY.md) §6). Resta **conciso**: è
 > uno *stato*, non un changelog (lo storico va in `archive/`). Da qui si riparte dopo una
 > compattazione o a inizio sessione.
-> **Ultimo aggiornamento: 2026-07-01.**
+> **Ultimo aggiornamento: 2026-07-03.**
 
 ## Dove siamo
 
@@ -326,6 +326,39 @@ bi-popolazione (caposaldo #2) È eseguibile qui: `python3 scripts/eval_suite.py 
 chat di default = deepseek-v4-pro:cloud (Z.ai, tier **Balanced**); Composio non configurato.
 
 ## Cosa è stato fatto (rolling, conciso)
+
+**Sessione 2026-07-02/03 (notturna, autonoma) — ADR 0023 #2 "SANDBOX ONESTO" COMPLETO (branch `feat/piano-ui-completion`):**
+Run autonomo per massimizzare l'allineamento a Codex (direttiva utente: scelte SOTA delegate; vedi
+[[homun-overnight-codex-alignment]]). Piano
+[plans/2026-07-03-sandbox-policy-resolution.md](superpowers/plans/2026-07-03-sandbox-policy-resolution.md)
++ spec [specs/2026-07-03-sandbox-policy-resolution-design.md](superpowers/specs/2026-07-03-sandbox-policy-resolution-design.md),
+eseguito subagent-driven + TDD (implementer + doppia review spec/qualità per task, security-audit sul task provenance).
+**Scoperta che ricalibra il gap:** NESSUN tool risolveva una `SandboxPolicy` selezionabile — bash hardcodava
+workspace-write, i file-tool hardcodavano il project-jail, i rami approval hardcodavano `DangerFullAccess`.
+`write_file`/`edit_file` NON giravano `DangerFullAccess` (STATO precedente impreciso): erano già project-jailed
+via `jail_in_root`, ma scollegati dall'asse policy. Il vero #2 = **una sola sorgente di risoluzione onorata da
+tutti i tool effettful**. Fatto:
+- **`SandboxMode` + `resolved_sandbox_mode()`** (precedenza env `HOMUN_SANDBOX_MODE`/`HOMUN_TOOL_SAFETY`-alias >
+  `RuntimeSettings.sandbox_mode` persistito > default `danger`); `tool_safety_enabled()` derivato (`!= Danger`).
+  Behavior-preserving (default danger → tutto identico; `HOMUN_TOOL_SAFETY=1` → workspace-write come prima). `0cdabf83`.
+- **Bash** `run_in_project` costruisce la policy dal resolver: `read-only` reale (writable-roots vuoti → fence nega).
+  **Validato ESEGUENDO su macOS** (`read_only_bash_denies_project_write` — scrittura negata, exit≠0, file assente;
+  bug del test scoperto eseguendo: `$TMPDIR` è sempre scrivibile nel profilo read-only → dir spostata sotto `$HOME`).
+  CI Linux esteso (`tests/linux_sandbox.rs` read-only nega). `f0cbab89`+`fe5d681d`.
+- **File-tool** `write_file`/`edit_file`: gate al chokepoint (`sandbox_gate_write` + helper puro
+  `write_needs_read_only_escalation`) → sotto `read-only` **card escalation** invece di eseguire; workspace-write/danger
+  invariati (sempre `jail_in_root`, least-privilege: mai fuori progetto neanche in danger). `804c075f`.
+- **Escalation esteso alle scritture** (`run_escalate` + `sandbox_escalate_write_matches`): riesegue la scrittura
+  su approvazione, **project-jailed**, con gate provenance anti-RCE (tool+arguments deep-equal vs card memorizzata,
+  no-card→403). **Security-audit: SOUND** (nessun RCE arbitrario, nessuna jail escape, nessun panic/DoS). Rewriter
+  generalizzato in helper condiviso (bash byte-identico). `1a2f6b96`.
+- **Frontend** escalate card generalizzata a union bash|write (discriminata da `tool`), bridge `runEscalate(payload)`;
+  build + ui-contract verdi, bash wire-identico. `d4132247`.
+- **Cleanup review nits** (spawn_blocking sul re-run, test dir cleanup, doc drift) + docs (ADR 0023 + STATO).
+**MCP/Composio = limite onesto documentato** (asse sandbox non li recinta — processi esterni, come Codex; gate = asse
+approval). **PROSSIMO (coda notturna):** **#1 Settings UI** (`sandbox_mode`+`approval_policy`) + **flip default a
+`workspace-write`** (ora onesto perché il recinto copre bash+scritture); poi **`apply_patch`** (tool-firma Codex),
+poi **orchestrazione subagenti** (design ADR + slice; priorità utente). NON toccare `check-ui-contract.mjs` (sessione vault).
 
 **Sessione 2026-07-02 — gap analysis production-readiness vs Codex.app + P0 IMPLEMENTATO (branch `feat/p0-production-hygiene`):**
 Analizzato il bundle distribuito di Codex (`/Users/fabio/Projects/codex/Contents`: asar estratto,

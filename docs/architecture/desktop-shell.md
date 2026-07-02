@@ -106,10 +106,19 @@ Base già a norma: `contextIsolation:true`, `sandbox:true`, `nodeIntegration:fal
   memoria, iframe noVNC) su un build firmato reale.
 - **devTools off** nel packaged (`webPreferences.devTools`), salvo dev o flag `HOMUN_ELECTRON_DEVTOOLS`.
 
+**Hardening P1 — Pilastro 1 (asse sandbox: fatto, 2026-07-03):**
+- **Sandbox OS-level a 3 livelli** imposto lato gateway sull'esecuzione tool. UNA sorgente di risoluzione
+  `resolved_sandbox_mode()` (env > `RuntimeSettings.sandbox_mode` > default `danger`) onorata da **tutti i tool
+  effettful**: `run_in_project` fenced via **Seatbelt** (`seatbelt.rs`, macOS) / **Landlock**
+  (`landlock_fence.rs` + `bin/homun-linux-sandbox.rs`, Linux), e `write_file`/`edit_file` gated al chokepoint
+  `execute_chat_tool` (read-only → escalation card che riesegue project-jailed su approvazione, provenance anti-RCE).
+  Enum + policy pura in `tool_safety.rs`. `read-only` validato **eseguendo** (macOS runtime test; Linux via CI
+  `landlock-fence`). MCP/Composio non recintati (processi esterni) → gated dall'asse approval (limite documentato).
+  Vedi [ADR 0023](../decisions/0023-sandbox-enforcement-and-unified-approval.md).
+
 **Residui P1/P2 (non fatti — vincoli espliciti):**
-- **Sandbox OS-level a 3 livelli + approval policy unica** (Pilastro 1, il valore vero di P1) — **in
-  attesa**: va progettato **con** la separazione motore/gateway (imporrebbe il recinto nel punto che
-  quella separazione sposta; farlo ora = rifarlo). Caposaldo #5.
+- **Settings UI (asse approval + esporre il mode) + flip del default a `workspace-write`** — prossimo passo
+  (il recinto è ora onesto: copre bash + scritture, quindi il flip non maschera buchi).
 - **Firma Windows/Linux + publish automatico** (Pilastro 2) — **bloccato su input utente**: la firma
   richiede certificati/segreti (Azure Trusted Signing per Windows); l'auto-publish della release
   ribalterebbe il gate di revisione *draft* deliberato in `build.yml` → decisione di processo, non
