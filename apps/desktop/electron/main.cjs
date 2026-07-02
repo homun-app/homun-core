@@ -7,6 +7,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const { createLogWriter, resolveLogsDir, pipeChildStream } = require("./lib/logging.cjs");
+const { nextRestartDelay } = require("./lib/watchdog.cjs");
 
 // Shell-side diagnostics (~/.homun/logs/desktop.log). Created eagerly so even
 // a failure during startup leaves a trail.
@@ -24,6 +25,7 @@ const RESOURCES_ROOT =
   process.env.HOMUN_DESKTOP_RESOURCES_DIR ??
   (app.isPackaged ? process.resourcesPath : REPO_ROOT);
 let gatewayProcess = null;
+let gatewayRestarts = []; // timestamps of watchdog respawns (see lib/watchdog.cjs)
 let isQuitting = false;
 const mainWindows = new Set();
 
@@ -50,18 +52,21 @@ app.setName("Homun");
 
 // Two app instances would spawn two gateways racing on the same port and the
 // same ~/.homun SQLite files — nondeterministic contention. First instance
-// wins; a second launch just focuses the existing window.
+// wins; a second launch just focuses the existing window. The lock file lives
+// in userData, which derives from the app name, so requestSingleInstanceLock()
+// must stay AFTER app.setName("Homun") — moving it changes the lock identity.
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 if (!hasSingleInstanceLock) {
   app.quit();
 }
 app.on("second-instance", () => {
+  desktopLog.log("second instance blocked — focusing existing window");
   const win = BrowserWindow.getAllWindows()[0] ?? null;
   if (win) {
     if (win.isMinimized()) win.restore();
     win.show();
     win.focus();
-  }
+  } else if (app.isReady()) createWindow(); // macOS: app alive with all windows closed
 });
 
 // Public page where each release's notes live (also where electron-updater pulls
@@ -371,11 +376,36 @@ function spawnGateway() {
   child.on("exit", (code, signal) => {
     if (gatewayProcess !== child) return; // stale exit from a replaced child
     gatewayProcess = null;
-    if (!isQuitting) {
-      const line = `gateway exited unexpectedly (code=${code} signal=${signal})`;
-      console.error(line);
-      desktopLog.log(line);
+    if (isQuitting) return;
+    const line = `gateway exited unexpectedly (code=${code} signal=${signal})`;
+    console.error(line);
+    desktopLog.log(line);
+
+    // The token and port don't change across respawns (they're constants of
+    // this shell process), so the renderer recovers by itself as soon as
+    // /api/health is back — no extra coordination needed beyond restarting
+    // the child process.
+    const delay = nextRestartDelay(gatewayRestarts, Date.now());
+    if (delay === null) {
+      desktopLog.log("gateway crash-loop: auto-restart budget exhausted, giving up");
+      void dialog
+        .showMessageBox({
+          type: "error",
+          title: "Homun",
+          message: "Il motore di Homun continua ad arrestarsi.",
+          detail: `I log diagnostici sono in ${LOGS_DIR}. Riavvia l'app; se il problema persiste, usa "Segnala un problema" nelle Impostazioni.`,
+          buttons: ["Apri i log", "Chiudi"],
+        })
+        .then((r) => {
+          if (r.response === 0) void shell.openPath(LOGS_DIR);
+        });
+      return;
     }
+    gatewayRestarts.push(Date.now());
+    desktopLog.log(`watchdog: respawning gateway in ${delay}ms`);
+    setTimeout(() => {
+      if (!isQuitting && !gatewayProcess) spawnGateway();
+    }, delay);
   });
 }
 
