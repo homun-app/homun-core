@@ -1903,6 +1903,22 @@ async function electronFsAuthorize(
   });
 }
 
+/** ADR 0023 — on-failure sandbox escalation: re-run a shell command that failed under
+ *  the Seatbelt workspace sandbox with FULL access (unsandboxed). `ctx` lets the backend
+ *  rewrite the originating message to a done-note so the card can't reopen. */
+async function electronRunEscalate(
+  command: string,
+  cwd: string,
+  ctx?: { threadId?: string; messageId?: string },
+): Promise<{ ok: boolean; output?: string; summary?: string }> {
+  return gatewayPostJson("/api/capabilities/run/escalate", {
+    command,
+    cwd,
+    ...(ctx?.threadId ? { thread_id: ctx.threadId } : {}),
+    ...(ctx?.messageId ? { message_id: ctx.messageId } : {}),
+  });
+}
+
 export interface VaultProposalActionInput {
   category: string;
   label: string;
@@ -2730,6 +2746,11 @@ export const coreBridge = {
     op: string,
     ctx?: { threadId?: string; messageId?: string },
   ) => electronFsAuthorize(path, op, ctx),
+  runEscalate: (
+    command: string,
+    cwd: string,
+    ctx?: { threadId?: string; messageId?: string },
+  ) => electronRunEscalate(command, cwd, ctx),
   vaultProposalAccept: (input: VaultProposalActionInput) =>
     electronVaultProposalAccept(input),
   vaultProposalDismiss: (input: VaultProposalActionInput) =>

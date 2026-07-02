@@ -113,6 +113,7 @@ import {
   COMPOSIO_CONFIRM_RE,
   MCP_CONFIRM_RE,
   FS_AUTHORIZE_RE,
+  SANDBOX_ESCALATE_RE,
   CONNECT_SUGGEST_RE,
   COMPOSIO_DONE_RE,
   COMPOSIO_RECONNECT_RE,
@@ -5929,6 +5930,7 @@ function parseComposioConfirm(text: string, eventParts?: ChatEventPart[]): {
   doneTool: string | null;
   reconnectSlug: string | null;
   fsAuthorize: { path: string; op: string } | null;
+  sandboxEscalate: { command: string; cwd: string } | null;
   connectSuggest: ConnectSuggest | null;
   vaultPropose: VaultProposal | null;
   vaultReveal: VaultRevealProposal | null;
@@ -5971,6 +5973,23 @@ function parseComposioConfirm(text: string, eventParts?: ChatEventPart[]): {
       const parsed = JSON.parse(fsMatch[1]) as { path?: string; op?: string };
       if (parsed && typeof parsed.path === "string") {
         fsAuthorize = { path: parsed.path, op: parsed.op === "read" ? "read" : "list" };
+      }
+    } catch {
+      /* malformed → just hide it */
+    }
+  }
+  // ADR 0023: shell command blocked by the Seatbelt sandbox → in-chat "run without
+  // sandbox" card. Payload is a tool call: {arguments:{command,cwd}}.
+  let sandboxEscalate: { command: string; cwd: string } | null = null;
+  const escMatch = text.match(SANDBOX_ESCALATE_RE);
+  if (escMatch) {
+    try {
+      const parsed = JSON.parse(escMatch[1]) as {
+        arguments?: { command?: string; cwd?: string };
+      };
+      const command = parsed?.arguments?.command;
+      if (typeof command === "string") {
+        sandboxEscalate = { command, cwd: parsed.arguments?.cwd ?? "" };
       }
     } catch {
       /* malformed → just hide it */
@@ -6113,6 +6132,7 @@ function parseComposioConfirm(text: string, eventParts?: ChatEventPart[]): {
     doneTool,
     reconnectSlug,
     fsAuthorize,
+    sandboxEscalate,
     connectSuggest,
     vaultPropose,
     vaultReveal,
@@ -6163,6 +6183,7 @@ const AssistantMessageBody = memo(
     doneTool,
     reconnectSlug,
     fsAuthorize,
+    sandboxEscalate,
     connectSuggest,
     vaultPropose,
     vaultReveal,
@@ -6190,6 +6211,14 @@ const AssistantMessageBody = memo(
         <FsAuthorizeCard
           path={fsAuthorize.path}
           op={fsAuthorize.op}
+          messageId={messageId}
+          threadId={threadId}
+        />
+      )}
+      {sandboxEscalate && !streaming && (
+        <SandboxEscalateCard
+          command={sandboxEscalate.command}
+          cwd={sandboxEscalate.cwd}
           messageId={messageId}
           threadId={threadId}
         />
@@ -7190,6 +7219,98 @@ function FsAuthorizeCard({
               : op === "read"
                 ? "Autorizza e leggi"
                 : "Autorizza ed elenca"}
+          </span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** ADR 0023 — on-failure sandbox escalation card. A shell command failed under the
+ *  Seatbelt workspace sandbox; approving re-runs it UNSANDBOXED with full access.
+ *  Mirrors FsAuthorizeCard: the backend rewrites the originating message to a
+ *  done-note (via ctx), so the card can't reopen after a successful run. */
+function SandboxEscalateCard({
+  command,
+  cwd,
+  messageId,
+  threadId,
+}: {
+  command: string;
+  cwd: string;
+  messageId?: string;
+  threadId?: string;
+}) {
+  const { t } = useTranslation();
+  const [status, setStatus] = useState<"idle" | "running" | "done" | "error">("idle");
+  const [output, setOutput] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+
+  const run = async () => {
+    setStatus("running");
+    setNote(null);
+    try {
+      const result = await coreBridge.runEscalate(command, cwd, { threadId, messageId });
+      if (!result.ok) {
+        setStatus("error");
+        setNote(result.summary || t("chat.failed"));
+        return;
+      }
+      setOutput(result.output ?? "");
+      setStatus("done");
+    } catch (error) {
+      setStatus("error");
+      setNote((error as Error).message);
+    }
+  };
+
+  if (status === "done") {
+    return (
+      <div className="cmp-confirm">
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <ShieldCheck size={15} />
+          <strong>Command ran with full access</strong>
+        </div>
+        {output && (
+          <pre
+            style={{
+              whiteSpace: "pre-wrap",
+              fontSize: 12,
+              marginTop: 8,
+              maxHeight: 300,
+              overflow: "auto",
+            }}
+          >
+            {output}
+          </pre>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="cmp-confirm">
+      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <SquareTerminal size={15} />
+        <strong>This command was blocked by the workspace sandbox. Run it with full access?</strong>
+      </div>
+      <code style={{ fontSize: 12, wordBreak: "break-all", display: "block", marginTop: 4 }}>
+        {command}
+      </code>
+      <p className="set-hint" style={{ fontSize: 12 }}>
+        It will run outside the sandbox with full access to your machine. Only approve commands you trust.
+      </p>
+      {status === "error" && <p className="cmp-confirm-err">{t("chat.failed")}: {note}</p>}
+      <div className="cmp-confirm-actions">
+        <button
+          className="set-btn primary"
+          type="button"
+          disabled={status === "running"}
+          onClick={() => void run()}
+        >
+          <SquareTerminal size={14} />
+          <span style={{ marginLeft: 6 }}>
+            {status === "running" ? "Running…" : "Run without sandbox"}
           </span>
         </button>
       </div>
