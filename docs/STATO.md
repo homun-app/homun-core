@@ -388,10 +388,24 @@ plugin.json+SKILL.md+.mcp.json = la formalizzazione che manca a F0–F3), e2e. P
   raggiungibili → sequenze tool nondeterministiche; l'oracolo deterministico per un refactor del dispatch è
   compilatore+suite, non un modello fiacco. Post-processing (`browse_sources`/vault marker/`step_evidence`) e
   guardia blocked+harness restano nel loop (non sono esecuzione tool).
-  **PROSSIMO = Fase 2** (basso rischio): instradare i rami MCP+Composio dentro `execute_chat_tool` a
-  `CapabilityFacade::call_tool` invece di `run_mcp_chat_tool`/`composio_execute_tool` diretti, e spostare le
-  confirmation card nel policy layer. Poi **checkpoint utente** → Fasi 3–4 (browser, builtin file/shell-first).
-  Il chokepoint è ora il prerequisito soddisfatto per agganciare la sandbox 0023 in UN posto.
+  **Fase 2 (routing-facade) RISCOPERTA e RIVISTA** (map 2026-07-02): il piano la dava "basso rischio", ma la
+  realtà è diversa — (a) **MCP passa GIÀ per `CapabilityFacade::call_tool`** dentro `run_mcp_chat_tool`
+  (main.rs:33985) → routing quasi no-op; (b) **Composio NON ha provider** (ritirato apposta, lib.rs:26, per
+  mismatch shape v3) → instradarlo = ricostruire infra ritirata (MEDIO); (c) la facade **non ha concetto di
+  approvazione** (decisione binaria, no stato "needs-confirm"; grant autonomy 3 → write executable) → spostare
+  le card nel policy layer = infra nuova + policy stateful (ALTO), e le card restano UI-coupled nel branch. Il
+  side-effect (`record_connector_run`/artifact-memory async/timeout/error-strings) resta nel branch comunque.
+  **PROSSIMO = pivot ad ADR 0023 al chokepoint (direttiva utente: "il più vicino a come è strutturato Codex").**
+  Verificato sul bundle Codex reale: usa esattamente `SandboxPolicy` (read-only/workspace-write/danger-full-access)
+  + `AskForApproval` (untrusted/on-failure/on-request/never) + Seatbelt/Landlock/seccomp — ADR 0023 È Codex.
+  La Fase 1 ha soddisfatto il prerequisito (chokepoint = `execute_chat_tool`). **Step 2a** (prossima azione):
+  introdurre i due enum Codex + una `assess_tool_safety(name,args,sandbox,approval,ctx) -> SafetyDecision`
+  (equivalente `safety.rs::assess_command_safety`) in cima a `execute_chat_tool`, **behavior-preserving**
+  (default `danger-full-access` + comportamento approval attuale dietro flag), **fondendo le due card
+  MCP/Composio duplicate in UN gate unificato** (= Option A, la metà "approval" dell'ADR). Poi Step 2b
+  (classifica footprint tool, shadow-log), Step 3 (enforcement OS: Seatbelt macOS prima), Step 4 (Settings UI
+  + Windows/Linux), Step 5 (confirmation policy dichiarative nelle skill). La convergenza-facade (Fasi 2b/3/4
+  vecchie) è DEROGATA: non è Codex e non è prerequisito, il chokepoint c'è già.
   NB: `check-ui-contract.mjs` toccato da sessione vault concorrente (task chip vault) — non è mio.
 - **Debito pre-esistente sfiorato:** `test:ui-contract` era rosso per drift `ChatView.tsx`↔script
   (`eventParts` aggiunto a `RichMessage` da altra sessione); allineato lo script nel Task 8.
