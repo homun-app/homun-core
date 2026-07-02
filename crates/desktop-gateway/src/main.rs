@@ -30,6 +30,9 @@ mod sandbox;
 mod task_registry;
 mod temporal;
 mod tool_exec;
+// Codex-style tool-safety policy vocabulary + pure decision fn (ADR 0023, step 1;
+// not wired yet — seam types only).
+mod tool_safety;
 mod tool_trace_dump;
 
 use axum::{
