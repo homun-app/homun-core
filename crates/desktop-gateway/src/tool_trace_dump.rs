@@ -13,11 +13,10 @@
 //! a silent no-op: the harness must NEVER crash or interrupt a chat turn.
 //!
 //! No new crate dependencies: normalization is hand-rolled scanning, and the
-//! hash is `DefaultHasher` (fixed keys → deterministic across processes), not
-//! sha2/blake3.
-
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
+//! hash is a fully-specified FNV-1a (64-bit) over the UTF-8 bytes. FNV-1a is
+//! deterministic AND toolchain-stable — unlike `DefaultHasher`, whose algorithm
+//! is unspecified and may change on a compiler upgrade, which would silently rot
+//! committed goldens. No sha2/blake3 dependency needed.
 
 /// One line of the `tool-trace.jsonl` dump: a normalized fingerprint of a single
 /// tool-call iteration, taken at the loop boundary.
@@ -27,9 +26,9 @@ pub struct ToolTraceRecord {
     /// 0-based index of the call within the round.
     pub idx: usize,
     pub name: String,
-    /// hex of DefaultHasher over normalize(args_raw)
+    /// FNV-1a hex over normalize(args_raw)
     pub args_hash: String,
-    /// hex of DefaultHasher over normalize(result)
+    /// FNV-1a hex over normalize(result)
     pub result_hash: String,
     /// result.chars().count()
     pub result_len: usize,
@@ -39,9 +38,24 @@ pub struct ToolTraceRecord {
     pub acc_delta_len: usize,
     /// marker tokens that appeared in accumulated during this call
     pub acc_markers: Vec<String>,
-    pub pending_confirm: bool,
-    /// messages.len() after - before (byte len is n/a; this is element count)
+    /// True only for the call that RAISED `pending_confirm` this iteration
+    /// (`pending_confirm && !pc_before`). `pending_confirm` lives outside the
+    /// loop and is never reset, so recording its raw value would misattribute
+    /// the flag to every later call in the round.
+    pub pending_confirm_raised: bool,
+    /// messages.len() after - before (element count). On the normal recorded
+    /// path this is invariantly 1 (the tool push); kept as cheap future-proofing
+    /// and to catch a dispatch arm that pushes extra messages inside the loop.
     pub msgs_pushed: usize,
+    /// True when this call hit the `workflow_route_blocked_tool_message` arm
+    /// (pushes a tool message then `continue`s). The upcoming extraction handles
+    /// this arm specially, so it must be visible to the oracle.
+    pub blocked: bool,
+    /// True when, after this arm ran, a browser image is pending
+    /// (`pending_browser_image.is_some()`) — i.e. the browser_screenshot arm's
+    /// side effect that pushes a SECOND message AFTER the loop. `msgs_pushed`
+    /// cannot see that later push, so this flag fingerprints the side effect.
+    pub browser_image_set: bool,
 }
 
 /// Normalize text so fingerprints are stable across runs/machines: strip the
@@ -71,39 +85,48 @@ fn normalize_with_home(s: &str, home: Option<&str>) -> String {
     replace_uuids(&ts_stripped)
 }
 
-/// Replace every `\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}` occurrence with `<TS>`.
-/// Byte-oriented scan over ASCII digits/`-`/`T`/`:`; safe because all matched
-/// bytes are ASCII (single-byte in UTF-8) and we copy the rest verbatim.
+/// Replace every ISO-8601 timestamp with `<TS>`.
+///
+/// The core pattern is `\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}` (19 chars),
+/// optionally followed by a fractional part (`.` + 1+ digits) and/or a timezone
+/// suffix (`Z`, or `+`/`-` then `dd:dd`) — see [`timestamp_match_end`].
+///
+/// UTF-8 safety: the byte scan is used ONLY to DETECT match spans (all matched
+/// bytes are ASCII). Non-matched content is copied by slicing the ORIGINAL
+/// `&str` (`&s[last..start]`), which always lands on char boundaries because a
+/// match never starts/ends inside a multi-byte char. So accented text, the
+/// `‹‹MARKER››` guillemets, and emoji survive intact.
 fn replace_timestamps(s: &str) -> String {
     let bytes = s.as_bytes();
     let n = bytes.len();
     let mut out = String::with_capacity(n);
+    let mut last = 0; // start of the not-yet-copied original slice
     let mut i = 0;
     while i < n {
-        if matches_timestamp(bytes, i) {
+        if let Some(end) = timestamp_match_end(bytes, i) {
+            out.push_str(&s[last..i]);
             out.push_str("<TS>");
-            i += TIMESTAMP_LEN;
+            last = end;
+            i = end;
         } else {
-            // Copy this byte. Since we only ever advance `i` past a full ASCII
-            // match or by 1 on a raw byte, and multi-byte UTF-8 leading/cont
-            // bytes are all >= 0x80 (never matched by the digit patterns), this
-            // preserves UTF-8 boundaries.
-            out.push(bytes[i] as char);
             i += 1;
         }
     }
+    out.push_str(&s[last..]);
     out
 }
 
-const TIMESTAMP_LEN: usize = 19; // 2026-07-02T13:45:00
+const TIMESTAMP_CORE_LEN: usize = 19; // 2026-07-02T13:45:00
 
-fn matches_timestamp(b: &[u8], i: usize) -> bool {
-    // Pattern positions: dddd-dd-ddTdd:dd:dd
-    if i + TIMESTAMP_LEN > b.len() {
-        return false;
+/// If a timestamp starts at `i`, return the byte offset just past it (core plus
+/// any optional fractional/timezone suffix); otherwise `None`. Bounded and
+/// panic-safe: every index is checked against `b.len()`; all bytes are ASCII.
+fn timestamp_match_end(b: &[u8], i: usize) -> Option<usize> {
+    if i + TIMESTAMP_CORE_LEN > b.len() {
+        return None;
     }
     let is_d = |k: usize| b[i + k].is_ascii_digit();
-    is_d(0)
+    let core_ok = is_d(0)
         && is_d(1)
         && is_d(2)
         && is_d(3)
@@ -121,25 +144,53 @@ fn matches_timestamp(b: &[u8], i: usize) -> bool {
         && is_d(15)
         && b[i + 16] == b':'
         && is_d(17)
-        && is_d(18)
+        && is_d(18);
+    if !core_ok {
+        return None;
+    }
+    let mut end = i + TIMESTAMP_CORE_LEN;
+    // Optional fractional part: '.' then 1+ digits (greedy).
+    if end < b.len() && b[end] == b'.' && end + 1 < b.len() && b[end + 1].is_ascii_digit() {
+        end += 1; // consume '.'
+        while end < b.len() && b[end].is_ascii_digit() {
+            end += 1;
+        }
+    }
+    // Optional timezone suffix: 'Z', or ('+'|'-') then dd:dd.
+    if end < b.len() {
+        if b[end] == b'Z' {
+            end += 1;
+        } else if (b[end] == b'+' || b[end] == b'-') && end + 5 < b.len() {
+            let d = |k: usize| b[end + k].is_ascii_digit();
+            if d(1) && d(2) && b[end + 3] == b':' && d(4) && d(5) {
+                end += 6; // ±dd:dd
+            }
+        }
+    }
+    Some(end)
 }
 
-/// Replace every canonical hyphenated hex UUID
-/// (`8-4-4-4-12` hex digits) with `<UUID>`. Hand-written byte scan.
+/// Replace every canonical hyphenated hex UUID (`8-4-4-4-12`) with `<UUID>`.
+///
+/// Same UTF-8-safe strategy as [`replace_timestamps`]: byte scan detects the
+/// match span; non-matched content is copied via original-`&str` slices.
 fn replace_uuids(s: &str) -> String {
     let bytes = s.as_bytes();
     let n = bytes.len();
     let mut out = String::with_capacity(n);
+    let mut last = 0;
     let mut i = 0;
     while i < n {
         if matches_uuid(bytes, i) {
+            out.push_str(&s[last..i]);
             out.push_str("<UUID>");
+            last = i + UUID_LEN;
             i += UUID_LEN;
         } else {
-            out.push(bytes[i] as char);
             i += 1;
         }
     }
+    out.push_str(&s[last..]);
     out
 }
 
@@ -203,13 +254,22 @@ pub fn extract_markers(prev_len: usize, accumulated: &str) -> Vec<String> {
     out
 }
 
-/// Hex of a `DefaultHasher` over `s`. `DefaultHasher::new()` uses fixed keys, so
-/// the digest is deterministic across processes — good enough for a parity
-/// fingerprint, and it avoids pulling in a crypto-hash dependency.
+/// 64-bit FNV-1a hex digest of `s`'s UTF-8 bytes.
+///
+/// Fully specified (offset basis `0xcbf29ce4_84222325`, prime `0x100000001b3`,
+/// wrapping multiply), so the digest is identical across processes AND across
+/// Rust toolchains. This is what keeps committed goldens valid over a compiler
+/// upgrade — `DefaultHasher`'s algorithm is unspecified and could change. Not a
+/// crypto hash and not meant to be one; it is a stable parity fingerprint.
 pub fn hash_hex(s: &str) -> String {
-    let mut h = DefaultHasher::new();
-    s.hash(&mut h);
-    format!("{:016x}", h.finish())
+    const OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
+    const PRIME: u64 = 0x0000_0100_0000_01b3;
+    let mut h = OFFSET_BASIS;
+    for &byte in s.as_bytes() {
+        h ^= byte as u64;
+        h = h.wrapping_mul(PRIME);
+    }
+    format!("{h:016x}")
 }
 
 /// Whether the dump is armed (`HOMUN_TRACE_DUMP=1`).
@@ -366,11 +426,46 @@ mod tests {
             result_head: String::new(),
             acc_delta_len: 0,
             acc_markers: vec![],
-            pending_confirm: false,
+            pending_confirm_raised: false,
             msgs_pushed: 0,
+            blocked: false,
+            browser_image_set: false,
         };
         // Non-existent dir → OpenOptions fails → silent no-op, no panic.
         let missing = std::path::Path::new("/nonexistent-homun-trace-dir-xyz");
         append(missing, &rec);
+    }
+
+    #[test]
+    fn normalize_preserves_multibyte_utf8() {
+        // Accented Italian text, the marker guillemets, and emoji must all
+        // survive normalization untouched (only TS/UUID/home get replaced).
+        let input = "però ‹‹PLAN›› café 🚀 at 2026-07-02T13:45:00 done";
+        let got = normalize_with_home(input, None);
+        assert_eq!(got, "però ‹‹PLAN›› café 🚀 at <TS> done");
+        // Explicit substring checks so a regression is unambiguous.
+        assert!(got.contains("però"));
+        assert!(got.contains("‹‹PLAN››"));
+        assert!(got.contains("café"));
+        assert!(got.contains("🚀"));
+    }
+
+    #[test]
+    fn normalize_strips_timestamp_with_fraction_and_zulu() {
+        let got = normalize_with_home("2026-07-02T13:45:00.123Z tail", None);
+        assert_eq!(got, "<TS> tail");
+    }
+
+    #[test]
+    fn normalize_strips_timestamp_with_offset_tz() {
+        let got = normalize_with_home("2026-07-02T13:45:00+02:00 tail", None);
+        assert_eq!(got, "<TS> tail");
+    }
+
+    #[test]
+    fn hash_hex_is_fnv1a_known_vectors() {
+        // FNV-1a/64 reference vectors (well-known): empty and "a".
+        assert_eq!(hash_hex(""), "cbf29ce484222325");
+        assert_eq!(hash_hex("a"), "af63dc4c8601ec8c");
     }
 }

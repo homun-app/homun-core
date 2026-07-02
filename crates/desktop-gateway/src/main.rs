@@ -20424,10 +20424,13 @@ check/update the key in Settings → Model & Runtime."
                 for (idx, call) in calls.iter().enumerate() {
                     // Parity-harness snapshots (see `tool_trace_dump`): capture the
                     // pre-dispatch state so the record built after the tool push can
-                    // measure the deltas. Zero cost beyond two `len()` reads when the
+                    // measure the deltas. Zero cost beyond three cheap reads when the
                     // dump is disarmed; the record itself is fully gated below.
+                    // `pc_before` lets us attribute `pending_confirm` to the call that
+                    // RAISED it (the flag lives outside the loop and is never reset).
                     let acc_before = accumulated.len();
                     let msgs_before = messages.len();
+                    let pc_before = pending_confirm;
                     let name = call
                         .get("function")
                         .and_then(|f| f.get("name"))
@@ -20456,11 +20459,56 @@ check/update the key in Settings → Model & Runtime."
                     if let Some(blocked) =
                         workflow_route_blocked_tool_message(&capability_route_for_runtime, name)
                     {
+                        // Parity harness: the blocked arm pushes a tool message then
+                        // `continue`s, jumping over the normal record block below. The
+                        // upcoming extraction handles this arm specially, so it MUST be
+                        // visible to the oracle — emit a record here with `blocked:true`.
+                        // Compute the `blocked`-derived fingerprint fields BEFORE the
+                        // push moves `blocked` into the message. Fully gated → no cost
+                        // when disarmed.
+                        let blocked_trace = if crate::tool_trace_dump::dump_enabled() {
+                            let normalized = crate::tool_trace_dump::normalize(&blocked);
+                            Some((
+                                crate::tool_trace_dump::hash_hex(
+                                    &crate::tool_trace_dump::normalize(args_raw),
+                                ),
+                                crate::tool_trace_dump::hash_hex(&normalized),
+                                blocked.chars().count(),
+                                normalized.chars().take(120).collect::<String>(),
+                            ))
+                        } else {
+                            None
+                        };
                         messages.push(serde_json::json!({
                             "role": "tool",
                             "tool_call_id": call_id,
                             "content": blocked,
                         }));
+                        if let Some((args_hash, result_hash, result_len, result_head)) =
+                            blocked_trace
+                        {
+                            let rec = crate::tool_trace_dump::ToolTraceRecord {
+                                round,
+                                idx,
+                                name: name.to_string(),
+                                args_hash,
+                                result_hash,
+                                result_len,
+                                result_head,
+                                acc_delta_len: accumulated.len().saturating_sub(acc_before),
+                                acc_markers: crate::tool_trace_dump::extract_markers(
+                                    acc_before,
+                                    &accumulated,
+                                ),
+                                pending_confirm_raised: pending_confirm && !pc_before,
+                                msgs_pushed: messages.len().saturating_sub(msgs_before),
+                                blocked: true,
+                                browser_image_set: pending_browser_image.is_some(),
+                            };
+                            if let Ok(dir) = gateway_logs_dir() {
+                                crate::tool_trace_dump::append(&dir, &rec);
+                            }
+                        }
                         continue;
                     }
 
@@ -23687,10 +23735,10 @@ Tell the user clearly; do NOT claim it's done."
                         "content": result,
                     }));
                     // Build + append the record AFTER the tool push so `msgs_pushed`
-                    // counts this push. If a browser screenshot pushes a SECOND
-                    // message later (outside this loop), that is intentionally not
-                    // reflected here: this record captures only what happened up to
-                    // and including the tool result push.
+                    // counts this push. A browser screenshot pushes a SECOND message
+                    // later (outside this loop), which `msgs_pushed` cannot see; that
+                    // side effect is instead fingerprinted by `browser_image_set`
+                    // below.
                     if let Some((args_hash, result_hash, result_len, result_head)) = trace_fields {
                         let rec = crate::tool_trace_dump::ToolTraceRecord {
                             round,
@@ -23705,8 +23753,13 @@ Tell the user clearly; do NOT claim it's done."
                                 acc_before,
                                 &accumulated,
                             ),
-                            pending_confirm,
+                            pending_confirm_raised: pending_confirm && !pc_before,
                             msgs_pushed: messages.len().saturating_sub(msgs_before),
+                            blocked: false,
+                            // Set by the browser_screenshot arm (if it ran) to queue a
+                            // SECOND message pushed AFTER this loop — invisible to
+                            // `msgs_pushed`, so we fingerprint the side effect here.
+                            browser_image_set: pending_browser_image.is_some(),
                         };
                         if let Ok(dir) = gateway_logs_dir() {
                             crate::tool_trace_dump::append(&dir, &rec);

@@ -39,5 +39,7 @@ All scenarios are **PENDING live capture**.
 Each `.jsonl` line is one `ToolTraceRecord` (see
 `crates/desktop-gateway/src/tool_trace_dump.rs`), normalized so fingerprints are
 stable across machines/runs: the user's home dir is rewritten to `~`, ISO-8601
-timestamps to `<TS>`, and UUIDs to `<UUID>`. Hashes are `DefaultHasher` hex
-(deterministic across processes), not a crypto hash.
+timestamps (including any fractional/timezone suffix) to `<TS>`, and UUIDs to
+`<UUID>`. Hashes are a fully-specified 64-bit **FNV-1a** hex digest — stable
+across processes AND across Rust toolchains, so committed goldens do not rot on a
+compiler upgrade — not a crypto hash.
