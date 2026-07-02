@@ -356,6 +356,13 @@ plugin.json+SKILL.md+.mcp.json = la formalizzazione che manca a F0–F3), e2e. P
   sandbox 3-livelli + approval unica, ibrido OS-primitive/container, da implementare CON la separazione
   motore (crea il chokepoint). **P1 Pilastro 2 (firma Win/Linux + publish) bloccato su input utente**
   (certificati + decisione sul gate draft di `build.yml`). Restano P2–P3.
+- **SEPARAZIONE MOTORE/GATEWAY PROGETTATA** ([ADR 0024](decisions/0024-engine-extraction-from-monolith-gateway.md)):
+  estrarre il loop `stream_chat_via_openai` (~5.700 righe inline in `main.rs`) in un crate motore, con
+  chokepoint UNICO su `CapabilityFacade::call_tool` (oggi il dispatch tool è sparso su 5 `match name`).
+  È il prerequisito di ADR 0023 (sandbox) e realizza fisicamente 0021. Confine = trait iniettati (non
+  `AppState`). Transport staged: crate in-process (Fase A) prima, processo satellite (Fase B) poi.
+  **Proposed, non implementato.** ⚠️ Gli ADR 0021/0022/0023/0024 sono tutti **Proposed**: la direzione
+  architettturale va ratificata prima di un'estrazione da 5.700 righe.
 - **Debito pre-esistente sfiorato:** `test:ui-contract` era rosso per drift `ChatView.tsx`↔script
   (`eventParts` aggiunto a `RichMessage` da altra sessione); allineato lo script nel Task 8.
 
