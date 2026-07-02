@@ -88,11 +88,34 @@ di corruzione, e `recovered_stores` riporta solo i rename riusciti.
 
 ## Sicurezza Electron (stato)
 
-Già a norma: `contextIsolation:true`, `sandbox:true`, `nodeIntegration:false`, `webSecurity:true`;
-`setWindowOpenHandler` → `openExternal` + deny; permission handler whitelist-only (`media`). Residui
-volutamente **fuori P0** (P1/P2 del doc di confronto): CSP nel renderer packaged, `@electron/fuses`,
-`devTools:false` in prod, protocol handler `homun://`, e la migrazione del token da Bearer/loopback a
-Unix domain socket (da progettare con la separazione motore/gateway).
+Base già a norma: `contextIsolation:true`, `sandbox:true`, `nodeIntegration:false`, `webSecurity:true`;
+`setWindowOpenHandler` → `openExternal` + deny; permission handler whitelist-only (`media`).
+
+**Hardening P1 — Pilastro 3 (fatto, 2026-07-02):**
+- **Fuses** (`scripts/after-pack-fuses.mjs`, hook `afterPack` di electron-builder): nel binario
+  packaged sono spenti `RunAsNode`, `EnableNodeCliInspectArguments`, `EnableNodeOptionsEnvironmentVariable`
+  e accesi `EnableCookieEncryption` + `OnlyLoadAppFromAsar`. Chiude i vettori "lancia l'app come Node".
+  Su macOS `resetAdHocDarwinSignature` così la firma reale riparte pulita. Verifica end-to-end solo al
+  release build (non nel `package:smoke`, che usa electron grezzo).
+- **CSP** (`applyContentSecurityPolicy` in `main.cjs`, via `onHeadersReceived`): solo nei build
+  packaged/staged (dev resta con la policy larga di Vite per l'HMR). Scoped ai bisogni reali —
+  `script-src 'self'` (bundle Vite esterno), `style-src 'unsafe-inline'` (mermaid/highlight/React),
+  `img/font data:/blob:`, `connect-src`/`frame-src` al gateway `127.0.0.1` (incluso l'iframe noVNC).
+  Verificato via smoke: il renderer monta sotto la policy (root non vuoto), zero violazioni al load,
+  `'self'` risolve sotto `file://`. *Residuo:* spot-check delle superfici dinamiche (mermaid, grafo
+  memoria, iframe noVNC) su un build firmato reale.
+- **devTools off** nel packaged (`webPreferences.devTools`), salvo dev o flag `HOMUN_ELECTRON_DEVTOOLS`.
+
+**Residui P1/P2 (non fatti — vincoli espliciti):**
+- **Sandbox OS-level a 3 livelli + approval policy unica** (Pilastro 1, il valore vero di P1) — **in
+  attesa**: va progettato **con** la separazione motore/gateway (imporrebbe il recinto nel punto che
+  quella separazione sposta; farlo ora = rifarlo). Caposaldo #5.
+- **Firma Windows/Linux + publish automatico** (Pilastro 2) — **bloccato su input utente**: la firma
+  richiede certificati/segreti (Azure Trusted Signing per Windows); l'auto-publish della release
+  ribalterebbe il gate di revisione *draft* deliberato in `build.yml` → decisione di processo, non
+  un fix.
+- **protocol handler `homun://`** (P2) + migrazione token Bearer/loopback → **Unix domain socket**
+  (P2, da fare con la separazione motore).
 
 ## Test e gate
 
