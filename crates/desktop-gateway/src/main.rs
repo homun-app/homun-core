@@ -11997,12 +11997,37 @@ fn list_project_files(state: &AppState, thread_id: Option<&str>) -> String {
 const PROJECT_CMD_TIMEOUT_SECS: u64 = 300;
 const PROJECT_CMD_MAX_OUTPUT_CHARS: usize = 16_000;
 
+/// The directories a `workspace-write` sandbox lets a project command write to:
+/// the project root, plus the standard tool-cache dirs under HOME (so npm/cargo/
+/// pip/etc. keep working). Everything else — `/`, `/etc`, `/usr`, `~/.ssh`,
+/// `~/.aws`, arbitrary HOME files — stays denied by the fence. `TMPDIR` is added
+/// by the profile generator itself. Deliberate, documented deviation from
+/// Codex-pure (project+tmp only): Codex relies on on-failure escalation to stay
+/// usable; until we have that, we widen writable roots to keep build tooling working.
+fn workspace_write_roots(project_root: &std::path::Path, home: Option<&str>) -> Vec<std::path::PathBuf> {
+    let mut roots = vec![project_root.to_path_buf()];
+    if let Some(home) = home {
+        for cache in [".cache", ".config", ".local", ".npm", ".cargo"] {
+            roots.push(std::path::Path::new(home).join(cache));
+        }
+    }
+    roots
+}
+
 /// Runs a shell command on the HOST with cwd = the project folder (build/test/lint
 /// on the user's real code — verify-by-execution, plus git). Gated by the same
 /// security scan as the sandbox + confined to a project that has a folder; killed
 /// on timeout via `kill_on_drop`. Returns combined stdout+stderr (capped) prefixed
 /// with the exit status. This is the host-execution counterpart to the isolated
 /// `run_in_sandbox` (which stays for throwaway/untrusted work).
+///
+/// ADR 0023 step 3 — macOS enforcement. When `HOMUN_TOOL_SAFETY=1` AND we are on
+/// macOS, the `bash` subprocess is wrapped in `sandbox-exec` under a workspace-write
+/// Seatbelt profile: writes are physically fenced to the project root + standard
+/// tool caches (see `workspace_write_roots`), everything else is read-only. The flag
+/// is OFF by default, so the default path is byte-identical to the pre-ADR host
+/// exec. Non-macOS never sandboxes here yet.
+/// TODO(ADR 0023): Linux Landlock+seccomp enforcement (the non-macOS fence).
 async fn run_in_project(state: &AppState, thread_id: Option<&str>, command: &str) -> String {
     let command = command.trim();
     if command.is_empty() {
@@ -12019,12 +12044,38 @@ Reformulate it without destructive operations.",
             scan.risk_score
         );
     }
-    let future = tokio::process::Command::new("bash")
-        .arg("-lc")
-        .arg(command)
-        .current_dir(&root)
-        .kill_on_drop(true)
-        .output();
+    // Enforce the OS fence only when the flag is on AND we're on macOS. When either
+    // is false we build the plain `bash -lc` command exactly as before — the
+    // `cfg!` and the `HOME` env read below only happen on the sandboxed path.
+    let sandboxed = tool_safety_enabled() && cfg!(target_os = "macos");
+    let mut cmd = if sandboxed {
+        let policy = crate::tool_safety::SandboxPolicy::WorkspaceWrite {
+            writable_roots: workspace_write_roots(&root, std::env::var("HOME").ok().as_deref()),
+            // v1: fence filesystem writes, allow network (npm/git need it). Stricter
+            // network-off is a follow-up.
+            network_access: true,
+        };
+        match crate::seatbelt::seatbelt_profile(&policy) {
+            Some(profile) => {
+                let mut c = tokio::process::Command::new("sandbox-exec");
+                c.arg("-p").arg(profile).arg("bash").arg("-lc").arg(command);
+                c
+            }
+            None => {
+                // DangerFullAccess → unreachable here (we build WorkspaceWrite), but
+                // be total: run unsandboxed rather than panic.
+                let mut c = tokio::process::Command::new("bash");
+                c.arg("-lc").arg(command);
+                c
+            }
+        }
+    } else {
+        let mut c = tokio::process::Command::new("bash");
+        c.arg("-lc").arg(command);
+        c
+    };
+    cmd.current_dir(&root).kill_on_drop(true);
+    let future = cmd.output();
     match tokio::time::timeout(
         std::time::Duration::from_secs(PROJECT_CMD_TIMEOUT_SECS),
         future,
@@ -12052,9 +12103,35 @@ Reformulate it without destructive operations.",
             } else {
                 body.as_str()
             };
-            format!("[exit {code}]\n{body}")
+            let mut rendered = format!("[exit {code}]\n{body}");
+            // Escalation-lite: if the fenced command failed and the output carries a
+            // sandbox denial marker, hint that the fence — not the command — may be at
+            // fault. The full "approve → re-run unsandboxed" card is a follow-up.
+            // TODO(ADR 0023): full on-failure escalation (approve → re-run unsandboxed card).
+            if sandboxed
+                && !output.status.success()
+                && (combined.contains("Operation not permitted") || combined.contains("sandbox"))
+            {
+                rendered.push_str(
+                    "\n\n(Note: this ran in a workspace-write sandbox — writes are limited to the \
+project and standard caches. If it failed because it needed to write elsewhere, that's the \
+sandbox, not a bug in the command.)",
+                );
+            }
+            rendered
         }
-        Ok(Err(error)) => format!("Could not run the command: {error}"),
+        Ok(Err(error)) => {
+            // Fail-closed: if the SANDBOXED spawn could not start (e.g. `sandbox-exec`
+            // missing), never silently fall back to unsandboxed — surface a clear error.
+            if sandboxed {
+                format!(
+                    "Command NOT executed: the workspace sandbox could not start ({error}). \
+The command was not run unsandboxed."
+                )
+            } else {
+                format!("Could not run the command: {error}")
+            }
+        }
         Err(_) => format!(
             "Command interrupted: exceeded the {PROJECT_CMD_TIMEOUT_SECS}s timeout (process terminated)."
         ),
@@ -47601,7 +47678,7 @@ mod tests {
         strip_json_fences, suggestion_choices_json, task_effective_goal,
         task_execution_outcome_from_executor_result, task_executor_worker_count,
         task_executor_worker_id, task_goal_summary, task_queue_response, tool_touches_calendar,
-        tool_touches_contacts, wiki_title_from_text,
+        tool_touches_contacts, wiki_title_from_text, workspace_write_roots,
     };
     use crate::browser_safety;
     use crate::chat_store::{self, ChatStore};
@@ -47658,6 +47735,33 @@ mod tests {
 
     fn isolated_gateway_test_dir(prefix: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!("homun-{prefix}-{}", uuid::Uuid::new_v4().simple()))
+    }
+
+    #[test]
+    fn workspace_write_roots_include_project_and_home_caches() {
+        // ADR 0023: the workspace-write fence's writable roots = the project root
+        // plus the standard HOME tool-cache dirs, so build tooling (npm/cargo/…)
+        // keeps working while everything else stays denied.
+        let project = std::path::Path::new("/Users/x/proj");
+        let roots = workspace_write_roots(project, Some("/Users/x"));
+
+        // The project root is always first.
+        assert_eq!(roots.first(), Some(&project.to_path_buf()));
+
+        // Each standard cache dir under HOME is present.
+        for cache in [".cache", ".config", ".local", ".npm", ".cargo"] {
+            let expected = std::path::Path::new("/Users/x").join(cache);
+            assert!(
+                roots.contains(&expected),
+                "missing writable cache root {expected:?} in {roots:?}"
+            );
+        }
+        // Exactly the project root + the five caches, nothing more.
+        assert_eq!(roots.len(), 6, "unexpected extra writable roots: {roots:?}");
+
+        // With no HOME, only the project root is writable.
+        let no_home = workspace_write_roots(project, None);
+        assert_eq!(no_home, vec![project.to_path_buf()]);
     }
 
     #[test]
