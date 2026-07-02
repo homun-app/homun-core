@@ -1,6 +1,6 @@
 # Homun vs Codex — Gap analysis aggiornata (delta post-PR #101)
 
-**Data:** 2026-07-02 · **Metodo:** read-only. Homun @ `main` (dopo la PR tool-safety #101); riferimento Codex `codex-cli 0.142.5` in `/Users/fabio/Projects/codex/Contents`. Evidenze citate come Homun `file:line` o token estratti dal binario Codex.
+**Data:** 2026-07-02 · **Metodo:** read-only. Homun @ `main` (dopo la PR tool-safety #101); riferimento Codex: il bundle desktop `codex-cli 0.142.5` (analizzato in locale). Evidenze citate come Homun `file:line` o token estratti dal binario Codex.
 
 > Aggiornamento di [confronto-codex-produzione.md](confronto-codex-produzione.md). Qui si traccia solo il **delta** da quando quel documento è stato scritto: cosa Homun ora eguaglia grazie al lavoro mergiato, e cosa Codex ha ancora che a Homun manca.
 
@@ -16,7 +16,7 @@
 | Sandbox 3 livelli (`read-only`/`workspace-write`/`danger-full-access`) | ✅ chiuso (tipi+generator) | `SandboxPolicy` in `tool_safety.rs`; risoluzione `WorkspaceWrite` se esiste root scrivibile, else `ReadOnly` |
 | Approval policy 4 livelli | ✅ chiuso (tipi), 🟡 parziale (wiring) | `AskForApproval` + `assess_tool_safety` in `tool_safety.rs`; il wiring live mappa solo il booleano legacy `autonomous`→`Never`/`OnRequest` |
 | Enforcement OS — macOS Seatbelt | ✅ chiuso (macOS, per `run_in_project`) | `seatbelt.rs` genera un profilo closed-by-default; wired via `sandbox-exec -p`. Network deny-by-default salvo `network_access` → macOS *può già* fare network-off |
-| Enforcement OS — Linux Landlock | ✅ chiuso (fence filesystem) | `landlock_fence.rs` + helper `src/bin/homun-linux-sandbox.rs`; best-effort ABI, fail-closed; runtime-validato in CI su ubuntu-24.04. Network-off (seccomp) = TODO |
+| Enforcement OS — Linux Landlock | ✅ chiuso (fence filesystem) | `crates/desktop-gateway/src/landlock_fence.rs` + helper `crates/desktop-gateway/src/bin/homun-linux-sandbox.rs`; best-effort ABI, fail-closed; runtime-validato in CI su ubuntu-24.04. Network-off (seccomp) = TODO |
 | Escalation on-failure | ✅ chiuso | card `‹‹SANDBOX_ESCALATE››` + endpoint `/api/capabilities/run/escalate` (`run_escalate`) riesegue unsandboxed dopo approvazione; frontend `SandboxEscalateCard` |
 | Card di approvazione unificata (prima MCP+Composio separate) | ✅ chiuso | `emit_approval_card` fonde i flussi via `assess_tool_safety` |
 | Shadow-mode osservabilità del fence | ➕ bonus (Homun avanti) | `sandbox_shadow_verdict`/`ShadowVerdict` logga i "would-fence" senza bloccare — Codex non ha equivalente |
