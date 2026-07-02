@@ -431,13 +431,21 @@ plugin.json+SKILL.md+.mcp.json = la formalizzazione che manca a F0–F3), e2e. P
   DangerFullAccess), fedele a `codex-rs/core/src/seatbelt.rs`: `(version 1)(deny default)(allow file-read*)` +
   process-exec/fork + `file-write*` solo sotto `(subpath root)` + tmp, network solo se `network_access`; 9 test,
   puro. Deviazioni doc: root inline (non `-D` param), `(allow sysctl-read)` allow-all con TODO per l'allowlist
-  esatta. **PROSSIMA AZIONE = wiring enforcement (PRIMO cambio di comportamento reale):** avvolgere l'exec di
-  `run_in_project` in `sandbox-exec -p <profilo> -- bash -lc <cmd>` quando la policy != DangerFullAccess, dietro
-  `HOMUN_TOOL_SAFETY` (off = bash-host attuale; on = recintato) + **flusso escalation Codex** (comando fallisce
-  in sandbox → superficie approvazione → rieseguе senza recinto). **PRIMA del wiring: raccogliere i dati shadow**
-  (accendere `HOMUN_TOOL_SAFETY=1` nell'uso reale, leggere le righe `SANDBOX-SHADOW` in `~/.homun/logs/gateway.log`
-  → validare la classificazione footprint contro la realtà prima di far mordere il kernel). Poi Linux
-  (Landlock+seccomp via helper binary), Windows (approval-only). Poi
+  esatta. **Enforcement macOS WIRED + VALIDATO DAL VIVO** (`3cafeb20` wiring + `c8d5bd0a` fix): `run_in_project`
+  (main.rs:12044) avvolge `bash -lc` in `sandbox-exec -p <profilo> bash -lc <cmd>` quando `HOMUN_TOOL_SAFETY=1`
+  E `cfg!(macos)`; policy `WorkspaceWrite{roots=project+~/.cache/.config/.local/.npm/.cargo, network=true}`
+  (deviazione documentata dal Codex-puro project+tmp: allarga i root per non rompere il tooling senza l'escalation
+  completa); fail-closed se `sandbox-exec` non parte; hint escalation-lite sul denial. Flag OFF = byte-identico
+  (bash host), non-macOS invariato. **BUG CRITICO trovato+risolto col test empirico** (`sandbox-exec` reale, non
+  il diff): Seatbelt matcha il path CANONICO → `/tmp`→`/private/tmp`, `$TMPDIR` `/var`→`/private/var`; senza
+  canonicalizzare, il recinto negava ANCHE le scritture consentite (ogni comando col flag on sarebbe fallito).
+  Fix: `canonical_or_raw` in `seatbelt.rs` canonicalizza roots+tmp (fallback al literal se il path non esiste →
+  test sintetici deterministici). Provato: write progetto OK, home/etc bloccate, `git init` OK. **Lezione: i
+  feature di sicurezza si validano ESEGUENDO, il diff+unit-test non bastano.** PROSSIME AZIONI (follow-up, in
+  ordine): (1) raccogliere dati reali col flag on (righe `SANDBOX-SHADOW` + comandi recintati) per tarare i root;
+  (2) escalation completa (card "approva → riesegui senza recinto" + resume, come Codex on-failure); (3) opzione
+  network-off + allowlist `sysctl-name` esatta di Codex (fedeltà); (4) Linux (Landlock+seccomp via helper
+  binary), Windows (approval-only). Poi
   (classifica footprint tool, shadow-log), Step 3 (enforcement OS: Seatbelt macOS prima), Step 4 (Settings UI
   + Windows/Linux), Step 5 (confirmation policy dichiarative nelle skill). La convergenza-facade (Fasi 2b/3/4
   vecchie) è DEROGATA: non è Codex e non è prerequisito, il chokepoint c'è già.
