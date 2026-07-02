@@ -18659,6 +18659,21 @@ fn resolved_sandbox_mode() -> crate::tool_safety::SandboxMode {
     SandboxMode::parse(&load_runtime_settings().sandbox_mode)
 }
 
+/// Pure: does a write tool need the read-only escalation under this mode? Testable
+/// without ChatToolCtx. `sandbox_gate_write` composes this with `resolved_sandbox_mode()`
+/// and, when true, emits the escalation card. Only the Write footprint (write_file/
+/// edit_file today) can escalate; reads and non-file tools never do.
+fn write_needs_read_only_escalation(
+    name: &str,
+    args: &serde_json::Value,
+    mode: crate::tool_safety::SandboxMode,
+) -> bool {
+    matches!(
+        crate::tool_safety::tool_footprint(name, args),
+        crate::tool_safety::ToolFootprint::Write { .. }
+    ) && mode == crate::tool_safety::SandboxMode::ReadOnly
+}
+
 /// ADR 0023 gate, now DERIVED from the sandbox axis (was `HOMUN_TOOL_SAFETY==1`).
 /// Deliberately NOT influenced by the approval axis: with the default mode `danger`
 /// this returns false (legacy behavior); `HOMUN_TOOL_SAFETY=1` → `workspace-write` →
@@ -18702,6 +18717,48 @@ async fn emit_approval_card(
     "AWAITING USER CONFIRMATION: the action was proposed via a \
 confirmation card in the interface. Do NOT say it was executed."
         .to_string()
+}
+
+/// ADR 0023 #2: a file-write blocked by the read-only sandbox surfaces the SAME
+/// escalation card as a fenced bash command — approving re-runs the write (still
+/// project-jailed, wired in a later task). The marker carries the tool + its arguments
+/// so the escalation endpoint can re-dispatch and verify provenance.
+async fn emit_write_escalate_card(
+    ctx: &mut ChatToolCtx<'_>,
+    name: &str,
+    args_val: &serde_json::Value,
+) -> String {
+    let approval =
+        create_pending_approval(ctx.state, name, args_val, "file write", ctx.thread_id, true);
+    let marker = match approval.as_ref() {
+        Some(a) => serde_json::json!({ "approval_id": a.approval_id, "tool": name, "arguments": args_val }),
+        None => serde_json::json!({ "tool": name, "arguments": args_val }),
+    }
+    .to_string();
+    let card = format!(
+        "\n\nThis write was blocked by the read-only sandbox.\n{SANDBOX_ESCALATE_OPEN}{marker}{SANDBOX_ESCALATE_CLOSE}\n"
+    );
+    ctx.accumulated.push_str(&card);
+    let _ = emit_stream_event(ctx.tx, GenerateStreamEvent::Delta { text: card }).await;
+    *ctx.pending_confirm = true;
+    "AWAITING USER CONFIRMATION: the write was blocked by the read-only sandbox and \
+proposed via an escalation card. Do NOT say it was written."
+        .to_string()
+}
+
+/// Returns `Some(model-facing string)` when a write tool must NOT proceed under the
+/// resolved sandbox mode (read-only → escalation card); `None` = proceed to normal
+/// dispatch (workspace-write/danger; jail_in_root still confines to the project).
+async fn sandbox_gate_write(
+    ctx: &mut ChatToolCtx<'_>,
+    name: &str,
+    args_val: &serde_json::Value,
+) -> Option<String> {
+    if write_needs_read_only_escalation(name, args_val, resolved_sandbox_mode()) {
+        Some(emit_write_escalate_card(ctx, name, args_val).await)
+    } else {
+        None
+    }
 }
 
 /// ADR 0023 sandbox axis, SHADOW mode: classify a tool call's filesystem footprint
@@ -21360,6 +21417,12 @@ loaded with use_skill):\n{}",
     } else if name == "write_file" {
         let args_val: serde_json::Value = serde_json::from_str(args_raw)
             .unwrap_or_else(|_| serde_json::json!({}));
+        // ADR 0023 #2: read-only sandbox blocks the write here (chokepoint) and
+        // surfaces an escalation card instead of dispatching. workspace-write/danger
+        // return None → unchanged dispatch below (jail_in_root still confines it).
+        if let Some(blocked) = sandbox_gate_write(ctx, "write_file", &args_val).await {
+            return blocked;
+        }
         let path = args_val
             .get("path")
             .and_then(|v| v.as_str())
@@ -21400,6 +21463,10 @@ loaded with use_skill):\n{}",
     } else if name == "edit_file" {
         let args_val: serde_json::Value = serde_json::from_str(args_raw)
             .unwrap_or_else(|_| serde_json::json!({}));
+        // ADR 0023 #2: same read-only gate as write_file (see above).
+        if let Some(blocked) = sandbox_gate_write(ctx, "edit_file", &args_val).await {
+            return blocked;
+        }
         let path = args_val
             .get("path")
             .and_then(|v| v.as_str())
@@ -57383,6 +57450,20 @@ data: [DONE]\n";
         assert_eq!(resolved_sandbox_mode(), SandboxMode::Danger); // explicit danger
         assert!(!tool_safety_enabled()); // danger → disabled
         unsafe { std::env::remove_var("HOMUN_SANDBOX_MODE"); } // clean up
+    }
+
+    #[test]
+    fn write_tools_escalate_only_under_read_only() {
+        use crate::tool_safety::SandboxMode;
+        use super::write_needs_read_only_escalation;
+        let args = serde_json::json!({ "path": "src/x.rs", "content": "hi" });
+        assert!(write_needs_read_only_escalation("write_file", &args, SandboxMode::ReadOnly));
+        assert!(!write_needs_read_only_escalation("write_file", &args, SandboxMode::WorkspaceWrite));
+        assert!(!write_needs_read_only_escalation("write_file", &args, SandboxMode::Danger));
+        let ra = serde_json::json!({ "path": "src/x.rs" });
+        assert!(!write_needs_read_only_escalation("read_text_file", &ra, SandboxMode::ReadOnly));
+        let ea = serde_json::json!({ "path": "src/x.rs", "old_string": "a", "new_string": "b" });
+        assert!(write_needs_read_only_escalation("edit_file", &ea, SandboxMode::ReadOnly));
     }
 
     #[test]
