@@ -411,12 +411,22 @@ plugin.json+SKILL.md+.mcp.json = la formalizzazione che manca a F0–F3), e2e. P
   il booleano legacy — ON==OFF provato per tabella di verità (verificato sul diff: byte-identità + equivalenza
   decisione; execute path e consumer 36287–36776 intatti). Flag default OFF. NB: la card è UI-coupled e resta
   nel branch (giusto: `assess_tool_safety` decide, il branch emette). Il resume è disaccoppiato via testo
-  marker, quindi non serviva mapparlo. **PROSSIMA AZIONE = Step 2b** (metà sandbox, ancora senza enforcement):
-  risolvere il `SandboxPolicy` effettivo del turno (oggi fisso `DangerFullAccess`; poi da settings/workspace)
-  e **classificare il footprint dei tool file/shell** (`write_file`/`edit_file`/`run_in_project`/
-  `run_in_sandbox`/`read_file`… → read-only vs workspace-write) con **shadow-log** di cosa VERREBBE recintato,
-  senza bloccare nulla. Poi Step 3 (enforcement OS: **Seatbelt macOS** — generare il profilo `.sb` dal livello,
-  come `codex-rs/core/src/seatbelt.rs`; il bundle Codex ha il vocabolario+binari a riferimento). Poi
+  marker, quindi non serviva mapparlo. **Step 2b FATTO** (metà sandbox, ancora senza enforcement):
+  (types `cafdcadb`) `tool_safety.rs` esteso con `ToolFootprint` (ReadOnly/Write{path}/Exec/Contained/
+  NonFilesystem) + `tool_footprint(name,args)` + `ShadowVerdict` + `sandbox_shadow_verdict(footprint,policy,
+  is_under_writable_root)` — puri, 22 test; (shadow-log `22b56ab3`) `shadow_log_sandbox(state,thread_id,name,
+  args_raw)` chiamato in cima a `execute_chat_tool` dietro `HOMUN_TOOL_SAFETY`, classifica il footprint,
+  valuta cosa un fence `WorkspaceWrite`-jailed-a-project-root VERREBBE a fare (riusa `project_root_for_thread`
+  + `jail_in_root`), e `eprintln!` `SANDBOX-SHADOW …` per ogni write/exec — **osserva, non blocca** (helper
+  prende `&AppState`, ritorna `()` → strutturalmente non può cambiare comportamento; 59 ins/0 del). Serve a
+  raccogliere dati reali PRIMA di accendere l'enforcement.
+  **PROSSIMA AZIONE = Step 3 (enforcement OS — la fase grossa, cambia davvero il comportamento):** generare un
+  profilo Seatbelt `.sb` dal `SandboxPolicy` (come `codex-rs/core/src/seatbelt.rs`) e avvolgere l'exec dei tool
+  file/shell (`run_in_project`, e le scritture) in `sandbox-exec -f profile.sb …` su macOS; gestire il flusso
+  di escalation Codex (sandbox fallisce → chiedi approvazione → riesegui senza recinto). Prima: MAPPARE come
+  `run_in_project`/`write_file` eseguono oggi (dove spawnano), e studiare il `.sb` che Codex genera (il bundle
+  `/Users/fabio/Projects/codex/Contents` ha il binario `codex` + vocabolario a riferimento). Poi Linux
+  (Landlock+seccomp via helper binary), Windows (approval-only). Poi
   (classifica footprint tool, shadow-log), Step 3 (enforcement OS: Seatbelt macOS prima), Step 4 (Settings UI
   + Windows/Linux), Step 5 (confirmation policy dichiarative nelle skill). La convergenza-facade (Fasi 2b/3/4
   vecchie) è DEROGATA: non è Codex e non è prerequisito, il chokepoint c'è già.
