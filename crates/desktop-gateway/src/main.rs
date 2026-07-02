@@ -18324,6 +18324,61 @@ const ATTACHMENT_TEXT_BUDGET_CHARS: usize = 120_000;
 /// most-recent files win.
 const ATTACHMENT_CONTEXT_IMAGES: usize = 12;
 
+/// Turn-level state that the per-tool-call dispatch loop reads and mutates. Bundled
+/// into one struct so the loop body can address it through `ctx.<field>` — the seam a
+/// LATER refactor extracts into a standalone `dispatch_one_tool_call` function. The
+/// struct is rebuilt once per `for round` iteration (so `round` is a plain `usize`),
+/// and its scope ends right after the dispatch loop so the borrows release before the
+/// post-loop reads (screenshot push, `if pending_confirm`) touch the raw locals.
+struct ChatToolCtx<'a> {
+    // `&mut` — mutated inside the dispatch loop.
+    messages: &'a mut Vec<serde_json::Value>,
+    accumulated: &'a mut String,
+    browser_session: &'a mut Option<BrowserAutomationClient<BrowserSidecarSession>>,
+    browser_used: &'a mut bool,
+    last_snapshot: &'a mut String,
+    pending_browser_image: &'a mut Option<String>,
+    browser_tool_call_ids: &'a mut std::collections::BTreeSet<String>,
+    current_target: &'a mut String,
+    opened_targets: &'a mut Vec<String>,
+    nav_failures: &'a mut std::collections::HashMap<String, u32>,
+    browse_sources: &'a mut Vec<String>,
+    plan: &'a mut ExecutionPlan,
+    step_evidence: &'a mut Vec<String>,
+    tool_trace: &'a mut Vec<String>,
+    loaded_tools: &'a mut std::collections::BTreeSet<String>,
+    tool_schemas: &'a mut Vec<serde_json::Value>,
+    last_round_sig: &'a mut String,
+    repeat_count: &'a mut u32,
+    progress_anchor_round: &'a mut usize,
+    pending_compaction: &'a mut bool,
+    pending_vault_reveal_marker: &'a mut Option<String>,
+    pending_confirm: &'a mut bool,
+    base_url: &'a mut String,
+    model: &'a mut String,
+    api_key: &'a mut Option<String>,
+    endpoint: &'a mut String,
+    // `&` / by-value — read-only inside the dispatch loop.
+    state: &'a AppState,
+    tx: &'a StreamSink,
+    thread_id: Option<&'a str>,
+    prompt: &'a str,
+    read_only: bool,
+    channel_owner: bool,
+    contact_only: bool,
+    can_see_contacts: bool,
+    can_see_calendar: bool,
+    autonomous: bool,
+    composio_writes: &'a std::collections::BTreeSet<String>,
+    catalog_index: &'a [(String, String, serde_json::Value)],
+    capability_corpus: &'a [CapabilityEntry],
+    automation_user_id: &'a UserId,
+    automation_workspace_id: &'a WorkspaceId,
+    turn_scaffold: &'a scaffold::ScaffoldProfile,
+    floor_acting: bool,
+    round: usize,
+}
+
 async fn stream_chat_via_openai(
     state: &AppState,
     request: ChatGenerateStreamRequest,
@@ -20421,6 +20476,58 @@ check/update the key in Settings → Model & Runtime."
                 // Set when a write tool needs confirmation: we stop the loop and let
                 // the user run it from the card instead of looping/hallucinating.
                 let mut pending_confirm = false;
+                // Bundle the turn-level state the dispatch loop touches into `ctx` so
+                // the loop body addresses it via `ctx.<field>` (the seam a later refactor
+                // extracts into a function). Built once per round; its block ends right
+                // after the dispatch loop so the borrows release before the post-loop
+                // reads (screenshot push, `if pending_confirm`) touch the raw locals.
+                {
+                    let ctx = ChatToolCtx {
+                        messages: &mut messages,
+                        accumulated: &mut accumulated,
+                        browser_session: &mut browser_session,
+                        browser_used: &mut browser_used,
+                        last_snapshot: &mut last_snapshot,
+                        pending_browser_image: &mut pending_browser_image,
+                        browser_tool_call_ids: &mut browser_tool_call_ids,
+                        current_target: &mut current_target,
+                        opened_targets: &mut opened_targets,
+                        nav_failures: &mut nav_failures,
+                        browse_sources: &mut browse_sources,
+                        plan: &mut plan,
+                        step_evidence: &mut step_evidence,
+                        tool_trace: &mut tool_trace,
+                        loaded_tools: &mut loaded_tools,
+                        tool_schemas: &mut tool_schemas,
+                        last_round_sig: &mut last_round_sig,
+                        repeat_count: &mut repeat_count,
+                        progress_anchor_round: &mut progress_anchor_round,
+                        pending_compaction: &mut pending_compaction,
+                        pending_vault_reveal_marker: &mut pending_vault_reveal_marker,
+                        pending_confirm: &mut pending_confirm,
+                        base_url: &mut base_url,
+                        model: &mut model,
+                        api_key: &mut api_key,
+                        endpoint: &mut endpoint,
+                        state: &state_owned,
+                        tx: &tx,
+                        thread_id: thread_id.as_deref(),
+                        prompt: &prompt,
+                        read_only,
+                        channel_owner,
+                        contact_only,
+                        can_see_contacts,
+                        can_see_calendar,
+                        autonomous,
+                        composio_writes: &composio_writes,
+                        catalog_index: &catalog_index,
+                        capability_corpus: &capability_corpus,
+                        automation_user_id: &automation_user_id,
+                        automation_workspace_id: &automation_workspace_id,
+                        turn_scaffold: &turn_scaffold,
+                        floor_acting,
+                        round,
+                    };
                 for (idx, call) in calls.iter().enumerate() {
                     // Parity-harness snapshots (see `tool_trace_dump`): capture the
                     // pre-dispatch state so the record built after the tool push can
@@ -20428,9 +20535,9 @@ check/update the key in Settings → Model & Runtime."
                     // dump is disarmed; the record itself is fully gated below.
                     // `pc_before` lets us attribute `pending_confirm` to the call that
                     // RAISED it (the flag lives outside the loop and is never reset).
-                    let acc_before = accumulated.len();
-                    let msgs_before = messages.len();
-                    let pc_before = pending_confirm;
+                    let acc_before = ctx.accumulated.len();
+                    let msgs_before = ctx.messages.len();
+                    let pc_before = *ctx.pending_confirm;
                     let name = call
                         .get("function")
                         .and_then(|f| f.get("name"))
@@ -20479,7 +20586,7 @@ check/update the key in Settings → Model & Runtime."
                         } else {
                             None
                         };
-                        messages.push(serde_json::json!({
+                        ctx.messages.push(serde_json::json!({
                             "role": "tool",
                             "tool_call_id": call_id,
                             "content": blocked,
@@ -20488,22 +20595,22 @@ check/update the key in Settings → Model & Runtime."
                             blocked_trace
                         {
                             let rec = crate::tool_trace_dump::ToolTraceRecord {
-                                round,
+                                round: ctx.round,
                                 idx,
                                 name: name.to_string(),
                                 args_hash,
                                 result_hash,
                                 result_len,
                                 result_head,
-                                acc_delta_len: accumulated.len().saturating_sub(acc_before),
+                                acc_delta_len: ctx.accumulated.len().saturating_sub(acc_before),
                                 acc_markers: crate::tool_trace_dump::extract_markers(
                                     acc_before,
-                                    &accumulated,
+                                    ctx.accumulated,
                                 ),
-                                pending_confirm_raised: pending_confirm && !pc_before,
-                                msgs_pushed: messages.len().saturating_sub(msgs_before),
+                                pending_confirm_raised: *ctx.pending_confirm && !pc_before,
+                                msgs_pushed: ctx.messages.len().saturating_sub(msgs_before),
                                 blocked: true,
-                                browser_image_set: pending_browser_image.is_some(),
+                                browser_image_set: ctx.pending_browser_image.is_some(),
                             };
                             if let Ok(dir) = gateway_logs_dir() {
                                 crate::tool_trace_dump::append(&dir, &rec);
@@ -20513,20 +20620,20 @@ check/update the key in Settings → Model & Runtime."
                     }
 
                     // Record consequential actions (any domain) for decision memory.
-                    if tool_trace.len() < 20 {
+                    if ctx.tool_trace.len() < 20 {
                         if let Some(line) = summarize_tool_action(name, args_raw) {
-                            tool_trace.push(line);
+                            ctx.tool_trace.push(line);
                         } else if let Some(line) =
-                            connected_capability_execution_trace_line(name, &catalog_index)
+                            connected_capability_execution_trace_line(name, ctx.catalog_index)
                         {
-                            tool_trace.push(line);
-                        } else if composio_writes.contains(name) {
+                            ctx.tool_trace.push(line);
+                        } else if ctx.composio_writes.contains(name) {
                             // A write on a connected service (Composio/MCP).
-                            tool_trace.push(format!("capability execution connector:{name}"));
+                            ctx.tool_trace.push(format!("capability execution connector:{name}"));
                         }
                     }
 
-                    let result = if read_only
+                    let result = if ctx.read_only
                         && matches!(
                             name,
                             "run_in_sandbox"
@@ -20565,9 +20672,12 @@ require your confirmation in the app. Propose it and stop."
                         // First browser tool this turn: mark used (raises round
                         // budget), publish live activity, acquire the session
                         // (reuse the thread's warm one, else spawn a chat sidecar).
-                        if !browser_used {
-                            browser_used = true;
-                            begin_browser_activity(prompt.clone(), thread_id.clone());
+                        if !*ctx.browser_used {
+                            *ctx.browser_used = true;
+                            begin_browser_activity(
+                                ctx.prompt.to_string(),
+                                ctx.thread_id.map(|s| s.to_string()),
+                            );
                             // Honor an EXPLICIT "browser" role: switch the driver
                             // model for the rest of this (browsing) turn. Skipped
                             // when the user forced a per-message model override.
@@ -20580,9 +20690,9 @@ require your confirmation in the app. Propose it and stop."
                                 if let Some((b_url, b_model, b_key)) =
                                     browser_openai_stream_config()
                                 {
-                                    if b_model != model || b_url != base_url {
+                                    if b_model != *ctx.model || b_url != *ctx.base_url {
                                         let _ = emit_stream_event(
-                                            &tx,
+                                            ctx.tx,
                                             GenerateStreamEvent::Delta {
                                                 text: format!(
                                                     "‹‹ACT››🧠 Passo al modello browser: {b_model}‹‹/ACT››"
@@ -20590,24 +20700,24 @@ require your confirmation in the app. Propose it and stop."
                                             },
                                         )
                                         .await;
-                                        base_url = b_url;
-                                        model = b_model;
-                                        api_key = b_key;
+                                        *ctx.base_url = b_url;
+                                        *ctx.model = b_model;
+                                        *ctx.api_key = b_key;
                                         // Provider-aware endpoint: an Ollama-based
                                         // browser role needs native /api/chat — the
                                         // old hardcoded "/chat/completions" sent
                                         // NATIVE-shaped payloads (object arguments)
                                         // to the strict /v1 endpoint → 400 on every
                                         // mid-turn model switch (task #105).
-                                        endpoint = chat_endpoint(&base_url);
+                                        *ctx.endpoint = chat_endpoint(ctx.base_url);
                                     }
                                 }
                             }
                         }
-                        if browser_session.is_none() {
-                            let reused = match thread_id.as_deref() {
+                        if ctx.browser_session.is_none() {
+                            let reused = match ctx.thread_id {
                                 Some(t) => {
-                                    let st = state_owned.clone();
+                                    let st = ctx.state.clone();
                                     let t = t.to_string();
                                     tokio::task::spawn_blocking(move || {
                                         take_thread_browser_session(&st, &t)
@@ -20621,11 +20731,11 @@ require your confirmation in the app. Propose it and stop."
                             // A reused session already has the "chat_0" tab open;
                             // mark it opened so navigate reuses it (Navigate, not
                             // Open). A fresh session has no tabs yet.
-                            if reused.is_some() && !opened_targets.iter().any(|t| t == "chat_0") {
-                                opened_targets.push("chat_0".to_string());
+                            if reused.is_some() && !ctx.opened_targets.iter().any(|t| t == "chat_0") {
+                                ctx.opened_targets.push("chat_0".to_string());
                             }
                             match reused {
-                                Some(existing) => browser_session = Some(existing),
+                                Some(existing) => *ctx.browser_session = Some(existing),
                                 None => {
                                     // Self-heal: a wedged contained-computer CDP makes the
                                     // sidecar's connectOverCDP time out. Health-check BEFORE
@@ -20633,38 +20743,38 @@ require your confirmation in the app. Propose it and stop."
                                     // race, or a container that wedged after the check),
                                     // recycle + recreate and retry once — resolve the block
                                     // automatically instead of reporting "non disponibile".
-                                    if !browser_cdp_ok(&state_owned).await {
+                                    if !browser_cdp_ok(ctx.state).await {
                                         let _ = emit_stream_event(
-                                            &tx,
+                                            ctx.tx,
                                             GenerateStreamEvent::Delta {
                                                 text: "‹‹ACT››🔧 Browser stuck: restarting the contained computer…‹‹/ACT››".to_string(),
                                             },
                                         )
                                         .await;
-                                        ensure_browser_cdp_healthy(&state_owned).await;
+                                        ensure_browser_cdp_healthy(ctx.state).await;
                                     }
                                     for attempt in 0u8..2 {
-                                        let st = state_owned.clone();
+                                        let st = ctx.state.clone();
                                         let spawned = tokio::task::spawn_blocking(move || {
                                             spawn_browser_sidecar_for_chat(&st)
                                         })
                                         .await;
                                         match spawned {
                                             Ok(Ok(session)) => {
-                                                browser_session =
+                                                *ctx.browser_session =
                                                     Some(BrowserAutomationClient::new(session));
                                                 break;
                                             }
                                             // First failure → recycle the container + retry.
                                             _ if attempt == 0 => {
                                                 let _ = emit_stream_event(
-                                                    &tx,
+                                                    ctx.tx,
                                                     GenerateStreamEvent::Delta {
                                                         text: "‹‹ACT››🔧 Browser unreachable: restarting and retrying…‹‹/ACT››".to_string(),
                                                     },
                                                 )
                                                 .await;
-                                                ensure_browser_cdp_healthy(&state_owned).await;
+                                                ensure_browser_cdp_healthy(ctx.state).await;
                                             }
                                             // Second failure → give up; reported below.
                                             _ => {}
@@ -20675,10 +20785,10 @@ require your confirmation in the app. Propose it and stop."
                         }
                         // Mark this tool result as carrying a (potentially large)
                         // snapshot so the pruner stubs older ones.
-                        browser_tool_call_ids.insert(call_id.clone());
+                        ctx.browser_tool_call_ids.insert(call_id.clone());
                         // We hold the session for the duration of this branch; the
                         // GLOBAL lock is acquired only around each single call.
-                        let outcome: Result<String, String> = match browser_session.take() {
+                        let outcome: Result<String, String> = match ctx.browser_session.take() {
                             None => {
                                 push_browser_step(
                                     "browser: session unavailable".to_string(),
@@ -20698,7 +20808,7 @@ or tell the user to start the contained computer (Settings → Local computer)."
                                     // logic below treats it as not-yet-opened → Open).
                                     if let Some(t) = args.get("target").and_then(|v| v.as_str()) {
                                         if !t.trim().is_empty() {
-                                            current_target = t.to_string();
+                                            *ctx.current_target = t.to_string();
                                         }
                                     }
                                     if args
@@ -20706,7 +20816,7 @@ or tell the user to start the contained computer (Settings → Local computer)."
                                         .and_then(|v| v.as_bool())
                                         .unwrap_or(false)
                                     {
-                                        current_target = format!("chat_{}", opened_targets.len());
+                                        *ctx.current_target = format!("chat_{}", ctx.opened_targets.len());
                                     }
                                     let url = args
                                         .get("url")
@@ -20714,11 +20824,11 @@ or tell the user to start the contained computer (Settings → Local computer)."
                                         .unwrap_or("")
                                         .to_string();
                                     if url.trim().is_empty() {
-                                        browser_session = Some(client);
+                                        *ctx.browser_session = Some(client);
                                         Err("Missing URL for browser_navigate.".to_string())
                                     } else {
                                         let _ = emit_stream_event(
-                                            &tx,
+                                            ctx.tx,
                                             GenerateStreamEvent::Delta {
                                                 text: format!("‹‹ACT››🌐 Opening {url}‹‹/ACT››"),
                                             },
@@ -20727,12 +20837,12 @@ or tell the user to start the contained computer (Settings → Local computer)."
                                         let guard = browse_web_lock().lock().await;
                                         // Open the current tab the first time, then Navigate.
                                         let already_open =
-                                            opened_targets.iter().any(|t| t == &current_target);
+                                            ctx.opened_targets.iter().any(|t| t.as_str() == ctx.current_target.as_str());
                                         let (open_method, open_params) = if already_open {
                                             (
                                                 BrowserMethod::Navigate,
                                                 serde_json::json!({
-                                                    "target_id": current_target.as_str(),
+                                                    "target_id": ctx.current_target.as_str(),
                                                     "url": url,
                                                 }),
                                             )
@@ -20741,7 +20851,7 @@ or tell the user to start the contained computer (Settings → Local computer)."
                                                 BrowserMethod::Open,
                                                 serde_json::json!({
                                                     "url": url,
-                                                    "label": current_target.as_str(),
+                                                    "label": ctx.current_target.as_str(),
                                                 }),
                                             )
                                         };
@@ -20757,7 +20867,7 @@ or tell the user to start the contained computer (Settings → Local computer)."
                                                     c,
                                                     BrowserMethod::Snapshot,
                                                     browser_chat_snapshot_params(
-                                                        current_target.as_str(),
+                                                        ctx.current_target.as_str(),
                                                     ),
                                                 )
                                                 .await;
@@ -20770,12 +20880,12 @@ or tell the user to start the contained computer (Settings → Local computer)."
                                             Err(nav_err.clone().unwrap_or_default())
                                         };
                                         drop(guard);
-                                        browser_session = client_now;
+                                        *ctx.browser_session = client_now;
                                         // Mark this tab opened once the Open/Navigate succeeds.
                                         if nav_err.is_none()
-                                            && !opened_targets.iter().any(|t| t == &current_target)
+                                            && !ctx.opened_targets.iter().any(|t| t.as_str() == ctx.current_target.as_str())
                                         {
-                                            opened_targets.push(current_target.clone());
+                                            ctx.opened_targets.push(ctx.current_target.clone());
                                         }
                                         match (nav_err, snap_result) {
                                             (Some(error), _) => {
@@ -20797,18 +20907,18 @@ or tell the user to start the contained computer (Settings → Local computer)."
                                                 // self-heal the drive's shared path already has).
                                                 if cdp_wedge_signature(&error) {
                                                     let _ = emit_stream_event(
-                                                        &tx,
+                                                        ctx.tx,
                                                         GenerateStreamEvent::Delta {
                                                             text: "‹‹ACT››🔧 Browser bloccato: riavvio il computer…‹‹/ACT››".to_string(),
                                                         },
                                                     )
                                                     .await;
                                                     let healed = force_recycle_contained_computer(
-                                                        &state_owned,
+                                                        ctx.state,
                                                     )
                                                     .await;
-                                                    browser_session = None;
-                                                    opened_targets.clear();
+                                                    *ctx.browser_session = None;
+                                                    ctx.opened_targets.clear();
                                                     if healed {
                                                         Err("The browser was wedged; I recycled the contained computer. Retry the SAME navigation now.".to_string())
                                                     } else {
@@ -20816,7 +20926,7 @@ or tell the user to start the contained computer (Settings → Local computer)."
                                                     }
                                                 } else {
                                                     let fails = {
-                                                        let entry = nav_failures
+                                                        let entry = ctx.nav_failures
                                                             .entry(url.to_string())
                                                             .or_insert(0);
                                                         *entry += 1;
@@ -20831,7 +20941,7 @@ or tell the user to start the contained computer (Settings → Local computer)."
                                             (None, Ok(value)) => {
                                                 let snap = browser_snapshot_text(&value);
                                                 if !snap.is_empty() {
-                                                    last_snapshot = snap.clone();
+                                                    *ctx.last_snapshot = snap.clone();
                                                 }
                                                 push_browser_step(
                                                     format!("navigate {url}"),
@@ -20860,11 +20970,11 @@ or tell the user to start the contained computer (Settings → Local computer)."
                                 "browser_snapshot" => {
                                     if let Some(t) = args.get("target").and_then(|v| v.as_str()) {
                                         if !t.trim().is_empty() {
-                                            current_target = t.to_string();
+                                            *ctx.current_target = t.to_string();
                                         }
                                     }
                                     let _ = emit_stream_event(
-                                        &tx,
+                                        ctx.tx,
                                         GenerateStreamEvent::Delta {
                                             text: "‹‹ACT››👁️ Re-reading the page‹‹/ACT››"
                                                 .to_string(),
@@ -20875,16 +20985,16 @@ or tell the user to start the contained computer (Settings → Local computer)."
                                     let (client_back, snap) = chat_browser_call(
                                         client,
                                         BrowserMethod::Snapshot,
-                                        browser_chat_snapshot_params(current_target.as_str()),
+                                        browser_chat_snapshot_params(ctx.current_target.as_str()),
                                     )
                                     .await;
                                     drop(guard);
-                                    browser_session = client_back;
+                                    *ctx.browser_session = client_back;
                                     match snap {
                                         Ok(value) => {
                                             let snap = browser_snapshot_text(&value);
                                             if !snap.is_empty() {
-                                                last_snapshot = snap.clone();
+                                                *ctx.last_snapshot = snap.clone();
                                             }
                                             push_browser_step("snapshot".to_string(), "done");
                                             Ok(format!("Page snapshot:\n{snap}"))
@@ -20927,18 +21037,18 @@ or tell the user to start the contained computer (Settings → Local computer)."
                                             obj.remove("target");
                                         } else if let Some(t) = target_arg.as_deref() {
                                             if !t.trim().is_empty() {
-                                                current_target = t.to_string();
+                                                *ctx.current_target = t.to_string();
                                             }
                                         }
                                         obj.insert(
                                             "target_id".to_string(),
-                                            serde_json::Value::String(current_target.clone()),
+                                            serde_json::Value::String(ctx.current_target.clone()),
                                         );
                                     }
                                     let mut preflight_error = None;
                                     let vault_secret_used =
                                         match apply_payment_approval_secret_for_action(
-                                            &state_owned,
+                                            ctx.state,
                                             &mut action,
                                         ) {
                                             Ok(used) => used,
@@ -20961,15 +21071,15 @@ or tell the user to start the contained computer (Settings → Local computer)."
                                     // other people, not from their own requests (e.g.
                                     // clicking "Cerca" on a train search they asked for).
                                     let approved_payment_id =
-                                        approved_payment_id_for_action(&state_owned, &action);
+                                        approved_payment_id_for_action(ctx.state, &action);
                                     let blocked = browser_safety::high_risk_reason_with_payment_approval(
                                         &action,
-                                        &last_snapshot,
+                                        ctx.last_snapshot,
                                         approved_payment_id.as_deref(),
                                     )
                                     .or_else(|| {
-                                        if read_only
-                                            && !channel_owner
+                                        if ctx.read_only
+                                            && !ctx.channel_owner
                                             && browser_safety::is_committing_action(&action)
                                         {
                                             Some(
@@ -20981,11 +21091,11 @@ or tell the user to start the contained computer (Settings → Local computer)."
                                         }
                                     });
                                     if let Some(error) = preflight_error {
-                                        browser_session = Some(client);
+                                        *ctx.browser_session = Some(client);
                                         Err(error)
                                     } else if let Some(reason) = blocked {
                                         eprintln!("browser-gate: BLOCKED ({reason})");
-                                        browser_session = Some(client);
+                                        *ctx.browser_session = Some(client);
                                         push_browser_step(
                                             format!(
                                                 "action blocked: {}",
@@ -21007,7 +21117,7 @@ I did nothing: propose to the user what to do and wait — do NOT retry the same
                                             .unwrap_or("action")
                                             .to_string();
                                         let _ = emit_stream_event(
-                                            &tx,
+                                            ctx.tx,
                                             GenerateStreamEvent::Delta {
                                                 text: format!(
                                                     "‹‹ACT››✋ {kind} on the page‹‹/ACT››"
@@ -21020,7 +21130,7 @@ I did nothing: propose to the user what to do and wait — do NOT retry the same
                                             chat_browser_call(client, BrowserMethod::Act, action)
                                                 .await;
                                         drop(guard);
-                                        browser_session = client_back;
+                                        *ctx.browser_session = client_back;
                                         match act_res {
                                             Ok(value) => {
                                                 let snap = browser_snapshot_text(&value);
@@ -21029,9 +21139,9 @@ I did nothing: propose to the user what to do and wait — do NOT retry the same
                                                 // a different element/approach instead of
                                                 // repeating the same move.
                                                 let no_change =
-                                                    !snap.is_empty() && snap == last_snapshot;
+                                                    !snap.is_empty() && snap == *ctx.last_snapshot;
                                                 if !snap.is_empty() {
-                                                    last_snapshot = snap.clone();
+                                                    *ctx.last_snapshot = snap.clone();
                                                 }
                                                 push_browser_step(format!("{kind}"), "done");
                                                 let mut out = if snap.is_empty() {
@@ -21106,19 +21216,19 @@ don't repeat the same action; try a different element, scroll, or wait (kind=wai
                                                     let e = error.to_lowercase();
                                                     e.contains("stale") || e.contains("detached")
                                                 };
-                                                match (stale, browser_session.take()) {
+                                                match (stale, ctx.browser_session.take()) {
                                                     (true, Some(c)) => {
                                                         let guard = browse_web_lock().lock().await;
                                                         let (c_back, snap_res) = chat_browser_call(
                                                             c,
                                                             BrowserMethod::Snapshot,
                                                             browser_chat_snapshot_params(
-                                                                current_target.as_str(),
+                                                                ctx.current_target.as_str(),
                                                             ),
                                                         )
                                                         .await;
                                                         drop(guard);
-                                                        browser_session = c_back;
+                                                        *ctx.browser_session = c_back;
                                                         let snap = snap_res
                                                             .as_ref()
                                                             .map(browser_snapshot_text)
@@ -21129,7 +21239,7 @@ don't repeat the same action; try a different element, scroll, or wait (kind=wai
                                                                 browser_act_error_hint(&error)
                                                             ))
                                                         } else {
-                                                            last_snapshot = snap.clone();
+                                                            *ctx.last_snapshot = snap.clone();
                                                             Ok(stale_ref_recovery_message(
                                                                 args.get("ref")
                                                                     .and_then(|v| v.as_str()),
@@ -21138,7 +21248,7 @@ don't repeat the same action; try a different element, scroll, or wait (kind=wai
                                                         }
                                                     }
                                                     (_, restored) => {
-                                                        browser_session = restored;
+                                                        *ctx.browser_session = restored;
                                                         Err(format!(
                                                             "Action failed: {error}{}",
                                                             browser_act_error_hint(&error)
@@ -21152,7 +21262,7 @@ don't repeat the same action; try a different element, scroll, or wait (kind=wai
                                 "browser_screenshot" => {
                                     if let Some(t) = args.get("target").and_then(|v| v.as_str()) {
                                         if !t.trim().is_empty() {
-                                            current_target = t.to_string();
+                                            *ctx.current_target = t.to_string();
                                         }
                                     }
                                     let full_page = args
@@ -21164,7 +21274,7 @@ don't repeat the same action; try a different element, scroll, or wait (kind=wai
                                         .and_then(|v| v.as_bool())
                                         .unwrap_or(false);
                                     let _ = emit_stream_event(
-                                        &tx,
+                                        ctx.tx,
                                         GenerateStreamEvent::Delta {
                                             text: "‹‹ACT››📸 Capturing a screenshot‹‹/ACT››"
                                                 .to_string(),
@@ -21178,7 +21288,7 @@ don't repeat the same action; try a different element, scroll, or wait (kind=wai
                                         client,
                                         BrowserMethod::Screenshot,
                                         serde_json::json!({
-                                            "target_id": current_target.as_str(),
+                                            "target_id": ctx.current_target.as_str(),
                                             "file_name": file_name,
                                             "full_page": full_page,
                                             "labels": marks,
@@ -21186,7 +21296,7 @@ don't repeat the same action; try a different element, scroll, or wait (kind=wai
                                     )
                                     .await;
                                     drop(guard);
-                                    browser_session = client_back;
+                                    *ctx.browser_session = client_back;
                                     match shot_res {
                                         Ok(value) => {
                                             let path = value
@@ -21239,7 +21349,7 @@ don't repeat the same action; try a different element, scroll, or wait (kind=wai
                                                             .encode(&bytes);
                                                     let dataurl =
                                                         format!("data:image/png;base64,{encoded}");
-                                                    pending_browser_image = Some(dataurl);
+                                                    *ctx.pending_browser_image = Some(dataurl);
                                                     push_browser_step(
                                                         "screenshot".to_string(),
                                                         "done",
@@ -21280,7 +21390,7 @@ Use the text snapshot."
                                 }
                                 "browser_tabs" => {
                                     let _ = emit_stream_event(
-                                        &tx,
+                                        ctx.tx,
                                         GenerateStreamEvent::Delta {
                                             text: "‹‹ACT››🗂️ Listing tabs‹‹/ACT››".to_string(),
                                         },
@@ -21294,7 +21404,7 @@ Use the text snapshot."
                                     )
                                     .await;
                                     drop(guard);
-                                    browser_session = client_back;
+                                    *ctx.browser_session = client_back;
                                     match tabs_res {
                                         Ok(value) => {
                                             // Sidecar shape: { tabs: [ { targetId, url,
@@ -21351,7 +21461,7 @@ Use the text snapshot."
                                     // DISMISS, never accept (an accept could confirm an
                                     // action). The dialog message is returned so the model
                                     // sees what it answered.
-                                    let accept = !read_only
+                                    let accept = !ctx.read_only
                                         && args
                                             .get("accept")
                                             .and_then(|v| v.as_bool())
@@ -21361,7 +21471,7 @@ Use the text snapshot."
                                         .and_then(|v| v.as_str())
                                         .unwrap_or("");
                                     let _ = emit_stream_event(
-                                        &tx,
+                                        ctx.tx,
                                         GenerateStreamEvent::Delta {
                                             text: format!(
                                                 "‹‹ACT››💬 Dialog: {}‹‹/ACT››",
@@ -21375,7 +21485,7 @@ Use the text snapshot."
                                         client,
                                         BrowserMethod::RespondDialog,
                                         serde_json::json!({
-                                            "target_id": current_target.as_str(),
+                                            "target_id": ctx.current_target.as_str(),
                                             "accept": accept,
                                             "promptText": prompt_text,
                                             "timeoutMs": 5_000,
@@ -21383,7 +21493,7 @@ Use the text snapshot."
                                     )
                                     .await;
                                     drop(guard);
-                                    browser_session = client_back;
+                                    *ctx.browser_session = client_back;
                                     match dialog_res {
                                         Ok(value) => {
                                             let msg = value
@@ -21419,13 +21529,13 @@ Use the text snapshot."
                             "Empty query.".to_string()
                         } else {
                             let _ = emit_stream_event(
-                                &tx,
+                                ctx.tx,
                                 GenerateStreamEvent::Delta {
                                     text: format!("‹‹ACT››🔎 Searching GitHub: «{query}»‹‹/ACT››"),
                                 },
                             )
                             .await;
-                            github_search(&state_owned, &query).await
+                            github_search(ctx.state, &query).await
                         }
                     } else if name == "use_skill" {
                         // Progressive disclosure L2: load the full SKILL.md so the
@@ -21452,7 +21562,7 @@ Use the text snapshot."
                             .collect::<Vec<_>>()
                             .join(" ");
                         let _ = emit_stream_event(
-                            &tx,
+                            ctx.tx,
                             GenerateStreamEvent::Delta {
                                 text: format!("‹‹ACT››📖 Using the skill «{readable}»‹‹/ACT››"),
                             },
@@ -21498,7 +21608,7 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                 )
                             } else {
                                 let _ = emit_stream_event(
-                                    &tx,
+                                    ctx.tx,
                                     GenerateStreamEvent::Delta {
                                         text: format!(
                                             "‹‹ACT››🖥️ Running: {}‹‹/ACT››",
@@ -21516,7 +21626,7 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                         .unwrap_or(false);
                                 if !docker_up {
                                     let _ = emit_stream_event(
-                                        &tx,
+                                        ctx.tx,
                                         GenerateStreamEvent::Delta {
                                             text: "‹‹ACT››🐳 Docker isn't running: starting Docker Desktop and waiting for it to be ready (~1 min)…‹‹/ACT››".to_string(),
                                         },
@@ -21524,11 +21634,11 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                     .await;
                                 }
                                 // Publish the command to the computer terminal panel.
-                                sandbox_begin(command.clone(), thread_id.clone());
+                                sandbox_begin(command.clone(), ctx.thread_id.map(|s| s.to_string()));
                                 // Per-conversation output dir: skills save generated
                                 // files to $OUTPUT_DIR, bind-mounted to the host so
                                 // they become downloadable artifacts.
-                                let thread_slug = artifact_thread_slug(thread_id.as_deref());
+                                let thread_slug = artifact_thread_slug(ctx.thread_id);
                                 let container_out = sandbox::container_output_dir(&thread_slug);
                                 let host_out = sandbox::artifacts_dir().join(&thread_slug);
                                 let run_started = std::time::SystemTime::now();
@@ -21592,17 +21702,17 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                     // Persist in the committed answer so the UI can
                                     // render the download card + Artefatti panel (the
                                     // Done payload is authoritative).
-                                    accumulated.push_str(&artifact_mark);
+                                    ctx.accumulated.push_str(&artifact_mark);
                                     let _ = emit_stream_event(
-                                        &tx,
+                                        ctx.tx,
                                         GenerateStreamEvent::Delta {
                                             text: artifact_mark,
                                         },
                                     )
                                     .await;
                                     register_artifact_memory(
-                                        &state_owned,
-                                        thread_id.as_deref(),
+                                        ctx.state,
+                                        ctx.thread_id,
                                         &thread_slug,
                                         &file_name,
                                         size,
@@ -21637,9 +21747,9 @@ available tools (for data from the web use the browser: browser_navigate on the 
                             .and_then(|v| v.as_str())
                             .unwrap_or("")
                             .to_string();
-                        let thread_slug = artifact_thread_slug(thread_id.as_deref());
+                        let thread_slug = artifact_thread_slug(ctx.thread_id);
                         let _ = emit_stream_event(
-                            &tx,
+                            ctx.tx,
                             GenerateStreamEvent::Delta {
                                 text: format!("‹‹ACT››📝 Creating the file {fname}‹‹/ACT››"),
                             },
@@ -21677,17 +21787,17 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                 // authoritative): the UI parses ‹‹ARTIFACT›› from the
                                 // saved message to render the download card + the
                                 // Artefatti panel. Without this the artifact vanishes.
-                                accumulated.push_str(&artifact_mark);
+                                ctx.accumulated.push_str(&artifact_mark);
                                 let _ = emit_stream_event(
-                                    &tx,
+                                    ctx.tx,
                                     GenerateStreamEvent::Delta {
                                         text: artifact_mark,
                                     },
                                 )
                                 .await;
                                 register_artifact_memory(
-                                    &state_owned,
-                                    thread_id.as_deref(),
+                                    ctx.state,
+                                    ctx.thread_id,
                                     &thread_slug,
                                     &fname,
                                     size,
@@ -21731,7 +21841,7 @@ available tools (for data from the web use the browser: browser_navigate on the 
                             "generate_image needs a prompt.".to_string()
                         } else {
                             let _ = emit_stream_event(
-                                &tx,
+                                ctx.tx,
                                 GenerateStreamEvent::Delta {
                                     text: format!(
                                         "‹‹ACT››🎨 Generating image: {}‹‹/ACT››",
@@ -21740,9 +21850,9 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                 },
                             )
                             .await;
-                            match generate_image_png(&state_owned.http, &prompt, &size).await {
+                            match generate_image_png(&ctx.state.http, &prompt, &size).await {
                                 Ok(bytes) => {
-                                    let thread_slug = artifact_thread_slug(thread_id.as_deref());
+                                    let thread_slug = artifact_thread_slug(ctx.thread_id);
                                     let slug_w = thread_slug.clone();
                                     let fname_w = fname.clone();
                                     let result = tokio::task::spawn_blocking(move || {
@@ -21760,17 +21870,17 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                             });
                                             let artifact_mark =
                                                 format!("‹‹ARTIFACT››{marker}‹‹/ARTIFACT››");
-                                            accumulated.push_str(&artifact_mark);
+                                            ctx.accumulated.push_str(&artifact_mark);
                                             let _ = emit_stream_event(
-                                                &tx,
+                                                ctx.tx,
                                                 GenerateStreamEvent::Delta {
                                                     text: artifact_mark,
                                                 },
                                             )
                                             .await;
                                             register_artifact_memory(
-                                                &state_owned,
-                                                thread_id.as_deref(),
+                                                ctx.state,
+                                                ctx.thread_id,
                                                 &thread_slug,
                                                 &fname,
                                                 size_b,
@@ -21797,7 +21907,7 @@ available tools (for data from the web use the browser: browser_navigate on the 
                         // the logo data URL in deck.json. Return colours/fonts (for image
                         // prompts) but REPLACE the big logo data URL with a note, so the
                         // model can't paste a 13KB blob into a shell-written deck.json.
-                        let slug = artifact_thread_slug(thread_id.as_deref());
+                        let slug = artifact_thread_slug(ctx.thread_id);
                         let slug2 = slug.clone();
                         let _ = tokio::task::spawn_blocking(move || materialize_brand_kit(&slug2))
                             .await;
@@ -21839,9 +21949,9 @@ available tools (for data from the web use the browser: browser_navigate on the 
                             "render_deck needs a non-empty 'slides' array (content only)."
                                 .to_string()
                         } else {
-                            let thread_slug = artifact_thread_slug(thread_id.as_deref());
+                            let thread_slug = artifact_thread_slug(ctx.thread_id);
                             let _ = emit_stream_event(
-                                &tx,
+                                ctx.tx,
                                 GenerateStreamEvent::Delta {
                                     text: "‹‹ACT››🎬 Rendering the deck (PPTX + preview)‹‹/ACT››"
                                         .to_string(),
@@ -21875,7 +21985,7 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                      if [ \"$qa_code\" -ne 0 ]; then exit \"$qa_code\"; fi; \
                                      ls -la deck.pptx deck.html deck.pdf 2>&1"
                                 );
-                                sandbox_begin(cmd.clone(), thread_id.clone());
+                                sandbox_begin(cmd.clone(), ctx.thread_id.map(|s| s.to_string()));
                                 let render = tokio::task::spawn_blocking(move || {
                                     sandbox::run_command(&cmd, None)
                                 })
@@ -21893,10 +22003,10 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                 let quality_metadata =
                                     deck_quality_metadata_from_qa_result(qa_result.as_ref());
                                 let produced = emit_rendered_deck_artifacts(
-                                    &state_owned,
-                                    &tx,
-                                    &mut accumulated,
-                                    thread_id.as_deref(),
+                                    ctx.state,
+                                    ctx.tx,
+                                    ctx.accumulated,
+                                    ctx.thread_id,
                                     &thread_slug,
                                     "render_deck",
                                     quality_metadata.as_ref(),
@@ -22026,9 +22136,9 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                     )
                                 }
                             };
-                            let thread_slug = artifact_thread_slug(thread_id.as_deref());
+                            let thread_slug = artifact_thread_slug(ctx.thread_id);
                             let _ = emit_stream_event(
-                                &tx,
+                                ctx.tx,
                                 GenerateStreamEvent::Delta {
                                     text: "‹‹ACT››🎬 Building the deck (brand · content · images · render)‹‹/ACT››".to_string(),
                                 },
@@ -22044,10 +22154,10 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                 .unwrap_or_default();
                             // 2) slide content — schema-enforced model call (the floor).
                             match generate_deck_content(
-                                &state_owned.http,
-                                &base_url,
-                                &model,
-                                api_key.as_deref(),
+                                &ctx.state.http,
+                                ctx.base_url,
+                                ctx.model,
+                                ctx.api_key.as_deref(),
                                 &brief,
                                 &brand,
                                 slides,
@@ -22063,8 +22173,8 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                     &e,
                                     requested_template_ref.as_deref(),
                                     template_ref.as_deref(),
-                                    &base_url,
-                                    &model,
+                                    ctx.base_url,
+                                    ctx.model,
                                 ),
                                 Ok(mut deck) => {
                                     apply_deck_design_components(&mut deck, &design_components);
@@ -22076,7 +22186,7 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                     let quality_issues = apply_deck_quality_guardrails(&mut deck);
                                     if !quality_issues.is_empty() {
                                         let _ = emit_stream_event(
-                                            &tx,
+                                            ctx.tx,
                                             GenerateStreamEvent::Delta {
                                                 text: format!(
                                                     "‹‹ACT››🔎 Deck QA adjusted {} layout-risk items‹‹/ACT››",
@@ -22120,7 +22230,7 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                             };
                                             let prompt = deck_slide_image_prompt(&title, &accent);
                                             let _ = emit_stream_event(
-                                                &tx,
+                                                ctx.tx,
                                                 GenerateStreamEvent::Delta {
                                                     text: format!(
                                                         "‹‹ACT››🎨 Image: {}‹‹/ACT››",
@@ -22130,7 +22240,7 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                             )
                                             .await;
                                             if let Ok(bytes) = generate_image_png(
-                                                &state_owned.http,
+                                                &ctx.state.http,
                                                 &prompt,
                                                 "1280x720",
                                             )
@@ -22179,7 +22289,7 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                             ) {
                                                 Ok(Some(filename)) => {
                                                     let _ = emit_stream_event(
-                                                        &tx,
+                                                        ctx.tx,
                                                         GenerateStreamEvent::Delta {
                                                             text: "‹‹ACT››📐 Using imported PPTX template‹‹/ACT››".to_string(),
                                                         },
@@ -22190,7 +22300,7 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                                 Ok(None) => String::new(),
                                                 Err(error) => {
                                                     let _ = emit_stream_event(
-                                                        &tx,
+                                                        ctx.tx,
                                                         GenerateStreamEvent::Delta {
                                                             text: format!(
                                                                 "‹‹ACT››⚠ Template source unavailable: {error}‹‹/ACT››"
@@ -22213,7 +22323,7 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                              if [ \"$qa_code\" -ne 0 ]; then exit \"$qa_code\"; fi; \
                                              ls -la deck.pptx deck.html deck.pdf 2>&1"
                                         );
-                                        sandbox_begin(cmd.clone(), thread_id.clone());
+                                        sandbox_begin(cmd.clone(), ctx.thread_id.map(|s| s.to_string()));
                                         let render = tokio::task::spawn_blocking(move || {
                                             sandbox::run_command(&cmd, None)
                                         })
@@ -22242,10 +22352,10 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                             .filter(|metadata| !metadata.is_empty())
                                             .map(|_| &artifact_metadata);
                                         let produced = emit_rendered_deck_artifacts(
-                                            &state_owned,
-                                            &tx,
-                                            &mut accumulated,
-                                            thread_id.as_deref(),
+                                            ctx.state,
+                                            ctx.tx,
+                                            ctx.accumulated,
+                                            ctx.thread_id,
                                             &thread_slug,
                                             "make_deck",
                                             artifact_metadata_ref,
@@ -22359,19 +22469,19 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                     )
                                 }
                             };
-                            let thread_slug = artifact_thread_slug(thread_id.as_deref());
+                            let thread_slug = artifact_thread_slug(ctx.thread_id);
                             let _ = emit_stream_event(
-                                &tx,
+                                ctx.tx,
                                 GenerateStreamEvent::Delta {
                                     text: "‹‹ACT››📝 Building the document (brief · draft · artifact · memory)‹‹/ACT››".to_string(),
                                 },
                             )
                             .await;
                             match generate_document_markdown(
-                                &state_owned.http,
-                                &base_url,
-                                &model,
-                                api_key.as_deref(),
+                                &ctx.state.http,
+                                ctx.base_url,
+                                ctx.model,
+                                ctx.api_key.as_deref(),
                                 &brief,
                                 &language,
                                 &document_options,
@@ -22391,7 +22501,7 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                     let quality_issues = document_quality_issues(&markdown);
                                     if !repaired_issues.is_empty() && quality_issues.is_empty() {
                                         let _ = emit_stream_event(
-                                            &tx,
+                                            ctx.tx,
                                             GenerateStreamEvent::Delta {
                                                 text: format!(
                                                     "‹‹ACT››🔎 Document QA repaired {} table-layout items‹‹/ACT››",
@@ -22473,9 +22583,9 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                                     let artifact_mark = format!(
                                                         "‹‹ARTIFACT››{marker}‹‹/ARTIFACT››"
                                                     );
-                                                    accumulated.push_str(&artifact_mark);
+                                                    ctx.accumulated.push_str(&artifact_mark);
                                                     let _ = emit_stream_event(
-                                                        &tx,
+                                                        ctx.tx,
                                                         GenerateStreamEvent::Delta {
                                                             text: artifact_mark,
                                                         },
@@ -22487,8 +22597,8 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                                         .unwrap_or("document.md")
                                                         .to_string();
                                                     register_artifact_memory(
-                                                        &state_owned,
-                                                        thread_id.as_deref(),
+                                                        ctx.state,
+                                                        ctx.thread_id,
                                                         &thread_slug,
                                                         &artifact_name,
                                                         size,
@@ -22540,9 +22650,9 @@ available tools (for data from the web use the browser: browser_navigate on the 
                             .and_then(|v| v.as_str())
                             .unwrap_or("")
                             .to_string();
-                        let thread_slug = artifact_thread_slug(thread_id.as_deref());
+                        let thread_slug = artifact_thread_slug(ctx.thread_id);
                         let _ = emit_stream_event(
-                            &tx,
+                            ctx.tx,
                             GenerateStreamEvent::Delta {
                                 text: format!("‹‹ACT››💾 Saving {file} to «{dest_name}»‹‹/ACT››"),
                             },
@@ -22562,7 +22672,7 @@ available tools (for data from the web use the browser: browser_navigate on the 
                         // contact): recall traverses the relationship graph, which IS the address
                         // book — perimeter-blind recall has no way to strip other people out, so
                         // fail-closed is to block it entirely.
-                        if contact_only || !can_see_contacts {
+                        if ctx.contact_only || !ctx.can_see_contacts {
                             "Personal memory not accessible in a conversation with this \
 contact: use only the messages from this chat. Do NOT reveal personal data of the user or third parties."
                                 .to_string()
@@ -22577,7 +22687,7 @@ contact: use only the messages from this chat. Do NOT reveal personal data of th
                             // `Recall` con i hits richiamati (visibile in UI: fase
                             // recalling + badge). Sostituisce il delta `‹‹ACT››🧠`.
                             let query_for_ui = if query.is_empty() { "(query)".to_string() } else { query.clone() };
-                            let st = state_owned.clone();
+                            let st = ctx.state.clone();
                             let outcome = tokio::task::spawn_blocking(move || recall_memory(&st, &query))
                                 .await
                                 .unwrap_or_else(|e| RecallOutcome {
@@ -22586,7 +22696,7 @@ contact: use only the messages from this chat. Do NOT reveal personal data of th
                                     scope: "personal".to_string(),
                                 });
                             let _ = emit_stream_event(
-                                &tx,
+                                ctx.tx,
                                 GenerateStreamEvent::Recall {
                                     payload: local_first_subagents::RecallStreamPayload {
                                         query: query_for_ui,
@@ -22615,13 +22725,13 @@ contact: use only the messages from this chat. Do NOT reveal personal data of th
                             })
                             .unwrap_or_default();
                         let _ = emit_stream_event(
-                            &tx,
+                            ctx.tx,
                             GenerateStreamEvent::Delta {
                                 text: format!("‹‹ACT››🗺️ Exploring the code map: {symbol}‹‹/ACT››"),
                             },
                         )
                         .await;
-                        let st = state_owned.clone();
+                        let st = ctx.state.clone();
                         tokio::task::spawn_blocking(move || query_code_graph(&st, &symbol))
                             .await
                             .unwrap_or_else(|e| format!("Execution error: {e}"))
@@ -22631,7 +22741,7 @@ contact: use only the messages from this chat. Do NOT reveal personal data of th
                             .and_then(|a| a.get("query").and_then(|s| s.as_str()).map(String::from))
                             .unwrap_or_default();
                         let _ = emit_stream_event(
-                            &tx,
+                            ctx.tx,
                             GenerateStreamEvent::Delta {
                                 text: format!("‹‹ACT››🕰️ Checking git history: {query}‹‹/ACT››"),
                             },
@@ -22661,7 +22771,7 @@ contact: use only the messages from this chat. Do NOT reveal personal data of th
                         }) {
                             Ok(res) => {
                                 let _ = emit_stream_event(
-                                    &tx,
+                                    ctx.tx,
                                     GenerateStreamEvent::Delta {
                                         text: format!(
                                             "‹‹ACT››🗓 Date resolved: {}‹‹/ACT››",
@@ -22699,14 +22809,14 @@ an uncertain date.",
                         let args_val: serde_json::Value = serde_json::from_str(args_raw)
                             .unwrap_or_else(|_| serde_json::json!({}));
                         let _ = emit_stream_event(
-                            &tx,
+                            ctx.tx,
                             GenerateStreamEvent::Delta {
                                 text: "‹‹ACT››🧠 Recording the decision in memory‹‹/ACT››"
                                     .to_string(),
                             },
                         )
                         .await;
-                        let st = state_owned.clone();
+                        let st = ctx.state.clone();
                         tokio::task::spawn_blocking(move || record_decision(&st, &args_val))
                             .await
                             .unwrap_or_else(|e| format!("Execution error: {e}"))
@@ -22714,13 +22824,13 @@ an uncertain date.",
                         let args_val: serde_json::Value = serde_json::from_str(args_raw)
                             .unwrap_or_else(|_| serde_json::json!({}));
                         let _ = emit_stream_event(
-                            &tx,
+                            ctx.tx,
                             GenerateStreamEvent::Delta {
                                 text: "‹‹ACT››🗑️ Forgetting from memory‹‹/ACT››".to_string(),
                             },
                         )
                         .await;
-                        let st = state_owned.clone();
+                        let st = ctx.state.clone();
                         tokio::task::spawn_blocking(move || forget_memory(&st, &args_val))
                             .await
                             .unwrap_or_else(|e| format!("Execution error: {e}"))
@@ -22746,8 +22856,8 @@ an uncertain date.",
                         // MERGE the model's steps into the CANONICAL plan (never replace);
                         // returns the canonical indices newly claimed done (held `doing`
                         // until F2 verifies). See `merge_plan` for the anti-reset rule.
-                        let claims = merge_execution_plan(&mut plan, &sent);
-                        let mut plan_steps = execution_plan_steps(&plan);
+                        let claims = merge_execution_plan(ctx.plan, &sent);
+                        let mut plan_steps = execution_plan_steps(ctx.plan);
                         // DIAG (HOMUN_DEBUG): the plan lifecycle, to see if the model
                         // re-proposes the whole plan (churn) or advances one step, and
                         // whether a re-proposal RESETS statuses (the "il piano riparta"
@@ -22780,10 +22890,10 @@ an uncertain date.",
                             // with NO external action (nothing to verify against, low risk);
                             // weak models (Always) still verify everything. OFF → unchanged.
                             let verify = step_verification_enabled()
-                                && if floor_acting {
-                                    match turn_scaffold.verify_depth {
+                                && if ctx.floor_acting {
+                                    match ctx.turn_scaffold.verify_depth {
                                         scaffold::VerifyDepth::Always => true,
-                                        scaffold::VerifyDepth::OnRisk => !step_evidence.is_empty(),
+                                        scaffold::VerifyDepth::OnRisk => !ctx.step_evidence.is_empty(),
                                     }
                                 } else {
                                     true
@@ -22797,13 +22907,13 @@ an uncertain date.",
                                     .unwrap_or("")
                                     .to_string();
                                 let (ok, reason) = if verify {
-                                    let evidence = if step_evidence.is_empty() {
+                                    let evidence = if ctx.step_evidence.is_empty() {
                                         "(no tool activity recorded for this step)".to_string()
                                     } else {
-                                        step_evidence.join("\n")
+                                        ctx.step_evidence.join("\n")
                                     };
                                     verify_step_complete(
-                                        &state_owned.http,
+                                        &ctx.state.http,
                                         &title,
                                         &criterion,
                                         &evidence,
@@ -22815,9 +22925,9 @@ an uncertain date.",
                                 if ok {
                                     plan_steps[i]["status"] = serde_json::json!("done");
                                     let verified_step = plan_steps[i].clone();
-                                    let verified_evidence = step_evidence.clone();
-                                    let st = state_owned.clone();
-                                    let thread_for_memory = thread_id.clone();
+                                    let verified_evidence = ctx.step_evidence.clone();
+                                    let st = ctx.state.clone();
+                                    let thread_for_memory = ctx.thread_id.map(|s| s.to_string());
                                     let _ = tokio::task::spawn_blocking(move || {
                                         record_runtime_plan_step_outcome_from_state(
                                             &st,
@@ -22827,15 +22937,15 @@ an uncertain date.",
                                         );
                                     })
                                     .await;
-                                    plan = runtime_execution_plan(&plan_steps);
-                                    progress_anchor_round = round; // F1: real progress
-                                    step_evidence.clear();
-                                    last_round_sig.clear();
-                                    repeat_count = 0;
-                                    pending_compaction = true; // F3
+                                    *ctx.plan = runtime_execution_plan(&plan_steps);
+                                    *ctx.progress_anchor_round = round; // F1: real progress
+                                    ctx.step_evidence.clear();
+                                    ctx.last_round_sig.clear();
+                                    *ctx.repeat_count = 0;
+                                    *ctx.pending_compaction = true; // F3
                                     if verify {
                                         let _ = emit_stream_event(
-                                            &tx,
+                                            ctx.tx,
                                             GenerateStreamEvent::Delta {
                                                 text: format!(
                                                     "‹‹ACT››✓ Step verified: {}‹‹/ACT››",
@@ -22860,18 +22970,18 @@ an uncertain date.",
                             // Marker rendered from the CANONICAL plan — the single source of
                             // truth (verified state), not the model's raw claim. This is what
                             // the UI shows and what the next turn resumes from.
-                            plan_steps = execution_plan_steps(&plan);
+                            plan_steps = execution_plan_steps(ctx.plan);
                             let plan_mark =
                                 format!("‹‹PLAN››{}‹‹/PLAN››", build_plan_markdown(&plan_steps));
-                            accumulated.push_str(&plan_mark);
+                            ctx.accumulated.push_str(&plan_mark);
                             let _ = emit_stream_event(
-                                &tx,
+                                ctx.tx,
                                 GenerateStreamEvent::Delta { text: plan_mark },
                             )
                             .await;
                             upsert_runtime_plan_memory_from_state(
-                                &state_owned,
-                                thread_id.as_deref(),
+                                ctx.state,
+                                ctx.thread_id,
                                 &plan_steps,
                             );
                             let done = plan_done_count(&plan_steps);
@@ -22884,31 +22994,31 @@ an uncertain date.",
                         }
                     } else if name == "create_automation" {
                         let _ = emit_stream_event(
-                            &tx,
+                            ctx.tx,
                             GenerateStreamEvent::Delta {
                                 text: "‹‹ACT››⚡ Creating an automation‹‹/ACT››".to_string(),
                             },
                         )
                         .await;
                         create_automation_from_chat(
-                            &state_owned,
+                            ctx.state,
                             args_raw,
-                            &automation_user_id,
-                            &automation_workspace_id,
+                            ctx.automation_user_id,
+                            ctx.automation_workspace_id,
                         )
                     } else if name == "update_automation" {
                         let _ = emit_stream_event(
-                            &tx,
+                            ctx.tx,
                             GenerateStreamEvent::Delta {
                                 text: "‹‹ACT››⚡ Updating an automation‹‹/ACT››".to_string(),
                             },
                         )
                         .await;
                         update_automation_from_chat(
-                            &state_owned,
+                            ctx.state,
                             args_raw,
-                            &automation_user_id,
-                            &automation_workspace_id,
+                            ctx.automation_user_id,
+                            ctx.automation_workspace_id,
                         )
                     } else if name == "find_capability" {
                         // Tool Search: discover DEFERRED native tools by intent and activate
@@ -22925,7 +23035,7 @@ an uncertain date.",
                             })
                             .unwrap_or_default();
                         let _ = emit_stream_event(
-                            &tx,
+                            ctx.tx,
                             GenerateStreamEvent::Delta {
                                 text: format!(
                                     "‹‹ACT››🧭 Searching for a capability: {}‹‹/ACT››",
@@ -22941,7 +23051,7 @@ an uncertain date.",
                         let mut lines = Vec::new();
                         let mut discovered_entries: Vec<CapabilityEntry> = Vec::new();
                         // In-house tools + skills (BM25 over the unified corpus).
-                        for entry in bm25_rank(&capability_corpus, &intent, 6) {
+                        for entry in bm25_rank(ctx.capability_corpus, &intent, 6) {
                             if entry.is_skill {
                                 lines.push(format!(
                                     "- skill «{}»: {} → load it with use_skill(\"{}\")",
@@ -22955,8 +23065,8 @@ an uncertain date.",
                                 ));
                                 discovered_entries.push(entry.clone());
                             } else if let Some(schema) = &entry.schema {
-                                if loaded_tools.insert(entry.key.clone()) {
-                                    tool_schemas.push(schema.clone());
+                                if ctx.loaded_tools.insert(entry.key.clone()) {
+                                    ctx.tool_schemas.push(schema.clone());
                                 }
                                 let label = capability_source_label(entry.source);
                                 lines.push(format!("- {label} «{}»: {}", entry.key, entry.desc));
@@ -22967,37 +23077,37 @@ an uncertain date.",
                         // tools so the model sees its full CRUD together. Channels: READ only.
                         // contact_only turns: don't surface connected services at all (the
                         // dispatch refuses them anyway — this just avoids a wasted round).
-                        if !catalog_index.is_empty() && !contact_only {
+                        if !ctx.catalog_index.is_empty() && !ctx.contact_only {
                             for entry in search_connector_capability_entries(
-                                &catalog_index,
+                                ctx.catalog_index,
                                 &intent,
                                 COMPOSIO_DISCOVERY_RESULTS,
                             ) {
-                                if read_only && !composio_tool_is_read(&entry.key) {
+                                if ctx.read_only && !composio_tool_is_read(&entry.key) {
                                     continue;
                                 }
                                 // PERIMETER: don't even surface calendar/contacts tools when the
                                 // matching axis is off (the dispatch refuses them anyway).
-                                if !can_see_calendar && tool_touches_calendar(&entry.key) {
+                                if !ctx.can_see_calendar && tool_touches_calendar(&entry.key) {
                                     continue;
                                 }
-                                if !can_see_contacts && tool_touches_contacts(&entry.key) {
+                                if !ctx.can_see_contacts && tool_touches_contacts(&entry.key) {
                                     continue;
                                 }
-                                if loaded_tools.insert(entry.key.clone()) {
+                                if ctx.loaded_tools.insert(entry.key.clone()) {
                                     if let Some(schema) = &entry.schema {
-                                        tool_schemas.push(schema.clone());
+                                        ctx.tool_schemas.push(schema.clone());
                                     }
                                 }
                                 lines.push(format!("- connector «{}»: {}", entry.key, entry.desc));
                                 discovered_entries.push(entry);
                             }
                         }
-                        if tool_trace.len() < 20 {
+                        if ctx.tool_trace.len() < 20 {
                             if let Some(trace_line) =
                                 capability_discovery_trace_line(&intent, &discovered_entries)
                             {
-                                tool_trace.push(trace_line);
+                                ctx.tool_trace.push(trace_line);
                             }
                         }
                         if lines.is_empty() {
@@ -23037,7 +23147,7 @@ loaded with use_skill):\n{}",
                                 .to_string()
                         } else {
                             let _ = emit_stream_event(
-                                &tx,
+                                ctx.tx,
                                 GenerateStreamEvent::Delta {
                                     text: format!("‹‹ACT››⏰ Scheduling: {goal} ({every})‹‹/ACT››"),
                                 },
@@ -23045,9 +23155,9 @@ loaded with use_skill):\n{}",
                             .await;
                             // Route through the first-class Automation model so a chat-
                             // scheduled task shows up in the Automazioni view (not a hidden run).
-                            let st = state_owned.clone();
-                            let user_id = automation_user_id.clone();
-                            let workspace_id = automation_workspace_id.clone();
+                            let st = ctx.state.clone();
+                            let user_id = ctx.automation_user_id.clone();
+                            let workspace_id = ctx.automation_workspace_id.clone();
                             let title: String = goal.chars().take(48).collect();
                             let auto_args = serde_json::json!({
                                 "title": title,
@@ -23077,14 +23187,14 @@ loaded with use_skill):\n{}",
                             .unwrap_or("")
                             .to_string();
                         let _ = emit_stream_event(
-                            &tx,
+                            ctx.tx,
                             GenerateStreamEvent::Delta {
                                 text: format!("‹‹ACT››📄 Reading {path}‹‹/ACT››"),
                             },
                         )
                         .await;
-                        let st = state_owned.clone();
-                        let tid = thread_id.clone();
+                        let st = ctx.state.clone();
+                        let tid = ctx.thread_id.map(|s| s.to_string());
                         let recall_path = path.clone();
                         let mut out = tokio::task::spawn_blocking(move || {
                             read_project_file(&st, tid.as_deref(), &path)
@@ -23093,7 +23203,7 @@ loaded with use_skill):\n{}",
                         .unwrap_or_else(|e| format!("Error: {e}"));
                         // Per-file recall: surface past DECISIONS about this file so the
                         // agent remembers WHY it's like this instead of re-deriving it.
-                        let st2 = state_owned.clone();
+                        let st2 = ctx.state.clone();
                         if let Some(note) = tokio::task::spawn_blocking(move || {
                             decisions_for_path(&st2, &recall_path)
                         })
@@ -23119,14 +23229,14 @@ loaded with use_skill):\n{}",
                             .unwrap_or("")
                             .to_string();
                         let _ = emit_stream_event(
-                            &tx,
+                            ctx.tx,
                             GenerateStreamEvent::Delta {
                                 text: format!("‹‹ACT››✍️ Scrivo {path}‹‹/ACT››"),
                             },
                         )
                         .await;
-                        let st = state_owned.clone();
-                        let tid = thread_id.clone();
+                        let st = ctx.state.clone();
+                        let tid = ctx.thread_id.map(|s| s.to_string());
                         let path_for_memory = path.clone();
                         let content_len = content.len() as u64;
                         let result = tokio::task::spawn_blocking(move || {
@@ -23136,8 +23246,8 @@ loaded with use_skill):\n{}",
                         .unwrap_or_else(|e| format!("Error: {e}"));
                         if result.starts_with("✅ Wrote ") {
                             register_project_file_artifact_memory(
-                                &state_owned,
-                                thread_id.as_deref(),
+                                ctx.state,
+                                ctx.thread_id,
                                 &path_for_memory,
                                 content_len,
                                 "write_file",
@@ -23164,14 +23274,14 @@ loaded with use_skill):\n{}",
                             .unwrap_or("")
                             .to_string();
                         let _ = emit_stream_event(
-                            &tx,
+                            ctx.tx,
                             GenerateStreamEvent::Delta {
                                 text: format!("‹‹ACT››✏️ Modifico {path}‹‹/ACT››"),
                             },
                         )
                         .await;
-                        let st = state_owned.clone();
-                        let tid = thread_id.clone();
+                        let st = ctx.state.clone();
+                        let tid = ctx.thread_id.map(|s| s.to_string());
                         tokio::task::spawn_blocking(move || {
                             edit_project_file(&st, tid.as_deref(), &path, &old, &new)
                         })
@@ -23179,14 +23289,14 @@ loaded with use_skill):\n{}",
                         .unwrap_or_else(|e| format!("Error: {e}"))
                     } else if name == "list_files" {
                         let _ = emit_stream_event(
-                            &tx,
+                            ctx.tx,
                             GenerateStreamEvent::Delta {
                                 text: "‹‹ACT››📂 Exploring the project‹‹/ACT››".to_string(),
                             },
                         )
                         .await;
-                        let st = state_owned.clone();
-                        let tid = thread_id.clone();
+                        let st = ctx.state.clone();
+                        let tid = ctx.thread_id.map(|s| s.to_string());
                         tokio::task::spawn_blocking(move || list_project_files(&st, tid.as_deref()))
                             .await
                             .unwrap_or_else(|e| format!("Error: {e}"))
@@ -23199,8 +23309,8 @@ loaded with use_skill):\n{}",
                             .and_then(|v| v.as_str())
                             .unwrap_or("")
                             .to_string();
-                        let st = state_owned.clone();
-                        let tid = thread_id.clone();
+                        let st = ctx.state.clone();
+                        let tid = ctx.thread_id.map(|s| s.to_string());
                         let pr = p.clone();
                         let resolved = tokio::task::spawn_blocking(move || {
                             fs_resolve_authorized(&st, tid.as_deref(), &pr)
@@ -23217,7 +23327,7 @@ loaded with use_skill):\n{}",
                                     "📂 Listing"
                                 };
                                 let _ = emit_stream_event(
-                                    &tx,
+                                    ctx.tx,
                                     GenerateStreamEvent::Delta {
                                         text: format!("‹‹ACT››{icon} {p}‹‹/ACT››"),
                                     },
@@ -23245,13 +23355,13 @@ loaded with use_skill):\n{}",
                                     "\n\nTo access this folder I need your authorization.\n\
 ‹‹FS_AUTHORIZE››{marker}‹‹/FS_AUTHORIZE››\n"
                                 );
-                                accumulated.push_str(&card);
+                                ctx.accumulated.push_str(&card);
                                 let _ = emit_stream_event(
-                                    &tx,
+                                    ctx.tx,
                                     GenerateStreamEvent::Delta { text: card },
                                 )
                                 .await;
-                                pending_confirm = true;
+                                *ctx.pending_confirm = true;
                                 "AWAITING AUTHORIZATION: I showed the user a card with the \
 button to authorize access to the folder. Do NOT say you have read/listed it."
                                     .to_string()
@@ -23266,7 +23376,7 @@ button to authorize access to the folder. Do NOT say you have read/listed it."
                             .unwrap_or("")
                             .to_string();
                         let _ = emit_stream_event(
-                            &tx,
+                            ctx.tx,
                             GenerateStreamEvent::Delta {
                                 text: format!(
                                     "‹‹ACT››🛠️ Running in the project: {}‹‹/ACT››",
@@ -23275,7 +23385,7 @@ button to authorize access to the folder. Do NOT say you have read/listed it."
                             },
                         )
                         .await;
-                        run_in_project(&state_owned, thread_id.as_deref(), &command).await
+                        run_in_project(ctx.state, ctx.thread_id, &command).await
                     } else if name == "list_addons" {
                         tokio::task::spawn_blocking(process_skills::addons_list_text)
                             .await
@@ -23306,7 +23416,7 @@ button to authorize access to the folder. Do NOT say you have read/listed it."
                             .cloned()
                             .unwrap_or_else(|| serde_json::json!({}));
                         let _ = emit_stream_event(
-                            &tx,
+                            ctx.tx,
                             GenerateStreamEvent::Delta {
                                 text: format!("‹‹ACT››🧩 Customizing addon {addon_id}‹‹/ACT››"),
                             },
@@ -23336,7 +23446,7 @@ button to authorize access to the folder. Do NOT say you have read/listed it."
                             .unwrap_or("")
                             .to_string();
                         let _ = emit_stream_event(
-                            &tx,
+                            ctx.tx,
                             GenerateStreamEvent::Delta {
                                 text: format!("‹‹ACT››🧩 Creating the skill {skill_name}‹‹/ACT››"),
                             },
@@ -23356,13 +23466,13 @@ button to authorize access to the folder. Do NOT say you have read/listed it."
                             .unwrap_or("")
                             .to_string();
                         let _ = emit_stream_event(
-                            &tx,
+                            ctx.tx,
                             GenerateStreamEvent::Delta {
                                 text: format!("‹‹ACT››🧭 Searching connectors for: {need}‹‹/ACT››"),
                             },
                         )
                         .await;
-                        let suggestions = suggest_capabilities(&state_owned, &need).await;
+                        let suggestions = suggest_capabilities(ctx.state, &need).await;
                         match suggestions.card {
                             Some(card) => {
                                 // In-chat connect-cards: render the suggestions as
@@ -23374,13 +23484,13 @@ button to authorize access to the folder. Do NOT say you have read/listed it."
                                     "\n\nHere's what I can connect for this. Choose below.\n\
 ‹‹CONNECT_SUGGEST››{marker}‹‹/CONNECT_SUGGEST››\n"
                                 );
-                                accumulated.push_str(&card_text);
+                                ctx.accumulated.push_str(&card_text);
                                 let _ = emit_stream_event(
-                                    &tx,
+                                    ctx.tx,
                                     GenerateStreamEvent::Delta { text: card_text },
                                 )
                                 .await;
-                                pending_confirm = true;
+                                *ctx.pending_confirm = true;
                                 "AWAITING: I showed the user clickable cards to \
 connect the suggested connectors (skill/MCP/Composio). Do NOT say you have already connected anything."
                                     .to_string()
@@ -23388,7 +23498,7 @@ connect the suggested connectors (skill/MCP/Composio). Do NOT say you have alrea
                             None => suggestions.model_text,
                         }
                     } else if name == "list_scheduled_tasks" {
-                        let st = state_owned.clone();
+                        let st = ctx.state.clone();
                         tokio::task::spawn_blocking(move || list_scheduled_tasks(&st))
                             .await
                             .unwrap_or_else(|e| format!("Error: {e}"))
@@ -23402,17 +23512,17 @@ connect the suggested connectors (skill/MCP/Composio). Do NOT say you have alrea
                             .trim()
                             .to_string();
                         let _ = emit_stream_event(
-                            &tx,
+                            ctx.tx,
                             GenerateStreamEvent::Delta {
                                 text: "‹‹ACT››🗑️ Cancelling scheduled task‹‹/ACT››".to_string(),
                             },
                         )
                         .await;
-                        let st = state_owned.clone();
+                        let st = ctx.state.clone();
                         tokio::task::spawn_blocking(move || cancel_scheduled_task(&st, &task_id))
                             .await
                             .unwrap_or_else(|e| format!("Error: {e}"))
-                    } else if !can_see_calendar && !name.is_empty() && tool_touches_calendar(name) {
+                    } else if !ctx.can_see_calendar && !name.is_empty() && tool_touches_calendar(name) {
                         // PERIMETER (anti-exfiltration): the can_see_calendar axis is enforced
                         // HARD here, independent of memory_scope — a "personal"-scope contact that
                         // is NOT contact_only still can't pull the user's calendar. All builtins
@@ -23420,14 +23530,14 @@ connect the suggested connectors (skill/MCP/Composio). Do NOT say you have alrea
                         "The user's calendar is not accessible in this conversation. \
 Do not reveal commitments, appointments or events."
                             .to_string()
-                    } else if !can_see_contacts && !name.is_empty() && tool_touches_contacts(name) {
+                    } else if !ctx.can_see_contacts && !name.is_empty() && tool_touches_contacts(name) {
                         // PERIMETER (anti-exfiltration): the can_see_contacts axis, enforced HARD
                         // here too — block the user's address book (Google Contacts / People etc.)
                         // even on a non-contact_only turn.
                         "The user's address book is not accessible in this conversation. \
 Do not reveal other contacts, people or relationships of the user."
                             .to_string()
-                    } else if contact_only && !name.is_empty() {
+                    } else if ctx.contact_only && !name.is_empty() {
                         // PERIMETER (anti-exfiltration): a `contact_only` turn must not reach the
                         // user's connected services. All builtins are matched in earlier arms, so
                         // any tool reaching here is a connected Composio/MCP tool — refuse it so a
@@ -23436,7 +23546,7 @@ Do not reveal other contacts, people or relationships of the user."
 this contact. Answer only with what's in this chat; do not reveal personal data \
 of the user or third parties."
                             .to_string()
-                    } else if read_only && !name.is_empty() && composio_writes.contains(name) {
+                    } else if ctx.read_only && !name.is_empty() && ctx.composio_writes.contains(name) {
                         // Channel (read-only) turn: never run a write tool, never even
                         // surface a confirm card (no UI on the channel). Phase 2 routes
                         // these to the in-app approval center.
@@ -23453,19 +23563,19 @@ require your confirmation in the app. Propose it and stop."
                         let args_val: serde_json::Value = serde_json::from_str(args_raw)
                             .unwrap_or_else(|_| serde_json::json!({}));
                         let workspace_scoped = workspace_scoped_mcp_write(
-                            &state_owned,
-                            thread_id.as_deref(),
+                            ctx.state,
+                            ctx.thread_id,
                             &mcp_provider,
                             &mcp_tool,
                             &args_val,
                         );
-                        if composio_writes.contains(name) && !autonomous && !workspace_scoped {
+                        if ctx.composio_writes.contains(name) && !ctx.autonomous && !workspace_scoped {
                             let approval = create_pending_approval(
-                                &state_owned,
+                                ctx.state,
                                 name,
                                 &args_val,
                                 &mcp_tool,
-                                thread_id.as_deref(),
+                                ctx.thread_id,
                                 true,
                             );
                             let marker = match approval.as_ref() {
@@ -23481,23 +23591,23 @@ require your confirmation in the app. Propose it and stop."
                                 "\n\nI need your confirmation for the action below.\n\
 ‹‹MCP_CONFIRM››{marker}‹‹/MCP_CONFIRM››\n"
                             );
-                            accumulated.push_str(&card);
+                            ctx.accumulated.push_str(&card);
                             let _ =
-                                emit_stream_event(&tx, GenerateStreamEvent::Delta { text: card })
+                                emit_stream_event(ctx.tx, GenerateStreamEvent::Delta { text: card })
                                     .await;
-                            pending_confirm = true;
+                            *ctx.pending_confirm = true;
                             "AWAITING USER CONFIRMATION: the action was proposed via a \
 confirmation card in the interface. Do NOT say it was executed."
                                 .to_string()
                         } else {
                             let _ = emit_stream_event(
-                                &tx,
+                                ctx.tx,
                                 GenerateStreamEvent::Delta {
                                     text: format!("‹‹ACT››🔌 Using {mcp_tool}‹‹/ACT››"),
                                 },
                             )
                             .await;
-                            let st = state_owned.clone();
+                            let st = ctx.state.clone();
                             let prov = mcp_provider.clone();
                             let tool = mcp_tool.clone();
                             let args_for_artifact = args_val.clone();
@@ -23545,8 +23655,8 @@ Connectors → MCP; do NOT claim it's done.",
                                 }
                             };
                             record_connector_run(
-                                &state_owned,
-                                thread_id.as_deref(),
+                                ctx.state,
+                                ctx.thread_id,
                                 name,
                                 "mcp",
                                 run_ok,
@@ -23555,8 +23665,8 @@ Connectors → MCP; do NOT claim it's done.",
                             );
                             if run_ok {
                                 register_mcp_filesystem_artifact_memory(
-                                    &state_owned,
-                                    thread_id.as_deref(),
+                                    ctx.state,
+                                    ctx.thread_id,
                                     mcp_provider.as_str(),
                                     &mcp_tool,
                                     &args_for_artifact,
@@ -23569,9 +23679,9 @@ Connectors → MCP; do NOT claim it's done.",
                         // A connected-service (Composio) tool. Writes need explicit
                         // confirmation unless the user marked this tool "always allow" OR the
                         // run is an autonomous automation (explicit per-automation opt-in).
-                        let needs_confirm = composio_writes.contains(name)
+                        let needs_confirm = ctx.composio_writes.contains(name)
                             && !composio_tool_allowed(name)
-                            && !autonomous;
+                            && !ctx.autonomous;
                         if needs_confirm {
                             // Do NOT execute. Emit a confirmation card carrying the exact
                             // action; the user runs it (once/always) via the card. The model
@@ -23579,11 +23689,11 @@ Connectors → MCP; do NOT claim it's done.",
                             let args_val: serde_json::Value = serde_json::from_str(args_raw)
                                 .unwrap_or_else(|_| serde_json::json!({}));
                             let approval = create_pending_approval(
-                                &state_owned,
+                                ctx.state,
                                 name,
                                 &args_val,
                                 &humanize_composio_tool(name),
-                                thread_id.as_deref(),
+                                ctx.thread_id,
                                 true,
                             );
                             let marker = match approval.as_ref() {
@@ -23599,17 +23709,17 @@ Connectors → MCP; do NOT claim it's done.",
                                 "\n\nI need your confirmation for the action below.\n\
 ‹‹COMPOSIO_CONFIRM››{marker}‹‹/COMPOSIO_CONFIRM››\n"
                             );
-                            accumulated.push_str(&card);
+                            ctx.accumulated.push_str(&card);
                             let _ =
-                                emit_stream_event(&tx, GenerateStreamEvent::Delta { text: card })
+                                emit_stream_event(ctx.tx, GenerateStreamEvent::Delta { text: card })
                                     .await;
-                            pending_confirm = true;
+                            *ctx.pending_confirm = true;
                             "AWAITING USER CONFIRMATION: the action was proposed via a \
 confirmation card in the interface. Do NOT say it was executed."
                                 .to_string()
                         } else {
                             let _ = emit_stream_event(
-                                &tx,
+                                ctx.tx,
                                 GenerateStreamEvent::Delta {
                                     text: format!(
                                         "‹‹ACT››🔧 Using {}‹‹/ACT››",
@@ -23618,7 +23728,7 @@ confirmation card in the interface. Do NOT say it was executed."
                                 },
                             )
                             .await;
-                            let st = state_owned.clone();
+                            let st = ctx.state.clone();
                             let tool = name.to_string();
                             let args: serde_json::Value = serde_json::from_str(args_raw)
                                 .unwrap_or_else(|_| serde_json::json!({}));
@@ -23669,8 +23779,8 @@ Tell the user clearly; do NOT claim it's done."
                                 }
                             };
                             record_connector_run(
-                                &state_owned,
-                                thread_id.as_deref(),
+                                ctx.state,
+                                ctx.thread_id,
                                 name,
                                 "composio",
                                 run_ok,
@@ -23694,23 +23804,23 @@ Tell the user clearly; do NOT claim it's done."
                         // links) lands in the "Sources" footer. The page visited IS the
                         // source. `is_low_value_source_url` stays as a defensive net.
                         if let Some(url) = extract_source_urls(&result).into_iter().next() {
-                            if !is_low_value_source_url(&url) && !browse_sources.contains(&url) {
-                                browse_sources.push(url);
+                            if !is_low_value_source_url(&url) && !ctx.browse_sources.contains(&url) {
+                                ctx.browse_sources.push(url);
                             }
                         }
                     }
                     if name == "recall_memory" {
-                        pending_vault_reveal_marker =
-                            extract_vault_reveal_marker(&result).or(pending_vault_reveal_marker);
+                        *ctx.pending_vault_reveal_marker =
+                            extract_vault_reveal_marker(&result).or(ctx.pending_vault_reveal_marker.take());
                     }
                     // F2: record this tool's outcome as evidence for the current plan
                     // step (the verifier's input). Skip the plan tool itself so the
                     // evidence reflects the actual WORK, not the bookkeeping. Bounded.
                     if name != "update_plan" {
                         let snippet: String = result.chars().take(400).collect();
-                        step_evidence.push(format!("{name} → {snippet}"));
-                        if step_evidence.len() > 60 {
-                            step_evidence.remove(0);
+                        ctx.step_evidence.push(format!("{name} → {snippet}"));
+                        if ctx.step_evidence.len() > 60 {
+                            ctx.step_evidence.remove(0);
                         }
                     }
                     // Parity harness: compute the result-derived fingerprint fields
@@ -23729,7 +23839,7 @@ Tell the user clearly; do NOT claim it's done."
                     } else {
                         None
                     };
-                    messages.push(serde_json::json!({
+                    ctx.messages.push(serde_json::json!({
                         "role": "tool",
                         "tool_call_id": call_id,
                         "content": result,
@@ -23741,31 +23851,32 @@ Tell the user clearly; do NOT claim it's done."
                     // below.
                     if let Some((args_hash, result_hash, result_len, result_head)) = trace_fields {
                         let rec = crate::tool_trace_dump::ToolTraceRecord {
-                            round,
+                            round: ctx.round,
                             idx,
                             name: name.to_string(),
                             args_hash,
                             result_hash,
                             result_len,
                             result_head,
-                            acc_delta_len: accumulated.len().saturating_sub(acc_before),
+                            acc_delta_len: ctx.accumulated.len().saturating_sub(acc_before),
                             acc_markers: crate::tool_trace_dump::extract_markers(
                                 acc_before,
-                                &accumulated,
+                                ctx.accumulated,
                             ),
-                            pending_confirm_raised: pending_confirm && !pc_before,
-                            msgs_pushed: messages.len().saturating_sub(msgs_before),
+                            pending_confirm_raised: *ctx.pending_confirm && !pc_before,
+                            msgs_pushed: ctx.messages.len().saturating_sub(msgs_before),
                             blocked: false,
                             // Set by the browser_screenshot arm (if it ran) to queue a
                             // SECOND message pushed AFTER this loop — invisible to
                             // `msgs_pushed`, so we fingerprint the side effect here.
-                            browser_image_set: pending_browser_image.is_some(),
+                            browser_image_set: ctx.pending_browser_image.is_some(),
                         };
                         if let Ok(dir) = gateway_logs_dir() {
                             crate::tool_trace_dump::append(&dir, &rec);
                         }
                     }
                 }
+                } // end ctx scope → borrows freed before the post-loop reads below
                 // A browser screenshot this round → feed the image to the (vision)
                 // model as a SEPARATE user message. It MUST come AFTER every tool
                 // result of this round (OpenAI-compat requires each assistant
