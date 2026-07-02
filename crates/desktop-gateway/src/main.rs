@@ -37152,10 +37152,28 @@ fn sandbox_escalate_matches(text: &str, command: &str) -> bool {
         == Some(command)
 }
 
-/// Rewrites the escalation-card marker into a plain "ran unsandboxed" note so
-/// reopening the chat doesn't re-show the actionable card (mirrors
-/// `rewrite_fs_authorize_to_done` / `rewrite_mcp_confirm_to_done`).
-fn rewrite_sandbox_escalate_to_done(text: &str, command: &str) -> String {
+/// Provenance for a file-write escalation: the stored message must carry a
+/// SANDBOX_ESCALATE card whose `tool` and `arguments` deep-equal the request's, so
+/// only the EXACT proposed write can run (no arbitrary-write RCE). Mirrors
+/// `sandbox_escalate_matches` (bash) but keyed on tool+arguments, not command.
+fn sandbox_escalate_write_matches(
+    text: &str,
+    tool: &str,
+    arguments: &serde_json::Value,
+) -> bool {
+    let Some(marker) = confirm_marker_value(text, SANDBOX_ESCALATE_OPEN, SANDBOX_ESCALATE_CLOSE)
+    else {
+        return false;
+    };
+    marker.get("tool").and_then(|v| v.as_str()) == Some(tool)
+        && marker.get("arguments") == Some(arguments)
+}
+
+/// Shared marker-location logic for both escalation rewriters: find the
+/// SANDBOX_ESCALATE card region, strip the card head (any of `head_markers`) and
+/// the marker block, and append `note`. Returns the text unchanged when the marker
+/// is absent (idempotent on already-rewritten text).
+fn rewrite_sandbox_escalate_region(text: &str, head_markers: &[&str], note: &str) -> String {
     let Some(open) = text.find(SANDBOX_ESCALATE_OPEN) else {
         return text.to_string();
     };
@@ -37163,8 +37181,10 @@ fn rewrite_sandbox_escalate_to_done(text: &str, command: &str) -> String {
         return text.to_string();
     };
     let close = open + close_rel + SANDBOX_ESCALATE_CLOSE.len();
-    let head_end = text[..open]
-        .rfind("I need your confirmation")
+    let head_end = head_markers
+        .iter()
+        .filter_map(|m| text[..open].rfind(m))
+        .min()
         .unwrap_or(open);
     let mut out = text[..head_end].trim_end().to_string();
     let tail = text[close..].trim();
@@ -37177,15 +37197,52 @@ fn rewrite_sandbox_escalate_to_done(text: &str, command: &str) -> String {
     if !out.is_empty() {
         out.push_str("\n\n");
     }
-    out.push_str(&format!("✓ Ran unsandboxed: {command}"));
+    out.push_str(note);
     out
+}
+
+/// Rewrites the escalation-card marker into a plain "ran unsandboxed" note so
+/// reopening the chat doesn't re-show the actionable card (mirrors
+/// `rewrite_fs_authorize_to_done` / `rewrite_mcp_confirm_to_done`).
+fn rewrite_sandbox_escalate_to_done(text: &str, command: &str) -> String {
+    rewrite_sandbox_escalate_region(
+        text,
+        &["I need your confirmation"],
+        &format!("✓ Ran unsandboxed: {command}"),
+    )
+}
+
+/// Payload-agnostic variant for the write path: the write card's head text differs
+/// from the bash card's, and we don't need the command to locate the marker. Shares
+/// `rewrite_sandbox_escalate_region` with the bash rewriter so the marker-location
+/// logic isn't duplicated.
+fn rewrite_sandbox_escalate_done_generic(text: &str) -> String {
+    rewrite_sandbox_escalate_region(
+        text,
+        &[
+            "This write was blocked by the read-only sandbox.",
+            "I need your confirmation",
+        ],
+        "✔ Ran with approval",
+    )
 }
 
 #[derive(Debug, Deserialize)]
 struct RunEscalateRequest {
-    command: String,
+    #[serde(default)]
+    command: Option<String>, // bash path (optional so the write path can omit it)
     #[serde(default)]
     cwd: Option<String>,
+    #[serde(default)]
+    tool: Option<String>, // write path: "write_file" | "edit_file"
+    #[serde(default)]
+    path: Option<String>,
+    #[serde(default)]
+    content: Option<String>,
+    #[serde(default)]
+    old_string: Option<String>,
+    #[serde(default)]
+    new_string: Option<String>,
     #[serde(default)]
     thread_id: Option<String>,
     #[serde(default)]
@@ -37202,13 +37259,82 @@ async fn run_escalate(
     State(state): State<AppState>,
     Json(request): Json<RunEscalateRequest>,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
+    // File-write escalation (ADR 0023 #2): re-run the exact blocked write, still project-jailed.
+    if let Some(tool) = request.tool.as_deref() {
+        if tool == "write_file" || tool == "edit_file" {
+            let arguments = if tool == "write_file" {
+                serde_json::json!({
+                    "path": request.path.clone().unwrap_or_default(),
+                    "content": request.content.clone().unwrap_or_default(),
+                })
+            } else {
+                serde_json::json!({
+                    "path": request.path.clone().unwrap_or_default(),
+                    "old_string": request.old_string.clone().unwrap_or_default(),
+                    "new_string": request.new_string.clone().unwrap_or_default(),
+                })
+            };
+            // Provenance gate: the tool+arguments must deep-equal the stored card, so
+            // only the EXACT proposed write can run (no arbitrary-write RCE).
+            let confirmed = match (&request.thread_id, &request.message_id) {
+                (Some(tid), Some(mid)) => lock_store(&state)
+                    .ok()
+                    .and_then(|s| s.message(tid, mid).ok().flatten())
+                    .is_some_and(|m| sandbox_escalate_write_matches(&m.text, tool, &arguments)),
+                _ => false,
+            };
+            if !confirmed {
+                return Err(GatewayError {
+                    status: StatusCode::FORBIDDEN,
+                    code: "sandbox_escalate_required",
+                    message: "Re-run a write only from its matching escalation card.".to_string(),
+                });
+            }
+            let path = request.path.clone().unwrap_or_default();
+            // Re-run through the canonical executor — STILL jail_in_root (project-scoped).
+            let output = if tool == "write_file" {
+                write_project_file(
+                    &state,
+                    request.thread_id.as_deref(),
+                    &path,
+                    &request.content.clone().unwrap_or_default(),
+                )
+            } else {
+                edit_project_file(
+                    &state,
+                    request.thread_id.as_deref(),
+                    &path,
+                    &request.old_string.clone().unwrap_or_default(),
+                    &request.new_string.clone().unwrap_or_default(),
+                )
+            };
+            // Rewrite the card marker to a done-note so it can't reopen on reload.
+            if let (Some(tid), Some(mid)) = (&request.thread_id, &request.message_id) {
+                if let Ok(store) = lock_store(&state) {
+                    if let Ok(Some(m)) = store.message(tid, mid) {
+                        let rewritten = rewrite_sandbox_escalate_done_generic(&m.text);
+                        let _ = store.set_message_text(tid, mid, &rewritten);
+                    }
+                }
+            }
+            return Ok(Json(serde_json::json!({ "ok": true, "output": output })));
+        }
+    }
+    // Bash path: the request must carry a command (write path returned above).
+    let Some(command) = request.command.clone() else {
+        return Err(GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "sandbox_escalate_no_command",
+            message: "No command to re-run.".to_string(),
+        });
+    };
     // Provenance gate (REQUIRED): the command must match the card in the stored
     // message. Without a matching marker, refuse — never run an arbitrary command.
     let confirmed = match (&request.thread_id, &request.message_id) {
         (Some(thread_id), Some(message_id)) => lock_store(&state)
             .ok()
             .and_then(|store| store.message(thread_id, message_id).ok().flatten())
-            .is_some_and(|message| sandbox_escalate_matches(&message.text, &request.command)),
+            .is_some_and(|message| sandbox_escalate_matches(&message.text, &command)),
         _ => false,
     };
     if !confirmed {
@@ -37232,12 +37358,12 @@ async fn run_escalate(
         });
     };
     // Execute UNSANDBOXED via the shared raw-exec helper.
-    let output = run_bash_unsandboxed(&root, &request.command).await;
+    let output = run_bash_unsandboxed(&root, &command).await;
     // Persist: rewrite the card marker to a "ran unsandboxed" note (no reopen on reload).
     if let (Some(thread_id), Some(message_id)) = (&request.thread_id, &request.message_id) {
         if let Ok(store) = lock_store(&state) {
             if let Ok(Some(message)) = store.message(thread_id, message_id) {
-                let rewritten = rewrite_sandbox_escalate_to_done(&message.text, &request.command);
+                let rewritten = rewrite_sandbox_escalate_to_done(&message.text, &command);
                 let _ = store.set_message_text(thread_id, message_id, &rewritten);
             }
         }
@@ -57493,6 +57619,43 @@ data: [DONE]\n";
         assert!(out.contains("✓ Ran unsandboxed: npm ci"));
         // No-op when the marker is absent (idempotent on already-rewritten text).
         assert_eq!(crate::rewrite_sandbox_escalate_to_done("hi", "npm ci"), "hi");
+    }
+
+    #[test]
+    fn write_escalate_matches_only_the_proposed_write() {
+        let args = serde_json::json!({ "path": "src/x.rs", "content": "hi" });
+        let text = format!(
+            "This write was blocked.\n{}{}{}\n",
+            crate::SANDBOX_ESCALATE_OPEN,
+            serde_json::json!({ "approval_id": "a1", "tool": "write_file", "arguments": args }),
+            crate::SANDBOX_ESCALATE_CLOSE,
+        );
+        assert!(crate::sandbox_escalate_write_matches(&text, "write_file", &args));
+        let other = serde_json::json!({ "path": "src/evil.rs", "content": "hi" });
+        assert!(!crate::sandbox_escalate_write_matches(&text, "write_file", &other)); // wrong path
+        assert!(!crate::sandbox_escalate_write_matches(&text, "edit_file", &args)); // wrong tool
+        let no_marker = "no card here";
+        assert!(!crate::sandbox_escalate_write_matches(no_marker, "write_file", &args)); // no card → reject
+    }
+
+    #[test]
+    fn write_escalate_rewrite_drops_card_marker() {
+        let args = serde_json::json!({ "path": "src/x.rs", "content": "hi" });
+        let text = format!(
+            "This write was blocked by the read-only sandbox.\n{}{}{}\n",
+            crate::SANDBOX_ESCALATE_OPEN,
+            serde_json::json!({ "tool": "write_file", "arguments": args }),
+            crate::SANDBOX_ESCALATE_CLOSE,
+        );
+        let out = crate::rewrite_sandbox_escalate_done_generic(&text);
+        assert!(!out.contains("SANDBOX_ESCALATE"), "marker removed");
+        assert!(
+            !out.contains("This write was blocked"),
+            "card head removed"
+        );
+        assert!(out.contains("✔ Ran with approval"));
+        // No-op when the marker is absent (idempotent on already-rewritten text).
+        assert_eq!(crate::rewrite_sandbox_escalate_done_generic("hi"), "hi");
     }
 
     #[test]
