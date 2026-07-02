@@ -6,12 +6,13 @@
 //! that a LATER task will hand to `sandbox-exec -p <profile>` to fence
 //! `run_in_project`'s `bash` subprocess.
 //!
-//! **PURE-ADDITION phase.** This module is *pure string generation*: no
-//! `sandbox-exec` invocation, no `std::fs`, no `Command`, no spawning, no wiring.
-//! `seatbelt_profile` is a total function of its input (plus one deterministic
-//! per-machine env read for the temp dir — see below), so it is identical to run
-//! anywhere and fully unit-testable. Nothing here is called by the chat loop yet;
-//! that is the wiring task.
+//! `seatbelt_profile` builds the profile string; it is wired into `run_in_project`
+//! (which passes it to `sandbox-exec -p`). It does NOT spawn anything itself. It
+//! reads the fs to **canonicalize** the writable roots + temp dir — Seatbelt
+//! matches the resolved (symlink-free) path, so `/tmp` must be inlined as
+//! `/private/tmp` or the fence denies even the writable root (see
+//! `canonical_or_raw`). Non-existent paths fall back to their literal, so unit
+//! tests with synthetic paths stay deterministic.
 //!
 //! Mirrors `codex-rs/core/src/seatbelt.rs` (the Codex reference): a
 //! **closed-by-default** profile that allows reads broadly and permits writes only
@@ -27,7 +28,7 @@
 //!   explicit sysctl-name allowlist. Allow-all is a faithful-enough base for the
 //!   read surface (sysctl reads are informational); see the `// TODO` below — the
 //!   exact Codex allowlist can be pasted in later for tighter fidelity.
-#![allow(dead_code)] // nothing is wired into the loop yet — pure generator phase.
+#![allow(dead_code)] // ReadOnly/DangerFullAccess branches aren't exercised by the current wiring yet.
 
 use crate::tool_safety::SandboxPolicy;
 
@@ -85,8 +86,11 @@ fn build_profile(writable_roots: &[String], allow_network: bool) -> String {
     // (e.g. `$TMPDIR/...`) succeed under the fence. `std::env::temp_dir()` reads
     // `TMPDIR` (falling back to `/tmp`); this makes the profile deterministic per
     // machine, which is exactly right for a per-machine profile generator.
-    let tmp = std::env::temp_dir();
-    let tmp = tmp.to_string_lossy();
+    // Canonicalize the temp dir: Seatbelt matches the RESOLVED path, and on macOS
+    // `$TMPDIR` lives under `/var/folders/…` where `/var` is a symlink to
+    // `/private/var`. A non-canonical subpath silently fails to match → scratch
+    // writes would be denied. (Empirically verified.)
+    let tmp = canonical_or_raw(&std::env::temp_dir().to_string_lossy());
 
     let mut out = String::new();
     out.push_str(BASE_PROFILE);
@@ -98,7 +102,7 @@ fn build_profile(writable_roots: &[String], allow_network: bool) -> String {
     out.push_str("(allow file-write*\n");
     for root in writable_roots {
         out.push_str("  (subpath \"");
-        out.push_str(&escape_sb_path(root));
+        out.push_str(&escape_sb_path(&canonical_or_raw(root)));
         out.push_str("\")\n");
     }
     out.push_str("  (subpath \"");
@@ -151,6 +155,20 @@ fn escape_sb_path(p: &str) -> String {
     p.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
+/// Resolve a path to its canonical, symlink-free form — which is what Seatbelt
+/// matches against. On macOS `/tmp` → `/private/tmp` and `/var/folders/…` →
+/// `/private/var/folders/…`, so a subpath that isn't canonical silently fails to
+/// match and the fence denies even the intended writable root (empirically
+/// verified). Falls back to the input unchanged when the path does not exist
+/// (`canonicalize` requires existence) or on any IO error — so a still-usable
+/// literal is always inlined, and unit tests that pass non-existent paths see them
+/// verbatim.
+fn canonical_or_raw(p: &str) -> String {
+    std::fs::canonicalize(p)
+        .map(|c| c.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| p.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -160,8 +178,10 @@ mod tests {
     /// computed the same way the function does so the assertions don't hard-code a
     /// single machine's `$TMPDIR`.
     fn tmp_subpath_line() -> String {
-        let tmp = std::env::temp_dir();
-        format!("(subpath \"{}\")", escape_sb_path(&tmp.to_string_lossy()))
+        // Canonicalized the same way the generator does, so assertions match the
+        // resolved (symlink-free) tmp subpath the profile actually inlines.
+        let tmp = super::canonical_or_raw(&std::env::temp_dir().to_string_lossy());
+        format!("(subpath \"{}\")", escape_sb_path(&tmp))
     }
 
     // ---- DangerFullAccess: no fence -------------------------------------------
@@ -262,6 +282,28 @@ mod tests {
     }
 
     // ---- escape_sb_path -------------------------------------------------------
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn writable_roots_are_canonicalized_symlinks_resolved() {
+        // On macOS `/tmp` is a symlink to `/private/tmp`; Seatbelt matches the
+        // CANONICAL path, so the profile must inline `/private/tmp`, not `/tmp`.
+        // Regression: a non-canonical subpath silently fails to match, denying even
+        // the writable root (found by live `sandbox-exec` testing).
+        let profile = seatbelt_profile(&SandboxPolicy::WorkspaceWrite {
+            writable_roots: vec![PathBuf::from("/tmp")],
+            network_access: false,
+        })
+        .unwrap();
+        assert!(
+            profile.contains("(subpath \"/private/tmp\")"),
+            "writable root /tmp was not canonicalized to /private/tmp:\n{profile}"
+        );
+        assert!(
+            !profile.contains("(subpath \"/tmp\")"),
+            "raw (non-canonical) /tmp leaked into the profile:\n{profile}"
+        );
+    }
 
     #[test]
     fn escape_sb_path_escapes_quotes_and_backslashes() {
