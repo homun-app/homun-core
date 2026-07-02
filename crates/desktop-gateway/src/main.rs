@@ -13,6 +13,8 @@ mod skills;
 mod skills_catalog;
 // Static security scan for installed skills, ported from Homun.
 mod skill_security;
+// Startup integrity sweep: quick_check + quarantine of corrupt SQLite stores (P0).
+mod store_integrity;
 // Skill execution sandbox (reuses the browser's contained-computer container).
 mod mcp_http;
 mod mcp_registry;
@@ -171,6 +173,8 @@ pub(crate) struct AppState {
     /// The current STABLE live-view ticket, reused across status polls so the embed
     /// URL (and thus the iframe) doesn't change every poll. Re-minted when expired.
     pub(crate) novnc_view_ticket: Arc<Mutex<Option<String>>>,
+    /// Stores quarantined by the startup integrity sweep (empty = all healthy).
+    recovered_stores: std::sync::Arc<Vec<String>>,
 }
 
 #[derive(Debug, Clone)]
@@ -234,6 +238,9 @@ struct HealthResponse {
     service: &'static str,
     local_first: bool,
     auth_required: bool,
+    /// Names of stores reset at startup after failing quick_check (backups kept
+    /// as *.corrupt-<epoch>.bak beside the store). Empty on a healthy boot.
+    recovered_stores: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -568,6 +575,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // opens it (the SQLite stores are created immediately below).
     migrate_legacy_data_dir();
 
+    // P0 resilience: verify every personal store BEFORE anything opens it; a
+    // corrupt file is quarantined (never deleted) and the fresh open below
+    // succeeds. Surfaced to the UI via /api/health `recovered_stores`.
+    let recovered_stores: std::sync::Arc<Vec<String>> = std::sync::Arc::new(
+        store_integrity::ensure_store_integrity(&[
+            store_integrity::StoreCheck { name: "desktop-gateway", path: gateway_database_path()? },
+            store_integrity::StoreCheck { name: "task-runtime", path: gateway_task_database_path()? },
+            store_integrity::StoreCheck { name: "local-computer-session", path: gateway_local_computer_database_path()? },
+            store_integrity::StoreCheck { name: "browser-url-policy", path: gateway_browser_policy_database_path()? },
+            store_integrity::StoreCheck { name: "memory", path: gateway_memory_database_path()? },
+            store_integrity::StoreCheck { name: "vault", path: gateway_vault_database_path()? },
+            store_integrity::StoreCheck { name: "capability-registry", path: gateway_capability_database_path()? },
+        ]),
+    );
+
     let port = env::var("HOMUN_DESKTOP_GATEWAY_PORT")
         .ok()
         .or_else(|| env::var("PORT").ok()) // PaaS convention
@@ -614,6 +636,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         auth_token: resolve_gateway_auth_token()?.into(),
         novnc_tickets: Arc::new(Mutex::new(std::collections::HashMap::new())),
         novnc_view_ticket: Arc::new(Mutex::new(None)),
+        recovered_stores: recovered_stores.clone(),
     };
     // ADR 0022 — Tappa 1: se il flag è ON, costruisci il service memoria che
     // incapsula brief/recall/learn. Costruito dopo il letterale perché
@@ -1142,6 +1165,7 @@ async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
         service: "local-first-desktop-gateway",
         local_first: true,
         auth_required: !state.auth_token.is_empty(),
+        recovered_stores: state.recovered_stores.as_ref().clone(),
     })
 }
 
@@ -53814,6 +53838,7 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
                 std::collections::HashMap::new(),
             )),
             novnc_view_ticket: std::sync::Arc::new(std::sync::Mutex::new(None)),
+            recovered_stores: std::sync::Arc::new(Vec::new()),
         }
     }
 
