@@ -29,6 +29,7 @@ mod privacy_guard;
 mod sandbox;
 mod task_registry;
 mod temporal;
+mod tool_exec;
 
 use axum::{
     Json, Router,
