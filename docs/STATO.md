@@ -544,9 +544,28 @@ single-threaded+approval.
   plan_marker` self-healing, `parse_plan_objective` + test. 553 test verdi, nessuna regressione.
   **Fase B frontend parte-1 FATTO (`be68d005`):** `parsePlanObjective` + `workspacePlanObjective` → la **working
   island rende il goal in cima** (`.wi-objective`, 🎯, brand-tinted, single-line) sopra gli step. tsc pulito,
-  ui-contract passa. **PROSSIMO/follow-up:** (B parte-2) **sync island** — `conversationPlan` deriva da `messages`
-  PERSISTED (ADR 0022 C2, *deliberato* per evitare churn per-frame in streaming) → lag; farlo live senza reintrodurre
-  il churn = cambio React da fare con CURA + test (non un edit al volo). (C) affidabilità produzione piano su modelli
+  ui-contract passa.
+  **⭐ B.2 SYNC ISLAND LIVE — FATTO (2026-07-03, spec+plan superpowers, TDD, 4 commit `5f452218`→`03300503`).**
+  Intuizione che scioglie il trade-off ADR 0022 C2: gli eventi `plan_update`/`activity` sono **sparsi** (una manciata
+  per turno), solo i delta di testo sono per-frame → alimentare l'island da quegli eventi dà churn ~zero, strettamente
+  meglio di derivare da `threadMessages` (che era il churn temuto). Impl (Approccio A, event-sourced): **reducer puro**
+  `applyLiveEvent` in `apps/desktop/src/lib/liveWorkspace.ts` (`plan_update`→sostituisce piano completo; `activity`→
+  appende step `text.trim()`, parità esatta con `parseActivitySteps`; altro→no-op) + **hook** `useLiveWorkspace` (state
+  + `onStreamEvent` + `reset`) in ChatView. Le **4 path di streaming** (`submitPrompt`/`resumeActiveStream`/
+  `streamRegeneratedAnswer`/`streamContinuetionIntoMessage`) fanno `onStreamEvent(part)` accanto a `streamEventParts`;
+  `reset()` nei 3 new-turn start (NON la continuation) + effetto reset su cambio `threadId`. Island: `conversationPlan =
+  livePlan ?? persistedPlan`, `conversationActivity = liveActivity.length ? liveActivity : persistedActivity` →
+  objective+step live gratis (derivano già da `conversationPlan`). **Artifact restano PERSISTED** (C2 invariato, non
+  lag-sensitive). **Hand-off sticky** (reset al turno successivo, non a fine turno) → nessun flicker.
+  **Verificato:** reducer 5/5 vitest (`npx vitest run`), `tsc --noEmit` 0, `npm run build` ✓ (tsc+vite), ui-contract ✓,
+  renderer boota pulito (0 errori relativi alla modifica; solo warn `automations Failed to fetch` = browser-mode senza
+  bridge Electron, non correlato). **RESTA (smoke live):** guidare un turno browse reale nell'app sbloccata e osservare
+  island che si muove live + no jank + hand-off + cancel + switch-thread — non eseguibile headless (access-token gate +
+  side-effect sul gateway live dell'utente). **Env-gap notato:** `vitest` NON installato in `node_modules` (devDep
+  dichiarato, install incompleto) → `npm run test:unit` (aggiunto) gira solo dopo `npm install`; qui i test passano via
+  `npx`. tsconfig produzione ora esclude `*.test.ts(x)` (il runner possiede i test; build resta verde). launch config
+  `homun-renderer` aggiunto a `Homun/.claude/launch.json` (dev convenience, fuori repo app).
+  **PROSSIMO/follow-up:** (C) affidabilità produzione piano su modelli
   deboli (finding 1.2); verificare edge marker seed/reconcile. Debito UI: `ChatView.tsx` 9.4k / `SettingsView` 6.9k
   da splittare.
 
