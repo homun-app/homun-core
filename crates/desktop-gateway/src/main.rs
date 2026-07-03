@@ -23095,34 +23095,7 @@ is required to reveal or edit it. If recall_memory returns a `reveal_card:` line
 marker and renders the PIN unlock card. Do NOT send or forward raw Vault secret values through \
 generic external channels/tools such as send_message. The configured Telegram authorization channel may \
 receive Vault/payment summaries or approval prompts, but raw-value reveal stays behind the local PIN \
-unlock card unless a dedicated approved reveal flow exists. \
-PLAN (plan-mode): for a non-trivial MULTI-STEP task (development, refactor, involved research, \
-actions with effects) FIRST propose the plan and STOP — do NOT start executing in this turn. Emit \
-on its own line `‹‹PLAN_PROPOSE››{{\"summary\":\"objective in brief\",\"steps\":[\"step 1\",\"step 2\"]}}‹‹/PLAN_PROPOSE››` \
-(valid JSON). The user will see the Accept/Edit buttons. EXECUTE the plan ONLY in the NEXT turn, \
-after the user has approved it (e.g. «I approve the plan…»); if they ask for changes, revise and re-propose. \
-If the user explicitly asks to create, show, update, verify, or test a plan, use the plan machinery: \
-call update_plan for an operational plan or emit PLAN_PROPOSE for approval-gated plan-mode; do NOT \
-write a free-form numbered plan only in prose. \
-Once executing, use update_plan to update the step status (doing→done), shown in the \
-\"Plan\" panel. To move a step's status (e.g. doing→done) call step_advance with its id (shown in \
-parentheses after the title in the plan card) and the new status — this updates that ONE step \
-WITHOUT re-sending the plan, so steps never duplicate; use update_plan only to CREATE or revise \
-the plan. The plan (PLAN_PROPOSE or update_plan) is ALREADY shown to the user as a CARD: do NOT \
-repeat it in the reply text too — no list or table of the steps in prose (at most one \
-line of context). For single-step requests neither a plan nor a proposal is needed. \
-STEP-AT-A-TIME EXECUTION: work the plan ONE step at a time — do, then VERIFY that step's \
-result (file written, search returned usable results, build/render succeeded), and only \
-THEN mark it `done` with update_plan before starting the next. Give each step a \
-`done_criterion` (the concrete, checkable proof it's finished): a step you mark done is \
-INDEPENDENTLY verified against its evidence before it counts — if it isn't actually complete \
-you'll be told and must keep working on it. Your working budget RESETS every time a step is \
-verified complete, so a long task (e.g. a 10-slide deck, a deep research) can run as long as \
-it KEEPS CLOSING STEPS — never rush or skip verification to save rounds, and never mark a \
-step done before its result actually exists. RESUMING: if the conversation ALREADY shows an \
-in-progress plan (some steps done, others not), CONTINUE it — re-emit the plan with update_plan \
-keeping the completed steps as done, and proceed from the first not-done step; do NOT restart \
-from scratch or re-propose."
+unlock card unless a dedicated approved reveal flow exists."
     );
     // LANGUAGE: the whole system prompt is in English, so without an explicit
     // directive coding-oriented models (e.g. kimi-*-code) reply in English even to an
@@ -23217,10 +23190,6 @@ to the user (one table per row + an optional Sources footer)."
     // "ask" also drops the toolset below (pure conversation).
     let mode = request.mode.as_deref().unwrap_or("agent").to_string();
     let system = match mode.as_str() {
-        "plan" => format!(
-            "{system}\n\nPLAN MODE (chosen by the user): for ANY non-trivial request \
-FIRST propose a plan with `‹‹PLAN_PROPOSE››…‹‹/PLAN_PROPOSE››` and STOP; execute only after approval."
-        ),
         "ask" => format!(
             "{system}\n\nASK MODE (chosen by the user): answer by conversing from your \
 knowledge and memory. Do NOT use tools and do NOT perform external actions (no browser, files, \
@@ -23233,6 +23202,15 @@ problem, isolate the cause, form a hypothesis, verify it with a minimal experime
 RE-VERIFY by executing. One cause at a time, no blind attempts."
         ),
         _ => system,
+    };
+    // Plan directive by mode (finding 1.2 / C): the HARNESS decides — agent/debug execute
+    // operationally, plan proposes-and-stops, ask has none. The weak model never sees a
+    // "propose and STOP" instruction in agent mode, so it can't stall on it. See plan_directive.rs.
+    let plan_directive = plan_directive::plan_directive_for_mode(&mode);
+    let system = if plan_directive.is_empty() {
+        system
+    } else {
+        format!("{system}\n\n{plan_directive}")
     };
     let system = system.as_str();
     let mut endpoint = chat_endpoint(&base_url);
